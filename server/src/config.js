@@ -18,6 +18,8 @@ export const config = {
   factoryBin: process.env.COCKPIT_FACTORY_BIN || path.join(process.env.FACTORY_HOME || path.join(home, 'Workspace', 'factory'), 'bin', 'factory'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
   factoryProfile: process.env.COCKPIT_FACTORY_PROFILE || '',
+  // Бинарь Claude для чата с агентом по задаче.
+  claudeBin: process.env.COCKPIT_CLAUDE_BIN || 'claude',
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),

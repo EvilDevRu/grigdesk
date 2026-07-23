@@ -20,6 +20,7 @@ import factoryModule from './modules/factory/index.js';
 import b24Module from './modules/b24/index.js';
 import systemModule from './modules/system/index.js';
 import mediaModule from './modules/media/index.js';
+import chatModule from './modules/chat/index.js';
 import settingsModule from './modules/settings/index.js';
 
 async function build() {
@@ -52,6 +53,7 @@ async function build() {
   await fastify.register(b24Module, { b24 });
   await fastify.register(systemModule, { system });
   await fastify.register(mediaModule, { media });
+  await fastify.register(chatModule, { factoryState, config });
   await fastify.register(settingsModule, { credsStore, b24 });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).

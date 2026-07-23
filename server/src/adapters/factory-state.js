@@ -67,6 +67,13 @@ export class FactoryStateAdapter {
     return ids;
   }
 
+  /** Параметры песочницы задачи (tNNNN.env): порты, worktree-пути. */
+  async readEnv(task) {
+    try {
+      return parsePipeline(await fsp.readFile(path.join(this.stateDir, `t${task}.env`), 'utf8'));
+    } catch { return {}; }
+  }
+
   /** Сырой реестр одной задачи + время модификации. */
   async readRegistry(task) {
     const file = path.join(this.stateDir, `t${task}.pipeline`);

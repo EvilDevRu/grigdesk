@@ -5,10 +5,12 @@ import { useSse } from '../composables/useSse.js';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
+import { useChatStore } from '../stores/chat.js';
 import { secToHMS } from '../shared/format.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 
 const ui = useUiStore();
+const chat = useChatStore();
 const taskStore = useTasksStore();
 const board = useBoardStore();
 
@@ -288,19 +290,17 @@ function cardState(g) {
             </div>
           </div>
 
-          <!-- Чат/указание агенту (применяется на границе этапов) -->
+          <!-- Обсудить с агентом (открывает глобальный чат по задаче) -->
           <div class="sect">
-            <div class="secth">Указание агенту</div>
-            <textarea v-model="stageInstruction" rows="2" placeholder="Вопрос/уточнение по реализации — агент прочитает в начале следующего этапа"></textarea>
-            <button class="btn" :disabled="stageBusy === 'instr'" @click="saveInstruction">{{ stageBusy === 'instr' ? '…' : 'Сохранить указание' }}</button>
+            <button class="btn" @click="chat.openFor(stage.task); closeStage()">💬 Обсудить с агентом</button>
           </div>
 
-          <!-- Принудительный переход -->
+          <!-- Принудительный переход — одной кнопкой «плей» -->
           <div class="sect">
-            <div class="secth">Принудительно перевести этап</div>
-            <div class="gbtns">
-              <button v-for="s in FORCE_STATUSES" :key="s" class="btn small" :disabled="stageBusy === 'force'" @click="forceStatus(s)">{{ s }}</button>
-            </div>
+            <div class="secth">Перейти на этот этап</div>
+            <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Сделать этот этап текущим">
+              {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
+            </button>
           </div>
         </div>
       </div>
