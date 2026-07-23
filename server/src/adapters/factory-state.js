@@ -181,6 +181,7 @@ export class FactoryStateAdapter {
       edges: def.edges,
       statuses,
       nodeMeta,
+      keys: def.keys,
       loops: loops.loops,
       halted: loops.halted,
       wfStatus: registry.WF_STATUS || null,

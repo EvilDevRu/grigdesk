@@ -32,7 +32,7 @@ function outsideElapsed(t) {
 
 let ticker = null;
 onMounted(() => { ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
-onUnmounted(() => { if (ticker) clearInterval(ticker); });
+onUnmounted(() => { if (ticker) clearInterval(ticker); clearInterval(actPoll); });
 
 // Тумблеры (переживают перезагрузку — как в старом дашборде).
 const compact = ref(localStorage.getItem('cockpit-compact') === '1');
@@ -58,15 +58,51 @@ function toggleCard(task) {
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
 const waitingCount = computed(() => filteredTasks.value.filter((t) => waitingReason(t.graph)).length);
 
-// Модалка этапа (клик по узлу графа).
+// Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref(null);
+const stageBusy = ref(null);
+const stageComment = ref('');
+const stageInstruction = ref('');
+const stageActivity = ref(null);
+let actPoll = null;
 const STAGE_HINT = {
   done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
   skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
   skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
 };
+const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
+
 function openStage(t, node) {
-  stage.value = { task: t.task, id: node.nid, label: stripEmoji(node.label), sub: node.sub, status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {} };
+  stage.value = {
+    task: t.task, id: node.nid, key: t.graph.keys?.[node.nid] || node.nid.toUpperCase(),
+    isGate: node.nid.startsWith('gate_'), label: stripEmoji(node.label), sub: node.sub,
+    status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
+  };
+  stageComment.value = ''; stageActivity.value = null; stageInstruction.value = '';
+  api.get(`/api/tasks/${t.task}/instruction`).then((r) => { stageInstruction.value = r.text || ''; }).catch(() => {});
+  clearInterval(actPoll);
+  if (node.status === 'run') { pollActivity(); actPoll = setInterval(pollActivity, 3000); }
+}
+function closeStage() { stage.value = null; clearInterval(actPoll); }
+async function pollActivity() {
+  if (!stage.value) return;
+  try { stageActivity.value = await api.get(`/api/tasks/${stage.value.task}/activity`); } catch { /* игнор */ }
+}
+async function gateDecide(decision) {
+  stageBusy.value = 'gate';
+  try { await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value }); await load(); closeStage(); }
+  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+}
+async function forceStatus(status) {
+  if (!confirm(`Принудительно: этап «${stage.value.label}» → ${status}?`)) return;
+  stageBusy.value = 'force';
+  try { await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`); await load(); closeStage(); }
+  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+}
+async function saveInstruction() {
+  stageBusy.value = 'instr';
+  try { await api.post(`/api/tasks/${stage.value.task}/instruction`, { text: stageInstruction.value }); }
+  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 
 // «Ждёт тебя» — по узлу-воротам в статусе wait/premature.
@@ -213,13 +249,13 @@ function cardState(g) {
       </div>
     </section>
 
-    <!-- Модалка этапа (клик по узлу графа) -->
-    <div v-if="stage" class="soverlay" @click.self="stage = null">
+    <!-- Модалка этапа (клик по узлу графа): инфо + управление -->
+    <div v-if="stage" class="soverlay" @click.self="closeStage()">
       <div class="smodal">
         <header class="sh">
           <span class="mono muted">#{{ stage.task }}</span>
           <h3>{{ stage.label }}</h3>
-          <button class="sx" @click="stage = null">✕</button>
+          <button class="sx" @click="closeStage()">✕</button>
         </header>
         <div class="sb">
           <div class="srow"><span class="k">Статус</span><span class="v">{{ stage.status }} — {{ STAGE_HINT[stage.status] || stage.status }}</span></div>
@@ -229,6 +265,43 @@ function cardState(g) {
           <div v-if="stage.meta.fanout != null" class="srow"><span class="k">Субагентов</span><span class="v">{{ stage.meta.fanout }}</span></div>
           <div v-if="stage.meta.fails" class="srow"><span class="k">Возвратов</span><span class="v bad">{{ stage.meta.fails }}</span></div>
           <div v-if="stage.meta.tokens" class="srow"><span class="k">Токенов</span><span class="v mono">{{ stage.meta.tokens.toLocaleString('ru') }}</span></div>
+
+          <!-- Живая активность (для идущего этапа) -->
+          <div v-if="stage.status === 'run'" class="sect">
+            <div class="secth">
+              <span class="spin"></span> Сейчас в работе
+              <span v-if="stageActivity" class="jf" :class="{ on: stageActivity.journalFresh }">{{ stageActivity.journalFresh ? 'агент пишет' : 'тихо' }}</span>
+            </div>
+            <div v-if="stageActivity && stageActivity.tail.length" class="log">
+              <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
+            </div>
+            <p v-else class="muted small">Ожидание записей…</p>
+          </div>
+
+          <!-- Ворота: принять/отклонить + указание что доработать -->
+          <div v-if="stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect">
+            <div class="secth">Ворота — твоё решение</div>
+            <textarea v-model="stageComment" rows="2" placeholder="Что доработать / замечание агенту (при отклонении)"></textarea>
+            <div class="gbtns">
+              <button class="btn good" :disabled="stageBusy === 'gate'" @click="gateDecide('approve')">✓ Принять</button>
+              <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">✗ Отклонить</button>
+            </div>
+          </div>
+
+          <!-- Чат/указание агенту (применяется на границе этапов) -->
+          <div class="sect">
+            <div class="secth">Указание агенту</div>
+            <textarea v-model="stageInstruction" rows="2" placeholder="Вопрос/уточнение по реализации — агент прочитает в начале следующего этапа"></textarea>
+            <button class="btn" :disabled="stageBusy === 'instr'" @click="saveInstruction">{{ stageBusy === 'instr' ? '…' : 'Сохранить указание' }}</button>
+          </div>
+
+          <!-- Принудительный переход -->
+          <div class="sect">
+            <div class="secth">Принудительно перевести этап</div>
+            <div class="gbtns">
+              <button v-for="s in FORCE_STATUSES" :key="s" class="btn small" :disabled="stageBusy === 'force'" @click="forceStatus(s)">{{ s }}</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -331,4 +404,20 @@ function cardState(g) {
 .srow:last-child { border-bottom: none; }
 .srow .k { color: var(--ink-mid); }
 .srow .v.bad { color: var(--bad); }
+
+.sect { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.secth { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-mid); display: flex; align-items: center; gap: 8px; }
+.jf { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--ink-mid); margin-left: auto; }
+.jf.on { color: var(--good); }
+.log { max-height: 160px; overflow-y: auto; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.logline { font-size: 12px; padding: 2px 0; }
+.small { font-size: 12px; }
+.sect textarea { background: var(--ground); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 8px 10px; font-family: inherit; font-size: 13.5px; resize: vertical; }
+.sect textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.sect .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; align-self: flex-start; }
+.sect .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
+.sect .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }
+.sect .btn.small { padding: 5px 10px; font-size: 12px; }
+.sect .btn:disabled { opacity: .5; cursor: default; }
 </style>
