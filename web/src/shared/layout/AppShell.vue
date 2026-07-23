@@ -77,8 +77,10 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
     <main class="content"><slot /></main>
 
     <div v-if="pwa.needRefresh" class="updbar">
-      <span>Доступно обновление</span>
-      <button @click="pwa.doUpdate()">Обновить</button>
+      <span>Доступно обновление кокпита</span>
+      <button :disabled="pwa.updating" @click="pwa.doUpdate()">
+        <span v-if="pwa.updating" class="spin"></span>{{ pwa.updating ? 'Обновляю…' : 'Обновить' }}
+      </button>
     </div>
   </div>
 </template>
@@ -110,6 +112,11 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .navitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .ic { width: 19px; height: 19px; flex: none; }
 .collapse-btn { margin-top: auto; }
+
+/* Свёрнутый сайдбар: только иконки по центру, подписи скрыты */
+.collapsed .brand .name, .collapsed .lbl { display: none; }
+.collapsed .brand { justify-content: center; padding: 8px 0 16px; }
+.collapsed .navitem, .collapsed .collapse-btn { justify-content: center; padding: 10px 0; gap: 0; }
 
 /* ── Топбар ── */
 .topbar {

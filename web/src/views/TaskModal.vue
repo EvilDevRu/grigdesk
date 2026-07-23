@@ -1,10 +1,14 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
+import { useRouter } from 'vue-router';
+import { api } from '../shared/api-client.js';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { secToHMS } from '../shared/format.js';
+
+const router = useRouter();
 
 const ui = useUiStore();
 const tasks = useTasksStore();
@@ -59,6 +63,18 @@ async function loadDetail(force = false) {
   finally { loading.value = false; }
 }
 
+// Уже ли задача на конвейере (есть в состоянии фабрики) — для защиты от повторного запуска.
+const conveyor = ref(null);
+async function loadConveyor() {
+  conveyor.value = null;
+  if (!taskId.value) return;
+  try {
+    const { tasks: list } = await api.get('/api/tasks');
+    conveyor.value = (list || []).find((t) => String(t.task) === String(taskId.value)) || null;
+  } catch { /* нет данных фабрики — не блокируем */ }
+}
+function openConveyor() { ui.close(); router.push('/pipeline'); }
+
 async function act(name, fn) {
   busy.value = name; err.value = null;
   try { await fn(); }
@@ -69,6 +85,8 @@ const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.v
 const complete = () => { if (confirm('Завершить задачу?')) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
 const launchMsg = ref(null);
 const launch = () => {
+  // Защита: задача уже на конвейере — не запускаем повторно.
+  if (conveyor.value) { launchMsg.value = 'Уже на конвейере'; return; }
   if (!confirm(`Направить задачу #${taskId.value} на конвейер? Запустит фабрику (песочница + агенты).`)) return;
   act('launch', async () => {
     const ticket = `${detail.value?.title || ''}\n${cleanDesc.value || ''}`.trim();
@@ -84,8 +102,9 @@ const refresh = () => { loadDetail(true); board.load(true); };
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
   if (id) {
-    detail.value = null;
+    detail.value = null; launchMsg.value = null;
     loadDetail();
+    loadConveyor();
     if (!ticker) ticker = setInterval(() => { now.value = Date.now(); }, 1000);
   } else if (ticker) { clearInterval(ticker); ticker = null; }
 }, { immediate: true });
@@ -126,15 +145,22 @@ watch(taskId, (id) => {
             <span class="tclock">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
             <span class="tstate">{{ running ? 'идёт' : 'остановлен' }}</span>
           </div>
-          <button class="btn" :class="running ? 'warn' : 'primary'" :disabled="busy === 'timer'" @click="toggleTimer">
-            {{ busy === 'timer' ? '…' : running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
-          </button>
-          <button class="btn good" :disabled="busy === 'complete'" @click="complete">
-            {{ busy === 'complete' ? '…' : '✓ Завершить' }}
-          </button>
-          <button class="btn" :disabled="busy === 'launch'" @click="launch" title="Запустить фабрику по задаче">
-            {{ busy === 'launch' ? '…' : '🏭 На конвейер' }}
-          </button>
+          <div class="cbtns">
+            <button class="btn" :class="running ? 'warn' : 'primary'" :disabled="busy === 'timer'" @click="toggleTimer">
+              {{ busy === 'timer' ? '…' : running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
+            </button>
+            <button class="btn good" :disabled="busy === 'complete'" @click="complete">
+              {{ busy === 'complete' ? '…' : '✓ Завершить' }}
+            </button>
+            <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован -->
+            <button v-if="conveyor" class="btn onconv" @click="openConveyor"
+                    :title="`Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`">
+              🏭 {{ conveyor.daemonAlive ? 'Идёт на конвейере' : 'Уже на конвейере' }} →
+            </button>
+            <button v-else class="btn launch" :disabled="busy === 'launch'" @click="launch" title="Запустить фабрику по задаче">
+              {{ busy === 'launch' ? '…' : '🏭 На конвейер' }}
+            </button>
+          </div>
           <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
         </div>
 
@@ -154,7 +180,7 @@ watch(taskId, (id) => {
 .overlay { position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(4px); display: flex; align-items: flex-start;
   justify-content: center; padding: 48px 16px; z-index: 100; overflow-y: auto; }
 .panel { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
-  width: 100%; max-width: 640px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
+  width: 100%; max-width: 860px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
 .mhead { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .mid { color: var(--ink-mid); font-size: 13px; flex: none; }
 .mtitle { flex: 1; margin: 0; font-size: 16px; font-weight: 640; min-width: 0; }
@@ -167,20 +193,25 @@ watch(taskId, (id) => {
 .tag { font-size: 12px; color: var(--ink-mid); background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 999px; padding: 2px 10px; }
 .tag.over { color: var(--bad); }
-.desc { margin: 0; font-size: 14px; color: var(--ink); white-space: pre-wrap; line-height: 1.5;
-  max-height: 240px; overflow-y: auto; }
-.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 12px; background: var(--ground); border: 1px solid var(--line); border-radius: 10px; }
+.desc { margin: 0; font-size: 14px; color: var(--ink); white-space: pre-wrap; line-height: 1.55;
+  max-height: 300px; overflow-y: auto; }
+.controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 14px 16px; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; }
 .timer { display: flex; flex-direction: column; margin-right: auto; }
-.tclock { font-size: 18px; font-weight: 650; }
+.tclock { font-size: 19px; font-weight: 650; }
 .timer.run .tclock { color: var(--good); }
 .tstate { font-size: 11px; color: var(--ink-mid); }
-.btn { padding: 9px 13px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2);
-  color: var(--ink); font-size: 13px; cursor: pointer; }
+.cbtns { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.btn { height: 40px; padding: 0 15px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1; cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
 .btn.warn { background: var(--warn); border-color: var(--warn); color: #241802; }
+.btn.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
+.btn.onconv:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
 .comment { display: flex; gap: 8px; align-items: flex-end; }
 .comment textarea { flex: 1; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);

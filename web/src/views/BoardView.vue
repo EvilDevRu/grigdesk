@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { hoursToHM, secToHMS, signed } from '../shared/format.js';
 import { useBoardStore } from '../stores/board.js';
@@ -27,19 +27,31 @@ function liveElapsed(t) {
   return (t.timerElapsed || 0) + extra;
 }
 
+// Иконки плиток (Lucide-контуры, stroke=currentColor).
+const TILE_ICONS = {
+  clock: 'M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
+  check: 'M21.5 11.1V12a9.5 9.5 0 1 1-5.6-8.7 M22 5 12 15l-3-3',
+  gauge: 'M12 13l3.4-3.4 M4.5 17.5a9 9 0 1 1 15 0',
+  calendar: 'M8 2.5v3 M16 2.5v3 M3.5 9.5h17 M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 19 20.5H5A1.5 1.5 0 0 1 3.5 19V6A1.5 1.5 0 0 1 5 4.5z',
+};
 const statTiles = computed(() => {
   const d = data.value; if (!d?.today) return [];
   const dyn = d.dynamics || {};
-  const dir = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : '');
+  const dir = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'flat');
   return [
-    { label: 'Отработано', value: hoursToHM(d.today.hours), delta: signed(dyn.hours, 'ч'), dir: dir(dyn.hours) },
-    { label: 'Выполнено', value: d.today.tasks_count ?? 0, delta: signed(dyn.tasks), dir: dir(dyn.tasks) },
-    { label: 'Ср. время', value: hoursToHM(d.today.avg_time), delta: signed(dyn.avg_time, 'ч'), dir: dir(dyn.avg_time) },
+    { key: 'hours', icon: 'clock', tone: 'accent', label: 'Отработано', value: hoursToHM(d.today.hours), delta: signed(dyn.hours, 'ч'), dir: dir(dyn.hours) },
+    { key: 'tasks', icon: 'check', tone: 'good', label: 'Выполнено', value: d.today.tasks_count ?? 0, delta: signed(dyn.tasks), dir: dir(dyn.tasks) },
+    { key: 'avg', icon: 'gauge', tone: 'warn', label: 'Ср. время', value: hoursToHM(d.today.avg_time), delta: signed(dyn.avg_time, 'ч'), dir: dir(dyn.avg_time) },
   ];
 });
 const overwork = computed(() => {
   const m = data.value?.month; if (!m?.norm) return 0;
   return Math.max(0, +(m.hours - m.norm).toFixed(1));
+});
+// Процент выполнения месячной нормы (может быть > 100 при переработке).
+const monthPct = computed(() => {
+  const m = data.value?.month; if (!m?.norm) return 0;
+  return Math.round((m.hours / m.norm) * 100);
 });
 const activeTask = computed(() => {
   const d = data.value; if (!d?.activeTimer) return null;
@@ -50,8 +62,23 @@ const q = ref('');
 const myTasks = computed(() => {
   const list = data.value?.tasks || [];
   const s = q.value.trim().toLowerCase();
-  return s ? list.filter((t) => (t.title || '').toLowerCase().includes(s)) : list;
+  if (!s) return list;
+  // Ищем по номеру задачи, названию и группе.
+  return list.filter((t) => String(t.id).includes(s)
+    || (t.title || '').toLowerCase().includes(s)
+    || (t.group || '').toLowerCase().includes(s));
 });
+// Пагинация по скроллу: рисуем первые N, при докрутке до низа добавляем ещё.
+const PAGE = 40;
+const visibleCount = ref(PAGE);
+const visibleTasks = computed(() => myTasks.value.slice(0, visibleCount.value));
+watch([q, () => data.value?.tasks?.length], () => { visibleCount.value = PAGE; });
+function onTasksScroll(e) {
+  const el = e.target;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && visibleCount.value < myTasks.value.length) {
+    visibleCount.value += PAGE;
+  }
+}
 const chart = computed(() => data.value?.charts?.[period.value] || null);
 
 let ticker = null;
@@ -70,18 +97,29 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
     <template v-else-if="data">
       <!-- Показатели + месяц -->
       <section class="stats">
-        <div v-for="s in statTiles" :key="s.label" class="tile">
+        <div v-for="s in statTiles" :key="s.key" class="tile" :class="'t-' + s.tone">
+          <div class="thead">
+            <span class="tico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="TILE_ICONS[s.icon]" /></svg></span>
+            <span class="tlabel">{{ s.label }}</span>
+          </div>
           <div class="tval">{{ s.value }}</div>
-          <div class="tlabel muted">{{ s.label }}</div>
           <div class="tdelta mono" :class="s.dir">
-            <span class="arrow">{{ s.dir === 'up' ? '↑' : s.dir === 'down' ? '↓' : '' }}</span>{{ s.delta }} vs вчера
+            <span class="darrow">{{ s.dir === 'up' ? '↑' : s.dir === 'down' ? '↓' : '→' }}</span>{{ s.delta }}
+            <span class="dvs">vs вчера</span>
           </div>
         </div>
-        <div class="tile month">
+        <div class="tile month t-month">
+          <div class="thead">
+            <span class="tico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="TILE_ICONS.calendar" /></svg></span>
+            <span class="tlabel">За месяц</span>
+            <span class="tpct mono" :class="{ over: overwork }">{{ monthPct }}%</span>
+          </div>
           <div class="tval">{{ hoursToHM(data.month.hours) }}</div>
-          <div class="tlabel muted">Отработано за месяц · норма {{ data.month.norm }}ч</div>
-          <div class="bar"><span :style="{ width: Math.min(100, (data.month.hours / data.month.norm) * 100) + '%' }"></span></div>
-          <div v-if="overwork" class="tdelta over mono">+{{ overwork }}ч переработки</div>
+          <div class="bar"><span class="fill" :class="{ over: overwork }" :style="{ width: Math.min(100, monthPct) + '%' }"></span></div>
+          <div class="mfoot">
+            <span class="muted">норма {{ data.month.norm }}ч</span>
+            <span v-if="overwork" class="over mono">+{{ overwork }}ч переработки</span>
+          </div>
         </div>
       </section>
 
@@ -93,21 +131,26 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
       </section>
 
       <div class="cols">
-        <!-- Мои задачи -->
-        <section class="col">
+        <!-- Мои задачи — основной блок -->
+        <section class="col primary">
           <div class="colhead">
-            <h3 class="h">Мои задачи <span class="cnt">{{ myTasks.length }}</span></h3>
+            <h3 class="h big">Мои задачи <span class="cnt">{{ myTasks.length }}</span></h3>
             <div class="search">
               <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-              <input v-model="q" placeholder="Поиск…" />
+              <input v-model="q" placeholder="Поиск по задачам…" />
+              <button v-if="q" class="clr" title="Сбросить" @click="q = ''">✕</button>
             </div>
           </div>
-          <ul class="tasks">
-            <li v-for="t in myTasks" :key="t.id" class="trow">
+          <ul class="tasks scroller" @scroll="onTasksScroll">
+            <li v-for="t in visibleTasks" :key="t.id" class="trow">
               <span class="tstat" :style="{ background: statusColor(t.statusKind) }" :title="t.statusLabel"></span>
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
               <span class="ttime mono muted">{{ secToHMS(liveElapsed(t)) }}</span>
+            </li>
+            <li v-if="!myTasks.length" class="muted empty">Ничего не найдено</li>
+            <li v-else-if="visibleTasks.length < myTasks.length" class="more muted">
+              Показано {{ visibleTasks.length }} из {{ myTasks.length }} — прокрути ниже
             </li>
           </ul>
         </section>
@@ -145,9 +188,9 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
           </div>
         </div>
         <div class="charts-grid">
-          <MiniChart title="Часы" :labels="chart.labels" :you="chart.hours" :dept="chart.hours_dept" />
-          <MiniChart title="Задачи" :labels="chart.labels" :you="chart.tasks" :dept="chart.tasks_dept" />
-          <MiniChart title="Ср. время" :labels="chart.labels" :you="chart.avg_time" :dept="chart.avg_time_dept" />
+          <MiniChart title="Часы" kind="hours" :labels="chart.labels" :you="chart.hours" :dept="chart.hours_dept" />
+          <MiniChart title="Задачи" kind="count" :labels="chart.labels" :you="chart.tasks" :dept="chart.tasks_dept" />
+          <MiniChart title="Ср. время" kind="hours" :labels="chart.labels" :you="chart.avg_time" :dept="chart.avg_time_dept" />
         </div>
       </section>
     </template>
@@ -159,18 +202,33 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .err { color: var(--bad); }
 .link { color: var(--accent); margin-left: 8px; }
 
-.stats { display: grid; gap: 10px; grid-template-columns: repeat(2, 1fr); }
+.stats { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
 @media (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
-.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 16px; }
-.tval { font-size: 21px; font-weight: 680; letter-spacing: -.01em; }
-.tlabel { font-size: 12px; margin-top: 2px; }
-.tdelta { font-size: 11px; margin-top: 7px; color: var(--ink-mid); }
-.tdelta .arrow { margin-right: 3px; font-weight: 700; }
-.tdelta.up { color: var(--good); }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+.thead { display: flex; align-items: center; gap: 9px; }
+.tico { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center; flex: none; }
+.tico svg { width: 15px; height: 15px; }
+.t-accent .tico { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.t-good .tico { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
+.t-warn .tico { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.t-month .tico { color: var(--ink); background: var(--surface-2); }
+.tlabel { font-size: 12px; color: var(--ink-mid); font-weight: 500; }
+.tval { font-size: 24px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.tdelta { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
+  font-size: 11px; color: var(--ink-mid); background: var(--surface-2); border-radius: 999px; padding: 3px 9px; }
+.tdelta .darrow { font-weight: 700; }
+.tdelta .dvs { opacity: .6; }
+.tdelta.up { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); }
 .tdelta.down { color: var(--ink-mid); }
-.tdelta.over { color: var(--good); }
-.bar { height: 6px; background: var(--surface-2); border-radius: 999px; margin-top: 8px; overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--good); }
+
+.tpct { margin-left: auto; font-size: 12px; color: var(--ink-mid); font-weight: 600; }
+.tpct.over { color: var(--good); }
+.bar { height: 7px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.bar .fill { display: block; height: 100%; background: var(--good); border-radius: 999px; transition: width .3s; }
+.bar .fill.over { background: linear-gradient(90deg, var(--good), var(--accent)); }
+.mfoot { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; }
+.mfoot .over { color: var(--good); font-weight: 600; }
 
 .active { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; }
 .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; animation: pulse 1.4s infinite; }
@@ -180,17 +238,24 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .atitle:hover { color: var(--accent); }
 .atimer { color: var(--accent); font-size: 15px; }
 
-.cols { display: grid; gap: 16px; grid-template-columns: 1fr; }
-@media (min-width: 860px) { .cols { grid-template-columns: 1.4fr 1fr; } }
+.cols { display: grid; gap: 18px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 860px) { .cols { grid-template-columns: 2fr 1fr; } }
 .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.colhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0 4px; }
+/* Основной блок «Мои задачи» — в карточке, чтобы визуально доминировал */
+.col.primary { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px 12px; }
+.colhead { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 6px 0 4px; }
 .h { font-size: 13px; font-weight: 640; margin: 6px 0 2px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); }
+.h.big { font-size: 14px; color: var(--ink); }
 .cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
-.search { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
+.search { display: flex; align-items: center; gap: 8px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; flex: 1; max-width: 340px; }
 .search:focus-within { border-color: var(--accent); }
-.search .si { width: 14px; height: 14px; color: var(--ink-mid); flex: none; }
-.search input { background: none; border: none; color: var(--ink); font-size: 13px; width: 130px; outline: none; }
+.search .si { width: 15px; height: 15px; color: var(--ink-mid); flex: none; }
+.search input { background: none; border: none; color: var(--ink); font-size: 14px; flex: 1; min-width: 0; outline: none; }
+.search .clr { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 12px; padding: 0 2px; flex: none; }
+.search .clr:hover { color: var(--ink); }
 .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.scroller { max-height: min(58vh, 560px); overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.more { font-size: 12px; text-align: center; padding: 10px 0 4px; }
 .trow { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 8px; }
 .trow:hover { background: var(--surface); }
 .trow + .trow { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 55%, transparent); }

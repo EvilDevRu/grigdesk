@@ -1,30 +1,40 @@
 // Чат с агентом по задаче (claude -p в worktree). Глобальный — доступен с любой страницы.
-// Контекст держится через sessionId (--resume). Модель и эффорт переключаются, запоминаются.
+// История и sessionId персистятся по задаче (переживают перезагрузку). Контекст — через --resume.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
+
+const EFFORTS = ['low', 'medium', 'high', 'max'];
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
     open: false,
     taskId: null,
-    model: localStorage.getItem('cockpit-chat-model') || 'sonnet',
-    effort: localStorage.getItem('cockpit-chat-effort') || 'medium',
-    messages: [],     // [{ role: 'user'|'assistant'|'error', text, cost? }]
+    model: localStorage.getItem('cockpit-chat-model') || 'opus',
+    effort: localStorage.getItem('cockpit-chat-effort') || 'high',
+    messages: [],
     sessionId: null,
     sending: false,
     error: null,
   }),
   actions: {
-    openFor(taskId) { this.open = true; if (taskId) this.setTask(String(taskId)); },
+    _key() { return `cockpit-chat-${this.taskId}`; },
+    _persist() { if (this.taskId) localStorage.setItem(this._key(), JSON.stringify({ messages: this.messages, sessionId: this.sessionId })); },
+    _restore() {
+      try { const j = JSON.parse(localStorage.getItem(this._key()) || '{}'); this.messages = j.messages || []; this.sessionId = j.sessionId || null; }
+      catch { this.messages = []; this.sessionId = null; }
+    },
+    openFor(taskId) { this.open = true; if (taskId) this.setTask(taskId); },
     toggle() { this.open = !this.open; },
     close() { this.open = false; },
     setTask(id) {
       const s = String(id);
-      if (s !== this.taskId) { this.taskId = s; this.messages = []; this.sessionId = null; this.error = null; }
+      if (s !== this.taskId) { this.taskId = s; this._restore(); this.error = null; }
     },
     setModel(m) { this.model = m; localStorage.setItem('cockpit-chat-model', m); },
     setEffort(e) { this.effort = e; localStorage.setItem('cockpit-chat-effort', e); },
-    reset() { this.messages = []; this.sessionId = null; this.error = null; },
+    cycleEffort() { const i = EFFORTS.indexOf(this.effort); this.setEffort(EFFORTS[(i + 1) % EFFORTS.length]); },
+    clearChat() { this.messages = []; this.error = null; this._persist(); },      // очистить видимую переписку
+    resetContext() { this.sessionId = null; this._persist(); },                   // забыть контекст (новый claude-сеанс)
     async send(text) {
       if (!this.taskId) { this.error = 'Выберите задачу'; return; }
       if (!text.trim() || this.sending) return;
@@ -39,7 +49,7 @@ export const useChatStore = defineStore('chat', {
       } catch (e) {
         this.error = e.message;
         this.messages.push({ role: 'error', text: e.message });
-      } finally { this.sending = false; }
+      } finally { this.sending = false; this._persist(); }
     },
   },
 });

@@ -72,7 +72,7 @@ const nodeEls = computed(() => {
 <template>
   <svg class="graph" :viewBox="vb" preserveAspectRatio="xMidYMid meet">
     <defs>
-      <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <marker id="arr" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
         <path d="M0,0 L8,4 L0,8 z" />
       </marker>
     </defs>
@@ -101,7 +101,9 @@ const nodeEls = computed(() => {
 
 <style scoped>
 .graph { width: 100%; height: auto; display: block; }
-#arr path { fill: var(--idle); }
+/* Наконечник наследует цвет своей линии (context-stroke), а не всегда серый */
+#arr path { fill: context-stroke; }
+.edges path { marker-end: url(#arr); }
 .startdot { fill: var(--good); filter: drop-shadow(0 0 4px var(--good)); }
 
 /* базовый узел */

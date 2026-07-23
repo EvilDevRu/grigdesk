@@ -29,8 +29,11 @@ async function staticPlugin(fastify, opts) {
       prefix: '/',
       cacheControl: false, // свой cache-control не ставим — управляем через setHeaders
       setHeaders(res, filePath) {
-        if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
-        else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        const base = path.basename(filePath);
+        // SW, воркбокс и манифест — всегда свежие, иначе обновления не подхватываются
+        if (filePath.endsWith('.html') || base === 'sw.js' || base.startsWith('workbox-') || base.endsWith('.webmanifest')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         }
       },

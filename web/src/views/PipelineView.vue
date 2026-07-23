@@ -203,7 +203,7 @@ function cardState(g) {
         <button v-if="!compact" class="chev" :title="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'" @click="toggleCard(t.task)">
           {{ collapsedSet.has(t.task) ? '▸' : '▾' }}
         </button>
-        <span class="task mono">#{{ t.task }}</span>
+        <button class="task mono" title="Свернуть/развернуть" @click="toggleCard(t.task)">#{{ t.task }}</button>
         <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
         <button v-if="title(t.task)" class="ctitle" :title="title(t.task)" @click="ui.openTask(t.task)">{{ title(t.task) }}</button>
         <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
@@ -310,9 +310,10 @@ function cardState(g) {
 
 <style scoped>
 .pipeline { display: flex; flex-direction: column; gap: 14px; }
-/* Липкий тулбар: остаётся сверху при скролле */
-.toolbar { position: sticky; top: 0; z-index: 15; background: var(--ground);
-  padding: 10px 0; margin: -10px 0 0; display: flex; flex-direction: column; gap: 8px;
+/* Липкий тулбар: full-bleed по бокам; top:-22px компенсирует padding-top .content,
+   иначе sticky прилипает ниже паддинга и над ним светит прокрученный контент. */
+.toolbar { position: sticky; top: -22px; z-index: 30; background: var(--ground);
+  padding: 14px 22px 12px; margin: 0 -22px 6px; display: flex; flex-direction: column; gap: 8px;
   border-bottom: 1px solid var(--line); }
 .tbrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-mid); margin: 0; display: flex; align-items: center; gap: 10px; }
@@ -347,7 +348,8 @@ function cardState(g) {
 .card.act { border-left-color: var(--accent); }
 
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.task { font-weight: 650; font-size: 15px; }
+.task { font-weight: 650; font-size: 15px; background: none; border: none; color: var(--ink); cursor: pointer; padding: 0; }
+.task:hover { color: var(--accent); }
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
 .spacer { flex: 1; }
