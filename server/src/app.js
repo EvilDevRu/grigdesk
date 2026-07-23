@@ -3,6 +3,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import websocket from '@fastify/websocket';
 
 import { config } from './config.js';
 import { FactoryStateAdapter } from './adapters/factory-state.js';
@@ -23,6 +24,7 @@ import systemModule from './modules/system/index.js';
 import mediaModule from './modules/media/index.js';
 import chatModule from './modules/chat/index.js';
 import settingsModule from './modules/settings/index.js';
+import terminalModule from './modules/terminal/index.js';
 
 async function build() {
   const fastify = Fastify({
@@ -36,6 +38,9 @@ async function build() {
 
   // Загрузка видео/аудио для распознавания (до 3 ГБ).
   await fastify.register(multipart, { limits: { fileSize: 3 * 1024 ** 3 } });
+
+  // WebSocket — для терминала (PTY-поток). maxPayload скромный: терминал — не файлы.
+  await fastify.register(websocket, { options: { maxPayload: 1 * 1024 ** 2 } });
 
   // Адаптеры (изоляция источников).
   const factoryState = new FactoryStateAdapter({ stateDir: config.stateDir, factoryHome: config.factoryHome });
@@ -57,6 +62,7 @@ async function build() {
   await fastify.register(mediaModule, { media });
   await fastify.register(chatModule, { factoryState, config, claudeAuth });
   await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config });
+  await fastify.register(terminalModule, { config });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });

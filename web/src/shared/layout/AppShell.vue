@@ -23,6 +23,7 @@ const ICONS = {
   agents: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
+  terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
   settings: 'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
 };
 const nav = [
@@ -32,6 +33,10 @@ const nav = [
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
   { to: '/video', label: 'Видео', icon: 'video' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
+];
+// Служебные пункты — прижаты к низу сайдбара.
+const navBottom = [
+  { to: '/terminal', label: 'Терминал', icon: 'terminal' },
 ];
 
 async function loadHealth() { try { health.value = await api.get('/api/health'); } catch { health.value = null; } }
@@ -48,6 +53,12 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
       </div>
       <nav class="nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+          <span class="lbl">{{ item.label }}</span>
+        </router-link>
+      </nav>
+      <nav class="nav nav-bottom">
+        <router-link v-for="item in navBottom" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
           <span class="lbl">{{ item.label }}</span>
         </router-link>
@@ -113,7 +124,8 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .navitem:hover, .collapse-btn:hover { background: var(--surface); color: var(--ink); }
 .navitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .ic { width: 19px; height: 19px; flex: none; }
-.collapse-btn { margin-top: auto; }
+.nav-bottom { margin-top: auto; }
+.collapse-btn { margin-top: 4px; }
 
 /* Свёрнутый сайдбар: только иконки по центру, подписи скрыты */
 .collapsed .brand .name, .collapsed .lbl { display: none; }
@@ -155,7 +167,8 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
   .sidebar { grid-row: 3; grid-column: 1; flex-direction: row; padding: 0; border-right: none; border-top: 1px solid var(--line);
     padding-bottom: env(safe-area-inset-bottom, 0); }
   .brand, .collapse-btn { display: none; }
-  .nav { flex-direction: row; flex: 1; gap: 0; }
+  /* На мобиле обе навигации сливаются в один нижний ряд */
+  .nav, .nav-bottom { display: contents; }
   .navitem { flex: 1; flex-direction: column; gap: 3px; font-size: 11px; padding: 9px 0; border-radius: 0; }
   .navitem.active { background: none; }
   .topbar { grid-row: 1; grid-column: 1; padding: 0 16px; }

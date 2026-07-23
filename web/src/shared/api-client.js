@@ -3,6 +3,8 @@
 // отдаёт сам сервер, и в dev через vite-proxy). Задел «сменный мозг»: адрес — одна настройка.
 const BASE = (import.meta.env.VITE_BRAIN_URL || '').replace(/\/$/, '');
 const TOKEN = import.meta.env.VITE_COCKPIT_TOKEN || '';
+// База для WebSocket (терминал): тот же хост, схема http→ws / https→wss.
+const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : '')).replace(/^http/, 'ws');
 
 function url(path) {
   return BASE + path;
@@ -32,6 +34,8 @@ async function request(method, path, body) {
 
 export const api = {
   base: BASE,
+  token: TOKEN,
+  wsUrl: (path) => WS_BASE + path,
   eventsUrl: () => url('/api/events'),
   get: (path) => request('GET', path),
   post: (path, body) => request('POST', path, body),
