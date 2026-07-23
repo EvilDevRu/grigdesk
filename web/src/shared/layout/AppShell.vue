@@ -151,8 +151,7 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
 .metric { color: var(--ink-mid); }
 .metric b { font-weight: 600; }
-.netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid);
-  padding: 3px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
+.netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }
 .lv-ok { color: var(--ink); } .lv-warn { color: var(--warn); } .lv-bad { color: var(--bad); }
