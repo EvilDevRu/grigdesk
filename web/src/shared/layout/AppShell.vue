@@ -82,6 +82,7 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
           <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
           <span class="ip">{{ sys.net.ip }}</span>
         </span>
+        <span v-if="sys?.net && sys" class="sep" aria-hidden="true">·</span>
         <span v-if="sys" class="metric mono"
               :title="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM+swap: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})` + (sys.mem.swapTotalGb ? ` · swap ${sys.mem.swapUsedGb}/${sys.mem.swapTotalGb} ГБ` : '')">
           CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
@@ -151,6 +152,7 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
 .metric { color: var(--ink-mid); }
 .metric b { font-weight: 600; }
+.sep { color: var(--ink-mid); margin: 0 -4px; }
 .netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }
