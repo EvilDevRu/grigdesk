@@ -30,10 +30,11 @@ function liveElapsed(t) {
 const statTiles = computed(() => {
   const d = data.value; if (!d?.today) return [];
   const dyn = d.dynamics || {};
+  const dir = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : '');
   return [
-    { label: 'Отработано', value: hoursToHM(d.today.hours), delta: signed(dyn.hours, 'ч') },
-    { label: 'Выполнено', value: d.today.tasks_count ?? 0, delta: signed(dyn.tasks) },
-    { label: 'Ср. время', value: hoursToHM(d.today.avg_time), delta: signed(dyn.avg_time, 'ч') },
+    { label: 'Отработано', value: hoursToHM(d.today.hours), delta: signed(dyn.hours, 'ч'), dir: dir(dyn.hours) },
+    { label: 'Выполнено', value: d.today.tasks_count ?? 0, delta: signed(dyn.tasks), dir: dir(dyn.tasks) },
+    { label: 'Ср. время', value: hoursToHM(d.today.avg_time), delta: signed(dyn.avg_time, 'ч'), dir: dir(dyn.avg_time) },
   ];
 });
 const overwork = computed(() => {
@@ -43,6 +44,13 @@ const overwork = computed(() => {
 const activeTask = computed(() => {
   const d = data.value; if (!d?.activeTimer) return null;
   return d.tasks.find((t) => t.id === d.activeTimer.task_id) || null;
+});
+// Поиск по «Моим задачам» (88 штук — без фильтра неудобно).
+const q = ref('');
+const myTasks = computed(() => {
+  const list = data.value?.tasks || [];
+  const s = q.value.trim().toLowerCase();
+  return s ? list.filter((t) => (t.title || '').toLowerCase().includes(s)) : list;
 });
 const chart = computed(() => data.value?.charts?.[period.value] || null);
 
@@ -65,7 +73,9 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
         <div v-for="s in statTiles" :key="s.label" class="tile">
           <div class="tval">{{ s.value }}</div>
           <div class="tlabel muted">{{ s.label }}</div>
-          <div class="tdelta muted mono">{{ s.delta }} vs вчера</div>
+          <div class="tdelta mono" :class="s.dir">
+            <span class="arrow">{{ s.dir === 'up' ? '↑' : s.dir === 'down' ? '↓' : '' }}</span>{{ s.delta }} vs вчера
+          </div>
         </div>
         <div class="tile month">
           <div class="tval">{{ hoursToHM(data.month.hours) }}</div>
@@ -85,9 +95,15 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
       <div class="cols">
         <!-- Мои задачи -->
         <section class="col">
-          <h3 class="h">Мои задачи <span class="cnt">{{ data.tasks.length }}</span></h3>
+          <div class="colhead">
+            <h3 class="h">Мои задачи <span class="cnt">{{ myTasks.length }}</span></h3>
+            <div class="search">
+              <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              <input v-model="q" placeholder="Поиск…" />
+            </div>
+          </div>
           <ul class="tasks">
-            <li v-for="t in data.tasks" :key="t.id" class="trow">
+            <li v-for="t in myTasks" :key="t.id" class="trow">
               <span class="tstat" :style="{ background: statusColor(t.statusKind) }" :title="t.statusLabel"></span>
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
@@ -145,10 +161,13 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 
 .stats { display: grid; gap: 10px; grid-template-columns: repeat(2, 1fr); }
 @media (min-width: 720px) { .stats { grid-template-columns: repeat(4, 1fr); } }
-.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
-.tval { font-size: 20px; font-weight: 680; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 16px; }
+.tval { font-size: 21px; font-weight: 680; letter-spacing: -.01em; }
 .tlabel { font-size: 12px; margin-top: 2px; }
-.tdelta { font-size: 11px; margin-top: 4px; }
+.tdelta { font-size: 11px; margin-top: 7px; color: var(--ink-mid); }
+.tdelta .arrow { margin-right: 3px; font-weight: 700; }
+.tdelta.up { color: var(--good); }
+.tdelta.down { color: var(--ink-mid); }
 .tdelta.over { color: var(--good); }
 .bar { height: 6px; background: var(--surface-2); border-radius: 999px; margin-top: 8px; overflow: hidden; }
 .bar span { display: block; height: 100%; background: var(--good); }
@@ -164,11 +183,18 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .cols { display: grid; gap: 16px; grid-template-columns: 1fr; }
 @media (min-width: 860px) { .cols { grid-template-columns: 1.4fr 1fr; } }
 .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.h { font-size: 14px; font-weight: 640; margin: 6px 0 2px; display: flex; align-items: center; gap: 8px; }
-.cnt { font-size: 11px; color: var(--ink-mid); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
+.colhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0 4px; }
+.h { font-size: 13px; font-weight: 640; margin: 6px 0 2px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); }
+.cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
+.search { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
+.search:focus-within { border-color: var(--accent); }
+.search .si { width: 14px; height: 14px; color: var(--ink-mid); flex: none; }
+.search input { background: none; border: none; color: var(--ink); font-size: 13px; width: 130px; outline: none; }
 .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.trow { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
-.tstat { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.trow { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 8px; }
+.trow:hover { background: var(--surface); }
+.trow + .trow { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 55%, transparent); }
+.tstat { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
 .ttext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;
   background: none; border: none; color: var(--ink); text-align: left; padding: 0; cursor: pointer; }
 .ttext:hover { color: var(--accent); }

@@ -151,10 +151,10 @@ watch(taskId, (id) => {
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-start;
-  justify-content: center; padding: 40px 16px; z-index: 100; overflow-y: auto; }
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
-  width: 100%; max-width: 640px; box-shadow: var(--shadow); }
+.overlay { position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(4px); display: flex; align-items: flex-start;
+  justify-content: center; padding: 48px 16px; z-index: 100; overflow-y: auto; }
+.panel { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
+  width: 100%; max-width: 640px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
 .mhead { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .mid { color: var(--ink-mid); font-size: 13px; flex: none; }
 .mtitle { flex: 1; margin: 0; font-size: 16px; font-weight: 640; min-width: 0; }

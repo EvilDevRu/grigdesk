@@ -93,7 +93,7 @@ watch(messages, async () => { await nextTick(); if (body.value) body.value.scrol
   background: var(--accent); color: #fff; border: none; font-size: 22px; cursor: pointer; box-shadow: 0 6px 22px #0008; }
 .panel { position: fixed; right: 18px; bottom: 18px; z-index: 95; width: min(440px, calc(100vw - 24px));
   height: min(72vh, 640px); display: flex; flex-direction: column;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 40px #000a; }
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px; box-shadow: 0 18px 50px #000c; }
 .ph { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .ph .ttl { font-weight: 640; }
 .x, .mini { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 8px; width: 30px; height: 30px; cursor: pointer; }

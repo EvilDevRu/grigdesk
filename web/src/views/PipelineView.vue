@@ -392,10 +392,10 @@ function cardState(g) {
 .otimer { color: var(--good); font-size: 15px; flex: none; }
 
 /* Модалка этапа */
-.soverlay { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-start;
-  justify-content: center; padding: 60px 16px; z-index: 100; }
-.smodal { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
-  width: 100%; max-width: 440px; box-shadow: var(--shadow); }
+.soverlay { position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(4px); display: flex; align-items: flex-start;
+  justify-content: center; padding: 60px 16px; z-index: 100; overflow-y: auto; }
+.smodal { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
+  width: 100%; max-width: 460px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
 .sh { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .sh h3 { flex: 1; margin: 0; font-size: 16px; font-weight: 640; }
 .sx { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
