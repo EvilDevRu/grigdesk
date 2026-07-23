@@ -8,6 +8,7 @@ const props = defineProps({
   loopsOn: { type: Boolean, default: false },
   reference: { type: Boolean, default: false }, // эталонная схема маршрута (без статусов задачи)
 });
+const emit = defineEmits(['node']);
 
 const doneLike = new Set(['done', 'skip']);
 
@@ -88,7 +89,8 @@ const nodeEls = computed(() => {
     </g>
 
     <!-- узлы -->
-    <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`]">
+    <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`, { clickable: !reference }]"
+       @click="!reference && emit('node', n)">
       <polygon v-if="n.points" :points="n.points" />
       <rect v-else :x="n.cx - n.hw" :y="n.cy - n.hh" :width="n.hw * 2" :height="n.hh * 2" :rx="n.rx" />
       <text :x="n.cx" :y="n.cy + 4" text-anchor="middle" class="nlbl">{{ n.label }}<tspan class="mk" :class="`mk-${n.status}`"> {{ n.mark }}</tspan></text>
@@ -104,6 +106,8 @@ const nodeEls = computed(() => {
 
 /* базовый узел */
 .ng rect, .ng polygon { fill: #0e1611; stroke-width: 1.4; }
+.clickable { cursor: pointer; }
+.clickable:hover rect, .clickable:hover polygon { stroke-width: 3; }
 .nt-agent rect, .nt-agent polygon { stroke: var(--node-agent); }
 .nt-human rect, .nt-human polygon { stroke: var(--node-human); }
 .nt-code rect, .nt-code polygon { stroke: var(--node-code); }

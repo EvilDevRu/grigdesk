@@ -58,6 +58,17 @@ function toggleCard(task) {
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
 const waitingCount = computed(() => filteredTasks.value.filter((t) => waitingReason(t.graph)).length);
 
+// Модалка этапа (клик по узлу графа).
+const stage = ref(null);
+const STAGE_HINT = {
+  done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
+  skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
+  skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
+};
+function openStage(t, node) {
+  stage.value = { task: t.task, id: node.nid, label: stripEmoji(node.label), sub: node.sub, status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {} };
+}
+
 // «Ждёт тебя» — по узлу-воротам в статусе wait/premature.
 const GATE_REASON = {
   gate_accept: 'принять работу — проверить в браузере', gate_plan: 'утвердить план работ',
@@ -177,7 +188,7 @@ function cardState(g) {
       </div>
 
       <div v-if="!isCollapsed(t.task)" class="gwrap">
-        <FactoryGraph :graph="t.graph" :loops-on="loopsOn" />
+        <FactoryGraph :graph="t.graph" :loops-on="loopsOn" @node="(n) => openStage(t, n)" />
       </div>
 
       <footer v-if="!isCollapsed(t.task)" class="strip">
@@ -201,6 +212,26 @@ function cardState(g) {
         <span class="otimer mono">⏱ {{ secToHMS(outsideElapsed(t)) }}</span>
       </div>
     </section>
+
+    <!-- Модалка этапа (клик по узлу графа) -->
+    <div v-if="stage" class="soverlay" @click.self="stage = null">
+      <div class="smodal">
+        <header class="sh">
+          <span class="mono muted">#{{ stage.task }}</span>
+          <h3>{{ stage.label }}</h3>
+          <button class="sx" @click="stage = null">✕</button>
+        </header>
+        <div class="sb">
+          <div class="srow"><span class="k">Статус</span><span class="v">{{ stage.status }} — {{ STAGE_HINT[stage.status] || stage.status }}</span></div>
+          <div v-if="stage.sub" class="srow"><span class="k">Инструмент</span><span class="v">{{ stage.sub }}</span></div>
+          <div v-if="stage.meta.at" class="srow"><span class="k">Время</span><span class="v mono">{{ stage.meta.at }}</span></div>
+          <div v-if="stage.meta.dur != null" class="srow"><span class="k">Длительность</span><span class="v">{{ stage.meta.dur }} мин</span></div>
+          <div v-if="stage.meta.fanout != null" class="srow"><span class="k">Субагентов</span><span class="v">{{ stage.meta.fanout }}</span></div>
+          <div v-if="stage.meta.fails" class="srow"><span class="k">Возвратов</span><span class="v bad">{{ stage.meta.fails }}</span></div>
+          <div v-if="stage.meta.tokens" class="srow"><span class="k">Токенов</span><span class="v mono">{{ stage.meta.tokens.toLocaleString('ru') }}</span></div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -286,4 +317,18 @@ function cardState(g) {
   background: none; border: none; color: var(--ink); text-align: left; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
 .otitle:hover { color: var(--accent); }
 .otimer { color: var(--good); font-size: 15px; flex: none; }
+
+/* Модалка этапа */
+.soverlay { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-start;
+  justify-content: center; padding: 60px 16px; z-index: 100; }
+.smodal { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  width: 100%; max-width: 440px; box-shadow: var(--shadow); }
+.sh { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.sh h3 { flex: 1; margin: 0; font-size: 16px; font-weight: 640; }
+.sx { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
+.sb { padding: 12px 16px; display: flex; flex-direction: column; }
+.srow { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line-soft, var(--line)); font-size: 13.5px; }
+.srow:last-child { border-bottom: none; }
+.srow .k { color: var(--ink-mid); }
+.srow .v.bad { color: var(--bad); }
 </style>

@@ -1,6 +1,16 @@
-// SystemAdapter — нагрузка «мозга» (домашнего ПК): CPU и RAM.
+// SystemAdapter — нагрузка «мозга» (домашнего ПК): CPU и RAM (вкл. swap).
 // CPU% считаем по разнице снимков os.cpus() на интервале (loadavg врёт на многоядерных).
 import os from 'node:os';
+import fs from 'node:fs';
+
+// Память из /proc/meminfo (Linux): точнее os.freemem (MemAvailable) + swap.
+function readMeminfo() {
+  try {
+    const t = fs.readFileSync('/proc/meminfo', 'utf8');
+    const g = (k) => { const m = t.match(new RegExp(`^${k}:\\s+(\\d+) kB`, 'm')); return m ? Number(m[1]) * 1024 : 0; };
+    return { memTotal: g('MemTotal'), memAvail: g('MemAvailable'), swapTotal: g('SwapTotal'), swapFree: g('SwapFree') };
+  } catch { return null; }
+}
 
 export class SystemAdapter {
   constructor({ intervalMs = 2000 } = {}) {
@@ -29,22 +39,26 @@ export class SystemAdapter {
     this.percent = dTotal > 0 ? Math.round((1 - dIdle / dTotal) * 100) : 0;
   }
 
-  /** Текущий снимок нагрузки. */
+  /** Текущий снимок нагрузки. RAM учитывает swap (файл подкачки). */
   read() {
-    const total = os.totalmem();
-    const free = os.freemem();
+    const mi = readMeminfo();
+    let total; let free; let swapTotal; let swapUsed;
+    if (mi && mi.memTotal) {
+      swapTotal = mi.swapTotal;
+      swapUsed = mi.swapTotal - mi.swapFree;
+      total = mi.memTotal + mi.swapTotal;   // ОЗУ + swap
+      free = mi.memAvail + mi.swapFree;
+    } else {
+      total = os.totalmem(); free = os.freemem(); swapTotal = 0; swapUsed = 0;
+    }
     const used = total - free;
+    const gb = (b) => +(b / 1024 ** 3).toFixed(1);
     return {
-      cpu: {
-        percent: this.percent,
-        cores: os.cpus().length,
-        load1: +os.loadavg()[0].toFixed(2),
-      },
+      cpu: { percent: this.percent, cores: os.cpus().length, load1: +os.loadavg()[0].toFixed(2) },
       mem: {
-        totalGb: +(total / 1024 ** 3).toFixed(1),
-        usedGb: +(used / 1024 ** 3).toFixed(1),
-        freeGb: +(free / 1024 ** 3).toFixed(1),
+        totalGb: gb(total), usedGb: gb(used), freeGb: gb(free),
         percent: Math.round((used / total) * 100),
+        swapTotalGb: gb(swapTotal), swapUsedGb: gb(swapUsed),
       },
     };
   }

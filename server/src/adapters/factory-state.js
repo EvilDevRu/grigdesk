@@ -158,6 +158,19 @@ export class FactoryStateAdapter {
     const doneCount = chain.filter((n) => ['done', 'skip', 'idle'].includes(statuses[n])).length;
     const cur = chain.find((n) => ['run', 'wait', 'premature'].includes(statuses[n])) || null;
 
+    // Мета каждого узла (для модалки этапа): время/длительность/фанаут/возвраты/токены.
+    const nodeMeta = {};
+    for (const nid of Object.keys(def.pos)) {
+      const key = def.keys[nid] || nid.toUpperCase();
+      nodeMeta[nid] = {
+        at: registry[`${key}_AT`] || null,
+        dur: registry[`DUR_${key}`] ? Number(registry[`DUR_${key}`]) : null,
+        fanout: registry[`FANOUT_${key}`] ? Number(registry[`FANOUT_${key}`]) : null,
+        fails: registry[`${key}_FAILS`] ? Number(registry[`${key}_FAILS`]) : 0,
+        tokens: registry[`TOKENS_${key}`] ? Number(registry[`TOKENS_${key}`]) : null,
+      };
+    }
+
     return {
       task,
       profile,
@@ -167,6 +180,7 @@ export class FactoryStateAdapter {
       pos: def.pos,
       edges: def.edges,
       statuses,
+      nodeMeta,
       loops: loops.loops,
       halted: loops.halted,
       wfStatus: registry.WF_STATUS || null,

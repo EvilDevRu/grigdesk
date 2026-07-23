@@ -1,5 +1,8 @@
 // Модуль media — эндпоинты распознавания речи (замена медиа-инструментов b24-mcp).
 import fp from 'fastify-plugin';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 async function mediaModule(fastify, opts) {
   const { media } = opts;
@@ -7,6 +10,21 @@ async function mediaModule(fastify, opts) {
 
   // Проверка окружения (ffmpeg/venv/whisper).
   fastify.get('/api/media/doctor', async () => media.doctor());
+
+  // Загрузка видео/аудио (multipart) → сохраняем на диск → запускаем распознавание → { jobId }.
+  fastify.post('/api/media/upload', async (request, reply) => {
+    const data = await request.file();
+    if (!data) return reply.code(400).send({ error: 'no_file' });
+    const dir = path.join(media.mediaDir, 'uploads');
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = (data.filename || 'upload').replace(/[^\w.\-а-яё]+/gi, '_');
+    const filePath = path.join(dir, `${Date.now()}-${safe}`);
+    try {
+      await pipeline(data.file, fs.createWriteStream(filePath));
+      const { jobId } = media.ingest({ filePath });
+      return { jobId, filename: data.filename };
+    } catch (err) { return fail(reply, err); }
+  });
 
   // Запуск распознавания → { jobId }. filePath — путь к видео/аудио на диске.
   fastify.post('/api/media/ingest', async (request, reply) => {

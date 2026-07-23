@@ -2,6 +2,7 @@
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 
 import { config } from './config.js';
 import { FactoryStateAdapter } from './adapters/factory-state.js';
@@ -30,6 +31,9 @@ async function build() {
   if (config.isDev) {
     await fastify.register(cors, { origin: true });
   }
+
+  // Загрузка видео/аудио для распознавания (до 3 ГБ).
+  await fastify.register(multipart, { limits: { fileSize: 3 * 1024 ** 3 } });
 
   // Адаптеры (изоляция источников).
   const factoryState = new FactoryStateAdapter({ stateDir: config.stateDir, factoryHome: config.factoryHome });

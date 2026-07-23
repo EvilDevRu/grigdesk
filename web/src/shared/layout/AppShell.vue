@@ -23,15 +23,17 @@ function toggleSidebar() { collapsed.value = !collapsed.value; localStorage.setI
 
 // Современные линейные иконки (Lucide-style).
 const ICONS = {
-  board: 'M4 4h7v7H4z M13 4h7v7h-7z M13 13h7v7h-7z M4 13h7v7H4z',
-  pipeline: 'M6 3v12 M18 6a3 3 0 100-.01 M6 21a3 3 0 100-.01 M18 6a9 9 0 01-9 9',
-  routes: 'M9 6l-5-2v14l5 2 6-2 5 2V6l-5-2-6 2z M9 4v16 M15 6v16',
-  settings: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M2 14h4 M10 8h4 M18 16h4',
+  board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
+  pipeline: 'M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9',
+  routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
+  video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
+  settings: 'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
 };
 const nav = [
   { to: '/board', label: 'Доска', icon: 'board' },
   { to: '/pipeline', label: 'Конвейер', icon: 'pipeline' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
+  { to: '/video', label: 'Видео', icon: 'video' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
 ];
 
@@ -59,7 +61,7 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
       </div>
       <div class="status">
         <span v-if="sys" class="metric mono"
-              :title="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})`">
+              :title="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM+swap: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})` + (sys.mem.swapTotalGb ? ` · swap ${sys.mem.swapUsedGb}/${sys.mem.swapTotalGb} ГБ` : '')">
           CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
           · RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }} ГБ</b>
         </span>
