@@ -21,7 +21,12 @@ export default defineConfig({
         lang: 'ru',
         start_url: './',
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // НЕ подменять SPA-fallback'ом навигации в проксируемый VS Code и API —
+        // иначе iframe /vscode/ получает index.html кокпита вместо настоящего редактора.
+        navigateFallbackDenylist: [/^\/vscode/, /^\/api/, /^\/shots/, /^\/demo/],
+      },
     }),
   ],
   base: './',
