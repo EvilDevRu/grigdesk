@@ -292,7 +292,7 @@ function cardState(g) {
 
           <!-- Обсудить с агентом (открывает глобальный чат по задаче) -->
           <div class="sect">
-            <button class="btn" @click="chat.openFor(stage.task); closeStage()">💬 Обсудить с агентом</button>
+            <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
           </div>
 
           <!-- Принудительный переход — одной кнопкой «плей» -->
