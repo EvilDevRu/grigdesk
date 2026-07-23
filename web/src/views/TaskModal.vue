@@ -67,6 +67,17 @@ async function act(name, fn) {
 }
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.value ? 'pause' : 'start'));
 const complete = () => { if (confirm('Завершить задачу?')) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
+const launchMsg = ref(null);
+const launch = () => {
+  if (!confirm(`Направить задачу #${taskId.value} на конвейер? Запустит фабрику (песочница + агенты).`)) return;
+  act('launch', async () => {
+    const ticket = `${detail.value?.title || ''}\n${cleanDesc.value || ''}`.trim();
+    const r = await tasks.launch(taskId.value, ticket);
+    launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
+      : r.outcome === 'launched' ? `Запущено (профиль ${r.profile})`
+      : r.note || 'Отправлено';
+  });
+};
 const sendComment = () => act('comment', async () => { await tasks.comment(taskId.value, commentText.value); commentText.value = ''; });
 const refresh = () => { loadDetail(true); board.load(true); };
 
@@ -121,6 +132,10 @@ watch(taskId, (id) => {
           <button class="btn good" :disabled="busy === 'complete'" @click="complete">
             {{ busy === 'complete' ? '…' : '✓ Завершить' }}
           </button>
+          <button class="btn" :disabled="busy === 'launch'" @click="launch" title="Запустить фабрику по задаче">
+            {{ busy === 'launch' ? '…' : '🏭 На конвейер' }}
+          </button>
+          <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
         </div>
 
         <!-- Комментарий -->
@@ -166,6 +181,7 @@ watch(taskId, (id) => {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
 .btn.warn { background: var(--warn); border-color: var(--warn); color: #241802; }
+.lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
 .comment { display: flex; gap: 8px; align-items: flex-end; }
 .comment textarea { flex: 1; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--ground); color: var(--ink); font-family: inherit; font-size: 14px; }

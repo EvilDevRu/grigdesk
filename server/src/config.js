@@ -15,6 +15,9 @@ export const config = {
   // Пути «мозга».
   stateDir: process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state'),
   factoryHome: process.env.FACTORY_HOME || path.join(home, 'Workspace', 'factory'),
+  factoryBin: process.env.COCKPIT_FACTORY_BIN || path.join(process.env.FACTORY_HOME || path.join(home, 'Workspace', 'factory'), 'bin', 'factory'),
+  // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
+  factoryProfile: process.env.COCKPIT_FACTORY_PROFILE || '',
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),

@@ -37,6 +37,38 @@ async function factoryModule(fastify, opts) {
     }
   });
 
+  // Запуск задачи на конвейер (замена входа через хук на mcp__b24__b24_task).
+  // Контракт: factory bin при ошибке аргументов → rc≠0; при занятом локе → rc=0.
+  // Исход читаем из состояния (ORCH_PID + /proc), не из stdout.
+  fastify.post('/api/tasks/:id/launch', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    const { ticket, route, profile: reqProfile } = request.body || {};
+    const profile = reqProfile || config.factoryProfile || (await factoryState.primaryProfile());
+    if (!profile) return reply.code(400).send({ error: 'no_profile', message: 'профиль конвейера не определён' });
+
+    // Уже идёт?
+    let reg = null;
+    try { reg = (await factoryState.readRegistry(id)).registry; } catch { /* реестра ещё нет */ }
+    if (reg && factoryState.isDaemonAlive(reg.ORCH_PID, id)) return { outcome: 'already_running', profile };
+
+    const args = [id, 'start', '--profile', profile];
+    if (ticket) args.push('--ticket', String(ticket).slice(0, 4000));
+    if (route) args.push('--route', route);
+    const rc = await new Promise((res) => execFile(config.factoryBin, args, { timeout: 20000 }, (err) => res(err ? (err.code ?? 1) : 0)));
+    if (rc !== 0) return reply.code(500).send({ outcome: 'invalid', message: 'factory bin: ошибка аргументов/профиля/маршрута' });
+
+    // Опрос ORCH_PID до ~10с.
+    for (let i = 0; i < 40; i += 1) {
+      await new Promise((r) => { setTimeout(r, 250); });
+      try {
+        const r2 = (await factoryState.readRegistry(id)).registry;
+        if (factoryState.isDaemonAlive(r2.ORCH_PID, id)) return { outcome: 'launched', profile };
+      } catch { /* реестр ещё пишется */ }
+    }
+    return { outcome: 'started', profile, note: 'демон не подтвердил PID за 10с — проверь конвейер' };
+  });
+
   // Снос стенда задачи. Команда проектно-специфична — задаётся окружением
   // (COCKPIT_SANDBOX_DOWN_CMD, {task} подставляется). Не настроено → 501.
   fastify.post('/api/tasks/:id/sandbox/down', async (request, reply) => {

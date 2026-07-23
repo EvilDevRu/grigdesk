@@ -28,5 +28,9 @@ export const useTasksStore = defineStore('tasks', {
     async comment(id, text) {
       await api.post(`/api/b24/task/${id}/comment`, { text });
     },
+    // Направить задачу на конвейер (запуск фабрики).
+    async launch(id, ticket) {
+      return api.post(`/api/tasks/${id}/launch`, { ticket });
+    },
   },
 });
