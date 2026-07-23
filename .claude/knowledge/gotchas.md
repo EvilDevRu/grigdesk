@@ -58,3 +58,16 @@ ffmpeg/ffprobe/venv/faster-whisper.
 
 В `~/.factory/state` есть файлы с двойным префиксом `tt*` (баг двойного `t`). Глоб задач —
 строго `^t(\d+)\.pipeline$` (см. `FactoryStateAdapter.listTaskIds`), призраки отсекаются.
+
+## VS Code в кокпите (`code serve-web` + прокси)
+
+- **Движок:** `code serve-web` (VS Code CLI). Один экземпляр (`lib/vscode-server.js`, ленивый старт
+  по `POST /api/vscode/ensure`); папку каждая задача открывает через `?folder=`. Без папки тоже поднимается.
+- **Слушает только `127.0.0.1:8141`** — наружу через реверс-прокси кокпита: `@fastify/http-proxy`,
+  prefix `/vscode`, **`rewritePrefix` тоже `/vscode` (НЕ срезаем)**.
+- **`--server-base-path /vscode` обязателен:** иначе VS Code эмитит ассеты по `/static/…` мимо прокси.
+- **iframe без проблем:** serve-web НЕ шлёт `frame-ancestors`/`X-Frame-Options`; прокси на тот же origin
+  убирает cross-origin и даёт доступ с планшета через Tailscale одним портом.
+- **Первый запуск качает веб-сборку** (~50MB, сеть) в `.state/vscode`. `ping`: 200 = готово, 202 = качается.
+- **Auth:** `/vscode` исключён из проверки токена мутаций (iframe не шлёт заголовок) — доступ по доверенной сети.
+- Воркдир задачи: `GET /api/tasks/:id/workspace` → `{beWt, feWt}` из `tNNNN.env`.
