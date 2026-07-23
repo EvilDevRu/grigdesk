@@ -15,6 +15,9 @@ async function authPlugin(fastify, opts) {
   fastify.addHook('onRequest', async (request, reply) => {
     if (!MUTATING.has(request.method)) return; // чтение — свободно
     if (!token) return; // токен не настроен — пропускаем (доверенная сеть)
+    // Прокси VS Code: iframe не может слать X-Cockpit-Token на каждый запрос;
+    // доступ к редактору держится на доверенной сети (Tailscale), как и у терминала.
+    if (request.url.startsWith('/vscode')) return;
     const provided = request.headers['x-cockpit-token'];
     if (provided !== token) {
       reply.code(401).send({ error: 'unauthorized', message: 'Неверный или отсутствующий X-Cockpit-Token для мутации.' });

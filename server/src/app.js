@@ -12,6 +12,7 @@ import { SystemAdapter } from './adapters/system.js';
 import { MediaAdapter } from './adapters/media.js';
 import { CredsStore } from './lib/b24/creds-store.js';
 import { ClaudeAuthStore } from './lib/claude-auth-store.js';
+import { VscodeServer } from './lib/vscode-server.js';
 
 import authPlugin from './plugins/auth.js';
 import ssePlugin from './plugins/sse.js';
@@ -25,6 +26,7 @@ import mediaModule from './modules/media/index.js';
 import chatModule from './modules/chat/index.js';
 import settingsModule from './modules/settings/index.js';
 import terminalModule from './modules/terminal/index.js';
+import vscodeModule from './modules/vscode/index.js';
 
 async function build() {
   const fastify = Fastify({
@@ -49,6 +51,7 @@ async function build() {
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
   const system = new SystemAdapter();
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
+  const vscode = new VscodeServer({ bin: config.vscodeBin, port: config.vscodePort, basePath: config.vscodeBasePath, dataDir: config.vscodeDataDir });
 
   // Плагины платформы.
   await fastify.register(authPlugin, { mutateToken: config.mutateToken });
@@ -63,6 +66,7 @@ async function build() {
   await fastify.register(chatModule, { factoryState, config, claudeAuth });
   await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config });
   await fastify.register(terminalModule, { config });
+  await fastify.register(vscodeModule, { vscode, config });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });

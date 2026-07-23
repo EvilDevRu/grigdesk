@@ -29,6 +29,13 @@ async function factoryModule(fastify, opts) {
     }
   });
 
+  // Воркдиры задачи (worktree бэка/фронта) — для кнопки «Открыть в VS Code».
+  fastify.get('/api/tasks/:id/workspace', async (request) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    const env = id ? await factoryState.readEnv(id) : {};
+    return { beWt: env.BE_WT || null, feWt: env.FE_WT || null };
+  });
+
   // Глобальный каталог стадий (enum) — для будущего редактора профилей.
   fastify.get('/api/factory/stages', async () => ({ kinds: StageKind, stages: STAGES }));
 

@@ -8,6 +8,7 @@ import { useBoardStore } from '../stores/board.js';
 import { useChatStore } from '../stores/chat.js';
 import { secToHMS } from '../shared/format.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
+import OpenInCodeButton from './OpenInCodeButton.vue';
 
 const ui = useUiStore();
 const chat = useChatStore();
@@ -290,9 +291,10 @@ function cardState(g) {
             </div>
           </div>
 
-          <!-- Обсудить с агентом (открывает глобальный чат по задаче) -->
-          <div class="sect">
+          <!-- Обсудить с агентом (чат) + открыть код задачи в VS Code -->
+          <div class="sect row">
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
+            <OpenInCodeButton :task-id="stage.task" @click="closeStage()" />
           </div>
 
           <!-- Принудительный переход — одной кнопкой «плей» -->
@@ -408,6 +410,7 @@ function cardState(g) {
 .srow .v.bad { color: var(--bad); }
 
 .sect { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.sect.row { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .secth { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-mid); display: flex; align-items: center; gap: 8px; }
 .jf { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--ink-mid); margin-left: auto; }
 .jf.on { color: var(--good); }

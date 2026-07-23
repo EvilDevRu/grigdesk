@@ -26,12 +26,14 @@ const ICONS = {
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
+  code: 'M8 6l-6 6 6 6 M16 6l6 6-6 6',
   settings: 'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
 };
 const nav = [
   { to: '/board', label: 'Доска', icon: 'board' },
   { to: '/pipeline', label: 'Конвейер', icon: 'pipeline' },
   { to: '/agents', label: 'Агенты', icon: 'agents' },
+  { to: '/code', label: 'Код', icon: 'code' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
   { to: '/video', label: 'Видео', icon: 'video' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },

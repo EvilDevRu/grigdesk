@@ -7,6 +7,7 @@ import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { secToHMS } from '../shared/format.js';
+import OpenInCodeButton from './OpenInCodeButton.vue';
 
 const router = useRouter();
 
@@ -160,6 +161,7 @@ watch(taskId, (id) => {
             <button v-else class="btn launch" :disabled="busy === 'launch'" @click="launch" title="Запустить фабрику по задаче">
               {{ busy === 'launch' ? '…' : '🏭 На конвейер' }}
             </button>
+            <OpenInCodeButton :task-id="taskId" />
           </div>
           <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
         </div>
