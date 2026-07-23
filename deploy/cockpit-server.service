@@ -1,0 +1,23 @@
+# systemd user-сервис сервера кокпита (host-native, по образцу factory-dashboard.service).
+# Установка: см. deploy/install.sh. Управление:
+#   systemctl --user enable --now cockpit-server
+#   systemctl --user status cockpit-server
+#   journalctl --user -u cockpit-server -f
+[Unit]
+Description=Кокпит: API-сервер (Fastify)
+After=network.target
+
+[Service]
+Type=simple
+# NODE и рабочая директория подставит install.sh (шаблонные плейсхолдеры).
+ExecStart=__NODE__ __COCKPIT_DIR__/server/src/app.js
+WorkingDirectory=__COCKPIT_DIR__/server
+Environment=NODE_ENV=production
+Environment=COCKPIT_PORT=8140
+# Токен на мутации — раскомментировать и задать для боевого доступа:
+# Environment=COCKPIT_TOKEN=change-me
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
