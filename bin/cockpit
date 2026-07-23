@@ -11,6 +11,16 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD="${1:-run}"
+PORT="${COCKPIT_PORT:-8140}"
+
+# node обязателен и должен быть в PATH (в «голом» шелле nvm-node может быть не подхвачен).
+if ! command -v node >/dev/null 2>&1; then
+  echo "✗ node не найден в PATH. Загрузи nvm (напр. 'nvm use') или укажи node вручную." >&2
+  exit 1
+fi
+
+# Занят ли порт (сервер уже запущен другим процессом/вкладкой).
+port_busy() { command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q "[:.]${PORT}[[:space:]]"; }
 
 ensure_deps() {
   [ -d "$DIR/server/node_modules" ] || ( echo "→ npm i (server)"; cd "$DIR/server" && npm install --no-audit --no-fund )
@@ -36,8 +46,13 @@ case "$CMD" in
     cd "$DIR/server" && NODE_ENV=development node --watch src/app.js
     ;;
   run|"")
+    if port_busy; then
+      echo "→ Кокпит уже слушает :$PORT — открой http://localhost:$PORT"
+      echo "  (чтобы перезапустить — сначала останови процесс на этом порту)"
+      exit 0
+    fi
     ensure_deps; build_web
-    echo "→ Сервер :${COCKPIT_PORT:-8140}"
+    echo "→ Сервер поднят: http://localhost:$PORT  (с планшета — через Tailscale: http://<ip>:$PORT)"
     cd "$DIR/server" && exec node src/app.js
     ;;
   *)
