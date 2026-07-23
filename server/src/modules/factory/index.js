@@ -3,6 +3,7 @@
 // добавятся отдельным этапом через factory-cli.
 import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
+import { STAGES, StageKind } from '../../lib/stages.js';
 
 async function factoryModule(fastify, opts) {
   const { factoryState, config } = opts;
@@ -23,6 +24,9 @@ async function factoryModule(fastify, opts) {
       return reply.code(404).send({ error: 'not_found', message: err.message });
     }
   });
+
+  // Глобальный каталог стадий (enum) — для будущего редактора профилей.
+  fastify.get('/api/factory/stages', async () => ({ kinds: StageKind, stages: STAGES }));
 
   // Эталонные схемы маршрутов. Профиль — из запроса, иначе определяется по данным
   // (активные задачи / обнаруженные схемы). Пустой кокпит вернёт profile:null.

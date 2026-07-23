@@ -1,10 +1,12 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { api } from '../shared/api-client.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 
 const data = ref(null);
 const error = ref(null);
+const loading = ref(true);
+const activeProfile = ref(null);
 
 const ROUTE_INFO = {
   feature: { icon: '✨', title: 'feature — новая функциональность',
@@ -15,10 +17,19 @@ const ROUTE_INFO = {
     desc: 'Без ворот плана: разведка → песочница → build → ревью → PHP → линт → приёмка → ship. Агент обязан эскалировать в feature/debug, если задача окажется сложнее.' },
 };
 const order = ['feature', 'debug', 'trivial'];
+// Все маршруты профиля: известные по порядку, затем прочие (dev/quick и т.п.).
+const routeNames = computed(() => {
+  const r = data.value?.routes || {};
+  return [...order.filter((n) => r[n]), ...Object.keys(r).filter((n) => !order.includes(n))];
+});
 
-async function load() {
-  try { data.value = await api.get('/api/factory/routes'); }
-  catch (e) { error.value = e.message; }
+async function load(profile) {
+  loading.value = true;
+  try {
+    data.value = await api.get(`/api/factory/routes${profile ? `?profile=${encodeURIComponent(profile)}` : ''}`);
+    activeProfile.value = data.value.profile;
+    error.value = null;
+  } catch (e) { error.value = e.message; } finally { loading.value = false; }
 }
 load();
 </script>
@@ -27,11 +38,16 @@ load();
   <div class="routes">
     <h2 class="ttl">Маршруты конвейера<span v-if="data" class="muted"> · профиль {{ data.profile }}</span></h2>
     <p class="muted lead">Какие пути проходит задача на фабрике в зависимости от типа. Тип выбирает роутер по тикету (или задаётся вручную).</p>
+    <div v-if="data && data.profiles && data.profiles.length" class="pfilter">
+      <button v-for="p in data.profiles" :key="p" class="pchip" :class="{ on: activeProfile === p }" @click="load(p)">{{ p }}</button>
+    </div>
+
     <p v-if="error" class="err">{{ error }}</p>
+    <p v-else-if="loading" class="muted"><span class="spin"></span> Загрузка схем…</p>
     <p v-else-if="data && !data.profile" class="muted">Профилей конвейера не найдено.</p>
 
-    <template v-if="data && data.profile">
-      <section v-for="name in order.filter(n => data.routes[n])" :key="name" class="rcard">
+    <template v-if="!loading && data && data.profile">
+      <section v-for="name in routeNames" :key="name" class="rcard">
         <header class="rhead">
           <span class="ricon">{{ ROUTE_INFO[name]?.icon || '•' }}</span>
           <span class="rname">{{ ROUTE_INFO[name]?.title || name }}</span>
@@ -49,6 +65,10 @@ load();
 .ttl { font-size: 20px; margin: 0; }
 .lead { max-width: 80ch; margin: 0; font-size: 13px; }
 .err { color: var(--bad); }
+.pfilter { display: flex; flex-wrap: wrap; gap: 6px; }
+.pfilter .pchip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
+  border-radius: 999px; padding: 4px 14px; font-size: 13px; cursor: pointer; }
+.pfilter .pchip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .rcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 16px; box-shadow: var(--shadow); }
 .rhead { display: flex; align-items: center; gap: 10px; }

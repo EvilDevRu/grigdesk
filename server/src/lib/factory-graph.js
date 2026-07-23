@@ -5,6 +5,7 @@
 // Геометрия узлов и кривые рёбер считаются на клиенте (graph-geom.js) — здесь только данные.
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveNode } from './stages.js';
 
 // Значение реестра → статус узла (_ST_MAP, dashboard.py:281). Остальное → pending.
 const ST_MAP = {
@@ -27,8 +28,11 @@ export function loadGraph(factoryHome, profile) {
 export function graphForRoute(g, route) {
   const r = g.routes[route] || g.routes[g.default_route];
   const optional = new Set([...(g.optional?.['*'] || []), ...(g.optional?.[route] || [])]);
+  // Узлы: оверрайд профиля поверх глобального каталога стадий (stages.js).
+  const nodes = {};
+  for (const id of Object.keys(r.pos)) nodes[id] = resolveNode(id, g.nodes?.[id]);
   return {
-    nodes: g.nodes,            // id → [kind, label, sub]
+    nodes,                     // id → [kind, label, sub] (профиль + каталог)
     keys: g.keys || {},        // id → registry key
     optional: [...optional],
     vb: r.vb,

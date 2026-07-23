@@ -54,6 +54,12 @@
   `factory/profiles/*.graph.json`, портал/креды из «Настроек» (`.state`), пути через env. Пустой кокпит
   ничего не знает о конкретном проекте.
 
+## База знаний (как работает и тонкости — чтобы не перечитывать код)
+
+@.claude/knowledge/architecture.md
+@.claude/knowledge/factory-graph.md
+@.claude/knowledge/gotchas.md
+
 ## Запуск
 
 ```bash

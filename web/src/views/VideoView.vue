@@ -94,7 +94,7 @@ onUnmounted(() => clearInterval(poll));
 
     <!-- Прогресс распознавания -->
     <div v-if="job && job.status === 'running'" class="progress">
-      Распознавание…
+      <span class="spin"></span> Распознавание…
       <span v-if="job.progress" class="mono">{{ job.progress.done }}/{{ job.progress.total }}</span>
       <div class="pbar"><span :style="{ width: job.progress ? (job.progress.done / job.progress.total * 100) + '%' : '10%' }"></span></div>
     </div>

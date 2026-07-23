@@ -168,7 +168,7 @@ function cardState(g) {
         <span class="task mono">#{{ t.task }}</span>
         <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
         <button v-if="title(t.task)" class="ctitle" :title="title(t.task)" @click="ui.openTask(t.task)">{{ title(t.task) }}</button>
-        <span v-else class="spacer"></span>
+        <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
         <span class="daemon" :class="t.daemonAlive ? 'alive' : 'idle'">{{ t.daemonAlive ? '● идёт' : '○ стоит' }}</span>
       </header>
 

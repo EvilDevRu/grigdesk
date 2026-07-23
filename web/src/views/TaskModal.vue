@@ -103,7 +103,7 @@ watch(taskId, (id) => {
     <div class="panel">
       <header class="mhead">
         <span class="mid mono">#{{ taskId }}</span>
-        <h3 class="mtitle">{{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}</h3>
+        <h3 class="mtitle"><span v-if="loading && !detail" class="spin"></span> {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}</h3>
         <button class="icon" title="Обновить" @click="refresh">⟳</button>
         <button class="icon" title="Закрыть" @click="ui.close()">✕</button>
       </header>

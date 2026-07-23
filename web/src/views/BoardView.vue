@@ -53,7 +53,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 
 <template>
   <div class="board">
-    <p v-if="!data && !error" class="muted">Загрузка доски…</p>
+    <p v-if="!data && !error" class="muted"><span class="spin"></span> Загрузка доски…</p>
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
       <router-link to="/settings" class="link">→ Настройки</router-link>
