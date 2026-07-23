@@ -78,6 +78,8 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
         <span class="mlogo">◧</span>
         <h1 class="page">{{ route.meta.title || 'Кокпит' }}</h1>
       </div>
+      <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
+      <div id="tb-slot" class="tb-slot"></div>
       <div class="status">
         <span v-if="sys?.net" class="netbox mono"
               :title="`Публичный IP мозга: ${sys.net.ip}` + (sys.net.country ? ` · ${sys.net.country}` : '')">
@@ -145,10 +147,14 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 /* ── Топбар ── */
 .topbar {
   grid-row: 1; grid-column: 2;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 14px;
   padding: 0 22px; background: var(--topbar); border-bottom: 1px solid var(--line);
 }
-.tbleft { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tbleft { display: flex; align-items: center; gap: 10px; min-width: 0; flex: none; }
+/* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
+.tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+.tb-slot:empty { display: none; }
+.status { margin-left: auto; }
 .mlogo { display: none; color: var(--accent); font-size: 18px; }
 .page { margin: 0; font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
 .status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }

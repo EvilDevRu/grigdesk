@@ -25,10 +25,13 @@ export default defineConfig({
     }),
   ],
   base: './',
+  // .env лежит в корне репо (общий для сервера и фронта) — читаем оттуда.
+  envDir: '..',
   server: {
     port: 5180,
     proxy: {
       '/api': { target: 'http://localhost:8140', changeOrigin: true, ws: false },
+      '/vscode': { target: 'http://localhost:8140', changeOrigin: true, ws: true },
       '/shots': 'http://localhost:8140',
       '/demo': 'http://localhost:8140',
     },
