@@ -34,6 +34,11 @@ export const config = {
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.COCKPIT_SANDBOX_DOWN_CMD || '',
 
+  // Медиа-конвейер (распознавание речи). Python venv — через COCKPIT_MEDIA_PYTHON
+  // (venv тяжёлый, переиспользуем; читается в media/preflight.js). Хранилище job'ов/медиа.
+  mediaDir: process.env.COCKPIT_MEDIA_DIR || path.join(__dirname, '..', '.state', 'media'),
+  mediaPython: process.env.COCKPIT_MEDIA_PYTHON || '',
+
   // Режим.
   isDev: process.env.NODE_ENV === 'development',
 };

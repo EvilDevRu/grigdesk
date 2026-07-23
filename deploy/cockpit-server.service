@@ -16,6 +16,10 @@ Environment=NODE_ENV=production
 Environment=COCKPIT_PORT=8140
 # Токен на мутации — раскомментировать и задать для боевого доступа:
 # Environment=COCKPIT_TOKEN=change-me
+# Медиа-конвейер: путь к python venv с faster-whisper (переиспользуем существующий):
+# Environment=COCKPIT_MEDIA_PYTHON=%h/Workspace/b24-mcp/app/.venv/bin/python
+# Команда сноса стенда ({task} подставляется), напр.:
+# Environment=COCKPIT_SANDBOX_DOWN_CMD=%h/Workspace/arsenkin/be/scripts/sandbox down {task}
 Restart=always
 RestartSec=2
 
