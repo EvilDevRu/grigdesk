@@ -13,12 +13,42 @@ function readMeminfo() {
 }
 
 export class SystemAdapter {
-  constructor({ intervalMs = 2000 } = {}) {
+  constructor({ intervalMs = 2000, netIntervalMs = 60000 } = {}) {
     this.percent = 0;
     this._prev = this._snapshot();
     // Периодический пересчёт CPU% (unref — не держит event loop).
     this._timer = setInterval(() => this._tick(), intervalMs);
     if (this._timer.unref) this._timer.unref();
+
+    // Публичный egress-IP + страна «мозга» (важно при VPN). Фоновый рефреш, кеш.
+    this.net = null;
+    this._refreshNet();
+    this._netTimer = setInterval(() => this._refreshNet(), netIntervalMs);
+    if (this._netTimer.unref) this._netTimer.unref();
+  }
+
+  /**
+   * Определяет внешний IP и страну через публичные гео-сервисы (два фоллбэка).
+   * При сбое сохраняет предыдущее значение (транзиентную ошибку не роняем в null).
+   */
+  async _refreshNet() {
+    const timeout = (ms) => { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms); return { signal: c.signal, done: () => clearTimeout(t) }; };
+    // 1) ip-api.com (http, щедрый лимит) → {query, country, countryCode}
+    try {
+      const s = timeout(4000);
+      const r = await fetch('http://ip-api.com/json/?fields=status,query,country,countryCode', { signal: s.signal });
+      s.done();
+      const j = await r.json();
+      if (j && j.status === 'success' && j.query) { this.net = { ip: j.query, country: j.country || '', countryCode: (j.countryCode || '').toUpperCase() }; return; }
+    } catch { /* пробуем фоллбэк */ }
+    // 2) ipinfo.io (https) → {ip, country}
+    try {
+      const s = timeout(4000);
+      const r = await fetch('https://ipinfo.io/json', { signal: s.signal, headers: { Accept: 'application/json' } });
+      s.done();
+      const j = await r.json();
+      if (j && j.ip) { this.net = { ip: j.ip, country: j.country || '', countryCode: (j.country || '').toUpperCase() }; return; }
+    } catch { /* оставляем прошлое значение */ }
   }
 
   _snapshot() {
@@ -60,10 +90,12 @@ export class SystemAdapter {
         percent: Math.round((used / total) * 100),
         swapTotalGb: gb(swapTotal), swapUsedGb: gb(swapUsed),
       },
+      net: this.net,
     };
   }
 
   stop() {
     if (this._timer) clearInterval(this._timer);
+    if (this._netTimer) clearInterval(this._netTimer);
   }
 }

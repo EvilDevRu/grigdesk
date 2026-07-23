@@ -13,6 +13,8 @@ const { data: sys } = storeToRefs(useSystemStore());
 const pwa = usePwaStore();
 
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
+// Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
+function flagOf(cc) { if (!cc || cc.length !== 2) return '🏳'; return cc.toUpperCase().replace(/[A-Z]/g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0))); }
 
 const collapsed = ref(localStorage.getItem('cockpit-sidebar') === '1');
 function toggleSidebar() { collapsed.value = !collapsed.value; localStorage.setItem('cockpit-sidebar', collapsed.value ? '1' : '0'); }
@@ -75,6 +77,11 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
         <h1 class="page">{{ route.meta.title || 'Кокпит' }}</h1>
       </div>
       <div class="status">
+        <span v-if="sys?.net" class="netbox mono"
+              :title="`Публичный IP мозга: ${sys.net.ip}` + (sys.net.country ? ` · ${sys.net.country}` : '')">
+          <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
+          <span class="ip">{{ sys.net.ip }}</span>
+        </span>
         <span v-if="sys" class="metric mono"
               :title="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM+swap: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})` + (sys.mem.swapTotalGb ? ` · swap ${sys.mem.swapUsedGb}/${sys.mem.swapTotalGb} ГБ` : '')">
           CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
@@ -144,6 +151,10 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
 .metric { color: var(--ink-mid); }
 .metric b { font-weight: 600; }
+.netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid);
+  padding: 3px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
+.netbox .flag { font-size: 14px; line-height: 1; }
+.netbox .ip { letter-spacing: .01em; }
 .lv-ok { color: var(--ink); } .lv-warn { color: var(--warn); } .lv-bad { color: var(--bad); }
 .conn { display: flex; align-items: center; gap: 7px; color: var(--ink-mid); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -175,6 +186,6 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
   .mlogo { display: inline; }
   .content { grid-row: 2; grid-column: 1; padding: 16px; }
   .host { display: none; }
-  @media (max-width: 440px) { .metric { display: none; } }
+  @media (max-width: 440px) { .metric { display: none; } .netbox .ip { display: none; } }
 }
 </style>
