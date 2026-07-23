@@ -45,11 +45,10 @@ function onTaskChange(e) {
 
 // ── Контекст ──
 const ctxPct = computed(() => Math.min(100, Math.round(((sess.value?.contextTokens || 0) / CONTEXT_WINDOW) * 100)));
-const ctxK = computed(() => {
-  const t = sess.value?.contextTokens || 0;
-  return t >= 1000 ? `${(t / 1000).toFixed(t >= 10000 ? 0 : 1)}k` : String(t);
-});
 const ctxClass = computed(() => (ctxPct.value >= 85 ? 'hi' : ctxPct.value >= 60 ? 'mid' : ''));
+// Кольцо-индикатор контекста (клик — сброс контекста).
+const RING_C = 2 * Math.PI * 9;
+const ringDash = computed(() => RING_C * (1 - ctxPct.value / 100));
 
 // ── Ввод ──
 const input = ref('');
@@ -82,32 +81,30 @@ async function toConveyor() {
 
 <template>
   <div v-if="sess" class="cs" :class="variant">
-    <!-- Панель управления -->
+    <!-- Панель управления: одна строка, всё выровнено по высоте -->
     <div class="cs-top">
-      <div class="row1">
-        <div class="sel grow">
-          <select :value="sess.taskId || ''" @change="onTaskChange">
-            <option value="">— без задачи (свободный вопрос) —</option>
-            <option v-for="o in taskOpts" :key="o.task" :value="o.task">{{ optLabel(o) }}</option>
-          </select>
-        </div>
-        <div class="sel">
-          <select :value="sess.model" title="Модель" @change="chat.setModel(sid, $event.target.value)">
-            <option v-for="m in MODELS" :key="m" :value="m">{{ m }}</option>
-          </select>
-        </div>
-        <EffortSlider :model-value="sess.effort" @update:model-value="chat.setEffort(sid, $event)" />
+      <div class="sel grow">
+        <select :value="sess.taskId || ''" @change="onTaskChange">
+          <option value="">— без задачи (свободный вопрос) —</option>
+          <option v-for="o in taskOpts" :key="o.task" :value="o.task">{{ optLabel(o) }}</option>
+        </select>
       </div>
-      <!-- Контекст + управление сеансом -->
-      <div class="row2">
-        <div class="ctx" :class="ctxClass" :title="`Контекст: ${sess.contextTokens.toLocaleString('ru')} токенов из ~${CONTEXT_WINDOW.toLocaleString('ru')} (${ctxPct}%)`">
-          <span class="ctx-lbl">контекст</span>
-          <span class="ctx-bar"><i :style="{ width: ctxPct + '%' }"></i></span>
-          <span class="ctx-val mono">{{ ctxPct }}% · {{ ctxK }}</span>
-        </div>
-        <button class="mini" title="Очистить переписку" :disabled="!sess.messages.length" @click="chat.clearChat(sid)">🧹</button>
-        <button class="mini" :class="{ hot: sess.sessionId }" :title="sess.sessionId ? 'Сбросить контекст (новый сеанс)' : 'Контекст пуст'" :disabled="!sess.sessionId" @click="chat.resetContext(sid)">⟳</button>
+      <div class="sel">
+        <select :value="sess.model" title="Модель" @change="chat.setModel(sid, $event.target.value)">
+          <option v-for="m in MODELS" :key="m" :value="m">{{ m }}</option>
+        </select>
       </div>
+      <EffortSlider :model-value="sess.effort" @update:model-value="chat.setEffort(sid, $event)" />
+      <!-- Контекст: маленькое кольцо-заполнение; клик — сброс контекста -->
+      <button class="ctx-ring" :class="ctxClass" :disabled="!sess.sessionId"
+              :title="`Контекст: ${sess.contextTokens.toLocaleString('ru')} токенов (${ctxPct}%)` + (sess.sessionId ? ' · клик — сбросить' : ' · пусто')"
+              @click="chat.resetContext(sid)">
+        <svg viewBox="0 0 24 24">
+          <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
+          <circle class="rfg" cx="12" cy="12" r="9" fill="none" stroke-width="3" stroke-linecap="round"
+                  :stroke-dasharray="RING_C" :stroke-dashoffset="ringDash" transform="rotate(-90 12 12)" />
+        </svg>
+      </button>
     </div>
 
     <!-- Сообщения -->
@@ -141,30 +138,24 @@ async function toConveyor() {
 <style scoped>
 .cs { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 
-.cs-top { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
-.row1 { display: flex; gap: 6px; align-items: stretch; }
-.row2 { display: flex; gap: 6px; align-items: center; }
+.cs-top { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .sel { position: relative; }
-.sel.grow { flex: 1; min-width: 0; }
+.sel.grow { flex: 1 1 180px; min-width: 0; }
 .sel::after { content: ''; position: absolute; right: 9px; top: 50%; width: 7px; height: 7px; pointer-events: none;
   border-right: 1.6px solid var(--ink-mid); border-bottom: 1.6px solid var(--ink-mid); transform: translateY(-70%) rotate(45deg); }
-.sel select { width: 100%; -webkit-appearance: none; appearance: none; background: var(--ground); border: 1px solid var(--line);
-  color: var(--ink); border-radius: 8px; padding: 6px 26px 6px 9px; font-size: 12.5px; cursor: pointer; text-overflow: ellipsis; }
+.sel select { width: 100%; height: 34px; -webkit-appearance: none; appearance: none; background: var(--ground); border: 1px solid var(--line);
+  color: var(--ink); border-radius: 8px; padding: 0 26px 0 10px; font-size: 12.5px; cursor: pointer; text-overflow: ellipsis; }
 .sel select:focus { outline: none; border-color: var(--line-2); }
-.ctx { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-mid);
-  background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
-.ctx-lbl { text-transform: uppercase; letter-spacing: .05em; font-size: 10px; flex: none; }
-.ctx-bar { flex: 1; min-width: 30px; height: 5px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
-.ctx-bar i { display: block; height: 100%; background: var(--good); border-radius: 999px; transition: width .3s; }
-.ctx-val { flex: none; font-size: 11px; }
-.ctx.mid .ctx-bar i { background: var(--warn); }
-.ctx.mid .ctx-val { color: var(--warn); }
-.ctx.hi .ctx-bar i { background: var(--bad); }
-.ctx.hi .ctx-val { color: var(--bad); }
-.mini { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 8px; width: 30px; height: 30px; cursor: pointer; flex: none; font-size: 13px; }
-.mini:not(:disabled):hover { color: var(--ink); border-color: var(--line-2); }
-.mini:disabled { opacity: .4; cursor: default; }
-.mini.hot { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+/* Кольцо контекста — маленькое, кликабельное (сброс) */
+.ctx-ring { width: 34px; height: 34px; flex: none; padding: 0; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--ground); cursor: pointer; display: grid; place-items: center; }
+.ctx-ring svg { width: 22px; height: 22px; }
+.ctx-ring .rbg { stroke: var(--surface-2); }
+.ctx-ring .rfg { stroke: var(--good); transition: stroke-dashoffset .3s; }
+.ctx-ring.mid .rfg { stroke: var(--warn); }
+.ctx-ring.hi .rfg { stroke: var(--bad); }
+.ctx-ring:not(:disabled):hover { border-color: var(--line-2); }
+.ctx-ring:disabled { cursor: default; opacity: .7; }
 
 .cs-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .hint { font-size: 12.5px; }

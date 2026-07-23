@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Запуск кокпита локально (host-native, без systemd).
+#
+#   bin/cockpit            собрать web и запустить сервер (прод-режим, один origin :8140)
+#   bin/cockpit dev        dev-режим: vite (:5180) + сервер с автоперезапуском
+#   bin/cockpit build      только собрать web
+#   bin/cockpit deps       установить зависимости server + web
+#
+# Переменные окружения (опционально): COCKPIT_PORT, COCKPIT_MEDIA_PYTHON и т.д. (см. server/src/config.js).
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CMD="${1:-run}"
+
+ensure_deps() {
+  [ -d "$DIR/server/node_modules" ] || ( echo "→ npm i (server)"; cd "$DIR/server" && npm install --no-audit --no-fund )
+  [ -d "$DIR/web/node_modules" ]    || ( echo "→ npm i (web)";    cd "$DIR/web"    && npm install --no-audit --no-fund )
+}
+
+build_web() { echo "→ Сборка web…"; ( cd "$DIR/web" && npm run build ); }
+
+case "$CMD" in
+  deps)
+    cd "$DIR/server" && npm install --no-audit --no-fund
+    cd "$DIR/web"    && npm install --no-audit --no-fund
+    ;;
+  build)
+    ensure_deps; build_web
+    ;;
+  dev)
+    ensure_deps
+    echo "→ Dev: vite :5180 + сервер (--watch) :8140"
+    ( cd "$DIR/web" && npm run dev ) &
+    VITE_PID=$!
+    trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT INT TERM
+    cd "$DIR/server" && NODE_ENV=development node --watch src/app.js
+    ;;
+  run|"")
+    ensure_deps; build_web
+    echo "→ Сервер :${COCKPIT_PORT:-8140}"
+    cd "$DIR/server" && exec node src/app.js
+    ;;
+  *)
+    echo "Неизвестная команда: $CMD"; echo "Смотри: bin/cockpit (без аргументов) / dev / build / deps"; exit 1
+    ;;
+esac
