@@ -10,6 +10,7 @@ import { B24Adapter } from './adapters/b24.js';
 import { SystemAdapter } from './adapters/system.js';
 import { MediaAdapter } from './adapters/media.js';
 import { CredsStore } from './lib/b24/creds-store.js';
+import { ClaudeAuthStore } from './lib/claude-auth-store.js';
 
 import authPlugin from './plugins/auth.js';
 import ssePlugin from './plugins/sse.js';
@@ -39,6 +40,7 @@ async function build() {
   // Адаптеры (изоляция источников).
   const factoryState = new FactoryStateAdapter({ stateDir: config.stateDir, factoryHome: config.factoryHome });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
+  const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
   const system = new SystemAdapter();
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
@@ -53,8 +55,8 @@ async function build() {
   await fastify.register(b24Module, { b24 });
   await fastify.register(systemModule, { system });
   await fastify.register(mediaModule, { media });
-  await fastify.register(chatModule, { factoryState, config });
-  await fastify.register(settingsModule, { credsStore, b24 });
+  await fastify.register(chatModule, { factoryState, config, claudeAuth });
+  await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });

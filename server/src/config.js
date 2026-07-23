@@ -20,6 +20,9 @@ export const config = {
   factoryProfile: process.env.COCKPIT_FACTORY_PROFILE || '',
   // Бинарь Claude для чата с агентом по задаче.
   claudeBin: process.env.COCKPIT_CLAUDE_BIN || 'claude',
+  // Свой API-ключ кокпита для claude (опционально). Хранится в .state (gitignore, 0600).
+  // Пусто → чат использует авторизацию хостового CLI (`claude login` / ANTHROPIC_API_KEY).
+  claudeAuthPath: process.env.COCKPIT_CLAUDE_AUTH_PATH || path.join(__dirname, '..', '.state', 'claude-auth.json'),
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),

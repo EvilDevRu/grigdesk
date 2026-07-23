@@ -7,7 +7,7 @@ import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
 
 async function chatModule(fastify, opts) {
-  const { factoryState, config } = opts;
+  const { factoryState, config, claudeAuth } = opts;
 
   /**
    * Единый запуск claude -p. cwd/доп-директории зависят от наличия задачи.
@@ -27,8 +27,9 @@ async function chatModule(fastify, opts) {
     if (sessionId) args.push('--resume', sessionId);
     for (const d of extraDirs) args.push('--add-dir', d);
 
+    const env = claudeAuth ? claudeAuth.env() : process.env;
     return new Promise((resolve) => {
-      execFile(config.claudeBin, args, { cwd, timeout: 300000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(config.claudeBin, args, { cwd, env, timeout: 300000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err && !stdout) {
           return resolve(reply.code(500).send({ error: 'chat_failed', message: (stderr || err.message).slice(-600) }));
         }

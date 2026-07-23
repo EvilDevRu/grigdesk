@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { api } from '../../shared/api-client.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useTasksStore } from '../../stores/tasks.js';
+import EffortSlider from './EffortSlider.vue';
 
 // Одна сессия чата. Переиспользуется в плавающей панели и на странице «Агенты».
 const props = defineProps({
@@ -95,7 +96,7 @@ async function toConveyor() {
             <option v-for="m in MODELS" :key="m" :value="m">{{ m }}</option>
           </select>
         </div>
-        <button class="effort" :data-lvl="sess.effort" title="Усилие рассуждения (клик — переключить)" @click="chat.cycleEffort(sid)">{{ sess.effort }}</button>
+        <EffortSlider :model-value="sess.effort" @update:model-value="chat.setEffort(sid, $event)" />
       </div>
       <!-- Контекст + управление сеансом -->
       <div class="row2">
@@ -150,13 +151,6 @@ async function toConveyor() {
 .sel select { width: 100%; -webkit-appearance: none; appearance: none; background: var(--ground); border: 1px solid var(--line);
   color: var(--ink); border-radius: 8px; padding: 6px 26px 6px 9px; font-size: 12.5px; cursor: pointer; text-overflow: ellipsis; }
 .sel select:focus { outline: none; border-color: var(--line-2); }
-.effort { min-width: 62px; text-transform: capitalize; background: var(--ground); border: 1px solid var(--line);
-  color: var(--ink); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; cursor: pointer; font-weight: 600; }
-.effort[data-lvl="low"] { color: var(--ink-mid); }
-.effort[data-lvl="medium"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-.effort[data-lvl="high"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
-.effort[data-lvl="max"] { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
-
 .ctx { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-mid);
   background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
 .ctx-lbl { text-transform: uppercase; letter-spacing: .05em; font-size: 10px; flex: none; }
