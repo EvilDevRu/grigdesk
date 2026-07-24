@@ -3,6 +3,7 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
+import { confirmDialog } from '../shared/ui/confirm.js';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
@@ -127,12 +128,12 @@ async function act(name, fn) {
   finally { busy.value = null; }
 }
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.value ? 'pause' : 'start'));
-const complete = () => { if (confirm('Завершить задачу?')) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
+const complete = async () => { if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
 const launchMsg = ref(null);
-const launch = () => {
+const launch = async () => {
   // Защита: задача уже на конвейере — не запускаем повторно.
   if (conveyor.value) { launchMsg.value = 'Уже на конвейере'; return; }
-  if (!confirm(`Направить задачу #${taskId.value} на конвейер? Запустит фабрику (песочница + агенты).`)) return;
+  if (!(await confirmDialog(`Направить задачу #${taskId.value} на конвейер? Запустит фабрику (песочница + агенты).`, { okText: 'На конвейер' }))) return;
   act('launch', async () => {
     const ticket = `${detail.value?.title || ''}\n${cleanDesc.value || ''}`.trim();
     const r = await tasks.launch(taskId.value, ticket);

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../shared/api-client.js';
+import { confirmDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import NumberField from '../shared/ui/NumberField.vue';
@@ -63,16 +64,16 @@ async function load() {
   finally { loading.value = false; }
 }
 
-function select(id) {
+async function select(id) {
   const a = agents.value.find((x) => x.id === id);
   if (!a) return;
-  if (dirty.value && !confirm('Есть несохранённые изменения — бросить?')) return;
+  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = id; isNew.value = false; notice.value = '';
   form.value = JSON.parse(JSON.stringify(a));
 }
 
-function createNew() {
-  if (dirty.value && !confirm('Есть несохранённые изменения — бросить?')) return;
+async function createNew() {
+  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = ''; isNew.value = true; notice.value = '';
   form.value = {
     id: '', kind: 'agent', label: '', sub: '', key: '', model: '',
@@ -101,7 +102,7 @@ async function save() {
 
 async function del() {
   if (!selectedId.value || isNew.value) return;
-  if (!confirm(`Удалить агента «${form.value.label || selectedId.value}»?`)) return;
+  if (!(await confirmDialog(`Удалить агента «${form.value.label || selectedId.value}»?`, { danger: true, okText: 'Удалить' }))) return;
   try {
     await api.del(`/api/agents/${selectedId.value}`);
     selectedId.value = ''; form.value = null;

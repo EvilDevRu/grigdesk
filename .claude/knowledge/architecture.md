@@ -33,6 +33,17 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 Плагины: `sse` (fs.watch → broadcast), `auth` (GET свободно / мутации по `X-Cockpit-Token`),
 `static` (web/dist + `/shots` `/demo`, кэш index=no-cache, assets=immutable).
 
+**Триаж (lib/analysis/analyzer.js), устойчивость:** очередь оценок при старте сервера
+ВОССТАНАВЛИВАЕТСЯ из статус-файлов (`queued` → снова в очередь; `running` → interrupted,
+перезапуск из бейджа топбара). Воркеров — `COCKPIT_ANALYSIS_CONCURRENCY` (дефолт 2);
+git-refresh перед оценкой — не чаще раза в 10 мин (волна задач не дёргает pull каждый раз).
+Одна оценка ~5–15 мин: очередь в 70 задач — это часы, «висит» ≠ сломано (смотри /api/analysis).
+
+**UI-мелочи:** системный `confirm()` запрещён — единый `shared/ui/confirm.js`
+(`await confirmDialog(text, {danger, okText})`, тёмная модалка проекта). Тултип исполнителя
+в топбаре показывает потребление лимитов подписки (`/api/providers/usage` →
+`executor.usage()`, у claude — OAuth-ручка usage хостового CLI; кэш 60с).
+
 ## Данные фабрики
 
 - Реестр прогона: `~/.factory/state/tNNNN.pipeline` — `KEY=VALUE` (не JSON), парс `lib/pipeline-parse`.

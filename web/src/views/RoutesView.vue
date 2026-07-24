@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watchEffect, onMounted, onBeforeUnmount, onUnmounted } from 'vue';
 import { api } from '../shared/api-client.js';
+import { confirmDialog } from '../shared/ui/confirm.js';
 import { useUiContextStore } from '../stores/ui-context.js';
 import { layoutRoute } from '../shared/route-layout.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
@@ -90,9 +91,9 @@ function onProjectCreated({ id, profiles: fresh }) {
   switchProfile(id);
 }
 
-function switchProfile(pr) {
+async function switchProfile(pr) {
   if (pr === profile.value) return;
-  if (dirty.value && !confirm('Есть несохранённые изменения — бросить?')) return;
+  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   profile.value = pr; localStorage.setItem('cockpit-project', pr);
   selectedId.value = ''; form.value = null; isNew.value = false; notice.value = '';
   closePopup(); linkFrom.value = '';
@@ -101,18 +102,18 @@ function switchProfile(pr) {
 
 function closePopup() { popup.value = null; pickFilter.value = ''; }
 
-function select(id) {
+async function select(id) {
   const r = routes.value.find((x) => x.id === id);
   if (!r) return;
-  if (dirty.value && !confirm('Есть несохранённые изменения — бросить?')) return;
+  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = id; isNew.value = false; notice.value = '';
   closePopup(); linkFrom.value = '';
   const { id: _, ...rest } = r;
   form.value = JSON.parse(JSON.stringify(rest));
 }
 
-function createNew() {
-  if (dirty.value && !confirm('Есть несохранённые изменения — бросить?')) return;
+async function createNew() {
+  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = ''; isNew.value = true; notice.value = '';
   closePopup(); linkFrom.value = '';
   form.value = { id: '', title: '', stages: [], returns: [] };
@@ -192,7 +193,7 @@ async function save() {
 
 async function del() {
   if (!selectedId.value || isNew.value) return;
-  if (!confirm(`Удалить маршрут «${selectedId.value}»?`)) return;
+  if (!(await confirmDialog(`Удалить маршрут «${selectedId.value}»?`, { danger: true, okText: 'Удалить' }))) return;
   try {
     await api.del(`/api/routes/${profile.value}/${selectedId.value}`);
     selectedId.value = ''; form.value = null;

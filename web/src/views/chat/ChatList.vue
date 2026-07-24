@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue';
 import { useChatStore } from '../../stores/chat.js';
+import { confirmDialog } from '../../shared/ui/confirm.js';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — все чаты (открытые + архив) свежие сверху.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
@@ -46,8 +47,8 @@ function commitEdit() {
   if (editId.value) chat.renameChat(editId.value, editVal.value.trim());
   editId.value = null;
 }
-function del(r) {
-  if (confirm(`Удалить чат «${r.title}» безвозвратно?`)) chat.deleteChat(r.id);
+async function del(r) {
+  if (await confirmDialog(`Удалить чат «${r.title}» безвозвратно?`, { danger: true, okText: 'Удалить' })) chat.deleteChat(r.id);
 }
 </script>
 
