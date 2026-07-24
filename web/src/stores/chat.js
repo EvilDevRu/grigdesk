@@ -96,6 +96,14 @@ export const useChatStore = defineStore('chat', {
           if (j) this._persist();
           // Ответы, доехавшие пока страница была закрыта/перезагружалась.
           await this._collectPending();
+          // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
+          try {
+            const { active } = await api.get('/api/chat/active');
+            for (const a of active || []) {
+              const s = this._get(a.chatKey);
+              if (s) { s.sending = true; s.progressTokens = a.tokens || 0; }
+            }
+          } catch { /* сервер старый/недоступен */ }
         })();
       }
       await loadPromise;
@@ -109,6 +117,10 @@ export const useChatStore = defineStore('chat', {
       for (const p of j.pending) {
         const s = this._get(p.chatKey) || this.archived.find((x) => x.id === p.chatKey);
         if (s && !(s.messages || []).some((m) => m.pid === p.id)) {
+          // Гонка last-write-wins могла затереть сам вопрос — восстанавливаем его перед ответом.
+          if (p.userText && !(s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === p.userText)) {
+            s.messages.push({ role: 'user', text: p.userText, pid: `${p.id}:u` });
+          }
           s.messages.push({ role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id });
           if (p.sessionId) s.sessionId = p.sessionId;
           if (typeof p.contextTokens === 'number' && p.contextTokens > 0) s.contextTokens = p.contextTokens;
@@ -120,9 +132,11 @@ export const useChatStore = defineStore('chat', {
       this._persist();
     },
     // Сохранение на сервер с дебаунсом — вызовы дискретные, но склеиваем всплески.
-    _persist() {
+    // flush=true — писать немедленно (критичные моменты: только что добавленное
+    // сообщение пользователя не должно потеряться из-за гонки окон/перезагрузки).
+    _persist(flush = false) {
       clearTimeout(persistTimer);
-      persistTimer = setTimeout(() => {
+      const write = () => {
         const slim = this.sessions.map((s) => ({
           id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
           messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
@@ -131,7 +145,9 @@ export const useChatStore = defineStore('chat', {
         api.put('/api/chat/store', {
           sessions: slim, archived: this.archived, activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort,
         }).catch(() => { /* сервер недоступен — сохранится при следующем изменении */ });
-      }, 300);
+      };
+      if (flush) write();
+      else persistTimer = setTimeout(write, 300);
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
 
@@ -171,12 +187,22 @@ export const useChatStore = defineStore('chat', {
       });
       // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
       permEs.addEventListener('chat-orphan', () => { this._collectPending(); });
-      // Живой прогресс «думает… · N ток.»
+      // Живой прогресс «думает… · N ток.». Прогресс = агент точно работает:
+      // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
       permEs.addEventListener('chat-progress', (e) => {
         try {
           const d = JSON.parse(e.data);
           const s = this._get(d.chatKey);
-          if (s?.sending) s.progressTokens = d.tokens;
+          if (s) { s.sending = true; s.progressTokens = d.tokens; }
+        } catch { /* битое событие */ }
+      });
+      // Ход завершён — снять «думает…» во всех окнах (ответ доставляется
+      // ожидавшему окну или через pending).
+      permEs.addEventListener('chat-done', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          const s = this._get(d.chatKey);
+          if (s) { s.sending = false; s.progressTokens = 0; }
         } catch { /* битое событие */ }
       });
     },
@@ -290,6 +316,8 @@ export const useChatStore = defineStore('chat', {
       const atts = attachments.map((a) => ({ file: a.file, name: a.name, url: a.url, mime: a.mime }));
       s.messages.push({ role: 'user', text, ...(atts.length ? { attachments: atts } : {}) });
       s.sending = true; s.error = null; s.progressTokens = 0;
+      s.updatedAt = Date.now();
+      this._persist(true); // немедленно: вопрос не должен потеряться при F5/гонке окон
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat';
         // Снимок UI-контекста: страница + детали от неё (агент понимает «поправь здесь»).

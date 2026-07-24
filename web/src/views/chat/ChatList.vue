@@ -62,9 +62,9 @@ async function del(r) {
       <div v-if="!rows.length" class="none muted">Ничего не найдено</div>
       <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived }"
            @click="chat.selectChat(r.id)" @dblclick="startEdit(r)">
-        <span class="ava" :style="{ background: `hsl(${hue(r.title)} 42% 46%)` }">
-          <span v-if="r.sending" class="spin"></span>
-          <template v-else>{{ letter(r) }}</template>
+        <!-- Агент работает — белое кольцо вокруг аватара (внутренний спиннер сливался с цветом) -->
+        <span class="ava" :class="{ live: r.sending }" :style="{ background: `hsl(${hue(r.title)} 42% 46%)` }">
+          {{ letter(r) }}
         </span>
         <div class="mid">
           <input v-if="editId === r.id" ref="editEl" v-model="editVal" class="edit"
@@ -106,7 +106,11 @@ async function del(r) {
 .row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 .ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
-  color: #fff; font-size: 15px; font-weight: 600; }
+  color: #fff; font-size: 15px; font-weight: 600; position: relative; }
+/* Кольцо «агент работает» — контрастно на аватаре любого цвета */
+.ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, #fff 25%, transparent); border-top-color: #fff;
+  animation: spin .8s linear infinite; }
 
 .mid { flex: 1; min-width: 0; }
 .t1 { display: flex; align-items: baseline; gap: 6px; }

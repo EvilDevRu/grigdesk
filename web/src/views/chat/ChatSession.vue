@@ -7,6 +7,7 @@ import { useTasksStore } from '../../stores/tasks.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
 import HelpTip from '../../shared/ui/HelpTip.vue';
+import { mdToHtml } from '../../shared/md.js';
 
 // Одна сессия чата. Переиспользуется в плавающей панели и на странице «Агенты».
 const props = defineProps({
@@ -355,8 +356,17 @@ async function toConveyor() {
               <span v-else class="m-file">📄 {{ a.name }}</span>
             </a>
           </div>
+          <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей -->
+          <div v-if="m.role === 'assistant'" class="ahead">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
+            </svg>
+            <span>Агент</span>
+          </div>
           <div v-if="m.text" class="mrow">
-            <div class="text">{{ m.text }}</div>
+            <!-- Ответ агента — маркдауном (заголовки/списки/код), текст экранируется в md.js -->
+            <div v-if="m.role === 'assistant'" class="text md" v-html="mdToHtml(m.text)"></div>
+            <div v-else class="text">{{ m.text }}</div>
             <button class="copy" :class="{ done: copiedIdx === i }"
                     :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
               <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
@@ -527,8 +537,23 @@ async function toConveyor() {
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
 .msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
 .msg.user .text { background: color-mix(in srgb, var(--accent) 18%, transparent); padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
-/* Агент — слева, спокойный текст без коробки */
-.msg.assistant { align-self: stretch; }
+/* Агент — слева, с подписью и акцентной полоской, текст маркдауном */
+.msg.assistant { align-self: stretch; border-left: 2px solid color-mix(in srgb, #d97757 45%, transparent); padding-left: 13px; }
+.ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
+.ahead svg { width: 12px; height: 12px; color: #d97757; }
+/* Маркдаун ответа */
+.text.md :deep(p) { margin: 0 0 8px; }
+.text.md :deep(p:last-child) { margin-bottom: 0; }
+.text.md :deep(h3), .text.md :deep(h4), .text.md :deep(h5), .text.md :deep(h6) { margin: 14px 0 6px; font-size: 14px; }
+.text.md :deep(ul) { margin: 4px 0 8px; padding-left: 20px; }
+.text.md :deep(li) { margin: 2px 0; }
+.text.md :deep(code) { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+.text.md :deep(pre) { background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; overflow-x: auto; margin: 6px 0 8px; }
+.text.md :deep(pre code) { background: none; padding: 0; }
+/* md-текст не pre-wrap (маркдаун сам управляет блоками) */
+.msg.assistant .text.md { white-space: normal; }
 /* Ошибка — компактная плашка по содержимому, а не баннер во всю ширину */
 .msg.error { align-self: flex-start; max-width: 80%; }
 .msg.error .text { background: color-mix(in srgb, var(--bad) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);

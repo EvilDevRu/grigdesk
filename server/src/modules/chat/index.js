@@ -61,6 +61,13 @@ async function chatModule(fastify, opts) {
    * и UI-контекста (страницы, с которой пишет пользователь).
    * Возвращает { reply, sessionId, cost, contextTokens } или reply-ошибку.
    */
+  // ── Активные запуски агента: перезагруженная страница восстанавливает «думает…» ──
+  const activeRuns = new Map(); // chatKey → { startedAt, tokens }
+
+  fastify.get('/api/chat/active', async () => ({
+    active: [...activeRuns.entries()].map(([chatKey, v]) => ({ chatKey, ...v })),
+  }));
+
   // ── Всплывашка разрешений: ожидающие решения пользователя запросы ──
   const pendingPerms = new Map(); // pid → { resolve, timer }
   const PERM_TIMEOUT_MS = 240000; // не ответил за 4 мин — deny (claude ждёт с таймаутом 5 мин)
@@ -169,6 +176,7 @@ async function chatModule(fastify, opts) {
       },
     };
 
+    if (chatKey) activeRuns.set(chatKey, { startedAt: Date.now(), tokens: 0 });
     try {
       const out = await executor.run({
         config,
@@ -184,12 +192,18 @@ async function chatModule(fastify, opts) {
         permissionPromptTool: 'mcp__cockpit-perm__approve',
         log: fastify.log,
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
-        onProgress: chatKey ? (tokens) => fastify.sse.broadcast('chat-progress', { chatKey, tokens }) : undefined,
+        onProgress: chatKey ? (tokens) => {
+          const a = activeRuns.get(chatKey);
+          if (a) a.tokens = tokens;
+          fastify.sse.broadcast('chat-progress', { chatKey, tokens });
+        } : undefined,
       });
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
       if (request.socket.destroyed && chatKey) {
+        // userText — страховка от гонки last-write-wins: если вопрос пользователя
+        // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'assistant', ...out, model: model || null, at: Date.now() });
+          chatKey, role: 'assistant', ...out, model: model || null, userText: message || '', at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
@@ -197,10 +211,17 @@ async function chatModule(fastify, opts) {
     } catch (err) {
       if (request.socket.destroyed && chatKey) {
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'error', reply: err.message, at: Date.now() });
+          chatKey, role: 'error', reply: err.message, userText: message || '', at: Date.now() });
+        fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
       return reply.code(500).send({ error: 'chat_failed', message: err.message });
+    } finally {
+      if (chatKey) {
+        activeRuns.delete(chatKey);
+        // Сигнал всем окнам: ход завершён (снимают «думает…», даже если ответ пришёл не к ним).
+        fastify.sse.broadcast('chat-done', { chatKey });
+      }
     }
   }
 

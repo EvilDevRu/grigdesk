@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute } from 'vue-router';
 import { api } from '../api-client.js';
@@ -8,6 +8,7 @@ import { useSystemStore } from '../../stores/system.js';
 import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
+import { useChatStore } from '../../stores/chat.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
 import HelpTip from '../ui/HelpTip.vue';
@@ -39,6 +40,11 @@ function resetIn(iso) {
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
 // Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
 function flagOf(cc) { if (!cc || cc.length !== 2) return '🏳'; return cc.toUpperCase().replace(/[A-Z]/g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0))); }
+
+// Активные чаты (агент работает) — бейдж на пункте «Чаты».
+const chatStore = useChatStore();
+chatStore.ensure();
+const activeChats = computed(() => chatStore.sessions.filter((s) => s.sending).length);
 
 const collapsed = ref(localStorage.getItem('cockpit-sidebar') === '1');
 function toggleSidebar() { collapsed.value = !collapsed.value; localStorage.setItem('cockpit-sidebar', collapsed.value ? '1' : '0'); }
@@ -86,7 +92,11 @@ const { connected } = useSse((name) => {
       </div>
       <nav class="nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+          <span class="icwrap">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+            <!-- Агент работает в N чатах -->
+            <span v-if="item.to === '/chats' && activeChats" class="navbadge">{{ activeChats }}</span>
+          </span>
           <span class="lbl">{{ item.label }}</span>
         </router-link>
       </nav>
@@ -134,7 +144,7 @@ const { connected } = useSse((name) => {
                   <span v-for="b in prov.usage[p.id]" :key="b.key" class="pu-row">
                     <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
-                    <span v-if="resetIn(b.resetsAt)" class="pu-reset">{{ resetIn(b.resetsAt) }}</span>
+                    <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
                   </span>
                 </span>
               </span>
@@ -195,6 +205,12 @@ const { connected } = useSse((name) => {
 .navitem:hover, .collapse-btn:hover { background: var(--surface); color: var(--ink); }
 .navitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .ic { width: 19px; height: 19px; flex: none; }
+.icwrap { position: relative; display: inline-flex; flex: none; }
+/* Бейдж «агент работает в N чатах» — пульсирует, виден и в свёрнутом сайдбаре */
+.navbadge { position: absolute; top: -5px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 999px; background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1; animation: navbadge-pulse 1.6s ease-in-out infinite; }
+@keyframes navbadge-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); } }
 .nav-bottom { margin-top: auto; }
 .collapse-btn { margin-top: 4px; }
 
