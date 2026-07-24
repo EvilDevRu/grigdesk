@@ -45,6 +45,25 @@ async function providersModule(fastify, opts) {
   }
 
   let cache = null; // { at, providers }
+  let usageCache = null; // { at, usage }
+
+  // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
+  fastify.get('/api/providers/usage', async () => {
+    if (usageCache && Date.now() - usageCache.at < CACHE_MS) return { usage: usageCache.usage };
+    const executors = await getExecutors();
+    const usage = {};
+    for (const ex of executors.values()) {
+      if (typeof ex.usage !== 'function') continue;
+      try {
+        const u = await ex.usage(config, deps);
+        if (u) usage[ex.id] = u;
+      } catch (e) {
+        fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
+      }
+    }
+    usageCache = { at: Date.now(), usage };
+    return { usage };
+  });
 
   fastify.get('/api/providers', async (request) => {
     const force = request.query?.refresh === '1';

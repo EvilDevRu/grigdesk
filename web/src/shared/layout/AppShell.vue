@@ -7,6 +7,7 @@ import { useSse } from '../../composables/useSse.js';
 import { useSystemStore } from '../../stores/system.js';
 import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
+import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
 import HelpTip from '../ui/HelpTip.vue';
@@ -19,9 +20,20 @@ const pwa = usePwaStore();
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
 prov.load();
+prov.loadUsage();
 function provTitle(p) {
   return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
     + (p.version ? ` · ${p.version}` : '');
+}
+// «сброс через 2ч» из ISO-даты сброса лимита
+function resetIn(iso) {
+  if (!iso) return '';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!(ms > 0)) return '';
+  const h = Math.floor(ms / 3600_000);
+  if (h >= 48) return `сброс через ${Math.round(h / 24)}д`;
+  if (h >= 1) return `сброс через ${h}ч`;
+  return `сброс через ${Math.max(1, Math.round(ms / 60_000))}м`;
 }
 
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
@@ -57,7 +69,12 @@ const navBottom = [
 
 async function loadHealth() { try { health.value = await api.get('/api/health'); } catch { health.value = null; } }
 loadHealth();
-const { connected } = useSse((name) => { if (name === 'state-change') loadHealth(); });
+// Вотчер оповещений: «конвейер отработал и ждёт тебя»
+const notifyWatch = useNotifyWatchStore();
+notifyWatch.start();
+const { connected } = useSse((name) => {
+  if (name === 'state-change') { loadHealth(); notifyWatch.check(); }
+});
 </script>
 
 <template>
@@ -104,11 +121,24 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
         </HelpTip>
         <span v-if="sys" class="sep" aria-hidden="true">·</span>
         <AttentionAlerts />
-        <span v-if="prov.providers.length" class="provbox">
-          <HelpTip v-for="p in prov.providers" :key="p.id" :text="provTitle(p)">
+        <span v-if="prov.providers.length" class="provbox" @mouseenter="prov.loadUsage()">
+          <HelpTip v-for="p in prov.providers" :key="p.id" class="prov-tip">
             <span class="prov" :class="{ off: !p.available }" :style="p.available ? { color: p.color } : null">
               <ProviderIcon :provider="p" :size="15" />
             </span>
+            <template #tip>
+              <span class="ptip">
+                <span>{{ provTitle(p) }}</span>
+                <!-- Потребление лимитов подписки — как /usage в CLI -->
+                <span v-if="prov.usage[p.id]?.length" class="pu">
+                  <span v-for="b in prov.usage[p.id]" :key="b.key" class="pu-row">
+                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
+                    <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
+                    <span v-if="resetIn(b.resetsAt)" class="pu-reset">{{ resetIn(b.resetsAt) }}</span>
+                  </span>
+                </span>
+              </span>
+            </template>
           </HelpTip>
         </span>
         <span v-if="prov.providers.length && sys?.net" class="sep" aria-hidden="true">·</span>
@@ -193,6 +223,18 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .provbox { display: inline-flex; align-items: center; gap: 9px; }
 .prov { display: inline-grid; place-items: center; }
 .prov.off { color: var(--ink-mid); opacity: .45; }
+/* Тултип исполнителя: статус + прогрессбары потребления лимитов */
+.prov-tip :deep(.ht-tip) { max-width: 320px; }
+.ptip { display: flex; flex-direction: column; gap: 10px; min-width: 240px; text-align: left; }
+.pu { display: flex; flex-direction: column; gap: 9px; }
+.pu-row { display: flex; flex-direction: column; gap: 4px; }
+.pu-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; color: var(--ink-mid); }
+.pu-head b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.pu-head b.hot { color: var(--bad); }
+.pu-bar { height: 5px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.pu-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.pu-fill.hot { background: var(--bad); }
+.pu-reset { font-size: 10.5px; color: var(--ink-mid); }
 .netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }

@@ -55,6 +55,49 @@ export default {
   },
 
   /**
+   * Потребление лимитов подписки (как /usage в CLI): прогрессбары «Сессия (5ч)»,
+   * «Неделя» и пр. Ручка OAuth-подписки — работает только с токеном хостового CLI
+   * (~/.claude/.credentials.json); пользователь явно попросил эту статистику.
+   */
+  async usage() {
+    let tok = null;
+    try {
+      const creds = JSON.parse(await fs.readFile(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8'));
+      tok = creds?.claudeAiOauth?.accessToken || null;
+    } catch { /* CLI-кредов нет */ }
+    if (!tok) return null;
+    const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: {
+        Authorization: `Bearer ${tok}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'anthropic-version': '2023-06-01',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const LABELS = {
+      five_hour: 'Сессия (5ч)',
+      seven_day: 'Неделя (7д)',
+      seven_day_opus: 'Неделя · Opus',
+      seven_day_sonnet: 'Неделя · Sonnet',
+      seven_day_fable: 'Неделя · Fable',
+      seven_day_oauth_apps: 'Неделя · приложения',
+    };
+    const bars = [];
+    for (const [k, v] of Object.entries(d || {})) {
+      if (!v || typeof v !== 'object' || typeof v.utilization !== 'number') continue;
+      bars.push({
+        key: k,
+        label: LABELS[k] || k.replace(/_/g, ' '),
+        pct: Math.max(0, Math.min(100, Math.round(v.utilization))),
+        resetsAt: v.resets_at || null,
+      });
+    }
+    return bars.length ? bars : null;
+  },
+
+  /**
    * Живой список моделей из Anthropic API (/v1/models) — так «Fable 6» появится сам.
    * Авторизация: ANTHROPIC_API_KEY из окружения, либо (ТОЛЬКО при явном опт-ине
    * config.discoverWithCliToken) OAuth-токен хостового CLI. Нет ни того ни другого → null,
