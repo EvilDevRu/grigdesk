@@ -30,15 +30,23 @@ export class Analyzer {
 
   async _init() {
     await fs.mkdir(this.dir, { recursive: true });
+    // Осиротевшие .tmp атомарной записи (умерли между write и rename) — мусор.
+    for (const f of await fs.readdir(this.dir)) {
+      if (f.endsWith('.json.tmp')) await fs.rm(path.join(this.dir, f), { force: true }).catch(() => {});
+    }
     await this._sweepOrphans();
   }
 
   /**
    * Незавершённые статусы прошлой жизни сервера. Агент — отдельный процесс: рестарт
    * сервера его не убивает, и результат он мог дописать. Файл анализа свежее старта
-   * прогона → done (без обогащения), иначе → failed.
+   * прогона → done (без обогащения), иначе:
+   *   • queued  → ВОССТАНАВЛИВАЕМ в очередь (задачи ставили осознанно, рестарт
+   *     сервера не повод терять их и заставлять перезапускать 70 штук руками);
+   *   • running → interrupted (агент реально прерван — перезапуск вручную из топбара).
    */
   async _sweepOrphans() {
+    const requeue = [];
     for (const f of await fs.readdir(this.dir)) {
       if (!/^t\d+\.status\.json$/.test(f)) continue;
       const p = path.join(this.dir, f);
@@ -48,17 +56,27 @@ export class Analyzer {
         const jsonStat = await fs.stat(this._paths(st.task).json).catch(() => null);
         if (jsonStat && st.startedAt && jsonStat.mtimeMs > st.startedAt) {
           await this._writeStatus(st.task, { ...st, state: 'done', note: 'дописан агентом после рестарта сервера', finishedAt: Date.now() });
+        } else if (st.state === 'queued') {
+          requeue.push({ id: String(st.task), at: st.queuedAt || 0 });
         } else {
-          // Не failed, а interrupted: агент не ошибся — его прервал рестарт.
-          // Авто-перезапуска нет намеренно (ручной контроль) — топбар покажет предупреждение.
           await this._writeStatus(st.task, {
             ...st,
             state: 'interrupted',
-            error: st.state === 'queued' ? 'очередь потеряна при рестарте сервера' : 'агент прерван рестартом сервера',
+            error: 'агент прерван рестартом сервера',
             finishedAt: Date.now(),
           });
         }
       } catch { /* битый статус не мешает остальным */ }
+    }
+    if (requeue.length) {
+      requeue.sort((a, b) => a.at - b.at);
+      for (const r of requeue) {
+        if (this._jobs.has(r.id)) continue;
+        this._jobs.set(r.id, 'queued');
+        this._queue.push(r.id);
+      }
+      this.log?.info({ count: requeue.length }, 'триаж: очередь восстановлена после рестарта');
+      this._pump();
     }
   }
 
@@ -186,16 +204,20 @@ export class Analyzer {
   }
 
   _pump() {
-    if (this._running || !this._queue.length) return;
-    this._running = true;
-    const id = this._queue.shift();
-    this.analyze(id)
-      .catch((e) => this.log?.error({ task: id, err: e.message }, 'триаж упал вне раннера'))
-      .finally(() => {
-        this._jobs.delete(id);
-        this._running = false;
-        this._pump();
-      });
+    // Конкуренция настраиваемая: очередь в 70 задач при одном воркере — это часы.
+    const max = Math.max(1, Number(this.config.analysisConcurrency) || 1);
+    this._active = this._active || 0;
+    while (this._active < max && this._queue.length) {
+      const id = this._queue.shift();
+      this._active += 1;
+      this.analyze(id)
+        .catch((e) => this.log?.error({ task: id, err: e.message }, 'триаж упал вне раннера'))
+        .finally(() => {
+          this._jobs.delete(id);
+          this._active -= 1;
+          this._pump();
+        });
+    }
   }
 
   /** Полный цикл анализа одной задачи (используется очередью и CLI). */
@@ -211,7 +233,11 @@ export class Analyzer {
       // Оцениваем свежий код: перед запуском подтягиваем изменения (правило кокпита,
       // выключается в настройках). Безопасно: ff-only и только чистый master.
       let gitRefresh = null;
-      if (this.prefs?.read().gitRefreshBeforeRun) {
+      // Не чаще раза в 10 минут: волна из десятков задач не должна дёргать pull
+      // на каждую (и параллельные воркеры не гоняют git по одному репо разом).
+      if (this.prefs?.read().gitRefreshBeforeRun
+          && (!this._lastRefreshAt || Date.now() - this._lastRefreshAt > 10 * 60_000)) {
+        this._lastRefreshAt = Date.now();
         gitRefresh = await refreshRepos(profile.repos);
         this.log?.info({ task: id, gitRefresh }, 'репозитории обновлены перед триажем');
       }

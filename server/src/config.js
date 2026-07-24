@@ -70,6 +70,8 @@ export const config = {
   analysisDir: process.env.COCKPIT_ANALYSIS_DIR || path.join(home, '.factory', 'analysis'),
   analysisModel: process.env.COCKPIT_ANALYSIS_MODEL || 'sonnet',
   analysisTimeoutMs: Number(process.env.COCKPIT_ANALYSIS_TIMEOUT_MS) || 20 * 60 * 1000,
+  // Параллельных оценок триажа: 1 воркер на очереди в 70 задач — это часы ожидания.
+  analysisConcurrency: Number(process.env.COCKPIT_ANALYSIS_CONCURRENCY) || 2,
 
   // Команда сноса стенда (проектно-специфична) — задаётся окружением, {task} подставляется.
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
