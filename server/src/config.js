@@ -21,12 +21,6 @@ export const config = {
   // Бинарь Claude для чата с агентом по задаче.
   claudeBin: process.env.COCKPIT_CLAUDE_BIN || 'claude',
 
-  // VS Code в браузере (`code serve-web`). Слушает ТОЛЬКО 127.0.0.1 — наружу отдаём через
-  // реверс-прокси кокпита (/vscode, тот же origin). basePath — чтобы URL VS Code были под префиксом.
-  vscodeBin: process.env.COCKPIT_VSCODE_BIN || 'code',
-  vscodePort: Number(process.env.COCKPIT_VSCODE_PORT) || 8141,
-  vscodeBasePath: '/vscode',
-  vscodeDataDir: process.env.COCKPIT_VSCODE_DATA || path.join(__dirname, '..', '.state', 'vscode'),
   // Свой API-ключ кокпита для claude (опционально). Хранится в .state (gitignore, 0600).
   // Пусто → чат использует авторизацию хостового CLI (`claude login` / ANTHROPIC_API_KEY).
   claudeAuthPath: process.env.COCKPIT_CLAUDE_AUTH_PATH || path.join(__dirname, '..', '.state', 'claude-auth.json'),

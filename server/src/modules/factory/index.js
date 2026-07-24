@@ -5,6 +5,7 @@ import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
 import { STAGES, StageKind } from '../../lib/stages.js';
 import { setPipeline, writeInstruction, readInstruction, readActivity } from '../../lib/factory-cli.js';
+import { taskDiff } from '../../lib/git.js';
 
 // Допустимые статусы для ручного перехода (форс).
 const STAGE_STATUSES = new Set(['pending', 'running', 'done', 'waiting', 'skipped', 'failed', 'approved', 'rejected']);
@@ -34,6 +35,19 @@ async function factoryModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     const env = id ? await factoryState.readEnv(id) : {};
     return { beWt: env.BE_WT || null, feWt: env.FE_WT || null };
+  });
+
+  // Диф задачи (несохранённые изменения воркдиров бэка/фронта) — для приёмки.
+  fastify.get('/api/tasks/:id/diff', async (request) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    const env = id ? await factoryState.readEnv(id) : {};
+    const repos = [];
+    for (const [name, wt] of [['be', env.BE_WT], ['fe', env.FE_WT]]) {
+      if (!wt) continue;
+      try { repos.push({ name, path: wt, ...(await taskDiff(wt)) }); }
+      catch (e) { repos.push({ name, path: wt, error: e.message, stat: '', files: [] }); }
+    }
+    return { repos };
   });
 
   // Глобальный каталог стадий (enum) — для будущего редактора профилей.

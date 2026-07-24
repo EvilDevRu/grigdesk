@@ -8,7 +8,7 @@ import { useBoardStore } from '../stores/board.js';
 import { useChatStore } from '../stores/chat.js';
 import { secToHMS } from '../shared/format.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
-import OpenInCodeButton from './OpenInCodeButton.vue';
+import OpenDiffButton from './OpenDiffButton.vue';
 
 const ui = useUiStore();
 const chat = useChatStore();
@@ -294,7 +294,7 @@ function cardState(g) {
           <!-- Обсудить с агентом (чат) + открыть код задачи в VS Code -->
           <div class="sect row">
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
-            <OpenInCodeButton :task-id="stage.task" @click="closeStage()" />
+            <OpenDiffButton :task-id="stage.task" @click="closeStage()" />
           </div>
 
           <!-- Принудительный переход — одной кнопкой «плей» -->

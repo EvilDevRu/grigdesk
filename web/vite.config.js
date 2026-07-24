@@ -23,9 +23,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        // НЕ подменять SPA-fallback'ом навигации в проксируемый VS Code и API —
-        // иначе iframe /vscode/ получает index.html кокпита вместо настоящего редактора.
-        navigateFallbackDenylist: [/^\/vscode/, /^\/api/, /^\/shots/, /^\/demo/],
+        // Monaco (диф-редактор) — крупный чанк; поднимаем лимит прекеша (по умолчанию 2 МБ).
+        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
+        // SPA-fallback не должен перехватывать API/статику.
+        navigateFallbackDenylist: [/^\/api/, /^\/shots/, /^\/demo/],
       },
     }),
   ],
