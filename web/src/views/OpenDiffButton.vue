@@ -1,15 +1,14 @@
 <script setup>
 import { useDiffStore } from '../stores/diff.js';
-import { useUiStore } from '../stores/ui.js';
 
 // Кнопка задачи: открыть диф (несохранённые изменения воркдира) в большом модале.
+// Нижний модал (приёмка/задача) НЕ закрываем — при закрытии дифа пользователь
+// возвращается туда, откуда открыл.
 const props = defineProps({
   taskId: { type: [String, Number], required: true },
 });
 const diff = useDiffStore();
-const ui = useUiStore();
-// Закрываем модалку задачи, чтобы не было стекинга оверлеев (их blur мерцает под Monaco).
-function openDiff() { ui.close(); diff.openFor(props.taskId); }
+function openDiff() { diff.openFor(props.taskId); }
 </script>
 
 <template>

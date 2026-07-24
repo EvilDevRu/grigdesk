@@ -56,6 +56,11 @@ button { font-family: inherit; }
 .mono { font-family: var(--mono); }
 .muted { color: var(--ink-mid); }
 
+/* Пока открыт диф-модал — гасим blur нижних оверлеев (приёмка/задача): они под непрозрачным
+   дифом, но их перерисовка под Monaco даёт мерцание. Класс ставит DiffModal. */
+html.diff-modal-open .soverlay,
+html.diff-modal-open .overlay { backdrop-filter: none !important; }
+
 /* Спиннер загрузки (глобальный) */
 .spin {
   display: inline-block; width: 13px; height: 13px; vertical-align: -2px;

@@ -291,10 +291,11 @@ function cardState(g) {
             </div>
           </div>
 
-          <!-- Обсудить с агентом (чат) + открыть код задачи в VS Code -->
+          <!-- Обсудить с агентом (чат) + открыть диф задачи -->
+          <!-- Диф открывается модалом ПОВЕРХ этапа: при закрытии дифа возвращаемся сюда -->
           <div class="sect row">
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
-            <OpenDiffButton :task-id="stage.task" @click="closeStage()" />
+            <OpenDiffButton :task-id="stage.task" />
           </div>
 
           <!-- Принудительный переход — одной кнопкой «плей» -->
