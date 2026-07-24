@@ -1,6 +1,25 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted, watchEffect } from 'vue';
+import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
+import { useProvidersStore } from '../stores/providers.js';
+import { useUiContextStore } from '../stores/ui-context.js';
+import ProviderIcon from '../shared/ProviderIcon.vue';
+import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
+
+// Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
+const TABS = [
+  { id: 'b24', label: 'Битрикс24' },
+  { id: 'providers', label: 'Исполнители' },
+  { id: 'runs', label: 'Запуски' },
+];
+const tab = ref(localStorage.getItem('cockpit-settings-tab') || 'b24');
+function setTab(id) { tab.value = id; localStorage.setItem('cockpit-settings-tab', id); }
+
+// Репортим открытый таб в UI-контекст — чат с агентом знает, что открыто.
+const ui = useUiContextStore();
+watchEffect(() => ui.set('settings', { tab: TABS.find((t) => t.id === tab.value)?.label || tab.value }));
+onUnmounted(() => ui.clear('settings'));
 
 // ── Битрикс24 ──
 const form = ref({ baseUrl: '', login: '', password: '' });
@@ -35,50 +54,49 @@ async function testAuth() {
   } catch (e) { msg.value = { type: 'err', text: e.message }; } finally { testing.value = false; }
 }
 
-// ── Авторизация Claude (для чата с агентами) ──
-const claude = ref({ mode: 'none', configured: false, keyHint: null, hostLoggedIn: false });
-const claudeKey = ref('');
-const claudeSaving = ref(false);
-const claudeTesting = ref(false);
-const claudeMsg = ref(null);
-
-const claudeStatus = computed(() => {
-  const m = claude.value.mode;
-  if (m === 'apikey') return { text: `Свой API-ключ кокпита (${claude.value.keyHint})`, cls: 'ok' };
-  if (m === 'cli') return { text: 'Авторизация хостового CLI (claude login)', cls: 'ok' };
-  if (m === 'env') return { text: 'Переменная окружения ANTHROPIC_API_KEY', cls: 'ok' };
-  return { text: 'Не авторизован — залогиньтесь в терминале (claude login) или задайте ключ ниже', cls: 'err' };
-});
-
-async function loadClaude() {
-  try { claude.value = await api.get('/api/settings/claude'); } catch { /* игнор */ }
+// ── Исполнители (реестр LLM-агентов) ──
+const prov = useProvidersStore();
+const refreshing = ref(false);
+async function refreshProv() {
+  refreshing.value = true;
+  await prov.load(true);
+  refreshing.value = false;
 }
-async function saveClaude() {
-  claudeSaving.value = true; claudeMsg.value = null;
+// Команда установки недоступного исполнителя — клик открывает терминал
+// с уже введённой командой (выполнение — Enter'ом пользователя).
+const router = useRouter();
+function installInTerminal(p) {
+  sessionStorage.setItem('cockpit-term-insert', p.install);
+  router.push('/terminal');
+}
+
+// ── Запуски (правила перед стартом триажа/конвейера) ──
+const prefs = ref(null);
+const prefsMsg = ref(null);
+async function loadPrefs() {
+  try { prefs.value = await api.get('/api/settings/prefs'); } catch { prefs.value = null; }
+}
+async function toggleGitRefresh(v) {
+  prefsMsg.value = null;
   try {
-    claude.value = await api.post('/api/settings/claude', { apiKey: claudeKey.value });
-    claudeKey.value = '';
-    claudeMsg.value = { type: 'ok', text: claude.value.configured ? 'Ключ сохранён.' : 'Ключ очищен — используется авторизация хоста.' };
-  } catch (e) { claudeMsg.value = { type: 'err', text: e.message }; } finally { claudeSaving.value = false; }
-}
-async function testClaude() {
-  claudeTesting.value = true; claudeMsg.value = null;
-  try {
-    const r = await api.post('/api/settings/claude/test');
-    claudeMsg.value = r.ok
-      ? { type: 'ok', text: `Успешно — ответ «${r.reply}»${r.cost ? ` ($${r.cost.toFixed(4)})` : ''}.` }
-      : { type: 'err', text: `Не удалось: ${r.error}` };
-  } catch (e) { claudeMsg.value = { type: 'err', text: e.message }; } finally { claudeTesting.value = false; }
+    prefs.value = await api.post('/api/settings/prefs', { gitRefreshBeforeRun: v });
+    prefsMsg.value = { type: 'ok', text: 'Сохранено.' };
+  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
 
-onMounted(() => { loadCurrent(); loadClaude(); });
+onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); });
 </script>
 
 <template>
   <div class="settings">
+    <nav class="tabs">
+      <button v-for="t in TABS" :key="t.id" class="tabbtn" :class="{ active: tab === t.id }" @click="setTab(t.id)">
+        {{ t.label }}
+      </button>
+    </nav>
+
     <!-- Битрикс24 -->
-    <section>
-      <h2>Битрикс24</h2>
+    <section v-if="tab === 'b24'">
       <p class="muted">Кокпит — единственный владелец сессии портала. Креды хранятся на сервере (не в git).</p>
       <div class="card">
         <label>Портал<input v-model="form.baseUrl" placeholder="https://ваш-портал.bitrix24.ru" /></label>
@@ -95,43 +113,73 @@ onMounted(() => { loadCurrent(); loadClaude(); });
       </div>
     </section>
 
-    <!-- Авторизация Claude -->
-    <section>
-      <h2>Авторизация Claude</h2>
+    <!-- Исполнители: реестр LLM-агентов (/api/providers) -->
+    <section v-else-if="tab === 'providers'">
       <p class="muted">
-        Чат с агентами гоняет CLI <code>claude</code>. По умолчанию используется авторизация хостового CLI
-        (<code>claude login</code> или <code>ANTHROPIC_API_KEY</code>). Можно задать отдельный API-ключ для кокпита —
-        он хранится на сервере (не в git) и передаётся агенту.
+        Реестр агентов-исполнителей. Его же читают топбар (иконки) и в перспективе схемы —
+        исполнителем шага сможет быть не только Claude. Авторизация — на хосте
+        (<code>claude login</code>), кокпит только показывает статус.
       </p>
       <div class="card">
-        <div class="status">
-          <span class="dot" :class="claudeStatus.cls"></span>
-          <span :class="claudeStatus.cls === 'err' ? 'muted' : ''">{{ claudeStatus.text }}</span>
+        <div v-if="!prov.loaded" class="muted">Загрузка…</div>
+        <div v-for="p in prov.providers" :key="p.id" class="pv">
+          <span class="pvicon" :style="{ color: p.available ? p.color : 'var(--ink-mid)' }">
+            <ProviderIcon :provider="p" :size="20" />
+          </span>
+          <div class="pvmid">
+            <div class="pvname">{{ p.name }} <span class="muted">· {{ p.vendor }} · {{ p.kind }}</span></div>
+            <div class="pvsub muted">{{ p.authLabel }}<template v-if="p.version"> · {{ p.version }}</template></div>
+            <div v-if="!p.available && p.install" class="pvinstall">
+              {{ p.installed ? 'Авторизация' : 'Установка' }}:
+              <code class="click" title="Кликни — откроется терминал с введённой командой"
+                    @click="installInTerminal(p)">{{ p.install }}</code>
+            </div>
+          </div>
+          <span class="pvstate" :class="p.available ? 'ok' : 'err'">
+            <span class="dot"></span>{{ p.available ? 'доступен' : 'недоступен' }}
+          </span>
         </div>
-        <label>Свой API-ключ (sk-ant-…)
-          <input v-model="claudeKey" type="password" autocomplete="off"
-                 :placeholder="claude.configured ? '•••••• (задан, введите новый для замены)' : 'оставьте пустым — авторизация хоста'" />
-        </label>
         <div class="row">
-          <button class="primary" :disabled="claudeSaving" @click="saveClaude">{{ claudeSaving ? 'Сохранение…' : (claudeKey ? 'Сохранить ключ' : 'Очистить ключ') }}</button>
-          <button :disabled="claudeTesting || !claude.hostLoggedIn && !claude.configured" @click="testClaude">{{ claudeTesting ? 'Проверка…' : 'Проверить (haiku-пинг)' }}</button>
+          <button :disabled="refreshing" @click="refreshProv">{{ refreshing ? 'Проверка…' : 'Перепроверить' }}</button>
         </div>
-        <p v-if="claudeMsg" class="msg" :class="claudeMsg.type">{{ claudeMsg.text }}</p>
+      </div>
+    </section>
+
+    <!-- Запуски: обязательные правила перед стартом триажа/конвейера -->
+    <section v-else-if="tab === 'runs'">
+      <p class="muted">
+        Правила, которые кокпит применяет перед каждым запуском — триажем задачи
+        и стартом конвейера фабрики.
+      </p>
+      <div class="card">
+        <div v-if="!prefs" class="muted">Загрузка…</div>
+        <template v-else>
+          <ToggleSwitch :model-value="prefs.gitRefreshBeforeRun" label="Обновлять репозитории перед запуском"
+                        @update:model-value="toggleGitRefresh" />
+          <p class="muted small">
+            Перед триажем и конвейером: <code>git fetch</code> всегда; <code>git pull --ff-only</code> —
+            только если репозиторий стоит на чистом master (ветка задачи или незакоммиченные
+            правки не трогаются, в результате запуска фиксируется причина пропуска).
+          </p>
+          <p v-if="prefsMsg" class="msg" :class="prefsMsg.type">{{ prefsMsg.text }}</p>
+        </template>
       </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.settings { max-width: 56ch; display: flex; flex-direction: column; gap: 22px; }
+.settings { max-width: 56ch; display: flex; flex-direction: column; gap: 16px; }
 section { display: flex; flex-direction: column; gap: 8px; }
-h2 { margin: 0; font-size: 18px; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabbtn { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--ink-mid); font-size: 14px; padding: 8px 12px 9px; cursor: pointer; }
+.tabbtn:hover { color: var(--ink); }
+.tabbtn.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
 .muted code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
-.status { display: flex; align-items: center; gap: 9px; font-size: 13.5px; }
-.status .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.status .dot.ok { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
-.status .dot.err { background: var(--bad); }
 label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
 input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -140,6 +188,26 @@ button { padding: 9px 14px; border-radius: 9px; border: 1px solid var(--line); b
 button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .msg { font-size: 13px; margin: 0; }
+.small { font-size: 12px; line-height: 1.5; }
 .msg.ok { color: var(--good); }
 .msg.err { color: var(--bad); }
+
+/* Строка исполнителя */
+.pv { display: flex; align-items: center; gap: 12px; }
+.pvicon { flex: none; display: grid; place-items: center; width: 34px; height: 34px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--ground); }
+.pvmid { flex: 1; min-width: 0; }
+.pvname { font-size: 14px; font-weight: 600; }
+.pvsub { font-size: 12.5px; }
+.pvstate { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.pvstate .dot { width: 8px; height: 8px; border-radius: 50%; }
+.pvstate.ok { color: var(--good); }
+.pvstate.ok .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
+.pvstate.err { color: var(--bad); }
+.pvstate.err .dot { background: var(--bad); }
+/* Подсказка установки недоступного исполнителя */
+.pvinstall { font-size: 12px; color: var(--ink-mid); margin-top: 4px; }
+.pvinstall code.click { background: var(--ground); border: 1px solid var(--line); border-radius: 5px;
+  padding: 2px 7px; font-size: 11.5px; cursor: pointer; user-select: all; }
+.pvinstall code.click:hover { border-color: var(--line-2); color: var(--ink); }
 </style>

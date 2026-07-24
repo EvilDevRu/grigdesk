@@ -23,6 +23,11 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 | `system` | `/api/system` (CPU + RAM вкл. swap) | `/proc/meminfo`, `os` |
 | `media` | `/api/media/{doctor,upload,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
 | `settings` | `/api/settings/b24` (+ `/test`) | `CredsStore` (`.state`) |
+| `chat` | `POST /api/chat`, `POST /api/tasks/:id/chat`, `GET/PUT /api/chat/store` | `claude -p` + файлы `chats/` (см. [[chat-agents]]) |
+| `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` |
+| `routes` | CRUD `/api/routes[/:id]` | файлы `routes/<id>.json` |
+| `providers` | `/api/providers` (реестр LLM-исполнителей, кэш 60с) | probe бинарей + `ClaudeAuthStore` |
+| `terminal` | `/api/terminal` (WebSocket) | PTY |
 | `health` | `/api/health` | — |
 
 Плагины: `sse` (fs.watch → broadcast), `auth` (GET свободно / мутации по `X-Cockpit-Token`),
@@ -38,12 +43,15 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 
 ## Веб (`web/src/`)
 
-- `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Routes (эталонные схемы +
-  фильтр профилей), Video (видео→задачи), Settings, TaskModal (управление задачей).
+- `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
+  Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью), Diff (git-диф на Monaco),
+  Video (видео→задачи), Terminal, Settings (на табах: Битрикс24 / Исполнители), TaskModal,
+  ChatPanel (плавающий чат на всех страницах, кроме `/chats`).
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
-  (порт `node_geom`/`edge_path`).
+  (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
-  (модалка задачи), `pwa` (баннер обновления).
+  (модалка задачи), `pwa` (баннер обновления), `chat` (мультисессии, история на сервере),
+  `diff`, `providers` (реестр исполнителей), `ui-context` (что открыто — для чата).
 
 ## Гашение b24-mcp
 

@@ -32,13 +32,31 @@ async function request(method, path, body) {
   return data;
 }
 
+// Multipart-загрузка (файлы): Content-Type ставит сам браузер (boundary).
+async function upload(path, formData) {
+  const headers = {};
+  if (TOKEN) headers['X-Cockpit-Token'] = TOKEN;
+  const res = await fetch(url(path), { method: 'POST', headers, body: formData });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const err = new Error(data?.message || data?.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 export const api = {
   base: BASE,
   token: TOKEN,
+  url,
   wsUrl: (path) => WS_BASE + path,
   eventsUrl: () => url('/api/events'),
   get: (path) => request('GET', path),
   post: (path, body) => request('POST', path, body),
   put: (path, body) => request('PUT', path, body),
   del: (path) => request('DELETE', path),
+  upload,
 };

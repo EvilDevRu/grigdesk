@@ -2,34 +2,43 @@
 import { computed } from 'vue';
 
 // Слайдер усилия рассуждения — как переключатель в расширении VS Code:
-// дискретные точки Low/Medium/High/Max, клик по точке (или трек) задаёт уровень.
-const props = defineProps({ modelValue: { type: String, default: 'high' } });
+// дискретные точки, клик по точке (или трек) задаёт уровень.
+// УРОВНИ НЕ ЗАХАРДКОЖЕНЫ: приходят пропсом levels из реестра моделей
+// (у каждой модели свой набор; появится новый уровень — отрисуется сам).
+const props = defineProps({
+  modelValue: { type: String, default: 'high' },
+  levels: { type: Array, default: () => ['low', 'medium', 'high', 'max'] },
+});
 const emit = defineEmits(['update:modelValue']);
 
-const LEVELS = ['low', 'medium', 'high', 'max'];
-const LABELS = { low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
-const idx = computed(() => { const i = LEVELS.indexOf(props.modelValue); return i < 0 ? 2 : i; });
-const pct = computed(() => (idx.value / (LEVELS.length - 1)) * 100);
-function posOf(i) { return (i / (LEVELS.length - 1)) * 100; }
-function set(i) { emit('update:modelValue', LEVELS[i]); }
+// Красивые подписи известных уровней; неизвестный — капитализируем как есть.
+const KNOWN = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Ultra', max: 'Max', minimal: 'Min' };
+function labelOf(l) { return KNOWN[l] || (l ? l[0].toUpperCase() + l.slice(1) : ''); }
+const idx = computed(() => {
+  const i = props.levels.indexOf(props.modelValue);
+  return i < 0 ? Math.min(2, props.levels.length - 1) : i;
+});
+const pct = computed(() => (idx.value / Math.max(1, props.levels.length - 1)) * 100);
+function posOf(i) { return (i / Math.max(1, props.levels.length - 1)) * 100; }
+function set(i) { emit('update:modelValue', props.levels[i]); }
 // Клик по треку — ближайшая точка.
 function onTrack(e) {
   const r = e.currentTarget.getBoundingClientRect();
   const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-  set(Math.round(f * (LEVELS.length - 1)));
+  set(Math.round(f * (props.levels.length - 1)));
 }
 </script>
 
 <template>
-  <div class="eff" :data-lvl="modelValue" :title="`Усилие рассуждения: ${LABELS[modelValue]}`">
+  <div class="eff" :data-lvl="modelValue" :title="`Усилие рассуждения: ${labelOf(modelValue)}`">
     <span class="cap">эффорт</span>
     <div class="track" @click="onTrack">
       <div class="rail"></div>
       <div class="fill" :style="{ width: pct + '%' }"></div>
-      <button v-for="(l, i) in LEVELS" :key="l" type="button" class="node" :class="{ on: i <= idx, cur: i === idx }"
-              :style="{ left: posOf(i) + '%' }" :aria-label="LABELS[l]" @click.stop="set(i)"></button>
+      <button v-for="(l, i) in levels" :key="l" type="button" class="node" :class="{ on: i <= idx, cur: i === idx }"
+              :style="{ left: posOf(i) + '%' }" :aria-label="labelOf(l)" @click.stop="set(i)"></button>
     </div>
-    <span class="val">{{ LABELS[modelValue] }}</span>
+    <span class="val">{{ labelOf(modelValue) }}</span>
   </div>
 </template>
 

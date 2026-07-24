@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Перезапуск сервера кокпита без конфликтов порта (EADDRINUSE):
+# гасим все процессы на порту, ЖДЁМ освобождения, только потом стартуем новый.
+set -euo pipefail
+
+PORT="${COCKPIT_PORT:-8140}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG="${COCKPIT_LOG:-$ROOT/server/.state/cockpit-server.log}"
+export COCKPIT_MEDIA_PYTHON="${COCKPIT_MEDIA_PYTHON:-/home/evildev/Workspace/b24-mcp/app/.venv/bin/python}"
+
+busy() { ss -tln 2>/dev/null | grep -q ":$PORT "; }
+
+# Все PID'ы, слушающие порт (может быть и зомби от прошлых конфликтов)
+pids=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+if [ -n "$pids" ]; then
+  echo "гашу: $pids"
+  kill $pids 2>/dev/null || true
+  for _ in $(seq 1 50); do busy || break; sleep 0.2; done
+  if busy; then
+    echo "порт не освободился — kill -9"
+    kill -9 $pids 2>/dev/null || true
+    for _ in $(seq 1 25); do busy || break; sleep 0.2; done
+  fi
+fi
+if busy; then
+  echo "порт :$PORT всё ещё занят — не стартую" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$LOG")"
+cd "$ROOT"
+setsid nohup node server/src/app.js </dev/null >>"$LOG" 2>&1 &
+disown
+
+for _ in $(seq 1 50); do
+  if curl -sf "http://localhost:$PORT/api/health" >/dev/null 2>&1; then
+    echo "кокпит поднят на :$PORT · лог: $LOG"
+    exit 0
+  fi
+  sleep 0.2
+done
+echo "сервер не поднялся за 10с — смотри $LOG" >&2
+exit 1

@@ -17,23 +17,40 @@
 ## Стек и структура
 
 - **server/** — Fastify (Node ESM, порт **8140**). `src/{app,config}.js`, `plugins/` (sse, auth, static),
-  `adapters/` (factory-state, b24, system, media), `lib/` (pipeline/stages/factory-graph парсеры,
-  `b24/` — перенесённый `B24Client`, `media/` — перенесённый медиа-конвейер), `modules/`
-  (factory, b24, system, media, settings, health).
-- **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Routes, Video, Settings, TaskModal),
-  `views/pipeline/FactoryGraph.vue` (SVG-граф), `stores/` (Pinia: board, tasks, system, ui, pwa),
-  `shared/` (api-client, layout, format, graph-geom).
+  `adapters/` (factory-state, b24, system, media), `lib/` (pipeline/stages/factory-graph парсеры, git,
+  `b24/` — перенесённый `B24Client`, `media/` — перенесённый медиа-конвейер, claude-auth-store), `modules/`
+  (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers).
+- **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Diff, Video, Terminal,
+  Settings, TaskModal, ChatPanel), `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
+  ChatSession, ChatTabs, EffortSlider), `stores/` (Pinia: board, tasks, system, ui, pwa, chat, diff,
+  providers, ui-context), `shared/` (api-client, layout, format, graph-geom, route-layout, ProviderIcon, ui/).
 - **bin/b24** — CLI-обёртка к B24-API (в PATH через симлинк). **deploy/** — systemd-юнит + install.sh.
+- **Базы в корне проекта** (самогитигнорятся, свой `.gitignore` внутри): `chats/` — история чатов
+  (`YYYY-MM/<id>.json`), `agents/` — агенты-стадии (`<id>.md`, frontmatter+промпт), `routes/` — маршруты
+  (`<id>.json`, цепочка+возвраты).
 
 ## Ключевые эндпоинты
 
 - Фабрика: `GET /api/tasks`, `/api/tasks/:id/graph` (схема+статусы+возвраты+nodeMeta),
-  `/api/factory/routes` (эталонные схемы), `POST /api/tasks/:id/sandbox/down`.
+  `/api/tasks/:id/diff` (git-диф worktree), `/api/factory/routes` (эталонные схемы),
+  `POST /api/tasks/:id/sandbox/down`.
 - B24: `GET /api/b24/dashboard` (полный «Рабочий стол»), `/api/b24/task/:id`, `/api/b24/users`;
   мутации `POST /api/b24/tasks` (создать), `/task/:id/{comment,timer/:action,complete,renew}`.
+- Чат: `POST /api/chat` (свободный), `POST /api/tasks/:id/chat` (в worktree задачи),
+  `GET/PUT /api/chat/store` (история — файлы `chats/`). Принимает `context` (UI-контекст страницы)
+  и `attachments` (вложения). Вложения: `POST /api/chat/upload` (multipart → `chats/attachments/`),
+  `GET /api/chat/attachment/:file` (превью). Диктовка: `POST /api/chat/transcribe` (аудио → whisper → текст).
+  Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка).
+- Исполнители (ИИ): модульно в `server/src/lib/executors/` (один файл = один ИИ), модели —
+  редактируемый `server/.state/models.json`. `GET /api/providers` отдаёт всё для UI (см. chat-agents.md).
+- **Перезапуск сервера — только `bin/restart`** (гасит порт и ждёт освобождения; ручной kill+start
+  между параллельными сессиями ловит EADDRINUSE).
+- Базы: `GET/POST/PUT/DELETE /api/agents[/:id]` (+`/reseed`), `GET/POST/PUT/DELETE /api/routes[/:id]`,
+  `GET /api/providers` (реестр LLM-исполнителей; его же рисует топбар).
 - Система: `GET /api/system` (CPU% + RAM вкл. swap). Медиа: `GET /api/media/doctor`,
   `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт).
-- Настройки: `GET/POST /api/settings/b24` + `POST /api/settings/b24/test`. Реалтайм: `GET /api/events` (SSE).
+- Настройки: `GET/POST /api/settings/b24` + `POST /api/settings/b24/test` (UI настроек — на табах).
+  Терминал: `GET /api/terminal` (WebSocket, PTY). Реалтайм: `GET /api/events` (SSE).
 
 ## Ключевые решения (почему так)
 
@@ -58,6 +75,7 @@
 
 @.claude/knowledge/architecture.md
 @.claude/knowledge/factory-graph.md
+@.claude/knowledge/chat-agents.md
 @.claude/knowledge/gotchas.md
 
 ## Запуск

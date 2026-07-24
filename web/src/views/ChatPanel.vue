@@ -13,8 +13,8 @@ const { open, activeId } = storeToRefs(chat);
 const panel = ref(null);
 
 // На странице «Агенты» плавающий чат не нужен — там своя большая рабочая область.
-const onAgents = computed(() => route.name === 'agents');
-watch(onAgents, (v) => { if (v) chat.close(); });
+const onChats = computed(() => route.name === 'chats');
+watch(onChats, (v) => { if (v) chat.close(); });
 
 // Закрытие по клику вне панели (мышью). Слушатель живёт только пока панель открыта.
 function onDocDown(e) {
@@ -31,11 +31,11 @@ watch(open, (v) => {
 });
 onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
 
-function openFull() { chat.close(); router.push('/agents'); }
+function openFull() { chat.close(); router.push('/chats'); }
 </script>
 
 <template>
-  <div v-if="!onAgents" class="chatw">
+  <div v-if="!onChats" class="chatw">
     <Transition name="fab">
       <button v-if="!open" class="fab" title="Чат с агентом" @click="chat.toggle()">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">

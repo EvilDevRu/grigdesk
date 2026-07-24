@@ -6,11 +6,23 @@ import { api } from '../api-client.js';
 import { useSse } from '../../composables/useSse.js';
 import { useSystemStore } from '../../stores/system.js';
 import { usePwaStore } from '../../stores/pwa.js';
+import { useProvidersStore } from '../../stores/providers.js';
+import ProviderIcon from '../ProviderIcon.vue';
+import AttentionAlerts from './AttentionAlerts.vue';
+import HelpTip from '../ui/HelpTip.vue';
 
 const route = useRoute();
 const health = ref(null);
 const { data: sys } = storeToRefs(useSystemStore());
 const pwa = usePwaStore();
+
+// Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
+const prov = useProvidersStore();
+prov.load();
+function provTitle(p) {
+  return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
+    + (p.version ? ` · ${p.version}` : '');
+}
 
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
 // Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
@@ -22,7 +34,8 @@ function toggleSidebar() { collapsed.value = !collapsed.value; localStorage.setI
 const ICONS = {
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
   pipeline: 'M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9',
-  agents: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
+  chats: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
+  agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
@@ -32,6 +45,7 @@ const nav = [
   { to: '/board', label: 'Доска', icon: 'board' },
   { to: '/pipeline', label: 'Конвейер', icon: 'pipeline' },
   { to: '/agents', label: 'Агенты', icon: 'agents' },
+  { to: '/chats', label: 'Чаты', icon: 'chats' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
   { to: '/video', label: 'Видео', icon: 'video' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
@@ -79,21 +93,38 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
       <div class="status">
-        <span v-if="sys?.net" class="netbox mono"
-              :title="`Публичный IP мозга: ${sys.net.ip}` + (sys.net.country ? ` · ${sys.net.country}` : '')">
-          <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
-          <span class="ip">{{ sys.net.ip }}</span>
+        <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
+             не сдвигая остальные элементы (правый край статуса зафиксирован) -->
+        <HelpTip v-if="sys" align="right"
+                 :text="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM+swap: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})` + (sys.mem.swapTotalGb ? ` · swap ${sys.mem.swapUsedGb}/${sys.mem.swapTotalGb} ГБ` : '')">
+          <span class="metric mono">
+            CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
+            · RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}</b>
+          </span>
+        </HelpTip>
+        <span v-if="sys" class="sep" aria-hidden="true">·</span>
+        <AttentionAlerts />
+        <span v-if="prov.providers.length" class="provbox">
+          <HelpTip v-for="p in prov.providers" :key="p.id" :text="provTitle(p)">
+            <span class="prov" :class="{ off: !p.available }" :style="p.available ? { color: p.color } : null">
+              <ProviderIcon :provider="p" :size="15" />
+            </span>
+          </HelpTip>
         </span>
-        <span v-if="sys?.net && sys" class="sep" aria-hidden="true">·</span>
-        <span v-if="sys" class="metric mono"
-              :title="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM+swap: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})` + (sys.mem.swapTotalGb ? ` · swap ${sys.mem.swapUsedGb}/${sys.mem.swapTotalGb} ГБ` : '')">
-          CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
-          · RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}</b>
-        </span>
-        <span class="conn" :class="connected ? 'on' : 'off'" :title="connected ? 'канал жив' : 'нет связи'">
-          <span class="dot"></span>
-          <span class="host mono">{{ health ? health.host : 'офлайн' }}</span>
-        </span>
+        <span v-if="prov.providers.length && sys?.net" class="sep" aria-hidden="true">·</span>
+        <HelpTip v-if="sys?.net" :text="`Публичный IP мозга: ${sys.net.ip}` + (sys.net.country ? ` · ${sys.net.country}` : '')">
+          <span class="netbox mono">
+            <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
+            <span class="ip">{{ sys.net.ip }}</span>
+          </span>
+        </HelpTip>
+        <span v-if="sys?.net" class="sep" aria-hidden="true">·</span>
+        <HelpTip align="right" :text="connected ? 'Связь с сервером кокпита — канал жив' : 'Нет связи с сервером кокпита'">
+          <span class="conn" :class="connected ? 'on' : 'off'">
+            <span class="dot"></span>
+            <span class="host mono">{{ health ? health.host : 'офлайн' }}</span>
+          </span>
+        </HelpTip>
       </div>
     </header>
 
@@ -156,9 +187,12 @@ const { connected } = useSse((name) => { if (name === 'state-change') loadHealth
 .mlogo { display: none; color: var(--accent); font-size: 18px; }
 .page { margin: 0; font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
 .status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
-.metric { color: var(--ink-mid); }
+.metric { color: var(--ink-mid); font-variant-numeric: tabular-nums; }
 .metric b { font-weight: 600; }
 .sep { color: var(--ink-mid); margin: 0 -4px; }
+.provbox { display: inline-flex; align-items: center; gap: 9px; }
+.prov { display: inline-grid; place-items: center; }
+.prov.off { color: var(--ink-mid); opacity: .45; }
 .netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }

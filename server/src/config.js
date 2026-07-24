@@ -20,10 +20,33 @@ export const config = {
   factoryProfile: process.env.COCKPIT_FACTORY_PROFILE || '',
   // Бинарь Claude для чата с агентом по задаче.
   claudeBin: process.env.COCKPIT_CLAUDE_BIN || 'claude',
+  // Бинарь Codex CLI (GPT-исполнитель OpenAI). Не установлен → провайдер «недоступен».
+  codexBin: process.env.COCKPIT_CODEX_BIN || 'codex',
+  // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
+  modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
+  // Автообнаружение новых моделей Anthropic ХОСТОВЫМ OAuth-токеном CLI (~/.claude/.credentials.json).
+  // Явный опт-ин пользователя: токен предназначен для claude CLI, использовать его для прямых
+  // API-запросов без разрешения нельзя. ANTHROPIC_API_KEY в окружении работает и без флага.
+  discoverWithCliToken: process.env.COCKPIT_DISCOVER_WITH_CLI_TOKEN === '1',
 
   // Свой API-ключ кокпита для claude (опционально). Хранится в .state (gitignore, 0600).
   // Пусто → чат использует авторизацию хостового CLI (`claude login` / ANTHROPIC_API_KEY).
   claudeAuthPath: process.env.COCKPIT_CLAUDE_AUTH_PATH || path.join(__dirname, '..', '.state', 'claude-auth.json'),
+
+  // История чатов с агентами — папка в корне проекта (внутри свой .gitignore):
+  // каждый чат — отдельный файл chats/YYYY-MM/<id>.json, мета — meta.json.
+  // Общая для всех окон/устройств, битый файл одного чата не трогает остальные.
+  chatsDir: process.env.COCKPIT_CHATS_DIR || path.join(__dirname, '..', '..', 'chats'),
+  // Старое хранилище одним файлом — только для одноразовой миграции.
+  chatStoreLegacyPath: process.env.COCKPIT_CHAT_STORE || path.join(__dirname, '..', '.state', 'chats.json'),
+
+  // База агентов (стадий конвейера) — папка в корне проекта (внутри свой .gitignore,
+  // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
+  agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
+
+  // База маршрутов конвейера — папка в корне проекта (внутри свой .gitignore):
+  // каждый маршрут — файл routes/<id>.json (цепочка агентов + возвраты).
+  routesDir: process.env.COCKPIT_ROUTES_DIR || path.join(__dirname, '..', '..', 'routes'),
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
@@ -38,6 +61,15 @@ export const config = {
   b24BaseUrl: process.env.COCKPIT_B24_BASE_URL || '',
   b24CookiePath: process.env.B24_COOKIE_PATH || path.join(__dirname, '..', '.state', 'b24-cookies.json'),
   b24CredsPath: process.env.B24_CREDS_PATH || path.join(__dirname, '..', '.state', 'b24-creds.json'),
+
+  // Общие настройки кокпита (редактируются из UI, живут в .state).
+  prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),
+
+  // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
+  // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.
+  analysisDir: process.env.COCKPIT_ANALYSIS_DIR || path.join(home, '.factory', 'analysis'),
+  analysisModel: process.env.COCKPIT_ANALYSIS_MODEL || 'sonnet',
+  analysisTimeoutMs: Number(process.env.COCKPIT_ANALYSIS_TIMEOUT_MS) || 20 * 60 * 1000,
 
   // Команда сноса стенда (проектно-специфична) — задаётся окружением, {task} подставляется.
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.

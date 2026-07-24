@@ -25,8 +25,22 @@ function connect() {
   ws = new WebSocket(u);
   ws.binaryType = 'arraybuffer';
 
+  // Команда, «принесённая» с другой страницы (например «Установка» исполнителя в настройках).
+  // Печатаем её ТОЛЬКО после первого вывода шелла (промпт готов) — если слать сразу
+  // в onopen, ввод эхоится дважды: до промпта (termios) и после (readline bash).
+  let pendingInsert = sessionStorage.getItem('cockpit-term-insert');
+  if (pendingInsert) sessionStorage.removeItem('cockpit-term-insert');
+
   ws.onopen = () => { status.value = 'open'; term.focus(); };
-  ws.onmessage = (ev) => { term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data)); };
+  ws.onmessage = (ev) => {
+    term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
+    if (pendingInsert) {
+      const cmd = pendingInsert;
+      pendingInsert = null;
+      // Небольшая пауза: даём шеллу дорисовать промпт. Не выполняем — Enter за пользователем.
+      setTimeout(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'in', d: cmd })); }, 200);
+    }
+  };
   ws.onclose = () => {
     status.value = 'closed';
     if (!disposed) term.write('\r\n\x1b[90m— сессия завершена. Кнопка «Переподключить» —\x1b[0m\r\n');

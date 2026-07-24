@@ -1,73 +1,122 @@
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
-// размер контекста. Всё персистится (переживает перезагрузку). Один стор питает и
-// плавающую панель (ChatPanel), и страницу «Агенты» (AgentsView) — компоненты переиспользуются.
+// размер контекста. История хранится НА СЕРВЕРЕ (файл в .state кокпита) — общая для всех
+// окон/устройств и переживает чистку браузера. Один стор питает и плавающую панель
+// (ChatPanel), и страницу «Агенты» (AgentsView) — компоненты переиспользуются.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
+import { router } from '../router.js';
+import { useUiContextStore } from './ui-context.js';
 
 const EFFORTS = ['low', 'medium', 'high', 'max'];
 // Оценочное окно контекста модели — для индикатора заполнения.
 export const CONTEXT_WINDOW = 200000;
+// Старое браузерное хранилище — остаётся только как источник одноразовой миграции.
 const LS_KEY = 'cockpit-chat-v2';
 
 function uid() { return `s${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`; }
 
-function load() {
-  try {
-    const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-    return {
-      sessions: Array.isArray(j.sessions) ? j.sessions : [],
-      archived: Array.isArray(j.archived) ? j.archived : [],
-      activeId: j.activeId || null,
-      defModel: j.defModel || 'opus',
-      defEffort: j.defEffort || 'high',
-    };
-  } catch { return { sessions: [], archived: [], activeId: null, defModel: 'opus', defEffort: 'high' }; }
+function pickStore(j) {
+  return {
+    sessions: Array.isArray(j?.sessions) ? j.sessions : [],
+    archived: Array.isArray(j?.archived) ? j.archived : [],
+    activeId: j?.activeId || null,
+    defModel: j?.defModel || 'opus',
+    defEffort: j?.defEffort || 'high',
+  };
 }
 
+let persistTimer = null;
+let loadPromise = null;
+let permEs = null; // SSE-подписка на запросы разрешений (одна на окно)
+// «Разрешать до конца сессии»: chatKey → Set(инструментов). Только в памяти —
+// умирает с перезагрузкой страницы, в allowlist навсегда ничего не попадает.
+const permAutoAllow = {};
+
 export const useChatStore = defineStore('chat', {
-  state: () => ({ ...load(), open: false, conveyorIds: [] }),
+  state: () => ({ ...pickStore(null), loaded: false, open: false, conveyorIds: [], permReq: null }),
   getters: {
     active: (s) => s.sessions.find((x) => x.id === s.activeId) || null,
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
     isOnConveyor: (s) => (taskId) => !!taskId && s.conveyorIds.includes(String(taskId)),
-    // Поиск по открытым и архивным чатам: совпадение в названии или тексте сообщений.
-    search: (s) => (q) => {
+    // Единый список чатов для телеграм-сайдбара: открытые + архив, свежие сверху.
+    // Без запроса — все чаты со сниппетом последнего сообщения; с запросом — фильтр
+    // по названию и тексту сообщений (сниппет — фрагмент совпадения).
+    list: (s) => (q) => {
       const t = q.trim().toLowerCase();
-      if (!t) return [];
-      const hit = (sess, archived) => {
+      const row = (sess, archived) => {
         const title = sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат');
-        let snippet = title.toLowerCase().includes(t) ? '' : null;
-        const m = (sess.messages || []).find((x) => (x.text || '').toLowerCase().includes(t));
-        if (m) {
-          const i = m.text.toLowerCase().indexOf(t);
-          snippet = (i > 24 ? '…' : '') + m.text.slice(Math.max(0, i - 24), i + 72).replace(/\s+/g, ' ');
+        const msgs = sess.messages || [];
+        let snippet = '';
+        if (t) {
+          const m = msgs.find((x) => (x.text || '').toLowerCase().includes(t));
+          if (!title.toLowerCase().includes(t) && !m) return null;
+          if (m) {
+            const i = m.text.toLowerCase().indexOf(t);
+            snippet = (i > 24 ? '…' : '') + m.text.slice(Math.max(0, i - 24), i + 72);
+          }
+        } else if (msgs.length) {
+          const last = msgs[msgs.length - 1];
+          snippet = (last.role === 'user' ? 'Ты: ' : last.role === 'error' ? '⚠ ' : '') + last.text;
         }
-        return snippet === null ? null : { id: sess.id, title, snippet, archived };
+        return {
+          id: sess.id, title, snippet: snippet.replace(/\s+/g, ' '), archived,
+          taskId: sess.taskId, sending: !!sess.sending, ts: sess.updatedAt || sess.closedAt || 0,
+        };
       };
       const out = [];
-      s.sessions.forEach((x) => { const h = hit(x, false); if (h) out.push(h); });
-      (s.archived || []).forEach((x) => { const h = hit(x, true); if (h) out.push(h); });
-      return out.slice(0, 20);
+      s.sessions.forEach((x) => { const h = row(x, false); if (h) out.push(h); });
+      (s.archived || []).forEach((x) => { const h = row(x, true); if (h) out.push(h); });
+      out.sort((a, b) => b.ts - a.ts);
+      return out;
     },
   },
   actions: {
+    // Загрузка истории с сервера (однократно). Если серверный файл пуст, а в localStorage
+    // осталась история со старой схемы хранения — мигрируем её и чистим браузер.
+    async _load() {
+      if (this.loaded) return;
+      if (!loadPromise) {
+        loadPromise = (async () => {
+          let j = null;
+          try { j = await api.get('/api/chat/store'); } catch { j = null; }
+          if (!(j?.sessions?.length || j?.archived?.length)) {
+            try {
+              const ls = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+              if (ls?.sessions?.length || ls?.archived?.length) {
+                j = ls;
+                localStorage.removeItem(LS_KEY);
+              }
+            } catch { /* битый localStorage — начинаем с пустого */ }
+          }
+          Object.assign(this, pickStore(j));
+          this.loaded = true;
+          if (j) this._persist();
+        })();
+      }
+      await loadPromise;
+    },
+    // Сохранение на сервер с дебаунсом — вызовы дискретные, но склеиваем всплески.
     _persist() {
-      const slim = this.sessions.map((s) => ({
-        id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
-        messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
-      }));
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        sessions: slim, archived: this.archived, activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort,
-      }));
+      clearTimeout(persistTimer);
+      persistTimer = setTimeout(() => {
+        const slim = this.sessions.map((s) => ({
+          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
+          messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
+          createdAt: s.createdAt, updatedAt: s.updatedAt,
+        }));
+        api.put('/api/chat/store', {
+          sessions: slim, archived: this.archived, activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort,
+        }).catch(() => { /* сервер недоступен — сохранится при следующем изменении */ });
+      }, 300);
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
 
     newSession(opts = {}) {
       const s = {
         id: uid(), taskId: opts.taskId ? String(opts.taskId) : null, title: opts.title || '',
-        model: this.defModel, effort: this.defEffort,
+        model: this.defModel, effort: this.defEffort, createdAt: Date.now(), updatedAt: Date.now(),
         messages: [], sessionId: null, contextTokens: 0, sending: false, error: null,
       };
       this.sessions.push(s);
@@ -75,9 +124,57 @@ export const useChatStore = defineStore('chat', {
       this._persist();
       return s.id;
     },
-    ensure() {
-      // sending/error могли не сохраниться — восстанавливаем поля.
+    // ── Всплывашка разрешений: агент просит выполнить действие (Bash/правка) ──
+    // Сервер шлёт SSE `chat-permission`, ответ уходит POST'ом; `chat-permission-done`
+    // (в т.ч. из другого окна или по таймауту) закрывает всплывашку везде.
+    initPerms() {
+      if (permEs) return;
+      permEs = new EventSource(api.eventsUrl());
+      permEs.addEventListener('chat-permission', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          // «Разрешать до конца сессии»: инструмент уже одобрен — отвечаем сами, без всплывашки.
+          if (d.chatKey && permAutoAllow[d.chatKey]?.has(d.tool)) {
+            api.post(`/api/chat/permission/${d.pid}`, { allow: true }).catch(() => {});
+            return;
+          }
+          this.permReq = d;
+        } catch { /* битое событие */ }
+      });
+      permEs.addEventListener('chat-permission-done', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          if (this.permReq?.pid === d.pid) this.permReq = null;
+        } catch { /* битое событие */ }
+      });
+      // Живой прогресс «думает… · N ток.»
+      permEs.addEventListener('chat-progress', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          const s = this._get(d.chatKey);
+          if (s?.sending) s.progressTokens = d.tokens;
+        } catch { /* битое событие */ }
+      });
+    },
+    async answerPerm(allow, remember = false) {
+      const p = this.permReq;
+      if (!p) return;
+      this.permReq = null;
+      if (allow && remember && p.chatKey && p.tool) {
+        (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
+      }
+      try { await api.post(`/api/chat/permission/${p.pid}`, { allow }); }
+      catch { /* запрос уже протух (таймаут/другое окно) */ }
+    },
+
+    async ensure() {
+      await this._load();
+      this.initPerms();
+      // sending/error не персистятся — восстанавливаем поля.
       this.sessions.forEach((s) => { if (s.sending === undefined) s.sending = false; if (s.error === undefined) s.error = null; });
+      // Миграция: алиаса «fable» в CLI нет — только полный ID.
+      this.sessions.forEach((s) => { if (s.model === 'fable') s.model = 'claude-fable-5'; });
+      if (this.defModel === 'fable') this.defModel = 'claude-fable-5';
       if (!this.sessions.length) this.newSession();
       else if (!this._get(this.activeId)) this.activeId = this.sessions[0].id;
     },
@@ -89,7 +186,8 @@ export const useChatStore = defineStore('chat', {
       if (s.messages?.length) {
         this.archived.unshift({
           id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
-          messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens, closedAt: Date.now(),
+          messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
+          createdAt: s.createdAt, closedAt: Date.now(),
         });
         if (this.archived.length > 50) this.archived.length = 50;
       }
@@ -109,12 +207,37 @@ export const useChatStore = defineStore('chat', {
     },
     setActive(id) { if (this._get(id)) { this.activeId = id; this._persist(); } },
     setTitle(id, title) { const s = this._get(id); if (!s) return; s.title = title; this._persist(); },
+    // Выбор чата из сайдбара: открытый — активируем, архивный — прозрачно восстанавливаем.
+    selectChat(id) {
+      if (this._get(id)) { this.activeId = id; this._persist(); return; }
+      this.restoreArchived(id);
+    },
+    // Переименование из сайдбара — работает и для открытых, и для архивных.
+    renameChat(id, title) {
+      const s = this._get(id) || this.archived.find((x) => x.id === id);
+      if (!s) return;
+      s.title = title;
+      this._persist();
+    },
+    // Безвозвратное удаление чата (открытого или архивного).
+    deleteChat(id) {
+      const i = this.sessions.findIndex((x) => x.id === id);
+      if (i >= 0) {
+        this.sessions.splice(i, 1);
+        if (this.activeId === id) this.activeId = this.sessions[0]?.id || null;
+        if (!this.sessions.length) this.newSession();
+      } else {
+        const j = this.archived.findIndex((x) => x.id === id);
+        if (j >= 0) this.archived.splice(j, 1);
+      }
+      this._persist();
+    },
 
     // Плавающая панель.
-    toggle() { this.ensure(); this.open = !this.open; },
+    async toggle() { await this.ensure(); this.open = !this.open; },
     close() { this.open = false; },
-    openFor(taskId, title) {
-      this.ensure();
+    async openFor(taskId, title) {
+      await this.ensure();
       if (taskId) {
         const ex = this.sessions.find((s) => s.taskId === String(taskId));
         if (ex) this.activeId = ex.id;
@@ -136,21 +259,34 @@ export const useChatStore = defineStore('chat', {
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
     resetContext(id) { const s = this._get(id); if (!s) return; s.sessionId = null; s.contextTokens = 0; this._persist(); },
 
-    async send(id, text) {
+    async send(id, text, attachments = []) {
       const s = this._get(id); if (!s) return;
-      if (!text.trim() || s.sending) return;
-      s.messages.push({ role: 'user', text });
-      s.sending = true; s.error = null;
+      if ((!text.trim() && !attachments.length) || s.sending) return;
+      // Вложения в истории — только ссылки на серверные файлы (file/name/url/mime).
+      const atts = attachments.map((a) => ({ file: a.file, name: a.name, url: a.url, mime: a.mime }));
+      s.messages.push({ role: 'user', text, ...(atts.length ? { attachments: atts } : {}) });
+      s.sending = true; s.error = null; s.progressTokens = 0;
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat';
-        const r = await api.post(url, { message: text, model: s.model, effort: s.effort, sessionId: s.sessionId });
+        // Снимок UI-контекста: страница + детали от неё (агент понимает «поправь здесь»).
+        const route = router.currentRoute.value;
+        const ui = useUiContextStore();
+        const context = {
+          page: route.meta?.title || '',
+          path: route.path,
+          ...(Object.keys(ui.extra).length ? { details: JSON.parse(JSON.stringify(ui.extra)) } : {}),
+        };
+        const r = await api.post(url, {
+          message: text, model: s.model, effort: s.effort, sessionId: s.sessionId, context, chatKey: id,
+          ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
+        });
         s.sessionId = r.sessionId;
         if (typeof r.contextTokens === 'number' && r.contextTokens > 0) s.contextTokens = r.contextTokens;
         s.messages.push({ role: 'assistant', text: r.reply || '(пусто)', cost: r.cost });
       } catch (e) {
         s.error = e.message;
         s.messages.push({ role: 'error', text: e.message });
-      } finally { s.sending = false; this._persist(); }
+      } finally { s.sending = false; s.progressTokens = 0; s.updatedAt = Date.now(); this._persist(); }
     },
 
     // Список номеров задач, уже находящихся на конвейере (для защиты «На конвейер»).

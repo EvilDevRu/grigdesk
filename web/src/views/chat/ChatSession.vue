@@ -1,10 +1,12 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../../shared/api-client.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useTasksStore } from '../../stores/tasks.js';
+import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
+import HelpTip from '../../shared/ui/HelpTip.vue';
 
 // Одна сессия чата. Переиспользуется в плавающей панели и на странице «Агенты».
 const props = defineProps({
@@ -16,8 +18,45 @@ const router = useRouter();
 const chat = useChatStore();
 const tasks = useTasksStore();
 
-const MODELS = ['opus', 'sonnet', 'haiku', 'fable'];
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid) || null);
+
+// ── Модели из реестра исполнителей (/api/providers): группы по ИИ, сила — сверху,
+// у каждой модели свои уровни эффорта и своё окно контекста. Хардкода нет:
+// новая модель/уровень появляется из реестра сама. ──
+const prov = useProvidersStore();
+prov.load();
+const provGroups = computed(() => prov.providers.filter((p) => p.models?.length));
+const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
+const currentModel = computed(() => {
+  for (const p of prov.providers) {
+    const m = (p.models || []).find((x) => x.id === sess.value?.model);
+    if (m) return m;
+  }
+  return null;
+});
+const effortLevels = computed(() => currentModel.value?.efforts || ['low', 'medium', 'high', 'max']);
+const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
+function providerIdOf(modelId) {
+  for (const p of prov.providers) {
+    if ((p.models || []).some((m) => m.id === modelId)) return p.id;
+  }
+  return null;
+}
+function onModelChange(e) {
+  const oldProv = providerIdOf(sess.value?.model);
+  const newProv = providerIdOf(e.target.value);
+  chat.setModel(props.sid, e.target.value);
+  // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
+  // резюмить им нельзя: сбрасываем контекст, история чата остаётся.
+  if (oldProv && newProv && oldProv !== newProv && sess.value?.sessionId) {
+    chat.resetContext(props.sid);
+  }
+  // У новой модели может не быть текущего уровня эффорта — подгоняем.
+  const lv = effortLevels.value;
+  if (sess.value && !lv.includes(sess.value.effort)) {
+    chat.setEffort(props.sid, lv.includes('high') ? 'high' : lv[lv.length - 1]);
+  }
+}
 
 // ── Список задач для селекта (с ЗАГОЛОВКАМИ, не только номером) ──
 let taskListPromise = null;
@@ -27,6 +66,9 @@ function fetchTaskList() {
 }
 const taskOpts = ref([]); // [{ task, route, title }]
 onMounted(async () => {
+  // При открытии — сразу в конец истории
+  await nextTick();
+  scrollDown();
   chat.loadConveyor();
   const list = await fetchTaskList();
   taskOpts.value = list.map((t) => ({ task: String(t.task), route: t.route, title: '' }));
@@ -43,8 +85,8 @@ function onTaskChange(e) {
   chat.setTask(props.sid, val || null, o ? (o.title || `#${o.task}`) : '');
 }
 
-// ── Контекст ──
-const ctxPct = computed(() => Math.min(100, Math.round(((sess.value?.contextTokens || 0) / CONTEXT_WINDOW) * 100)));
+// ── Контекст (окно — у каждой модели своё, из реестра) ──
+const ctxPct = computed(() => Math.min(100, Math.round(((sess.value?.contextTokens || 0) / ctxWindow.value) * 100)));
 const ctxClass = computed(() => (ctxPct.value >= 85 ? 'hi' : ctxPct.value >= 60 ? 'mid' : ''));
 // Кольцо-индикатор контекста (клик — сброс контекста).
 const RING_C = 2 * Math.PI * 9;
@@ -53,16 +95,188 @@ const ringDash = computed(() => RING_C * (1 - ctxPct.value / 100));
 // ── Ввод ──
 const input = ref('');
 const body = ref(null);
+function scrollDown() { if (body.value) body.value.scrollTop = body.value.scrollHeight; }
+// Переключение на другой чат — тоже в конец истории
+watch(() => props.sid, async () => { await nextTick(); scrollDown(); });
 async function submit() {
   const t = input.value.trim();
-  if (!t || !sess.value) return;
+  const atts = pending.value.slice();
+  if ((!t && !atts.length) || !sess.value) return;
+  // Точное имя команды — выполняем её, а не шлём агенту.
+  if (COMMANDS.some((c) => c.cmd === t)) { runCommand(t); return; }
   input.value = '';
-  await chat.send(props.sid, t);
+  pending.value = [];
+  await chat.send(props.sid, t, atts);
   await nextTick();
-  if (body.value) body.value.scrollTop = body.value.scrollHeight;
+  scrollDown();
 }
-function onKey(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }
-watch(() => sess.value?.messages.length, async () => { await nextTick(); if (body.value) body.value.scrollTop = body.value.scrollHeight; });
+function onKey(e) {
+  // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
+  const m = cmdMatches.value;
+  if (m.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); cmdIndex.value = (cmdIndex.value + 1) % m.length; return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); cmdIndex.value = (cmdIndex.value - 1 + m.length) % m.length; return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); runCommand(m[Math.min(cmdIndex.value, m.length - 1)].cmd); return; }
+    if (e.key === 'Escape') { input.value = ''; return; }
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit();
+}
+
+// ── Слэш-команды: ввод «/» открывает меню со списком и описаниями (как в Claude Code) ──
+const COMMANDS = [
+  { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента' },
+  { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)' },
+  { cmd: '/new', desc: 'Открыть новый чат' },
+];
+const cmdIndex = ref(0);
+const cmdMatches = computed(() => {
+  const t = input.value.trimStart().toLowerCase();
+  if (!t.startsWith('/') || /[\s\n]/.test(t)) return [];
+  return COMMANDS.filter((c) => c.cmd.startsWith(t));
+});
+watch(cmdMatches, (m) => { if (cmdIndex.value >= m.length) cmdIndex.value = 0; });
+function runCommand(cmd) {
+  input.value = '';
+  cmdIndex.value = 0;
+  if (cmd === '/clear') {
+    pending.value = [];
+    chat.clearChat(props.sid);
+    chat.resetContext(props.sid);
+  } else if (cmd === '/reset') {
+    chat.resetContext(props.sid);
+  } else if (cmd === '/new') {
+    chat.newSession();
+  }
+}
+
+// ── Вложения (фото): кнопка 📎 + вставка из буфера. Файл сразу уходит на сервер
+// (chats/attachments/), к сообщению прикладывается ссылка — агент читает через Read. ──
+const pending = ref([]); // [{ file, name, url, mime }]
+const fileInput = ref(null);
+const attachBusy = ref(false);
+async function addFiles(files) {
+  for (const f of files) {
+    if (!f) continue;
+    attachBusy.value = true;
+    try {
+      const fd = new FormData();
+      fd.append('file', f, f.name || 'image.png');
+      pending.value.push(await api.upload('/api/chat/upload', fd));
+    } catch (e) {
+      inputErr.value = `Загрузка: ${e.message}`;
+    } finally { attachBusy.value = false; }
+  }
+}
+function onPick(e) { addFiles([...e.target.files]); e.target.value = ''; }
+function onPaste(e) {
+  const imgs = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/'));
+  if (!imgs.length) return;
+  e.preventDefault();
+  addFiles(imgs.map((i) => i.getAsFile()).filter(Boolean));
+}
+function removePending(i) { pending.value.splice(i, 1); }
+function isImg(a) { return (a.mime || '').startsWith('image/'); }
+
+// Drag&drop файлов на весь чат: счётчик enter/leave (leave стреляет на каждом
+// дочернем элементе), оверлей-подсказка поверх.
+const dragDepth = ref(0);
+const dragOver = computed(() => dragDepth.value > 0);
+function onDragEnter(e) { if (e.dataTransfer?.types?.includes('Files')) dragDepth.value++; }
+function onDragLeave() { if (dragDepth.value > 0) dragDepth.value--; }
+function onDrop(e) {
+  dragDepth.value = 0;
+  const files = [...(e.dataTransfer?.files || [])];
+  if (files.length) addFiles(files);
+}
+
+// ── Диктовка с микрофона: MediaRecorder → /api/chat/transcribe (whisper) → текст в поле ──
+const recording = ref(false);
+const transcribing = ref(false);
+const inputErr = ref('');
+let recorder = null;
+async function toggleMic() {
+  inputErr.value = '';
+  if (recording.value) { recorder?.stop(); return; }
+  // getUserMedia доступен только в secure context (https/localhost).
+  if (!navigator.mediaDevices?.getUserMedia) {
+    inputErr.value = 'Микрофон требует https или localhost — открой кокпит по защищённому адресу';
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const chunks = [];
+    mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    mr.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      recording.value = false;
+      transcribing.value = true;
+      try {
+        const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
+        const fd = new FormData();
+        fd.append('file', blob, 'dictation.webm');
+        const r = await api.upload('/api/chat/transcribe', fd);
+        if (r.text) input.value = (input.value ? input.value.trimEnd() + ' ' : '') + r.text;
+        else inputErr.value = 'Речь не распознана — попробуй ещё раз';
+      } catch (e) {
+        inputErr.value = `Распознавание: ${e.message}`;
+      } finally { transcribing.value = false; }
+    };
+    recorder = mr;
+    mr.start();
+    recording.value = true;
+  } catch (e) {
+    inputErr.value = `Микрофон: ${e.message}`;
+  }
+}
+// Ctrl+D — старт/стоп записи (по физической клавише, работает в любой раскладке).
+function onGlobalKey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD' && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    toggleMic();
+  }
+}
+onMounted(() => window.addEventListener('keydown', onGlobalKey));
+onUnmounted(() => window.removeEventListener('keydown', onGlobalKey));
+watch(() => sess.value?.messages.length, async () => { await nextTick(); scrollDown(); });
+
+// ── Копирование сообщения (иконка при наведении) ──
+const copiedIdx = ref(-1);
+async function copyMsg(m, i) {
+  const text = m.text || '';
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // http://<ip> — clipboard API нет, фоллбэк через скрытую textarea
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    copiedIdx.value = i;
+    setTimeout(() => { if (copiedIdx.value === i) copiedIdx.value = -1; }, 1500);
+  } catch { /* не скопировалось — молча */ }
+}
+
+// ── Всплывашка разрешений: агент просит выполнить действие ──
+const perm = computed(() => {
+  const p = chat.permReq;
+  return p && (!p.chatKey || p.chatKey === props.sid) ? p : null;
+});
+const permRemember = ref(false);
+watch(perm, () => { permRemember.value = false; });
+const permPreview = computed(() => {
+  const i = perm.value?.input || {};
+  if (i.command) return i.command;              // Bash — показываем команду
+  if (i.file_path) return i.file_path;          // правки — показываем файл
+  const s = JSON.stringify(i);
+  return s === '{}' ? '' : s.length > 400 ? s.slice(0, 400) + '…' : s;
+});
 
 // ── Действие «На конвейер» с защитой ──
 const onConveyor = computed(() => chat.isOnConveyor(sess.value?.taskId));
@@ -80,7 +294,12 @@ async function toConveyor() {
 </script>
 
 <template>
-  <div v-if="sess" class="cs" :class="variant">
+  <div v-if="sess" class="cs" :class="variant"
+       @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+    <!-- Оверлей при перетаскивании файла -->
+    <div v-if="dragOver" class="drop-overlay">
+      <div class="drop-box">📎 Отпусти, чтобы приложить</div>
+    </div>
     <!-- Панель управления: селект задачи слева, настройки прижаты вправо -->
     <div class="cs-top">
       <div class="col bar">
@@ -91,12 +310,21 @@ async function toConveyor() {
           </select>
         </div>
         <div class="spacer"></div>
-        <div class="sel">
-          <select :value="sess.model" title="Модель" @change="chat.setModel(sid, $event.target.value)">
-            <option v-for="m in MODELS" :key="m" :value="m">{{ m }}</option>
+        <div class="sel model">
+          <select :value="sess.model" :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
+                  @change="onModelChange">
+            <template v-if="provGroups.length">
+              <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
+                <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
+                        :title="`контекст ${(m.context / 1000).toFixed(0)}k`">{{ m.name }}</option>
+              </optgroup>
+            </template>
+            <template v-else>
+              <option v-for="m in FALLBACK_MODELS" :key="m" :value="m">{{ m }}</option>
+            </template>
           </select>
         </div>
-        <EffortSlider :model-value="sess.effort" @update:model-value="chat.setEffort(sid, $event)" />
+        <EffortSlider :model-value="sess.effort" :levels="effortLevels" @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: маленькое кольцо-заполнение; клик — сброс контекста -->
         <button class="ctx-ring" :class="ctxClass" :disabled="!sess.sessionId"
                 :title="`Контекст: ${sess.contextTokens.toLocaleString('ru')} токенов (${ctxPct}%)` + (sess.sessionId ? ' · клик — сбросить' : ' · пусто')"
@@ -117,13 +345,33 @@ async function toConveyor() {
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
           <p class="e-sub muted">
             {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
-            Модель и усилие — сверху. Ctrl+Enter — отправить.
+            Модель и усилие — сверху. Ctrl+Enter — отправить. «/» — команды.
           </p>
         </div>
         <div v-for="(m, i) in sess.messages" :key="i" class="msg" :class="m.role">
-          <div class="text">{{ m.text }}</div>
+          <div v-if="m.attachments?.length" class="m-atts">
+            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener">
+              <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
+              <span v-else class="m-file">📄 {{ a.name }}</span>
+            </a>
+          </div>
+          <div v-if="m.text" class="text">{{ m.text }}</div>
+          <button v-if="m.text" class="copy" :class="{ done: copiedIdx === i }"
+                  :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
+            <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          </button>
         </div>
-        <div v-if="sess.sending" class="msg assistant"><div class="text muted"><span class="spin"></span> думает…</div></div>
+        <div v-if="sess.sending" class="msg assistant">
+          <div class="text muted">
+            <span class="spin"></span> думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -137,11 +385,74 @@ async function toConveyor() {
       </div>
     </div>
 
-    <!-- Ввод: единый композер, кнопка внутри -->
+    <!-- Всплывашка разрешения: агент хочет выполнить действие -->
+    <div v-if="perm" class="perm">
+      <div class="col">
+        <div class="p-t">Агент просит разрешение: <span class="p-tool">{{ perm.tool }}</span></div>
+        <pre v-if="permPreview" class="p-in">{{ permPreview }}</pre>
+        <label class="p-rem">
+          <input v-model="permRemember" type="checkbox" />
+          Разрешать «{{ perm.tool }}» до конца сессии (не навсегда)
+        </label>
+        <div class="p-act">
+          <button class="p-ok" @click="chat.answerPerm(true, permRemember)">Разрешить</button>
+          <button class="p-no" @click="chat.answerPerm(false)">Отклонить</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
-      <div class="col composer">
-        <textarea v-model="input" rows="2" placeholder="Сообщение агенту…" @keydown="onKey"></textarea>
-        <button class="send" :disabled="sess.sending || !input.trim()" title="Отправить (Ctrl+Enter)" @click="submit">↑</button>
+      <div class="col">
+        <!-- Чипы ещё не отправленных вложений -->
+        <div v-if="pending.length || attachBusy" class="pend">
+          <div v-for="(a, i) in pending" :key="a.file" class="chip">
+            <img v-if="isImg(a)" :src="api.url(a.url)" alt="" />
+            <span class="nm">{{ a.name }}</span>
+            <button class="x" title="Убрать" @click="removePending(i)">×</button>
+          </div>
+          <span v-if="attachBusy" class="muted"><span class="spin"></span></span>
+        </div>
+        <!-- Меню слэш-команд над композером -->
+        <div v-if="cmdMatches.length" class="cmd-menu">
+          <button v-for="(c, i) in cmdMatches" :key="c.cmd" class="cmd" :class="{ on: i === cmdIndex }"
+                  @mouseenter="cmdIndex = i" @click="runCommand(c.cmd)">
+            <span class="c-cmd">{{ c.cmd }}</span>
+            <span class="c-desc">{{ c.desc }}</span>
+          </button>
+        </div>
+        <div class="composer">
+          <button class="tool" title="Приложить файл (или перетащи/вставь из буфера)" @click="fileInput.click()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+          <input ref="fileInput" type="file" multiple hidden @change="onPick" />
+          <textarea v-model="input" rows="2"
+                    :placeholder="recording ? 'Говори… (клик по микрофону — стоп)' : 'Сообщение агенту…'"
+                    @keydown="onKey" @paste="onPaste"></textarea>
+          <HelpTip align="right" :text="recording ? 'Остановить запись · Ctrl+D' : transcribing ? 'Расшифровываю запись…' : 'Надиктовать голосом · Ctrl+D'">
+          <button class="tool mic" :class="{ rec: recording, wait: transcribing }" :disabled="transcribing"
+                  @click="toggleMic">
+            <!-- Расшифровка: крутящийся спиннер -->
+            <svg v-if="transcribing" class="spin-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+              <path d="M21 12a9 9 0 1 1-6.2-8.56" />
+            </svg>
+            <!-- Запись: квадрат-стоп -->
+            <svg v-else-if="recording" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
+            </svg>
+            <!-- Покой: микрофон -->
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" x2="12" y1="19" y2="22" />
+            </svg>
+          </button>
+          </HelpTip>
+          <button class="send" :disabled="sess.sending || (!input.trim() && !pending.length)" title="Отправить (Ctrl+Enter)" @click="submit">↑</button>
+        </div>
+        <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
     </div>
   </div>
@@ -152,11 +463,22 @@ async function toConveyor() {
 
 .col { width: 100%; min-width: 0; }
 
-.cs-top { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.cs-top { padding: 12px 22px; border-bottom: 1px solid var(--line); }
 .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .sel { position: relative; }
 .sel.task { flex: 0 1 420px; min-width: 160px; }
+/* Селект модели сжимаемый: в узкой плавающей панели ряд «модель + эффорт + кольцо»
+   должен оставаться одним рядом, а не разъезжаться на три */
+.sel.model { flex: 0 1 140px; min-width: 84px; }
+/* Плавающая панель: контролы всегда в два ряда. Распорку убираем — при переносе
+   она вставала В НАЧАЛО второго ряда и сдвигала селект модели вправо (кривой отступ);
+   вместо неё ряд заполняет растянутый селект модели. */
+.panel .spacer { display: none; }
+.panel .sel.task { flex: 1 1 100%; }
+/* basis 0 (не auto!): естественная ширина селекта — по самой длинной опции,
+   с ней эффорт и кольцо выдавливаются на третий ряд */
+.panel .sel.model { flex: 1 1 0; min-width: 84px; }
 .sel::after { content: ''; position: absolute; right: 9px; top: 50%; width: 7px; height: 7px; pointer-events: none;
   border-right: 1.6px solid var(--ink-mid); border-bottom: 1.6px solid var(--ink-mid); transform: translateY(-70%) rotate(45deg); }
 .sel select { width: 100%; height: 34px; -webkit-appearance: none; appearance: none; background: var(--ground); border: 1px solid var(--line);
@@ -173,7 +495,9 @@ async function toConveyor() {
 .ctx-ring:not(:disabled):hover { border-color: var(--line-2); }
 .ctx-ring:disabled { cursor: default; opacity: .7; }
 
-.cs-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; }
+/* Правый паддинг меньше на ширину скроллбара (11px, styles.css): контент
+   заканчивается на тех же 22px, что и композер/шапка */
+.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 11px 20px 22px; display: flex; }
 .flow { display: flex; flex-direction: column; gap: 14px; }
 
 /* Пустое состояние — по центру, а не подсказка в углу */
@@ -181,8 +505,20 @@ async function toConveyor() {
 .e-title { font-size: 17px; font-weight: 600; }
 .e-sub { font-size: 13px; line-height: 1.6; margin-top: 8px; }
 
-.msg { display: flex; flex-direction: column; gap: 4px; }
-.msg .text { font-size: 13.5px; white-space: pre-wrap; line-height: 1.55; }
+.msg { display: flex; flex-direction: column; gap: 4px; position: relative; }
+/* Копировать — при наведении, у правого края сообщения (без резервного желоба:
+   он давал пустой отступ справа и горизонтальный скролл в узкой панели) */
+.copy { position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+  width: 26px; height: 26px; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; color: var(--ink-mid);
+  cursor: pointer; opacity: 0; transition: opacity .15s; padding: 0; }
+/* У твоего пузыря (прижат к правому краю) иконка ложится на его край с небольшим заступом */
+.msg.user .copy { right: 6px; }
+.copy svg { width: 13px; height: 13px; }
+.msg:hover .copy { opacity: 1; }
+.copy:hover { color: var(--ink); border-color: var(--line-2); }
+.copy.done { opacity: 1; color: var(--good); }
+.msg .text { font-size: 13.5px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; min-width: 0; }
 .page .msg .text { font-size: 14.5px; }
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
 .msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
@@ -195,14 +531,74 @@ async function toConveyor() {
   color: var(--bad); padding: 8px 12px; border-radius: 10px; font-size: 12.5px; }
 .msg.error .text::before { content: '⚠ '; }
 
-.cs-act { padding: 8px 16px; border-top: 1px solid var(--line); }
+/* Всплывашка разрешения */
+.perm { padding: 12px 22px; border-top: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn, #e0a33a) 7%, transparent); }
+.p-t { font-size: 13px; }
+.p-tool { font-family: var(--mono, monospace); color: var(--warn, #e0a33a); }
+.p-in { margin: 8px 0 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 11px; line-height: 1.45; color: var(--ink-mid); white-space: pre-wrap; word-break: break-all;
+  max-height: 84px; overflow-y: auto; }
+.p-rem { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 12px; color: var(--ink-mid); cursor: pointer; }
+.p-rem input { accent-color: var(--accent); }
+.p-act { display: flex; gap: 8px; margin-top: 10px; }
+.p-ok, .p-no { border: none; border-radius: 8px; padding: 7px 14px; font-size: 12.5px; cursor: pointer; }
+.p-ok { background: var(--good); color: #fff; }
+.p-no { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
+
+.cs-act { padding: 8px 22px; border-top: 1px solid var(--line); }
 .act-row { display: flex; align-items: center; gap: 10px; }
 .act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
 .act.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .lm { font-size: 12px; }
 
-.cs-input { padding: 12px 16px 14px; border-top: 1px solid var(--line); }
-.composer { display: flex; gap: 8px; align-items: flex-end; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 8px 8px 8px 12px; }
+/* Вложения в сообщениях: превью-картинки, клик — оригинал */
+.m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
+.msg.user .m-atts { justify-content: flex-end; }
+.m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
+.m-atts a { text-decoration: none; }
+
+.cs-input { padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+/* Чипы вложений до отправки */
+.pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
+.chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
+.chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .x { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 14px; padding: 0 2px; }
+.chip .x:hover { color: var(--bad); }
+/* Кнопки-инструменты композера (скрепка / микрофон) */
+.tool { flex: none; width: 36px; height: 36px; background: transparent; border: none; border-radius: 10px; cursor: pointer;
+  color: var(--ink-mid); display: grid; place-items: center; }
+.tool svg { width: 18px; height: 18px; }
+.tool:hover { background: var(--surface-2); color: var(--ink); }
+.tool.mic.rec { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); animation: mic-pulse 1.2s ease-in-out infinite; }
+.tool.mic.wait { cursor: default; color: var(--accent); opacity: 1; }
+@keyframes mic-pulse { 50% { background: color-mix(in srgb, var(--bad) 38%, transparent); } }
+.spin-ico { animation: ico-rotate .9s linear infinite; }
+@keyframes ico-rotate { to { transform: rotate(360deg); } }
+.in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
+
+/* Меню слэш-команд: якорится над композером */
+.cs-input .col { position: relative; }
+.cmd-menu { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 6;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.cmd { display: flex; align-items: baseline; gap: 12px; width: 100%; padding: 9px 14px; background: transparent;
+  border: none; cursor: pointer; text-align: left; }
+.cmd + .cmd { border-top: 1px solid var(--line); }
+.cmd.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.c-cmd { font-family: var(--mono, monospace); font-size: 13px; color: var(--accent); flex: none; }
+.c-desc { font-size: 12.5px; color: var(--ink-mid); }
+
+/* Оверлей drag&drop поверх всего чата */
+.cs { position: relative; }
+.drop-overlay { position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--ground) 65%, transparent);
+  display: grid; place-items: center; pointer-events: none; }
+.drop-box { border: 2px dashed var(--accent); border-radius: 14px; padding: 18px 28px; font-size: 14px;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.composer { display: flex; gap: 6px; align-items: flex-end; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
 .composer:focus-within { border-color: var(--line-2); }
 .cs-input textarea { flex: 1; resize: none; background: transparent; border: none; outline: none; color: var(--ink);
   padding: 6px 0; font-family: inherit; font-size: 14px; line-height: 1.45; }
