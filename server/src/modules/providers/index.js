@@ -61,8 +61,9 @@ async function providersModule(fastify, opts) {
         fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
       }
     }
-    usageCache = { at: Date.now(), usage };
-    return { usage };
+    // Сетевой сбой не затирает прошлые данные: лучше слегка устаревшие бары, чем пустые.
+    usageCache = { at: Date.now(), usage: Object.keys(usage).length ? usage : (usageCache?.usage || {}) };
+    return { usage: usageCache.usage };
   });
 
   fastify.get('/api/providers', async (request) => {

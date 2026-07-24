@@ -66,33 +66,54 @@ export default {
       tok = creds?.claudeAiOauth?.accessToken || null;
     } catch { /* CLI-кредов нет */ }
     if (!tok) return null;
-    const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: {
-        Authorization: `Bearer ${tok}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-        'anthropic-version': '2023-06-01',
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!r.ok) return null;
+    // Сеть до api.anthropic.com бывает нестабильна (VPN) — пробуем дважды.
+    let r = null;
+    for (let i = 0; i < 2 && !r?.ok; i++) {
+      r = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          Authorization: `Bearer ${tok}`,
+          'anthropic-beta': 'oauth-2025-04-20',
+          'anthropic-version': '2023-06-01',
+        },
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => null);
+    }
+    if (!r?.ok) return null;
     const d = await r.json();
-    const LABELS = {
-      five_hour: 'Сессия (5ч)',
-      seven_day: 'Неделя (7д)',
-      seven_day_opus: 'Неделя · Opus',
-      seven_day_sonnet: 'Неделя · Sonnet',
-      seven_day_fable: 'Неделя · Fable',
-      seven_day_oauth_apps: 'Неделя · приложения',
-    };
+    const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
     const bars = [];
-    for (const [k, v] of Object.entries(d || {})) {
-      if (!v || typeof v !== 'object' || typeof v.utilization !== 'number') continue;
+    // Каноничный источник — массив limits (из него строится и официальная панель /usage):
+    // session, weekly_all и weekly_scoped с именем модели (например «Fable»).
+    const KIND = { session: 'Сессия (5ч)', weekly_all: 'Неделя (7д)' };
+    for (const l of d.limits || []) {
+      if (typeof l.percent !== 'number') continue;
+      let label = KIND[l.kind] || l.kind.replace(/_/g, ' ');
+      if (l.kind === 'weekly_scoped') label = `Неделя · ${l.scope?.model?.display_name || l.scope?.surface || '?'}`;
       bars.push({
-        key: k,
-        label: LABELS[k] || k.replace(/_/g, ' '),
-        pct: Math.max(0, Math.min(100, Math.round(v.utilization))),
-        resetsAt: v.resets_at || null,
+        key: l.kind + (l.scope?.model?.display_name || ''),
+        label,
+        pct: clamp(l.percent),
+        resetsAt: l.resets_at || null,
       });
+    }
+    // Extra usage (доплата сверх лимитов) — отдельной строкой с потраченным бюджетом.
+    const x = d.extra_usage;
+    if (x?.is_enabled && typeof x.utilization === 'number') {
+      const dp = 10 ** (x.decimal_places ?? 2);
+      bars.push({
+        key: 'extra_usage',
+        label: 'Extra usage (доплата)',
+        pct: clamp(x.utilization),
+        resetsAt: null,
+        note: `${Math.round(x.used_credits / dp)} из ${Math.round(x.monthly_limit / dp)} ${x.currency || ''}`,
+      });
+    }
+    // Фоллбэк на старую плоскую форму, если limits в ответе нет.
+    if (!bars.length) {
+      for (const [k, v] of Object.entries(d || {})) {
+        if (!v || typeof v !== 'object' || typeof v.utilization !== 'number') continue;
+        bars.push({ key: k, label: k.replace(/_/g, ' '), pct: clamp(v.utilization), resetsAt: v.resets_at || null });
+      }
     }
     return bars.length ? bars : null;
   },
