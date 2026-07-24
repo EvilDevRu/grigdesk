@@ -1,12 +1,12 @@
 <script setup>
-import { useRouter } from 'vue-router';
+import { useDiffStore } from '../stores/diff.js';
 
-// Кнопка задачи: открыть диф (несохранённые изменения воркдира — их смотрят на приёмке).
+// Кнопка задачи: открыть диф (несохранённые изменения воркдира) в большом модале.
 const props = defineProps({
   taskId: { type: [String, Number], required: true },
 });
-const router = useRouter();
-function openDiff() { router.push({ name: 'diff', query: { task: String(props.taskId) } }); }
+const diff = useDiffStore();
+function openDiff() { diff.openFor(props.taskId); }
 </script>
 
 <template>

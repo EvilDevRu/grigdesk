@@ -3,6 +3,7 @@ import { onMounted } from 'vue';
 import AppShell from './shared/layout/AppShell.vue';
 import TaskModal from './views/TaskModal.vue';
 import ChatPanel from './views/ChatPanel.vue';
+import DiffModal from './views/DiffModal.vue';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 
@@ -22,4 +23,5 @@ onMounted(() => {
   </AppShell>
   <TaskModal />
   <ChatPanel />
+  <DiffModal />
 </template>
