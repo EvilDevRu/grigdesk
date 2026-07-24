@@ -46,14 +46,9 @@ function onTrack(e) {
 .node.cur { width: 14px; height: 14px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; min-width: 46px; }
 
-/* Семантика уровней (как в остальном UI): выше усилие — «горячее». */
+/* Уровни не красим в warn/bad — это цвета ошибок, настройка не должна «тревожить».
+   Всё в акценте, только low приглушён. */
 .eff[data-lvl="low"] .fill, .eff[data-lvl="low"] .node.on { background: var(--ink-mid); }
 .eff[data-lvl="low"] .node.cur { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-mid) 22%, transparent); }
 .eff[data-lvl="low"] .val { color: var(--ink-mid); }
-.eff[data-lvl="high"] .fill, .eff[data-lvl="high"] .node.on { background: var(--warn); }
-.eff[data-lvl="high"] .node.cur { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent); }
-.eff[data-lvl="high"] .val { color: var(--warn); }
-.eff[data-lvl="max"] .fill, .eff[data-lvl="max"] .node.on { background: var(--bad); }
-.eff[data-lvl="max"] .node.cur { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
-.eff[data-lvl="max"] .val { color: var(--bad); }
 </style>
