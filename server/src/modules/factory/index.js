@@ -6,12 +6,14 @@ import { execFile } from 'node:child_process';
 import { STAGES, StageKind } from '../../lib/stages.js';
 import { setPipeline, writeInstruction, readInstruction, readActivity } from '../../lib/factory-cli.js';
 import { taskDiff } from '../../lib/git.js';
+import { refreshRepos } from '../../lib/git-refresh.js';
+import { loadTriageProfile } from '../../lib/analysis/profile.js';
 
 // Допустимые статусы для ручного перехода (форс).
 const STAGE_STATUSES = new Set(['pending', 'running', 'done', 'waiting', 'skipped', 'failed', 'approved', 'rejected']);
 
 async function factoryModule(fastify, opts) {
-  const { factoryState, config } = opts;
+  const { factoryState, config, prefs } = opts;
 
   // Список всех задач с картой статусов этапов.
   fastify.get('/api/tasks', async () => {
@@ -81,6 +83,19 @@ async function factoryModule(fastify, opts) {
     try { reg = (await factoryState.readRegistry(id)).registry; } catch { /* реестра ещё нет */ }
     if (reg && factoryState.isDaemonAlive(reg.ORCH_PID, id)) return { outcome: 'already_running', profile };
 
+    // Правило кокпита: конвейер стартует со свежего кода (worktree задачи форкается
+    // от локального master). Безопасно: ff-only и только чистый master; сбой
+    // обновления запуск не блокирует — фиксируется в ответе.
+    let gitRefresh = null;
+    if (prefs?.read().gitRefreshBeforeRun) {
+      try {
+        const triageProfile = await loadTriageProfile(config.factoryHome, profile);
+        gitRefresh = await refreshRepos(triageProfile.repos);
+        fastify.log.info({ task: id, gitRefresh }, 'репозитории обновлены перед конвейером');
+      } catch (e) {
+        fastify.log.warn({ task: id, err: e.message }, 'обновление репозиториев перед конвейером не удалось');
+      }
+    }
     const args = [id, 'start', '--profile', profile];
     if (ticket) args.push('--ticket', String(ticket).slice(0, 4000));
     if (route) args.push('--route', route);
@@ -92,10 +107,10 @@ async function factoryModule(fastify, opts) {
       await new Promise((r) => { setTimeout(r, 250); });
       try {
         const r2 = (await factoryState.readRegistry(id)).registry;
-        if (factoryState.isDaemonAlive(r2.ORCH_PID, id)) return { outcome: 'launched', profile };
+        if (factoryState.isDaemonAlive(r2.ORCH_PID, id)) return { outcome: 'launched', profile, gitRefresh };
       } catch { /* реестр ещё пишется */ }
     }
-    return { outcome: 'started', profile, note: 'демон не подтвердил PID за 10с — проверь конвейер' };
+    return { outcome: 'started', profile, gitRefresh, note: 'демон не подтвердил PID за 10с — проверь конвейер' };
   });
 
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };

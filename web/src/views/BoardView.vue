@@ -4,7 +4,9 @@ import { storeToRefs } from 'pinia';
 import { hoursToHM, secToHMS, signed } from '../shared/format.js';
 import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
+import { useAnalysisStore } from '../stores/analysis.js';
 import MiniChart from './board/MiniChart.vue';
+import TriageBadge from './board/TriageBadge.vue';
 
 const ui = useUiStore();
 
@@ -59,14 +61,67 @@ const activeTask = computed(() => {
 });
 // Поиск по «Моим задачам» (88 штук — без фильтра неудобно).
 const q = ref('');
+
+// Триаж: бейджи оценок + сортировка/фильтры по ним. Выбор запоминается.
+const analysis = useAnalysisStore();
+const TRIAGE_LS = 'board.triage';
+const saved = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
+const sortBy = ref(saved.sortBy || 'b24');   // b24 | risk | complexity | size | fresh
+const onlyUnrated = ref(!!saved.onlyUnrated);
+const onlyNeedsInfo = ref(!!saved.onlyNeedsInfo);
+watch([sortBy, onlyUnrated, onlyNeedsInfo], () => {
+  localStorage.setItem(TRIAGE_LS, JSON.stringify({
+    sortBy: sortBy.value, onlyUnrated: onlyUnrated.value, onlyNeedsInfo: onlyNeedsInfo.value,
+  }));
+});
+const SIZE_ORD = { S: 1, M: 2, L: 3, XL: 4 };
+const triageOf = (t) => analysis.byTask[t.id] || null;
+// Метрика сортировки; неоценённые — в конец списка.
+function metric(t) {
+  const a = triageOf(t)?.analysis;
+  if (!a) return -1;
+  switch (sortBy.value) {
+    case 'risk': return a.risk || 0;
+    case 'complexity': return a.complexity || 0;
+    case 'size': return SIZE_ORD[a.diff_size] || 0;
+    case 'fresh': return Date.parse(a.generated_at || 0) || 0;
+    default: return 0;
+  }
+}
+// Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
+const unrated = computed(() => (data.value?.tasks || []).filter((t) => {
+  const r = triageOf(t);
+  return !r?.analysis && !['queued', 'running'].includes(r?.status?.state);
+}));
+async function analyzeAllUnrated() {
+  const list = unrated.value;
+  if (!list.length) return;
+  if (!confirm(`Поставить в очередь триажа ${list.length} задач(и)? Оценки идут последовательно, по несколько минут на задачу.`)) return;
+  for (const t of list) {
+    try { await analysis.analyze(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
+  }
+}
+
 const myTasks = computed(() => {
-  const list = data.value?.tasks || [];
+  let list = data.value?.tasks || [];
   const s = q.value.trim().toLowerCase();
-  if (!s) return list;
-  // Ищем по номеру задачи, названию и группе.
-  return list.filter((t) => String(t.id).includes(s)
-    || (t.title || '').toLowerCase().includes(s)
-    || (t.group || '').toLowerCase().includes(s));
+  if (s) {
+    // Ищем по номеру задачи, названию и группе.
+    list = list.filter((t) => String(t.id).includes(s)
+      || (t.title || '').toLowerCase().includes(s)
+      || (t.group || '').toLowerCase().includes(s));
+  }
+  if (onlyUnrated.value) list = list.filter((t) => !triageOf(t)?.analysis);
+  if (onlyNeedsInfo.value) {
+    list = list.filter((t) => {
+      const a = triageOf(t)?.analysis;
+      return a && (a.needs_clarification || a.confidence === 'low');
+    });
+  }
+  if (sortBy.value !== 'b24') {
+    list = [...list].sort((a, b) => metric(b) - metric(a));
+  }
+  return list;
 });
 // Пагинация по скроллу: рисуем первые N, при докрутке до низа добавляем ещё.
 const PAGE = 40;
@@ -82,7 +137,7 @@ function onTasksScroll(e) {
 const chart = computed(() => data.value?.charts?.[period.value] || null);
 
 let ticker = null;
-onMounted(() => { board.load(); ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
+onMounted(() => { board.load(); analysis.startPolling(); ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
 onUnmounted(() => { if (ticker) clearInterval(ticker); });
 </script>
 
@@ -135,6 +190,21 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
         <section class="col primary">
           <div class="colhead">
             <h3 class="h big">Мои задачи <span class="cnt">{{ myTasks.length }}</span></h3>
+            <div class="tritools">
+              <select v-model="sortBy" class="trisort" title="Сортировка по оценкам триажа">
+                <option value="b24">порядок B24</option>
+                <option value="risk">по риску</option>
+                <option value="complexity">по сложности</option>
+                <option value="size">по размеру</option>
+                <option value="fresh">по свежести оценки</option>
+              </select>
+              <button class="trif" :class="{ on: onlyUnrated }" title="Только неоценённые" @click="onlyUnrated = !onlyUnrated; if (onlyUnrated) onlyNeedsInfo = false;">без оценки</button>
+              <button class="trif" :class="{ on: onlyNeedsInfo }" title="Триаж просит уточнений" @click="onlyNeedsInfo = !onlyNeedsInfo; if (onlyNeedsInfo) onlyUnrated = false;">уточнить</button>
+              <button v-if="unrated.length" class="trif trif-ic" title="Оценить все неоценённые (очередь)" @click="analyzeAllUnrated">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+                {{ unrated.length }}
+              </button>
+            </div>
             <div class="search">
               <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
               <input v-model="q" placeholder="Поиск по задачам…" />
@@ -145,6 +215,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
             <li v-for="t in visibleTasks" :key="t.id" class="trow">
               <span class="tstat" :style="{ background: statusColor(t.statusKind) }" :title="t.statusLabel"></span>
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
+              <TriageBadge :row="triageOf(t)" />
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
               <span class="ttime mono muted">{{ secToHMS(liveElapsed(t)) }}</span>
             </li>
@@ -247,7 +318,22 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .h { font-size: 13px; font-weight: 640; margin: 6px 0 2px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); }
 .h.big { font-size: 14px; color: var(--ink); }
 .cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
-.search { display: flex; align-items: center; gap: 8px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; flex: 1; max-width: 340px; }
+/* Тулбар триажа: все контролы одной высоты с поиском (36px) */
+.tritools { display: flex; align-items: center; gap: 6px; flex: none; }
+.trisort {
+  height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px;
+  color: var(--ink-mid); font-size: 12px; padding: 0 8px; outline: none; cursor: pointer;
+}
+.trisort:focus, .trisort:hover { border-color: var(--accent); color: var(--ink); }
+.trif {
+  height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px;
+  color: var(--ink-mid); font-size: 12px; padding: 0 11px; cursor: pointer;
+}
+.trif:hover { color: var(--ink); }
+.trif.on { border-color: var(--accent); color: var(--accent); }
+.trif-ic { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.trif-ic svg { width: 13px; height: 13px; }
+.search { display: flex; align-items: center; gap: 8px; height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 0 11px; flex: 1; max-width: 340px; }
 .search:focus-within { border-color: var(--accent); }
 .search .si { width: 15px; height: 15px; color: var(--ink-mid); flex: none; }
 .search input { background: none; border: none; color: var(--ink); font-size: 14px; flex: 1; min-width: 0; outline: none; }

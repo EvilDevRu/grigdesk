@@ -93,6 +93,9 @@ export class B24Adapter {
   /** Детали одной задачи. */
   async taskDetail(taskId) { return this._run(() => this.client().taskDetails(taskId)); }
 
+  /** Вложения + комментарии со страницы задачи (getTaskDetails их не отдаёт). */
+  async taskPageData(taskId) { return this._run(() => this.client().taskPageData(taskId)); }
+
   // --- Действия (мутации). Все — через очередь (общая сессия). ---
 
   async createTask(opts) { return this._run(() => this.client().createTask(opts)); }
