@@ -114,7 +114,8 @@ export default {
       let resultEv = null;
       let spentTokens = 0;
       let buf = '';
-      const child = execFile(config.claudeBin, args, { cwd, env, timeout: 300000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const timeoutMs = config.chatTimeoutMs || 3600000;
+      const child = execFile(config.claudeBin, args, { cwd, env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
         // Подстраховка: финальная строка могла остаться в буфере без \n.
         if (!resultEv) {
           for (const line of (buf + '\n' + (stdout || '')).split('\n')) {
@@ -124,7 +125,7 @@ export default {
           }
         }
         if (!resultEv) {
-          if (err?.killed) return reject(new Error('Агент не уложился в 5 минут — скорее всего, ждал разрешения во всплывашке. Ответь на неё быстрее или переформулируй без действий.'));
+          if (err?.killed) return reject(new Error(`Агент не уложился в лимит ${Math.round(timeoutMs / 60000)} мин — возможно, ждал разрешения во всплывашке или задача слишком большая.`));
           const tail = (stderr || '').trim().slice(-600);
           return reject(new Error(tail || `claude завершился без результата (код ${err?.code ?? '?'})`));
         }

@@ -96,7 +96,37 @@ async function chatModule(fastify, opts) {
     return { ok: true };
   });
 
-  async function runChat(reply, { id, message, model, effort, sessionId, context, attachments, chatKey }) {
+  // ── Недоставленные ответы: клиент умер (F5/закрытие вкладки), пока агент работал ──
+  // Ответ пишем в chats/pending/<id>.json; фронт при загрузке подбирает их
+  // (GET /api/chat/pending), раскладывает по чатам и подтверждает (DELETE).
+  const pendingDir = path.join(config.chatsDir, 'pending');
+
+  async function writeOrphan(entry) {
+    await fs.mkdir(pendingDir, { recursive: true });
+    const p = path.join(pendingDir, `${entry.id}.json`);
+    await fs.writeFile(p + '.tmp', JSON.stringify(entry));
+    await fs.rename(p + '.tmp', p);
+  }
+
+  fastify.get('/api/chat/pending', async () => {
+    const pending = [];
+    let files = [];
+    try { files = await fs.readdir(pendingDir); } catch { return { pending }; }
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      try { pending.push(JSON.parse(await fs.readFile(path.join(pendingDir, f), 'utf8'))); }
+      catch { /* битый файл — подберём/удалят руками */ }
+    }
+    return { pending };
+  });
+
+  fastify.delete('/api/chat/pending/:id', async (request) => {
+    const id = String(request.params.id).replace(/[^\w.-]/g, '');
+    if (id) await fs.rm(path.join(pendingDir, `${id}.json`), { force: true });
+    return { ok: true };
+  });
+
+  async function runChat(reply, request, { id, message, model, effort, sessionId, context, attachments, chatKey }) {
     let cwd = config.factoryHome;
     const extraDirs = [];
     if (id) {
@@ -156,8 +186,20 @@ async function chatModule(fastify, opts) {
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
         onProgress: chatKey ? (tokens) => fastify.sse.broadcast('chat-progress', { chatKey, tokens }) : undefined,
       });
+      // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
+      if (request.socket.destroyed && chatKey) {
+        await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+          chatKey, role: 'assistant', ...out, model: model || null, at: Date.now() });
+        fastify.sse.broadcast('chat-orphan', { chatKey });
+        return reply;
+      }
       return { ...out, model: model || null };
     } catch (err) {
+      if (request.socket.destroyed && chatKey) {
+        await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+          chatKey, role: 'error', reply: err.message, at: Date.now() });
+        return reply;
+      }
       return reply.code(500).send({ error: 'chat_failed', message: err.message });
     }
   }
@@ -230,14 +272,14 @@ async function chatModule(fastify, opts) {
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     const { message, model, effort, sessionId, context, attachments, chatKey } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, { id, message, model, effort, sessionId, context, attachments, chatKey });
+    return runChat(reply, request, { id, message, model, effort, sessionId, context, attachments, chatKey });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
     const { message, model, effort, sessionId, context, attachments, chatKey } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, { id: null, message, model, effort, sessionId, context, attachments, chatKey });
+    return runChat(reply, request, { id: null, message, model, effort, sessionId, context, attachments, chatKey });
   });
 
   // ── Хранилище истории чатов: папка chats/ в корне проекта ──

@@ -74,7 +74,7 @@ export default {
     args.push(message);
 
     return new Promise((resolve, reject) => {
-      const child = execFile(config.codexBin, args, { cwd, timeout: 300000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const child = execFile(config.codexBin, args, { cwd, timeout: config.chatTimeoutMs || 3600000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err && err.code === 'ENOENT') {
           return reject(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
         }

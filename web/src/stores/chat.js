@@ -7,6 +7,7 @@ import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
+import { notify } from '../shared/notify.js';
 
 const EFFORTS = ['low', 'medium', 'high', 'max'];
 // Оценочное окно контекста модели — для индикатора заполнения.
@@ -93,9 +94,30 @@ export const useChatStore = defineStore('chat', {
           Object.assign(this, pickStore(j));
           this.loaded = true;
           if (j) this._persist();
+          // Ответы, доехавшие пока страница была закрыта/перезагружалась.
+          await this._collectPending();
         })();
       }
       await loadPromise;
+    },
+    // Недоставленные ответы (chats/pending на сервере): раскладываем по чатам,
+    // dedup по pid в сообщении, подтверждаем удалением.
+    async _collectPending() {
+      let j = null;
+      try { j = await api.get('/api/chat/pending'); } catch { return; }
+      if (!j?.pending?.length) return;
+      for (const p of j.pending) {
+        const s = this._get(p.chatKey) || this.archived.find((x) => x.id === p.chatKey);
+        if (s && !(s.messages || []).some((m) => m.pid === p.id)) {
+          s.messages.push({ role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id });
+          if (p.sessionId) s.sessionId = p.sessionId;
+          if (typeof p.contextTokens === 'number' && p.contextTokens > 0) s.contextTokens = p.contextTokens;
+          s.sending = false;
+          s.updatedAt = p.at || Date.now();
+        }
+        api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
+      }
+      this._persist();
     },
     // Сохранение на сервер с дебаунсом — вызовы дискретные, но склеиваем всплески.
     _persist() {
@@ -147,6 +169,8 @@ export const useChatStore = defineStore('chat', {
           if (this.permReq?.pid === d.pid) this.permReq = null;
         } catch { /* битое событие */ }
       });
+      // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
+      permEs.addEventListener('chat-orphan', () => { this._collectPending(); });
       // Живой прогресс «думает… · N ток.»
       permEs.addEventListener('chat-progress', (e) => {
         try {
@@ -283,6 +307,12 @@ export const useChatStore = defineStore('chat', {
         s.sessionId = r.sessionId;
         if (typeof r.contextTokens === 'number' && r.contextTokens > 0) s.contextTokens = r.contextTokens;
         s.messages.push({ role: 'assistant', text: r.reply || '(пусто)', cost: r.cost });
+        // Оповещение, если пользователь не смотрит на этот чат (другая вкладка ОС,
+        // другой раздел с закрытой панелью или другой активный чат).
+        const chatVisible = !document.hidden
+          && (router.currentRoute.value.path === '/chats' || this.open)
+          && this.activeId === id;
+        if (!chatVisible) notify(`Агент ответил — ${this.tabLabel(s)}`, (r.reply || '').slice(0, 120), `chat-${id}`);
       } catch (e) {
         s.error = e.message;
         s.messages.push({ role: 'error', text: e.message });

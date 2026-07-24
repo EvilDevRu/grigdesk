@@ -24,6 +24,9 @@ export const config = {
   codexBin: process.env.COCKPIT_CODEX_BIN || 'codex',
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
   modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
+  // Лимит одного хода агента в чате. Задачи бывают долгими (разбор видео и т.п.) —
+  // по умолчанию час; всплывашка разрешений живёт своим таймаутом (4 мин).
+  chatTimeoutMs: Number(process.env.COCKPIT_CHAT_TIMEOUT_MS) || 60 * 60 * 1000,
   // Автообнаружение новых моделей Anthropic ХОСТОВЫМ OAuth-токеном CLI (~/.claude/.credentials.json).
   // Явный опт-ин пользователя: токен предназначен для claude CLI, использовать его для прямых
   // API-запросов без разрешения нельзя. ANTHROPIC_API_KEY в окружении работает и без флага.

@@ -355,17 +355,19 @@ async function toConveyor() {
               <span v-else class="m-file">📄 {{ a.name }}</span>
             </a>
           </div>
-          <div v-if="m.text" class="text">{{ m.text }}</div>
-          <button v-if="m.text" class="copy" :class="{ done: copiedIdx === i }"
-                  :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
-            <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          </button>
+          <div v-if="m.text" class="mrow">
+            <div class="text">{{ m.text }}</div>
+            <button class="copy" :class="{ done: copiedIdx === i }"
+                    :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
+              <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div v-if="sess.sending" class="msg assistant">
           <div class="text muted">
@@ -495,28 +497,30 @@ async function toConveyor() {
 .ctx-ring:not(:disabled):hover { border-color: var(--line-2); }
 .ctx-ring:disabled { cursor: default; opacity: .7; }
 
-/* Правый паддинг меньше на ширину скроллбара (11px, styles.css): контент
-   заканчивается на тех же 22px, что и композер/шапка */
-.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 11px 20px 22px; display: flex; }
-.flow { display: flex; flex-direction: column; gap: 14px; }
+/* Воздух сверху/снизу — margin'ом самого скролл-контейнера (не паддингом:
+   нижний паддинг при прокрутке до конца ненадёжен). Правый паддинг меньше
+   на ширину скроллбара (11px, styles.css) — края совпадают с композером. */
+.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 11px 0 22px; margin: 26px 0; }
+/* min-height 100% — пустое состояние центрируется */
+.flow { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
 
 /* Пустое состояние — по центру, а не подсказка в углу */
 .empty { margin: auto; text-align: center; padding: 24px; }
 .e-title { font-size: 17px; font-weight: 600; }
 .e-sub { font-size: 13px; line-height: 1.6; margin-top: 8px; }
 
-.msg { display: flex; flex-direction: column; gap: 4px; position: relative; }
-/* Копировать — при наведении, у правого края сообщения (без резервного желоба:
-   он давал пустой отступ справа и горизонтальный скролл в узкой панели) */
-.copy { position: absolute; top: 50%; right: 0; transform: translateY(-50%);
-  width: 26px; height: 26px; display: grid; place-items: center;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px; color: var(--ink-mid);
-  cursor: pointer; opacity: 0; transition: opacity .15s; padding: 0; }
-/* У твоего пузыря (прижат к правому краю) иконка ложится на его край с небольшим заступом */
-.msg.user .copy { right: 6px; }
-.copy svg { width: 13px; height: 13px; }
+.msg { display: flex; flex-direction: column; gap: 4px; }
+/* Текст + иконка копирования рядом (в потоке, не поверх текста). У пользовательских
+   сообщений порядок обратный — иконка слева от пузыря. */
+.mrow { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.msg.user .mrow { flex-direction: row-reverse; }
+/* Копировать — просто иконка-призрак, появляется при наведении на сообщение */
+.copy { flex: none; background: none; border: none; padding: 2px; margin-bottom: 3px;
+  color: var(--ink-mid); cursor: pointer; opacity: 0; transition: opacity .15s, color .15s;
+  display: grid; place-items: center; }
+.copy svg { width: 14px; height: 14px; }
 .msg:hover .copy { opacity: 1; }
-.copy:hover { color: var(--ink); border-color: var(--line-2); }
+.copy:hover { color: var(--ink); }
 .copy.done { opacity: 1; color: var(--good); }
 .msg .text { font-size: 13.5px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; min-width: 0; }
 .page .msg .text { font-size: 14.5px; }
