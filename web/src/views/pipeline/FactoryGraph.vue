@@ -7,6 +7,7 @@ const props = defineProps({
   graph: { type: Object, required: true },
   loopsOn: { type: Boolean, default: false },
   reference: { type: Boolean, default: false }, // эталонная схема маршрута (без статусов задачи)
+  interactive: { type: Boolean, default: false }, // клики по узлам даже в reference (редактор маршрутов)
 });
 const emit = defineEmits(['node']);
 
@@ -89,8 +90,8 @@ const nodeEls = computed(() => {
     </g>
 
     <!-- узлы -->
-    <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`, { clickable: !reference }]"
-       @click="!reference && emit('node', n)">
+    <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`, { clickable: interactive || !reference }]"
+       @click="(interactive || !reference) && emit('node', n, $event)">
       <polygon v-if="n.points" :points="n.points" />
       <rect v-else :x="n.cx - n.hw" :y="n.cy - n.hh" :width="n.hw * 2" :height="n.hh * 2" :rx="n.rx" />
       <text :x="n.cx" :y="n.cy + 4" text-anchor="middle" class="nlbl">{{ n.label }}<tspan class="mk" :class="`mk-${n.status}`"> {{ n.mark }}</tspan></text>

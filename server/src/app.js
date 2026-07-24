@@ -12,6 +12,7 @@ import { SystemAdapter } from './adapters/system.js';
 import { MediaAdapter } from './adapters/media.js';
 import { CredsStore } from './lib/b24/creds-store.js';
 import { ClaudeAuthStore } from './lib/claude-auth-store.js';
+import { PrefsStore } from './lib/prefs-store.js';
 
 import authPlugin from './plugins/auth.js';
 import ssePlugin from './plugins/sse.js';
@@ -25,6 +26,11 @@ import mediaModule from './modules/media/index.js';
 import chatModule from './modules/chat/index.js';
 import settingsModule from './modules/settings/index.js';
 import terminalModule from './modules/terminal/index.js';
+import agentsModule from './modules/agents/index.js';
+import routesModule from './modules/routes/index.js';
+import providersModule from './modules/providers/index.js';
+import analysisModule from './modules/analysis/index.js';
+import { Analyzer } from './lib/analysis/analyzer.js';
 
 async function build() {
   const fastify = Fastify({
@@ -49,6 +55,8 @@ async function build() {
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
   const system = new SystemAdapter();
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
+  const prefs = new PrefsStore({ prefsPath: config.prefsPath });
+  const analyzer = new Analyzer({ config, claudeAuth, b24, factoryState, prefs, log: fastify.log });
 
   // Плагины платформы.
   await fastify.register(authPlugin, { mutateToken: config.mutateToken });
@@ -56,13 +64,17 @@ async function build() {
 
   // Модули.
   await fastify.register(healthModule, { config, factoryState });
-  await fastify.register(factoryModule, { factoryState, config });
+  await fastify.register(factoryModule, { factoryState, config, prefs });
   await fastify.register(b24Module, { b24 });
   await fastify.register(systemModule, { system });
   await fastify.register(mediaModule, { media });
   await fastify.register(chatModule, { factoryState, config, claudeAuth });
-  await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config });
+  await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config, prefs });
   await fastify.register(terminalModule, { config });
+  await fastify.register(agentsModule, { config });
+  await fastify.register(routesModule, { config });
+  await fastify.register(providersModule, { config, claudeAuth });
+  await fastify.register(analysisModule, { analyzer });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });
