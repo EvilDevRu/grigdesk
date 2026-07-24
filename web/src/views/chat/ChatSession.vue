@@ -122,7 +122,6 @@ async function toConveyor() {
         </div>
         <div v-for="(m, i) in sess.messages" :key="i" class="msg" :class="m.role">
           <div class="text">{{ m.text }}</div>
-          <div v-if="m.role === 'assistant' && m.cost" class="meta muted">${{ m.cost.toFixed(3) }}</div>
         </div>
         <div v-if="sess.sending" class="msg assistant"><div class="text muted"><span class="spin"></span> думает…</div></div>
       </div>
@@ -151,9 +150,7 @@ async function toConveyor() {
 <style scoped>
 .cs { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 
-/* Центральная колонка: на странице контент не растекается на всю ширину */
 .col { width: 100%; min-width: 0; }
-.page .col { max-width: 860px; margin: 0 auto; }
 
 .cs-top { padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -187,9 +184,8 @@ async function toConveyor() {
 .msg { display: flex; flex-direction: column; gap: 4px; }
 .msg .text { font-size: 13.5px; white-space: pre-wrap; line-height: 1.55; }
 .page .msg .text { font-size: 14.5px; }
-.msg .meta { font-size: 11px; }
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
-.msg.user { align-self: flex-end; align-items: flex-end; max-width: 78%; }
+.msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
 .msg.user .text { background: color-mix(in srgb, var(--accent) 18%, transparent); padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
 /* Агент — слева, спокойный текст без коробки */
 .msg.assistant { align-self: stretch; }

@@ -48,6 +48,9 @@ const loading = ref(false);
 const error = ref('');
 const repos = ref([]);
 const sideBySide = ref(localStorage.getItem('cockpit-diff-side') !== '0');
+// Полноэкранная загрузка — только когда данных ещё нет. При рефреше редактор НЕ прячем
+// (иначе размонтируется хост Monaco и редактор гаснет).
+const showLoading = computed(() => loading.value && !repos.value.length);
 
 // Плоский список файлов (для выбора первого).
 const files = computed(() => repos.value.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name, branch: r.branch }))));
@@ -146,9 +149,13 @@ async function load() {
     if (!selected.value) selectedKey.value = files.value[0] ? fkey(files.value[0]) : '';
   } catch (e) { error.value = e.message; repos.value = []; }
   finally { loading.value = false; }
-  // Хост редактора рендерится только после loading=false — показываем файл теперь.
+  // Хост рендерится только после loading=false. Явно показываем только при ПЕРВОМ монтировании;
+  // на рефреше перерисовку делает watch(selected) — иначе двойной showFile дёргает модели
+  // в момент вычисления дифа («no diff result available»).
   await nextTick();
-  if (selected.value) showFile(selected.value);
+  const firstMount = !diffEditor;
+  mountEditor();
+  if (firstMount && selected.value) showFile(selected.value);
 }
 
 onMounted(load);
@@ -158,8 +165,8 @@ onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(
 
 <template>
   <div class="diff-core">
-    <div v-if="loading" class="state"><span class="spin big"></span><p class="muted">Считаю диф…</p></div>
-    <div v-else-if="error" class="state"><p class="bad">{{ error }}</p><button class="act big" @click="load">Повторить</button></div>
+    <div v-if="showLoading" class="state"><span class="spin big"></span><p class="muted">Считаю диф…</p></div>
+    <div v-else-if="error && !repos.length" class="state"><p class="bad">{{ error }}</p><button class="act big" @click="load">Повторить</button></div>
     <div v-else-if="!files.length" class="state">
       <p>Несохранённых изменений нет</p>
       <p class="muted sm">Правки задачи уже закоммичены — смотри их в PR.</p>
@@ -201,7 +208,7 @@ onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(
           <button class="act" :class="{ on: sideBySide }" :title="sideBySide ? 'Рядом' : 'В строку'" @click="sideBySide = !sideBySide">
             {{ sideBySide ? '⇆ рядом' : '≡ в строку' }}
           </button>
-          <button class="act" :disabled="loading" title="Обновить" @click="load">↻</button>
+          <button class="act" :disabled="loading" title="Обновить" @click="load"><span v-if="loading" class="spin"></span><span v-else>↻</span></button>
         </div>
         <div ref="host" class="editor"></div>
       </section>

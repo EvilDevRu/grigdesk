@@ -17,11 +17,12 @@ function load() {
     const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
     return {
       sessions: Array.isArray(j.sessions) ? j.sessions : [],
+      archived: Array.isArray(j.archived) ? j.archived : [],
       activeId: j.activeId || null,
       defModel: j.defModel || 'opus',
       defEffort: j.defEffort || 'high',
     };
-  } catch { return { sessions: [], activeId: null, defModel: 'opus', defEffort: 'high' }; }
+  } catch { return { sessions: [], archived: [], activeId: null, defModel: 'opus', defEffort: 'high' }; }
 }
 
 export const useChatStore = defineStore('chat', {
@@ -31,6 +32,25 @@ export const useChatStore = defineStore('chat', {
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
     isOnConveyor: (s) => (taskId) => !!taskId && s.conveyorIds.includes(String(taskId)),
+    // Поиск по открытым и архивным чатам: совпадение в названии или тексте сообщений.
+    search: (s) => (q) => {
+      const t = q.trim().toLowerCase();
+      if (!t) return [];
+      const hit = (sess, archived) => {
+        const title = sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат');
+        let snippet = title.toLowerCase().includes(t) ? '' : null;
+        const m = (sess.messages || []).find((x) => (x.text || '').toLowerCase().includes(t));
+        if (m) {
+          const i = m.text.toLowerCase().indexOf(t);
+          snippet = (i > 24 ? '…' : '') + m.text.slice(Math.max(0, i - 24), i + 72).replace(/\s+/g, ' ');
+        }
+        return snippet === null ? null : { id: sess.id, title, snippet, archived };
+      };
+      const out = [];
+      s.sessions.forEach((x) => { const h = hit(x, false); if (h) out.push(h); });
+      (s.archived || []).forEach((x) => { const h = hit(x, true); if (h) out.push(h); });
+      return out.slice(0, 20);
+    },
   },
   actions: {
     _persist() {
@@ -39,7 +59,7 @@ export const useChatStore = defineStore('chat', {
         messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
       }));
       localStorage.setItem(LS_KEY, JSON.stringify({
-        sessions: slim, activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort,
+        sessions: slim, archived: this.archived, activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort,
       }));
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
@@ -64,12 +84,31 @@ export const useChatStore = defineStore('chat', {
     closeSession(id) {
       const i = this.sessions.findIndex((s) => s.id === id);
       if (i < 0) return;
-      this.sessions.splice(i, 1);
+      const [s] = this.sessions.splice(i, 1);
+      // Чат с историей не удаляем, а уносим в архив — поиск его найдёт, можно восстановить.
+      if (s.messages?.length) {
+        this.archived.unshift({
+          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
+          messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens, closedAt: Date.now(),
+        });
+        if (this.archived.length > 50) this.archived.length = 50;
+      }
       if (this.activeId === id) this.activeId = this.sessions[Math.max(0, i - 1)]?.id || null;
       if (!this.sessions.length) this.newSession();
       this._persist();
     },
+    // Вернуть чат из архива в открытые вкладки.
+    restoreArchived(id) {
+      const i = this.archived.findIndex((s) => s.id === id);
+      if (i < 0) return;
+      const [a] = this.archived.splice(i, 1);
+      a.sending = false; a.error = null;
+      this.sessions.push(a);
+      this.activeId = a.id;
+      this._persist();
+    },
     setActive(id) { if (this._get(id)) { this.activeId = id; this._persist(); } },
+    setTitle(id, title) { const s = this._get(id); if (!s) return; s.title = title; this._persist(); },
 
     // Плавающая панель.
     toggle() { this.ensure(); this.open = !this.open; },

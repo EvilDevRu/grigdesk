@@ -25,8 +25,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 </template>
 
 <style scoped>
+/* Без backdrop-filter: blur — он даёт мерцание при перерисовке тяжёлого Monaco и во время анимаций. */
 .dm-overlay { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center;
-  background: #000a; backdrop-filter: blur(3px); padding: 3vh 2vw; }
+  background: #000c; padding: 3vh 2vw; }
 .dm-modal { width: min(1500px, 96vw); height: 94vh; display: flex; flex-direction: column; min-height: 0;
   background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 70px #000c; }
 .dm-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -37,8 +38,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 .dm-x:hover { color: var(--ink); border-color: var(--line-2); }
 .dm-panel { flex: 1; min-height: 0; }
 
-.dm-enter-active, .dm-leave-active { transition: opacity .18s ease; }
+/* Только плавность прозрачности overlay — без transform на модале (иначе Monaco релэйаутится в анимации → мерцание). */
+.dm-enter-active, .dm-leave-active { transition: opacity .15s ease; }
 .dm-enter-from, .dm-leave-to { opacity: 0; }
-.dm-enter-active .dm-modal, .dm-leave-active .dm-modal { transition: transform .18s ease; }
-.dm-enter-from .dm-modal, .dm-leave-to .dm-modal { transform: scale(.97); }
 </style>
