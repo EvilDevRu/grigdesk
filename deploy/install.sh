@@ -34,4 +34,18 @@ systemctl --user enable --now "$UNIT"
 echo "✓ Готово. Статус:"
 systemctl --user --no-pager status "$UNIT" | head -n 6 || true
 echo "  Логи:  journalctl --user -u $UNIT -f"
-echo "  URL:   http://localhost:8140  (с планшета — через Tailscale: http://<ip>:8140)"
+echo "  URL:   http://localhost:8140"
+echo
+# Вход в кокпит: пароль НЕ генерируем и в файлы не пишем — его задаёт человек при первом
+# открытии (экран первичной настройки). Пока пароль не задан, весь /api закрыт, а `setup`
+# доступен ровно один раз: как только пароль есть, повторно переустановить его нельзя.
+if [ -f "$COCKPIT_DIR/server/.state/auth-account.json" ]; then
+  echo "  Вход:  пароль уже задан (Настройки → Доступ, чтобы сменить)"
+else
+  echo "  Вход:  открой http://localhost:8140 и задай пароль — до этого API закрыт."
+  echo "         ВАЖНО: сделай это ДО того, как откроешь кокпит из сети: экран первичной"
+  echo "         настройки доступен любому, кто зайдёт первым."
+fi
+echo
+echo "  Доступ из сети: нужен HTTPS, иначе пароль уйдёт открытым текстом."
+echo "                  COCKPIT_TLS_KEY и COCKPIT_TLS_CERT в .env, затем перезапуск."

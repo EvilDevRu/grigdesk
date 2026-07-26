@@ -1,11 +1,14 @@
 // Ядро сервера кокпита. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
+import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 
 import { config } from './config.js';
+import { AuthStore } from './lib/auth-store.js';
 import { FactoryStateAdapter } from './adapters/factory-state.js';
 import { B24Adapter } from './adapters/b24.js';
 import { SystemAdapter } from './adapters/system.js';
@@ -30,11 +33,31 @@ import agentsModule from './modules/agents/index.js';
 import routesModule from './modules/routes/index.js';
 import providersModule from './modules/providers/index.js';
 import analysisModule from './modules/analysis/index.js';
+import authModule from './modules/auth/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 
+/**
+ * Опции TLS, если сертификат задан в конфиге. Читаем синхронно на старте: без сертификата
+ * сервер поднимать нельзя, а падать надо сразу с понятной ошибкой, а не на первом запросе.
+ */
+function tlsOptions() {
+  if (!config.tlsKeyPath || !config.tlsCertPath) return null;
+  try {
+    return { key: readFileSync(config.tlsKeyPath), cert: readFileSync(config.tlsCertPath) };
+  } catch (err) {
+    throw new Error(`Не читается TLS-сертификат (COCKPIT_TLS_KEY / COCKPIT_TLS_CERT): ${err.message}`);
+  }
+}
+
 async function build() {
+  const https = tlsOptions();
   const fastify = Fastify({
     logger: { level: config.isDev ? 'debug' : 'info' },
+    ...(https ? { https } : {}),
+    // trustProxy НЕ включаем: прокси перед кокпитом нет (TLS терминируется здесь же), а с
+    // доверием к X-Forwarded-For клиент сам назначал бы себе `request.ip` — и лимит попыток
+    // входа обходился бы сменой заголовка на каждый запрос. Появится реальный прокси —
+    // включать осознанно и только для его адреса.
   });
 
   // CORS нужен только в dev (vite на другом порту). В проде фронт — тот же origin.
@@ -57,23 +80,33 @@ async function build() {
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
   const prefs = new PrefsStore({ prefsPath: config.prefsPath });
   const analyzer = new Analyzer({ config, claudeAuth, b24, factoryState, prefs, log: fastify.log });
+  const authStore = new AuthStore({
+    accountPath: config.authAccountPath,
+    sessionsPath: config.authSessionsPath,
+  });
 
-  // Плагины платформы.
-  await fastify.register(authPlugin, { mutateToken: config.mutateToken });
+  // Секрет ЭТОГО процесса для внутренних запросов: permission-prompt-tool чата работает
+  // в дочернем процессе claude (cookie у него нет), но обязан достучаться до сервера.
+  // Живёт только в памяти, на диск и в конфиг не попадает, меняется с каждым запуском.
+  const internalToken = randomUUID();
+
+  // Плагины платформы. Гард — первым: он закрывает весь /api, включая upgrade вебсокета.
+  await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, internalToken });
   await fastify.register(ssePlugin, { stateDir: config.stateDir });
 
   // Модули.
+  await fastify.register(authModule, { authStore, tlsEnabled: !!https });
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register(factoryModule, { factoryState, config, prefs });
   await fastify.register(b24Module, { b24 });
   await fastify.register(systemModule, { system });
   await fastify.register(mediaModule, { media });
-  await fastify.register(chatModule, { factoryState, config, claudeAuth });
+  await fastify.register(chatModule, { factoryState, config, claudeAuth, internalToken });
   await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config, prefs });
-  await fastify.register(terminalModule, { config });
+  await fastify.register(terminalModule);
   await fastify.register(agentsModule, { config });
   await fastify.register(routesModule, { config });
-  await fastify.register(providersModule, { config, claudeAuth });
+  await fastify.register(providersModule, { config, claudeAuth, prefs });
   await fastify.register(analysisModule, { analyzer });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).

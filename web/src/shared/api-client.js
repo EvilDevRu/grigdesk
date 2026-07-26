@@ -2,56 +2,70 @@
 // base URL из VITE_BRAIN_URL (пусто = тот же origin — так работает и в проде, где фронт
 // отдаёт сам сервер, и в dev через vite-proxy). Задел «сменный мозг»: адрес — одна настройка.
 const BASE = (import.meta.env.VITE_BRAIN_URL || '').replace(/\/$/, '');
-const TOKEN = import.meta.env.VITE_COCKPIT_TOKEN || '';
 // База для WebSocket (терминал): тот же хост, схема http→ws / https→wss.
 const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : '')).replace(/^http/, 'ws');
+
+// Авторизация — сессионная httpOnly-cookie, её ставит сервер на входе. Никаких секретов
+// в клиентском коде: прежний VITE_COCKPIT_TOKEN попадал в бандл открытым текстом (Vite
+// подставляет env на сборке), то есть был доступен любому, кто открыл страницу.
+// credentials: 'include' — чтобы cookie уходила и при VITE_BRAIN_URL на другом origin.
+const FETCH_OPTS = { credentials: 'include' };
+
+// Слушатели 401: истёкшая или отозванная сессия должна сразу возвращать на экран входа,
+// из какого бы места её ни поймали. Подписывается стор auth (без импорта стора сюда —
+// иначе circular import).
+const unauthorizedHandlers = new Set();
+function onUnauthorized(fn) {
+  unauthorizedHandlers.add(fn);
+  return () => unauthorizedHandlers.delete(fn);
+}
+function notifyUnauthorized(data) {
+  for (const fn of unauthorizedHandlers) {
+    try { fn(data); } catch { /* один сломанный слушатель не мешает остальным */ }
+  }
+}
 
 function url(path) {
   return BASE + path;
 }
 
+/**
+ * Разбор ответа + единая обработка 401. Пути входа исключаем: там 401 — это «неверный
+ * пароль», а не «сессия истекла», и сбрасывать состояние по нему нельзя.
+ */
+async function handle(res, path) {
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/api/auth/')) notifyUnauthorized(data);
+    const err = new Error(data?.message || data?.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 async function request(method, path, body) {
   const headers = {};
-  const opts = { method, headers };
+  const opts = { ...FETCH_OPTS, method, headers };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  // Токен — только на мутации (не читаем его в GET, чтобы не светить в кэше).
-  if (method !== 'GET' && TOKEN) headers['X-Cockpit-Token'] = TOKEN;
-
-  const res = await fetch(url(path), opts);
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) {
-    const err = new Error(data?.message || data?.error || `HTTP ${res.status}`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
+  return handle(await fetch(url(path), opts), path);
 }
 
 // Multipart-загрузка (файлы): Content-Type ставит сам браузер (boundary).
 async function upload(path, formData) {
-  const headers = {};
-  if (TOKEN) headers['X-Cockpit-Token'] = TOKEN;
-  const res = await fetch(url(path), { method: 'POST', headers, body: formData });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) {
-    const err = new Error(data?.message || data?.error || `HTTP ${res.status}`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
+  const res = await fetch(url(path), { ...FETCH_OPTS, method: 'POST', body: formData });
+  return handle(res, path);
 }
 
 export const api = {
   base: BASE,
-  token: TOKEN,
   url,
+  onUnauthorized,
   wsUrl: (path) => WS_BASE + path,
   eventsUrl: () => url('/api/events'),
   get: (path) => request('GET', path),

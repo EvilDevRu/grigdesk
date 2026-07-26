@@ -20,8 +20,9 @@ function connect() {
   if (!term) return;
   status.value = 'connecting';
   const { cols, rows } = term;
-  let u = api.wsUrl('/api/terminal') + `?cols=${cols}&rows=${rows}`;
-  if (api.token) u += `&token=${encodeURIComponent(api.token)}`;
+  // Авторизация — сессионной cookie: браузер отправляет её и при WS-рукопожатии.
+  // Секрет в query больше не передаём — он оседал в логах сервера.
+  const u = api.wsUrl('/api/terminal') + `?cols=${cols}&rows=${rows}`;
   ws = new WebSocket(u);
   ws.binaryType = 'arraybuffer';
 

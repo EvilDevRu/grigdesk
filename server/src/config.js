@@ -54,9 +54,6 @@ export const config = {
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
 
-  // Токен на мутации (POST/PUT/DELETE). Пусто → мутации открыты внутри доверенной сети
-  // (Tailscale). Для боевого доступа задать COCKPIT_TOKEN.
-  mutateToken: process.env.COCKPIT_TOKEN || '',
 
   // Битрикс24. Куки и креды — В СВОЁМ каталоге (изоляция: свой cookie-файл = нет
   // session-thrash). Портал/креды задаются из «Настроек» и живут в .state (gitignore).
@@ -84,6 +81,23 @@ export const config = {
   // (venv тяжёлый, переиспользуем; читается в media/preflight.js). Хранилище job'ов/медиа.
   mediaDir: process.env.COCKPIT_MEDIA_DIR || path.join(__dirname, '..', '.state', 'media'),
   mediaPython: process.env.COCKPIT_MEDIA_PYTHON || '',
+
+  // Вход в кокпит: учётка (логин + scrypt-хеш пароля) и сессии. Оба файла в .state (0600).
+  // Один пользователь — пульт личный. Пароль задаётся при первом открытии или в install.sh,
+  // меняется в настройках.
+  authAccountPath: process.env.COCKPIT_AUTH_ACCOUNT || path.join(__dirname, '..', '.state', 'auth-account.json'),
+  authSessionsPath: process.env.COCKPIT_AUTH_SESSIONS || path.join(__dirname, '..', '.state', 'auth-sessions.json'),
+
+  // TLS. Пусто → http. Задать оба пути → Fastify слушает https на том же порту.
+  //
+  // Прямо связано с авторизацией: по http пароль уходит открытым текстом, поэтому для доступа
+  // вне localhost TLS обязателен, иначе вход декоративный. От него же зависит флаг Secure
+  // у сессионной cookie.
+  //
+  // Терминируем в самом Fastify, без прокси: на этом порту живут SSE (`/api/events`) и
+  // WebSocket-терминал (`/api/terminal`) — именно эти потоки обычно и ломает лишний прокси.
+  tlsKeyPath: process.env.COCKPIT_TLS_KEY || '',
+  tlsCertPath: process.env.COCKPIT_TLS_CERT || '',
 
   // Режим.
   isDev: process.env.NODE_ENV === 'development',

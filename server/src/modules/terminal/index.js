@@ -17,15 +17,11 @@ function clampInt(v, def, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
-async function terminalModule(fastify, opts) {
-  const { config } = opts;
-  const token = config.mutateToken || '';
-
+async function terminalModule(fastify) {
   fastify.get('/api/terminal', { websocket: true }, (socket, req) => {
-    // Терминал = мощная операция. Если токен задан — требуем ?token=. Если нет — открыт
-    // внутри доверенной сети (как и остальные мутации), но это ШЕЛЛ — предупреждаем в лог.
-    if (token && req.query.token !== token) { socket.close(1008, 'unauthorized'); return; }
-    if (!token) fastify.log.warn('terminal: сессия открыта БЕЗ токена — задайте COCKPIT_TOKEN для боевого доступа');
+    // Доступ проверен глобальным гардом (plugins/auth.js): хуки Fastify выполняются и для
+    // WS-роутов, поэтому без валидной сессии сюда не доходят. Прежний `?token=` убран —
+    // секрет в query-параметре оседает в логах, cookie этого не делает.
     if (active >= MAX_SESSIONS) { socket.close(1013, 'too many sessions'); return; }
 
     const cols = clampInt(req.query.cols, 100, 20, 500);
