@@ -290,10 +290,12 @@ onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); acc.value.login = aut
         не попадает — клиент получает только сессионную cookie.
       </p>
 
-      <p v-if="!auth.tls" class="msg err">
-        Сейчас без HTTPS: пароль передаётся открытым текстом. Пока кокпит открывают только
-        с этой машины — не проблема, для доступа из сети задай <code>COCKPIT_TLS_KEY</code>
-        и <code>COCKPIT_TLS_CERT</code>.
+      <!-- Предупреждение только когда оно по делу: на localhost соединение и так не выходит
+           за пределы машины, а за шлюзом браузер идёт по https. -->
+      <p v-if="!auth.secure && !auth.isLocal" class="msg err">
+        Соединение без HTTPS — пароль передаётся открытым текстом. Для доступа из сети нужен
+        шлюз (<code>COCKPIT_TRUST_PROXY</code>) либо свой сертификат
+        (<code>COCKPIT_TLS_KEY</code> и <code>COCKPIT_TLS_CERT</code>).
       </p>
 
       <div class="card">

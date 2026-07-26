@@ -26,6 +26,8 @@ function pickStore(j) {
     // Пусто = «ещё не выбирали»: модель нового чата возьмётся из реестра (см. defaultModelId).
     defModel: j?.defModel || '',
     defEffort: j?.defEffort || 'max',
+    // Режим прав по умолчанию для новых чатов (пусто = как решит сервер по странице).
+    defMode: j?.defMode || '',
   };
 }
 
@@ -81,6 +83,10 @@ export const useChatStore = defineStore('chat', {
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
     isOnConveyor: (s) => (taskId) => !!taskId && s.conveyorIds.includes(String(taskId)),
+    // Непрочитанные: агент ответил, а мы на этот чат ещё не смотрели. Считаем и архивные —
+    // чат могли закрыть, пока агент думал, и ответ приехал уже в архив.
+    unreadCount: (s) => s.sessions.filter((x) => x.unread).length
+      + (s.archived || []).filter((x) => x.unread).length,
     // Единый список чатов для телеграм-сайдбара: открытые + архив, свежие сверху.
     // Без запроса — все чаты со сниппетом последнего сообщения; с запросом — фильтр
     // по названию и тексту сообщений (сниппет — фрагмент совпадения).
@@ -109,7 +115,8 @@ export const useChatStore = defineStore('chat', {
           draft: !t && !!(sess.draft || '').trim(),
           // Модель чата — для иконки исполнителя и подписи в строке списка.
           model: sess.model || '',
-          taskId: sess.taskId, sending: !!sess.sending, ts: sess.updatedAt || sess.closedAt || 0,
+          taskId: sess.taskId, sending: !!sess.sending, unread: !!sess.unread,
+          ts: sess.updatedAt || sess.closedAt || 0,
         };
       };
       const out = [];
@@ -142,7 +149,10 @@ export const useChatStore = defineStore('chat', {
               }
             } catch { /* битый localStorage — начинаем с пустого */ }
           }
-          Object.assign(this, pickStore(j));
+          const picked = pickStore(j);
+          this._normalize(picked.sessions);
+          this._normalize(picked.archived);
+          Object.assign(this, picked);
           this.loaded = true;
           // Восстановленное из снимка сразу возвращаем на сервер (flush, без дебаунса).
           if (j) this._persist(restored);
@@ -182,6 +192,8 @@ export const useChatStore = defineStore('chat', {
           if (typeof p.contextTokens === 'number' && p.contextTokens > 0) s.contextTokens = p.contextTokens;
           // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
           if (p.effort && p.effort !== s.effort) s.effort = p.effort;
+          // Ответ доехал, пока мы смотрели в другое место — чат становится непрочитанным.
+          if (!this._visible(p.chatKey)) s.unread = true;
           s.sending = false;
           s.updatedAt = p.at || Date.now();
         }
@@ -196,13 +208,13 @@ export const useChatStore = defineStore('chat', {
       clearTimeout(persistTimer);
       const write = () => {
         const slim = this.sessions.map((s) => ({
-          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
+          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
           messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
-          draft: s.draft || '', createdAt: s.createdAt, updatedAt: s.updatedAt,
+          draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
         }));
         const payload = {
           sessions: slim, archived: this.archived, activeId: this.activeId,
-          defModel: this.defModel, defEffort: this.defEffort,
+          defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
         };
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
@@ -222,12 +234,46 @@ export const useChatStore = defineStore('chat', {
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
 
+    /**
+     * Чат из истории мог прийти без части полей (запись старой версии, ручная правка
+     * файла, чужой источник) — дозаполняем, иначе рендер падает на первом же обращении.
+     */
+    _normalize(list) {
+      for (const s of list || []) {
+        s.messages ||= [];
+        s.contextTokens ??= 0;
+        s.sending = false;
+        s.error ??= null;
+        s.steps ||= [];
+        s.draft ??= '';
+      }
+      return list;
+    },
+    /**
+     * Смотрим ли прямо сейчас именно на этот чат: вкладка ОС активна, открыт раздел
+     * «Чаты» или плавающая панель, и это активный чат. Одно правило и для оповещения,
+     * и для метки «непрочитано» — чтобы бейдж не спорил с уведомлением.
+     */
+    _visible(id) {
+      return !document.hidden
+        && (router.currentRoute.value.path === '/chats' || this.open)
+        && this.activeId === id;
+    },
+    // Чат увидели — гасим метку. Зовёт открытый на экране ChatSession.
+    markRead(id) {
+      const s = this._get(id) || this.archived.find((x) => x.id === id);
+      if (!s?.unread) return;
+      s.unread = false;
+      this._persist();
+    },
+
     newSession(opts = {}) {
       const s = {
         id: uid(), taskId: opts.taskId ? String(opts.taskId) : null, title: opts.title || '',
         // Пустая модель = «по умолчанию»: конкретный id подставится из реестра при показе
         // и отправке. Фиксировать здесь нельзя — реестр к этому моменту может не загрузиться.
-        model: this.defModel, effort: this.defEffort, createdAt: Date.now(), updatedAt: Date.now(),
+        model: this.defModel, effort: this.defEffort, mode: this.defMode,
+        createdAt: Date.now(), updatedAt: Date.now(),
         messages: [], sessionId: null, contextTokens: 0, sending: false, error: null, draft: '',
       };
       this.sessions.push(s);
@@ -299,6 +345,19 @@ export const useChatStore = defineStore('chat', {
       if (allow && remember && p.chatKey && p.tool) {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
       }
+      // План оставляем в переписке: всплывашка закроется, а решение принималось по нему —
+      // потом нужно видеть, что именно утвердили (или что ушло на доработку).
+      if (p.tool === 'ExitPlanMode' && p.input?.plan) {
+        const s = this._get(p.chatKey);
+        if (s) {
+          s.messages.push({
+            role: 'assistant',
+            text: `**План — ${allow ? 'утверждён' : 'на доработку'}**\n\n${p.input.plan}`,
+          });
+          s.updatedAt = Date.now();
+          this._persist();
+        }
+      }
       try { await api.post(`/api/chat/permission/${p.pid}`, { allow }); }
       catch { /* запрос уже протух (таймаут/другое окно) */ }
     },
@@ -330,7 +389,7 @@ export const useChatStore = defineStore('chat', {
       // Чат с историей не удаляем, а уносим в архив — поиск его найдёт, можно восстановить.
       if (s.messages?.length) {
         this.archived.unshift({
-          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
+          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
           messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
           createdAt: s.createdAt, closedAt: Date.now(),
         });
@@ -398,6 +457,11 @@ export const useChatStore = defineStore('chat', {
       s.title = title || '';
       this._persist();
     },
+    /**
+     * Режим прав чата (вручную / авто / план …). Запоминаем и как дефолт новых чатов —
+     * выбор режима обычно про привычку работы, а не про конкретный разговор.
+     */
+    setMode(id, m) { const s = this._get(id); if (!s) return; s.mode = m; this.defMode = m; this._persist(); },
     setModel(id, m) { const s = this._get(id); if (!s) return; s.model = m; this.defModel = m; this._persist(); },
     /**
      * Черновик неотправленного сообщения. Живёт в чате (и на сервере), поэтому
@@ -451,7 +515,7 @@ export const useChatStore = defineStore('chat', {
         // пустое значение — модель по умолчанию из реестра.
         const provStore = useProvidersStore();
         const r = await api.post(url, {
-          message: text, model: provStore.modelOf(s.model).id, effort: s.effort,
+          message: text, model: provStore.modelOf(s.model).id, effort: s.effort, mode: s.mode || '',
           sessionId: s.sessionId, context, chatKey: id,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
@@ -469,12 +533,12 @@ export const useChatStore = defineStore('chat', {
         // setEffort: вынужденный откат не должен становиться дефолтом для новых чатов.
         if (r.effort && r.effort !== s.effort) s.effort = r.effort;
         s.steps = [];
-        // Оповещение, если пользователь не смотрит на этот чат (другая вкладка ОС,
-        // другой раздел с закрытой панелью или другой активный чат).
-        const chatVisible = !document.hidden
-          && (router.currentRoute.value.path === '/chats' || this.open)
-          && this.activeId === id;
-        if (!chatVisible) notify(`Агент ответил — ${this.tabLabel(s)}`, (r.reply || '').slice(0, 120), `chat-${id}`);
+        // Пользователь не смотрит на этот чат (другая вкладка ОС, другой раздел с закрытой
+        // панелью или другой активный чат) — метка «непрочитано» и оповещение.
+        if (!this._visible(id)) {
+          s.unread = true;
+          notify(`Агент ответил — ${this.tabLabel(s)}`, (r.reply || '').slice(0, 120), `chat-${id}`);
+        }
       } catch (e) {
         s.error = e.message;
         s.messages.push({ role: 'error', text: e.message });

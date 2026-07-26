@@ -66,6 +66,26 @@ async function chatModule(fastify, opts) {
   // и уже показанную ленту шагов текущего хода. ──
   const activeRuns = new Map(); // chatKey → { startedAt, tokens, steps[], ac }
 
+  // Допустимые режимы прав исполнителя: спрашиваем у CLI (executor.modes), кэшируем —
+  // это запуск подпроцесса, гонять его на каждое сообщение незачем.
+  const modesCache = new Map(); // providerId → { at, ids: Set }
+  const MODES_TTL = 10 * 60 * 1000;
+
+  async function allowedMode(executor, want) {
+    if (!want || typeof executor?.modes !== 'function') return '';
+    let entry = modesCache.get(executor.id);
+    if (!entry || Date.now() - entry.at > MODES_TTL) {
+      const list = await executor.modes(config).catch(() => null);
+      entry = { at: Date.now(), ids: new Set((list || []).map((m) => m.id)) };
+      modesCache.set(executor.id, entry);
+    }
+    // Список не прочитался — доверяем клиенту (он берёт значения из того же реестра).
+    if (!entry.ids.size) return want;
+    if (entry.ids.has(want)) return want;
+    fastify.log.warn({ want, provider: executor.id }, 'чат: неизвестный режим прав — беру режим по умолчанию');
+    return '';
+  }
+
   fastify.get('/api/chat/active', async () => ({
     // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
@@ -191,7 +211,7 @@ async function chatModule(fastify, opts) {
     return { ok: true };
   });
 
-  async function runChat(reply, request, { id, message, model, effort, sessionId, context, attachments, chatKey }) {
+  async function runChat(reply, request, { id, message, model, effort, mode: wantMode, sessionId, context, attachments, chatKey }) {
     let cwd = config.factoryHome;
     const extraDirs = [];
     if (id) {
@@ -201,6 +221,7 @@ async function chatModule(fastify, opts) {
     }
     const mode = pageMode(context, !!id);
     if (mode.cwd) cwd = mode.cwd;
+
     // Вложения: клиент присылает имена файлов, ранее загруженных через /api/chat/upload.
     // Пути строим сами (только внутри attachDir) и открываем агенту доступ через --add-dir.
     let attachBlock = '';
@@ -217,6 +238,10 @@ async function chatModule(fastify, opts) {
     const info = await modelInfo(model, config);
     const provId = info?.provider || 'claude';
     const executor = await getExecutor(provId);
+    // Режим прав выбирает пользователь в чате; страница даёт лишь дефолт для своих
+    // сценариев (например «Агенты» — правки без спроса). Значение сверяем со списком
+    // самого CLI: неизвестное он не принимает, а падает с ошибкой валидации.
+    const permissionMode = (await allowedMode(executor, wantMode)) || mode.permissionMode;
     if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
 
     // Уровень эффорта CLI не прощает: `--effort xhigh` для claude — не «игнор»,
@@ -260,7 +285,7 @@ async function chatModule(fastify, opts) {
         model,
         effort: safeEffort,
         sessionId,
-        permissionMode: mode.permissionMode,
+        permissionMode,
         mcpConfig,
         permissionPromptTool: 'mcp__cockpit-perm__approve',
         log: fastify.log,
@@ -386,16 +411,16 @@ async function chatModule(fastify, opts) {
   fastify.post('/api/tasks/:id/chat', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const { message, model, effort, sessionId, context, attachments, chatKey } = request.body || {};
+    const { message, model, effort, mode, sessionId, context, attachments, chatKey } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, request, { id, message, model, effort, sessionId, context, attachments, chatKey });
+    return runChat(reply, request, { id, message, model, effort, mode, sessionId, context, attachments, chatKey });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
-    const { message, model, effort, sessionId, context, attachments, chatKey } = request.body || {};
+    const { message, model, effort, mode, sessionId, context, attachments, chatKey } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, request, { id: null, message, model, effort, sessionId, context, attachments, chatKey });
+    return runChat(reply, request, { id: null, message, model, effort, mode, sessionId, context, attachments, chatKey });
   });
 
   // ── Хранилище истории чатов: файлы chats/YYYY-MM/<id>.json (см. lib/chat/history-store) ──

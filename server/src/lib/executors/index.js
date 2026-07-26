@@ -9,6 +9,7 @@
 //   probe(config)            — { ok, version } — установлен ли
 //   auth(config, deps)       — { mode, label } — авторизован ли
 //   efforts?(config)         — динамическое обнаружение уровней эффорта (или null)
+//   modes?(config)           — режимы прав: [{ id, label, hint }] (или null)
 //   seedModels()             — стартовый список моделей для models.json
 //   catalog?(config)         — полный список моделей, поддерживаемых установленным CLI
 //                              (обновляется при смене версии; см. models-registry)

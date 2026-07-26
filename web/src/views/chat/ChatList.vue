@@ -71,6 +71,8 @@ async function del(r) {
         <span class="ava" :class="{ live: r.sending }" :title="r.modelName || 'Модель по умолчанию'">
           <ProviderIcon v-if="r.provider" :provider="r.provider" :size="19" />
           <template v-else>{{ letter(r) }}</template>
+          <!-- Точка «непрочитано»: бейджи на кнопке и в сайдбаре считают именно такие чаты -->
+          <span v-if="r.unread" class="udot" title="непрочитанный ответ"></span>
         </span>
         <div class="mid">
           <input v-if="editId === r.id" ref="editEl" v-model="editVal" class="edit"
@@ -121,6 +123,9 @@ async function del(r) {
 .ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
   border: 2.5px solid color-mix(in srgb, #fff 25%, transparent); border-top-color: #fff;
   animation: spin .8s linear infinite; }
+/* «Непрочитано» — точка на аватаре: не двигает разметку строки и не спорит с кольцом работы */
+.udot { position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--surface); }
 
 .mid { flex: 1; min-width: 0; }
 .t1 { display: flex; align-items: baseline; gap: 6px; }

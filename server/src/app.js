@@ -34,6 +34,7 @@ import routesModule from './modules/routes/index.js';
 import providersModule from './modules/providers/index.js';
 import analysisModule from './modules/analysis/index.js';
 import authModule from './modules/auth/index.js';
+import gatewayModule from './modules/gateway/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 
 /**
@@ -54,10 +55,9 @@ async function build() {
   const fastify = Fastify({
     logger: { level: config.isDev ? 'debug' : 'info' },
     ...(https ? { https } : {}),
-    // trustProxy НЕ включаем: прокси перед кокпитом нет (TLS терминируется здесь же), а с
-    // доверием к X-Forwarded-For клиент сам назначал бы себе `request.ip` — и лимит попыток
-    // входа обходился бы сменой заголовка на каждый запрос. Появится реальный прокси —
-    // включать осознанно и только для его адреса.
+    // trustProxy — только по явной настройке и только для адреса шлюза (см. config.trustProxy).
+    // Без неё заголовки `X-Forwarded-*` игнорируются: иначе клиент сам назначал бы себе адрес.
+    ...(config.trustProxy ? { trustProxy: config.trustProxy } : {}),
   });
 
   // CORS нужен только в dev (vite на другом порту). В проде фронт — тот же origin.
@@ -91,11 +91,12 @@ async function build() {
   const internalToken = randomUUID();
 
   // Плагины платформы. Гард — первым: он закрывает весь /api, включая upgrade вебсокета.
-  await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, internalToken });
+  await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, trustProxy: config.trustProxy, internalToken });
   await fastify.register(ssePlugin, { stateDir: config.stateDir });
 
   // Модули.
-  await fastify.register(authModule, { authStore, tlsEnabled: !!https });
+  await fastify.register(authModule, { authStore, config });
+  await fastify.register(gatewayModule, { config });
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register(factoryModule, { factoryState, config, prefs });
   await fastify.register(b24Module, { b24 });

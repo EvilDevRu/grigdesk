@@ -1,6 +1,8 @@
 // Модуль входа: состояние, логин, выход, первичная настройка и смена пароля.
 import fp from 'fastify-plugin';
-import { sessionCookie, clearCookie, readCookie, SESSION_COOKIE } from '../../plugins/auth.js';
+import {
+  sessionCookie, clearCookie, readCookie, SESSION_COOKIE, isSecureRequest, cookieDomain,
+} from '../../plugins/auth.js';
 
 // Ограничение попыток входа. Без него пароль перебирается по сети за вечер.
 const WINDOW_MS = 15 * 60 * 1000;
@@ -44,8 +46,17 @@ function clearFailures(request) {
 const slowDown = () => new Promise((r) => setTimeout(r, 400));
 
 async function authModule(fastify, opts) {
-  const { authStore, tlsEnabled } = opts;
-  const secure = !!tlsEnabled;
+  const { authStore, config } = opts;
+
+  // Параметры cookie считаем по КАЖДОМУ запросу, а не один раз на старте:
+  //  - Secure: за шлюзом браузер идёт по https, а до нас доезжает http — решение «на старте»
+  //    ставило бы cookie без Secure именно снаружи, где он и нужен;
+  //  - Domain: нужен, чтобы cookie уезжала на поддомены стендов, но только когда запрос
+  //    пришёл на публичный домен (на localhost чужой Domain браузер отбросит).
+  const cookieOpts = (request) => ({
+    secure: isSecureRequest(request),
+    domain: cookieDomain(request, config?.publicDomain),
+  });
 
   // Состояние входа — публичный эндпоинт: с него оболочка решает, что показать.
   fastify.get('/api/auth/state', async (request) => {
@@ -54,7 +65,7 @@ async function authModule(fastify, opts) {
       configured: authStore.isConfigured(),
       authenticated: authStore.isValidSession(sid),
       login: authStore.publicView().login,
-      tls: secure,
+      secure: isSecureRequest(request),
     };
   });
 
@@ -73,7 +84,7 @@ async function authModule(fastify, opts) {
     // Сразу впускаем — иначе пользователь задал пароль и тут же вводит его снова.
     const s = authStore.createSession();
     return reply
-      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, secure }))
+      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
       .send({ ok: true, login: login || '' });
   });
 
@@ -93,19 +104,19 @@ async function authModule(fastify, opts) {
     clearFailures(request);
     const s = authStore.createSession();
     return reply
-      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, secure }))
+      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
       .send({ ok: true });
   });
 
   // Выход. Под гардом — сюда попадают только с валидной сессией.
   fastify.post('/api/auth/logout', async (request, reply) => {
     authStore.dropSession(readCookie(request.headers.cookie, SESSION_COOKIE));
-    return reply.header('Set-Cookie', clearCookie({ secure })).send({ ok: true });
+    return reply.header('Set-Cookie', clearCookie(cookieOpts(request))).send({ ok: true });
   });
 
   fastify.post('/api/auth/logout-all', async (request, reply) => {
     authStore.dropAllSessions();
-    return reply.header('Set-Cookie', clearCookie({ secure })).send({ ok: true });
+    return reply.header('Set-Cookie', clearCookie(cookieOpts(request))).send({ ok: true });
   });
 
   // Смена логина/пароля из настроек. Требуем текущий пароль: украденная сессия не должна
@@ -125,7 +136,7 @@ async function authModule(fastify, opts) {
     }
     const s = authStore.createSession();
     return reply
-      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, secure }))
+      .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
       .send({ ok: true, note: 'Остальные устройства разлогинены.' });
   });
 }

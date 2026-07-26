@@ -20,6 +20,9 @@ const PUBLIC_API = new Set([
   '/api/auth/state',
   '/api/auth/login',
   '/api/auth/setup',
+  // Шлюз спрашивает разрешение на выдачу сертификата ДО всякой авторизации (сессии у него нет).
+  // Данных не отдаёт — только «да/нет» по имени хоста.
+  '/api/gateway/tls-allow',
 ]);
 
 // Артефакты приёмки (`/shots/*`) и демо-видео (`/demo/*`) — это скриншоты и записи
@@ -43,11 +46,67 @@ export function readCookie(header, name) {
 }
 
 /**
- * Заголовок Set-Cookie для сессии.
- * Secure ставим ТОЛЬКО при включённом TLS: на http браузер cookie с Secure выбрасывает,
- * и вход сломался бы молча.
+ * Пришёл ли запрос по защищённой схеме — решается ПО ЗАПРОСУ, а не один раз на старте.
+ *
+ * Причина: TLS может терминироваться не у нас. За шлюзом (VPS с Caddy) браузер говорит по https,
+ * а до нас доезжает обычный http — если смотреть только на локальный TLS, сессионная cookie
+ * уедет без флага Secure именно там, где он нужнее всего. `request.protocol` у Fastify учитывает
+ * `X-Forwarded-Proto`, но ТОЛЬКО когда включён trustProxy (иначе заголовок игнорируется).
  */
-export function sessionCookie(id, { maxAgeSec, secure }) {
+export function isSecureRequest(request) {
+  return request.protocol === 'https';
+}
+
+/**
+ * Запрос действительно с этой машины?
+ *
+ * Нужно для первичной настройки пароля: `setup` публичен по необходимости (иначе пароль не задать),
+ * и на сетевом адресе кто угодно успел бы задать его первым, получив вместе с кокпитом PTY-шелл.
+ *
+ * Двойная проверка сознательно. `request.ip` за доверенным прокси — это уже адрес КЛИЕНТА
+ * (Fastify разбирает `X-Forwarded-For`), поэтому удалённый клиент локальным не выглядит. Но если
+ * прокси однажды настроят так, что заголовок не добавится, socket-адрес будет `127.0.0.1` —
+ * поэтому дополнительно требуем ОТСУТСТВИЕ следов проксирования. Любой признак пересылки —
+ * значит запрос пришёл извне, и настройку мы не отдаём.
+ */
+export function isLocalRequest(request) {
+  const ip = request.ip || '';
+  const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  const forwarded = !!(request.headers['x-forwarded-for']
+    || request.headers['x-forwarded-proto']
+    || request.headers['x-forwarded-host']
+    || request.headers.forwarded);
+  return local && !forwarded;
+}
+
+/**
+ * Область действия сессионной cookie.
+ *
+ * По умолчанию cookie host-only — она уедет только на тот хост, что её поставил. Стенды за
+ * шлюзом живут на ПОДДОМЕНАХ (`p5191.<домен>`), и без явного `Domain` браузер к ним cookie
+ * не отправит: `forward_auth` не увидит сессию и стенды окажутся недоступны.
+ *
+ * Ставим `Domain` только когда запрос действительно пришёл на публичный домен. На localhost
+ * и на адрес в локальной сети он не нужен и вреден: cookie с чужим `Domain` браузер отбросит,
+ * и вход сломается молча.
+ *
+ * Цена: cookie становится видна всем поддоменам публичного домена. Все они наши (стенды),
+ * а `HttpOnly` не даёт прочитать её из JS — приемлемо.
+ */
+export function cookieDomain(request, publicDomain) {
+  if (!publicDomain) return '';
+  const base = String(publicDomain).trim().toLowerCase().replace(/\.$/, '');
+  const host = String(request.hostname || '').toLowerCase().replace(/:\d+$/, '');
+  if (!base || !host) return '';
+  return (host === base || host.endsWith(`.${base}`)) ? base : '';
+}
+
+/**
+ * Заголовок Set-Cookie для сессии.
+ * Secure ставим только когда браузер реально говорит по https: на http он cookie с Secure
+ * выбрасывает, и вход сломался бы молча.
+ */
+export function sessionCookie(id, { maxAgeSec, secure, domain }) {
   const parts = [
     `${SESSION_COOKIE}=${encodeURIComponent(id)}`,
     'Path=/',
@@ -55,24 +114,26 @@ export function sessionCookie(id, { maxAgeSec, secure }) {
     'SameSite=Lax',
     `Max-Age=${maxAgeSec}`,
   ];
+  if (domain) parts.push(`Domain=${domain}`);
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-export function clearCookie({ secure }) {
+export function clearCookie({ secure, domain }) {
   const parts = [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+  if (domain) parts.push(`Domain=${domain}`);
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
 async function authPlugin(fastify, opts) {
-  const { authStore, tlsEnabled, internalToken } = opts;
+  const { authStore, tlsEnabled, trustProxy, internalToken } = opts;
 
   if (!authStore.isConfigured()) {
-    fastify.log.warn('Пароль кокпита НЕ задан — до первичной настройки API закрыт, откроется экран создания пароля.');
+    fastify.log.warn('Пароль кокпита НЕ задан. Задать можно ТОЛЬКО с этой машины (localhost) — с сети первичная настройка закрыта.');
   }
-  if (!tlsEnabled) {
-    fastify.log.warn('TLS выключен: пароль будет ходить открытым текстом. Для доступа вне localhost задайте COCKPIT_TLS_KEY/CERT.');
+  if (!tlsEnabled && !trustProxy) {
+    fastify.log.warn('Ни TLS, ни доверенного прокси: пароль вне localhost пойдёт открытым текстом. Для доступа снаружи нужен шлюз (COCKPIT_TRUST_PROXY) либо свой сертификат (COCKPIT_TLS_KEY/CERT).');
   }
 
   fastify.addHook('onRequest', async (request, reply) => {
@@ -94,6 +155,18 @@ async function authPlugin(fastify, opts) {
     const guarded = routeUrl.startsWith('/api/')
       || PROTECTED_STATIC.some((p) => routeUrl.startsWith(p));
     if (!guarded) return;
+
+    // Первичная настройка пароля — только с самой машины. Пока пароль не задан, этот эндпоинт
+    // обязан быть открытым (иначе его нечем вызвать), и на сетевом адресе им бы завладел первый
+    // желающий — вместе с терминалом. Владелец задаёт пароль на мозге, где кокпит и живёт.
+    if (routeUrl === '/api/auth/setup') {
+      if (isLocalRequest(request)) return;
+      return reply.code(403).send({
+        error: 'setup_local_only',
+        message: 'Первичная настройка пароля возможна только с самой машины (localhost).',
+      });
+    }
+
     if (PUBLIC_API.has(routeUrl)) return;
 
     const sid = readCookie(request.headers.cookie, SESSION_COOKIE);

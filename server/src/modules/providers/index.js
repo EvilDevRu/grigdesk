@@ -27,6 +27,11 @@ async function providersModule(fastify, opts) {
     const providers = [];
     for (const ex of executors.values()) {
       const [{ ok, version }, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
+      // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
+      let modes = null;
+      if (ok && typeof ex.modes === 'function') {
+        try { modes = await ex.modes(config); } catch { modes = null; }
+      }
       providers.push({
         id: ex.id,
         name: ex.name,
@@ -47,6 +52,7 @@ async function providersModule(fastify, opts) {
         updateAvailable: !!updates.get(ex.id)?.outdated,
         checkedAt: updates.get(ex.id)?.at || null,
         models: models[ex.id] || [],
+        modes: modes || [],
       });
     }
     return providers;

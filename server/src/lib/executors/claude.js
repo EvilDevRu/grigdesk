@@ -9,12 +9,30 @@ import { toStep } from '../chat/stream-steps.js';
 
 /**
  * probe/efforts гоняют CLI — короткие таймауты, ошибки не роняют реестр.
+ * anyExit: вернуть вывод даже при ненулевом коде — так читается текст ошибки
+ * валидации (в нём CLI перечисляет допустимые значения флага).
  */
-function exec(bin, args, timeout = 15_000) {
+function exec(bin, args, { timeout = 15_000, anyExit = false } = {}) {
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout }, (err, stdout) => resolve(err ? null : (stdout || '')));
+    execFile(bin, args, { timeout }, (err, stdout, stderr) => {
+      if (!err) return resolve(stdout || '');
+      resolve(anyExit ? `${stdout || ''}\n${stderr || ''}` : null);
+    });
   });
 }
+
+// Подписи режимов прав для UI. Список режимов приходит из CLI (modes()), а человеческие
+// названия и пояснения — здесь: CLI их не отдаёт. Незнакомый режим покажется как есть.
+// order — порядок в селекте: от самого осторожного к самому свободному, план — первым
+// (это отдельный сценарий «сначала подумай»), а не по алфавиту, как отдаёт CLI.
+const MODE_LABELS = {
+  plan: { order: 1, label: 'План', hint: 'Только изучает код и предлагает план, ничего не меняет' },
+  manual: { order: 2, label: 'Вручную', hint: 'Спрашивать разрешение на каждое действие' },
+  auto: { order: 3, label: 'Авто', hint: 'Безопасные действия делает сам, на рискованных спросит' },
+  acceptEdits: { order: 4, label: 'Правки без спроса', hint: 'Файлы правит молча, остальное спрашивает' },
+  dontAsk: { order: 5, label: 'Не спрашивать', hint: 'Действует без подтверждений' },
+  bypassPermissions: { order: 6, label: 'Без ограничений', hint: 'Обходит все проверки прав — на свой страх' },
+};
 
 export default {
   id: 'claude',
@@ -27,7 +45,7 @@ export default {
   bin(config) { return config.claudeBin; },
 
   async probe(config) {
-    const out = await exec(config.claudeBin, ['--version'], 10_000);
+    const out = await exec(config.claudeBin, ['--version'], { timeout: 10_000 });
     return { ok: out !== null, version: out ? out.trim().slice(0, 60) : null };
   },
 
@@ -55,6 +73,23 @@ export default {
     if (!m) return null;
     const levels = m[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     return levels.length ? levels : null;
+  },
+
+  /**
+   * Режимы прав (`--permission-mode`). В `--help` этого флага нет, зато CLI сам
+   * перечисляет допустимые значения в ошибке валидации — спрашиваем его заведомо
+   * неверным значением и парсим ответ. Появится новый режим — подхватится сам.
+   * Подписи наши (CLI их не отдаёт); незнакомый режим показывается как есть.
+   */
+  async modes(config) {
+    const out = await exec(config.claudeBin, ['-p', 'x', '--permission-mode', '__ask__'], { anyExit: true });
+    const m = (out || '').match(/Allowed choices are ([^.\n]+)/i);
+    if (!m) return null;
+    const ids = m[1].split(',').map((s) => s.trim()).filter(Boolean);
+    if (!ids.length) return null;
+    return ids
+      .map((id) => ({ id, order: 99, label: id, hint: '', ...(MODE_LABELS[id] || {}) }))
+      .sort((a, b) => a.order - b.order);
   },
 
   /**

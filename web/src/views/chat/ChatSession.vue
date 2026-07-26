@@ -41,6 +41,16 @@ const provGroups = computed(() => prov.providers
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
 const effortLevels = computed(() => currentModel.value?.efforts || ['low', 'medium', 'high', 'max']);
+// Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
+// «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
+const modes = computed(() => prov.modesOf(sess.value?.model));
+const currentMode = computed(() => {
+  const want = sess.value?.mode;
+  const list = modes.value;
+  if (want && list.some((m) => m.id === want)) return want;
+  return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
+});
+const modeHint = computed(() => modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента');
 const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
@@ -112,13 +122,46 @@ const ctxClass = computed(() => (ctxPct.value >= 85 ? 'hi' : ctxPct.value >= 60 
 const RING_C = 2 * Math.PI * 9;
 const ringDash = computed(() => RING_C * (1 - ctxPct.value / 100));
 
+// ── «Прочитано» ──
+// Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
+// смотрят (панель открыта / раздел «Чаты»). Ответ, пришедший в свёрнутую вкладку ОС,
+// остаётся непрочитанным до возврата — поэтому слушаем ещё и visibilitychange.
+function markRead() { if (!document.hidden) chat.markRead(props.sid); }
+watch(() => [props.sid, sess.value?.unread], markRead, { immediate: true });
+document.addEventListener('visibilitychange', markRead);
+onUnmounted(() => document.removeEventListener('visibilitychange', markRead));
+
 // ── Ввод ──
 const input = ref(sess.value?.draft || '');
 const body = ref(null);
 function scrollDown() { if (body.value) body.value.scrollTop = body.value.scrollHeight; }
+
+// ── Автопрокрутка ──
+// Едем вниз на всё новое (сообщения, шаги ленты, «думает…»), но ТОЛЬКО если пользователь
+// и так внизу: отлистал историю вверх — не дёргаем, иначе читать невозможно.
+const NEAR_BOTTOM_PX = 120;
+const atBottom = ref(true);
+function onBodyScroll() {
+  const el = body.value;
+  if (!el) return;
+  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+}
+async function autoScroll() {
+  if (!atBottom.value) return;
+  await nextTick();
+  scrollDown();
+}
+watch(() => [
+  sess.value?.messages?.length,
+  sess.value?.steps?.length,
+  sess.value?.sending,
+  chat.permReq?.pid,
+  chat.questionReq?.pid,
+], autoScroll);
 // Переключение на другой чат: подставляем его черновик и — в конец истории.
 watch(() => props.sid, async () => {
   input.value = sess.value?.draft || '';
+  atBottom.value = true; // новый чат открываем в конце истории
   await nextTick();
   scrollDown();
 });
@@ -141,14 +184,13 @@ async function submit() {
   // Точное имя команды — выполняем её, а не шлём агенту.
   if (COMMANDS.some((c) => c.cmd === t)) { runCommand(t); return; }
   input.value = '';
+  atBottom.value = true; // своё сообщение всегда показываем — как в мессенджерах
   // Черновик отправленного сообщения гасим сразу: дебаунс успел бы записать его
   // уже после отправки, и в списке чат остался бы «с черновиком».
   clearTimeout(draftTimer);
   chat.setDraft(props.sid, '');
   pending.value = [];
   await chat.send(props.sid, t, atts);
-  await nextTick();
-  scrollDown();
 }
 function onKey(e) {
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
@@ -279,7 +321,6 @@ function onGlobalKey(e) {
 }
 onMounted(() => window.addEventListener('keydown', onGlobalKey));
 onUnmounted(() => window.removeEventListener('keydown', onGlobalKey));
-watch(() => sess.value?.messages.length, async () => { await nextTick(); scrollDown(); });
 
 // ── Копирование сообщения (иконка при наведении) ──
 const copiedIdx = ref(-1);
@@ -362,10 +403,17 @@ async function toConveyor() {
             </template>
           </select>
         </div>
+        <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
+        <div v-if="modes.length" class="sel mode">
+          <span class="lbl">режим</span>
+          <select :value="currentMode" :title="modeHint" @change="chat.setMode(sid, $event.target.value)">
+            <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
+          </select>
+        </div>
         <EffortSlider :model-value="sess.effort" :levels="effortLevels" @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: маленькое кольцо-заполнение; клик — сброс контекста -->
         <button class="ctx-ring" :class="ctxClass" :disabled="!sess.sessionId"
-                :title="`Контекст: ${sess.contextTokens.toLocaleString('ru')} токенов (${ctxPct}%)` + (sess.sessionId ? ' · клик — сбросить' : ' · пусто')"
+                :title="`Контекст: ${(sess.contextTokens || 0).toLocaleString('ru')} токенов (${ctxPct}%)` + (sess.sessionId ? ' · клик — сбросить' : ' · пусто')"
                 @click="chat.resetContext(sid)">
           <svg viewBox="0 0 24 24">
             <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
@@ -389,16 +437,16 @@ async function toConveyor() {
     </div>
 
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
-    <div ref="body" class="cs-body">
+    <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
       <div class="col flow">
-        <div v-if="!sess.messages.length" class="empty">
+        <div v-if="!sess.messages?.length" class="empty">
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
           <p class="e-sub muted">
             {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
             Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос. «/» — команды.
           </p>
         </div>
-        <div v-for="(m, i) in sess.messages" :key="i" class="msg" :class="m.role">
+        <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
           <div v-if="m.attachments?.length" class="m-atts">
             <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener">
               <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
@@ -442,7 +490,7 @@ async function toConveyor() {
     </div>
 
     <!-- Действие на конвейер (только для задачи) -->
-    <div v-if="sess.taskId && sess.messages.length" class="cs-act">
+    <div v-if="sess.taskId && sess.messages?.length" class="cs-act">
       <div class="col act-row">
         <button class="act" :class="{ onconv: onConveyor }" @click="toConveyor">
           🏭 {{ onConveyor ? 'Уже на конвейере →' : 'На конвейер' }}

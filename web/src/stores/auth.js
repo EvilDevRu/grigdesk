@@ -13,10 +13,16 @@ export const useAuthStore = defineStore('auth', {
     configured: true,
     authenticated: false,
     login: '',
-    tls: false,
+    // Браузер говорит с сервером по защищённой схеме (локальный TLS либо https на шлюзе).
+    secure: false,
     error: null,
     busy: false,
   }),
+  getters: {
+    // Открыто с самой машины: там http безопасен по определению, предупреждать не о чем.
+    isLocal: () => typeof location !== 'undefined'
+      && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname),
+  },
   actions: {
     async load() {
       try {
@@ -24,7 +30,7 @@ export const useAuthStore = defineStore('auth', {
         this.configured = s.configured;
         this.authenticated = s.authenticated;
         this.login = s.login || '';
-        this.tls = !!s.tls;
+        this.secure = !!s.secure;
       } catch {
         // Сервер недоступен — считаем невошедшим, экран входа покажет ошибку при попытке.
         this.authenticated = false;
