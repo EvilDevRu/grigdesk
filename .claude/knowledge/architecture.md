@@ -24,8 +24,8 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 | `media` | `/api/media/{doctor,upload,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
 | `settings` | `/api/settings/b24` (+ `/test`) | `CredsStore` (`.state`) |
 | `chat` | `POST /api/chat`, `POST /api/tasks/:id/chat`, `GET/PUT /api/chat/store` | `claude -p` + файлы `chats/` (см. [[chat-agents]]) |
-| `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` |
-| `routes` | CRUD `/api/routes[/:id]` | файлы `routes/<id>.json` |
+| `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
+| `routes` | CRUD `/api/routes/:profile[/:id]`, `POST …/reseed` | `routes/<профиль>/<id>.json` + промпты узлов `routes/<профиль>/<id>/<этап>.md` |
 | `providers` | `/api/providers` (реестр LLM-исполнителей, кэш 60с) | probe бинарей + `ClaudeAuthStore` |
 | `terminal` | `/api/terminal` (WebSocket) | PTY |
 | `health` | `/api/health` | — |
@@ -38,6 +38,23 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 перезапуск из бейджа топбара). Воркеров — `COCKPIT_ANALYSIS_CONCURRENCY` (дефолт 2);
 git-refresh перед оценкой — не чаще раза в 10 мин (волна задач не дёргает pull каждый раз).
 Одна оценка ~5–15 мин: очередь в 70 задач — это часы, «висит» ≠ сломано (смотри /api/analysis).
+
+**Агенты и промпты (модель данных):** агент в `agents/` — переиспользуемый ШАБЛОН роли
+(один id = один шаблон, коллизий и суффиксов `-<профиль>` больше нет, `.remap.json` умер).
+У шаблона явные `model` и `effort`: селекты в редакторе строятся из реестра исполнителей
+(`/api/providers`, без хардкода списков); `''` = сессионная модель / дефолт движка.
+Посев обновляет метаданные, но НЕ трогает курируемые поля: `prompt` (заготовка) и `effort`.
+Боевой промпт каждого этапа принадлежит СХЕМЕ: сайдкар `routes/<профиль>/<маршрут>/<этап>.md`.
+При добавлении узла в конструкторе заготовка копируется из шаблона в схему (инстанцирование)
+и дальше живёт своей жизнью; правка шаблона расставленные узлы НЕ меняет. В редакторе маршрутов
+клик по узлу → «Промпт этапа» (кнопки «Из шаблона» и «Применить во все схемы» — разнести общий
+текст, например уроки прогонов, по всем схемам проекта). Пустой промпт = сайдкар удаляется;
+промпты в `<id>.json` не живут (только сайдкары). Посев: метаданные шаблона — первый профиль
+по алфавиту, а ЗАГОТОВКА промпта посевом не трогается (курируется руками, обезличенные скелеты
+ролей без проектных путей); промпты узлов каждого профиля — из его bash-профиля
+(`extractProfilePrompts` в agents/seed.js).
+У стадий-статусов arsenkin (skeptic/validate/tcritic/simplify) промпт пуст ЗАКОННО — их ведут
+промпты соседних стадий (plan/tests/build).
 
 **UI-мелочи:** системный `confirm()` запрещён — единый `shared/ui/confirm.js`
 (`await confirmDialog(text, {danger, okText})`, тёмная модалка проекта). Тултип исполнителя

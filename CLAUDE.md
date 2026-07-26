@@ -22,12 +22,15 @@
   (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers).
 - **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Diff, Video, Terminal,
   Settings, TaskModal, ChatPanel), `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
-  ChatSession, ChatTabs, EffortSlider), `stores/` (Pinia: board, tasks, system, ui, pwa, chat, diff,
-  providers, ui-context), `shared/` (api-client, layout, format, graph-geom, route-layout, ProviderIcon, ui/).
+  ChatSession, ChatTabs, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
+  `stores/` (Pinia: board, tasks, system, ui, pwa, chat, diff, providers, ui-context), `shared/`
+  (api-client, layout, format, graph-geom, route-layout, diff — построчный LCS-дифф, ProviderIcon, ui/).
 - **bin/b24** — CLI-обёртка к B24-API (в PATH через симлинк). **deploy/** — systemd-юнит + install.sh.
 - **Базы в корне проекта** (самогитигнорятся, свой `.gitignore` внутри): `chats/` — история чатов
-  (`YYYY-MM/<id>.json`), `agents/` — агенты-стадии (`<id>.md`, frontmatter+промпт), `routes/` — маршруты
-  (`<id>.json`, цепочка+возвраты).
+  (`YYYY-MM/<id>.json`), `agents/` — ШАБЛОНЫ агентов (`<id>.md`, frontmatter+заготовка промпта; один id =
+  один шаблон, без коллизий по профилям), `routes/` — маршруты по проектам (`<профиль>/<id>.json`, цепочка+возвраты)
+  + **промпты узлов сайдкарами** `<профиль>/<id>/<этап>.md`. Промпт — свойство места в схеме, не агента:
+  при добавлении узла заготовка копируется из шаблона и дальше живёт в схеме (правится кликом по узлу).
 
 ## Ключевые эндпоинты
 
@@ -41,12 +44,24 @@
   и `attachments` (вложения). Вложения: `POST /api/chat/upload` (multipart → `chats/attachments/`),
   `GET /api/chat/attachment/:file` (превью). Диктовка: `POST /api/chat/transcribe` (аудио → whisper → текст).
   Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка).
-- Исполнители (ИИ): модульно в `server/src/lib/executors/` (один файл = один ИИ), модели —
-  редактируемый `server/.state/models.json`. `GET /api/providers` отдаёт всё для UI (см. chat-agents.md).
+  **Вопрос агента** (AskUserQuestion): SSE `chat-question` → тот же `POST /api/chat/permission/:pid`
+  с `{answers}` (ответ доезжает до агента через `deny.message` — см. chat-agents.md).
+  **Лента хода** (инструменты/размышления, как в чате VS Code): SSE `chat-step`, шаги нормализует
+  `lib/chat/stream-steps.js`, рисует `views/chat/StepList.vue`.
+- Исполнители (ИИ): модульно в `server/src/lib/executors/` (один файл = один ИИ; файлы на `_` —
+  вспомогательные, загрузчик их пропускает). Модели Claude берутся ИЗ БИНАРЯ установленного CLI
+  (`_claude-catalog.js`) и мёржатся в редактируемый `server/.state/models.json` — никаких
+  захардкоженных версий. `GET /api/providers` отдаёт всё для UI, `POST /api/providers/:id/update`
+  обновляет CLI кнопкой из настроек, `POST /api/providers/check-updates` — проверка новых версий
+  (она же идёт фоном раз в 6 часов → SSE `providers-update` → точка на иконке в топбаре).
+  **Автообновления нет и не будет: кокпит только сообщает** (см. chat-agents.md).
 - **Перезапуск сервера — только `bin/restart`** (гасит порт и ждёт освобождения; ручной kill+start
   между параллельными сессиями ловит EADDRINUSE).
 - Базы: `GET/POST/PUT/DELETE /api/agents[/:id]` (+`/reseed`), `GET/POST/PUT/DELETE /api/routes[/:id]`,
   `GET /api/providers` (реестр LLM-исполнителей; его же рисует топбар).
+- Вход: `GET /api/auth/state` (публичный), `POST /api/auth/{setup,login,logout,logout-all,password}`.
+  Гард (`plugins/auth.js`) закрывает **весь** `/api` включая GET и WS-upgrade; публичны только
+  `auth/{state,login,setup}` и `health`. UI — `views/LoginView.vue` + таб «Доступ» в настройках.
 - Система: `GET /api/system` (CPU% + RAM вкл. swap). Медиа: `GET /api/media/doctor`,
   `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт).
 - Настройки: `GET/POST /api/settings/b24` + `POST /api/settings/b24/test` (UI настроек — на табах).
@@ -67,6 +82,10 @@
   машинный (чтение `ORCH_PID`+`/proc`), не парсинг stdout.
 - **Медиа-конвейер** (whisper/ffmpeg) перенесён из b24-mcp; venv (492МБ) и модель (1.5ГБ)
   **переиспользуются** через `COCKPIT_MEDIA_PYTHON` (не дублируем).
+- **Вход — один пользователь, пароль scrypt-хешем в `.state`, сессия в httpOnly-cookie.**
+  Закрыт весь `/api` (чтение тоже: чаты, дифы, а через терминал — шелл). Экран входа показывает
+  само приложение по 401, серверных редиректов НЕТ — они конфликтуют с service worker'ом PWA.
+  `COCKPIT_TOKEN` убран: он утекал в публичный бандл через `VITE_COCKPIT_TOKEN`.
 - **Никаких хардкодов проекта в коде**: профиль из реестра, обнаружение профилей сканом
   `factory/profiles/*.graph.json`, портал/креды из «Настроек» (`.state`), пути через env. Пустой кокпит
   ничего не знает о конкретном проекте.
