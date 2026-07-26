@@ -6,7 +6,7 @@ set -euo pipefail
 PORT="${COCKPIT_PORT:-8140}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${COCKPIT_LOG:-$ROOT/server/.state/cockpit-server.log}"
-export COCKPIT_MEDIA_PYTHON="${COCKPIT_MEDIA_PYTHON:-/home/evildev/Workspace/b24-mcp/app/.venv/bin/python}"
+export COCKPIT_MEDIA_PYTHON="${COCKPIT_MEDIA_PYTHON:-$HOME/Workspace/b24-mcp/app/.venv/bin/python}"
 
 busy() { ss -tln 2>/dev/null | grep -q ":$PORT "; }
 

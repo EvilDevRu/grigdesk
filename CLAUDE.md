@@ -110,4 +110,4 @@ cd web && npm run dev             # dev-фронт (:5180, проксирует 
 
 Кокпит замещает b24-mcp. Переведены на `bin/b24`: `/commit-task`, `/pr-fixes`. Медиа-конвейер и
 раздел «Видео» замещают `/video-task`. Осталось: репойнт `/b24` и `factory b24-timer.mjs`, удалить хук
-`arsenkin-b24-factory.sh` + записи в `settings.json`/`~/.claude.json`, погасить контейнеры MCP.
+`<профиль>-b24-factory.sh` + записи в `settings.json`/`~/.claude.json`, погасить контейнеры MCP.

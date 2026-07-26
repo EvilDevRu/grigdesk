@@ -1,4 +1,4 @@
-// Клиент к порталу b24.discript.ru (Битрикс24).
+// Клиент к порталу Битрикс24 (адрес портала — из настроек кокпита).
 //
 // Авторизация — как в браузере: POST формы логина /salary/?login=yes отдаёт
 // сессионные куки (BITRIX_SM_*, PHPSESSID), дальше все запросы идут с этими
@@ -81,7 +81,7 @@ function extractDivById(html, id) {
 export class B24Client {
     /**
      * @param {object} opts
-     * @param {string} opts.baseUrl   например https://b24.discript.ru
+     * @param {string} opts.baseUrl   адрес портала, например https://b24.example.com
      * @param {string} opts.login     логин (email)
      * @param {string} opts.password  пароль
      * @param {string|null} opts.cookiePath путь для хранения кук между запусками
@@ -594,7 +594,7 @@ export class B24Client {
 
     /**
      * Определяет «проект по умолчанию» — самую частую группу среди моих задач
-     * (на этом портале это обычно arsenkin.ru). Возвращает { groupId, groupName } или null.
+     * (обычно это домен проекта, например example.com). Возвращает { groupId, groupName } или null.
      */
     async resolveDefaultGroup() {
         const tasks = await this.listTasks({ all: true });
