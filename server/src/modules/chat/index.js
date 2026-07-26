@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { ingestRecording } from '../../lib/media/ingest.js';
 import { getExecutor } from '../../lib/executors/index.js';
 import { modelInfo } from '../../lib/models-registry.js';
+import { ChatHistoryStore } from '../../lib/chat/history-store.js';
 
 const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
 
@@ -397,118 +398,17 @@ async function chatModule(fastify, opts) {
     return runChat(reply, request, { id: null, message, model, effort, sessionId, context, attachments, chatKey });
   });
 
-  // ── Хранилище истории чатов: папка chats/ в корне проекта ──
-  // Каждый чат — свой файл chats/YYYY-MM/<id>.json (месяц создания чата),
-  // мета (активный чат, дефолты) — chats/meta.json. Битый файл одного чата
-  // не валит остальную историю.
-  const chatsDir = config.chatsDir;
+  // ── Хранилище истории чатов: файлы chats/YYYY-MM/<id>.json (см. lib/chat/history-store) ──
+  const history = new ChatHistoryStore({
+    chatsDir: config.chatsDir,
+    legacyPath: config.chatStoreLegacyPath,
+    log: fastify.log,
+  });
 
-  async function ensureChatsDir() {
-    await fs.mkdir(chatsDir, { recursive: true });
-    const gi = path.join(chatsDir, '.gitignore');
-    try { await fs.access(gi); } catch { await fs.writeFile(gi, '*\n!.gitignore\n'); }
-  }
-
-  function monthOf(c) {
-    return new Date(c.createdAt || c.updatedAt || Date.now()).toISOString().slice(0, 7);
-  }
-
-  function fileOf(c) {
-    return path.join(chatsDir, monthOf(c), `${c.id}.json`);
-  }
-
-  /**
-   * Скан всех чат-файлов: Map id → { path, chat, json }.
-   * Нечитаемый/битый файл пропускаем — теряется один чат, не вся история.
-   */
-  async function scanChats() {
-    const map = new Map();
-    let months = [];
-    try { months = await fs.readdir(chatsDir); } catch { return map; }
-    for (const m of months) {
-      if (!/^\d{4}-\d{2}$/.test(m)) continue;
-      const mdir = path.join(chatsDir, m);
-      for (const f of await fs.readdir(mdir)) {
-        if (!f.endsWith('.json')) continue;
-        const p = path.join(mdir, f);
-        try {
-          const json = await fs.readFile(p, 'utf8');
-          const chat = JSON.parse(json);
-          if (chat?.id) map.set(chat.id, { path: p, chat, json });
-        } catch (e) {
-          fastify.log.warn({ file: p, err: e.message }, 'чат-файл не читается, пропущен');
-        }
-      }
-    }
-    return map;
-  }
-
-  async function writeAtomic(p, data) {
-    await fs.mkdir(path.dirname(p), { recursive: true });
-    await fs.writeFile(p + '.tmp', data);
-    await fs.rename(p + '.tmp', p);
-  }
-
-  /**
-   * Раскладывает стор по файлам: пишет только изменившиеся чаты,
-   * удаляет файлы исчезнувших, переносит файл при смене месяца (не должно случаться).
-   */
-  async function saveStore(body) {
-    await ensureChatsDir();
-    const incoming = [
-      ...(body.sessions || []).map((c) => ({ ...c, archived: false })),
-      ...(body.archived || []).map((c) => ({ ...c, archived: true })),
-    ];
-    const existing = await scanChats();
-    const seen = new Set();
-    for (const c of incoming) {
-      if (!c.id) continue;
-      c.createdAt = c.createdAt || c.updatedAt || Date.now();
-      seen.add(c.id);
-      const target = fileOf(c);
-      const json = JSON.stringify(c);
-      const prev = existing.get(c.id);
-      if (prev && prev.path === target && prev.json === json) continue;
-      await writeAtomic(target, json);
-      if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
-    }
-    for (const [id, v] of existing) {
-      if (!seen.has(id)) await fs.rm(v.path, { force: true });
-    }
-    await writeAtomic(path.join(chatsDir, 'meta.json'), JSON.stringify({
-      activeId: body.activeId ?? null, defModel: body.defModel, defEffort: body.defEffort,
-    }));
-  }
-
-  async function readStore() {
-    let map = await scanChats();
-    // Одноразовая миграция со старой схемы «всё в одном файле».
-    if (!map.size) {
-      try {
-        const legacy = JSON.parse(await fs.readFile(config.chatStoreLegacyPath, 'utf8'));
-        if (legacy?.sessions?.length || legacy?.archived?.length) {
-          await saveStore(legacy);
-          await fs.rename(config.chatStoreLegacyPath, config.chatStoreLegacyPath + '.migrated');
-          map = await scanChats();
-        }
-      } catch { /* старого файла нет — начинаем с пустого */ }
-    }
-    let meta = {};
-    try { meta = JSON.parse(await fs.readFile(path.join(chatsDir, 'meta.json'), 'utf8')); } catch { /* меты ещё нет */ }
-    const all = [...map.values()].map((v) => v.chat).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-    return {
-      sessions: all.filter((c) => !c.archived),
-      archived: all.filter((c) => c.archived),
-      activeId: meta.activeId ?? null,
-      defModel: meta.defModel,
-      defEffort: meta.defEffort,
-    };
-  }
-
-  fastify.get('/api/chat/store', async () => readStore());
+  fastify.get('/api/chat/store', async () => history.read());
 
   fastify.put('/api/chat/store', async (request) => {
-    await saveStore(request.body || {});
+    await history.save(request.body || {});
     return { ok: true };
   });
 }

@@ -32,19 +32,14 @@ prov.load();
 // Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
-const modelId = computed(() => prov.resolveModelId(sess.value?.model) || prov.defaultModelId);
+const current = computed(() => prov.modelOf(sess.value?.model));
+const modelId = computed(() => current.value.id);
+const currentModel = computed(() => current.value.model);
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь кокпит).
 const provGroups = computed(() => prov.providers
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
-const currentModel = computed(() => {
-  for (const p of prov.providers) {
-    const m = (p.models || []).find((x) => x.id === modelId.value);
-    if (m) return m;
-  }
-  return null;
-});
 const effortLevels = computed(() => currentModel.value?.efforts || ['low', 'medium', 'high', 'max']);
 const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
@@ -67,15 +62,9 @@ const modelMismatch = computed(() => {
   if (!a || !want) return false;
   return !a.startsWith(String(want).replace(/\[1m\]$/, '')) && a !== want;
 });
-function providerIdOf(modelId) {
-  for (const p of prov.providers) {
-    if ((p.models || []).some((m) => m.id === modelId)) return p.id;
-  }
-  return null;
-}
 function onModelChange(e) {
-  const oldProv = providerIdOf(modelId.value);
-  const newProv = providerIdOf(e.target.value);
+  const oldProv = current.value.provider?.id;
+  const newProv = prov.modelOf(e.target.value).provider?.id;
   chat.setModel(props.sid, e.target.value);
   // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
   // резюмить им нельзя: сбрасываем контекст, история чата остаётся.

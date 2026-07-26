@@ -45,6 +45,22 @@ export const useProvidersStore = defineStore('providers', {
       }
       return id; // реестр не загружен или модель незнакомая — отдаём как есть
     },
+    /**
+     * Всё про модель чата одним вызовом: `{ id, model, provider }`. Пустое значение
+     * и алиас разворачиваются как обычно (`resolveModelId` + `defaultModelId`).
+     * Единая точка: и селект в чате, и строка списка чатов, и отправка спрашивают отсюда,
+     * а не ищут модель по реестру каждый своим циклом.
+     */
+    modelOf() {
+      return (sessionModel) => {
+        const id = this.resolveModelId(sessionModel) || this.defaultModelId;
+        for (const p of this.providers) {
+          const model = (p.models || []).find((m) => m.id === id);
+          if (model) return { id, model, provider: p };
+        }
+        return { id, model: null, provider: null };
+      };
+    },
   },
   actions: {
     async load(refresh = false) {

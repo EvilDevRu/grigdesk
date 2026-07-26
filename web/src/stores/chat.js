@@ -451,7 +451,7 @@ export const useChatStore = defineStore('chat', {
         // пустое значение — модель по умолчанию из реестра.
         const provStore = useProvidersStore();
         const r = await api.post(url, {
-          message: text, model: provStore.resolveModelId(s.model) || provStore.defaultModelId, effort: s.effort,
+          message: text, model: provStore.modelOf(s.model).id, effort: s.effort,
           sessionId: s.sessionId, context, chatKey: id,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });

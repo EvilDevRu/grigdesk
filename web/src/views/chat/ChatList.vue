@@ -9,26 +9,19 @@ import { confirmDialog } from '../../shared/ui/confirm.js';
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
 const chat = useChatStore();
 
+const prov = useProvidersStore();
+prov.load();
+
 const q = ref('');
-const rows = computed(() => chat.list(q.value));
+// Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
+// Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
+const rows = computed(() => chat.list(q.value).map((r) => {
+  const { model, provider } = prov.modelOf(r.model);
+  return { ...r, provider, modelName: model?.name || '' };
+}));
 
 // Буква — фоллбэк, пока реестр исполнителей не загрузился (иначе аватар пустой).
 function letter(r) { return r.taskId ? '#' : (r.title[0] || '?').toUpperCase(); }
-
-// ── Кто отвечает в чате: иконка исполнителя и короткое имя модели ──
-const prov = useProvidersStore();
-prov.load();
-function modelOf(r) {
-  const id = prov.resolveModelId(r.model) || prov.defaultModelId;
-  for (const p of prov.providers) {
-    const m = (p.models || []).find((x) => x.id === id);
-    if (m) return { model: m, provider: p };
-  }
-  return null;
-}
-function providerOf(r) { return modelOf(r)?.provider || null; }
-// В строку списка влезает только короткое имя: «Opus 5», без «— последняя» и хвостов.
-function modelName(r) { return modelOf(r)?.model?.name || ''; }
 
 // Относительное время как в телеге
 function ago(ts) {
@@ -75,8 +68,8 @@ async function del(r) {
            @click="chat.selectChat(r.id)" @dblclick="startEdit(r)">
         <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
              Агент работает — белое кольцо вокруг (внутренний спиннер сливался с цветом) -->
-        <span class="ava" :class="{ live: r.sending }" :title="modelName(r) || 'Модель по умолчанию'">
-          <ProviderIcon v-if="providerOf(r)" :provider="providerOf(r)" :size="19" />
+        <span class="ava" :class="{ live: r.sending }" :title="r.modelName || 'Модель по умолчанию'">
+          <ProviderIcon v-if="r.provider" :provider="r.provider" :size="19" />
           <template v-else>{{ letter(r) }}</template>
         </span>
         <div class="mid">
@@ -85,7 +78,7 @@ async function del(r) {
           <template v-else>
             <div class="t1">
               <span class="name">{{ r.title }}</span>
-              <span v-if="modelName(r)" class="mdl">{{ modelName(r) }}</span>
+              <span v-if="r.modelName" class="mdl">{{ r.modelName }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </div>
             <div class="t2 muted">
