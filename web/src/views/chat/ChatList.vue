@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue';
 import { useChatStore } from '../../stores/chat.js';
+import { useProvidersStore } from '../../stores/providers.js';
+import ProviderIcon from '../../shared/ProviderIcon.vue';
 import { confirmDialog } from '../../shared/ui/confirm.js';
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — все чаты (открытые + архив) свежие сверху.
@@ -10,14 +12,23 @@ const chat = useChatStore();
 const q = ref('');
 const rows = computed(() => chat.list(q.value));
 
-// Аватар: устойчивый цвет из названия, буква (для задач — #)
-const HUES = [212, 340, 25, 130, 275, 45, 180, 95];
-function hue(t) {
-  let h = 0;
-  for (const c of t) h = (h * 31 + c.charCodeAt(0)) % 9973;
-  return HUES[h % HUES.length];
-}
+// Буква — фоллбэк, пока реестр исполнителей не загрузился (иначе аватар пустой).
 function letter(r) { return r.taskId ? '#' : (r.title[0] || '?').toUpperCase(); }
+
+// ── Кто отвечает в чате: иконка исполнителя и короткое имя модели ──
+const prov = useProvidersStore();
+prov.load();
+function modelOf(r) {
+  const id = prov.resolveModelId(r.model) || prov.defaultModelId;
+  for (const p of prov.providers) {
+    const m = (p.models || []).find((x) => x.id === id);
+    if (m) return { model: m, provider: p };
+  }
+  return null;
+}
+function providerOf(r) { return modelOf(r)?.provider || null; }
+// В строку списка влезает только короткое имя: «Opus 5», без «— последняя» и хвостов.
+function modelName(r) { return modelOf(r)?.model?.name || ''; }
 
 // Относительное время как в телеге
 function ago(ts) {
@@ -62,9 +73,11 @@ async function del(r) {
       <div v-if="!rows.length" class="none muted">Ничего не найдено</div>
       <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived }"
            @click="chat.selectChat(r.id)" @dblclick="startEdit(r)">
-        <!-- Агент работает — белое кольцо вокруг аватара (внутренний спиннер сливался с цветом) -->
-        <span class="ava" :class="{ live: r.sending }" :style="{ background: `hsl(${hue(r.title)} 42% 46%)` }">
-          {{ letter(r) }}
+        <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
+             Агент работает — белое кольцо вокруг (внутренний спиннер сливался с цветом) -->
+        <span class="ava" :class="{ live: r.sending }" :title="modelName(r) || 'Модель по умолчанию'">
+          <ProviderIcon v-if="providerOf(r)" :provider="providerOf(r)" :size="19" />
+          <template v-else>{{ letter(r) }}</template>
         </span>
         <div class="mid">
           <input v-if="editId === r.id" ref="editEl" v-model="editVal" class="edit"
@@ -72,9 +85,12 @@ async function del(r) {
           <template v-else>
             <div class="t1">
               <span class="name">{{ r.title }}</span>
+              <span v-if="modelName(r)" class="mdl">{{ modelName(r) }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </div>
-            <div class="t2 muted">{{ r.snippet || 'Пустой чат' }}</div>
+            <div class="t2 muted">
+              <span v-if="r.draft" class="dr">черновик:</span>{{ r.snippet || 'Пустой чат' }}
+            </div>
           </template>
         </div>
         <span v-if="editId !== r.id" class="acts">
@@ -106,7 +122,8 @@ async function del(r) {
 .row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 .ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
-  color: #fff; font-size: 15px; font-weight: 600; position: relative; }
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
+  font-size: 15px; font-weight: 600; position: relative; }
 /* Кольцо «агент работает» — контрастно на аватаре любого цвета */
 .ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
   border: 2.5px solid color-mix(in srgb, #fff 25%, transparent); border-top-color: #fff;
@@ -116,6 +133,11 @@ async function del(r) {
 .t1 { display: flex; align-items: baseline; gap: 6px; }
 .name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ago { flex: none; font-size: 11px; }
+/* Модель чата — мелкой подписью рядом с названием; при нехватке места жертвуем ею, а не названием */
+.mdl { flex: none; font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px;
+  padding: 0 5px; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Неотправленный текст — как в телеграме: пометка цветом, дальше сам текст */
+.dr { color: var(--warn, #e0a33a); margin-right: 4px; }
 .t2 { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
 .edit { width: 100%; height: 30px; background: var(--ground); border: 1px solid var(--line-2); border-radius: 7px;
   color: var(--ink); font-size: 13px; padding: 0 8px; outline: none; font-family: inherit; }

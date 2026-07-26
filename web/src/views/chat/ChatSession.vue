@@ -124,11 +124,27 @@ const RING_C = 2 * Math.PI * 9;
 const ringDash = computed(() => RING_C * (1 - ctxPct.value / 100));
 
 // ── Ввод ──
-const input = ref('');
+const input = ref(sess.value?.draft || '');
 const body = ref(null);
 function scrollDown() { if (body.value) body.value.scrollTop = body.value.scrollHeight; }
-// Переключение на другой чат — тоже в конец истории
-watch(() => props.sid, async () => { await nextTick(); scrollDown(); });
+// Переключение на другой чат: подставляем его черновик и — в конец истории.
+watch(() => props.sid, async () => {
+  input.value = sess.value?.draft || '';
+  await nextTick();
+  scrollDown();
+});
+// Набранный, но не отправленный текст живёт в чате (и на сервере): переключение чатов,
+// перезагрузка страницы и второе окно его не теряют. Пишем с задержкой — не на каждую букву.
+let draftTimer = null;
+watch(input, (v) => {
+  clearTimeout(draftTimer);
+  const sid = props.sid;
+  draftTimer = setTimeout(() => chat.setDraft(sid, v), 400);
+});
+// Уход со страницы/закрытие вкладки — дописываем черновик немедленно, дебаунс не успел бы.
+function flushDraft() { clearTimeout(draftTimer); chat.setDraft(props.sid, input.value); }
+window.addEventListener('beforeunload', flushDraft);
+onUnmounted(() => { flushDraft(); window.removeEventListener('beforeunload', flushDraft); });
 async function submit() {
   const t = input.value.trim();
   const atts = pending.value.slice();
@@ -136,6 +152,10 @@ async function submit() {
   // Точное имя команды — выполняем её, а не шлём агенту.
   if (COMMANDS.some((c) => c.cmd === t)) { runCommand(t); return; }
   input.value = '';
+  // Черновик отправленного сообщения гасим сразу: дебаунс успел бы записать его
+  // уже после отправки, и в списке чат остался бы «с черновиком».
+  clearTimeout(draftTimer);
+  chat.setDraft(props.sid, '');
   pending.value = [];
   await chat.send(props.sid, t, atts);
   await nextTick();

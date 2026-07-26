@@ -30,7 +30,43 @@ function pickStore(j) {
 }
 
 let persistTimer = null;
+let retryTimer = null;
+let retryDelay = 0;
 let loadPromise = null;
+
+// ── Страховочный снимок истории в браузере ────────────────────────────────────
+// Сервер пишет историю в файлы, но между «ответ пришёл» и «PUT долетел» есть окно:
+// если в него попадает рестарт сервера, последний ответ пропадает. Снимок закрывает
+// именно это окно — при загрузке берём его, если он свежее серверного.
+const SNAP_KEY = 'cockpit-chat-snapshot';
+
+function writeSnapshot(payload) {
+  try {
+    localStorage.setItem(SNAP_KEY, JSON.stringify(payload));
+  } catch {
+    // Не влезло (квота ~5МБ) — кладём укороченную версию: свежие сообщения важнее старых.
+    try {
+      const cut = {
+        ...payload,
+        sessions: (payload.sessions || []).map((s) => ({ ...s, messages: (s.messages || []).slice(-30) })),
+        archived: [],
+      };
+      localStorage.setItem(SNAP_KEY, JSON.stringify(cut));
+    } catch { /* localStorage недоступен — работаем без страховки */ }
+  }
+}
+
+function readSnapshot() {
+  try { return JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'); } catch { return null; }
+}
+
+/**
+ * «Возраст» состояния — самое свежее изменение среди чатов. По нему решаем,
+ * кто новее: серверная копия или локальный снимок (в другом окне могли писать).
+ */
+function stampOf(store) {
+  return Math.max(0, ...(store?.sessions || []).map((s) => s.updatedAt || 0));
+}
 let permEs = null; // SSE-подписка на запросы разрешений (одна на окно)
 // «Разрешать до конца сессии»: chatKey → Set(инструментов). Только в памяти —
 // умирает с перезагрузкой страницы, в allowlist навсегда ничего не попадает.
@@ -61,12 +97,18 @@ export const useChatStore = defineStore('chat', {
             const i = m.text.toLowerCase().indexOf(t);
             snippet = (i > 24 ? '…' : '') + m.text.slice(Math.max(0, i - 24), i + 72);
           }
+        } else if ((sess.draft || '').trim()) {
+          // Неотправленный текст показываем вместо последнего сообщения — как в телеграме.
+          snippet = sess.draft;
         } else if (msgs.length) {
           const last = msgs[msgs.length - 1];
           snippet = (last.role === 'user' ? 'Ты: ' : last.role === 'error' ? '⚠ ' : '') + last.text;
         }
         return {
           id: sess.id, title, snippet: snippet.replace(/\s+/g, ' '), archived,
+          draft: !t && !!(sess.draft || '').trim(),
+          // Модель чата — для иконки исполнителя и подписи в строке списка.
+          model: sess.model || '',
           taskId: sess.taskId, sending: !!sess.sending, ts: sess.updatedAt || sess.closedAt || 0,
         };
       };
@@ -86,6 +128,11 @@ export const useChatStore = defineStore('chat', {
         loadPromise = (async () => {
           let j = null;
           try { j = await api.get('/api/chat/store'); } catch { j = null; }
+          // Снимок свежее серверной копии — значит сервер не успел записать последнее
+          // (например, его перезапустили сразу после ответа агента): восстанавливаем из него.
+          const snap = readSnapshot();
+          const restored = snap && stampOf(snap) > stampOf(j);
+          if (restored) j = snap;
           if (!(j?.sessions?.length || j?.archived?.length)) {
             try {
               const ls = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
@@ -97,7 +144,8 @@ export const useChatStore = defineStore('chat', {
           }
           Object.assign(this, pickStore(j));
           this.loaded = true;
-          if (j) this._persist();
+          // Восстановленное из снимка сразу возвращаем на сервер (flush, без дебаунса).
+          if (j) this._persist(restored);
           // Ответы, доехавшие пока страница была закрыта/перезагружалась.
           await this._collectPending();
           // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
@@ -150,11 +198,24 @@ export const useChatStore = defineStore('chat', {
         const slim = this.sessions.map((s) => ({
           id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort,
           messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
-          createdAt: s.createdAt, updatedAt: s.updatedAt,
+          draft: s.draft || '', createdAt: s.createdAt, updatedAt: s.updatedAt,
         }));
-        api.put('/api/chat/store', {
-          sessions: slim, archived: this.archived, activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort,
-        }).catch(() => { /* сервер недоступен — сохранится при следующем изменении */ });
+        const payload = {
+          sessions: slim, archived: this.archived, activeId: this.activeId,
+          defModel: this.defModel, defEffort: this.defEffort,
+        };
+        // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
+        // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
+        // на котором он бы сохранился, могло и не быть.
+        writeSnapshot(payload);
+        api.put('/api/chat/store', payload)
+          .then(() => { retryDelay = 0; })
+          .catch(() => {
+            // Сервер недоступен (перезапускается) — повторяем с нарастающей паузой.
+            retryDelay = Math.min(retryDelay ? retryDelay * 2 : 1000, 15000);
+            clearTimeout(retryTimer);
+            retryTimer = setTimeout(write, retryDelay);
+          });
       };
       if (flush) write();
       else persistTimer = setTimeout(write, 300);
@@ -167,7 +228,7 @@ export const useChatStore = defineStore('chat', {
         // Пустая модель = «по умолчанию»: конкретный id подставится из реестра при показе
         // и отправке. Фиксировать здесь нельзя — реестр к этому моменту может не загрузиться.
         model: this.defModel, effort: this.defEffort, createdAt: Date.now(), updatedAt: Date.now(),
-        messages: [], sessionId: null, contextTokens: 0, sending: false, error: null,
+        messages: [], sessionId: null, contextTokens: 0, sending: false, error: null, draft: '',
       };
       this.sessions.push(s);
       this.activeId = s.id;
@@ -338,6 +399,17 @@ export const useChatStore = defineStore('chat', {
       this._persist();
     },
     setModel(id, m) { const s = this._get(id); if (!s) return; s.model = m; this.defModel = m; this._persist(); },
+    /**
+     * Черновик неотправленного сообщения. Живёт в чате (и на сервере), поэтому
+     * переключение чатов и перезагрузка страницы его не теряют — как в телеграме.
+     * updatedAt НЕ трогаем: набор текста не должен поднимать чат в списке.
+     */
+    setDraft(id, text) {
+      const s = this._get(id);
+      if (!s || (s.draft || '') === text) return;
+      s.draft = text;
+      this._persist();
+    },
     setEffort(id, e) { const s = this._get(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
     cycleEffort(id) { const s = this._get(id); if (!s) return; this.setEffort(id, EFFORTS[(EFFORTS.indexOf(s.effort) + 1) % EFFORTS.length]); },
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
