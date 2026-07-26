@@ -3,6 +3,9 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { claudeCatalog } from './_claude-catalog.js';
+import { npmLatest } from './_npm-latest.js';
+import { toStep } from '../chat/stream-steps.js';
 
 /**
  * probe/efforts гоняют CLI — короткие таймауты, ошибки не роняют реестр.
@@ -146,26 +149,48 @@ export default {
   },
 
   /**
-   * Стартовый сид моделей (дальше живёт в редактируемом models.json).
-   * efforts: null = взять динамически обнаруженные у CLI.
+   * Каталог моделей УСТАНОВЛЕННОГО CLI (скан бинаря; имена выводятся из id).
+   * Пересобирается при смене версии CLI — новые модели появляются сами, а имена
+   * никогда не расходятся с реальностью («Opus 4.8» при opus → claude-opus-4-6).
+   */
+  catalog(config) {
+    return claudeCatalog(config);
+  },
+
+  /**
+   * Обновление CLI (кнопка «Обновить» в настройках → «Исполнители»).
+   * Само не запускается — только по нажатию пользователя.
+   */
+  updateCmd: ['install', 'latest'],
+
+  /**
+   * Последняя опубликованная версия — для индикатора «доступно обновление».
+   * Нативная сборка и npm-пакет идут под одним номером, поэтому реестра достаточно.
+   */
+  latestVersion() {
+    return npmLatest('@anthropic-ai/claude-code');
+  },
+
+  /**
+   * Стартовый сид — только на случай, если каталог не прочитался (нет бинаря).
+   * Никаких версий в подписях: алиасы CLI резолвит сам.
    */
   seedModels() {
     return [
-      // fable — алиаса в CLI нет, только полный ID
-      { id: 'claude-fable-5', name: 'Fable 5', context: 200000, tier: 100, efforts: null },
-      { id: 'opus', name: 'Opus 4.8', context: 200000, tier: 90, efforts: null },
-      { id: 'sonnet', name: 'Sonnet 5', context: 200000, tier: 80, efforts: null },
-      { id: 'haiku', name: 'Haiku 4.5', context: 200000, tier: 40, efforts: null },
+      { id: 'opus', name: 'Opus — последняя', context: 200000, tier: 8995, efforts: null, alias: true },
+      { id: 'sonnet', name: 'Sonnet — последняя', context: 200000, tier: 6995, efforts: null, alias: true },
+      { id: 'haiku', name: 'Haiku — последняя', context: 200000, tier: 3995, efforts: null, alias: true },
     ];
   },
 
   /**
    * Запуск: claude -p с резюмом сессии, MCP-конфигом всплывашки разрешений и т.д.
-   * Вывод — stream-json: по ходу работы считаем потраченные токены и дёргаем
-   * onProgress (кокпит транслирует в UI «думает… · N ток.»).
-   * Возвращает { reply, sessionId, contextTokens, cost } или бросает Error.
+   * Вывод — stream-json: по ходу работы считаем потраченные токены (onProgress →
+   * «думает… · N ток.») и разбираем события в ШАГИ (onStep → лента инструментов
+   * и размышлений в чате, как в VS Code).
+   * Возвращает { reply, sessionId, contextTokens, cost, actualModel, steps } или бросает Error.
    */
-  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress }) {
+  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress, onStep }) {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
     if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
@@ -177,7 +202,22 @@ export default {
     return new Promise((resolve, reject) => {
       let resultEv = null;
       let spentTokens = 0;
+      let lastTurnInput = 0;
       let buf = '';
+      // Лента шагов хода: копим на сервере (уедет в историю чата) и параллельно
+      // отдаём наружу через onStep — окно рисует их по мере поступления.
+      const steps = [];
+      // Модель, которой CLI ФАКТИЧЕСКИ отработал: алиас `opus` он резолвит сам,
+      // и это единственный способ увидеть рассинхрон с выбором в кокпите.
+      let actualModel = '';
+      const pushSteps = (ev) => {
+        for (const s of toStep(ev)) {
+          // at — чтобы в ленте было видно, сколько агент думал (как «Thought for 49s»).
+          s.at = Date.now();
+          if (steps.length < 400) steps.push(s);
+          try { onStep?.(s); } catch { /* лента не критична для хода */ }
+        }
+      };
       const timeoutMs = config.chatTimeoutMs || 3600000;
       const child = execFile(config.claudeBin, args, { cwd, env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
         // Подстраховка: финальная строка могла остаться в буфере без \n.
@@ -194,19 +234,24 @@ export default {
           return reject(new Error(tail || `claude завершился без результата (код ${err?.code ?? '?'})`));
         }
         const j = resultEv;
-        const u = j.usage || {};
-        // Размер контекста = все входные токены последнего запроса (обычные + кэш).
-        const contextTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+        // Размер контекста = входные токены ПОСЛЕДНЕГО хода (из потока assistant-событий).
+        // result.usage — это СУММА за все ходы, она может многократно превышать окно.
+        const contextTokens = lastTurnInput || ((u) => (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0))(j.usage || {});
         // Пустой result — агент завершил ход без текста (не разрешили действие, лимит шагов).
         let reply = j.result || '';
         if (!reply) {
           log?.warn({ subtype: j.subtype, turns: j.num_turns, denials: j.permission_denials }, 'чат: пустой result от claude');
-          const denied = [...new Set((j.permission_denials || []).map((d) => d.tool_name).filter(Boolean))];
+          // AskUserQuestion кокпит «отклоняет» намеренно — так ответ пользователя доезжает
+          // до агента (см. modules/chat). Это не отказ в действии, в текст его не тащим.
+          const denied = [...new Set((j.permission_denials || []).map((d) => d.tool_name).filter((n) => n && n !== 'AskUserQuestion'))];
           if (j.subtype === 'error_max_turns') reply = '⚠ Агент упёрся в лимит шагов и не успел сформулировать ответ. Переформулируй запрос или разбей его на части.';
           else if (denied.length) reply = `⚠ Действия не были разрешены (${denied.join(', ')}) — агент завершил ход без ответа. Разреши действие во всплывашке или переформулируй запрос.`;
           else reply = '⚠ Агент завершил ход без текстового ответа. Повтори вопрос — контекст сохранён.';
         }
-        resolve({ reply, sessionId: j.session_id || sessionId || null, cost: j.total_cost_usd ?? null, contextTokens });
+        resolve({
+          reply, sessionId: j.session_id || sessionId || null, cost: j.total_cost_usd ?? null,
+          contextTokens, actualModel, steps,
+        });
       });
       // stdin не используем — закрываем сразу, иначе claude ждёт ввода (3с warning, бывают зависания).
       child.stdin?.end();
@@ -220,8 +265,16 @@ export default {
           if (!line.startsWith('{')) continue;
           let ev;
           try { ev = JSON.parse(line); } catch { continue; }
-          if (ev.type === 'assistant' && ev.message?.usage) {
-            spentTokens += ev.message.usage.output_tokens || 0;
+          pushSteps(ev);
+          if (ev.type === 'system' && ev.subtype === 'init' && ev.model) {
+            actualModel = ev.model;
+          } else if (ev.type === 'assistant' && ev.message?.usage) {
+            const mu = ev.message.usage;
+            spentTokens += mu.output_tokens || 0;
+            // Полный id модели хода (с датой сборки) точнее, чем алиас из init.
+            if (ev.message.model) actualModel = ev.message.model;
+            // Входные токены последнего хода — реальная заполненность окна контекста.
+            lastTurnInput = (mu.input_tokens || 0) + (mu.cache_read_input_tokens || 0) + (mu.cache_creation_input_tokens || 0);
             try { onProgress?.(spentTokens); } catch { /* прогресс не критичен */ }
           } else if (ev.type === 'result') {
             resultEv = ev;

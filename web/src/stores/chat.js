@@ -7,6 +7,7 @@ import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
+import { useProvidersStore } from './providers.js';
 import { notify } from '../shared/notify.js';
 
 const EFFORTS = ['low', 'medium', 'high', 'max'];
@@ -22,8 +23,9 @@ function pickStore(j) {
     sessions: Array.isArray(j?.sessions) ? j.sessions : [],
     archived: Array.isArray(j?.archived) ? j.archived : [],
     activeId: j?.activeId || null,
-    defModel: j?.defModel || 'opus',
-    defEffort: j?.defEffort || 'high',
+    // Пусто = «ещё не выбирали»: модель нового чата возьмётся из реестра (см. defaultModelId).
+    defModel: j?.defModel || '',
+    defEffort: j?.defEffort || 'max',
   };
 }
 
@@ -35,7 +37,9 @@ let permEs = null; // SSE-подписка на запросы разрешен�
 const permAutoAllow = {};
 
 export const useChatStore = defineStore('chat', {
-  state: () => ({ ...pickStore(null), loaded: false, open: false, conveyorIds: [], permReq: null }),
+  // permReq — запрос разрешения на действие, questionReq — вопрос агента (AskUserQuestion):
+  // это разные вещи, «разрешить/отклонить» на вопрос не отвечают.
+  state: () => ({ ...pickStore(null), loaded: false, open: false, conveyorIds: [], permReq: null, questionReq: null }),
   getters: {
     active: (s) => s.sessions.find((x) => x.id === s.activeId) || null,
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
@@ -101,7 +105,8 @@ export const useChatStore = defineStore('chat', {
             const { active } = await api.get('/api/chat/active');
             for (const a of active || []) {
               const s = this._get(a.chatKey);
-              if (s) { s.sending = true; s.progressTokens = a.tokens || 0; }
+              // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
+              if (s) { s.sending = true; s.progressTokens = a.tokens || 0; s.steps = a.steps || []; }
             }
           } catch { /* сервер старый/недоступен */ }
         })();
@@ -121,7 +126,10 @@ export const useChatStore = defineStore('chat', {
           if (p.userText && !(s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === p.userText)) {
             s.messages.push({ role: 'user', text: p.userText, pid: `${p.id}:u` });
           }
-          s.messages.push({ role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id });
+          s.messages.push({
+            role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id,
+            steps: p.steps || [], model: p.model || '', actualModel: p.actualModel || '', effort: p.effort || '',
+          });
           if (p.sessionId) s.sessionId = p.sessionId;
           if (typeof p.contextTokens === 'number' && p.contextTokens > 0) s.contextTokens = p.contextTokens;
           s.sending = false;
@@ -154,6 +162,8 @@ export const useChatStore = defineStore('chat', {
     newSession(opts = {}) {
       const s = {
         id: uid(), taskId: opts.taskId ? String(opts.taskId) : null, title: opts.title || '',
+        // Пустая модель = «по умолчанию»: конкретный id подставится из реестра при показе
+        // и отправке. Фиксировать здесь нельзя — реестр к этому моменту может не загрузиться.
         model: this.defModel, effort: this.defEffort, createdAt: Date.now(), updatedAt: Date.now(),
         messages: [], sessionId: null, contextTokens: 0, sending: false, error: null,
       };
@@ -167,7 +177,7 @@ export const useChatStore = defineStore('chat', {
     // (в т.ч. из другого окна или по таймауту) закрывает всплывашку везде.
     initPerms() {
       if (permEs) return;
-      permEs = new EventSource(api.eventsUrl());
+      permEs = new EventSource(api.eventsUrl(), { withCredentials: true });
       permEs.addEventListener('chat-permission', (e) => {
         try {
           const d = JSON.parse(e.data);
@@ -179,10 +189,23 @@ export const useChatStore = defineStore('chat', {
           this.permReq = d;
         } catch { /* битое событие */ }
       });
+      // Вопрос агента (AskUserQuestion): не разрешение, а диалог с вариантами ответа.
+      permEs.addEventListener('chat-question', (e) => {
+        try { this.questionReq = JSON.parse(e.data); } catch { /* битое событие */ }
+      });
       permEs.addEventListener('chat-permission-done', (e) => {
         try {
           const d = JSON.parse(e.data);
           if (this.permReq?.pid === d.pid) this.permReq = null;
+          if (this.questionReq?.pid === d.pid) this.questionReq = null;
+        } catch { /* битое событие */ }
+      });
+      // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
+      permEs.addEventListener('chat-step', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          const s = this._get(d.chatKey);
+          if (s && d.step) (s.steps ||= []).push(d.step);
         } catch { /* битое событие */ }
       });
       // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
@@ -214,6 +237,15 @@ export const useChatStore = defineStore('chat', {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
       }
       try { await api.post(`/api/chat/permission/${p.pid}`, { allow }); }
+      catch { /* запрос уже протух (таймаут/другое окно) */ }
+    },
+    // Ответ на вопрос агента: answers = [{ header, question, selected: [метки], text }].
+    // Сервер превращает их в текст, который агент читает как результат своего вопроса.
+    async answerQuestion(answers) {
+      const q = this.questionReq;
+      if (!q) return;
+      this.questionReq = null;
+      try { await api.post(`/api/chat/permission/${q.pid}`, { answers }); }
       catch { /* запрос уже протух (таймаут/другое окно) */ }
     },
 
@@ -316,6 +348,7 @@ export const useChatStore = defineStore('chat', {
       const atts = attachments.map((a) => ({ file: a.file, name: a.name, url: a.url, mime: a.mime }));
       s.messages.push({ role: 'user', text, ...(atts.length ? { attachments: atts } : {}) });
       s.sending = true; s.error = null; s.progressTokens = 0;
+      s.steps = []; // лента предыдущего хода уже уехала в своё сообщение
       s.updatedAt = Date.now();
       this._persist(true); // немедленно: вопрос не должен потеряться при F5/гонке окон
       try {
@@ -328,13 +361,24 @@ export const useChatStore = defineStore('chat', {
           path: route.path,
           ...(Object.keys(ui.extra).length ? { details: JSON.parse(JSON.stringify(ui.extra)) } : {}),
         };
+        // Модель: сохранённый алиас резолвим в конкретную (что показано в селекте, то и считает),
+        // пустое значение — модель по умолчанию из реестра.
+        const provStore = useProvidersStore();
         const r = await api.post(url, {
-          message: text, model: s.model, effort: s.effort, sessionId: s.sessionId, context, chatKey: id,
+          message: text, model: provStore.resolveModelId(s.model) || provStore.defaultModelId, effort: s.effort,
+          sessionId: s.sessionId, context, chatKey: id,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
         s.sessionId = r.sessionId;
         if (typeof r.contextTokens === 'number' && r.contextTokens > 0) s.contextTokens = r.contextTokens;
-        s.messages.push({ role: 'assistant', text: r.reply || '(пусто)', cost: r.cost });
+        // Лента хода переезжает в сообщение (серверная копия полнее: SSE мог что-то не донести),
+        // actualModel/effort — чем CLI отработал на самом деле (алиасы он резолвит сам).
+        s.messages.push({
+          role: 'assistant', text: r.reply || '(пусто)', cost: r.cost,
+          steps: (r.steps?.length ? r.steps : s.steps) || [],
+          model: r.model || s.model, actualModel: r.actualModel || '', effort: r.effort || s.effort,
+        });
+        s.steps = [];
         // Оповещение, если пользователь не смотрит на этот чат (другая вкладка ОС,
         // другой раздел с закрытой панелью или другой активный чат).
         const chatVisible = !document.hidden

@@ -6,12 +6,14 @@ import { useProvidersStore } from '../stores/providers.js';
 import { useUiContextStore } from '../stores/ui-context.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
+import { useAuthStore } from '../stores/auth.js';
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
 const TABS = [
   { id: 'b24', label: 'Битрикс24' },
   { id: 'providers', label: 'Исполнители' },
   { id: 'runs', label: 'Запуски' },
+  { id: 'access', label: 'Доступ' },
 ];
 const tab = ref(localStorage.getItem('cockpit-settings-tab') || 'b24');
 function setTab(id) { tab.value = id; localStorage.setItem('cockpit-settings-tab', id); }
@@ -70,6 +72,40 @@ function installInTerminal(p) {
   router.push('/terminal');
 }
 
+// Проверка новых версий CLI. Сервер и сам проверяет раз в 6 часов (индикатор в топбаре),
+// эта кнопка — «посмотреть прямо сейчас». Обновление НИКОГДА не запускается само.
+const checking = ref(false);
+async function checkUpdates() {
+  checking.value = true;
+  try {
+    await api.post('/api/providers/check-updates', {});
+    await prov.load(true);
+  } catch { /* сеть недоступна — индикатор просто останется прежним */ }
+  finally { checking.value = false; }
+}
+
+// Обновление CLI исполнителя. Версия CLI определяет и набор моделей: пока на хосте
+// старый claude, алиас `opus` резолвится в старую модель, а новых в каталоге нет.
+// После обновления кокпит пересобирает каталог моделей из нового бинаря.
+const updating = ref('');
+const updMsg = ref({});
+async function updateProvider(p) {
+  updating.value = p.id;
+  updMsg.value = { ...updMsg.value, [p.id]: null };
+  try {
+    const r = await api.post(`/api/providers/${p.id}/update`, {});
+    updMsg.value = {
+      ...updMsg.value,
+      [p.id]: r.changed
+        ? { type: 'ok', text: `Обновлён: ${r.before || '?'} → ${r.after}. Список моделей пересобран.` }
+        : { type: r.ok ? 'ok' : 'err', text: r.ok ? `Уже последняя версия (${r.after || r.before}).` : `Не получилось: ${(r.output || '').slice(-300)}` },
+    };
+    await prov.load(true);
+  } catch (e) {
+    updMsg.value = { ...updMsg.value, [p.id]: { type: 'err', text: e.message } };
+  } finally { updating.value = ''; }
+}
+
 // ── Запуски (правила перед стартом триажа/конвейера) ──
 const prefs = ref(null);
 const prefsMsg = ref(null);
@@ -84,7 +120,55 @@ async function toggleGitRefresh(v) {
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
 
-onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); });
+// Сколько моделей исполнителя сейчас скрыто из выбора — считаем тем же правилом,
+// по которому строится селект в чате (стор providers), а не своей копией условия.
+function hiddenCount(p) {
+  return (p.models || []).length - prov.visibleModels(p).length;
+}
+
+// Показ старых версий моделей в выборе чата. Сохраняем на сервере (настройка общая для всех
+// окон) и сразу отражаем в сторе — селект перестраивается без перезагрузки.
+const modelsMsg = ref(null);
+async function toggleShowAllModels(v) {
+  modelsMsg.value = null;
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { showAllModels: v });
+    prov.showAllModels = !!prefs.value.showAllModels;
+  } catch (e) { modelsMsg.value = { type: 'err', text: e.message }; }
+}
+
+// ── Доступ (вход в кокпит) ──
+const auth = useAuthStore();
+const acc = ref({ currentPassword: '', login: '', password: '', password2: '' });
+const accBusy = ref(false);
+const accMsg = ref(null);
+
+async function saveAccount() {
+  accMsg.value = null;
+  if (acc.value.password.length < 8) { accMsg.value = { type: 'err', text: 'Новый пароль — не короче 8 символов.' }; return; }
+  if (acc.value.password !== acc.value.password2) { accMsg.value = { type: 'err', text: 'Пароли не совпадают.' }; return; }
+  accBusy.value = true;
+  try {
+    const r = await api.post('/api/auth/password', {
+      currentPassword: acc.value.currentPassword,
+      login: acc.value.login,
+      password: acc.value.password,
+    });
+    acc.value = { currentPassword: '', login: acc.value.login, password: '', password2: '' };
+    accMsg.value = { type: 'ok', text: `Сохранено. ${r.note || ''}`.trim() };
+    await auth.load();
+  } catch (e) {
+    accMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally { accBusy.value = false; }
+}
+
+async function logoutAll() {
+  if (!confirm('Разлогинить все устройства, включая это?')) return;
+  try { await api.post('/api/auth/logout-all'); } catch { /* всё равно уходим на вход */ }
+  auth.authenticated = false;
+}
+
+onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); acc.value.login = auth.login || ''; });
 </script>
 
 <template>
@@ -134,14 +218,47 @@ onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); });
               <code class="click" title="Кликни — откроется терминал с введённой командой"
                     @click="installInTerminal(p)">{{ p.install }}</code>
             </div>
+            <div v-if="p.models?.length" class="pvsub muted">
+              моделей в каталоге: {{ p.models.length }}<template v-if="hiddenCount(p)"> (в выборе {{ p.models.length - hiddenCount(p) }} — остальные скрыты)</template><template v-if="p.models.some((m) => m.unknown)"> · есть неизвестные CLI (помечены «?»)</template>
+            </div>
+            <!-- Индикатор новой версии: кокпит только сообщает, обновление — по кнопке -->
+            <div v-if="p.updateAvailable" class="pvupd">
+              ● Доступно обновление: <b>{{ p.latest }}</b> — нажми «Обновить»
+            </div>
+            <div v-else-if="p.latest" class="pvsub muted">последняя версия ({{ p.latest }})</div>
+            <p v-if="updMsg[p.id]" class="msg" :class="updMsg[p.id].type">{{ updMsg[p.id].text }}</p>
           </div>
-          <span class="pvstate" :class="p.available ? 'ok' : 'err'">
-            <span class="dot"></span>{{ p.available ? 'доступен' : 'недоступен' }}
-          </span>
+          <div class="pvright">
+            <span class="pvstate" :class="p.available ? 'ok' : 'err'">
+              <span class="dot"></span>{{ p.available ? 'доступен' : 'недоступен' }}
+            </span>
+            <button v-if="p.installed && p.canUpdate" class="upd" :class="{ hot: p.updateAvailable }" :disabled="!!updating"
+                    title="Обновить CLI исполнителя. Версия CLI задаёт и список моделей — после обновления каталог пересобирается."
+                    @click="updateProvider(p)">
+              {{ updating === p.id ? 'Обновление…' : 'Обновить' }}
+            </button>
+          </div>
+        </div>
+        <!-- Что показывать в выборе модели: только свежие версии или вообще всё, что помнит CLI -->
+        <div class="prow">
+          <ToggleSwitch :model-value="prefs?.showAllModels === true" label="Показывать все модели: старые версии и алиасы"
+                        @update:model-value="toggleShowAllModels" />
+          <div class="muted small">
+            По умолчанию в выборе — только свежая модель каждого семейства (Opus 4.6, Sonnet 4.6 и
+            её 1M-вариант, Haiku 4.5). Скрыты старые версии (Sonnet 3.7, Opus 4.0…) и алиасы
+            «— последняя»: алиас указывает на ту же модель, что уже есть в списке.
+          </div>
+          <p v-if="modelsMsg" class="msg" :class="modelsMsg.type">{{ modelsMsg.text }}</p>
         </div>
         <div class="row">
           <button :disabled="refreshing" @click="refreshProv">{{ refreshing ? 'Проверка…' : 'Перепроверить' }}</button>
+          <button :disabled="checking" title="Кокпит и сам проверяет раз в 6 часов; обновление никогда не запускается автоматически"
+                  @click="checkUpdates">{{ checking ? 'Смотрю…' : 'Проверить обновления' }}</button>
         </div>
+        <p class="muted small">
+          Новые версии проверяются автоматически раз в 6 часов (индикатор — точка на иконке
+          исполнителя в шапке). Обновление ставится только по кнопке.
+        </p>
       </div>
     </section>
 
@@ -165,6 +282,45 @@ onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); });
         </template>
       </div>
     </section>
+
+    <!-- Доступ: вход в сам кокпит (один пользователь) -->
+    <section v-else-if="tab === 'access'">
+      <p class="muted">
+        Вход в кокпит. Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер
+        не попадает — клиент получает только сессионную cookie.
+      </p>
+
+      <p v-if="!auth.tls" class="msg err">
+        Сейчас без HTTPS: пароль передаётся открытым текстом. Пока кокпит открывают только
+        с этой машины — не проблема, для доступа из сети задай <code>COCKPIT_TLS_KEY</code>
+        и <code>COCKPIT_TLS_CERT</code>.
+      </p>
+
+      <div class="card">
+        <label>Логин<input v-model="acc.login" autocomplete="username" placeholder="необязательно" /></label>
+        <label>Текущий пароль
+          <input v-model="acc.currentPassword" type="password" autocomplete="current-password" />
+        </label>
+        <label>Новый пароль
+          <input v-model="acc.password" type="password" autocomplete="new-password" placeholder="минимум 8 символов" />
+        </label>
+        <label>Новый пароль ещё раз
+          <input v-model="acc.password2" type="password" autocomplete="new-password" />
+        </label>
+        <p class="muted small">
+          Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
+          Текущее устройство останется в системе.
+        </p>
+        <div class="row">
+          <button class="primary" :disabled="accBusy || !acc.currentPassword || !acc.password" @click="saveAccount">
+            {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
+          </button>
+          <button @click="auth.doLogout()">Выйти</button>
+          <button @click="logoutAll">Выйти со всех устройств</button>
+        </div>
+        <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -184,6 +340,8 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color:
 input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Настройка показа моделей — отделена от списка исполнителей */
+.prow { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; display: grid; gap: 6px; }
 button { padding: 9px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 14px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -199,6 +357,17 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .pvmid { flex: 1; min-width: 0; }
 .pvname { font-size: 14px; font-weight: 600; }
 .pvsub { font-size: 12.5px; }
+/* Правая колонка карточки исполнителя: статус + обновление CLI */
+.pvright { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.upd { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
+  padding: 5px 11px; font-size: 12px; cursor: pointer; }
+.upd:hover:not(:disabled) { border-color: var(--line-2); }
+.upd:disabled { opacity: .55; cursor: default; }
+/* Есть новая версия — кнопка заметная, но ничего не делает сама */
+.upd.hot { border-color: color-mix(in srgb, var(--warn, #e0a33a) 55%, var(--line));
+  background: color-mix(in srgb, var(--warn, #e0a33a) 14%, transparent); color: var(--warn, #e0a33a); }
+.pvupd { margin-top: 3px; font-size: 12.5px; color: var(--warn, #e0a33a); }
+.pvupd b { font-weight: 600; }
 .pvstate { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
 .pvstate .dot { width: 8px; height: 8px; border-radius: 50%; }
 .pvstate.ok { color: var(--good); }

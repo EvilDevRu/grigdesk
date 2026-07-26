@@ -7,6 +7,9 @@ const DEFAULTS = {
   // Перед любым запуском (триаж, конвейер) подтягивать свежий код в репозитории
   // проекта: fetch всегда, pull --ff-only только на чистом master.
   gitRefreshBeforeRun: true,
+  // Показывать в выборе модели ВСЕ, что помнит CLI (включая Sonnet 3.7, Opus 4.0…),
+  // а не только две свежие версии каждого семейства.
+  showAllModels: false,
 };
 
 export class PrefsStore {

@@ -6,6 +6,9 @@ import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
+import StepList from './StepList.vue';
+import ChatQuestion from './ChatQuestion.vue';
+import ChatPermission from './ChatPermission.vue';
 import HelpTip from '../../shared/ui/HelpTip.vue';
 import { mdToHtml } from '../../shared/md.js';
 
@@ -26,17 +29,44 @@ const sess = computed(() => chat.sessions.find((s) => s.id === props.sid) || nul
 // новая модель/уровень появляется из реестра сама. ──
 const prov = useProvidersStore();
 prov.load();
-const provGroups = computed(() => prov.providers.filter((p) => p.models?.length));
+// Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
+// на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
+// к тому моменту может быть не загружен, да и бинарь потом обновится.
+const modelId = computed(() => prov.resolveModelId(sess.value?.model) || prov.defaultModelId);
+// Группы моделей для селекта (что именно видно — решает стор, правило одно на весь кокпит).
+const provGroups = computed(() => prov.providers
+  .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
+  .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
 const currentModel = computed(() => {
   for (const p of prov.providers) {
-    const m = (p.models || []).find((x) => x.id === sess.value?.model);
+    const m = (p.models || []).find((x) => x.id === modelId.value);
     if (m) return m;
   }
   return null;
 });
 const effortLevels = computed(() => currentModel.value?.efforts || ['low', 'medium', 'high', 'max']);
 const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
+// Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
+// полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
+const modelUnknown = computed(() => !!currentModel.value?.unknown);
+// Чем CLI отработал на самом деле (из потока последнего ответа) — алиасы он резолвит сам,
+// поэтому «Opus — последняя» может оказаться какой угодно версией.
+const lastRun = computed(() => {
+  const msgs = sess.value?.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'assistant' && msgs[i].actualModel) return msgs[i];
+  }
+  return null;
+});
+// Рассинхрон выбора и факта: для алиаса это норма (он и должен резолвиться),
+// для конкретной модели — повод показать, чем на самом деле считали.
+const modelMismatch = computed(() => {
+  const a = lastRun.value?.actualModel;
+  const want = lastRun.value?.model;
+  if (!a || !want) return false;
+  return !a.startsWith(String(want).replace(/\[1m\]$/, '')) && a !== want;
+});
 function providerIdOf(modelId) {
   for (const p of prov.providers) {
     if ((p.models || []).some((m) => m.id === modelId)) return p.id;
@@ -44,7 +74,7 @@ function providerIdOf(modelId) {
   return null;
 }
 function onModelChange(e) {
-  const oldProv = providerIdOf(sess.value?.model);
+  const oldProv = providerIdOf(modelId.value);
   const newProv = providerIdOf(e.target.value);
   chat.setModel(props.sid, e.target.value);
   // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
@@ -120,7 +150,7 @@ function onKey(e) {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); runCommand(m[Math.min(cmdIndex.value, m.length - 1)].cmd); return; }
     if (e.key === 'Escape') { input.value = ''; return; }
   }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit();
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); submit(); }
 }
 
 // ── Слэш-команды: ввод «/» открывает меню со списком и описаниями (как в Claude Code) ──
@@ -264,20 +294,13 @@ async function copyMsg(m, i) {
   } catch { /* не скопировалось — молча */ }
 }
 
-// ── Всплывашка разрешений: агент просит выполнить действие ──
-const perm = computed(() => {
-  const p = chat.permReq;
-  return p && (!p.chatKey || p.chatKey === props.sid) ? p : null;
-});
-const permRemember = ref(false);
-watch(perm, () => { permRemember.value = false; });
-const permPreview = computed(() => {
-  const i = perm.value?.input || {};
-  if (i.command) return i.command;              // Bash — показываем команду
-  if (i.file_path) return i.file_path;          // правки — показываем файл
-  const s = JSON.stringify(i);
-  return s === '{}' ? '' : s.length > 400 ? s.slice(0, 400) + '…' : s;
-});
+// ── Спросы агента: разрешение на действие и вопрос (AskUserQuestion). Оба запроса
+// глобальные (приходят по SSE в стор) — берём только адресованные этому чату. ──
+const perm = computed(() => forThisChat(chat.permReq));
+const question = computed(() => forThisChat(chat.questionReq));
+function forThisChat(req) {
+  return req && (!req.chatKey || req.chatKey === props.sid) ? req : null;
+}
 
 // ── Действие «На конвейер» с защитой ──
 const onConveyor = computed(() => chat.isOnConveyor(sess.value?.taskId));
@@ -312,12 +335,15 @@ async function toConveyor() {
         </div>
         <div class="spacer"></div>
         <div class="sel model">
-          <select :value="sess.model" :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
+          <select :value="modelId" :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
                   @change="onModelChange">
             <template v-if="provGroups.length">
               <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
+                <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
                 <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
-                        :title="`контекст ${(m.context / 1000).toFixed(0)}k`">{{ m.name }}</option>
+                        :title="`${m.id} · контекст ${(m.context / 1000).toFixed(0)}k` + (m.unknown ? ' · нет в каталоге установленного CLI' : '')">
+                  {{ m.name }}{{ m.unknown ? ' ?' : '' }}
+                </option>
               </optgroup>
             </template>
             <template v-else>
@@ -337,6 +363,18 @@ async function toConveyor() {
           </svg>
         </button>
       </div>
+      <!-- Что реально ушло в запуск: модель, которой CLI отработал, и уровень усилия.
+           Здесь виден любой рассинхрон между выбором в кокпите и фактом. -->
+      <div v-if="lastRun || modelUnknown" class="factbar">
+        <template v-if="lastRun">
+          <span class="fb" :class="{ warn: modelMismatch }">
+            факт: <b>{{ lastRun.actualModel }}</b>
+            <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
+          </span>
+          <span v-if="modelMismatch" class="fb warn">— выбрано «{{ currentModel?.name || lastRun.model }}»</span>
+        </template>
+        <span v-if="modelUnknown" class="fb warn">установленный CLI не знает эту модель — обнови его в настройках</span>
+      </div>
     </div>
 
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
@@ -346,7 +384,7 @@ async function toConveyor() {
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
           <p class="e-sub muted">
             {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
-            Модель и усилие — сверху. Ctrl+Enter — отправить. «/» — команды.
+            Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос. «/» — команды.
           </p>
         </div>
         <div v-for="(m, i) in sess.messages" :key="i" class="msg" :class="m.role">
@@ -362,7 +400,10 @@ async function toConveyor() {
               <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
             </svg>
             <span>Агент</span>
+            <span v-if="m.actualModel" class="amodel">{{ m.actualModel }}<template v-if="m.effort"> · {{ m.effort }}</template></span>
           </div>
+          <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
+          <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
           <div v-if="m.text" class="mrow">
             <!-- Ответ агента — маркдауном (заголовки/списки/код), текст экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md" v-html="mdToHtml(m.text)"></div>
@@ -380,6 +421,8 @@ async function toConveyor() {
           </div>
         </div>
         <div v-if="sess.sending" class="msg assistant">
+          <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
+          <StepList v-if="sess.steps?.length" :steps="sess.steps" live />
           <div class="text muted">
             <span class="spin"></span> думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
           </div>
@@ -397,21 +440,12 @@ async function toConveyor() {
       </div>
     </div>
 
+    <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
+    <ChatQuestion v-if="question" :req="question"
+                  @answer="chat.answerQuestion($event)" @skip="chat.answerQuestion([])" />
+
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
-    <div v-if="perm" class="perm">
-      <div class="col">
-        <div class="p-t">Агент просит разрешение: <span class="p-tool">{{ perm.tool }}</span></div>
-        <pre v-if="permPreview" class="p-in">{{ permPreview }}</pre>
-        <label class="p-rem">
-          <input v-model="permRemember" type="checkbox" />
-          Разрешать «{{ perm.tool }}» до конца сессии (не навсегда)
-        </label>
-        <div class="p-act">
-          <button class="p-ok" @click="chat.answerPerm(true, permRemember)">Разрешить</button>
-          <button class="p-no" @click="chat.answerPerm(false)">Отклонить</button>
-        </div>
-      </div>
-    </div>
+    <ChatPermission v-if="perm" :req="perm" @answer="chat.answerPerm" />
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
@@ -462,7 +496,7 @@ async function toConveyor() {
             </svg>
           </button>
           </HelpTip>
-          <button class="send" :disabled="sess.sending || (!input.trim() && !pending.length)" title="Отправить (Ctrl+Enter)" @click="submit">↑</button>
+          <button class="send" :disabled="sess.sending || (!input.trim() && !pending.length)" title="Отправить (Enter)" @click="submit">↑</button>
         </div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -542,6 +576,15 @@ async function toConveyor() {
 .ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
   letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
 .ahead svg { width: 12px; height: 12px; color: #d97757; }
+/* Модель, которой ответ реально посчитан (из потока CLI) */
+.amodel { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .75;
+  font-family: var(--mono, monospace); font-size: 10.5px; }
+
+/* Строка факта под панелью управления: что ушло в запуск на самом деле */
+.factbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--ink-mid); }
+.fb b { font-weight: 600; font-family: var(--mono, monospace); color: var(--ink); }
+.fb.warn { color: var(--warn, #e0a33a); }
+.fb.warn b { color: var(--warn, #e0a33a); }
 /* Маркдаун ответа */
 .text.md :deep(p) { margin: 0 0 8px; }
 .text.md :deep(p:last-child) { margin-bottom: 0; }
@@ -559,21 +602,6 @@ async function toConveyor() {
 .msg.error .text { background: color-mix(in srgb, var(--bad) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
   color: var(--bad); padding: 8px 12px; border-radius: 10px; font-size: 12.5px; }
 .msg.error .text::before { content: '⚠ '; }
-
-/* Всплывашка разрешения */
-.perm { padding: 12px 22px; border-top: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 45%, var(--line));
-  background: color-mix(in srgb, var(--warn, #e0a33a) 7%, transparent); }
-.p-t { font-size: 13px; }
-.p-tool { font-family: var(--mono, monospace); color: var(--warn, #e0a33a); }
-.p-in { margin: 8px 0 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
-  font-size: 11px; line-height: 1.45; color: var(--ink-mid); white-space: pre-wrap; word-break: break-all;
-  max-height: 84px; overflow-y: auto; }
-.p-rem { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 12px; color: var(--ink-mid); cursor: pointer; }
-.p-rem input { accent-color: var(--accent); }
-.p-act { display: flex; gap: 8px; margin-top: 10px; }
-.p-ok, .p-no { border: none; border-radius: 8px; padding: 7px 14px; font-size: 12.5px; cursor: pointer; }
-.p-ok { background: var(--good); color: #fff; }
-.p-no { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
 
 .cs-act { padding: 8px 22px; border-top: 1px solid var(--line); }
 .act-row { display: flex; align-items: center; gap: 10px; }

@@ -10,7 +10,11 @@
 //   auth(config, deps)       — { mode, label } — авторизован ли
 //   efforts?(config)         — динамическое обнаружение уровней эффорта (или null)
 //   seedModels()             — стартовый список моделей для models.json
+//   catalog?(config)         — полный список моделей, поддерживаемых установленным CLI
+//                              (обновляется при смене версии; см. models-registry)
+//   updateCmd?               — команда обновления CLI (кнопка «Обновить» в настройках)
 //   run(opts)                — выполнить сообщение → { reply, sessionId, contextTokens, cost }
+//                              opts.onStep — колбэк живых шагов хода (лента как в VS Code)
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -27,7 +31,8 @@ export async function getExecutors() {
   if (loaded) return loaded;
   const map = new Map();
   for (const f of readdirSync(DIR).sort()) {
-    if (!f.endsWith('.js') || f === 'index.js') continue;
+    // Файлы на `_` — вспомогательные модули исполнителей (каталоги моделей и т.п.), не ИИ.
+    if (!f.endsWith('.js') || f === 'index.js' || f.startsWith('_')) continue;
     const mod = await import(pathToFileURL(path.join(DIR, f)).href);
     const ex = mod.default;
     if (ex?.id && typeof ex.run === 'function') map.set(ex.id, ex);

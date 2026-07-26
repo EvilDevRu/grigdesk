@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { npmLatest } from './_npm-latest.js';
 
 export default {
   id: 'codex',
@@ -56,6 +57,19 @@ export default {
     return (d.data || [])
       .filter((m) => /^gpt-/.test(m.id) && !/(audio|realtime|image|tts|transcribe|search|embed|moderation)/.test(m.id))
       .map((m) => ({ id: m.id, name: m.id, createdAt: m.created ? new Date(m.created * 1000).toISOString() : '' }));
+  },
+
+  /**
+   * Обновление CLI (кнопка «Обновить» в настройках → «Исполнители»).
+   * Само не запускается — только по нажатию пользователя.
+   */
+  updateCmd: ['update'],
+
+  /**
+   * Последняя опубликованная версия — для индикатора «доступно обновление».
+   */
+  latestVersion() {
+    return npmLatest('@openai/codex');
   },
 
   seedModels() {

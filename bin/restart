@@ -32,8 +32,10 @@ cd "$ROOT"
 setsid nohup node server/src/app.js </dev/null >>"$LOG" 2>&1 &
 disown
 
+# Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health
+# закрыт гардом авторизации — по нему скрипт всегда решал бы, что сервер не поднялся.
 for _ in $(seq 1 50); do
-  if curl -sf "http://localhost:$PORT/api/health" >/dev/null 2>&1; then
+  if curl -sf "http://localhost:$PORT/api/auth/state" >/dev/null 2>&1; then
     echo "кокпит поднят на :$PORT · лог: $LOG"
     exit 0
   fi

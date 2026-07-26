@@ -11,7 +11,10 @@ import readline from 'node:readline';
 
 const PERM_URL = process.env.COCKPIT_PERM_URL || '';
 const CHAT_KEY = process.env.COCKPIT_CHAT_KEY || '';
-const TOKEN = process.env.COCKPIT_TOKEN || '';
+// Секрет процесса-сервера: вход в кокпит закрывает весь /api, а этот MCP живёт в дочернем
+// процессе claude — сессионной cookie у него нет и быть не может. Секрет держится только
+// в памяти сервера и меняется с каждым запуском (см. internalToken в app.js).
+const INTERNAL = process.env.COCKPIT_INTERNAL || '';
 
 const TOOL = {
   name: 'approve',
@@ -56,7 +59,11 @@ rl.on('line', async (line) => {
     try {
       const r = await fetch(PERM_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(TOKEN ? { 'X-Cockpit-Token': TOKEN } : {}) },
+        headers: {
+          'Content-Type': 'application/json',
+          // Прежний X-Cockpit-Token убран вместе с самим COCKPIT_TOKEN.
+          ...(INTERNAL ? { 'X-Cockpit-Internal': INTERNAL } : {}),
+        },
         body: JSON.stringify({ ...(params?.arguments || {}), chatKey: CHAT_KEY }),
       });
       if (r.ok) decision = await r.json();

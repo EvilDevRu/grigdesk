@@ -14,6 +14,11 @@ import { getExecutors } from './executors/index.js';
 // Дефолт, если и файла нет, и динамическое обнаружение не сработало.
 const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'max'];
 
+// Версия правил составления каталога. Меняем, когда меняется САМ принцип отбора моделей
+// (например «в кратком списке — только свежая версия семейства») — иначе у работающих
+// кокпитов в реестре останется список, собранный по старым правилам.
+const CATALOG_SCHEMA = 4;
+
 let cache = null; // { at, registry }
 const CACHE_MS = 60_000;
 
@@ -76,15 +81,66 @@ async function mergeDiscovered(file, prov, ex, config) {
 }
 
 /**
+ * Каталог установленного CLI (executor.catalog) — ГЛАВНЫЙ источник правды о моделях:
+ * что CLI знает, то и показываем, с именами, выведенными из id. Скан дорогой, поэтому
+ * гоняем его только при смене версии CLI (`_meta[prov].catalogVersion`) — то есть
+ * сразу после обновления исполнителя список сам становится актуальным.
+ *
+ * Мёрж, а не перезапись: новые модели добавляются, у известных освежаются name/context/tier
+ * (кроме записей с `custom: true` — они правлены руками), пропавшие из каталога помечаются
+ * `unknown: true` (не удаляем: полный id CLI обычно принимает и без записи о нём).
+ */
+async function mergeCatalog(file, prov, ex, config) {
+  if (typeof ex?.catalog !== 'function') return false;
+  let version = '';
+  try { version = (await ex.probe(config))?.version || ''; } catch { version = ''; }
+  const meta = (file._meta ||= {});
+  const pm = (meta[prov] ||= {});
+  const list = (file[prov] ||= []);
+  // Пересобираем и когда сменилась версия CLI, и когда поменялись правила составления
+  // каталога (CATALOG_SCHEMA) — иначе у уже работающих кокпитов остался бы старый список.
+  if (list.length && pm.catalogVersion === version && pm.catalogSchema === CATALOG_SCHEMA) return false;
+
+  let catalog = null;
+  try { catalog = await ex.catalog(config); } catch { catalog = null; }
+  if (!catalog?.length) {
+    // Каталог не прочитался (нет бинаря) — оставляем что есть, версию не фиксируем.
+    return false;
+  }
+  // Каталог задаёт СОСТАВ списка: что CLI забыл (или мы решили не показывать — старые версии),
+  // из выбора уходит. Иначе список копит всё, что когда-либо видел любой CLI, и превращается
+  // в свалку. Исключение — записи с `custom: true`: их добавил человек, их не трогаем.
+  const prevById = new Map(list.map((m) => [m.id, m]));
+  const next = catalog.map((m) => {
+    const cur = prevById.get(m.id);
+    // Ручные правки (имя, окно, свои efforts) переживают пересборку.
+    return cur?.custom ? { ...m, ...cur, unknown: false } : { ...m, efforts: cur?.efforts ?? m.efforts };
+  });
+  const inCatalog = new Set(catalog.map((m) => m.id));
+  for (const m of list) {
+    if (!inCatalog.has(m.id) && m.custom) next.push({ ...m, unknown: true });
+  }
+  file[prov] = next;
+  pm.catalogVersion = version;
+  pm.catalogSchema = CATALOG_SCHEMA;
+  return true;
+}
+
+/**
  * Итоговый реестр: { providerId: [модели с efforts, сортированные по tier desc] }.
  */
-export async function getModelsRegistry(config) {
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.registry;
+export async function getModelsRegistry(config, { refresh = false } = {}) {
+  if (!refresh && cache && Date.now() - cache.at < CACHE_MS) return cache.registry;
   const executors = await getExecutors();
   const file = await loadFile(config.modelsPath);
 
-  // Автообнаружение новых моделей у исполнителей, которые это умеют.
   let dirty = false;
+  // Каталог установленного CLI (обновляется при смене его версии; refresh — принудительно).
+  for (const ex of executors.values()) {
+    if (refresh) delete file._meta?.[ex.id]?.catalogVersion;
+    if (await mergeCatalog(file, ex.id, ex, config)) dirty = true;
+  }
+  // Автообнаружение новых моделей у исполнителей, которые это умеют (API вендора).
   for (const ex of executors.values()) {
     if (await mergeDiscovered(file, ex.id, ex, config)) dirty = true;
   }
@@ -107,13 +163,18 @@ export async function getModelsRegistry(config) {
 }
 
 /**
- * Какому исполнителю принадлежит модель (по id из реестра). null — неизвестна.
+ * Запись модели + её исполнитель: { provider, model }. null — модели нет в реестре.
+ * Нужна там, где важны свойства модели (уровни эффорта, окно контекста), а не только
+ * кому её отдать: неподдерживаемый уровень CLI не проглатывает, а падает с ошибкой валидации.
  */
-export async function providerOfModel(modelId, config) {
+export async function modelInfo(modelId, config) {
   if (!modelId) return null;
   const registry = await getModelsRegistry(config);
-  for (const [prov, models] of Object.entries(registry)) {
-    if (models.some((m) => m.id === modelId)) return prov;
+  for (const [provider, models] of Object.entries(registry)) {
+    // Алиас CLI (`opus`) отдельной записи не имеет — он привязан к модели, в которую
+    // резолвится: запрос со старым выбором всё равно находит свойства нужной модели.
+    const model = models.find((m) => m.id === modelId || (m.aliases || []).includes(modelId));
+    if (model) return { provider, model };
   }
   return null;
 }
