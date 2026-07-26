@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/api-client.js';
 import { useSse } from '../composables/useSse.js';
 import { useUiStore } from '../stores/ui.js';
@@ -7,6 +7,8 @@ import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useChatStore } from '../stores/chat.js';
 import { secToHMS } from '../shared/format.js';
+import { mdToHtml } from '../shared/md.js';
+import { sandboxUrl } from '../shared/sandbox.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -67,13 +69,27 @@ const stageBusy = ref(null);
 const stageComment = ref('');
 const stageInstruction = ref('');
 const stageActivity = ref(null);
+const stageDoc = ref('');       // документ этапа (план/разведнота/диагноз…) — рендерится в модалке
+const stageDocOpen = ref(true);
+const stageLogOpen = ref(false);
+const liveFeed = ref(null);
+const stageDocLoading = ref(false);
 let actPoll = null;
+// Какой документ показывать на каком узле: у ворот плана — сам план, у приёмки — отчёт.
+const NODE_DOC = {
+  gate_plan: 'plan', plan: 'plan', skeptic: 'plan', validate: 'plan', translator: 'plan',
+  scout: 'recon', diagnose: 'diag', hyposkeptic: 'diag', proof: 'diag', gate_cause: 'diag',
+  ship: 'ship', gate_accept: 'report', browser: 'report', measure: 'report',
+};
 const STAGE_HINT = {
   done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
   skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
   skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
 };
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
+
+const LIVE_ICONS = { tool: '⚙', subagent: '🤖', text: '💬', think: '🧠' };
+function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
 
 function openStage(t, node) {
   stage.value = {
@@ -82,6 +98,16 @@ function openStage(t, node) {
     status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
   };
   stageComment.value = ''; stageActivity.value = null; stageInstruction.value = '';
+  stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
+  stageLogOpen.value = false;
+  const doc = NODE_DOC[node.nid];
+  if (doc) {
+    stageDocLoading.value = true;
+    api.get(`/api/tasks/${t.task}/doc/${doc}`)
+      .then((r) => { stageDoc.value = r.text || ''; })
+      .catch(() => { /* документа нет — секция не показывается */ })
+      .finally(() => { stageDocLoading.value = false; });
+  }
   api.get(`/api/tasks/${t.task}/instruction`).then((r) => { stageInstruction.value = r.text || ''; }).catch(() => {});
   clearInterval(actPoll);
   if (node.status === 'run') { pollActivity(); actPoll = setInterval(pollActivity, 3000); }
@@ -91,6 +117,10 @@ async function pollActivity() {
   if (!stage.value) return;
   try { stageActivity.value = await api.get(`/api/tasks/${stage.value.task}/activity`); } catch { /* игнор */ }
 }
+// Автопрокрутка ленты действий агента вниз при обновлении.
+watch(() => stageActivity.value?.live?.actions?.length, () => {
+  nextTick(() => { if (liveFeed.value) liveFeed.value.scrollTop = liveFeed.value.scrollHeight; });
+});
 async function gateDecide(decision) {
   stageBusy.value = 'gate';
   try { await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value }); await load(); closeStage(); }
@@ -233,8 +263,13 @@ function cardState(g) {
       <footer v-if="!isCollapsed(t.task)" class="strip">
         <span v-if="t.graph.fePort" class="chunk">
           <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <a :href="`http://localhost:${t.graph.fePort}`" target="_blank">фронт :{{ t.graph.fePort }}</a>
-          <a v-if="t.graph.apiPort" :href="`http://localhost:${t.graph.apiPort}`" target="_blank">API :{{ t.graph.apiPort }}</a>
+          стенд · <a :href="sandboxUrl(t.graph.fePort)" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
+          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort)" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
+        </span>
+        <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
+        <span v-else-if="t.graph.sandbox" class="chunk building">
+          <span class="spin"></span>
+          стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
         </span>
         <button v-if="t.graph.fePort" class="sbdown" @click="sandboxDown(t.task)">⏏ снести стенд</button>
         <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
@@ -260,29 +295,22 @@ function cardState(g) {
           <h3>{{ stage.label }}</h3>
           <button class="sx" @click="closeStage()">✕</button>
         </header>
+
+        <!-- Компактная строка метаданных -->
+        <div class="smeta">
+          <span class="sbadge" :class="stage.status">{{ STAGE_HINT[stage.status] || stage.status }}</span>
+          <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
+          <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
+          <span v-if="stage.meta.fanout != null" class="smchip">{{ stage.meta.fanout }} субаг.</span>
+          <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
+          <span v-if="stage.meta.fails" class="smchip bad">{{ stage.meta.fails }} возвр.</span>
+          <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
+          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ stageActivity.journalFresh ? 'агент пишет' : 'тихо' }}</span>
+        </div>
+
         <div class="sb">
-          <div class="srow"><span class="k">Статус</span><span class="v">{{ stage.status }} — {{ STAGE_HINT[stage.status] || stage.status }}</span></div>
-          <div v-if="stage.sub" class="srow"><span class="k">Инструмент</span><span class="v">{{ stage.sub }}</span></div>
-          <div v-if="stage.meta.at" class="srow"><span class="k">Время</span><span class="v mono">{{ stage.meta.at }}</span></div>
-          <div v-if="stage.meta.dur != null" class="srow"><span class="k">Длительность</span><span class="v">{{ stage.meta.dur }} мин</span></div>
-          <div v-if="stage.meta.fanout != null" class="srow"><span class="k">Субагентов</span><span class="v">{{ stage.meta.fanout }}</span></div>
-          <div v-if="stage.meta.fails" class="srow"><span class="k">Возвратов</span><span class="v bad">{{ stage.meta.fails }}</span></div>
-          <div v-if="stage.meta.tokens" class="srow"><span class="k">Токенов</span><span class="v mono">{{ stage.meta.tokens.toLocaleString('ru') }}</span></div>
-
-          <!-- Живая активность (для идущего этапа) -->
-          <div v-if="stage.status === 'run'" class="sect">
-            <div class="secth">
-              <span class="spin"></span> Сейчас в работе
-              <span v-if="stageActivity" class="jf" :class="{ on: stageActivity.journalFresh }">{{ stageActivity.journalFresh ? 'агент пишет' : 'тихо' }}</span>
-            </div>
-            <div v-if="stageActivity && stageActivity.tail.length" class="log">
-              <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
-            </div>
-            <p v-else class="muted small">Ожидание записей…</p>
-          </div>
-
-          <!-- Ворота: принять/отклонить + указание что доработать -->
-          <div v-if="stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect">
+          <!-- Ворота: принять/отклонить — первым делом, если ждёт решения -->
+          <div v-if="stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect gate-sect">
             <div class="secth">Ворота — твоё решение</div>
             <textarea v-model="stageComment" rows="2" placeholder="Что доработать / замечание агенту (при отклонении)"></textarea>
             <div class="gbtns">
@@ -291,16 +319,55 @@ function cardState(g) {
             </div>
           </div>
 
-          <!-- Обсудить с агентом (чат) + открыть диф задачи -->
-          <!-- Диф открывается модалом ПОВЕРХ этапа: при закрытии дифа возвращаемся сюда -->
-          <div class="sect row">
-            <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
-            <OpenDiffButton :task-id="stage.task" />
+          <!-- Живая лента действий агента (для идущего этапа) -->
+          <div v-if="stage.status === 'run' && stageActivity?.live" class="sect">
+            <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
+            <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
+              <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
+                <span class="lf-icon">{{ liveIcon(a) }}</span>
+                <span class="lf-body">
+                  <template v-if="a.type === 'tool' || a.type === 'subagent'">
+                    <span class="lf-name">{{ a.name }}</span>
+                    <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
+                    <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
+                  </template>
+                  <template v-else>
+                    <span class="lf-text">{{ a.text }}</span>
+                  </template>
+                </span>
+                <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
+              </div>
+            </div>
+            <p v-else class="muted small">Ожидание действий агента…</p>
+            <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
           </div>
 
-          <!-- Принудительный переход — одной кнопкой «плей» -->
-          <div class="sect">
-            <div class="secth">Перейти на этот этап</div>
+          <!-- Журнал этапов (stages.log) — сворачиваемый -->
+          <div v-if="stage.status === 'run' && stageActivity?.tail?.length" class="sect">
+            <div class="secth doct" @click="stageLogOpen = !stageLogOpen">
+              {{ stageLogOpen ? '▾' : '▸' }} Журнал этапов
+              <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
+            </div>
+            <div v-if="stageLogOpen" class="log">
+              <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
+            </div>
+          </div>
+
+          <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
+          <div v-if="stageDocLoading" class="sect">
+            <div class="secth"><span class="spin"></span> Документ этапа</div>
+          </div>
+          <div v-else-if="stageDoc" class="sect">
+            <div class="secth doct" @click="stageDocOpen = !stageDocOpen">
+              {{ stageDocOpen ? '▾' : '▸' }} Документ этапа
+            </div>
+            <div v-if="stageDocOpen" class="sdoc md" v-html="mdToHtml(stageDoc)"></div>
+          </div>
+
+          <!-- Действия -->
+          <div class="sect sactions">
+            <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
+            <OpenDiffButton :task-id="stage.task" />
             <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Сделать этот этап текущим">
               {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
             </button>
@@ -377,6 +444,7 @@ function cardState(g) {
 .chunk { display: inline-flex; align-items: center; gap: 6px; }
 .chunk.warn { color: var(--warn); }
 .chunk.bad { color: var(--bad); }
+.chunk.building { color: var(--accent); }
 .strip a { color: var(--accent); margin-left: 6px; }
 .sdot { width: 8px; height: 8px; border-radius: 50%; }
 .sdot.on { background: var(--good); }
@@ -400,27 +468,76 @@ function cardState(g) {
 .soverlay { position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(4px); display: flex; align-items: flex-start;
   justify-content: center; padding: 60px 16px; z-index: 100; overflow-y: auto; }
 .smodal { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
-  width: 100%; max-width: 460px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
+  width: 100%; max-width: 760px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
 .sh { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
 .sh h3 { flex: 1; margin: 0; font-size: 16px; font-weight: 640; }
 .sx { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
-.sb { padding: 12px 16px; display: flex; flex-direction: column; }
-.srow { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line-soft, var(--line)); font-size: 13.5px; }
-.srow:last-child { border-bottom: none; }
-.srow .k { color: var(--ink-mid); }
-.srow .v.bad { color: var(--bad); }
 
-.sect { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+/* Компактная строка метаданных */
+.smeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); background: var(--ground); }
+.sbadge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+  padding: 3px 10px; border-radius: 999px; }
+.sbadge.run { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.sbadge.done { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.sbadge.wait, .sbadge.premature { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.sbadge.pending, .sbadge.idle { background: var(--surface-2); color: var(--ink-mid); }
+.sbadge.stall, .sbadge.skipbad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.sbadge.skip { background: var(--surface-2); color: var(--ink-mid); }
+.smchip { font-size: 11.5px; color: var(--ink-mid); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; }
+.smchip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.jf { font-size: 11px; color: var(--ink-mid); padding: 2px 8px; border-radius: 6px;
+  background: var(--surface-2); text-transform: none; letter-spacing: 0; margin-left: auto; }
+.jf.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+
+.sb { padding: 12px 16px; display: flex; flex-direction: column; }
+
+/* Живая лента действий */
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad);
+  animation: live-pulse 1.2s ease-in-out infinite; display: inline-block; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.live-feed { max-height: 300px; overflow-y: auto; background: var(--ground); border: 1px solid var(--line);
+  border-radius: 10px; padding: 4px 0; }
+.lf-row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 12px; font-size: 12.5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent); }
+.lf-row:last-child { border-bottom: none; }
+.lf-row.run { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.lf-icon { flex: none; width: 18px; text-align: center; font-size: 13px; line-height: 1.4; }
+.lf-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lf-name { font-weight: 600; color: var(--ink); }
+.lf-desc { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-text { color: var(--ink-mid); font-style: italic; }
+.lf-sub { font-size: 11px; color: var(--ink-mid); }
+.lf-st { flex: none; width: 16px; text-align: center; font-size: 11px; }
+.lf-st.done { color: var(--good); }
+.lf-st.run { color: var(--accent); animation: live-pulse 1s ease-in-out infinite; }
+.lf-st.error { color: var(--bad); }
+.lf-model { font-size: 10.5px; color: var(--ink-mid); margin-top: 6px; text-align: right; }
+
+.sect { padding-top: 10px; margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
 .sect.row { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .secth { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-mid); display: flex; align-items: center; gap: 8px; }
-.jf { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--ink-mid); margin-left: auto; }
-.jf.on { color: var(--good); }
 .log { max-height: 160px; overflow-y: auto; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .logline { font-size: 12px; padding: 2px 0; }
 .small { font-size: 12px; }
 .sect textarea { background: var(--ground); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 8px 10px; font-family: inherit; font-size: 13.5px; resize: vertical; }
+.secth.doct { cursor: pointer; user-select: none; }
+.sdoc { max-height: 52vh; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere;
+  background: var(--ground); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.55; }
+.sdoc :deep(h1) { font-size: 15px; margin: 4px 0 8px; }
+.sdoc :deep(h2) { font-size: 13.5px; margin: 12px 0 6px; }
+.sdoc :deep(h3) { font-size: 12.5px; margin: 10px 0 4px; }
+.sdoc :deep(code) { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+.sdoc :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-x: auto; }
+.sdoc :deep(table) { border-collapse: collapse; }
+.sdoc :deep(td), .sdoc :deep(th) { border: 1px solid var(--line); padding: 4px 8px; font-size: 12px; }
+.gate-sect { background: color-mix(in srgb, var(--warn) 6%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
+  border-radius: 10px; padding: 12px; margin-bottom: 4px; }
 .sect textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.sactions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
+  border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
 .sect .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; align-self: flex-start; }
 .sect .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
 .sect .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }

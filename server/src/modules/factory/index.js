@@ -2,9 +2,11 @@
 // которого нет у Python-дашборда (там server-rendered HTML). Мутации (ворота/запуск)
 // добавятся отдельным этапом через factory-cli.
 import fp from 'fastify-plugin';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { STAGES, StageKind } from '../../lib/stages.js';
-import { setPipeline, writeInstruction, readInstruction, readActivity } from '../../lib/factory-cli.js';
+import { setPipeline, writeInstruction, readInstruction, readActivity, readAgentLive } from '../../lib/factory-cli.js';
 import { taskDiff } from '../../lib/git.js';
 import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
@@ -30,6 +32,17 @@ async function factoryModule(fastify, opts) {
     } catch (err) {
       return reply.code(404).send({ error: 'not_found', message: err.message });
     }
+  });
+
+  // Документ этапа — человеку у ворот: план (утверждение), разведнота, диагноз,
+  // шип-инструкция, отчёт браузерной проверки. Без него решение по воротам слепое.
+  const STAGE_DOCS = { plan: 'plan.md', recon: 'recon.md', diag: 'diag.md', ship: 'ship.md', report: 'report.md' };
+  fastify.get('/api/tasks/:id/doc/:name', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    const file = STAGE_DOCS[request.params.name];
+    if (!id || !file) return reply.code(400).send({ error: 'bad_doc' });
+    try { return { text: await fs.readFile(path.join(config.stateDir, `t${id}.${file}`), 'utf8') }; }
+    catch { return { text: '' }; }
   });
 
   // Воркдиры задачи (worktree бэка/фронта) — для кнопки «Открыть в VS Code».
@@ -96,20 +109,46 @@ async function factoryModule(fastify, opts) {
         fastify.log.warn({ task: id, err: e.message }, 'обновление репозиториев перед конвейером не удалось');
       }
     }
-    const args = [id, 'start', '--profile', profile];
-    if (ticket) args.push('--ticket', String(ticket).slice(0, 4000));
+    // Живой незавершённый реестр = продолжение прогона: у фабрики для этого есть
+    // режим resume (start реинициализирует реестр и гонит цепочку заново со скаута —
+    // так резюм #7803 дважды пере-прогонял разведку).
+    const mode = reg && reg.WF_STATUS === 'running' ? 'resume' : 'start';
+    const args = [id, mode, '--profile', profile];
+    if (ticket && mode === 'start') args.push('--ticket', String(ticket).slice(0, 4000));
     if (route) args.push('--route', route);
-    const rc = await new Promise((res) => execFile(config.factoryBin, args, { timeout: 20000 }, (err) => res(err ? (err.code ?? 1) : 0)));
-    if (rc !== 0) return reply.code(500).send({ outcome: 'invalid', message: 'factory bin: ошибка аргументов/профиля/маршрута' });
+    // КРИТИЧНО: оркестратор живёт ЧАСЫ и обязан пережить рестарт кокпита.
+    // Прогон #7803 умер именно так: сервер работал под systemd-юнитом, фабрика
+    // родилась в его cgroup, и при рестарте systemd зачистил cgroup целиком (TERM
+    // демону и claude-агенту). Поэтому фабрика уезжает в СВОЙ transient scope
+    // (systemd-run --user --scope) — отдельный cgroup, жизнь кокпита её не касается.
+    // Без systemd — просто полная отвязка: detached, вывод в файл, unref.
+    const launchLog = path.join(config.stateDir, `t${id}.launch.log`);
+    const out = await fs.open(launchLog, 'a');
+    const haveScope = await new Promise((res) => execFile('systemd-run', ['--version'], (err) => res(!err)));
+    const [bin, argv] = haveScope
+      ? ['systemd-run', ['--user', '--scope', '--quiet', '--collect', `--unit=factory-t${id}`, config.factoryBin, ...args]]
+      : [config.factoryBin, args];
+    const child = spawn(bin, argv, {
+      detached: true,
+      stdio: ['ignore', out.fd, out.fd],
+    });
+    child.unref();
+    let exited = null; // быстрый выход = ошибка аргументов/профиля
+    child.on('exit', (code) => { exited = code ?? 1; });
 
     // Опрос ORCH_PID до ~10с.
     for (let i = 0; i < 40; i += 1) {
       await new Promise((r) => { setTimeout(r, 250); });
       try {
         const r2 = (await factoryState.readRegistry(id)).registry;
-        if (factoryState.isDaemonAlive(r2.ORCH_PID, id)) return { outcome: 'launched', profile, gitRefresh };
+        if (factoryState.isDaemonAlive(r2.ORCH_PID, id)) { await out.close(); return { outcome: 'launched', profile, gitRefresh }; }
       } catch { /* реестр ещё пишется */ }
+      if (exited !== null && exited !== 0) {
+        await out.close();
+        return reply.code(500).send({ outcome: 'invalid', message: `factory bin завершился с кодом ${exited} — смотри ${launchLog}` });
+      }
     }
+    await out.close();
     return { outcome: 'started', profile, gitRefresh, note: 'демон не подтвердил PID за 10с — проверь конвейер' };
   });
 
@@ -159,7 +198,9 @@ async function factoryModule(fastify, opts) {
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     try {
       const { registry } = await factoryState.readRegistry(id);
-      return readActivity({ ...cfg, task: id, registry });
+      const activity = readActivity({ ...cfg, task: id, registry });
+      const live = readAgentLive({ stateDir: cfg.stateDir, task: id });
+      return { ...activity, live };
     } catch (err) { return reply.code(404).send({ error: 'not_found', message: err.message }); }
   });
 

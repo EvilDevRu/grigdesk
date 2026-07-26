@@ -43,7 +43,11 @@ export function readActivity({ stateDir, task, registry }) {
     tail = parseStagesLog(log).slice(-12).map((e) => ({ ts: e.ts, event: e.event }));
   } catch { /* журнала нет */ }
 
-  // Свежая запись в journal.jsonl активного workflow = агент реально пишет прямо сейчас.
+  // «Агент пишет» = свежая запись в его выводе. Кандидаты по убыванию точности:
+  // journal.jsonl workflow-движка (ACTIVE_DIR/JOURNAL в реестре — старая схема),
+  // затем logs/tNNNN.orch.log — туда стримится stream-json текущего claude-агента.
+  // Без второго кандидата индикатор всегда показывал «тихо» на живом агенте:
+  // у нынешней фабрики ключей ACTIVE_DIR/JOURNAL в реестре нет.
   let journalFresh = false;
   const adir = registry.ACTIVE_DIR || (registry.JOURNAL ? path.dirname(registry.JOURNAL) : '');
   if (adir) {
@@ -53,5 +57,108 @@ export function readActivity({ stateDir, task, registry }) {
       }
     } catch { /* нет каталога */ }
   }
+  if (!journalFresh) {
+    try {
+      journalFresh = Date.now() - fs.statSync(path.join(stateDir, 'logs', `t${task}.orch.log`)).mtimeMs < 60000;
+    } catch { /* лога агента нет */ }
+  }
   return { tail, journalFresh, wfStatus: registry.WF_STATUS || null };
+}
+
+/**
+ * Живая лента действий агента: парсит хвост orch.log (stream-json от Claude CLI)
+ * и выдаёт последние N событий (tool_use, text, thinking, subagent progress).
+ * Читает только последние TAIL_BYTES байт — файл может быть десятки МБ.
+ * @returns {{ actions: Array<{type,ts?,name?,desc?,text?,status?,tokens?,tools?}>, model: string|null }}
+ */
+export function readAgentLive({ stateDir, task }) {
+  const TAIL_BYTES = 192 * 1024;
+  const MAX_ACTIONS = 25;
+  const logFile = path.join(stateDir, 'logs', `t${task}.orch.log`);
+
+  let raw;
+  try {
+    const stat = fs.statSync(logFile);
+    if (stat.size === 0) return { actions: [], model: null };
+    const fd = fs.openSync(logFile, 'r');
+    try {
+      const start = Math.max(0, stat.size - TAIL_BYTES);
+      const buf = Buffer.alloc(Math.min(stat.size, TAIL_BYTES));
+      fs.readSync(fd, buf, 0, buf.length, start);
+      raw = buf.toString('utf8');
+    } finally { fs.closeSync(fd); }
+  } catch { return { actions: [], model: null }; }
+
+  // Первая строка может быть обрезана — отбрасываем её, если начали не с начала.
+  const lines = raw.split('\n');
+  if (raw.length >= TAIL_BYTES) lines.shift();
+
+  const actions = [];
+  const pendingTools = new Map(); // tool_use_id → index in actions
+  const subagents = new Map();   // tool_use_id → index in actions
+  let model = null;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t.startsWith('{')) continue;
+    let ev;
+    try { ev = JSON.parse(t); } catch { continue; }
+
+    if (ev.type === 'assistant' && ev.message?.content) {
+      if (!model && ev.message.model) model = ev.message.model;
+      const ts = ev.timestamp || null;
+      for (const block of ev.message.content) {
+        if (block.type === 'tool_use') {
+          const desc = block.input?.description || block.input?.file_path || block.input?.command?.slice(0, 80) || '';
+          const isAgent = block.name === 'Agent';
+          const a = { type: isAgent ? 'subagent' : 'tool', ts, name: block.name, desc, status: 'run' };
+          if (isAgent && block.input?.description) a.desc = block.input.description;
+          actions.push(a);
+          pendingTools.set(block.id, actions.length - 1);
+          if (isAgent) subagents.set(block.id, actions.length - 1);
+        } else if (block.type === 'text' && block.text) {
+          const txt = block.text.length > 120 ? block.text.slice(0, 120) + '…' : block.text;
+          actions.push({ type: 'text', ts, text: txt });
+        } else if (block.type === 'thinking' && block.thinking) {
+          const dot = block.thinking.indexOf('.');
+          const nl = block.thinking.indexOf('\n');
+          let end = Math.min(dot > 0 ? dot + 1 : 999, nl > 0 ? nl : 999, 100);
+          if (end >= 999) end = Math.min(block.thinking.length, 100);
+          actions.push({ type: 'think', ts, text: block.thinking.slice(0, end).trim() });
+        }
+      }
+    } else if (ev.type === 'user' && ev.message?.content) {
+      const ts = ev.timestamp || null;
+      for (const block of ev.message.content) {
+        if (block.type === 'tool_result' && block.tool_use_id && pendingTools.has(block.tool_use_id)) {
+          const idx = pendingTools.get(block.tool_use_id);
+          actions[idx].status = block.is_error ? 'error' : 'done';
+          if (ts) actions[idx].doneAt = ts;
+          pendingTools.delete(block.tool_use_id);
+        }
+      }
+    } else if (ev.type === 'system' && ev.subtype === 'task_progress') {
+      const tid = ev.tool_use_id;
+      if (tid && subagents.has(tid)) {
+        const idx = subagents.get(tid);
+        actions[idx].tokens = ev.usage?.total_tokens || 0;
+        actions[idx].tools = ev.usage?.tool_uses || 0;
+        if (ev.last_tool_name) actions[idx].lastTool = ev.last_tool_name;
+      }
+    } else if (ev.type === 'system' && ev.subtype === 'task_started') {
+      const tid = ev.tool_use_id;
+      if (tid && subagents.has(tid)) {
+        const idx = subagents.get(tid);
+        if (ev.description) actions[idx].desc = ev.description;
+      }
+    } else if (ev.type === 'result') {
+      // Финальный результат текущего этапа — всё «done», лента сбрасывается.
+      actions.length = 0;
+      pendingTools.clear();
+      subagents.clear();
+      model = null;
+    }
+  }
+
+  return { actions: actions.slice(-MAX_ACTIONS), model };
 }

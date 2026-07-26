@@ -74,6 +74,21 @@ export class FactoryStateAdapter {
     } catch { return {}; }
   }
 
+  /**
+   * Прогресс СБОРКИ песочницы (tNNNN.stage): строки «время|шаг/всего|подпись»,
+   * актуальна последняя. Пока стенд строится, порты в env ещё не появились —
+   * это единственный источник «что сейчас происходит со стендом».
+   */
+  async readSandboxStage(task) {
+    try {
+      const p = path.join(this.stateDir, `t${task}.stage`);
+      const lines = (await fsp.readFile(p, 'utf8')).trim().split('\n').filter(Boolean);
+      const m = /^([^|]*)\|(\d+)\/(\d+)\|(.*)$/.exec(lines[lines.length - 1] || '');
+      if (!m) return null;
+      return { at: m[1], step: Number(m[2]), total: Number(m[3]), label: m[4].trim() };
+    } catch { return null; }
+  }
+
   /** Сырой реестр одной задачи + время модификации. */
   async readRegistry(task) {
     const file = path.join(this.stateDir, `t${task}.pipeline`);
@@ -160,6 +175,15 @@ export class FactoryStateAdapter {
       env = parsePipeline(await fsp.readFile(path.join(this.stateDir, `t${task}.env`), 'utf8'));
     } catch { /* env нет */ }
 
+    // Честный статус ромба песочницы: порты есть → готова; идёт сборка → running
+    // (при живом демоне), демон умер посреди сборки → fail. Иначе — как посчитала цепочка.
+    const alive = this.isDaemonAlive(registry.ORCH_PID, task);
+    const sandbox = env.FE_PORT ? null : await this.readSandboxStage(task);
+    if ('sandbox' in def.pos) {
+      if (env.FE_PORT) statuses.sandbox = 'done';
+      else if (sandbox) statuses.sandbox = alive ? 'run' : 'fail';
+    }
+
     // Прогресс: done/skip/idle из узлов маршрута.
     const chain = Object.keys(def.pos).filter((n) => n !== 'sandbox');
     const doneCount = chain.filter((n) => ['done', 'skip', 'idle'].includes(statuses[n])).length;
@@ -193,9 +217,11 @@ export class FactoryStateAdapter {
       halted: loops.halted,
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
-      daemonAlive: this.isDaemonAlive(registry.ORCH_PID, task),
+      daemonAlive: alive,
       fePort: env.FE_PORT || null,
       apiPort: env.API_PORT || null,
+      // Стенд ещё строится (портов нет) — отдаём прогресс сборки для футера карточки.
+      sandbox,
       progress: { done: doneCount, total: chain.length, current: cur },
       updatedAt: mtime,
     };

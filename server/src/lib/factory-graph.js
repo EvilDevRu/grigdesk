@@ -54,9 +54,15 @@ export function computeNodeStatuses({ pf, pos, keys, optional, mtimeMs }) {
   const unknown = new Set();
 
   for (const nid of chain) {
+    // Два кандидата ключа (как в посеве агентов): ключ реестра из graph.json и UPPER(id).
+    // Они расходятся у плана: движок ведёт этап под PLAN, а агент плана по ходу выставляет
+    // PLANS/SKEPTIC/VALIDATE/TRANSLATOR. Пока агент не записал свой ключ, узел горит от
+    // движкового — иначе первые минуты этапа схема выглядит мёртвой («не вижу работу»).
     const key = keys[nid] || nid.toUpperCase();
-    if (!(key in pf)) { unknown.add(nid); st[nid] = 'pending'; continue; }
-    const raw = pf[key];
+    const alt = nid.toUpperCase();
+    let raw = pf[key];
+    if ((raw === undefined || raw === 'pending') && alt !== key && pf[alt] !== undefined) raw = pf[alt];
+    if (raw === undefined) { unknown.add(nid); st[nid] = 'pending'; continue; }
     if (raw === 'skipped') st[nid] = opt.has(nid) ? 'skip' : 'skipbad';
     else st[nid] = ST_MAP[raw] || 'pending';
   }
