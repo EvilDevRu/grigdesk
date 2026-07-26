@@ -9,6 +9,10 @@ import './styles.css';
 const pinia = createPinia();
 createApp(App).use(pinia).use(router).mount('#app');
 
+// Ловим предложение установки на устройство (beforeinstallprompt). Слушатель надо повесить
+// как можно раньше: событие прилетает один раз на загрузку, пропустим — кнопки не будет.
+usePwaStore(pinia).initInstall();
+
 // ВАЖНО: НЕ вешаем глобальный слушатель controllerchange с reload() — с включённым
 // в DevTools «Update on reload» воркер обновляется на каждую загрузку, controllerchange
 // сыпется постоянно, и такой слушатель зациклил бы перезагрузки (страница висла).

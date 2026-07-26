@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { storeToRefs } from 'pinia';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api-client.js';
 import { useSse } from '../../composables/useSse.js';
 import { useSystemStore } from '../../stores/system.js';
@@ -25,6 +25,13 @@ prov.loadUsage();
 function provTitle(p) {
   return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
     + (p.version ? ` · ${p.version}` : '');
+}
+// Клик по иконке исполнителя — сразу на вкладку «Исполнители» настроек
+// (таб настроек запоминается в localStorage, поэтому просто задаём его).
+const router = useRouter();
+function toProviders() {
+  localStorage.setItem('cockpit-settings-tab', 'providers');
+  router.push('/settings');
 }
 // «сброс через 2ч» из ISO-даты сброса лимита
 function resetIn(iso) {
@@ -80,6 +87,8 @@ const notifyWatch = useNotifyWatchStore();
 notifyWatch.start();
 const { connected } = useSse((name) => {
   if (name === 'state-change') { loadHealth(); notifyWatch.check(); }
+  // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
+  if (name === 'providers-update') prov.load();
 });
 </script>
 
@@ -133,12 +142,20 @@ const { connected } = useSse((name) => {
         <AttentionAlerts />
         <span v-if="prov.providers.length" class="provbox" @mouseenter="prov.loadUsage()">
           <HelpTip v-for="p in prov.providers" :key="p.id" class="prov-tip">
-            <span class="prov" :class="{ off: !p.available }" :style="p.available ? { color: p.color } : null">
+            <!-- Клик ведёт в настройки: обновление CLI — только вручную, кнопкой -->
+            <span class="prov" :class="{ off: !p.available, upd: p.updateAvailable }"
+                  :style="p.available ? { color: p.color } : null" @click="toProviders">
               <ProviderIcon :provider="p" :size="15" />
+              <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
             </span>
             <template #tip>
               <span class="ptip">
                 <span>{{ provTitle(p) }}</span>
+                <!-- Индикатор новой версии. Кокпит НИЧЕГО не обновляет сам — только сообщает. -->
+                <span v-if="p.updateAvailable" class="pupd">
+                  Доступно обновление: <b>{{ p.latest }}</b> (стоит {{ (p.version || '').split(' ')[0] || '?' }})<br>
+                  Обновить — в «Настройки → Исполнители» (клик по иконке)
+                </span>
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
                 <span v-if="prov.usage[p.id]?.length" class="pu">
                   <span v-for="b in prov.usage[p.id]" :key="b.key" class="pu-row">
@@ -170,11 +187,15 @@ const { connected } = useSse((name) => {
 
     <main class="content"><slot /></main>
 
-    <div v-if="pwa.needRefresh" class="updbar">
-      <span>Доступно обновление кокпита</span>
-      <button :disabled="pwa.updating" @click="pwa.doUpdate()">
-        <span v-if="pwa.updating" class="spin"></span>{{ pwa.updating ? 'Обновляю…' : 'Обновить' }}
-      </button>
+    <!-- Баннер обновления живёт в App.vue: он нужен и на экране входа, куда оболочка
+         не доходит (см. shared/ui/UpdateBanner.vue). -->
+
+    <!-- Установка на устройство. Появляется только когда браузер сам счёл приложение
+         устанавливаемым (https + иконки + живой SW) — по http-адресу кнопки не будет. -->
+    <div v-if="pwa.canInstall" class="instbar">
+      <span>Установить кокпит как приложение</span>
+      <button @click="pwa.install()">Установить</button>
+      <button class="ghost" @click="pwa.installPrompt = null">Позже</button>
     </div>
   </div>
 </template>
@@ -237,8 +258,15 @@ const { connected } = useSse((name) => {
 .metric b { font-weight: 600; }
 .sep { color: var(--ink-mid); margin: 0 -4px; }
 .provbox { display: inline-flex; align-items: center; gap: 9px; }
-.prov { display: inline-grid; place-items: center; }
+.prov { display: inline-grid; place-items: center; position: relative; cursor: pointer; }
 .prov.off { color: var(--ink-mid); opacity: .45; }
+/* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
+.updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--warn, #e0a33a); box-shadow: 0 0 0 2px var(--surface); }
+.prov.upd { opacity: 1; }
+.pupd { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
+  color: var(--warn, #e0a33a); line-height: 1.5; }
+.pupd b { font-weight: 600; }
 /* Тултип исполнителя: статус + прогрессбары потребления лимитов */
 .prov-tip :deep(.ht-tip) { max-width: 320px; }
 .ptip { display: flex; flex-direction: column; gap: 10px; min-width: 240px; text-align: left; }
@@ -263,13 +291,20 @@ const { connected } = useSse((name) => {
 
 .content { grid-row: 2; grid-column: 2; overflow-y: auto; padding: 22px; }
 
-.updbar {
-  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 200;
-  display: flex; align-items: center; gap: 12px;
-  background: var(--accent); color: #fff; border-radius: 999px;
+/* Плашка установки — снизу, чтобы не спорить с баннером обновления сверху.
+   На мобиле поднята над нижней навигацией. */
+.instbar {
+  position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 200;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 999px;
   padding: 8px 10px 8px 18px; font-size: 13px; box-shadow: 0 8px 26px #0009;
+  max-width: calc(100vw - 24px);
 }
-.updbar button { background: #fff; color: var(--accent); border: none; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.instbar button { background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.instbar button.ghost { background: none; color: var(--ink-mid); font-weight: 400; padding: 6px 8px; }
+@media (max-width: 759px) {
+  .instbar { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+}
 
 /* ── Мобайл: сайдбар → нижняя навигация ── */
 @media (max-width: 759px) {

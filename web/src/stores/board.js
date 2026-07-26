@@ -10,6 +10,7 @@ export const useBoardStore = defineStore('board', {
     error: null,
     loadedAt: 0,
     _polling: false,
+    _timer: null,
   }),
   getters: {
     fresh: (s) => Date.now() - s.loadedAt < 20000,
@@ -34,8 +35,14 @@ export const useBoardStore = defineStore('board', {
       if (this._polling) return;
       this._polling = true;
       this.load();
-      const t = setInterval(() => this.load(true), ms);
-      if (t.unref) t.unref?.();
+      this._timer = setInterval(() => this.load(true), ms);
+      if (this._timer.unref) this._timer.unref?.();
+    },
+    // Нужен при потере сессии: иначе поллинг молотит в закрытый API и сыпет 401 в консоль.
+    stopPolling() {
+      if (this._timer) clearInterval(this._timer);
+      this._timer = null;
+      this._polling = false;
     },
   },
 });

@@ -9,7 +9,9 @@ export function useSse(onEvent) {
   let retry = null;
 
   function connect() {
-    es = new EventSource(api.eventsUrl());
+    // withCredentials — чтобы сессионная cookie уходила и при VITE_BRAIN_URL на другом origin
+    // (для того же origin браузер отправляет её и так).
+    es = new EventSource(api.eventsUrl(), { withCredentials: true });
     es.onopen = () => { connected.value = true; };
     es.onerror = () => {
       connected.value = false;
@@ -18,7 +20,7 @@ export function useSse(onEvent) {
       retry = setTimeout(connect, 3000);
     };
     // именованные события сервера
-    for (const name of ['hello', 'state-change']) {
+    for (const name of ['hello', 'state-change', 'providers-update']) {
       es.addEventListener(name, (e) => {
         let data = null;
         try { data = JSON.parse(e.data); } catch { /* пусто */ }

@@ -20,6 +20,17 @@ export default defineConfig({
         display: 'standalone',
         lang: 'ru',
         start_url: './',
+        // Без иконок 192 и 512 Chrome НЕ предложит установку — приложение останется закладкой
+        // в браузере вместо WebAPK со своей иконкой и без адресной строки.
+        // Пути относительные (не с `/`) — резолвятся от манифеста, живут и в поддиректории.
+        // Генерируются `python3 scripts/gen-icons.py` → public/.
+        icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+          // maskable — Android режет иконку под форму лончера (круг/сквиркл); рисунок
+          // вписан в safe zone, иначе рамку обрежет по краям.
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],

@@ -42,7 +42,10 @@ export async function ensureNotifyPermission() {
 export function notify(title, body = '', tag = '') {
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
-      const n = new Notification(title, { body, tag: tag || undefined, icon: '/favicon.svg' });
+      // Иконка — реальный файл из public (раньше стоял `/favicon.svg`, которого не существует:
+      // favicon зашит инлайном в index.html как data:-URI). BASE_URL — чтобы работало и в поддиректории.
+      const icon = `${import.meta.env.BASE_URL}icon-96.png`;
+      const n = new Notification(title, { body, tag: tag || undefined, icon });
       n.onclick = () => { window.focus(); n.close(); };
       return;
     }
