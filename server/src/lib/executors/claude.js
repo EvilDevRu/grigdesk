@@ -190,7 +190,7 @@ export default {
    * и размышлений в чате, как в VS Code).
    * Возвращает { reply, sessionId, contextTokens, cost, actualModel, steps } или бросает Error.
    */
-  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress, onStep }) {
+  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress, onStep, signal }) {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
     if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
@@ -219,7 +219,9 @@ export default {
         }
       };
       const timeoutMs = config.chatTimeoutMs || 3600000;
-      const child = execFile(config.claudeBin, args, { cwd, env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      // signal — кнопка «стоп» в чате: Node сам убьёт процесс, а мы отличим остановку
+      // от таймаута по коду ошибки (ABORT_ERR) и вернём понятный текст, а не «код null».
+      const child = execFile(config.claudeBin, args, { cwd, env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, signal }, (err, stdout, stderr) => {
         // Подстраховка: финальная строка могла остаться в буфере без \n.
         if (!resultEv) {
           for (const line of (buf + '\n' + (stdout || '')).split('\n')) {
@@ -229,6 +231,12 @@ export default {
           }
         }
         if (!resultEv) {
+          if (err?.code === 'ABORT_ERR' || signal?.aborted) {
+            const stopped = new Error('Ход остановлен.');
+            stopped.stopped = true;
+            stopped.steps = steps;
+            return reject(stopped);
+          }
           if (err?.killed) return reject(new Error(`Агент не уложился в лимит ${Math.round(timeoutMs / 60000)} мин — возможно, ждал разрешения во всплывашке или задача слишком большая.`));
           const tail = (stderr || '').trim().slice(-600);
           return reject(new Error(tail || `claude завершился без результата (код ${err?.code ?? '?'})`));

@@ -132,6 +132,8 @@ export const useChatStore = defineStore('chat', {
           });
           if (p.sessionId) s.sessionId = p.sessionId;
           if (typeof p.contextTokens === 'number' && p.contextTokens > 0) s.contextTokens = p.contextTokens;
+          // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
+          if (p.effort && p.effort !== s.effort) s.effort = p.effort;
           s.sending = false;
           s.updatedAt = p.at || Date.now();
         }
@@ -225,7 +227,7 @@ export const useChatStore = defineStore('chat', {
         try {
           const d = JSON.parse(e.data);
           const s = this._get(d.chatKey);
-          if (s) { s.sending = false; s.progressTokens = 0; }
+          if (s) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
         } catch { /* битое событие */ }
       });
     },
@@ -341,6 +343,18 @@ export const useChatStore = defineStore('chat', {
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
     resetContext(id) { const s = this._get(id); if (!s) return; s.sessionId = null; s.contextTokens = 0; this._persist(); },
 
+    /**
+     * Стоп работающего (или зависшего) агента: сервер убивает процесс CLI, ход
+     * возвращается как обычный ответ «⏹ Ход остановлен» с уже показанной лентой.
+     * Флаг sending снимет сам ответ запроса send(), поэтому здесь его не трогаем.
+     */
+    async stop(id) {
+      const s = this._get(id);
+      if (!s?.sending) return;
+      s.stopping = true;
+      try { await api.post('/api/chat/stop', { chatKey: id }); } catch { /* ход мог уже кончиться */ }
+    },
+
     async send(id, text, attachments = []) {
       const s = this._get(id); if (!s) return;
       if ((!text.trim() && !attachments.length) || s.sending) return;
@@ -378,6 +392,10 @@ export const useChatStore = defineStore('chat', {
           steps: (r.steps?.length ? r.steps : s.steps) || [],
           model: r.model || s.model, actualModel: r.actualModel || '', effort: r.effort || s.effort,
         });
+        // Сервер мог подменить эффорт (модель не тянет выбранный уровень) — подтягиваем
+        // слайдер под реальность, чтобы UI не врал. Пишем в сессию напрямую, НЕ через
+        // setEffort: вынужденный откат не должен становиться дефолтом для новых чатов.
+        if (r.effort && r.effort !== s.effort) s.effort = r.effort;
         s.steps = [];
         // Оповещение, если пользователь не смотрит на этот чат (другая вкладка ОС,
         // другой раздел с закрытой панелью или другой активный чат).
@@ -388,7 +406,7 @@ export const useChatStore = defineStore('chat', {
       } catch (e) {
         s.error = e.message;
         s.messages.push({ role: 'error', text: e.message });
-      } finally { s.sending = false; s.progressTokens = 0; s.updatedAt = Date.now(); this._persist(); }
+      } finally { s.sending = false; s.stopping = false; s.progressTokens = 0; s.updatedAt = Date.now(); this._persist(); }
     },
 
     // Список номеров задач, уже находящихся на конвейере (для защиты «На конвейер»).

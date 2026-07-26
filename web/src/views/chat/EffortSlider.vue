@@ -43,9 +43,10 @@ function onTrack(e) {
 </template>
 
 <style scoped>
-.eff { display: inline-flex; align-items: center; gap: 8px; height: 34px; background: var(--ground); border: 1px solid var(--line);
-  border-radius: 8px; padding: 0 10px; user-select: none; flex: none; }
-.cap { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); flex: none; }
+/* Без своей коробки: панель чата — строка состояния, а не набор форм */
+.eff { display: inline-flex; align-items: center; gap: 8px; height: 28px; background: none; border: none;
+  padding: 0; user-select: none; flex: none; }
+.cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; flex: none; }
 .track { position: relative; width: 78px; height: 16px; flex: none; cursor: pointer; }
 .rail { position: absolute; top: 50%; left: 0; right: 0; height: 3px; transform: translateY(-50%); background: var(--surface-2); border-radius: 999px; }
 .fill { position: absolute; top: 50%; left: 0; height: 3px; transform: translateY(-50%); border-radius: 999px; background: var(--accent); transition: width .15s; }

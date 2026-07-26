@@ -42,19 +42,26 @@ function submit() {
 <template>
   <div class="q">
     <div class="col">
-      <!-- Компактно: вопрос — строкой, варианты — чипами, пояснения вариантов в подсказке -->
+      <!-- Вариант — строка на всю ширину: отметка, название, справа пояснение агента.
+           Так видно, чем варианты отличаются, и попасть мышью проще, чем по чипам. -->
       <div v-for="(q, qi) in questions" :key="qi" class="q-item">
         <div class="q-text">
           <span class="q-ico">?</span>{{ q.question }}
-          <span v-if="q.multiSelect" class="q-multi">неск.</span>
+          <span v-if="q.multiSelect" class="q-multi">можно несколько</span>
         </div>
         <div class="q-opts">
           <button v-for="o in q.options || []" :key="o.label" class="q-opt" :class="{ on: isPicked(qi, o.label) }"
-                  :title="o.description || o.label" @click="pick(qi, o.label)">{{ o.label }}</button>
-          <button class="q-own-btn" :class="{ on: state[qi].own }" title="Ответить своими словами"
-                  @click="state[qi].own = !state[qi].own">своё…</button>
+                  @click="pick(qi, o.label)">
+            <span class="q-mark" :class="{ multi: q.multiSelect }"></span>
+            <span class="q-name">{{ o.label }}</span>
+            <span v-if="o.description" class="q-desc">{{ o.description }}</span>
+          </button>
+          <button class="q-opt own" :class="{ on: state[qi].own }" @click="state[qi].own = !state[qi].own">
+            <span class="q-mark" :class="{ multi: q.multiSelect }"></span>
+            <span class="q-name">свой ответ…</span>
+          </button>
         </div>
-        <input v-if="state[qi].own" v-model="state[qi].text" class="q-own" placeholder="свой ответ"
+        <input v-if="state[qi].own" v-model="state[qi].text" class="q-own" placeholder="напиши своими словами"
                @keydown.enter.prevent="ready && submit()" />
       </div>
       <div class="q-act">
@@ -71,19 +78,24 @@ function submit() {
 .q { padding: 9px 22px 10px; border-top: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, transparent); max-height: 38vh; overflow-y: auto; }
 .col { width: 100%; min-width: 0; }
-.q-item + .q-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-.q-text { font-size: 13px; margin-bottom: 6px; display: flex; align-items: baseline; gap: 6px; }
+.q-item + .q-item { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.q-text { font-size: 13px; margin-bottom: 7px; display: flex; align-items: baseline; gap: 6px; }
 .q-ico { flex: none; color: var(--accent); font-weight: 700; }
-.q-multi { font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; }
-.q-opts { display: flex; flex-wrap: wrap; gap: 6px; }
-/* Вариант — чип в одну строку; пояснение из ответа агента уходит в подсказку по наведению */
-.q-opt, .q-own-btn { background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
-  padding: 4px 10px; font-size: 12.5px; cursor: pointer; color: var(--ink); }
-.q-opt:hover, .q-own-btn:hover { border-color: var(--line-2); }
-.q-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.q-own-btn { color: var(--ink-mid); }
-.q-own-btn.on { border-color: var(--accent); color: var(--ink); }
-.q-own { width: 100%; margin-top: 6px; height: 30px; background: var(--ground); border: 1px solid var(--line);
+.q-multi { font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+/* Варианты — строки на всю ширину: отметка, название, справа пояснение от агента */
+.q-opts { display: flex; flex-direction: column; gap: 3px; }
+.q-opt { display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left; padding: 6px 10px;
+  background: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; color: var(--ink); font-size: 12.5px; }
+.q-opt:hover { background: var(--surface-2); }
+.q-opt.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.q-mark { flex: none; width: 12px; height: 12px; border: 1.5px solid var(--line-2); border-radius: 50%; align-self: center; }
+.q-mark.multi { border-radius: 3px; }
+.q-opt.on .q-mark { border-color: var(--accent); background: var(--accent);
+  box-shadow: inset 0 0 0 2.5px var(--ground); }
+.q-name { flex: none; }
+.q-desc { color: var(--ink-mid); font-size: 11.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-opt.own .q-name { color: var(--ink-mid); }
+.q-own { width: 100%; margin-top: 5px; height: 30px; background: var(--ground); border: 1px solid var(--line);
   border-radius: 8px; color: var(--ink); padding: 0 10px; font-size: 12.5px; font-family: inherit; }
 .q-own:focus { outline: none; border-color: var(--line-2); }
 .q-act { display: flex; gap: 8px; margin-top: 9px; }

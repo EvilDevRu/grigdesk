@@ -328,13 +328,15 @@ async function toConveyor() {
     <div class="cs-top">
       <div class="col bar">
         <div class="sel task">
+          <span class="lbl">задача</span>
           <select :value="sess.taskId || ''" @change="onTaskChange">
-            <option value="">— без задачи (свободный вопрос) —</option>
+            <option value="">без задачи</option>
             <option v-for="o in taskOpts" :key="o.task" :value="o.task">{{ optLabel(o) }}</option>
           </select>
         </div>
         <div class="spacer"></div>
         <div class="sel model">
+          <span class="lbl">модель</span>
           <select :value="modelId" :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
                   @change="onModelChange">
             <template v-if="provGroups.length">
@@ -496,7 +498,12 @@ async function toConveyor() {
             </svg>
           </button>
           </HelpTip>
-          <button class="send" :disabled="sess.sending || (!input.trim() && !pending.length)" title="Отправить (Enter)" @click="submit">↑</button>
+          <!-- Пока агент работает, та же кнопка останавливает ход: заодно спасает от зависших -->
+          <button v-if="sess.sending" class="send stop" :disabled="sess.stopping"
+                  :title="sess.stopping ? 'Останавливаю…' : 'Остановить агента'" @click="chat.stop(sid)">
+            <span class="sq"></span>
+          </button>
+          <button v-else class="send" :disabled="!input.trim() && !pending.length" title="Отправить (Enter)" @click="submit">↑</button>
         </div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -516,7 +523,9 @@ async function toConveyor() {
 .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .sel { position: relative; }
-.sel.task { flex: 0 1 420px; min-width: 160px; }
+/* Задача сжимается первой: правая группа (модель · эффорт · контекст) должна
+   помещаться в один ряд, иначе кольцо контекста переносится на вторую строку */
+.sel.task { flex: 0 1 320px; min-width: 120px; }
 /* Селект модели сжимаемый: в узкой плавающей панели ряд «модель + эффорт + кольцо»
    должен оставаться одним рядом, а не разъезжаться на три */
 .sel.model { flex: 0 1 140px; min-width: 84px; }
@@ -528,20 +537,31 @@ async function toConveyor() {
 /* basis 0 (не auto!): естественная ширина селекта — по самой длинной опции,
    с ней эффорт и кольцо выдавливаются на третий ряд */
 .panel .sel.model { flex: 1 1 0; min-width: 84px; }
-.sel::after { content: ''; position: absolute; right: 9px; top: 50%; width: 7px; height: 7px; pointer-events: none;
-  border-right: 1.6px solid var(--ink-mid); border-bottom: 1.6px solid var(--ink-mid); transform: translateY(-70%) rotate(45deg); }
-.sel select { width: 100%; height: 34px; -webkit-appearance: none; appearance: none; background: var(--ground); border: 1px solid var(--line);
-  color: var(--ink); border-radius: 8px; padding: 0 26px 0 10px; font-size: 12.5px; cursor: pointer; text-overflow: ellipsis; }
-.sel select:focus { outline: none; border-color: var(--line-2); }
+/* Панель — строка состояния, а не форма: у контролов нет своих коробок, только
+   подпись-метка, значение и шеврон. Разделители — тонкие вертикальные линии. */
+.sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
+.sel .lbl { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; }
+.sel::after { content: ''; position: absolute; right: 2px; top: 50%; width: 6px; height: 6px; pointer-events: none;
+  border-right: 1.5px solid var(--ink-mid); border-bottom: 1.5px solid var(--ink-mid); transform: translateY(-70%) rotate(45deg); }
+.sel select { width: 100%; height: 28px; -webkit-appearance: none; appearance: none; background: none; border: none;
+  border-bottom: 1px solid transparent; color: var(--ink); padding: 0 16px 0 0; font-size: 12.5px; font-family: inherit;
+  cursor: pointer; text-overflow: ellipsis; }
+.sel select:hover { border-bottom-color: var(--line-2); }
+.sel select:focus { outline: none; border-bottom-color: var(--accent); }
+/* Раскрытый список системный — ему нужен непрозрачный фон, иначе на тёмной теме нечитаемо */
+.sel select option, .sel select optgroup { background: var(--surface); color: var(--ink); }
+.sel + .sel, .bar > .sel + :deep(.eff), .bar :deep(.eff) + .ctx-ring {
+  border-left: 1px solid var(--line); padding-left: 12px; margin-left: 4px; }
+
 /* Кольцо контекста — маленькое, кликабельное (сброс) */
-.ctx-ring { width: 34px; height: 34px; flex: none; padding: 0; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--ground); cursor: pointer; display: grid; place-items: center; }
+.ctx-ring { width: 30px; height: 30px; flex: none; padding: 0; border: none; border-radius: 8px;
+  background: none; cursor: pointer; display: grid; place-items: center; }
 .ctx-ring svg { width: 22px; height: 22px; }
 .ctx-ring .rbg { stroke: var(--surface-2); }
 .ctx-ring .rfg { stroke: var(--good); transition: stroke-dashoffset .3s; }
 .ctx-ring.mid .rfg { stroke: var(--warn); }
 .ctx-ring.hi .rfg { stroke: var(--bad); }
-.ctx-ring:not(:disabled):hover { border-color: var(--line-2); }
+.ctx-ring:not(:disabled):hover { background: var(--surface-2); }
 .ctx-ring:disabled { cursor: default; opacity: .7; }
 
 /* Воздух сверху/снизу — margin'ом самого скролл-контейнера (не паддингом:
@@ -663,6 +683,10 @@ async function toConveyor() {
 .cs-input textarea { flex: 1; resize: none; background: transparent; border: none; outline: none; color: var(--ink);
   padding: 6px 0; font-family: inherit; font-size: 14px; line-height: 1.45; }
 .page .cs-input textarea { min-height: 48px; }
-.send { flex: none; width: 36px; height: 36px; background: var(--accent); color: #fff; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; }
+.send { flex: none; width: 36px; height: 36px; background: var(--accent); color: #fff; border: none; border-radius: 10px;
+  font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .send:disabled { opacity: .5; cursor: default; }
+/* Пока агент работает — та же кнопка становится «стоп» (квадрат), как в плеере */
+.send.stop { background: var(--bad); }
+.send.stop .sq { width: 11px; height: 11px; border-radius: 2px; background: #fff; display: block; }
 </style>

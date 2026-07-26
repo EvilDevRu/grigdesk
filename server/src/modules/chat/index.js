@@ -63,11 +63,36 @@ async function chatModule(fastify, opts) {
    */
   // ── Активные запуски агента: перезагруженная страница восстанавливает «думает…»
   // и уже показанную ленту шагов текущего хода. ──
-  const activeRuns = new Map(); // chatKey → { startedAt, tokens, steps[] }
+  const activeRuns = new Map(); // chatKey → { startedAt, tokens, steps[], ac }
 
   fastify.get('/api/chat/active', async () => ({
-    active: [...activeRuns.entries()].map(([chatKey, v]) => ({ chatKey, ...v })),
+    // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
+    active: [...activeRuns.entries()].map(([chatKey, v]) => ({
+      chatKey, startedAt: v.startedAt, tokens: v.tokens, steps: v.steps,
+    })),
   }));
+
+  /**
+   * Стоп: агент ушёл не туда или завис. Убиваем процесс CLI — ход завершится
+   * ошибкой `stopped`, и чат покажет «Ход остановлен» вместо бесконечного «думает…».
+   * Ждущий ответа запрос разрешения тоже снимаем: отвечать уже некому.
+   */
+  fastify.post('/api/chat/stop', async (request) => {
+    const chatKey = String(request.body?.chatKey || '');
+    const run = activeRuns.get(chatKey);
+    if (!run) return { ok: false, reason: 'нет активного хода' };
+    for (const [pid, p] of pendingPerms) {
+      if (p.chatKey === chatKey) {
+        clearTimeout(p.timer);
+        pendingPerms.delete(pid);
+        p.resolve({ behavior: 'deny', message: 'Ход остановлен пользователем' });
+        fastify.sse.broadcast('chat-permission-done', { pid });
+      }
+    }
+    run.ac?.abort();
+    fastify.log.info({ chatKey }, 'чат: ход остановлен пользователем');
+    return { ok: true };
+  });
 
   // ── Всплывашка разрешений и диалог с агентом: ожидающие ответа пользователя запросы ──
   const pendingPerms = new Map(); // pid → { resolve, timer }
@@ -106,7 +131,8 @@ async function chatModule(fastify, opts) {
             : 'Пользователь не ответил на запрос разрешения в кокпите — действие отклонено',
         });
       }, PERM_TIMEOUT_MS);
-      pendingPerms.set(pid, { resolve, timer, isQuestion, input: input || {} });
+      // chatKey запоминаем, чтобы «стоп» снял именно висящие запросы этого чата.
+      pendingPerms.set(pid, { resolve, timer, isQuestion, input: input || {}, chatKey: chatKey || '' });
       if (isQuestion) {
         fastify.sse.broadcast('chat-question', { pid, chatKey: chatKey || '', questions: input?.questions || [] });
       } else {
@@ -218,10 +244,14 @@ async function chatModule(fastify, opts) {
       },
     };
 
-    if (chatKey) activeRuns.set(chatKey, { startedAt: Date.now(), tokens: 0, steps: [] });
+    // Ход можно оборвать кнопкой «стоп»: контроллер живёт в activeRuns, POST /api/chat/stop
+    // дёргает abort, execFile убивает CLI.
+    const ac = new AbortController();
+    if (chatKey) activeRuns.set(chatKey, { startedAt: Date.now(), tokens: 0, steps: [], ac });
     try {
       const out = await executor.run({
         config,
+        signal: ac.signal,
         env: claudeAuth ? claudeAuth.env() : process.env,
         message: fullMessage,
         cwd,
@@ -260,6 +290,19 @@ async function chatModule(fastify, opts) {
       // effort — что реально ушло в запуск. По этой тройке в UI видно любой рассинхрон.
       return { ...out, model: model || null, effort: safeEffort || null };
     } catch (err) {
+      // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
+      // чтобы в истории осталось, что агент успел сделать до стопа.
+      if (err.stopped) {
+        const stoppedOut = { reply: '⏹ Ход остановлен.', steps: err.steps || [], sessionId, contextTokens: 0, cost: null,
+          model: model || null, effort: safeEffort || null, stopped: true };
+        if (request.socket.destroyed && chatKey) {
+          await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+            chatKey, role: 'assistant', ...stoppedOut, userText: message || '', at: Date.now() });
+          fastify.sse.broadcast('chat-orphan', { chatKey });
+          return reply;
+        }
+        return stoppedOut;
+      }
       if (request.socket.destroyed && chatKey) {
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
           chatKey, role: 'error', reply: err.message, userText: message || '', at: Date.now() });
