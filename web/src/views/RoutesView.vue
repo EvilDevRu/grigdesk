@@ -29,13 +29,16 @@ const linkFrom = ref('');     // источник возврата в режим
 const pickFilter = ref('');
 const canvasEl = ref(null);
 const popupEl = ref(null);
+const promptEd = ref(null);   // { nid, text } — редактор промпта узла
+const applying = ref(false);  // «применить во все схемы» в процессе
 
 // Репортим открытый маршрут в UI-контекст — чат с агентом знает, что открыто.
 const ui = useUiContextStore();
 watchEffect(() => { if (selectedId.value) ui.set('routes', { project: profile.value, route: selectedId.value }); });
 onUnmounted(() => ui.clear('routes'));
 
-const HELP_SCHEMA = 'Правка — кликом по схеме: клик по блоку открывает действия (вставить этап, возврат при провале, убрать). Схема раскладывается сама; возвраты — красные дуги.';
+const HELP_SCHEMA = 'Правка — кликом по схеме: клик по блоку открывает действия (промпт этапа, вставить этап, возврат при провале, убрать). Схема раскладывается сама; возвраты — красные дуги.';
+const HELP_PROMPT = 'Промпт принадлежит месту в схеме, а не агенту: при добавлении узла сюда копируется заготовка из шаблона агента, дальше текст живёт в этой схеме и тюнится под её маршрут. «Из шаблона» — заменить текущий текст заготовкой; «Применить во все схемы» — разнести этот текст по всем схемам проекта с этим этапом (например, после добавления уроков прогонов).';
 
 const agentsById = computed(() => Object.fromEntries(agents.value.map((a) => [a.id, a])));
 const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
@@ -116,7 +119,7 @@ async function createNew() {
   if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = ''; isNew.value = true; notice.value = '';
   closePopup(); linkFrom.value = '';
-  form.value = { id: '', title: '', stages: [], returns: [] };
+  form.value = { id: '', title: '', stages: [], returns: [], prompts: {} };
 }
 
 // ── Клик по узлу схемы ──
@@ -148,6 +151,10 @@ function startInsertFirst(ev) {
 }
 function pickAgent(id) {
   form.value.stages.splice(popup.value.insertAt, 0, id);
+  // Инстанцирование: заготовка промпта копируется из шаблона агента в схему.
+  if (!form.value.prompts) form.value.prompts = {};
+  const tpl = (agentsById.value[id]?.prompt || '').trim();
+  if (tpl && !form.value.prompts[id]) form.value.prompts[id] = tpl;
   closePopup();
 }
 function startLink() {
@@ -158,7 +165,50 @@ function removeNode() {
   const id = popup.value.nid;
   form.value.stages = form.value.stages.filter((s) => s !== id);
   form.value.returns = form.value.returns.filter((r) => r.from !== id && r.to !== id);
+  if (form.value.prompts) delete form.value.prompts[id];
   closePopup();
+}
+
+// ── Промпт узла ──
+function openPrompt() {
+  promptEd.value = { nid: popup.value.nid, text: form.value.prompts?.[popup.value.nid] || '' };
+  closePopup();
+}
+function promptFromTemplate() {
+  promptEd.value.text = (agentsById.value[promptEd.value.nid]?.prompt || '').trim();
+}
+function promptOk() {
+  const { nid, text } = promptEd.value;
+  if (!form.value.prompts) form.value.prompts = {};
+  if (text.trim()) form.value.prompts[nid] = text.trim();
+  else delete form.value.prompts[nid];
+  promptEd.value = null;
+}
+// Разнести текст этого узла по всем схемам проекта, где есть этот этап
+// (другие маршруты пишутся на сервер сразу, текущий — через «Сохранить»).
+async function promptApplyAll() {
+  const { nid, text } = promptEd.value;
+  const others = routes.value.filter((r) => r.id !== selectedId.value && r.stages.includes(nid));
+  const label = agentsById.value[nid]?.label || nid;
+  if (!(await confirmDialog(
+    `Записать этот промпт «${label}» во все схемы проекта (${others.length + 1} шт.)? Их текущие тексты этапа будут заменены.`,
+    { okText: 'Применить' },
+  ))) return;
+  applying.value = true;
+  try {
+    for (const r of others) {
+      const { id, ...rest } = r;
+      await api.put(`/api/routes/${profile.value}/${id}`, { ...rest, prompts: { ...rest.prompts, [nid]: text.trim() } });
+    }
+    promptOk();
+    notice.value = `Промпт разнесён по ${others.length + 1} схемам`;
+    setTimeout(() => { notice.value = ''; }, 3000);
+    // Обновляем список, не трогая открытую форму (она сохранится своей кнопкой).
+    const fresh = (await api.get(`/api/routes/${profile.value}`)).routes || [];
+    const cur = routes.value.find((r) => r.id === selectedId.value);
+    routes.value = fresh.map((r) => (r.id === selectedId.value && cur ? cur : r));
+  } catch (e) { notice.value = `Ошибка: ${e.message}`; }
+  finally { applying.value = false; }
 }
 function removeReturn(r) {
   form.value.returns = form.value.returns.filter((x) => x !== r);
@@ -169,7 +219,7 @@ function onDocDown(e) {
   if (popup.value && popupEl.value && !popupEl.value.contains(e.target)) closePopup();
 }
 function onKey(e) {
-  if (e.key === 'Escape') { closePopup(); linkFrom.value = ''; }
+  if (e.key === 'Escape') { closePopup(); linkFrom.value = ''; promptEd.value = null; }
 }
 
 async function save() {
@@ -270,6 +320,7 @@ onBeforeUnmount(() => {
               <span class="pic">{{ KIND_ICON[agentsById[popup.nid]?.kind] || '🤖' }}</span>
               <span class="pname">{{ agentsById[popup.nid]?.label || popup.nid }}</span>
             </div>
+            <button class="pact" @click="openPrompt">📝 Промпт этапа<span v-if="!form.prompts?.[popup.nid]" class="muted"> (пусто)</span></button>
             <button class="pact" @click="startInsert(0)">⇤ Вставить этап до</button>
             <button class="pact" @click="startInsert(1)">⇥ Вставить этап после</button>
             <button class="pact" @click="startLink">↩ Возврат при провале…</button>
@@ -294,6 +345,29 @@ onBeforeUnmount(() => {
               <div v-if="!pickList.length" class="muted pempty">Все агенты уже в цепочке</div>
             </div>
           </template>
+        </div>
+      </div>
+
+      <!-- Редактор промпта узла: текст живёт в схеме, шаблон агента — только заготовка -->
+      <div v-if="promptEd" class="pm-back" @mousedown.self="promptEd = null">
+        <div class="pm">
+          <header class="pm-head">
+            <span class="pic">{{ KIND_ICON[agentsById[promptEd.nid]?.kind] || '🤖' }}</span>
+            <span class="pname">{{ agentsById[promptEd.nid]?.label || promptEd.nid }}</span>
+            <span class="muted pm-sub">промпт этапа в схеме «{{ isNew ? form.id || 'новая' : selectedId }}»</span>
+            <HelpTip :text="HELP_PROMPT" />
+          </header>
+          <textarea v-model="promptEd.text" class="pm-text mono" spellcheck="false"
+                    :placeholder="agentsById[promptEd.nid]?.kind === 'human' ? 'Человеческие ворота — обычно без промпта, конвейер ждёт решения в дашборде' : 'Текст промпта этого узла…'"></textarea>
+          <footer class="pm-foot">
+            <button class="btn" :disabled="!agentsById[promptEd.nid]?.prompt" @click="promptFromTemplate">Из шаблона</button>
+            <button class="btn" :disabled="applying || !promptEd.text.trim()" @click="promptApplyAll">
+              <span v-if="applying" class="spin"></span> Применить во все схемы
+            </button>
+            <span class="grow"></span>
+            <button class="btn" @click="promptEd = null">Отмена</button>
+            <button class="btn accent" @click="promptOk">Готово</button>
+          </footer>
         </div>
       </div>
     </section>
@@ -361,6 +435,17 @@ onBeforeUnmount(() => {
 .plabel { flex: 1; min-width: 0; padding: 4px 8px; font-size: 12px; }
 .x { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 11px; padding: 2px 4px; }
 .x:hover { color: var(--bad); }
+
+/* Редактор промпта узла */
+.pm-back { position: fixed; inset: 0; z-index: 60; background: #0008; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.pm { width: min(860px, 100%); height: min(640px, 100%); display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 13px; box-shadow: 0 18px 60px #000c; padding: 14px 16px 16px; }
+.pm-head { display: flex; align-items: center; gap: 8px; }
+.pm-sub { font-size: 12px; }
+.pm-text { flex: 1; resize: none; background: var(--ground); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 10px; padding: 12px 14px; font-size: 12.5px; line-height: 1.55; }
+.pm-text:focus { outline: none; border-color: var(--line-2); }
+.pm-foot { display: flex; align-items: center; gap: 8px; }
 
 .pfilter { width: 100%; margin-bottom: 6px; }
 .plist { max-height: 260px; overflow-y: auto; }

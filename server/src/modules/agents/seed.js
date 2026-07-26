@@ -1,12 +1,15 @@
-// Посев ГЛОБАЛЬНОЙ библиотеки агентов из всех профилей фабрики.
+// Посев библиотеки ШАБЛОНОВ агентов из всех профилей фабрики.
+// Модель данных: агент — переиспользуемый шаблон роли (метаданные + заготовка
+// промпта); боевой промпт каждого этапа принадлежит СХЕМЕ и лежит сайдкаром
+// routes/<профиль>/<маршрут>/<этап>.md (см. модуль routes).
+//
 // Метаданные — из profiles/<профиль>.graph.json; настройки и промпты — из bash-функций
 // профиля (profile_stage_*): профиль сорсится с заглушками движка, переменные окружения
 // подставляются плейсхолдерами {{TASK}}, {{STATE_DIR}} — на выходе готовые шаблоны.
 //
-// Коллизии id между профилями: один и тот же id (scout) в разных профилях — это РАЗНЫЕ
-// агенты (другая подпись, другой промпт). Первый профиль занимает исходный id, следующим
-// достаётся суффикс: scout-rdesigner. Карта переименований (профиль → {старый id → новый})
-// пишется в agents/.remap.json — по ней посев маршрутов подменяет ссылки.
+// Коллизии id между профилями суффиксами НЕ разводятся: один id = один шаблон,
+// первый профиль (по алфавиту) даёт заготовку промпта, остальные — только свои
+// сайдкары в маршрутах. Никакой карты переименований больше нет.
 //
 // Тонкость с ключами: функции профиля матчат ИМЕНА ЭТАПОВ ДВИЖКА (PLAN, PHPCHECK),
 // а graph.json хранит КЛЮЧИ РЕЕСТРА (PLANS, PHPCHECK) — почти всегда совпадают, но не
@@ -78,28 +81,36 @@ done
   return { byId };
 }
 
-export function remapPath(agentsDir) { return path.join(agentsDir, '.remap.json'); }
-
-/** Карта переименований последнего посева: профиль → {старый id → id в библиотеке}. */
-export async function readRemap(agentsDir) {
-  try { return JSON.parse(await fs.readFile(remapPath(agentsDir), 'utf8')); } catch { return {}; }
+/** Кандидаты ключей стадий профиля из graph.json (для extract). */
+function stagesOf(g) {
+  return Object.keys(g.nodes || {}).map((id) => ({ id, k1: g.keys?.[id] || id.toUpperCase(), k2: id.toUpperCase() }));
 }
 
 /**
- * Посев библиотеки из всех профилей фабрики.
- * @returns {{n: number, remap: Record<string, Record<string, string>>}}
+ * Промпты всех стадий профиля: { <id этапа>: текст }. Используется посевом
+ * маршрутов — тексты уезжают сайдкарами в папки схем.
+ */
+export async function extractProfilePrompts(factoryHome, profile) {
+  const g = await readGraph(factoryHome, profile);
+  const stages = stagesOf(g);
+  if (!stages.length) return {};
+  const { byId } = await extractFromProfile(factoryHome, profile, stages);
+  return Object.fromEntries(stages.map(({ id }) => [id, byId[id]?.prompt || '']));
+}
+
+/**
+ * Посев библиотеки шаблонов из всех профилей фабрики. Один id — один шаблон:
+ * повторное появление id в другом профиле шаблон не перетирает.
+ * @returns {{n: number}}
  */
 export async function seedAgents(store, factoryHome, log) {
-  const remap = {};
   const claimed = new Set();
   let n = 0;
   for (const profile of (await listFactoryProfiles(factoryHome)).sort()) {
     const g = await readGraph(factoryHome, profile);
-    const ids = Object.keys(g.nodes || {});
-    if (!ids.length) continue;
-    const keyOf = (id) => g.keys?.[id] || id.toUpperCase();
+    const stages = stagesOf(g);
+    if (!stages.length) continue;
     const optional = new Set(Object.values(g.optional || {}).flat());
-    const stages = ids.map((id) => ({ id, k1: keyOf(id), k2: id.toUpperCase() }));
 
     let extracted = { byId: {} };
     try {
@@ -108,29 +119,31 @@ export async function seedAgents(store, factoryHome, log) {
       log?.warn({ err: e.message, profile }, 'посев агентов: профиль не прочитался, сею только метаданные');
     }
 
-    remap[profile] = {};
     for (const { id, k1 } of stages) {
+      if (claimed.has(id)) continue; // шаблон уже есть — специфика профиля живёт в его схемах
+      claimed.add(id);
       const node = g.nodes?.[id] || [];
       const ext = extracted.byId[id] || {};
-      const target = claimed.has(id) ? `${id}-${profile}` : id;
-      claimed.add(target);
-      remap[profile][id] = target;
-      await store.save(target, {
+      // Заготовка промпта и эффорт — курируются руками: посев их НЕ трогает
+      // (в bash-профилях эффорта нет, а проектные тексты уезжают в схемы, не в шаблон).
+      let prev = null;
+      try { prev = await store.get(id); } catch { /* шаблона ещё нет */ }
+      await store.save(id, {
         kind: node[0] || 'agent',
         label: (node[1] || id).replace(/^(🤖|👤|<\/>)\s*/, ''),
         sub: node[2] || '',
         key: k1,
         model: ext.model || '',
+        effort: prev?.effort || '',
         timeout: ext.timeout || 0,
         budget: ext.budget || 0,
         readonly: !!ext.readonly,
         optional: optional.has(id),
-        prompt: ext.prompt || '',
+        prompt: prev?.prompt || '',
       });
       n++;
     }
   }
   await store.ensureDir();
-  await fs.writeFile(remapPath(store.dir), `${JSON.stringify(remap, null, 2)}\n`);
-  return { n, remap };
+  return { n };
 }

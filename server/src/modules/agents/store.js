@@ -12,6 +12,7 @@ const FIELDS = [
   ['sub', 'str'],       // сноска под блоком
   ['key', 'str'],       // ключ реестра прогона (SCOUT, PHPCHECK…)
   ['model', 'str'],     // модель этапа ('' = модель сессии)
+  ['effort', 'str'],    // усилие размышлений ('' = дефолт движка); значения — из реестра моделей
   ['timeout', 'num'],   // сек, 0 = дефолт движка
   ['budget', 'num'],    // ориентир бюджета этапа, 0 = нет
   ['readonly', 'bool'], // запрет записи в каталоги проекта
@@ -22,7 +23,7 @@ export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 
 export function defaults() {
   return {
-    kind: 'agent', label: '', sub: '', key: '', model: '',
+    kind: 'agent', label: '', sub: '', key: '', model: '', effort: '',
     timeout: 0, budget: 0, readonly: false, optional: false, prompt: '',
   };
 }

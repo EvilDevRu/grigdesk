@@ -27,19 +27,22 @@ const KINDS = [
   { v: 'code', label: '</> Код' },
 ];
 const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
-const MODELS = ['', 'haiku', 'sonnet', 'opus'];
+// Модели и их эффорты — из реестра исполнителей, без хардкода.
+const providers = ref([]);
+const EFFORT_LABEL = { low: 'низкий', medium: 'средний', high: 'высокий', max: 'максимум', xhigh: 'ультра' };
 
 // Описания настроек для тултипов — языком человека, не движка.
 const HELP = {
   label: 'Название блока — так этап подписан на схеме конвейера.',
   kind: 'Кто выполняет этап: агент Claude, человек (конвейер встаёт и ждёт решения в дашборде) или код (скрипт/проверка). Заодно определяет форму блока на схеме: прямоугольник, пилюля или ромб.',
-  model: 'Какая модель Claude выполняет этап. «Сессионная» — самая сильная и дорогая; лёгким механическим этапам (поиск, запуск линтера) хватает haiku или sonnet.',
+  model: 'Какая модель выполняет этап (список — из реестра исполнителей). «Сессионная» — модель, с которой запущен прогон, обычно самая сильная; лёгким механическим этапам (поиск, запуск линтера) хватает моделей попроще.',
+  effort: 'Сколько модель «думает» на этапе. «Дефолт движка» — не задавать явно. Механическим этапам хватает низкого, проверочным и планирующим — высокий и выше. Доступные ступени зависят от выбранной модели.',
   sub: 'Мелкая приписка под блоком на схеме — подсказка, чем этап занимается (например «pint · eslint»).',
   key: 'Имя ключа в реестре прогона, куда движок и агент пишут статус этапа: running, done, failed. По нему схема красит блок.',
   timeout: 'Максимум времени на этап в секундах. 0 — стандартный лимит движка. Агент, убитый по таймауту, теряет всю работу этапа — браузерным и видео-этапам лимит поднимают.',
   budget: 'Ориентир длительности этапа в минутах. Агенту говорят укладываться в него, сужая охват работы, а не работать дольше.',
   flags: '«read-only» — агенту запрещена запись в файлы проекта (для проверочных этапов: ревью, линт). «optional» — этап можно штатно пропустить, пропуск не считается аномалией.',
-  prompt: 'Задание, которое получает агент на этом этапе. Плейсхолдеры {{TASK}} и {{STATE_DIR}} движок заменяет на номер задачи и каталог состояния прогона.',
+  prompt: 'Заготовка задания: при добавлении агента в схему копируется в узел и дальше живёт в самой схеме (правится кликом по узлу в «Маршрутах»). Правка шаблона уже расставленные узлы не меняет. Плейсхолдеры {{TASK}} и {{STATE_DIR}} движок заменяет на номер задачи и каталог состояния прогона.',
 };
 
 watch(pro, (v) => localStorage.setItem('cockpit-agents-pro', v ? '1' : '0'));
@@ -47,6 +50,18 @@ watch(pro, (v) => localStorage.setItem('cockpit-agents-pro', v ? '1' : '0'));
 const groups = computed(() => KINDS
   .map((k) => ({ ...k, items: agents.value.filter((a) => a.kind === k.v) }))
   .filter((g) => g.items.length));
+
+// Модели для селекта: группами по исполнителям (значение = id модели из реестра).
+const modelGroups = computed(() => providers.value
+  .map((p) => ({ id: p.id, name: p.name, models: p.models || [] }))
+  .filter((g) => g.models.length));
+// Эффорты доступной ступенью зависят от выбранной модели; без модели — объединение всех.
+const effortOptions = computed(() => {
+  const all = providers.value.flatMap((p) => p.models || []);
+  const m = all.find((x) => x.id === form.value?.model);
+  const list = m?.efforts || [...new Set(all.flatMap((x) => x.efforts || []))];
+  return list.length ? list : ['low', 'medium', 'high', 'max'];
+});
 
 const original = computed(() => agents.value.find((a) => a.id === selectedId.value) || null);
 const dirty = computed(() => {
@@ -62,6 +77,13 @@ async function load() {
     if (!selectedId.value && agents.value.length) select(agents.value[0].id);
   } catch (e) { error.value = e.message; }
   finally { loading.value = false; }
+  // Реестр моделей — отдельно и без блокировки списка (селекты дозаполнятся).
+  try { providers.value = (await api.get('/api/providers')).providers || []; } catch { /* остаётся пусто */ }
+}
+
+// Смена модели: если выбранный эффорт этой модели недоступен — сбрасываем на дефолт.
+function onModelChange() {
+  if (form.value.effort && !effortOptions.value.includes(form.value.effort)) form.value.effort = '';
 }
 
 async function select(id) {
@@ -76,7 +98,7 @@ async function createNew() {
   if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = ''; isNew.value = true; notice.value = '';
   form.value = {
-    id: '', kind: 'agent', label: '', sub: '', key: '', model: '',
+    id: '', kind: 'agent', label: '', sub: '', key: '', model: '', effort: '',
     timeout: 0, budget: 0, readonly: false, optional: false, prompt: '',
   };
 }
@@ -128,7 +150,7 @@ onMounted(load);
         <button v-for="a in g.items" :key="a.id" class="item" :class="{ sel: a.id === selectedId && !isNew }" @click="select(a.id)">
           <span class="ic" :class="`k-${a.kind}`">{{ KIND_ICON[a.kind] }}</span>
           <span class="nm">{{ a.label || a.id }}</span>
-          <span v-if="a.model" class="chip mono">{{ a.model }}</span>
+          <span v-if="a.model || a.effort" class="chip mono">{{ [a.model || 'сессия', a.effort].filter(Boolean).join(' · ') }}</span>
         </button>
       </template>
     </aside>
@@ -165,8 +187,21 @@ onMounted(load);
         </label>
         <label class="f">
           <span class="lbl">Модель <HelpTip :text="HELP.model" /></span>
-          <select v-model="form.model" class="fld">
-            <option v-for="m in MODELS" :key="m" :value="m">{{ m || 'сессионная (сильная)' }}</option>
+          <select v-model="form.model" class="fld" @change="onModelChange">
+            <option value="">сессионная (модель прогона)</option>
+            <optgroup v-for="g in modelGroups" :key="g.id" :label="g.name">
+              <option v-for="m in g.models" :key="m.id" :value="m.id">{{ m.name }}</option>
+            </optgroup>
+            <!-- Значение из файла, которого нет в реестре — не терять при сохранении -->
+            <option v-if="form.model && !modelGroups.some((g) => g.models.some((m) => m.id === form.model))"
+                    :value="form.model">{{ form.model }} (нет в реестре)</option>
+          </select>
+        </label>
+        <label class="f">
+          <span class="lbl">Эффорт <HelpTip :text="HELP.effort" /></span>
+          <select v-model="form.effort" class="fld">
+            <option value="">дефолт движка</option>
+            <option v-for="e in effortOptions" :key="e" :value="e">{{ EFFORT_LABEL[e] || e }}</option>
           </select>
         </label>
       </div>
@@ -199,9 +234,9 @@ onMounted(load);
       </div>
 
       <div class="prompt-wrap">
-        <div class="lbl prompt-lbl">Промпт этапа <HelpTip :text="HELP.prompt" align="left" /> <span class="muted sm">— плейсхолдеры {{ '\{\{TASK\}\}' }} и {{ '\{\{STATE_DIR\}\}' }} подставляются при прогоне</span></div>
+        <div class="lbl prompt-lbl">Заготовка промпта <HelpTip :text="HELP.prompt" align="left" /> <span class="muted sm">— копируется в узел при добавлении в схему; боевой текст правится в самой схеме</span></div>
         <textarea v-model="form.prompt" class="prompt mono" spellcheck="false"
-                  :placeholder="form.kind === 'human' ? 'У человеческих ворот промпта нет — движок ждёт решения в дашборде' : 'Текст промпта этапа…'"></textarea>
+                  :placeholder="form.kind === 'human' ? 'У человеческих ворот промпта нет — движок ждёт решения в дашборде' : 'Заготовка задания для новых узлов…'"></textarea>
       </div>
     </section>
 

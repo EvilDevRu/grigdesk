@@ -1,45 +1,23 @@
-// Модуль agents — ГЛОБАЛЬНАЯ библиотека агентов: просмотр, правка, создание.
-// Агенты не принадлежат проектам: это маршруты проектов ссылаются на агентов
-// (один ко многим). Хранение: agents/<id>.md (frontmatter + промпт), папка
-// самогитигнорится. Пустая библиотека засевается из ВСЕХ профилей фабрики,
-// коллизии id разводятся суффиксом (см. seed.js).
+// Модуль agents — ГЛОБАЛЬНАЯ библиотека ШАБЛОНОВ агентов: просмотр, правка, создание.
+// Агент — переиспользуемая роль: метаданные + заготовка промпта. Боевой промпт
+// каждого этапа принадлежит схеме (модуль routes, сайдкары в папке маршрута) —
+// при добавлении узла заготовка копируется туда и живёт своей жизнью.
+// Хранение: agents/<id>.md (frontmatter + промпт), папка самогитигнорится.
+// Пустая библиотека засевается из ВСЕХ профилей фабрики; один id = один шаблон
+// (см. seed.js).
 import fp from 'fastify-plugin';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { AgentsStore, ID_RE, defaults } from './store.js';
 import { seedAgents } from './seed.js';
-import { PROFILE_RE } from '../../lib/profiles.js';
-
-/**
- * Миграция от прежней раскладки «по проектам» (agents/<профиль>/*.md).
- * Подпапки — это выход старого посева, кастомных правок в них движок не делает:
- * удаляем и даём глобальному посеву пересобрать библиотеку с картой переименований.
- * @returns {boolean} были ли подпапки (нужен пересев маршрутов)
- */
-async function dropLegacyProfileDirs(agentsDir) {
-  let dropped = false;
-  let entries = [];
-  try { entries = await fs.readdir(agentsDir, { withFileTypes: true }); } catch { return false; }
-  for (const e of entries) {
-    if (!e.isDirectory() || !PROFILE_RE.test(e.name)) continue;
-    await fs.rm(path.join(agentsDir, e.name), { recursive: true, force: true });
-    dropped = true;
-  }
-  return dropped;
-}
 
 async function agentsModule(fastify, opts) {
   const { config } = opts;
   const store = new AgentsStore(config.agentsDir);
 
-  // Миграция со схемы «агенты по проектам» + автопосев пустой библиотеки.
-  const hadLegacy = await dropLegacyProfileDirs(config.agentsDir);
-  if (hadLegacy || await store.isEmpty()) {
+  // Автопосев пустой библиотеки из профилей фабрики.
+  if (await store.isEmpty()) {
     try {
       const { n } = await seedAgents(store, config.factoryHome, fastify.log);
       fastify.log.info({ n }, 'библиотека агентов засеяна из фабрики');
-      // Маршруты ссылались на старые id — просигналим модулю routes пересеять их.
-      if (hadLegacy) fastify.decorate('agentsMigrated', true);
     } catch (e) {
       fastify.log.warn({ err: e.message }, 'посев библиотеки агентов не удался — база пустая');
     }
