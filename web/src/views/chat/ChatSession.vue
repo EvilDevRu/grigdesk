@@ -505,7 +505,10 @@ async function toConveyor() {
 </template>
 
 <style scoped>
-.cs { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+/* min-width: 0 обязателен: без него флекс-элемент не сжимается ниже min-content своего
+   содержимого — одна длинная команда в ленте или во всплывашке раздувала всю колонку
+   чата, и кнопки «Разрешить/Отклонить» уезжали за правый край экрана. */
+.cs { display: flex; flex-direction: column; min-height: 0; min-width: 0; height: 100%; }
 
 .col { width: 100%; min-width: 0; }
 

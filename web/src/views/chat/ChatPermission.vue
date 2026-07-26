@@ -32,18 +32,19 @@ const isPlan = computed(() => props.req?.tool === 'ExitPlanMode');
 <template>
   <div class="perm" :class="{ plan: isPlan }">
     <div class="col">
+      <!-- Кнопки — в строке заголовка: их видно всегда, какой бы длинной ни была команда -->
       <div class="p-row">
         <span class="p-t">
           <template v-if="isPlan">План готов — утвердить?</template>
           <template v-else>Разрешить <span class="p-tool">{{ req.tool }}</span>?</template>
         </span>
-        <span v-if="preview && !isPlan" class="p-line" :title="preview">{{ preview }}</span>
         <span class="p-act">
           <button class="p-ok" @click="emit('answer', true, remember)">{{ isPlan ? 'Утвердить' : 'Разрешить' }}</button>
           <button class="p-no" @click="emit('answer', false, false)">{{ isPlan ? 'Доработать' : 'Отклонить' }}</button>
         </span>
       </div>
-      <pre v-if="isPlan && preview" class="p-in big">{{ preview }}</pre>
+      <!-- Команда/файл/план — целиком, с переносами: решение принимают по тому, что видно -->
+      <pre v-if="preview" class="p-in" :class="{ big: isPlan }">{{ preview }}</pre>
       <label v-if="!isPlan" class="p-rem">
         <input v-model="remember" type="checkbox" />
         не спрашивать про «{{ req.tool }}» до конца сессии
@@ -53,18 +54,17 @@ const isPlan = computed(() => props.req?.tool === 'ExitPlanMode');
 </template>
 
 <style scoped>
+/* Плашка не должна расширять страницу: длинная команда переносится, а не тянет вёрстку */
 .perm { padding: 8px 22px 9px; border-top: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 45%, var(--line));
-  background: color-mix(in srgb, var(--warn, #e0a33a) 7%, transparent); }
+  background: color-mix(in srgb, var(--warn, #e0a33a) 7%, transparent); overflow: hidden; }
 .col { width: 100%; min-width: 0; }
-.p-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.p-t { font-size: 13px; flex: none; }
+.p-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.p-t { font-size: 13px; min-width: 0; }
 .p-tool { font-family: var(--mono, monospace); color: var(--warn, #e0a33a); }
-/* Команда/файл — одной строкой с многоточием, целиком видна в подсказке */
-.p-line { flex: 1; min-width: 0; font-family: var(--mono, monospace); font-size: 11.5px; color: var(--ink-mid);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p-in { margin: 8px 0 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
-  font-size: 11px; line-height: 1.45; color: var(--ink-mid); white-space: pre-wrap; word-break: break-all;
-  max-height: 84px; overflow-y: auto; }
+/* Команда/файл целиком: переносы по словам, высокие блоки скроллятся внутри себя */
+.p-in { margin: 6px 0 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 11.5px; line-height: 1.5; color: var(--ink-mid); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 132px; overflow-y: auto; }
 /* План читают целиком — ему нужно больше места и обычные переносы слов */
 .p-in.big { max-height: 320px; font-size: 12px; color: var(--ink); word-break: normal; overflow-wrap: anywhere; }
 .perm.plan { border-top-color: color-mix(in srgb, var(--accent) 45%, var(--line));
