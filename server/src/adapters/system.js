@@ -69,26 +69,35 @@ export class SystemAdapter {
     this.percent = dTotal > 0 ? Math.round((1 - dIdle / dTotal) * 100) : 0;
   }
 
-  /** Текущий снимок нагрузки. RAM учитывает swap (файл подкачки). */
+  /**
+   * Текущий снимок нагрузки. Цифра в шапке (totalGb/usedGb/percent) — ОЗУ вместе со swap:
+   * это общее давление на память. Всплывашке нужна разбивка, поэтому физическая память и
+   * подкачка едут ещё и по отдельности: 90% занятого ОЗУ и 90% занятого swap — совсем разные
+   * новости, в сумме они неразличимы.
+   */
   read() {
     const mi = readMeminfo();
-    let total; let free; let swapTotal; let swapUsed;
+    let ramTotal; let ramFree; let swapTotal; let swapFree;
     if (mi && mi.memTotal) {
-      swapTotal = mi.swapTotal;
-      swapUsed = mi.swapTotal - mi.swapFree;
-      total = mi.memTotal + mi.swapTotal;   // ОЗУ + swap
-      free = mi.memAvail + mi.swapFree;
+      ramTotal = mi.memTotal; ramFree = mi.memAvail;   // MemAvailable, а не MemFree: кеш отдаётся под запрос
+      swapTotal = mi.swapTotal; swapFree = mi.swapFree;
     } else {
-      total = os.totalmem(); free = os.freemem(); swapTotal = 0; swapUsed = 0;
+      ramTotal = os.totalmem(); ramFree = os.freemem(); swapTotal = 0; swapFree = 0;
     }
+    const total = ramTotal + swapTotal;   // ОЗУ + swap
+    const free = ramFree + swapFree;
     const used = total - free;
     const gb = (b) => +(b / 1024 ** 3).toFixed(1);
+    const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
     return {
       cpu: { percent: this.percent, cores: os.cpus().length, load1: +os.loadavg()[0].toFixed(2) },
       mem: {
         totalGb: gb(total), usedGb: gb(used), freeGb: gb(free),
-        percent: Math.round((used / total) * 100),
-        swapTotalGb: gb(swapTotal), swapUsedGb: gb(swapUsed),
+        percent: pct(used, total),
+        ramTotalGb: gb(ramTotal), ramUsedGb: gb(ramTotal - ramFree), ramFreeGb: gb(ramFree),
+        ramPercent: pct(ramTotal - ramFree, ramTotal),
+        swapTotalGb: gb(swapTotal), swapUsedGb: gb(swapTotal - swapFree),
+        swapPercent: pct(swapTotal - swapFree, swapTotal),
       },
       net: this.net,
     };

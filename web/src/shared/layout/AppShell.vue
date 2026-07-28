@@ -7,11 +7,13 @@ import { useSse } from '../../composables/useSse.js';
 import { useSystemStore } from '../../stores/system.js';
 import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
+import { usePluginsStore } from '../../stores/plugins.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useChatStore } from '../../stores/chat.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
 import HelpTip from '../ui/HelpTip.vue';
+import ToggleSwitch from '../ui/ToggleSwitch.vue';
 
 const route = useRoute();
 const health = ref(null);
@@ -20,6 +22,8 @@ const pwa = usePwaStore();
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
+const plugins = usePluginsStore();
+plugins.load();
 prov.load();
 prov.loadUsage();
 function provTitle(p) {
@@ -44,14 +48,122 @@ function resetIn(iso) {
   return `сброс через ${Math.max(1, Math.round(ms / 60_000))}м`;
 }
 
+// ── Доплата сверх лимитов (extra usage) ──
+// Полоса, у которой сервер прислал `credits`, — управляемая: тумблер вкл/выкл и месячный
+// потолок. Это РЕАЛЬНЫЕ деньги, поэтому каждое действие — через подтверждение, и оно
+// спрашивается ПРЯМО ВО ВСПЛЫВАШКЕ: модалка забирает фокус, всплывашка при этом
+// закрывается — человек не увидел бы ни вопроса, ни ответа. Состояние после действия
+// перечитываем с сервера, оптимистично не рисуем: списания — не то место для догадок.
+const CREDITS_URL = 'https://claude.ai/settings/usage';
+const credits = ref({}); // id исполнителя → { busy, msg, limit, ask }
+const crOf = (id) => credits.value[id] || { busy: false, msg: null, limit: '', ask: null };
+function setCr(id, patch) { credits.value = { ...credits.value, [id]: { ...crOf(id), ...patch } }; }
+
+// В поле потолка — то, что человек набрал; пока не трогал — факт со счёта.
+const limitValue = (p, b) => (crOf(p.id).limit !== '' ? crOf(p.id).limit : (b.credits?.limit ?? ''));
+
+function askCredits(p, b, on) {
+  const c = b.credits || {};
+  const cur = c.currency || 'в валюте счёта';
+  setCr(p.id, {
+    msg: null,
+    ask: on
+      ? {
+        text: `Кончатся лимиты подписки — работа продолжится за деньги с карты аккаунта Anthropic.`
+          + ` Месячный потолок ${c.limit ? `${c.limit} ${cur}` : `20 ${cur}`}, поменять можно тут же.`,
+        ok: 'Включить',
+        patch: { enabled: true },
+      }
+      : {
+        text: 'Списаний больше не будет: кончатся лимиты подписки — агенты встанут до сброса.',
+        ok: 'Выключить',
+        danger: true,
+        patch: { enabled: false },
+      },
+  });
+}
+
+function askLimit(p, b) {
+  const v = Number(String(limitValue(p, b)).replace(',', '.'));
+  if (!(v > 0)) { setCr(p.id, { msg: 'Потолок — положительное число', ask: null }); return; }
+  setCr(p.id, {
+    msg: null,
+    ask: {
+      text: `Доплата будет останавливаться на ${v} ${b.credits?.currency || ''} в месяц.`.replace(/ +/g, ' '),
+      ok: 'Поставить',
+      patch: { limit: v },
+    },
+  });
+}
+
+async function applyCredits(p) {
+  const { ask, busy } = crOf(p.id);
+  if (!ask || busy) return;
+  setCr(p.id, { busy: true, ask: null });
+  const r = await prov.setCredits(p.id, ask.patch);
+  // Успех — поле потолка чистим, чтобы показывать снова факт со счёта.
+  setCr(p.id, { busy: false, msg: r.ok ? null : (r.error || 'не получилось'), ...(r.ok && { limit: '' }) });
+}
+
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
+// Разбивка памяти для всплывашки: физическая отдельно, подкачка отдельно.
+// `??` — страховка на окно между выкаткой фронта и перезапуском сервера: пока сервер
+// старой сборки, полей ram*/swapPercent нет, и без фолбэка всплывашка покажет undefined.
+const mem = computed(() => {
+  const m = sys.value?.mem;
+  if (!m) return null;
+  const swapTotal = m.swapTotalGb || 0;
+  const swapUsed = m.swapUsedGb || 0;
+  const ramTotal = m.ramTotalGb ?? +(m.totalGb - swapTotal).toFixed(1);
+  const ramUsed = m.ramUsedGb ?? +(m.usedGb - swapUsed).toFixed(1);
+  return {
+    ramTotal, ramUsed, ramFree: m.ramFreeGb ?? +(ramTotal - ramUsed).toFixed(1),
+    ramPercent: m.ramPercent ?? (ramTotal ? Math.round((ramUsed / ramTotal) * 100) : 0),
+    swapTotal, swapUsed,
+    swapPercent: m.swapPercent ?? (swapTotal ? Math.round((swapUsed / swapTotal) * 100) : 0),
+  };
+});
 // Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
 function flagOf(cc) { if (!cc || cc.length !== 2) return '🏳'; return cc.toUpperCase().replace(/[A-Z]/g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0))); }
 
-// Непрочитанные чаты (агент ответил, а мы ещё не смотрели) — бейдж на пункте «Чаты».
+// ── Бейджи в навигации ──
+// Правило одно на все разделы: жёлтый пульсирующий — работа СТОИТ, пока не подойду;
+// красный — что-то сломалось и ждёт разбора; синий — просто «посмотри, когда сможешь».
+
+// Чаты: сколько чатов ждут МЕНЯ (агент задал вопрос и стоит) и сколько просто
+// непрочитано. Ждущие важнее — их бейдж перекрывает непрочитанные.
 const chatStore = useChatStore();
 chatStore.ensure();
 const unreadChats = computed(() => chatStore.unreadCount);
+const waitingChats = computed(() => chatStore.waitingCount);
+const chatsBadgeTitle = computed(() => (waitingChats.value
+  ? `ждут твоего ответа: ${waitingChats.value}` + (unreadChats.value ? ` · непрочитанных: ${unreadChats.value}` : '')
+  : `непрочитанные чаты: ${unreadChats.value}`));
+
+// Конвейер: задачи, которые встали на человеке — ворота ждут решения или движок упёрся.
+// Считает вотчер оповещений: он и так обходит все задачи, второго обхода не заводим.
+const notifyWatch = useNotifyWatchStore();
+notifyWatch.start();
+
+const badges = computed(() => {
+  const out = {};
+  if (waitingChats.value || unreadChats.value) {
+    out['/chats'] = {
+      n: waitingChats.value || unreadChats.value,
+      kind: waitingChats.value ? 'wait' : '',
+      title: chatsBadgeTitle.value,
+    };
+  }
+  if (notifyWatch.attentionCount) {
+    out['/pipeline'] = {
+      n: notifyWatch.attentionCount,
+      // Вставший конвейер тревожнее ждущих ворот: у ворот есть кнопка, а тут — авария.
+      kind: notifyWatch.stalled.length ? 'stall' : 'wait',
+      title: notifyWatch.attentionTitle,
+    };
+  }
+  return out;
+});
 
 const collapsed = ref(localStorage.getItem('cockpit-sidebar') === '1');
 function toggleSidebar() { collapsed.value = !collapsed.value; localStorage.setItem('cockpit-sidebar', collapsed.value ? '1' : '0'); }
@@ -65,14 +177,17 @@ const ICONS = {
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
   settings: 'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
+  demo: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M10 9l5 3-5 3V9z',
+  plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
 const nav = [
   { to: '/board', label: 'Доска', icon: 'board' },
   { to: '/pipeline', label: 'Конвейер', icon: 'pipeline' },
-  { to: '/agents', label: 'Агенты', icon: 'agents' },
+  // Чаты сразу под конвейером: это два раздела, куда ходят постоянно (и оба зажигают
+  // чипы). Базы агентов и маршрутов — редкая настройка, им ниже.
   { to: '/chats', label: 'Чаты', icon: 'chats' },
+  { to: '/agents', label: 'Агенты', icon: 'agents' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
-  { to: '/video', label: 'Видео', icon: 'video' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
 ];
 // Служебные пункты — прижаты к низу сайдбара.
@@ -82,9 +197,6 @@ const navBottom = [
 
 async function loadHealth() { try { health.value = await api.get('/api/health'); } catch { health.value = null; } }
 loadHealth();
-// Вотчер оповещений: «конвейер отработал и ждёт тебя»
-const notifyWatch = useNotifyWatchStore();
-notifyWatch.start();
 const { connected } = useSse((name) => {
   if (name === 'state-change') { loadHealth(); notifyWatch.check(); }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
@@ -103,11 +215,21 @@ const { connected } = useSse((name) => {
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
           <span class="icwrap">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
-            <!-- Непрочитанных чатов: N -->
-            <span v-if="item.to === '/chats' && unreadChats" class="navbadge" title="непрочитанные чаты">{{ unreadChats }}</span>
+            <!-- Требует человека: жёлтый — работа стоит и ждёт меня (вопрос агента,
+                 ворота конвейера), красный — конвейер встал, синий — непрочитанное -->
+            <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
+                  :title="badges[item.to].title">{{ badges[item.to].n }}</span>
           </span>
           <span class="lbl">{{ item.label }}</span>
         </router-link>
+        <!-- Плагины: под основными разделами, за разделителем. Состав живёт в «Настройки → Плагины». -->
+        <template v-if="plugins.navItems.length">
+          <div class="navsep"></div>
+          <router-link v-for="item in plugins.navItems" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
+            <span class="lbl">{{ item.label }}</span>
+          </router-link>
+        </template>
       </nav>
       <nav class="nav nav-bottom">
         <router-link v-for="item in navBottom" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
@@ -131,12 +253,36 @@ const { connected } = useSse((name) => {
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <HelpTip v-if="sys" align="right"
-                 :text="`CPU ${sys.cpu.percent}% (${sys.cpu.cores} ядер) · RAM+swap: занято ${sys.mem.usedGb} из ${sys.mem.totalGb} ГБ (свободно ${sys.mem.freeGb})` + (sys.mem.swapTotalGb ? ` · swap ${sys.mem.swapUsedGb}/${sys.mem.swapTotalGb} ГБ` : '')">
+        <HelpTip v-if="sys" align="right" class="sys-tip">
           <span class="metric mono">
             CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
             · RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}</b>
           </span>
+          <!-- Разбивка нагрузки полосками: одной строкой «занято 22 из 47» не видно,
+               кончилась физическая память или просто лежит холодный swap. -->
+          <template #tip>
+            <span class="ptip">
+              <span class="pu">
+                <span class="pu-row">
+                  <span class="pu-head"><span>Процессор · {{ sys.cpu.cores }} ядер</span><b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(sys.cpu.percent)" :style="{ width: Math.min(100, sys.cpu.percent) + '%' }"></span></span>
+                  <span class="pu-reset">средняя загрузка за минуту — {{ sys.cpu.load1 }}</span>
+                </span>
+                <span class="pu-row">
+                  <span class="pu-head"><span>Оперативная память</span><b :class="loadClass(mem.ramPercent)">{{ mem.ramPercent }}%</b></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.ramPercent)" :style="{ width: Math.min(100, mem.ramPercent) + '%' }"></span></span>
+                  <span class="pu-reset">занято {{ mem.ramUsed }} из {{ mem.ramTotal }} ГБ · свободно {{ mem.ramFree }} ГБ</span>
+                </span>
+                <span v-if="mem.swapTotal" class="pu-row">
+                  <span class="pu-head"><span>Подкачка (swap)</span><b :class="loadClass(mem.swapPercent)">{{ mem.swapPercent }}%</b></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.swapPercent)" :style="{ width: Math.min(100, mem.swapPercent) + '%' }"></span></span>
+                  <span class="pu-reset">занято {{ mem.swapUsed }} из {{ mem.swapTotal }} ГБ</span>
+                </span>
+                <span v-else class="pu-reset">подкачка выключена</span>
+              </span>
+              <span class="sysnote">В шапке ОЗУ и подкачка сложены: занято {{ sys.mem.usedGb }} из {{ sys.mem.totalGb }} ГБ</span>
+            </span>
+          </template>
         </HelpTip>
         <span v-if="sys" class="sep" aria-hidden="true">·</span>
         <AttentionAlerts />
@@ -159,9 +305,35 @@ const { connected } = useSse((name) => {
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
                 <span v-if="prov.usage[p.id]?.length" class="pu">
                   <span v-for="b in prov.usage[p.id]" :key="b.key" class="pu-row">
-                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
+                    <!-- У выключенной доплаты процент бессмыслен: там не «0% потрачено», а «не считается» -->
+                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.credits && !b.credits.enabled ? '—' : `${b.pct}%` }}</b></span>
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                     <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
+                    <!-- Управляемая полоса (доплата сверх лимитов): тумблер и месячный потолок -->
+                    <span v-if="b.credits" class="pu-cr">
+                      <ToggleSwitch :model-value="b.credits.enabled"
+                                    :label="crOf(p.id).busy ? 'применяю…' : (b.credits.enabled ? 'доплата включена' : 'доплата выключена')"
+                                    @update:model-value="(v) => askCredits(p, b, v)" />
+                      <span v-if="b.credits.enabled && !crOf(p.id).ask" class="pu-lim">
+                        <span>потолок</span>
+                        <input :value="limitValue(p, b)" inputmode="decimal" aria-label="Месячный потолок доплаты"
+                               @input="setCr(p.id, { limit: $event.target.value })" @keyup.enter="askLimit(p, b)" />
+                        <span class="cur">{{ b.credits.currency }}</span>
+                        <button :disabled="crOf(p.id).busy" @click="askLimit(p, b)">Сохранить</button>
+                      </span>
+                      <span v-if="b.credits.unlimited" class="pu-reset">потолка нет — тратится без верхней границы</span>
+                      <span v-if="b.credits.disabledReason" class="pu-reset">причина отказа: {{ b.credits.disabledReason }}</span>
+                      <!-- Подтверждение — здесь же: модалка закрыла бы всплывашку -->
+                      <span v-if="crOf(p.id).ask" class="pu-ask">
+                        <span>{{ crOf(p.id).ask.text }}</span>
+                        <span class="pu-ask-a">
+                          <button class="ok" :class="{ danger: crOf(p.id).ask.danger }" @click="applyCredits(p)">{{ crOf(p.id).ask.ok }}</button>
+                          <button @click="setCr(p.id, { ask: null })">Отмена</button>
+                        </span>
+                      </span>
+                      <span v-if="crOf(p.id).msg" class="pu-err">{{ crOf(p.id).msg }}</span>
+                      <a class="pu-link" :href="CREDITS_URL" target="_blank" rel="noopener">карта, история и доплата без потолка — на claude.ai</a>
+                    </span>
                   </span>
                 </span>
               </span>
@@ -218,6 +390,7 @@ const { connected } = useSse((name) => {
 .brand .logo { color: var(--accent); font-size: 20px; line-height: 1; }
 .brand .name { font-weight: 680; font-size: 16px; letter-spacing: -.01em; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
+.navsep { height: 1px; margin: 6px 8px; background: var(--line); }
 .navitem, .collapse-btn {
   display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 9px;
   color: var(--ink-mid); font-size: 14px; background: none; border: none; cursor: pointer; text-align: left; width: 100%;
@@ -232,6 +405,17 @@ const { connected } = useSse((name) => {
 .navbadge { position: absolute; top: -5px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
   border-radius: 999px; background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700;
   display: grid; place-items: center; line-height: 1; }
+/* «Ждут меня» — работа СТОИТ, пока не подойду (вопрос агента, ворота конвейера):
+   этот случай пульсирует, в отличие от непрочитанного, и перебивает его цветом.
+   «Встал» — конвейер упёрся или оборвался: там нет кнопки, поэтому цвет аварийный. */
+.navbadge.wait, .navbadge.stall { animation: badgepulse 1.9s ease-in-out infinite; }
+.navbadge.wait { background: var(--warn, #e0a33a); color: #1a1206; --pulse: var(--warn, #e0a33a); }
+.navbadge.stall { background: var(--bad, #f0564c); color: #fff; --pulse: var(--bad, #f0564c); }
+@keyframes badgepulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse, var(--warn, #e0a33a)) 65%, transparent); }
+  60% { box-shadow: 0 0 0 5px transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .navbadge.wait, .navbadge.stall { animation: none; } }
 .nav-bottom { margin-top: auto; }
 .collapse-btn { margin-top: 4px; }
 
@@ -279,6 +463,43 @@ const { connected } = useSse((name) => {
 .pu-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .pu-fill.hot { background: var(--bad); }
 .pu-reset { font-size: 10.5px; color: var(--ink-mid); }
+
+/* Управление доплатой: живёт внутри всплывашки, поэтому всё компактное */
+.pu-cr { display: flex; flex-direction: column; gap: 6px; margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--line); }
+.pu-lim { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-mid); }
+.pu-lim input {
+  width: 62px; padding: 3px 7px; border-radius: 7px;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
+  font-family: var(--mono); font-size: 11.5px; text-align: right;
+}
+.pu-lim input:focus { outline: none; border-color: var(--accent); }
+.pu-lim button {
+  margin-left: auto; padding: 3px 9px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); font-size: 11.5px;
+}
+.pu-lim button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pu-lim button:disabled { opacity: .5; cursor: default; }
+
+.pu-ask { display: flex; flex-direction: column; gap: 7px; font-size: 11px; line-height: 1.45; color: var(--ink); }
+.pu-ask-a { display: flex; gap: 6px; }
+.pu-ask-a button {
+  padding: 4px 11px; border-radius: 7px; cursor: pointer; font-size: 11.5px;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
+}
+.pu-ask-a button.ok { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.pu-ask-a button.ok.danger { background: var(--bad); border-color: var(--bad); }
+
+.pu-err { font-size: 10.5px; line-height: 1.45; color: var(--bad); overflow-wrap: anywhere; }
+.pu-link { font-size: 10.5px; color: var(--ink-mid); text-decoration: underline; }
+.pu-link:hover { color: var(--accent); }
+/* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).
+   Селекторы с тегом: иначе .pu-head b перебивает .lv-* по специфичности. */
+.pu-fill.lv-warn { background: var(--warn); }
+.pu-fill.lv-bad { background: var(--bad); }
+.pu-head b.lv-warn { color: var(--warn); }
+.pu-head b.lv-bad { color: var(--bad); }
+.sys-tip :deep(.ht-tip) { max-width: 320px; }
+.sysnote { font-size: 10.5px; color: var(--ink-mid); padding-top: 8px; border-top: 1px solid var(--line); }
 .netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }

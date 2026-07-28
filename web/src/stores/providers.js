@@ -78,14 +78,30 @@ export const useProvidersStore = defineStore('providers', {
       } catch { /* сервер молчит — иконок просто нет */ }
       this.loaded = true;
     },
-    // Потребление лимитов (прогрессбары в тултипе иконки исполнителя). Кэш минута.
-    async loadUsage() {
-      if (Date.now() - usageAt < 60_000) return;
+    // Потребление лимитов (прогрессбары в тултипе иконки исполнителя). Кэш минута;
+    // force — после своих же изменений (доплата), когда ждать минуту нельзя.
+    async loadUsage(force = false) {
+      if (!force && Date.now() - usageAt < 60_000) return;
       usageAt = Date.now();
       try {
         const { usage } = await api.get('/api/providers/usage');
         this.usage = usage || {};
       } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
+    },
+    /**
+     * Доплата сверх лимитов подписки: включить/выключить, сменить месячный потолок.
+     * Тратит РЕАЛЬНЫЕ деньги — зовётся только из явного действия человека, подтверждение
+     * спрашивает UI. Текст ошибки от Anthropic отдаём наверх как есть: ручки приватные,
+     * и «что именно не так» знает только их ответ.
+     */
+    async setCredits(providerId, patch) {
+      try {
+        const r = await api.post(`/api/providers/${providerId}/credits`, patch);
+        if (r?.ok) await this.loadUsage(true);
+        return r || { ok: false, error: 'сервер не ответил' };
+      } catch (e) {
+        return { ok: false, error: e.data?.message || e.message };
+      }
     },
   },
 });
