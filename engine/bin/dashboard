@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Дашборд движка. Профиль (для проектных путей/контейнеров/трекера) — из первого аргумента.
+#   dashboard [профиль] [порт]
+set -euo pipefail
+FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+PROFILE="${1:-arsenkin}"; PORT="${2:-8070}"
+export FACTORY_STATE="${FACTORY_STATE:-$HOME/.factory/state}"
+ENVF="$FACTORY_HOME/profiles/${PROFILE}.dashboard.env"
+[[ -f "$ENVF" ]] && set -a && source "$ENVF" && set +a
+exec python3 "$FACTORY_HOME/lib/dashboard.py" "$PORT"

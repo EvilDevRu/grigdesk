@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Фабрика задач — движок (project-agnostic). Проектная специфика — в profiles/<name>.sh.
+#   factory <TASK> start  --profile <name> [--ticket "текст"] [--route <маршрут>]  — новый конвейер
+#   factory <TASK> resume --profile <name> [--route <маршрут>]  — продолжить (после смерти/ребута)
+#   factory list                                                — активные задачи
+#   factory slots --profile <name>                              — занятость слотов стенда (JSON)
+# --route: маршрут, согласованный с человеком ДО запуска. Без него маршрут выбирает
+# разведка сама, и решение человека молча теряется (инцидент #8060: договорились про
+# debug, конвейер пошёл классифицировать заново). С ним разведка ROUTE не трогает.
+# Демонизируется (nohup): работа в фоне, вызвавший (кнопка/терминал) не висит.
+set -uo pipefail
+FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+
+# --- разбор аргументов ---
+TASK=""; MODE=""; PROFILE=""; TICKET=""; ROUTE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    start|resume) MODE=$1; shift ;;
+    demo) MODE=demo; shift ;;
+    list) MODE=list; shift ;;
+    slots) MODE=slots; shift ;;
+    --profile) PROFILE=$2; shift 2 ;;
+    --ticket) TICKET=$2; shift 2 ;;
+    --route) ROUTE=$2; shift 2 ;;
+    *) [[ -z "$TASK" ]] && TASK=$1; shift ;;
+  esac
+done
+
+export STATE_DIR="${STATE_DIR:-$HOME/.factory/state}"
+mkdir -p "$STATE_DIR/logs"
+
+if [[ "$MODE" == list ]]; then
+  for pf in "$STATE_DIR"/t*.pipeline; do
+    [[ -f "$pf" ]] || continue
+    t=$(basename "$pf" .pipeline); t=${t#t}
+    prof=$(grep '^PROFILE=' "$pf" | cut -d= -f2)
+    printf '#%s [%s] route=%s\n' "$t" "$prof" "$(grep '^ROUTE=' "$pf" | cut -d= -f2)"
+  done
+  exit 0
+fi
+
+# --- slots: занятость слотов стенда в JSON (без задачи, без демонизации) ---
+# Нужно внешнему распределителю. Индекс слота выбирается ВНУТРИ подъёма стенда, а в
+# реестр попадает только в его конце (~20 минут спустя): всё это время слот выглядит
+# свободным, и параллельный запуск берёт тот же — #7789 и #7804 так оба взяли k=5, и
+# второй умер на «Address already in use», потеряв провижининг. Кокпит резервирует
+# индекс под локом ДО запуска и передаёт его через FACTORY_SB_K; чтобы резервировать,
+# ему нужна занятость — отсюда и команда. Считает её профиль, движок только сериализует.
+if [[ "$MODE" == slots ]]; then
+  [[ -n "$PROFILE" ]] || { echo "использование: factory slots --profile <name>" >&2; exit 1; }
+  PF_FILE="$FACTORY_HOME/profiles/${PROFILE}.sh"
+  [[ -f "$PF_FILE" ]] || { echo "профиль не найден: $PF_FILE" >&2; exit 1; }
+  # shellcheck disable=SC1090
+  source "$FACTORY_HOME/lib/core.sh" >/dev/null 2>&1
+  # shellcheck disable=SC1090
+  source "$PF_FILE" >/dev/null 2>&1
+  declare -F profile_slots >/dev/null \
+    || { echo "профиль $PROFILE не объявляет profile_slots — слоты распределять некому" >&2; exit 2; }
+  profile_slots | awk -v prof="$PROFILE" '
+    /^ERROR/ { err=substr($0, 7); next }
+    /^RANGE/ { lo=$2; hi=$3; have=1; next }
+    /^USED/  { used[$2]=1; by[$2]=$3; why[$2]=$4; next }
+    END {
+      if (err != "" || !have) {
+        printf "{\"profile\":\"%s\",\"error\":\"%s\"}\n", prof, (err != "" ? err : "профиль не вернул диапазон слотов")
+        exit 3
+      }
+      printf "{\"profile\":\"%s\",\"range\":[%d,%d],\"used\":[", prof, lo, hi
+      n = 0
+      for (k = lo; k <= hi; k++) if (k in used) {
+        printf "%s{\"k\":%d,\"by\":\"%s\",\"why\":\"%s\"}", (n++ ? "," : ""), k, by[k], why[k]
+      }
+      printf "],\"free\":["
+      n = 0
+      for (k = lo; k <= hi; k++) if (!(k in used)) printf "%s%d", (n++ ? "," : ""), k
+      printf "]}\n"
+    }'
+  exit ${PIPESTATUS[1]:-0}
+fi
+
+[[ -n "$TASK" && -n "$MODE" ]] || { echo "использование: factory <TASK> start|resume --profile <name> [--ticket ...]"; exit 1; }
+
+# --- профиль ---
+PF_FILE="$FACTORY_HOME/profiles/${PROFILE}.sh"
+if [[ "$MODE" == resume && -z "$PROFILE" ]]; then
+  PROFILE=$(grep '^PROFILE=' "$STATE_DIR/t${TASK}.pipeline" 2>/dev/null | cut -d= -f2)
+  PF_FILE="$FACTORY_HOME/profiles/${PROFILE}.sh"
+fi
+[[ -f "$PF_FILE" ]] || { echo "профиль не найден: $PF_FILE (--profile <name>)"; exit 1; }
+
+# Маршрут проверяем ДО форка: неизвестный core.sh молча заменит на feature,
+# и человек узнает об этом, только когда конвейер уйдёт не туда.
+if [[ -n "$ROUTE" ]] && ! grep -q "^PROFILE_ROUTE_STAGES_${ROUTE}=" "$PF_FILE"; then
+  echo "маршрут '$ROUTE' не описан в профиле $PROFILE; известные: $(grep -o '^PROFILE_ROUTE_STAGES_[a-z]*' "$PF_FILE" | sed 's/.*STAGES_//' | tr '\n' ' ')"
+  exit 1
+fi
+
+# --- демонизация (кроме уже-демона) ---
+if [[ "${FACTORY_DAEMON:-}" != "1" ]]; then
+  OLD=$(grep '^ORCH_PID=' "$STATE_DIR/t${TASK}.pipeline" 2>/dev/null | cut -d= -f2 || true)
+  if [[ -n "$OLD" ]] && kill -0 "$OLD" 2>/dev/null; then
+    echo "оркестратор t${TASK} уже жив (pid $OLD)"; exit 0
+  fi
+  # Гонка двойного запуска: демон пишет свой PID только дойдя до конвейера (секунды),
+  # и второй вызов в это окно видел «PID пуст» и форкал дубль. Берём лок ЗДЕСЬ, до форка,
+  # и сразу фиксируем PID демона.
+  exec 8>"$STATE_DIR/t${TASK}.launch.lock"
+  flock -n 8 || { echo "запуск t${TASK} уже идёт (лок занят)"; exit 0; }
+  # Второй рубеж: живой демон этой задачи в системе. ORCH_PID мог не записаться
+  # (демон падал до записи) или быть затёртым — тогда сторож авто-resume считал задачу
+  # мёртвой и поднимал ДУБЛЬ. Два демона писали статусы наперегонки: один «готово»,
+  # другой «не начато» — на схеме этап то гас, то загорался (жалоба «не вижу активности»).
+  # Ищем ЧУЖОЙ живой демон. Сверяем НАСТОЯЩИЕ аргументы процесса, а не текст командной
+  # строки: pgrep по подстроке ловил любые команды, где просто упоминается «bin/factory N»
+  # (в том числе диагностические), и запуск отклонял сам себя.
+  for _pid in $(pgrep -f "bin/factory ${TASK} " 2>/dev/null); do
+    [[ "$_pid" == "$$" ]] && continue
+    mapfile -d '' _av < "/proc/$_pid/cmdline" 2>/dev/null || continue
+    [[ "${_av[1]:-}" == */bin/factory && "${_av[2]:-}" == "$TASK" ]] || continue
+    echo "демон t${TASK} уже работает (pid $_pid) — второй запуск отклонён"; exit 0
+  done
+  FACTORY_DAEMON=1 nohup "$0" "$TASK" "$MODE" --profile "$PROFILE" --ticket "$TICKET" --route "$ROUTE" \
+    >>"$STATE_DIR/logs/t${TASK}.stages.log" 2>&1 &
+  DPID=$!
+  STATE_DIR="$STATE_DIR" bash "$FACTORY_HOME/lib/pipeline-set.sh" "$TASK" ORCH_PID "$DPID" >/dev/null 2>&1
+  echo "фабрика t${TASK} (профиль $PROFILE): pid $DPID"
+  exit 0
+fi
+
+# --- демон: грузим ядро + профиль, инициализируем, гоним конвейер ---
+# ВСЁ тело демона — внутри функции НАМЕРЕННО. Bash читает скрипт порциями ПО МЕРЕ ВЫПОЛНЕНИЯ:
+# если файл правят, пока демон работает, смещения съезжают и живой процесс падает на середине
+# чужой строки (так умер демон t101 после SHIP, не доделав ретро). Определение функции bash
+# дочитывает целиком сразу, поэтому правки файла на уже запущенный демон больше не влияют.
+_daemon_main() {
+source "$FACTORY_HOME/lib/core.sh"
+source "$PF_FILE"
+
+if [[ "$MODE" == start ]]; then
+  set_st "$TASK" --init PROFILE "$PROFILE" TICKET "$TICKET"
+fi
+# Маршрут человека пишем и на resume: так им же чинится задача, которую разведка
+# уже увела не туда (без ручного дёрганья pipeline-set.sh).
+if [[ -n "$ROUTE" ]]; then
+  [[ "$(get "$TASK" ROUTE)" != "$ROUTE" ]] && flog "$TASK" "маршрут задан человеком: $ROUTE"
+  set_st "$TASK" ROUTE "$ROUTE" ROUTE_BY human
+fi
+[[ -f "$(_pf "$TASK")" ]] || { echo "нет реестра для t${TASK}"; exit 1; }
+[[ -z "$(get "$TASK" PROFILE)" ]] && set_st "$TASK" PROFILE "$PROFILE"
+
+# --- режим demo: ОДИНОЧНЫЙ прогон демо-агента вне цепочки (кнопка плагина «Демо» в кокпите).
+# Стенд должен быть жив — агент проверит сам и выставит failed, если не отвечает.
+if [[ "$MODE" == demo ]]; then
+  set_st "$TASK" DEMO running
+  flog "$TASK" "снимаю демо-видео (по кнопке, вне конвейера)"
+  if run_agent "$TASK" "$(_stage_ctx "$TASK" DEMO)" DEMO; then
+    [[ "$(get "$TASK" DEMO)" == "failed" ]] || set_st "$TASK" DEMO done
+  else
+    set_st "$TASK" DEMO failed
+    flog "$TASK" "демо не сняли (агент завершился с ошибкой)"
+  fi
+  flog "$TASK" "демо-прогон завершён"
+  return 0
+fi
+
+run_pipeline "$TASK"
+
+# --- ship / retro — тоже через профильные промпты ---
+# Третьим аргументом run_agent ОБЯЗАН получить имя этапа: без него профиль не спрашивают
+# ни про модель, ни про таймаут, и хвост уходил на самой сильной модели сессии, хотя профиль
+# для SHIP/RETRO назначает sonnet (механика, а не размышление) — цена прогона на ровном месте.
+if [[ "$(get "$TASK" GATE_ACCEPT)" == "approved" && "$(get "$TASK" SHIP)" != "done" ]]; then
+  set_st "$TASK" SHIP running
+  run_agent "$TASK" "$(_stage_ctx "$TASK" SHIP)" SHIP || true
+fi
+
+# ДЕМО ИЗ ЦЕПОЧКИ УБРАНО (решение человека 2026-07-27): конвейер не должен стоять и ждать
+# решения про видео — задача считается доставленной после ship. Демо снимается ОТДЕЛЬНО,
+# по кнопке из кокпита (плагин «Демо»): factory <TASK> demo — одиночный прогон DEMO-агента,
+# пока стенд жив. В реестре остаётся один ключ DEMO, и пишет его только режим demo:
+# ни конвейер, ни дашборд его не ведут (DEMO_ASK/GATE_DEMO выпилены вместе с воротами).
+
+# РЕТРО — сразу после ship.
+# Стенд здесь НЕ СНОСИТСЯ: песочница — ресурс человека (после ретро её открывают
+# посмотреть результат, доснять демо, доперепроверить руками), а движок сносил её молча,
+# и вернуть можно было только полным подъёмом. Снос — отдельная кнопка на карточке
+# задачи в дашборде (/api/sandbox/<task>/down).
+if [[ "$(get "$TASK" SHIP)" == "done" && "$(get "$TASK" RETRO)" != "done" ]]; then
+  flog "$TASK" "ретро (стенд не трогаем — сносится кнопкой в дашборде)"
+  # Статус running ОБЯЗАТЕЛЕН: ретро идёт минутами, а на схеме всё это время висело
+  # «не начато» — со стороны конвейер выглядел замершим сразу после ship, и человек шёл
+  # выяснять, работает ли фабрика вообще (#7800). У ship выше статус ставится, у ретро забыли.
+  set_st "$TASK" RETRO running
+  run_agent "$TASK" "$(_stage_ctx "$TASK" RETRO)" RETRO || true
+  set_st "$TASK" RETRO done
+fi
+flog "$TASK" "конвейер завершён"
+}
+
+_daemon_main

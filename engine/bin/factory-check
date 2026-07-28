@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Все проверки профиля в одном месте: factory-check [профиль ...] [--quick]
+#   --quick — без живого прогона агента (не тратит токены)
+# Ноль на выходе = профиль готов вести задачи.
+set -uo pipefail
+FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+export FACTORY_STATE="${FACTORY_STATE:-$HOME/.factory/state}"
+
+QUICK=0; PROFILES=()
+for a in "$@"; do
+  [[ "$a" == --quick ]] && QUICK=1 || PROFILES+=("$a")
+done
+if [[ ${#PROFILES[@]} -eq 0 ]]; then
+  mapfile -t PROFILES < <(cd "$FACTORY_HOME/profiles" && ls *.sh 2>/dev/null | sed 's/\.sh$//')
+fi
+
+RC=0
+for prof in "${PROFILES[@]}"; do
+  echo "── $prof ───────────────────────────────────────────"
+
+  # 1. Контракт: обязательные переменные и хуки на месте?
+  miss=$(bash -c "
+    source '$FACTORY_HOME/profiles/${prof}.sh' 2>/dev/null
+    for v in PROFILE_NAME PROFILE_CTX PROFILE_AGENT_CWD; do
+      [[ -n \"\${!v:-}\" ]] || echo \"нет переменной \$v\"
+    done
+    compgen -A variable | grep -q '^PROFILE_ROUTE_STAGES_' || echo 'нет ни одного PROFILE_ROUTE_STAGES_<маршрут>'
+    for f in profile_sandbox_up profile_sandbox_down profile_sandbox_exists profile_stage_prompt; do
+      declare -F \$f >/dev/null || echo \"нет функции \$f\"
+    done
+    declare -F profile_stage_model >/dev/null || echo 'нет profile_stage_model (весь конвейер пойдёт на самой дорогой модели)'
+  ")
+  if [[ -n "$miss" ]]; then
+    echo "$miss" | sed 's/^/✗ контракт: /'
+    RC=1
+  else
+    echo "✓ контракт: переменные и хуки на месте"
+  fi
+
+  # 1b. Мёртвые хуки и хвост движка внутри маршрута — оба случая тихие.
+  # Хвост (SHIP → RETRO) движок гоняет в bin/factory ПОСЛЕ конвейера и по своим правилам.
+  # SHIP/RETRO там идемпотентны по статусу (уже `done` — хвост пропустит), поэтому в маршруте
+  # они допустимы, но ТОЛЬКО после ворот приёмки: раньше ворот — это отгрузка без утверждения
+  # человеком. А демо в маршруте ломается всерьёз: оно вообще не этап конвейера — снимается
+  # отдельно, кнопкой плагина «Демо» в кокпите (`factory <TASK> demo`).
+  extra=$(bash -c "
+    source '$FACTORY_HOME/profiles/${prof}.sh' 2>/dev/null
+    for f in profile_run_id profile_report; do
+      declare -F \$f >/dev/null && echo \"⚠ хук \$f мёртв: движок его не вызывает — удали, чтобы не выглядел рабочим\"
+    done
+    for v in \$(compgen -A variable | grep '^PROFILE_ROUTE_STAGES_'); do
+      n=\"\$v[@]\"
+      gate_seen=0
+      for s in \${!n}; do
+        case \"\$s\" in
+          GATE_ACCEPT) gate_seen=1 ;;
+          DEMO|DEMO_ASK|GATE_DEMO)
+            echo \"✗ \$v содержит \$s — демо не этап конвейера: оно снимается по кнопке плагина «Демо» (factory <TASK> demo). В маршруте конвейер встанет на этапе, которого движок не ведёт\" ;;
+          SHIP|RETRO)
+            if [[ \$gate_seen -eq 0 ]]; then
+              echo \"✗ \$v: \$s стоит до GATE_ACCEPT — отгрузка раньше, чем человек принял работу\"
+            else
+              echo \"⚠ \$v содержит \$s — его же гоняет хвост движка; повтора не будет (статус уже done), но порядок держи сам\"
+            fi ;;
+        esac
+      done
+    done
+  ")
+  [[ -n "$extra" ]] && echo "$extra"
+  grep -q '^✗' <<<"$extra" && RC=1
+
+  # 2. У каждого этапа маршрута есть промпт, и в нём есть команда отчёта о статусе
+  bash -c "
+    export STATE_DIR='$FACTORY_STATE'
+    source '$FACTORY_HOME/lib/core.sh' 2>/dev/null
+    source '$FACTORY_HOME/profiles/${prof}.sh' 2>/dev/null
+    bad=0
+    for v in \$(compgen -A variable | grep '^PROFILE_ROUTE_STAGES_'); do
+      n=\"\$v[@]\"
+      for s in \${!n}; do
+        [[ \"\$s\" == GATE_* ]] && continue          # ворота ждёт движок, промпт не нужен
+        p=\$(profile_stage_prompt 9999 \"\$s\" 2>/dev/null)
+        # Команду отчёта о статусе добавляет ядро (_stage_ctx), профилю дублировать не нужно.
+        # А вот этап без задания — подозрительно: агент получит пустой промпт. Это законно
+        # только если статус этапа выставляет соседний этап (у arsenkin TCRITIC ставит TESTS).
+        if [[ -z \"\$p\" ]]; then
+          echo \"⚠ этап \$s: нет промпта — убедись, что его статус выставляет другой этап\"
+        fi
+      done
+    done
+    [[ \$bad -eq 0 ]] && echo '✓ промпты: у всех этапов есть задание и отчёт о статусе'
+    exit \$bad
+  " || RC=1
+
+  # 2b. Промпт просит параллельной работы, а веер не объявлен — просьбу агент проигнорирует
+  # (проверено на задачах #8060 и #101: за 15 прогонов ни одного субагента не запущено).
+  bash -c "
+    export STATE_DIR='$FACTORY_STATE'
+    source '$FACTORY_HOME/lib/core.sh' 2>/dev/null
+    source '$FACTORY_HOME/profiles/${prof}.sh' 2>/dev/null
+    for v in \$(compgen -A variable | grep '^PROFILE_ROUTE_STAGES_'); do
+      n=\"\$v[@]\"
+      for s in \${!n}; do
+        [[ \"\$s\" == GATE_* ]] && continue
+        p=\$(profile_stage_prompt 9999 \"\$s\" 2>/dev/null)
+        asks=\$(grep -ciE 'субагент|параллельн|конкурирующ' <<<\"\$p\")
+        fan=0
+        declare -F profile_stage_fanout >/dev/null && fan=\$(profile_stage_fanout \"\$s\" 2>/dev/null | grep -c .)
+        [[ \$asks -gt 0 && \${fan:-0} -eq 0 ]] && echo \"⚠ этап \$s: промпт просит параллельной работы, но profile_stage_fanout молчит — веер не случится\"
+      done
+    done | sort -u
+  "
+
+  # 2c. Скорость конвейера: веер, бюджеты, модели
+  bash "$FACTORY_HOME/tests/profile-speed.sh" "$prof"
+
+  # 3. Доступ агента к путям (статически) + 4. соответствие схемы этапам
+  python3 "$FACTORY_HOME/tests/profile-access.py" "$prof" || RC=1
+  python3 "$FACTORY_HOME/tests/routes-sync.py" "$prof" || RC=1
+
+  # 5. Живой прогон: агент реально выставляет статус (копейки на дешёвой модели)
+  if [[ $QUICK -eq 0 ]]; then
+    bash "$FACTORY_HOME/tests/agent-can-write.sh" "$prof" || RC=1
+  else
+    echo "· живой прогон пропущен (--quick)"
+  fi
+  echo
+done
+
+[[ $RC -eq 0 ]] && echo "ГОТОВО: профили можно запускать" || echo "ЕСТЬ ПРОБЛЕМЫ — см. выше"
+exit $RC

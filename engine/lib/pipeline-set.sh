@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Статусы конвейера фабрики: безопасная запись в state/tNNNN.pipeline.
+#   pipeline-set.sh <TASK> --init [KEY=VAL ...]   — создать реестр со ВСЕМИ узлами (pending)
+#   pipeline-set.sh <TASK> KEY VAL [KEY VAL ...]  — выставить статус(ы)
+# Всегда upsert: отсутствующий ключ СОЗДАЁТСЯ (sed-замена по отсутствующему ключу —
+# молчаливый no-op, из-за этого узел Ship не подсветился на пилоте #7793).
+# STATE_DIR передаётся движком через env (по умолчанию ~/.factory/state)
+STATE_DIR="${STATE_DIR:-$HOME/.factory/state}"
+# Значение бывает свободным текстом (причина пропуска, замечание ревью), а уходит оно
+# в sed-замену: «|» рвал бы саму команду, «&» подставлял бы весь найденный кусок, а перевод
+# строки ломал бы формат KEY=VAL. Поэтому экранируем разметку и схлопываем переносы.
+upsert() { local f=$1 k=$2 v=$3; v=${v//$'\n'/ }; local e=${v//\\/\\\\}; e=${e//&/\\&}; e=${e//|/\\|}; if grep -q "^${k}=" "$f" 2>/dev/null; then sed -i "s|^${k}=.*|${k}=${e}|" "$f"; else [[ -s "$f" && -n "$(tail -c1 "$f")" ]] && printf "\n" >> "$f"; printf "%s=%s\n" "$k" "$v" >> "$f"; fi; }
+
+TASK=${1:?Использование: pipeline-set.sh <TASK> --init|KEY VAL ...}
+shift
+# Агенты зовут скрипт и как «8060», и как «t8060» (имя задачи они видят с префиксом в файлах).
+# Без нормализации второй вариант создаёт реестр-призрак tt8060.pipeline, отчёт этапа уходит
+# в никуда, а движок считает этап неотчитавшимся и гоняет его заново (инцидент #8060:
+# REPRO выполнен и перезапущен, 19 минут в мусор).
+TASK=${TASK#[tT]}
+PF="$STATE_DIR/t${TASK}.pipeline"
+mkdir -p "$STATE_DIR"
+
+# Задача уже отгружена (реестр в архиве, живого нет) — писать в АРХИВ,
+# иначе upsert создаст файл-призрак и дашборд «воскресит» задачу
+if [[ ! -f "$PF" && -f "$STATE_DIR/archive/t${TASK}.pipeline" && "${1:-}" != "--init" ]]; then
+  PF="$STATE_DIR/archive/t${TASK}.pipeline"
+fi
+
+if [[ "${1:-}" == "--replan" ]]; then
+  shift
+  # Новый круг планирования (reject ворот): хвост прошлого круга сбрасывается,
+  # иначе граф показывает «тесты бегут при неутверждённом плане».
+  # SCOUT НЕ сбрасываем: отклонён ПЛАН, а не разведка — прогон #7803 на reject
+  # ворот гонял разведку по четвёртому кругу впустую (код за это время не менялся).
+  # PLAN (движковый ключ этапа) — ОБЯЗАТЕЛЬНО в списке рядом с PLANS (ключ подэтапа):
+  # без него run_pipeline видел stale PLAN=done и пропускал планирование —
+  # ворота открывались со СТАРЫМ, уже отклонённым планом.
+  # DEMO в списке НЕТ: демо снимается вне конвейера, по кнопке плагина «Демо» в кокпите,
+  # и его статусом распоряжается только режим `factory <TASK> demo`. Сбрасывать чужой ключ
+  # за компанию — как раз то, из-за чего дашборд потом ждал этап, которого движок не гоняет.
+  for k in PLAN PLANS SKEPTIC VALIDATE TRANSLATOR GATE_PLAN TESTS TCRITIC BUILD SIMPLIFY REVIEW TRACE PHPCHECK LINT \
+           BROWSER GATE_ACCEPT SHIP RETRO; do
+    upsert "$PF" "$k" "pending"
+  done
+  upsert "$PF" WF_STATUS "running"
+fi
+
+if [[ "${1:-}" == "--reject-accept" ]]; then
+  shift
+  # Приёмку отклонили: конвейер откатывается в Build. Тесты остаются заморожены,
+  # всё от сборки и далее — заново (аналог --replan для этапа сборки)
+  # MEASURE тоже сбрасываем: в маршруте debug это «замер ПОСЛЕ», и после новой правки
+  # старые цифры недействительны. Без него отклонённая задача приезжала на приёмку
+  # со «зелёным» замером от прошлой сборки (#8060: замер сняли на схлопнутой таблице).
+  for k in BUILD SIMPLIFY REVIEW TRACE MEASURE PHPCHECK LINT BROWSER GATE_ACCEPT SHIP; do
+    upsert "$PF" "$k" "pending"
+  done
+  upsert "$PF" BUILD "running"
+fi
+
+if [[ "${1:-}" == "--init" ]]; then
+  shift
+  touch "$PF"
+  # Полный скелет: каждый узел графа обязан иметь ключ, иначе статусы теряются
+  for kv in WF_STATUS=running SCOUT=pending PLANS=pending SKEPTIC=pending VALIDATE=pending \
+            TRANSLATOR=pending GATE_PLAN=pending TESTS=pending TCRITIC=pending BUILD=pending \
+            SIMPLIFY=pending REVIEW=pending TRACE=pending PHPCHECK=pending LINT=pending \
+            GATE_CAUSE=pending GATE_ACCEPT=pending SHIP=pending RETRO=pending; do
+    upsert "$PF" "${kv%%=*}" "${kv#*=}"
+  done
+fi
+
+# Помимо статуса пишем телеметрию: KEY_AT (время перехода) для терминальных
+# состояний и KEY_FAILS (счётчик петель) — сырьё для страницы /stats
+set_kv() {
+  local key=$1 val=$2
+  upsert "$PF" "$key" "$val"
+  case "$val" in
+    done|failed|waiting|approved|rejected|skipped|running)
+      upsert "$PF" "${key}_AT" "$(date '+%F %T')" ;;
+  esac
+  if [[ "$val" == "failed" ]]; then
+    local fails
+    fails=$(grep "^${key}_FAILS=" "$PF" 2>/dev/null | cut -d= -f2 || true)
+    upsert "$PF" "${key}_FAILS" "$(( ${fails:-0} + 1 ))"
+  fi
+}
+
+while [[ $# -ge 1 ]]; do
+  kv="$1"; shift
+  if [[ "$kv" == *=* ]]; then
+    set_kv "${kv%%=*}" "${kv#*=}"
+  else
+    val=${1-}; shift 2>/dev/null || true   # пустое значение допустимо (очистка ключа)
+    set_kv "$kv" "$val"
+  fi
+done
+grep -E '=' "$PF" | head -20
