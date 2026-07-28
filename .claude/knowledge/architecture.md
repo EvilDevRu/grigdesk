@@ -18,7 +18,7 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 
 | Модуль | Эндпоинты | Источник |
 |--------|-----------|----------|
-| `factory` | `/api/tasks`, `/api/tasks/:id/graph`, `/api/factory/routes`, `/api/factory/stages`, `POST /api/tasks/:id/{launch,sandbox/down}` | `~/.factory/state` + `factory bin` |
+| `factory` | `/api/tasks`, `/api/tasks/:id/graph`, `/api/factory/routes`, `/api/factory/stages`, `POST /api/tasks/:id/{launch,sandbox/down,sandbox/retry}` | `~/.factory/state` + `factory bin` |
 | `b24` | `/api/b24/{dashboard,task/:id,users}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
 | `system` | `/api/system` (CPU + RAM вкл. swap) | `/proc/meminfo`, `os` |
 | `media` | `/api/media/{doctor,upload,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
@@ -79,10 +79,66 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
   (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
   (модалка задачи), `pwa` (баннер обновления), `chat` (мультисессии, история на сервере),
-  `diff`, `providers` (реестр исполнителей), `ui-context` (что открыто — для чата).
+  `diff`, `providers` (реестр исполнителей), `ui-context` (что открыто — для чата),
+  `notify-watch` (что на конвейере встало на человеке).
+- **Чипы «требует меня» в навигации** (`AppShell.vue`, карта `badges`: пункт → `{n, kind, title}`) —
+  одно правило на все разделы. Жёлтый пульсирующий (`wait`) — работа СТОИТ, пока не подойду
+  (вопрос агента в чате, ворота конвейера); красный (`stall`) — конвейер упёрся или оборвался,
+  своей кнопки там нет, надо разбираться; синий — просто непрочитанное. Видны и в свёрнутом
+  сайдбаре, и в нижней навигации на мобиле; подсказка перечисляет задачи поимённо.
+  Источники: чаты — `chat.waitingCount`/`unreadCount` (см. [[chat-agents]]), конвейер —
+  `notify-watch` (он и так обходит `/api/tasks` + `/api/tasks/:id/graph` ради оповещений —
+  второго обхода ради цифры не заводим; обновляется по SSE `state-change` + 120-секундная
+  страховка). Цифра конвейера — ЗАДАЧИ, а не поводы: задача, которая и ждёт у ворот, и числится
+  вставшей, считается один раз.
+- `shared/pipeline-wait.js` — единственный ответ на «чего конвейер ждёт от человека»
+  (`waitingReason` + расшифровки ворот `GATE_REASON`). Общий для страницы конвейера, вотчера
+  оповещений и чипа: цифра чипа обязана сходиться с «⏳ ждут тебя» на странице. Копий этой
+  логики было две, и они уже разошлись в мелочах.
 
 ## Гашение b24-mcp
 
 Кокпит заместил b24-mcp: доска+действия (перенос `B24Client`), медиа/видео (перенос whisper),
 вход в фабрику (кнопка «На конвейер»). Скиллы `/commit-task` `/pr-fixes` `/b24` → CLI `bin/b24`.
 MCP отключён (регистрация/хуки/контейнеры сняты). Подробности переноса — в CLAUDE.md.
+
+## Плагины кокпита (2026-07-27)
+
+Плагин = отключаемый блок: пункт в сайдбаре (под разделителем после основного nav), плашка
+в «Настройки → Плагины», свои API/настройки. Реестр: `lib/plugins-registry.js` (SYSTEM =
+video, demo) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
+Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
+`fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
+системные модули (media, demo) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
+plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ входит в плагин video — не гейтится.
+Фронт: `stores/plugins.js`, DemoView/VideoView показывают заглушку при выключенном плагине.
+Вкладка «Настройки → Плагины»: карточки горизонтальной сеткой (auto-fill 340px), селекты
+настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
+действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.
+
+## Демо вне конвейера
+
+Демо УБРАНО из цепочки фабрики (хвост bin/factory: ship → сразу ретро). Съёмка — плагин «Демо»
+(`/demo`): `POST /api/demo/:id/run` → `factory <task> demo` (одиночный прогон DEMO-агента в
+transient scope `factory-demo-tNNNN`), статус — ключ DEMO реестра (running→done|failed), фронт
+поллит `/api/demo/overview` (задачи+стенды+ролики из `~/.factory/state/demo`). В реестре остался
+ОДИН ключ — `DEMO`, и пишет его только режим demo. Ворота `DEMO_ASK`/`GATE_DEMO` выпилены
+целиком (2026-07-27): из `--init` реестра, из `ROUTE_STAGES.feature`, из каталога стадий
+`lib/stages.js`, из `GATE_REASON` и из эндпоинта ворот — он снова принимает только `GATE_*`.
+Пока они числились этапами маршрута, прогресс feature не доходил до 100%, а дашборд фабрики
+ждал ответа на вопрос, которого движок больше не задаёт.
+
+## Авторизация и CLI-токен
+
+Весь `/api` за сессией (httpOnly cookie). Для локальных CLI (bin/b24, ship-этап фабрики,
+скиллы) — `server/.state/cli-token` (0600, создаётся сервером): заголовок `X-Cockpit-Token`.
+`bin/b24` сам читает токен от РЕАЛЬНОГО пути скрипта (readlink -f, симлинк из ~/.local/bin).
+Внутренний `internalToken` (in-memory, per-process) — только для permission-mcp чата.
+
+## Авто-шип фабрики
+
+SHIP-этап arsenkin-профиля публикует сам: чистка диффа → merge origin/master (конфликт →
+abort + пометка, решает PR) → тесты → коммит `Task NNNN - ...` (без Co-Authored-By) → push →
+`gh pr create` (существующий PR не дублирует) → `b24 comment` со ссылками → итог в ship.md.
+Права: PROFILE_AGENT_ALLOW += gh pr create/view/list, b24. Не запушил → SHIP failed.

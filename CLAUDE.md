@@ -36,16 +36,25 @@
 
 - Фабрика: `GET /api/tasks`, `/api/tasks/:id/graph` (схема+статусы+возвраты+nodeMeta),
   `/api/tasks/:id/diff` (git-диф worktree), `/api/factory/routes` (эталонные схемы),
-  `POST /api/tasks/:id/sandbox/down`.
+  `POST /api/tasks/:id/sandbox/down`, `POST /api/tasks/:id/sandbox/retry` (снос остатков
+  упавшей песочницы + resume — кнопка в плашке «стенд не поднялся»).
 - B24: `GET /api/b24/dashboard` (полный «Рабочий стол»), `/api/b24/task/:id`, `/api/b24/users`;
-  мутации `POST /api/b24/tasks` (создать), `/task/:id/{comment,timer/:action,complete,renew}`.
+  мутации `POST /api/b24/tasks` (создать; тело — `title,description,groupId,responsibleId,createdById,
+  priority` 0/1/2, `images`), `/task/:id/{comment,timer/:action,complete,renew}`.
 - Чат: `POST /api/chat` (свободный), `POST /api/tasks/:id/chat` (в worktree задачи),
-  `GET/PUT /api/chat/store` (история — файлы `chats/`). Принимает `context` (UI-контекст страницы)
+  `GET /api/chat/store` (история — файлы `chats/`), запись — **по одному чату**:
+  `PUT /api/chat/store/chat` (`{chat, archived}`), `DELETE /api/chat/store/chat/:id`,
+  `PUT /api/chat/store/meta` (активный чат и дефолты). Полный `PUT /api/chat/store` остался
+  только для миграции и восстановления снимка: одним телом история упиралась в лимит
+  запроса — см. gotchas.md. Принимает `context` (UI-контекст страницы)
   и `attachments` (вложения). Вложения: `POST /api/chat/upload` (multipart → `chats/attachments/`),
   `GET /api/chat/attachment/:file` (превью). Диктовка: `POST /api/chat/transcribe` (аудио → whisper → текст).
   Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка).
   **Вопрос агента** (AskUserQuestion): SSE `chat-question` → тот же `POST /api/chat/permission/:pid`
   с `{answers}` (ответ доезжает до агента через `deny.message` — см. chat-agents.md).
+  **Спрос висит до ответа** (таймаута нет): `GET /api/chat/waiting` поднимает висящее после F5,
+  лимит хода не тикает, пока ждём человека, а чаты «ждут тебя» помечены чипами в навигации
+  и в списке чатов — см. chat-agents.md.
   **Лента хода** (инструменты/размышления, как в чате VS Code): SSE `chat-step`, шаги нормализует
   `lib/chat/stream-steps.js`, рисует `views/chat/StepList.vue`.
 - Исполнители (ИИ): модульно в `server/src/lib/executors/` (один файл = один ИИ; файлы на `_` —
@@ -55,14 +64,21 @@
   обновляет CLI кнопкой из настроек, `POST /api/providers/check-updates` — проверка новых версий
   (она же идёт фоном раз в 6 часов → SSE `providers-update` → точка на иконке в топбаре).
   **Автообновления нет и не будет: кокпит только сообщает** (см. chat-agents.md).
+  `GET /api/providers/usage` — полосы потребления лимитов во всплывашке шапки;
+  `POST /api/providers/:id/credits` — доплата сверх лимитов (вкл/выкл и месячный потолок).
+  **Доплата тратит реальные деньги: только по подтверждению человека, никогда сама** (chat-agents.md).
 - **Перезапуск сервера — только `bin/restart`** (гасит порт и ждёт освобождения; ручной kill+start
-  между параллельными сессиями ловит EADDRINUSE).
+  между параллельными сессиями ловит EADDRINUSE). **Агент, запущенный ИЗ чата кокпита, — дочерний
+  процесс этого сервера:** перезапуск изнутри такого хода убивает того, кто его ждёт, и ответ не
+  доезжает никуда (даже в `chats/pending`). Правки сервера из чата — только с просьбой к человеку
+  перезапустить.
 - Базы: `GET/POST/PUT/DELETE /api/agents[/:id]` (+`/reseed`), `GET/POST/PUT/DELETE /api/routes[/:id]`,
   `GET /api/providers` (реестр LLM-исполнителей; его же рисует топбар).
 - Вход: `GET /api/auth/state` (публичный), `POST /api/auth/{setup,login,logout,logout-all,password}`.
   Гард (`plugins/auth.js`) закрывает **весь** `/api` включая GET и WS-upgrade; публичны только
   `auth/{state,login,setup}` и `health`. UI — `views/LoginView.vue` + таб «Доступ» в настройках.
-- Система: `GET /api/system` (CPU% + RAM вкл. swap). Медиа: `GET /api/media/doctor`,
+- Система: `GET /api/system` (CPU% + RAM: сумма «ОЗУ+swap» для цифры в шапке и разбивка
+  `ram*`/`swap*` для всплывашки с полосками). Медиа: `GET /api/media/doctor`,
   `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт).
 - Настройки: `GET/POST /api/settings/b24` + `POST /api/settings/b24/test` (UI настроек — на табах).
   Терминал: `GET /api/terminal` (WebSocket, PTY). Реалтайм: `GET /api/events` (SSE).

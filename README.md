@@ -20,6 +20,28 @@ agents/   шаблоны агентов      (данные, самогитигн
 routes/   маршруты конвейера + промпты узлов схем (данные, самогитигнор)
 ```
 
+## Системные требования
+
+| Что | Версия | Зачем |
+|---|---|---|
+| Linux + systemd (user) | — | боевой режим — user-юнит (`deploy/install.sh`) |
+| Node.js | **≥ 22** | `engines` в `server/package.json`; `.env` грузится нативным `--env-file` |
+| npm | — | зависимости `server/` и `web/` |
+| bash | — | `bin/*`, `deploy/install.sh`; профили фабрики сервер читает через `bash -c` |
+| git | — | ветки и диффы worktree'ов задач |
+| util-linux: `script` | — | PTY веб-терминала (`script -qfc`) — нативный `node-pty` не нужен |
+| iproute2: `ss`, `ip` | — | занятость :8140 и ворота VPN |
+
+Не обязательно, но без этого часть разделов пустая:
+
+- **`claude` CLI** — чаты и агенты (`COCKPIT_CLAUDE_BIN`); **`codex` CLI** — провайдер GPT
+  (`npm i -g @openai/codex`), не поставлен — просто не показывается в списке.
+- **ffmpeg + ffprobe** и **venv с faster-whisper** (`COCKPIT_MEDIA_PYTHON`) — «Видео» и диктовка;
+  чего не хватает, скажет предполётная проверка `lib/media/preflight.js`.
+
+> **nvm.** У systemd свой PATH, nvm-шный node в нём не виден — `install.sh` подставляет в юнит
+> абсолютный путь. Переключил версию через nvm — прогони установщик заново.
+
 ## Запуск
 
 ```bash
@@ -33,6 +55,12 @@ bin/restart            # перезапуск сервера: гасит пор�
                        # между параллельными сессиями ловит EADDRINUSE.
 ```
 
+> **`bin/restart` — только для ручной разработки.** Он поднимает свой setsid-процесс, а не
+> systemd-юнит. Если юнит при этом включён, он уходит в вечный crashloop по EADDRINUSE
+> (27.07.2026 намотал 8057 падений) и в окна свободного порта успевает его перехватывать.
+> Перед ручной работой: `systemctl --user stop cockpit-server`. Подробности и диагностика —
+> `.claude/knowledge/gotchas.md`, раздел «Два владельца порта 8140».
+
 Переменные окружения — `server/src/config.js` (грузятся и из корневого `.env`):
 `COCKPIT_PORT`, `COCKPIT_MEDIA_PYTHON` (venv whisper), `COCKPIT_CHAT_TIMEOUT_MS`,
 `COCKPIT_ANALYSIS_CONCURRENCY`, `COCKPIT_DISCOVER_WITH_CLI_TOKEN` и др.
@@ -43,6 +71,23 @@ bin/restart            # перезапуск сервера: гасит пор�
 deploy/install.sh      # зависимости, сборка web, systemd user-сервис, симлинк b24 в PATH
 # → http://localhost:8140  (с планшета — через Tailscale http://<ip>:8140)
 ```
+
+Боевой режим — **только systemd-юнит**. Порядок перехода с ручного запуска на юнит:
+
+```bash
+systemctl --user stop cockpit-server        # остановить crashloop, если он идёт
+deploy/install.sh                            # поставит/обновит юнит и включит его
+kill <pid-ручного-экземпляра>                # ss -ltnp | grep :8140 — кто держит порт
+systemctl --user reset-failed cockpit-server # обнулить счётчик падений
+systemctl --user status cockpit-server
+```
+
+**Кокпит не поднимется без VPN.** В юните стоят ворота `deploy/require-vpn.sh`: пока трафик
+наружу не идёт через туннель (`ip route get 1.1.1.1` → `dev singbox_tun`), сервер не стартует
+и висит в `activating (auto-restart)`, повторяя попытку раз в 5 секунд. Причина пишется словами
+в `journalctl --user -u cockpit-server`. Подняли VPN — кокпит стартует сам, команд не нужно.
+Так задумано: sing-box запускается руками, и после перезагрузки машины веб-интерфейса не будет,
+пока не поднимешь туннель.
 
 ## Что внутри (кратко)
 
