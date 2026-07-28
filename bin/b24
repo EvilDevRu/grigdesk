@@ -7,19 +7,27 @@
 #   b24 timer <id> start|pause|stop
 #   b24 complete <id>             — завершить (со стопом таймера)
 #   b24 renew <id>                — возобновить (из «Сдана»/«Завершена»)
-#   b24 create <<'JSON' … JSON    — создать задачу (JSON на stdin: {title,description,groupId,responsibleId,createdById})
+#   b24 create <<'JSON' … JSON    — создать задачу (JSON на stdin: {title,description,groupId,
+#                                   responsibleId,createdById,priority}; priority 0 низкий / 1 средний / 2 высокий)
 #   b24 users [запрос]            — ростер/поиск исполнителя
 set -uo pipefail
 
 BASE="${COCKPIT_URL:-http://localhost:8140}"
+# Токен: из окружения, иначе — файл .state/cli-token (создаётся сервером, 0600).
+# Скрипт может быть симлинком (~/.local/bin/b24) — путь ищем от РЕАЛЬНОГО файла.
 TOKEN="${COCKPIT_TOKEN:-}"
+if [ -z "$TOKEN" ]; then
+  _self="$(readlink -f "$0")"
+  _tf="$(dirname "$_self")/../server/.state/cli-token"
+  [ -r "$_tf" ] && TOKEN="$(cat "$_tf")"
+fi
 AUTH=(); [ -n "$TOKEN" ] && AUTH=(-H "X-Cockpit-Token: $TOKEN")
 JSON=(-H 'Content-Type: application/json')
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  dashboard) curl -sf "$BASE/api/b24/dashboard" ;;
-  task)      curl -sf "$BASE/api/b24/task/$1" ;;
+  dashboard) curl -sf "${AUTH[@]}" "$BASE/api/b24/dashboard" ;;
+  task)      curl -sf "${AUTH[@]}" "$BASE/api/b24/task/$1" ;;
   comment)
     id="$1"; shift
     curl -sf "${AUTH[@]}" "${JSON[@]}" -X POST "$BASE/api/b24/task/$id/comment" \
@@ -31,6 +39,6 @@ case "$cmd" in
              curl -sf "${AUTH[@]}" -X POST "$BASE/api/b24/task/$1/renew" >/dev/null 2>&1 || true
              curl -sf "${AUTH[@]}" -X POST "$BASE/api/b24/task/$1/timer/start" ;;
   create)    curl -sf "${AUTH[@]}" "${JSON[@]}" -X POST "$BASE/api/b24/tasks" -d "$(cat)" ;;
-  users)     curl -sf "$BASE/api/b24/users" --data-urlencode "q=${1:-}" -G ;;
+  users)     curl -sf "${AUTH[@]}" "$BASE/api/b24/users" --data-urlencode "q=${1:-}" -G ;;
   *) echo "usage: b24 {dashboard|task <id>|comment <id> <text>|timer <id> start|pause|stop|start <id>|complete <id>|renew <id>|create <stdin-json>|users [q]}" >&2; exit 1 ;;
 esac

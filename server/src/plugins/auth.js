@@ -127,7 +127,7 @@ export function clearCookie({ secure, domain }) {
 }
 
 async function authPlugin(fastify, opts) {
-  const { authStore, tlsEnabled, trustProxy, internalToken } = opts;
+  const { authStore, tlsEnabled, trustProxy, internalToken, cliToken } = opts;
 
   if (!authStore.isConfigured()) {
     fastify.log.warn('Пароль кокпита НЕ задан. Задать можно ТОЛЬКО с этой машины (localhost) — с сети первичная настройка закрыта.');
@@ -176,6 +176,11 @@ async function authPlugin(fastify, opts) {
     // процессе claude, cookie у него нет и быть не может, а спросить разрешение он должен.
     // Пускаем по секрету, который живёт только в памяти процесса и передаётся тому child'у.
     if (internalToken && request.headers['x-cockpit-internal'] === internalToken) return;
+
+    // Локальные CLI-потребители (bin/b24, ship-этап фабрики, скиллы): токен из файла 0600
+    // в .state — прочитать его может только владелец машины, которому и так принадлежит
+    // всё содержимое .state. Cookie у CLI нет, а публиковать PR/комментарии он обязан.
+    if (cliToken && request.headers['x-cockpit-token'] === cliToken) return;
 
     // 401 и на upgrade вебсокета тоже: хуки Fastify выполняются и для WS-роутов,
     // так что терминал закрыт тем же гардом, без токена в query (тот утекал в логи).
