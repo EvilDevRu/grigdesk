@@ -6,6 +6,7 @@ set -euo pipefail
 
 COCKPIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="$(command -v node)"
+NODE_DIR="$(dirname "$NODE_BIN")"   # в PATH сервиса: nvm-каталог node виден только так
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="cockpit-server.service"
 
@@ -20,7 +21,7 @@ echo "→ Зависимости web + сборка…"
 
 echo "→ systemd user-юнит…"
 mkdir -p "$UNIT_DIR"
-sed -e "s|__NODE__|$NODE_BIN|g" -e "s|__COCKPIT_DIR__|$COCKPIT_DIR|g" \
+sed -e "s|__NODE__|$NODE_BIN|g" -e "s|__NODE_DIR__|$NODE_DIR|g" -e "s|__COCKPIT_DIR__|$COCKPIT_DIR|g" \
   "$COCKPIT_DIR/deploy/$UNIT" > "$UNIT_DIR/$UNIT"
 
 echo "→ CLI b24 в PATH…"

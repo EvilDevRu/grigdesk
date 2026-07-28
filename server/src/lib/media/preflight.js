@@ -11,16 +11,17 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-// Корень проекта b24-mcp (на уровень выше src/).
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-// Python из локального venv, куда npm run setup ставит faster-whisper.
-// Python из venv с faster-whisper. Путь конфигурируется окружением (venv тяжёлый,
-// переиспользуем существующий) — в исходнике проектных путей нет.
-export const VENV_PYTHON = process.env.COCKPIT_MEDIA_PYTHON || join(ROOT, '.venv', 'bin', 'python');
+// Python из venv с faster-whisper. Путь ТОЛЬКО из окружения (venv тяжёлый — 492 МБ плюс
+// модель 1.5 ГБ, — переиспользуем существующий; проектных путей в исходнике нет).
+//
+// Значения по умолчанию сознательно нет: своего venv у кокпита не бывает, и любой «путь на
+// всякий случай» — это ложь про настроенное окружение. Раньше тут был fallback на
+// `<каталог файла>/../.venv/bin/python` — наследство раскладки b24-mcp, где файл лежал в
+// src/media/ и `..` попадал в корень проекта. После переезда в server/src/lib/media/ он стал
+// указывать на server/src/lib/.venv, которого нет и не будет: вместо внятного «не настроено»
+// диктовка отвечала `spawn .../lib/.venv/bin/python ENOENT`.
+export const VENV_PYTHON = process.env.COCKPIT_MEDIA_PYTHON || '';
 
 /**
  * Проверяет, что бинарь существует в PATH (по коду ошибки ENOENT при spawn).
@@ -52,11 +53,13 @@ export function preflight() {
         fix: 'sudo apt install -y ffmpeg   (ffprobe идёт в том же пакете)',
     });
 
-    const venv = existsSync(VENV_PYTHON);
+    const venv = Boolean(VENV_PYTHON) && existsSync(VENV_PYTHON);
     checks.push({
-        name: 'python venv (.venv)',
+        name: VENV_PYTHON
+            ? `python venv (${VENV_PYTHON})`
+            : 'python venv (COCKPIT_MEDIA_PYTHON не задан)',
         ok: venv,
-        fix: 'npm run setup',
+        fix: 'COCKPIT_MEDIA_PYTHON=<путь к venv>/bin/python в корневом .env кокпита + перезапуск сервера',
     });
 
     // faster-whisper проверяем только если venv вообще есть.
@@ -68,7 +71,7 @@ export function preflight() {
     checks.push({
         name: 'faster-whisper (распознавание речи)',
         ok: whisper,
-        fix: 'npm run setup',
+        fix: venv ? `${VENV_PYTHON} -m pip install faster-whisper` : 'тот же venv: python -m pip install faster-whisper',
     });
 
     return { ok: checks.every((c) => c.ok), checks, venvPython: VENV_PYTHON };
@@ -82,12 +85,12 @@ export function preflightReport(pf) {
     if (pf.ok) {
         return ['🩺 Окружение для разбора видео готово:', ...lines].join('\n');
     }
-    // Уникальные шаги починки в порядке появления (apt раньше npm).
+    // Уникальные шаги починки в порядке появления (apt раньше настройки путей).
     const fixes = [...new Set(pf.checks.filter((c) => !c.ok).map((c) => c.fix))];
-    // Если нет самого venv — модуль python3-venv может быть не установлен системно.
+    // Своего venv кокпит не ставит — он переиспользуется, поэтому подсказываем, где искать готовый.
     const venvMissing = pf.checks.some((c) => c.name.startsWith('python venv') && !c.ok);
     const notes = venvMissing
-        ? ['', 'Если `npm run setup` пожалуется на venv:  sudo apt install -y python3-venv']
+        ? ['', 'Готовый venv на машине обычно уже есть — найти:  ls -d ~/Workspace/*/.venv ~/Workspace/*/*/.venv']
         : [];
     return [
         '🩺 Окружение для разбора видео НЕ готово:',

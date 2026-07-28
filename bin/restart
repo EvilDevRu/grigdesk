@@ -6,7 +6,12 @@ set -euo pipefail
 PORT="${COCKPIT_PORT:-8140}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${COCKPIT_LOG:-$ROOT/server/.state/cockpit-server.log}"
-export COCKPIT_MEDIA_PYTHON="${COCKPIT_MEDIA_PYTHON:-$HOME/Workspace/b24-mcp/app/.venv/bin/python}"
+
+# Машинные настройки — из корневого .env, как у bin/cockpit и systemd-юнита. Раньше путь к
+# venv распознавания был прописан прямо здесь, и работа диктовки зависела от способа запуска:
+# поднятый этим скриптом кокпит распознавал, поднятый systemd падал со spawn ... ENOENT.
+ENV_ARG=()
+[ -f "$ROOT/.env" ] && ENV_ARG=(--env-file "$ROOT/.env")
 
 busy() { ss -tln 2>/dev/null | grep -q ":$PORT "; }
 
@@ -29,7 +34,7 @@ fi
 
 mkdir -p "$(dirname "$LOG")"
 cd "$ROOT"
-setsid nohup node server/src/app.js </dev/null >>"$LOG" 2>&1 &
+setsid nohup node "${ENV_ARG[@]}" server/src/app.js </dev/null >>"$LOG" 2>&1 &
 disown
 
 # Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health

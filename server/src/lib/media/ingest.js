@@ -10,12 +10,11 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, rmSync, readdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { VENV_PYTHON } from './preflight.js';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // transcribe.py лежит рядом с этим файлом (перенесён вместе с медиа-кодом).
 const TRANSCRIBE_PY = process.env.COCKPIT_TRANSCRIBE_PY || fileURLToPath(new URL('./transcribe.py', import.meta.url));
 const WORKER_JS = fileURLToPath(new URL('./ingest-worker.js', import.meta.url));
@@ -119,6 +118,16 @@ async function transcribe(wav, { model, lang, progressFile = null }) {
 export async function ingestRecording({ filePath, workDir, model = 'medium', lang = 'ru', frames = 0 }) {
     if (!existsSync(filePath)) {
         throw new Error(`Файл не найден: ${filePath}`);
+    }
+    // Про ненастроенное окружение говорим ДО ffmpeg: иначе минуты работы уходят впустую, а
+    // человек в чате видит только сырое `spawn ... ENOENT` от python и не понимает, что чинить.
+    if (!VENV_PYTHON || !existsSync(VENV_PYTHON)) {
+        throw new Error(
+            `Распознавание речи не настроено: ${VENV_PYTHON
+                ? `python не найден по COCKPIT_MEDIA_PYTHON (${VENV_PYTHON})`
+                : 'не задан COCKPIT_MEDIA_PYTHON (путь к python из venv с faster-whisper)'
+            }. Подробности и что сделать — GET /api/media/doctor.`,
+        );
     }
     mkdirSync(workDir, { recursive: true });
 
