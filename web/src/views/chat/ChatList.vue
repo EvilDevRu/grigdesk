@@ -64,7 +64,7 @@ async function del(r) {
     </div>
     <div class="rows">
       <div v-if="!rows.length" class="none muted">Ничего не найдено</div>
-      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived }"
+      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived, wait: r.waiting }"
            @click="chat.selectChat(r.id)" @dblclick="startEdit(r)">
         <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
              Агент работает — белое кольцо вокруг (внутренний спиннер сливался с цветом) -->
@@ -80,7 +80,9 @@ async function del(r) {
           <template v-else>
             <div class="t1">
               <span class="name">{{ r.title }}</span>
-              <span v-if="r.modelName" class="mdl">{{ r.modelName }}</span>
+              <!-- Агент упёрся в вопрос и стоит: чип важнее подписи модели, поэтому вместо неё -->
+              <span v-if="r.waiting" class="wchip" title="агент ждёт твоего ответа — работа стоит">ждёт ответа</span>
+              <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </div>
             <div class="t2 muted">
@@ -115,6 +117,12 @@ async function del(r) {
 .row { position: relative; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 10px; cursor: pointer; }
 .row:hover { background: var(--surface-2); }
 .row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* Чат, где агент ждёт ответа: тёплая полоска слева — видно, что строка требует действия,
+   даже когда список длинный (сам чип может уехать под многоточие названия). */
+.row.wait { background: color-mix(in srgb, var(--warn, #e0a33a) 10%, transparent); }
+.row.wait::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--warn, #e0a33a); }
+.row.wait.cur { background: color-mix(in srgb, var(--warn, #e0a33a) 18%, transparent); }
 
 .ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
@@ -134,6 +142,10 @@ async function del(r) {
 /* Модель чата — мелкой подписью рядом с названием; при нехватке места жертвуем ею, а не названием */
 .mdl { flex: none; font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px;
   padding: 0 5px; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* «Ждёт ответа» — чип на месте подписи модели: тёплый, заметный, но не кричащий */
+.wchip { flex: none; font-size: 10.5px; font-weight: 600; color: var(--warn, #e0a33a); line-height: 1.6;
+  border: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 55%, transparent); border-radius: 5px; padding: 0 5px;
+  background: color-mix(in srgb, var(--warn, #e0a33a) 14%, transparent); white-space: nowrap; }
 /* Неотправленный текст — как в телеграме: пометка цветом, дальше сам текст */
 .dr { color: var(--warn, #e0a33a); margin-right: 4px; }
 .t2 { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }

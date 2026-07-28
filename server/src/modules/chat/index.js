@@ -66,6 +66,32 @@ async function chatModule(fastify, opts) {
   // и уже показанную ленту шагов текущего хода. ──
   const activeRuns = new Map(); // chatKey → { startedAt, tokens, steps[], ac }
 
+  // ── Очередь ходов на чат ─────────────────────────────────────────────────────
+  // ДВА CLI НА ОДНУ СЕССИЮ НЕ ЖИВУТ: второй `claude --resume <тот же id>` падает
+  // мгновенно (result без текста, subtype error_during_execution, turns=0, cost=0),
+  // а человек видит «⚠ Агент завершил ход без текстового ответа» и повторяет вопрос —
+  // порождая ещё один процесс-смертник (инцидент 27.07.2026: три повтора подряд,
+  // три потерянных сообщения; в сессию CLI они не попали вовсе, агент их не увидел).
+  // Поэтому сообщение, пришедшее во время чужого хода, НЕ отклоняем и ввод не блокируем
+  // (человек имеет право готовить следующее сообщение) — ставим в очередь: запрос висит,
+  // пока не дойдёт черёд, и уходит сразу после текущего хода.
+  const chatQueues = new Map();   // chatKey → промис последнего поставленного в очередь хода
+  const lastSession = new Map();  // chatKey → sessionId последнего завершённого хода
+
+  /** Поставить ход в очередь чата (FIFO). Без chatKey очередь не построить — гоним сразу. */
+  function enqueueTurn(chatKey, job) {
+    if (!chatKey) return job();
+    const prev = chatQueues.get(chatKey) || Promise.resolve();
+    // .catch до then: упавший ход не должен вешать очередь — следующий обязан пойти.
+    const next = prev.catch(() => {}).then(job);
+    chatQueues.set(chatKey, next);
+    next.catch(() => {}).finally(() => {
+      // Чистим ТОЛЬКО собственный хвост: иначе снесли бы ссылку на чужой, уже вставший в очередь ход.
+      if (chatQueues.get(chatKey) === next) chatQueues.delete(chatKey);
+    });
+    return next;
+  }
+
   // Допустимые режимы прав исполнителя: спрашиваем у CLI (executor.modes), кэшируем —
   // это запуск подпроцесса, гонять его на каждое сообщение незачем.
   const modesCache = new Map(); // providerId → { at, ids: Set }
@@ -102,22 +128,61 @@ async function chatModule(fastify, opts) {
     const chatKey = String(request.body?.chatKey || '');
     const run = activeRuns.get(chatKey);
     if (!run) return { ok: false, reason: 'нет активного хода' };
-    for (const [pid, p] of pendingPerms) {
-      if (p.chatKey === chatKey) {
-        clearTimeout(p.timer);
-        pendingPerms.delete(pid);
-        p.resolve({ behavior: 'deny', message: 'Ход остановлен пользователем' });
-        fastify.sse.broadcast('chat-permission-done', { pid });
-      }
-    }
+    dropPending(chatKey, 'Ход остановлен пользователем');
     run.ac?.abort();
     fastify.log.info({ chatKey }, 'чат: ход остановлен пользователем');
     return { ok: true };
   });
 
   // ── Всплывашка разрешений и диалог с агентом: ожидающие ответа пользователя запросы ──
-  const pendingPerms = new Map(); // pid → { resolve, timer }
-  const PERM_TIMEOUT_MS = 240000; // не ответил за 4 мин — deny (claude ждёт с таймаутом 5 мин)
+  const pendingPerms = new Map(); // pid → { resolve, isQuestion, tool, input, chatKey, at }
+  // Ждём ответ СКОЛЬКО НУЖНО: «не успел за 4 минуты» — не повод продолжать без человека.
+  // Сутки — верхняя граница здравого смысла, столько же держит вызов сам CLI
+  // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
+  const PERM_WAIT_MS = 24 * 60 * 60 * 1000;
+
+  /** Есть ли у этого чата запрос, ждущий человека (вопрос или разрешение). */
+  function waitsForHuman(chatKey) {
+    for (const p of pendingPerms.values()) if (p.chatKey === chatKey) return true;
+    return false;
+  }
+
+  /** Снять висящие запросы чата: ход кончился или остановлен — отвечать уже некому. */
+  function dropPending(chatKey, message) {
+    for (const [pid, p] of pendingPerms) {
+      if (p.chatKey !== chatKey) continue;
+      pendingPerms.delete(pid);
+      p.resolve({ behavior: 'deny', message });
+      fastify.sse.broadcast('chat-permission-done', { pid });
+    }
+  }
+
+  // Что сейчас ждёт человека — чтобы окно после F5 (и второе окно) подняло всплывашки:
+  // SSE доставляет событие один раз, а запрос висит, пока на него не ответят.
+  fastify.get('/api/chat/waiting', async () => ({
+    waiting: [...pendingPerms.entries()].map(([pid, p]) => ({
+      pid, chatKey: p.chatKey, at: p.at,
+      ...(p.isQuestion ? { questions: p.input?.questions || [] } : { tool: p.tool, input: p.input }),
+    })),
+  }));
+
+  // ── Лимит длительности хода ──────────────────────────────────────────────────
+  // Время ожидания ответа человека В ЛИМИТ НЕ ИДЁТ: иначе «отошёл на час» убивало бы
+  // ход вместе с висящим вопросом. Поэтому таймаута у execFile больше нет — тикаем
+  // здесь и только пока агент реально работает.
+  const WATCH_TICK_MS = 30_000;
+  const watchdog = setInterval(() => {
+    for (const [chatKey, run] of activeRuns) {
+      if (waitsForHuman(chatKey)) continue;
+      run.leftMs -= WATCH_TICK_MS;
+      if (run.leftMs > 0) continue;
+      run.timedOut = true;
+      run.ac?.abort();
+      fastify.log.warn({ chatKey }, 'чат: ход не уложился в лимит — прерван');
+    }
+  }, WATCH_TICK_MS);
+  watchdog.unref();
+  fastify.addHook('onClose', () => clearInterval(watchdog));
 
   /**
    * Ответ пользователя на вопрос агента (AskUserQuestion) в виде текста для агента.
@@ -136,28 +201,36 @@ async function chatModule(fastify, opts) {
 
   // Сюда стучится permission-mcp.js (child-процесс claude). Держим запрос открытым,
   // пока пользователь не нажмёт кнопку во всплывашке / не ответит на вопрос (или таймаут).
-  fastify.post('/api/chat/permission-request', async (request) => {
+  fastify.post('/api/chat/permission-request', async (request, reply) => {
     const { tool_name, input, chatKey } = request.body || {};
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     // Вопрос агента — не разрешение, а диалог: показываем варианты, а не «разрешить/отклонить».
     const isQuestion = tool_name === 'AskUserQuestion';
+    const at = Date.now();
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      // chatKey запоминаем, чтобы «стоп» и конец хода сняли именно запросы этого чата.
+      pendingPerms.set(pid, { resolve, isQuestion, tool: tool_name || '?', input: input || {}, chatKey: chatKey || '', at });
+      // Агент умер, пока мы ждали человека (упал, убит извне) — снимаем спрос сами,
+      // иначе он остался бы висеть на экране навсегда: отвечать в мёртвый процесс некому.
+      //
+      // Слушаем ОТВЕТ, а не запрос. `request.raw` здесь — уже дочитанный поток тела:
+      // json-парсер Fastify высасывает его до конца ДО обработчика, поток автоуничтожается
+      // и шлёт свой 'close' на ближайшем тике — то есть сразу, при живом агенте. С
+      // `request.raw.on('close')` каждый вопрос мгновенно отклонялся с «Агент отключился»,
+      // а всплывашка успевала лишь мигнуть на экране. У `reply.raw` 'close' означает то,
+      // что нужно: ответ дописан (тогда pid уже снят — сработает guard ниже) либо
+      // соединение оборвалось раньше времени, то есть агента не стало.
+      // На GET без тела (SSE, plugins/sse.js) подвоха нет: там тело никто не читает.
+      reply.raw.on('close', () => {
+        if (!pendingPerms.has(pid)) return;
         pendingPerms.delete(pid);
         fastify.sse.broadcast('chat-permission-done', { pid });
-        resolve({
-          behavior: 'deny',
-          message: isQuestion
-            ? 'Пользователь не ответил на вопрос за 4 минуты. Продолжай сам, разумно выбрав вариант, либо заверши ход.'
-            : 'Пользователь не ответил на запрос разрешения в кокпите — действие отклонено',
-        });
-      }, PERM_TIMEOUT_MS);
-      // chatKey запоминаем, чтобы «стоп» снял именно висящие запросы этого чата.
-      pendingPerms.set(pid, { resolve, timer, isQuestion, input: input || {}, chatKey: chatKey || '' });
+        resolve({ behavior: 'deny', message: 'Агент отключился' });
+      });
       if (isQuestion) {
-        fastify.sse.broadcast('chat-question', { pid, chatKey: chatKey || '', questions: input?.questions || [] });
+        fastify.sse.broadcast('chat-question', { pid, chatKey: chatKey || '', questions: input?.questions || [], at });
       } else {
-        fastify.sse.broadcast('chat-permission', { pid, tool: tool_name || '?', input: input || {}, chatKey: chatKey || '' });
+        fastify.sse.broadcast('chat-permission', { pid, tool: tool_name || '?', input: input || {}, chatKey: chatKey || '', at });
       }
     });
   });
@@ -168,7 +241,6 @@ async function chatModule(fastify, opts) {
     const p = pendingPerms.get(pid);
     if (!p) return reply.code(404).send({ error: 'not_found' });
     pendingPerms.delete(pid);
-    clearTimeout(p.timer);
     fastify.sse.broadcast('chat-permission-done', { pid });
     const body = request.body || {};
     if (p.isQuestion) {
@@ -211,7 +283,27 @@ async function chatModule(fastify, opts) {
     return { ok: true };
   });
 
-  async function runChat(reply, request, { id, message, model, effort, mode: wantMode, sessionId, context, attachments, chatKey }) {
+  /**
+   * Точка входа роутов: ход либо стартует сразу, либо встаёт в очередь чата.
+   * Ответ на HTTP-запрос приходит по завершении СВОЕГО хода — клиенту ждать дольше,
+   * зато сообщение не теряется и агент видит его в правильном порядке.
+   */
+  async function runChat(reply, request, opts) {
+    const chatKey = opts.chatKey || '';
+    const queued = !!chatKey && (activeRuns.has(chatKey) || chatQueues.has(chatKey));
+    if (queued) {
+      fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
+      // Второму окну (и своему же, если оно захочет показать «в очереди») — сигнал.
+      fastify.sse.broadcast('chat-queued', { chatKey, at: Date.now() });
+    }
+    return enqueueTurn(chatKey, () => runChatTurn(reply, request, { ...opts, queued }));
+  }
+
+  async function runChatTurn(reply, request, { id, message, model, effort, mode: wantMode, sessionId, context, attachments, chatKey, queued }) {
+    // Сообщение ждало в очереди — его sessionId устарел: пока оно стояло, предыдущий ход
+    // мог завести новый id, и запуск со старым потерял бы контекст разговора. Пустой
+    // sessionId не трогаем: это осознанный старт нового разговора, а не устаревшая копия.
+    if (queued && sessionId && lastSession.get(chatKey)) sessionId = lastSession.get(chatKey);
     let cwd = config.factoryHome;
     const extraDirs = [];
     if (id) {
@@ -259,6 +351,10 @@ async function chatModule(fastify, opts) {
         'cockpit-perm': {
           command: process.execPath,
           args: [PERM_MCP_PATH],
+          // Сколько CLI готов ждать ответа на вызов инструмента. Без этого он обрывает
+          // ожидание своим дефолтом (минуты) — и вопрос «висел» бы только у нас на экране,
+          // а агент уже пошёл дальше. Дублируется переменной MCP_TOOL_TIMEOUT ниже.
+          timeout: PERM_WAIT_MS,
           env: {
             COCKPIT_PERM_URL: `http://127.0.0.1:${config.port}/api/chat/permission-request`,
             COCKPIT_CHAT_KEY: chatKey || '',
@@ -273,12 +369,20 @@ async function chatModule(fastify, opts) {
     // Ход можно оборвать кнопкой «стоп»: контроллер живёт в activeRuns, POST /api/chat/stop
     // дёргает abort, execFile убивает CLI.
     const ac = new AbortController();
-    if (chatKey) activeRuns.set(chatKey, { startedAt: Date.now(), tokens: 0, steps: [], ac });
+    // leftMs — остаток лимита хода; его тикает watchdog и НЕ тикает, пока ждём человека.
+    const runRec = { startedAt: Date.now(), tokens: 0, steps: [], ac, leftMs: config.chatTimeoutMs || 3600000 };
+    if (chatKey) {
+      activeRuns.set(chatKey, runRec);
+      // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
+      fastify.sse.broadcast('chat-turn-start', { chatKey, at: runRec.startedAt });
+    }
+    // Ожидание ответа человека не должно упираться в таймаут вызова MCP-инструмента.
+    const baseEnv = claudeAuth ? claudeAuth.env() : process.env;
     try {
-      const out = await executor.run({
+      const runArgs = {
         config,
         signal: ac.signal,
-        env: claudeAuth ? claudeAuth.env() : process.env,
+        env: { ...baseEnv, MCP_TOOL_TIMEOUT: String(PERM_WAIT_MS) },
         message: fullMessage,
         cwd,
         extraDirs,
@@ -302,7 +406,17 @@ async function chatModule(fastify, opts) {
           if (a && a.steps.length < 400) a.steps.push(step);
           fastify.sse.broadcast('chat-step', { chatKey, step });
         } : undefined,
-      });
+      };
+      let out = await executor.run(runArgs);
+      // Пустой ход (ноль шагов, ноль стоимости) = CLI умер на старте и НИЧЕГО не сделал.
+      // Повторить его безопасно — и честнее, чем отдать человеку заглушку и ждать, что
+      // он пришлёт сообщение заново (а он пришлёт — и получит то же самое).
+      if (out?.emptyRun) {
+        fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
+        out = await executor.run(runArgs);
+      }
+      // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
+      if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
       if (request.socket.destroyed && chatKey) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
@@ -319,8 +433,18 @@ async function chatModule(fastify, opts) {
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
       if (err.stopped) {
-        const stoppedOut = { reply: '⏹ Ход остановлен.', steps: err.steps || [], sessionId, contextTokens: 0, cost: null,
-          model: model || null, effort: safeEffort || null, stopped: true };
+        // Тем же путём (abort) ход прерывает watchdog — тогда это не «кнопка», а лимит.
+        const stopReply = runRec.timedOut
+          ? `⏹ Ход прерван: агент работал дольше лимита (${Math.round((config.chatTimeoutMs || 3600000) / 60000)} мин). Ожидание твоего ответа в лимит не входит.`
+          : '⏹ Ход остановлен.';
+        // sessionId — тот, что CLI успел завести в этом ходе (executor ловит его из потока).
+        // Раньше сюда уходил ВХОДНОЙ id, а у первого хода в чате он пустой: после «стопа»
+        // следующий вопрос шёл без --resume, и агент не помнил ничего из разговора.
+        const stoppedOut = { reply: stopReply, steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
+          contextTokens: 0, cost: null, model: model || null, effort: safeEffort || null, stopped: true };
+        // Оборванный ход всё равно завёл разговор: следующему из очереди нужен ЕГО id,
+        // иначе сообщение уйдёт со старым и агент не вспомнит, на чём его прервали.
+        if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
         if (request.socket.destroyed && chatKey) {
           await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
             chatKey, role: 'assistant', ...stoppedOut, userText: message || '', at: Date.now() });
@@ -339,6 +463,9 @@ async function chatModule(fastify, opts) {
     } finally {
       if (chatKey) {
         activeRuns.delete(chatKey);
+        // Ход кончился (в т.ч. упал), а запрос всё ещё висит — снимаем: без хода
+        // отвечать на него некому, а чип «ждёт ответа» висел бы вечно.
+        dropPending(chatKey, 'Ход завершён — ответ уже не нужен');
         // Сигнал всем окнам: ход завершён (снимают «думает…», даже если ответ пришёл не к ним).
         fastify.sse.broadcast('chat-done', { chatKey });
       }
@@ -370,7 +497,9 @@ async function chatModule(fastify, opts) {
     await fs.mkdir(attachDir, { recursive: true });
     const file = `${Date.now()}-${safeName(data.filename)}`;
     await pipeline(data.file, createWriteStream(path.join(attachDir, file)));
-    return { file, name: data.filename || file, url: `/api/chat/attachment/${file}`, mime: data.mimetype || '' };
+    // path — абсолютный путь на диске: его вписывают в комментарии/уточнения,
+    // чтобы АГЕНТ (чата или триажа) мог открыть файл инструментом Read.
+    return { file, name: data.filename || file, url: `/api/chat/attachment/${file}`, path: path.join(attachDir, file), mime: data.mimetype || '' };
   });
 
   // Отдача вложения (превью в истории чата).
@@ -432,10 +561,30 @@ async function chatModule(fastify, opts) {
 
   fastify.get('/api/chat/store', async () => history.read());
 
+  // Полная запись стора. Осталась для миграции со старой схемы и восстановления
+  // из браузерного снимка; в обычной работе клиент ею НЕ пользуется — с ростом истории
+  // тело перерастало лимит запроса, сервер отвечал 413, и переписка не сохранялась вообще.
   fastify.put('/api/chat/store', async (request) => {
     await history.save(request.body || {});
     return { ok: true };
   });
+
+  // ── Точечное сохранение: одно тело — один чат ──
+  // Объём запроса больше не зависит от того, сколько чатов накопилось всего.
+  fastify.put('/api/chat/store/chat', async (request, reply) => {
+    const { chat, archived } = request.body || {};
+    if (!chat?.id) return reply.code(400).send({ error: 'bad_chat' });
+    const written = await history.saveOne(chat, !!archived);
+    return { ok: true, written };
+  });
+
+  fastify.delete('/api/chat/store/chat/:id', async (request) => {
+    const removed = await history.remove(String(request.params.id));
+    return { ok: true, removed };
+  });
+
+  // Мета отдельно: переключение вкладки не тащит за собой переписку.
+  fastify.put('/api/chat/store/meta', async (request) => ({ ok: true, meta: await history.saveMeta(request.body || {}) }));
 }
 
 export default fp(chatModule, { name: 'module-chat' });

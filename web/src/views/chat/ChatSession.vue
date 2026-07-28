@@ -155,8 +155,8 @@ watch(() => [
   sess.value?.messages?.length,
   sess.value?.steps?.length,
   sess.value?.sending,
-  chat.permReq?.pid,
-  chat.questionReq?.pid,
+  chat.permFor(props.sid)?.pid,
+  chat.questionFor(props.sid)?.pid,
 ], autoScroll);
 // Переключение на другой чат: подставляем его черновик и — в конец истории.
 watch(() => props.sid, async () => {
@@ -344,13 +344,11 @@ async function copyMsg(m, i) {
   } catch { /* не скопировалось — молча */ }
 }
 
-// ── Спросы агента: разрешение на действие и вопрос (AskUserQuestion). Оба запроса
-// глобальные (приходят по SSE в стор) — берём только адресованные этому чату. ──
-const perm = computed(() => forThisChat(chat.permReq));
-const question = computed(() => forThisChat(chat.questionReq));
-function forThisChat(req) {
-  return req && (!req.chatKey || req.chatKey === props.sid) ? req : null;
-}
+// ── Спросы агента: разрешение на действие и вопрос (AskUserQuestion). Все висящие
+// запросы лежат в сторе (приходят по SSE, после F5 — из /api/chat/waiting);
+// берём адресованные этому чату. Висят, пока не ответишь: агент их ждёт. ──
+const perm = computed(() => chat.permFor(props.sid));
+const question = computed(() => chat.questionFor(props.sid));
 
 // ── Действие «На конвейер» с защитой ──
 const onConveyor = computed(() => chat.isOnConveyor(sess.value?.taskId));
@@ -436,6 +434,11 @@ async function toConveyor() {
       </div>
     </div>
 
+    <!-- Плашки «переписка не сохраняется» здесь НЕТ намеренно: saveError — состояние
+         общее (сервер не принимает запись вообще), а рисовалась бы она внутри открытого
+         чата и висела бы в каждом, куда ни зайди. Об этой беде сообщает разовое
+         оповещение из стора (_saveFailed), а сама переписка держится снимком в браузере. -->
+
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
     <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
       <div class="col flow">
@@ -461,6 +464,9 @@ async function toConveyor() {
             <span>Агент</span>
             <span v-if="m.actualModel" class="amodel">{{ m.actualModel }}<template v-if="m.effort"> · {{ m.effort }}</template></span>
           </div>
+          <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
+               а не наперегонки (два CLI на одну сессию убивают друг друга). -->
+          <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
           <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
           <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
           <div v-if="m.text" class="mrow">
@@ -501,10 +507,10 @@ async function toConveyor() {
 
     <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
     <ChatQuestion v-if="question" :req="question"
-                  @answer="chat.answerQuestion($event)" @skip="chat.answerQuestion([])" />
+                  @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
 
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
-    <ChatPermission v-if="perm" :req="perm" @answer="chat.answerPerm" />
+    <ChatPermission v-if="perm" :req="perm" @answer="(allow, remember) => chat.answerPerm(perm.pid, allow, remember)" />
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
@@ -555,12 +561,16 @@ async function toConveyor() {
             </svg>
           </button>
           </HelpTip>
-          <!-- Пока агент работает, та же кнопка останавливает ход: заодно спасает от зависших -->
+          <!-- Пока агент работает, рядом появляется «стоп». Отправку при этом НЕ прячем:
+               следующее сообщение можно готовить и слать сразу — сервер поставит его
+               в очередь и пустит следом (раньше оно молча пропадало). -->
           <button v-if="sess.sending" class="send stop" :disabled="sess.stopping"
                   :title="sess.stopping ? 'Останавливаю…' : 'Остановить агента'" @click="chat.stop(sid)">
             <span class="sq"></span>
           </button>
-          <button v-else class="send" :disabled="!input.trim() && !pending.length" title="Отправить (Enter)" @click="submit">↑</button>
+          <button class="send" :disabled="!input.trim() && !pending.length"
+                  :title="sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
+                  @click="submit">↑</button>
         </div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -683,6 +693,8 @@ async function toConveyor() {
   color: var(--bad); padding: 8px 12px; border-radius: 10px; font-size: 12.5px; }
 .msg.error .text::before { content: '⚠ '; }
 
+/* Запись истории не проходит — предупреждение поперёк всей ширины, над лентой:
+   это не ошибка одного сообщения, а риск потерять весь разговор. */
 .cs-act { padding: 8px 22px; border-top: 1px solid var(--line); }
 .act-row { display: flex; align-items: center; gap: 10px; }
 .act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
@@ -690,6 +702,8 @@ async function toConveyor() {
 .lm { font-size: 12px; }
 
 /* Вложения в сообщениях: превью-картинки, клик — оригинал */
+.m-queued { font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
+.msg.user .m-queued { text-align: right; }
 .m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg.user .m-atts { justify-content: flex-end; }
 .m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block; }

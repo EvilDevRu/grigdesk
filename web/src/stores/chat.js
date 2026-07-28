@@ -9,6 +9,7 @@ import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
 import { useProvidersStore } from './providers.js';
 import { notify } from '../shared/notify.js';
+import { sseSubscribe } from '../composables/useSse.js';
 
 const EFFORTS = ['low', 'medium', 'high', 'max'];
 // Оценочное окно контекста модели — для индикатора заполнения.
@@ -35,6 +36,24 @@ let persistTimer = null;
 let retryTimer = null;
 let retryDelay = 0;
 let loadPromise = null;
+
+// ── Что уже лежит на сервере ──────────────────────────────────────────────────
+// id чата → его JSON на момент последней УСПЕШНОЙ записи. По этой карте шлём только
+// изменившееся: раньше каждое сохранение тащило весь стор одним телом, и когда история
+// доросла до лимита запроса, сервер стал отвечать 413 — переписка перестала сохраняться
+// совсем, а клиент молча ретраил. Теперь объём запроса не зависит от размера истории.
+const sentChats = new Map();
+let sentMeta = '';
+let saveWarned = false;
+
+// Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
+function slimOf(s) {
+  return {
+    id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
+    messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
+    draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
+  };
+}
 
 // ── Страховочный снимок истории в браузере ────────────────────────────────────
 // Сервер пишет историю в файлы, но между «ответ пришёл» и «PUT долетел» есть окно:
@@ -69,15 +88,20 @@ function readSnapshot() {
 function stampOf(store) {
   return Math.max(0, ...(store?.sessions || []).map((s) => s.updatedAt || 0));
 }
-let permEs = null; // SSE-подписка на запросы разрешений (одна на окно)
+let permOff = null; // отписка от общего SSE (подписка одна на окно)
 // «Разрешать до конца сессии»: chatKey → Set(инструментов). Только в памяти —
 // умирает с перезагрузкой страницы, в allowlist навсегда ничего не попадает.
 const permAutoAllow = {};
 
 export const useChatStore = defineStore('chat', {
-  // permReq — запрос разрешения на действие, questionReq — вопрос агента (AskUserQuestion):
-  // это разные вещи, «разрешить/отклонить» на вопрос не отвечают.
-  state: () => ({ ...pickStore(null), loaded: false, open: false, conveyorIds: [], permReq: null, questionReq: null }),
+  // pending — ВСЕ висящие спросы агентов, pid → запрос: `kind: 'perm'` (разрешение на
+  // действие) либо `kind: 'question'` (вопрос по существу, AskUserQuestion). Карта, а не
+  // одно поле: агенты работают в нескольких чатах сразу, и новый спрос не должен затирать
+  // предыдущий — каждый висит, пока на него не ответят.
+  // saveError — история не пишется на сервер (см. _saveFailed). В чате НЕ рисуется:
+  // состояние общее, а плашка в открытом чате висела бы в каждом. Наружу идёт разовым
+  // оповещением, текст ошибки хранится здесь.
+  state: () => ({ ...pickStore(null), loaded: false, open: false, conveyorIds: [], pending: {}, saveError: null }),
   getters: {
     active: (s) => s.sessions.find((x) => x.id === s.activeId) || null,
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
@@ -87,11 +111,24 @@ export const useChatStore = defineStore('chat', {
     // чат могли закрыть, пока агент думал, и ответ приехал уже в архив.
     unreadCount: (s) => s.sessions.filter((x) => x.unread).length
       + (s.archived || []).filter((x) => x.unread).length,
+    // ── «Требуют вмешательства» ──
+    // Агент стоит и ждёт человека: без ответа ход не двинется. Это сильнее «непрочитанного»
+    // (там просто не смотрели), поэтому считается и показывается отдельно.
+    waitingChats: (s) => new Set(Object.values(s.pending).map((p) => p.chatKey || '')),
+    // Сколько чатов ждут меня — цифра для чипа в навигации и на кнопке чата.
+    waitingCount() { return this.waitingChats.size; },
+    // Спрос, адресованный конкретному чату. Запрос без chatKey (старый сервер) показываем
+    // в любом открытом чате — иначе он не показался бы нигде.
+    permFor: (s) => (chatKey) => Object.values(s.pending)
+      .find((p) => p.kind === 'perm' && (!p.chatKey || p.chatKey === chatKey)) || null,
+    questionFor: (s) => (chatKey) => Object.values(s.pending)
+      .find((p) => p.kind === 'question' && (!p.chatKey || p.chatKey === chatKey)) || null,
     // Единый список чатов для телеграм-сайдбара: открытые + архив, свежие сверху.
     // Без запроса — все чаты со сниппетом последнего сообщения; с запросом — фильтр
     // по названию и тексту сообщений (сниппет — фрагмент совпадения).
-    list: (s) => (q) => {
+    list(s) { return (q) => {
       const t = q.trim().toLowerCase();
+      const waiting = this.waitingChats;
       const row = (sess, archived) => {
         const title = sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат');
         const msgs = sess.messages || [];
@@ -116,15 +153,18 @@ export const useChatStore = defineStore('chat', {
           // Модель чата — для иконки исполнителя и подписи в строке списка.
           model: sess.model || '',
           taskId: sess.taskId, sending: !!sess.sending, unread: !!sess.unread,
+          // Агент в этом чате упёрся в вопрос и стоит — строке нужен чип «ждёт ответа».
+          waiting: waiting.has(sess.id),
           ts: sess.updatedAt || sess.closedAt || 0,
         };
       };
       const out = [];
       s.sessions.forEach((x) => { const h = row(x, false); if (h) out.push(h); });
       (s.archived || []).forEach((x) => { const h = row(x, true); if (h) out.push(h); });
-      out.sort((a, b) => b.ts - a.ts);
+      // Ждущие ответа — наверх: пока не ответишь, работа в них стоит.
+      out.sort((a, b) => (b.waiting - a.waiting) || (b.ts - a.ts));
       return out;
-    },
+    }; },
   },
   actions: {
     // Загрузка истории с сервера (однократно). Если серверный файл пуст, а в localStorage
@@ -154,10 +194,15 @@ export const useChatStore = defineStore('chat', {
           this._normalize(picked.archived);
           Object.assign(this, picked);
           this.loaded = true;
-          // Восстановленное из снимка сразу возвращаем на сервер (flush, без дебаунса).
-          if (j) this._persist(restored);
+          // Снимок оказался свежее серверной копии — немедленно возвращаем расхождение
+          // на сервер. Если же стор пришёл с сервера как есть, слать нечего: запоминаем
+          // слепки, чтобы дальше уезжали только реальные изменения.
+          if (restored) this._persist(true);
+          else this._markSent();
           // Ответы, доехавшие пока страница была закрыта/перезагружалась.
           await this._collectPending();
+          // Спросы агентов, висящие прямо сейчас: после F5 их некому было показать.
+          await this._loadWaiting();
           // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
           try {
             const { active } = await api.get('/api/chat/active');
@@ -207,11 +252,7 @@ export const useChatStore = defineStore('chat', {
     _persist(flush = false) {
       clearTimeout(persistTimer);
       const write = () => {
-        const slim = this.sessions.map((s) => ({
-          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
-          messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
-          draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
-        }));
+        const slim = this.sessions.map(slimOf);
         const payload = {
           sessions: slim, archived: this.archived, activeId: this.activeId,
           defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
@@ -220,17 +261,68 @@ export const useChatStore = defineStore('chat', {
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
         // на котором он бы сохранился, могло и не быть.
         writeSnapshot(payload);
-        api.put('/api/chat/store', payload)
-          .then(() => { retryDelay = 0; })
-          .catch(() => {
+        // Каждый чат — свой запрос, и только если он реально изменился.
+        const jobs = [];
+        const alive = new Set();
+        const push = (c, archived) => {
+          if (!c?.id) return;
+          alive.add(c.id);
+          const json = JSON.stringify(c);
+          if (sentChats.get(c.id) === json) return;
+          jobs.push(api.put('/api/chat/store/chat', { chat: c, archived })
+            .then(() => { sentChats.set(c.id, json); }));
+        };
+        slim.forEach((c) => push(c, false));
+        (this.archived || []).forEach((c) => push(c, true));
+        // Чат исчез из стора (удалили, вытеснили из архива) — убираем и на сервере.
+        for (const id of [...sentChats.keys()]) {
+          if (alive.has(id)) continue;
+          jobs.push(api.del(`/api/chat/store/chat/${id}`).then(() => { sentChats.delete(id); }));
+        }
+        const meta = { activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode };
+        const metaJson = JSON.stringify(meta);
+        if (metaJson !== sentMeta) {
+          jobs.push(api.put('/api/chat/store/meta', meta).then(() => { sentMeta = metaJson; }));
+        }
+        if (!jobs.length) return;
+        Promise.all(jobs)
+          .then(() => { retryDelay = 0; this._saveFailed(false); })
+          .catch((e) => {
             // Сервер недоступен (перезапускается) — повторяем с нарастающей паузой.
+            // Успевшие запросы уже отметились в sentChats, повтор их не тронет.
             retryDelay = Math.min(retryDelay ? retryDelay * 2 : 1000, 15000);
             clearTimeout(retryTimer);
             retryTimer = setTimeout(write, retryDelay);
+            this._saveFailed(true, e?.message || '');
           });
       };
       if (flush) write();
       else persistTimer = setTimeout(write, 300);
+    },
+    /**
+     * Стор совпал с серверным — запоминаем слепки, чтобы первое же сохранение
+     * не гнало всю историю заново.
+     */
+    _markSent() {
+      sentChats.clear();
+      this.sessions.forEach((s) => sentChats.set(s.id, JSON.stringify(slimOf(s))));
+      (this.archived || []).forEach((c) => sentChats.set(c.id, JSON.stringify(c)));
+      sentMeta = JSON.stringify({
+        activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
+      });
+    },
+    /**
+     * История не сохраняется. Раньше клиент ретраил молча, и человек узнавал о потере
+     * только после перезагрузки страницы — уже пустой. Поэтому о беде сообщаем —
+     * но РОВНО ОДИН РАЗ, оповещением, пока не восстановится: постоянная плашка в чате
+     * ходила за человеком по всем чатам и превращалась в шум.
+     */
+    _saveFailed(bad, msg = '') {
+      if (!bad) { this.saveError = null; saveWarned = false; return; }
+      this.saveError = msg || 'сервер не принял запись';
+      if (saveWarned) return;
+      saveWarned = true;
+      notify('История чата не сохраняется', `${this.saveError}. Не закрывай вкладку — идут повторные попытки.`, 'chat-save-error');
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
 
@@ -283,65 +375,93 @@ export const useChatStore = defineStore('chat', {
     },
     // ── Всплывашка разрешений: агент просит выполнить действие (Bash/правка) ──
     // Сервер шлёт SSE `chat-permission`, ответ уходит POST'ом; `chat-permission-done`
-    // (в т.ч. из другого окна или по таймауту) закрывает всплывашку везде.
+    // (ответили в другом окне, «стоп», конец хода) закрывает всплывашку везде.
+    // Таймаута у спроса нет: без ответа человека агент стоит и ждёт.
     initPerms() {
-      if (permEs) return;
-      permEs = new EventSource(api.eventsUrl(), { withCredentials: true });
-      permEs.addEventListener('chat-permission', (e) => {
-        try {
-          const d = JSON.parse(e.data);
+      if (permOff) return;
+      // Общий EventSource вкладки (useSse) — свой открывать НЕЛЬЗЯ: лимит браузера
+      // 6 соединений на хост, лишние SSE душат все fetch (см. composables/useSse.js).
+      permOff = sseSubscribe((name, d) => {
+        if (!d && name !== 'chat-orphan') return;
+        if (name === 'chat-permission') {
           // «Разрешать до конца сессии»: инструмент уже одобрен — отвечаем сами, без всплывашки.
           if (d.chatKey && permAutoAllow[d.chatKey]?.has(d.tool)) {
             api.post(`/api/chat/permission/${d.pid}`, { allow: true }).catch(() => {});
             return;
           }
-          this.permReq = d;
-        } catch { /* битое событие */ }
-      });
-      // Вопрос агента (AskUserQuestion): не разрешение, а диалог с вариантами ответа.
-      permEs.addEventListener('chat-question', (e) => {
-        try { this.questionReq = JSON.parse(e.data); } catch { /* битое событие */ }
-      });
-      permEs.addEventListener('chat-permission-done', (e) => {
-        try {
-          const d = JSON.parse(e.data);
-          if (this.permReq?.pid === d.pid) this.permReq = null;
-          if (this.questionReq?.pid === d.pid) this.questionReq = null;
-        } catch { /* битое событие */ }
-      });
-      // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
-      permEs.addEventListener('chat-step', (e) => {
-        try {
-          const d = JSON.parse(e.data);
+          this._addPending({ ...d, kind: 'perm' });
+        } else if (name === 'chat-question') {
+          // Вопрос агента (AskUserQuestion): не разрешение, а диалог с вариантами ответа.
+          this._addPending({ ...d, kind: 'question' });
+        } else if (name === 'chat-permission-done') {
+          delete this.pending[d.pid];
+        } else if (name === 'hello') {
+          // Связь восстановилась (в т.ч. после рестарта сервера) — пока её не было,
+          // спросы могли и появиться, и умереть: сверяем список целиком.
+          if (this.loaded) this._loadWaiting();
+        } else if (name === 'chat-step') {
+          // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
           const s = this._get(d.chatKey);
           if (s && d.step) (s.steps ||= []).push(d.step);
-        } catch { /* битое событие */ }
-      });
-      // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
-      permEs.addEventListener('chat-orphan', () => { this._collectPending(); });
-      // Живой прогресс «думает… · N ток.». Прогресс = агент точно работает:
-      // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
-      permEs.addEventListener('chat-progress', (e) => {
-        try {
-          const d = JSON.parse(e.data);
+        } else if (name === 'chat-orphan') {
+          // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
+          this._collectPending();
+        } else if (name === 'chat-progress') {
+          // Живой прогресс «думает… · N ток.». Прогресс = агент точно работает:
+          // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
           const s = this._get(d.chatKey);
           if (s) { s.sending = true; s.progressTokens = d.tokens; }
-        } catch { /* битое событие */ }
-      });
-      // Ход завершён — снять «думает…» во всех окнах (ответ доставляется
-      // ожидавшему окну или через pending).
-      permEs.addEventListener('chat-done', (e) => {
-        try {
-          const d = JSON.parse(e.data);
+        } else if (name === 'chat-turn-start') {
+          // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
+          // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
           const s = this._get(d.chatKey);
-          if (s) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
-        } catch { /* битое событие */ }
+          const m = (s?.messages || []).find((x) => x.queued);
+          if (m) delete m.queued;
+          if (s) { s.sending = true; s.steps = []; s.progressTokens = 0; }
+        } else if (name === 'chat-done') {
+          // Ход завершён — снять «думает…» во всех окнах (ответ доставляется
+          // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
+          // и они ждут очереди, агент продолжит работу: индикатор оставляем.
+          const s = this._get(d.chatKey);
+          if (s && !s.inflight) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
+        }
       });
     },
-    async answerPerm(allow, remember = false) {
-      const p = this.permReq;
+    /**
+     * Новый спрос агента. Оповещаем, если на этот чат сейчас не смотрят: агент СТОИТ,
+     * пока не ответят, — пропустить такое дороже, чем пропустить обычный ответ.
+     */
+    _addPending(req) {
+      this.pending[req.pid] = req;
+      if (this._visible(req.chatKey)) return;
+      const s = this._get(req.chatKey) || this.archived.find((x) => x.id === req.chatKey);
+      const who = s ? this.tabLabel(s) : 'чат';
+      const what = req.kind === 'question'
+        ? (req.questions?.[0]?.question || 'Агент задал вопрос')
+        : `Агент просит разрешение: ${req.tool || 'действие'}`;
+      notify(`Нужен твой ответ — ${who}`, what.slice(0, 120), `chat-ask-${req.chatKey || req.pid}`);
+    },
+    /**
+     * Спросы, которые уже висели: SSE доставляет событие один раз, поэтому после F5
+     * (и во втором окне) поднимаем их отдельным запросом — иначе агент ждёт ответа,
+     * а показать его некому.
+     */
+    async _loadWaiting() {
+      let waiting;
+      try { ({ waiting } = await api.get('/api/chat/waiting')); }
+      catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
+      // Сверяемся ПОЛНОСТЬЮ, а не дозаливаем: после рестарта сервера запросы умирают
+      // вместе с процессами агентов, и наши всплывашки стали бы фантомами.
+      const fresh = {};
+      for (const w of waiting || []) {
+        fresh[w.pid] = this.pending[w.pid] || { ...w, kind: w.questions ? 'question' : 'perm' };
+      }
+      this.pending = fresh;
+    },
+    async answerPerm(pid, allow, remember = false) {
+      const p = this.pending[pid];
       if (!p) return;
-      this.permReq = null;
+      delete this.pending[pid];
       if (allow && remember && p.chatKey && p.tool) {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
       }
@@ -363,12 +483,11 @@ export const useChatStore = defineStore('chat', {
     },
     // Ответ на вопрос агента: answers = [{ header, question, selected: [метки], text }].
     // Сервер превращает их в текст, который агент читает как результат своего вопроса.
-    async answerQuestion(answers) {
-      const q = this.questionReq;
-      if (!q) return;
-      this.questionReq = null;
-      try { await api.post(`/api/chat/permission/${q.pid}`, { answers }); }
-      catch { /* запрос уже протух (таймаут/другое окно) */ }
+    async answerQuestion(pid, answers) {
+      if (!this.pending[pid]) return;
+      delete this.pending[pid];
+      try { await api.post(`/api/chat/permission/${pid}`, { answers }); }
+      catch { /* запрос уже снят (стоп/конец хода/другое окно) */ }
     },
 
     async ensure() {
@@ -493,12 +612,19 @@ export const useChatStore = defineStore('chat', {
 
     async send(id, text, attachments = []) {
       const s = this._get(id); if (!s) return;
-      if ((!text.trim() && !attachments.length) || s.sending) return;
+      if (!text.trim() && !attachments.length) return;
+      // Писать во время хода МОЖНО: человек готовит следующее сообщение, пока агент работает.
+      // Сервер выстроит ходы в очередь (см. modules/chat: два CLI на одну сессию не живут),
+      // а здесь помечаем сообщение «ждёт очереди», чтобы было видно — оно принято, но ещё не в работе.
+      const queued = !!s.sending;
       // Вложения в истории — только ссылки на серверные файлы (file/name/url/mime).
       const atts = attachments.map((a) => ({ file: a.file, name: a.name, url: a.url, mime: a.mime }));
-      s.messages.push({ role: 'user', text, ...(atts.length ? { attachments: atts } : {}) });
-      s.sending = true; s.error = null; s.progressTokens = 0;
-      s.steps = []; // лента предыдущего хода уже уехала в своё сообщение
+      s.messages.push({ role: 'user', text, ...(atts.length ? { attachments: atts } : {}), ...(queued ? { queued: true } : {}) });
+      // Счётчик незакрытых отправок: «думает…» гасим, только когда закончилась ПОСЛЕДНЯЯ,
+      // иначе ответ первого хода снимал бы индикатор у ещё работающего второго.
+      s.inflight = (s.inflight || 0) + 1;
+      s.sending = true; s.error = null;
+      if (!queued) { s.progressTokens = 0; s.steps = []; } // лента предыдущего хода уже уехала в своё сообщение
       s.updatedAt = Date.now();
       this._persist(true); // немедленно: вопрос не должен потеряться при F5/гонке окон
       try {
@@ -519,7 +645,10 @@ export const useChatStore = defineStore('chat', {
           sessionId: s.sessionId, context, chatKey: id,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
-        s.sessionId = r.sessionId;
+        // Пустой id не затираем: у оборванного хода («стоп», лимит) его может не быть,
+        // а прежняя сессия жива — иначе следующий вопрос уйдёт без --resume и агент
+        // не вспомнит ничего из разговора.
+        if (r.sessionId) s.sessionId = r.sessionId;
         if (typeof r.contextTokens === 'number' && r.contextTokens > 0) s.contextTokens = r.contextTokens;
         // Лента хода переезжает в сообщение (серверная копия полнее: SSE мог что-то не донести),
         // actualModel/effort — чем CLI отработал на самом деле (алиасы он резолвит сам).
@@ -542,7 +671,12 @@ export const useChatStore = defineStore('chat', {
       } catch (e) {
         s.error = e.message;
         s.messages.push({ role: 'error', text: e.message });
-      } finally { s.sending = false; s.stopping = false; s.progressTokens = 0; s.updatedAt = Date.now(); this._persist(); }
+      } finally {
+        s.inflight = Math.max(0, (s.inflight || 1) - 1);
+        // Ещё есть незакрытые отправки этого чата — ход продолжается, «думает…» не снимаем.
+        if (!s.inflight) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
+        s.updatedAt = Date.now(); this._persist();
+      }
     },
 
     // Список номеров задач, уже находящихся на конвейере (для защиты «На конвейер»).

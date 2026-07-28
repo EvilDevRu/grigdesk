@@ -91,9 +91,57 @@ export class ChatHistoryStore {
     for (const [id, v] of existing) {
       if (!seen.has(id)) await fs.rm(v.path, { force: true });
     }
-    await this.writeAtomic(path.join(this.dir, 'meta.json'), JSON.stringify({
-      activeId: body.activeId ?? null, defModel: body.defModel, defEffort: body.defEffort,
-    }));
+    await this.saveMeta({
+      activeId: body.activeId ?? null, defModel: body.defModel, defEffort: body.defEffort, defMode: body.defMode,
+    });
+  }
+
+  /**
+   * Запись ОДНОГО чата — основной путь сохранения. Раньше клиент присылал весь стор
+   * одним телом; вместе с лентами шагов он дорос до лимита тела запроса, сервер начал
+   * отвечать 413, и история не сохранялась вовсе. Одно тело = один чат, и объём запроса
+   * больше не зависит от того, сколько всего чатов накопилось.
+   * Возвращает false, если на диске уже лежит ровно это (частый случай — лишний persist).
+   */
+  async saveOne(chat, archived = false) {
+    if (!chat?.id) return false;
+    await this.ensureDir();
+    const c = { ...chat, archived: !!archived };
+    c.createdAt = c.createdAt || c.updatedAt || Date.now();
+    const target = this.fileOf(c);
+    const json = JSON.stringify(c);
+    // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
+    const prev = (await this.scan()).get(c.id);
+    if (prev && prev.path === target && prev.json === json) return false;
+    await this.writeAtomic(target, json);
+    if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
+    return true;
+  }
+
+  /** Удаление чата (человек стёр его в списке). Файла нет — значит уже удалён. */
+  async remove(id) {
+    if (!id) return false;
+    const prev = (await this.scan()).get(id);
+    if (!prev) return false;
+    await fs.rm(prev.path, { force: true });
+    return true;
+  }
+
+  /**
+   * Мета (активный чат и дефолты новых чатов) — отдельно от чатов, поэтому переключение
+   * вкладки не тащит за собой переписку. Пишем слиянием: частичное обновление не должно
+   * стирать соседние поля.
+   */
+  async saveMeta(meta) {
+    await this.ensureDir();
+    let prev = {};
+    try { prev = JSON.parse(await fs.readFile(path.join(this.dir, 'meta.json'), 'utf8')); } catch { /* меты ещё нет */ }
+    const next = { ...prev };
+    for (const k of ['activeId', 'defModel', 'defEffort', 'defMode']) {
+      if (meta?.[k] !== undefined) next[k] = meta[k];
+    }
+    await this.writeAtomic(path.join(this.dir, 'meta.json'), JSON.stringify(next));
+    return next;
   }
 
   async read() {
@@ -118,6 +166,9 @@ export class ChatHistoryStore {
       activeId: meta.activeId ?? null,
       defModel: meta.defModel,
       defEffort: meta.defEffort,
+      // defMode клиент присылал, а мета его не хранила — выбранный режим прав не переживал
+      // перезагрузку страницы и молча откатывался к режиму по умолчанию.
+      defMode: meta.defMode,
     };
   }
 }
