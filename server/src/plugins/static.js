@@ -1,7 +1,7 @@
 // Статика: собранный фронт (web/dist) + артефакты приёмки из STATE_DIR (/shots, /demo).
 // @fastify/static регистрируется несколько раз с разными префиксами; повторные — с
-// decorateReply:false. Каждый корень регистрируем только если он существует, иначе
-// плагин бросит на старте (dist может быть не собран, shots/demo — не созданы).
+// decorateReply:false. shots/demo создаём сами: иначе первый же ролик, снятый после
+// старта сервера, не раздавался бы до рестарта (роут регистрируется только на старте).
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
@@ -12,13 +12,11 @@ async function staticPlugin(fastify, opts) {
 
   const shotsDir = path.join(stateDir, 'shots');
   const demoDir = path.join(stateDir, 'demo');
+  fs.mkdirSync(shotsDir, { recursive: true });
+  fs.mkdirSync(demoDir, { recursive: true });
 
-  if (fs.existsSync(shotsDir)) {
-    await fastify.register(fastifyStatic, { root: shotsDir, prefix: '/shots/', decorateReply: false });
-  }
-  if (fs.existsSync(demoDir)) {
-    await fastify.register(fastifyStatic, { root: demoDir, prefix: '/demo/', decorateReply: false });
-  }
+  await fastify.register(fastifyStatic, { root: shotsDir, prefix: '/shots/', decorateReply: false });
+  await fastify.register(fastifyStatic, { root: demoDir, prefix: '/demo/', decorateReply: false });
 
   // Фронт — последним, на корне. SPA-fallback: неизвестные не-API пути → index.html.
   // Кеш: index.html — no-cache (иначе старый html держит ссылки на старые ассеты);

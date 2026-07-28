@@ -1,6 +1,7 @@
 // Ядро сервера кокпита. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -35,6 +36,8 @@ import providersModule from './modules/providers/index.js';
 import analysisModule from './modules/analysis/index.js';
 import authModule from './modules/auth/index.js';
 import gatewayModule from './modules/gateway/index.js';
+import pluginsModule from './modules/plugins/index.js';
+import demoModule from './modules/demo/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 
 /**
@@ -58,6 +61,11 @@ async function build() {
     // trustProxy — только по явной настройке и только для адреса шлюза (см. config.trustProxy).
     // Без неё заголовки `X-Forwarded-*` игнорируются: иначе клиент сам назначал бы себе адрес.
     ...(config.trustProxy ? { trustProxy: config.trustProxy } : {}),
+    // Дефолтного мегабайта fastify хватало ровно до того дня, когда история чатов доросла
+    // до него: PUT /api/chat/store начал отвечать 413, клиент молча ретраил каждые 15 с —
+    // и переписка перестала сохраняться совсем (терялась на F5 и «стопе»). Тело чатов
+    // теперь режется на отдельные запросы (store/chat), а этот лимит — общая страховка.
+    bodyLimit: 64 * 1024 ** 2,
   });
 
   // CORS нужен только в dev (vite на другом порту). В проде фронт — тот же origin.
@@ -90,18 +98,33 @@ async function build() {
   // Живёт только в памяти, на диск и в конфиг не попадает, меняется с каждым запуском.
   const internalToken = randomUUID();
 
+  // Токен ЛОКАЛЬНЫХ CLI-потребителей (bin/b24, ship-этап фабрики, скиллы): у них нет ни
+  // cookie, ни памяти нашего процесса. Файл 0600 на диске машины-мозга — владение файлом
+  // эквивалентно владению остальными кредами .state. Стабилен между рестартами:
+  // демоны фабрики живут дольше процесса кокпита.
+  let cliToken = '';
+  try { cliToken = readFileSync(config.cliTokenPath, 'utf8').trim(); } catch { /* ещё не создан */ }
+  if (!cliToken) {
+    cliToken = randomUUID().replace(/-/g, '');
+    mkdirSync(path.dirname(config.cliTokenPath), { recursive: true });
+    writeFileSync(config.cliTokenPath, cliToken + '\n', { mode: 0o600 });
+  }
+
   // Плагины платформы. Гард — первым: он закрывает весь /api, включая upgrade вебсокета.
-  await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, trustProxy: config.trustProxy, internalToken });
+  await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, trustProxy: config.trustProxy, internalToken, cliToken });
   await fastify.register(ssePlugin, { stateDir: config.stateDir });
 
   // Модули.
   await fastify.register(authModule, { authStore, config });
   await fastify.register(gatewayModule, { config });
   await fastify.register(healthModule, { config, factoryState });
-  await fastify.register(factoryModule, { factoryState, config, prefs });
+  await fastify.register(factoryModule, { factoryState, config, prefs, b24, analyzer });
   await fastify.register(b24Module, { b24 });
   await fastify.register(systemModule, { system });
+  // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
+  await fastify.register(pluginsModule, { config, prefs });
   await fastify.register(mediaModule, { media });
+  await fastify.register(demoModule, { config, factoryState });
   await fastify.register(chatModule, { factoryState, config, claudeAuth, internalToken });
   await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config, prefs });
   await fastify.register(terminalModule);

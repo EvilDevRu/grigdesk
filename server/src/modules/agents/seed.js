@@ -13,8 +13,8 @@
 //
 // Тонкость с ключами: функции профиля матчат ИМЕНА ЭТАПОВ ДВИЖКА (PLAN, PHPCHECK),
 // а graph.json хранит КЛЮЧИ РЕЕСТРА (PLANS, PHPCHECK) — почти всегда совпадают, но не
-// везде (plan↔PLANS, gate_demo↔DEMO_ASK). Поэтому пробуем оба кандидата: ключ реестра
-// и UPPER(id) — берём первый непустой ответ.
+// везде (plan↔PLANS). Поэтому пробуем оба кандидата: ключ реестра и UPPER(id) —
+// берём первый непустой ответ.
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';

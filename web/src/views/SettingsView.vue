@@ -7,12 +7,14 @@ import { useUiContextStore } from '../stores/ui-context.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import { useAuthStore } from '../stores/auth.js';
+import { usePluginsStore } from '../stores/plugins.js';
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
 const TABS = [
   { id: 'b24', label: 'Битрикс24' },
   { id: 'providers', label: 'Исполнители' },
   { id: 'runs', label: 'Запуски' },
+  { id: 'plugins', label: 'Плагины' },
   { id: 'access', label: 'Доступ' },
 ];
 const tab = ref(localStorage.getItem('cockpit-settings-tab') || 'b24');
@@ -168,7 +170,16 @@ async function logoutAll() {
   auth.authenticated = false;
 }
 
-onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); acc.value.login = auth.login || ''; });
+// ── Плагины ──
+const pluginsStore = usePluginsStore();
+const plugMsg = ref(null);
+async function savePlugin(p) {
+  await pluginsStore.saveSettings(p.id, p.values);
+  plugMsg.value = p.id;
+  setTimeout(() => { if (plugMsg.value === p.id) plugMsg.value = null; }, 2000);
+}
+
+onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); pluginsStore.load(); acc.value.login = auth.login || ''; });
 </script>
 
 <template>
@@ -283,6 +294,43 @@ onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); acc.value.login = aut
       </div>
     </section>
 
+    <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
+         папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера. -->
+    <section v-else-if="tab === 'plugins'">
+      <p class="muted">
+        Плагин — отключаемый раздел кокпита: пункт в сайдбаре (под разделителем), свои API и настройки.
+        Свой плагин — папка <code>plugins/&lt;id&gt;/</code> с манифестом <code>plugin.json</code>
+        (+ опционально <code>server.js</code>), появится здесь после рестарта сервера.
+      </p>
+      <div v-if="!pluginsStore.loaded" class="muted">Загрузка…</div>
+      <div v-else class="plugcards">
+        <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard">
+          <div class="plughead">
+            <div>
+              <b>{{ p.name }}</b>
+              <span class="plugver">v{{ p.version }}</span>
+              <span class="plugtag" :class="{ user: !p.system }">{{ p.system ? 'системный' : 'пользовательский' }}</span>
+            </div>
+            <ToggleSwitch :model-value="p.enabled" label="" @update:model-value="(v) => pluginsStore.toggle(p.id, v)" />
+          </div>
+          <p class="muted small">{{ p.description }}</p>
+          <p v-if="p.needsRestart" class="muted small">Серверная часть подключается на старте — вкл/выкл подействует после рестарта кокпита.</p>
+          <div v-if="p.enabled && p.settings.length" class="plugset">
+            <div v-for="s in p.settings" :key="s.key" class="plugrow">
+              <label>{{ s.label }}</label>
+              <select v-if="s.type === 'select'" v-model="p.values[s.key]" class="inp">
+                <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <input v-else-if="s.type === 'checkbox'" v-model="p.values[s.key]" type="checkbox" />
+              <input v-else v-model="p.values[s.key]" class="inp" type="text" />
+            </div>
+            <button class="btn" @click="savePlugin(p)">Сохранить</button>
+            <span v-if="plugMsg === p.id" class="msg ok">Сохранено</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Доступ: вход в сам кокпит (один пользователь) -->
     <section v-else-if="tab === 'access'">
       <p class="muted">
@@ -338,6 +386,27 @@ section { display: flex; flex-direction: column; gap: 8px; }
 
 .muted code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+/* Карточки плагинов — горизонтальной линией, с переносом на узких экранах. */
+.plugcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
+.plugcard { gap: 8px; }
+.plughead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.plugver { color: var(--mut); font-size: 12px; margin-left: 8px; }
+.plugtag { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; color: var(--mut); }
+.plugtag.user { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+.plugcard .small { flex: 1; }
+.plugset { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.plugrow { display: flex; align-items: center; gap: 10px; }
+.plugrow label { min-width: 140px; color: var(--mut); font-size: 13px; }
+.plugrow .inp { max-width: 220px; }
+/* Нормальный селект вместо нативного: свой фон, рамка и шеврон. */
+.plugrow select.inp {
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888da8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 1px solid var(--line); border-radius: 8px; color: var(--ink);
+  padding: 6px 28px 6px 10px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.plugrow select.inp:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.plugrow select.inp:focus { outline: none; border-color: var(--accent); }
 label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
 input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }

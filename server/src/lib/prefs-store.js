@@ -10,6 +10,10 @@ const DEFAULTS = {
   // Показывать в выборе модели ВСЕ, что помнит CLI (включая Sonnet 3.7, Opus 4.0…),
   // а не только две свежие версии каждого семейства.
   showAllModels: false,
+  // Плагины: вкл/выкл по id (отсутствие ключа = дефолт: системный вкл, пользовательский выкл)
+  // и значения их настроек. Схемы настроек — в lib/plugins-registry.js и манифестах.
+  plugins: {},
+  pluginSettings: {},
 };
 
 export class PrefsStore {
@@ -33,7 +37,9 @@ export class PrefsStore {
       if (patch && k in patch) next[k] = patch[k];
     }
     fs.mkdirSync(path.dirname(this.prefsPath), { recursive: true });
-    fs.writeFileSync(this.prefsPath, JSON.stringify(next, null, 2), { mode: 0o600 });
+    // Атомарно (tmp+rename): падение в момент записи не бьёт файл настроек.
+    fs.writeFileSync(`${this.prefsPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
+    fs.renameSync(`${this.prefsPath}.tmp`, this.prefsPath);
     return next;
   }
 }

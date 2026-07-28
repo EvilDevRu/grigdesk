@@ -87,6 +87,11 @@ export const config = {
   // меняется в настройках.
   authAccountPath: process.env.COCKPIT_AUTH_ACCOUNT || path.join(__dirname, '..', '.state', 'auth-account.json'),
   authSessionsPath: process.env.COCKPIT_AUTH_SESSIONS || path.join(__dirname, '..', '.state', 'auth-sessions.json'),
+  // Токен для ЛОКАЛЬНЫХ CLI-потребителей API (bin/b24, ship-этап фабрики, скиллы):
+  // файл 0600 на этой же машине. Кто может его прочитать — уже владеет всеми кредами .state.
+  cliTokenPath: process.env.COCKPIT_CLI_TOKEN_PATH || path.join(__dirname, '..', '.state', 'cli-token'),
+  // Пользовательские плагины: plugins/<id>/plugin.json (+server.js) в корне проекта.
+  userPluginsDir: process.env.COCKPIT_PLUGINS_DIR || path.join(__dirname, '..', '..', 'plugins'),
 
   // TLS. Пусто → http. Задать оба пути → Fastify слушает https на том же порту.
   //

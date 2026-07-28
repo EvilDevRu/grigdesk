@@ -27,9 +27,9 @@ export const STAGES = Object.freeze({
   browser: { kind: 'agent', label: 'Браузер' },
   gate_accept: { kind: 'human', label: 'Приёмка', gate: true },
   ship: { kind: 'human', label: 'Merge / Ship' },
-  gate_demo: { kind: 'human', label: 'Демо?', gate: true },
-  demo: { kind: 'agent', label: 'Демо' },
-  gate_demo_ok: { kind: 'human', label: 'Демо: принять', gate: true },
+  // Демо-стадий в каталоге нет: демо не этап конвейера, а отдельный прогон по кнопке
+  // плагина «Демо» (factory <task> demo). Вернёшь их сюда — редактор маршрутов снова
+  // предложит поставить демо в цепочку, и конвейер встанет на том, чего движок не ведёт.
   retro: { kind: 'agent', label: 'Ретро' },
   // debug-маршрут
   repro: { kind: 'agent', label: 'Воспроизвести' },
