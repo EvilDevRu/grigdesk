@@ -53,7 +53,28 @@ async function request(method, path, body) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  return handle(await fetch(url(path), opts), path);
+  // GET — с таймаутом: во время docker-манипуляций со стендами fetch может не
+  // оборваться, а ЗАВИСНУТЬ (соединение в подвешенном состоянии) — раздел тогда
+  // вечно показывает «Загрузка…». 30с покрывает даже медленный B24-портал.
+  const isGet = method === 'GET';
+  const attempt = () => fetch(url(path), {
+    ...opts,
+    ...(isGet && typeof AbortSignal?.timeout === 'function' ? { signal: AbortSignal.timeout(30000) } : {}),
+  });
+  try {
+    return await handle(await attempt(), path);
+  } catch (e) {
+    // Сетевой обрыв (TypeError) или таймаут. Частный случай на этой машине: docker
+    // поднимает/сносит сеть стенда → Chrome видит «сеть изменилась» и рубит ВСЕ
+    // летящие запросы (ERR_NETWORK_CHANGED), даже на localhost. Сервер при этом
+    // жив — GET безопасно повторить один раз. Мутации не повторяем: неизвестно,
+    // дошла ли первая (риск дубля).
+    if (isGet && (e instanceof TypeError || e?.name === 'TimeoutError' || e?.name === 'AbortError')) {
+      await new Promise((r) => { setTimeout(r, 700); });
+      return handle(await attempt(), path);
+    }
+    throw e;
+  }
 }
 
 // Multipart-загрузка (файлы): Content-Type ставит сам браузер (boundary).

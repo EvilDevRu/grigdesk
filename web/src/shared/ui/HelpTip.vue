@@ -20,6 +20,14 @@ const tipEl = ref(null);
 const below = ref(false);
 const tipStyle = ref({});
 
+// Показ управляется из JS, а не CSS :hover: тултип в fixed-режиме отстоит от
+// триггера на зазор, и на пути к нему hover слетал — навести мышь на кнопки
+// внутри было невозможно. Закрытие с задержкой: успеваем перелететь зазор.
+const on = ref(false);
+let hideT = null;
+function show() { clearTimeout(hideT); place(); on.value = true; }
+function hide() { clearTimeout(hideT); hideT = setTimeout(() => { on.value = false; }, 180); }
+
 function place() {
   const r = icEl.value?.getBoundingClientRect();
   // ~120px — высота тултипа с запасом; меньше сверху → раскрываемся вниз.
@@ -37,9 +45,9 @@ function place() {
 </script>
 
 <template>
-  <span class="ht" :class="[`al-${align}`, { below, fx: fixed }]" @mouseenter="place">
-    <span v-if="$slots.default" ref="icEl" class="ht-tr" tabindex="0" @focus="place"><slot /></span>
-    <span v-else ref="icEl" class="ht-ic" tabindex="0" aria-label="Подсказка" @focus="place">?</span>
+  <span class="ht" :class="[`al-${align}`, { below, fx: fixed, on }]" @mouseenter="show" @mouseleave="hide">
+    <span v-if="$slots.default" ref="icEl" class="ht-tr" tabindex="0" @focus="show" @blur="hide"><slot /></span>
+    <span v-else ref="icEl" class="ht-ic" tabindex="0" aria-label="Подсказка" @focus="show" @blur="hide">?</span>
     <span ref="tipEl" class="ht-tip" role="tooltip" :style="fixed ? tipStyle : undefined"><slot name="tip">{{ text }}</slot></span>
   </span>
 </template>
@@ -72,34 +80,34 @@ function place() {
   content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   border: 5px solid transparent; border-top-color: var(--line-2);
 }
-.ht:hover .ht-tip, .ht:focus-within .ht-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
+.ht.on .ht-tip, .ht:focus-within .ht-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
 /* Видимый тултип кликабелен (внутри бывают кнопки действий) */
-.ht:hover .ht-tip, .ht:focus-within .ht-tip { pointer-events: auto; }
+.ht.on .ht-tip, .ht:focus-within .ht-tip { pointer-events: auto; }
 /* Свой триггер (слот): без круга, курсор как у подсказки */
 .ht-tr { display: inline-flex; align-items: center; cursor: help; outline: none; }
 
 /* fixed-режим: координаты от вьюпорта (inline-стилем из place), стрелку не рисуем —
    тултип может быть прижат к краю и стрелка укажет мимо триггера. */
 .ht.fx .ht-tip, .ht.fx.below .ht-tip { position: fixed; bottom: auto; right: auto; transform: translateY(4px); }
-.ht.fx:hover .ht-tip, .ht.fx:focus-within .ht-tip { transform: translateY(0); }
+.ht.fx.on .ht-tip, .ht.fx:focus-within .ht-tip { transform: translateY(0); }
 .ht.fx .ht-tip::after { display: none; }
 
 /* Раскрытие вниз, когда сверху нет места */
 .ht.below .ht-tip { bottom: auto; top: calc(100% + 9px); transform: translateX(-50%) translateY(-4px); }
-.ht.below:hover .ht-tip, .ht.below:focus-within .ht-tip { transform: translateX(-50%) translateY(0); }
+.ht.below.on .ht-tip, .ht.below:focus-within .ht-tip { transform: translateX(-50%) translateY(0); }
 .ht.below .ht-tip::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--line-2); }
 
 /* Раскрытие у края: тултип прижат к левому/правому краю иконки */
 .al-left .ht-tip { left: -6px; transform: translateY(4px); }
-.al-left:hover .ht-tip, .al-left:focus-within .ht-tip { transform: translateY(0); }
+.al-left.on .ht-tip, .al-left:focus-within .ht-tip { transform: translateY(0); }
 .al-left .ht-tip::after { left: 10px; transform: none; }
 .al-left.below .ht-tip { transform: translateY(-4px); }
-.al-left.below:hover .ht-tip, .al-left.below:focus-within .ht-tip { transform: translateY(0); }
+.al-left.below.on .ht-tip, .al-left.below:focus-within .ht-tip { transform: translateY(0); }
 .al-right .ht-tip { left: auto; right: -6px; transform: translateY(4px); }
-.al-right:hover .ht-tip, .al-right:focus-within .ht-tip { transform: translateY(0); }
+.al-right.on .ht-tip, .al-right:focus-within .ht-tip { transform: translateY(0); }
 .al-right .ht-tip::after { left: auto; right: 10px; transform: none; }
 .al-right.below .ht-tip { transform: translateY(-4px); }
-.al-right.below:hover .ht-tip, .al-right.below:focus-within .ht-tip { transform: translateY(0); }
+.al-right.below.on .ht-tip, .al-right.below:focus-within .ht-tip { transform: translateY(0); }
 
 @media (prefers-reduced-motion: reduce) { .ht-tip { transition: opacity .16s ease; } }
 </style>

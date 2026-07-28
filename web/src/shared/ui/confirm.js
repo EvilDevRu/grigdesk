@@ -67,3 +67,41 @@ export function confirmDialog(text, { title = 'Подтверди действи
     no.focus();
   });
 }
+
+/**
+ * Сообщение вместо системного alert(): та же модалка, одна кнопка.
+ * Возвращает Promise<void> (закрытие — кнопка/Esc/Enter/фон).
+ */
+export function alertDialog(text, { title = 'Кокпит', okText = 'Понятно' } = {}) {
+  injectCss();
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'cfm-overlay';
+    const box = document.createElement('div');
+    box.className = 'cfm';
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-modal', 'true');
+    const t = document.createElement('div'); t.className = 'cfm-t'; t.textContent = title;
+    const x = document.createElement('div'); x.className = 'cfm-x'; x.textContent = text;
+    const a = document.createElement('div'); a.className = 'cfm-a';
+    const ok = document.createElement('button'); ok.className = 'cfm-ok'; ok.textContent = okText;
+    a.append(ok);
+    box.append(t, x, a);
+    wrap.append(box);
+
+    const done = () => {
+      document.removeEventListener('keydown', onKey, true);
+      wrap.remove();
+      resolve();
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape' || e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); done(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    ok.addEventListener('click', done);
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
+
+    document.body.appendChild(wrap);
+    ok.focus();
+  });
+}
