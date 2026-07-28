@@ -45,6 +45,11 @@ async function b24Module(fastify, opts) {
 
   fastify.post('/api/b24/tasks', wrap((r) => b24.createTask(r.body || {})));
   fastify.post('/api/b24/task/:id/comment', wrap((r) => b24.addComment(taskId(r), (r.body || {}).text || '')));
+  // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
+  fastify.get('/api/b24/task/:id/comments', wrap(async (r) => {
+    const page = await b24.taskPageData(taskId(r));
+    return { comments: (page.comments || []).filter((c) => !c.isSystem) };
+  }));
   fastify.post('/api/b24/task/:id/timer/:action', wrap((r) => {
     const a = r.params.action;
     if (!['start', 'pause', 'stop'].includes(a)) throw new Error(`неизвестное действие таймера: ${a}`);

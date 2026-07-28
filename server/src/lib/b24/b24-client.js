@@ -78,6 +78,22 @@ function extractDivById(html, id) {
     return null;
 }
 
+// Приоритет задачи в Битриксе: 0 низкий, 1 средний, 2 высокий. Приходит из HTTP-тела,
+// поэтому может быть строкой («2») или словом. Мусор НЕ глотаем молча: незамеченное
+// поле = задача без приоритета при полной уверенности человека, что он его выставил.
+const PRIORITY_ALIASES = { низкий: 0, низкая: 0, low: 0, средний: 1, средняя: 1, обычный: 1, обычная: 1, normal: 1, average: 1, высокий: 2, высокая: 2, важная: 2, high: 2 };
+function normalizePriority(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    const alias = PRIORITY_ALIASES[String(value).trim().toLowerCase()];
+    const num = alias ?? Number(value);
+    if (![0, 1, 2].includes(num)) {
+        throw new Error(`Неверный приоритет «${value}»: жду 0 (низкий), 1 (средний) или 2 (высокий)`);
+    }
+    return num;
+}
+
 export class B24Client {
     /**
      * @param {object} opts
@@ -774,13 +790,18 @@ export class B24Client {
      * @param {number|null} opts.groupId  группа/проект (если null — определяется автоматически)
      * @param {number|null} opts.responsibleId ответственный (если null — я)
      * @param {number|null} opts.createdById постановщик/автор задачи (если null — я)
+     * @param {number|string|null} opts.priority приоритет 0/1/2 (или слово: низкий/средний/высокий);
+     *                                           null — не трогаем, портал ставит свой по умолчанию
      * @param {Array<string|object>} opts.images пути к файлам/изображениям для прикрепления
      * @returns {Promise<{id:number, group:{id:number,name:string}|null, responsibleId:number, files:Array}>}
      */
-    async createTask({ title, description = '', groupId = null, responsibleId = null, createdById = null, images = [] }) {
+    async createTask({ title, description = '', groupId = null, responsibleId = null, createdById = null, priority = null, images = [] }) {
         if (!title || !title.trim()) {
             throw new Error('Пустой заголовок задачи');
         }
+        // Проверяем приоритет ДО логина и загрузки вложений — чтобы опечатка не стоила
+        // залитых на диск файлов.
+        const prio = normalizePriority(priority);
         await this.ensureAuth();
         const uid = (await this.discoverUserId()) ?? 0;
         // Грузим вложения один раз — вне CSRF-ретраев самого add-запроса.
@@ -791,6 +812,7 @@ export class B24Client {
             groupId,
             responsibleId: responsibleId ?? uid,
             createdById,
+            priority: prio,
             fileIds: uploaded.map((u) => u.id),
         });
         return { ...result, files: uploaded };
@@ -800,7 +822,7 @@ export class B24Client {
      * Отправляет tasks.task.add с уже готовыми serverFileId вложений.
      * Выделено из createTask, чтобы CSRF-ретрай не перезагружал файлы заново.
      */
-    async sendTaskAdd({ title, description, groupId, responsibleId, createdById = null, fileIds }, retry = true) {
+    async sendTaskAdd({ title, description, groupId, responsibleId, createdById = null, priority = null, fileIds }, retry = true) {
         const sessid = await this.getSessid();
         const body = new URLSearchParams();
         body.set('fields[TITLE]', title);
@@ -814,6 +836,11 @@ export class B24Client {
         }
         if (groupId) {
             body.set('fields[GROUP_ID]', String(groupId));
+        }
+        // Именно !== null: приоритет 0 (низкий) — валидное значение, обычная проверка на
+        // истинность его бы потеряла.
+        if (priority !== null) {
+            body.set('fields[PRIORITY]', String(priority));
         }
         fileIds.forEach((fid, i) => body.set(`fields[UF_TASK_WEBDAV_FILES][${i}]`, fid));
         body.set('sessid', sessid || '');
@@ -833,7 +860,7 @@ export class B24Client {
             // Протух CSRF — обновим sessid и повторим один раз.
             if (retry && /csrf|sessid|sign/i.test(msg)) {
                 await this.getSessid(true);
-                return this.sendTaskAdd({ title, description, groupId, responsibleId, createdById, fileIds }, false);
+                return this.sendTaskAdd({ title, description, groupId, responsibleId, createdById, priority, fileIds }, false);
             }
             throw new Error(msg || 'Не удалось создать задачу');
         }
@@ -844,6 +871,7 @@ export class B24Client {
             group: groupId ? { id: groupId } : null,
             responsibleId: Number(responsibleId),
             createdById: createdById ? Number(createdById) : null,
+            priority,
         };
     }
 

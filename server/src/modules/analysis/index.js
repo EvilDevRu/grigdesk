@@ -22,6 +22,22 @@ async function analysisModule(fastify, opts) {
     return analyzer.get(id);
   });
 
+  // Локальные уточнения к задаче (НЕ комментарии B24 — заказчик их не видит).
+  // Копятся в t<id>.clarify.md; их читают триаж и запуск конвейера.
+  fastify.get('/api/tasks/:id/clarifications', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    return { text: await analyzer.readClarifications(id) };
+  });
+
+  fastify.post('/api/tasks/:id/clarifications', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    const text = String((request.body || {}).text || '').trim();
+    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    if (!text) return reply.code(400).send({ error: 'empty_text' });
+    return { text: await analyzer.appendClarification(id, text) };
+  });
+
   // Скрыть прерванный/упавший статус (человек решил не перезапускать).
   fastify.delete('/api/analysis/:id/status', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');

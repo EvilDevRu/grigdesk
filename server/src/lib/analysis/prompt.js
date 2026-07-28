@@ -16,7 +16,7 @@ const MAX_COMMENTS = 15;  // последних комментариев
  * @param {string} p.jsonPath куда писать analysis.json
  * @param {string} p.notePath куда писать разведноту
  */
-export function buildTriagePrompt({ task, title, description, comments, profile, jsonPath, notePath }) {
+export function buildTriagePrompt({ task, title, description, comments, clarifications, profile, jsonPath, notePath }) {
   const comm = (comments || [])
     .slice(-MAX_COMMENTS)
     .map((c) => `- ${c.author}${c.time ? ` (${c.time})` : ''}: ${String(c.text || '').slice(0, CAP_COMMENT)}`)
@@ -39,6 +39,8 @@ ${repoList || '(не заданы)'}
 Описание:
 ${String(description || '(пусто)').slice(0, CAP_DESC)}
 ${comm ? `\nКомментарии (последние, старые → новые):\n${comm}` : ''}
+${clarifications ? `\n[Уточнения человека — внутренние, ответы на вопросы прошлого триажа; приоритетнее описания]\n${String(clarifications).slice(0, 6000)}` : ''}
+${`${comm}${clarifications || ''}`.includes('[приложено фото:') ? '\nПометки «[приложено фото: /путь]» — скриншоты от человека, ОБЯЗАТЕЛЬНО открой каждый инструментом Read и учти содержимое в оценке.' : ''}
 
 [Что сделать]
 1. Разведай код: где живёт затронутый функционал, какие файлы/подсистемы придётся трогать (смотри ВСЕ репозитории из списка выше).

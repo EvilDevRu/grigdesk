@@ -4,11 +4,12 @@ import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
+import HelpTip from '../shared/ui/HelpTip.vue';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useAnalysisStore } from '../stores/analysis.js';
-import { secToHMS } from '../shared/format.js';
+import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -18,7 +19,6 @@ const ui = useUiStore();
 const tasks = useTasksStore();
 const board = useBoardStore();
 const { taskId } = storeToRefs(ui);
-const { loadedAt: boardLoadedAt } = storeToRefs(board);
 
 const detail = ref(null);
 const loading = ref(false);
@@ -40,11 +40,7 @@ const boardTask = computed(() => {
   return null;
 });
 const running = computed(() => !!boardTask.value?.timerRunning);
-const elapsed = computed(() => {
-  const t = boardTask.value; if (!t) return null;
-  const extra = t.timerRunning ? (now.value - boardLoadedAt.value) / 1000 : 0;
-  return (t.timerElapsed || 0) + extra;
-});
+const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 
 // B24 отдаёт описание с HTML/entities — чистим до читаемого текста.
 function htmlToText(s) {
@@ -101,25 +97,113 @@ const analyzeNow = () => act('analyze', async () => {
 
 // Ответ на вопросы триажа: уходит комментарием в B24 (агент читает комментарии
 // вместе с тикетом) и сразу запускает переоценку — цикл уточнения в один клик.
+// К уточнению можно приложить фото (скрин переписки/бага): файл сохраняется в
+// chats/attachments, в комментарий вписывается абсолютный путь — агент переоценки
+// открывает его Read'ом (папка выдана ему через --add-dir).
 const clarifyText = ref('');
+const clarifyAtts = ref([]);   // [{file,name,url,path}]
+const clarifyUploading = ref(false);
+async function onClarifyFiles(e) {
+  const files = [...(e.target.files || [])];
+  e.target.value = '';
+  await uploadClarifyFiles(files);
+}
+function dropClarifyAtt(file) { clarifyAtts.value = clarifyAtts.value.filter((a) => a.file !== file); }
+// Скрин из буфера обмена (Ctrl+V прямо в поле) и перетаскивание файлов — как в чате.
+async function uploadClarifyFiles(files) {
+  if (!files.length) return;
+  clarifyUploading.value = true;
+  try {
+    for (const f of files) {
+      const fd = new FormData();
+      fd.append('file', f, f.name || 'clipboard.png');
+      clarifyAtts.value.push(await api.upload('/api/chat/upload', fd));
+    }
+  } catch (e2) { err.value = e2.message; }
+  finally { clarifyUploading.value = false; }
+}
+function onClarifyPaste(e) {
+  const files = [...(e.clipboardData?.items || [])]
+    .filter((i) => i.kind === 'file' && i.type.startsWith('image/'))
+    .map((i) => i.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); uploadClarifyFiles(files); }
+}
+const clarifyDrag = ref(false);
+function onClarifyDrop(e) {
+  clarifyDrag.value = false;
+  uploadClarifyFiles([...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/')));
+}
+// Сохраняются ЛОКАЛЬНО (t<id>.clarify.md), НЕ комментарием в B24: комментарии
+// видит заказчик, а рабочие пояснения — внутренняя кухня. Их читают триаж и конвейер.
+const clarifySaved = ref('');
+async function loadClarifications() {
+  try { clarifySaved.value = (await api.get(`/api/tasks/${taskId.value}/clarifications`)).text || ''; }
+  catch { clarifySaved.value = ''; }
+}
 const sendClarify = () => act('clarify', async () => {
-  await tasks.comment(taskId.value, `Уточнение к триажу:\n${clarifyText.value.trim()}`);
-  clarifyText.value = '';
+  const photos = clarifyAtts.value.map((a) => `[приложено фото: ${a.path}]`).join('\n');
+  const r = await api.post(`/api/tasks/${taskId.value}/clarifications`, {
+    text: `${clarifyText.value.trim()}${photos ? `\n${photos}` : ''}`,
+  });
+  clarifySaved.value = r.text || '';
+  clarifyText.value = ''; clarifyAtts.value = [];
   await analysisStore.analyze(taskId.value);
   await loadTriage();
 });
 
+// ── Табы модалки: Триаж | Комментарии ──
+const mtab = ref('triage');
+const comments = ref(null);    // null = ещё не загружали
+const comLoading = ref(false);
+async function loadComments() {
+  comLoading.value = true;
+  try { comments.value = (await api.get(`/api/b24/task/${taskId.value}/comments`)).comments || []; }
+  catch { comments.value = []; }
+  finally { comLoading.value = false; }
+}
+watch(mtab, (t) => { if (t === 'comments' && comments.value === null) loadComments(); });
+
 // Уже ли задача на конвейере (есть в состоянии фабрики) — для защиты от повторного запуска.
 const conveyor = ref(null);
+// Живой стенд задачи ({fePort, apiPort}) — чтобы снести его прямо отсюда.
+const sandbox = ref(null);
 async function loadConveyor() {
-  conveyor.value = null;
+  conveyor.value = null; sandbox.value = null;
   if (!taskId.value) return;
   try {
     const { tasks: list } = await api.get('/api/tasks');
     conveyor.value = (list || []).find((t) => String(t.task) === String(taskId.value)) || null;
   } catch { /* нет данных фабрики — не блокируем */ }
+  if (!conveyor.value) return;
+  // Порты стенда лежат не в списке задач, а в графе — тянем только для задач конвейера.
+  try {
+    const g = await api.get(`/api/tasks/${taskId.value}/graph`);
+    if (g?.fePort) sandbox.value = { fePort: g.fePort, apiPort: g.apiPort || null };
+  } catch { /* графа нет — кнопку сноса просто не покажем */ }
 }
 function openConveyor() { ui.close(); router.push('/pipeline'); }
+
+// Снести стенд, не уходя в конвейер: задачу закрывают из карточки, и возвращаться
+// на страницу конвейера ради одной кнопки незачем. Снос идёт до пары минут
+// (docker + схемы БД) — кнопка на это время становится индикатором.
+// После сноса перечитываем состояние: down.sh уносит реестр задачи в архив, то есть
+// задача уходит и с конвейера — иначе в карточке осталась бы кнопка «Уже на конвейере».
+const sandboxBusy = ref(false);
+const sandboxMsg = ref(null);
+async function sandboxDown() {
+  if (sandboxBusy.value) return;
+  if (!(await confirmDialog(`Снести стенд задачи #${taskId.value}? Действие необратимо.`, { danger: true, okText: 'Снести' }))) return;
+  sandboxBusy.value = true; err.value = null; sandboxMsg.value = null;
+  try {
+    await api.post(`/api/tasks/${taskId.value}/sandbox/down`);
+    await loadConveyor();
+    sandboxMsg.value = 'Стенд снесён';
+  } catch (e) {
+    err.value = e.status === 501
+      ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      : e.message;
+  } finally { sandboxBusy.value = false; }
+}
 
 async function act(name, fn) {
   busy.value = name; err.value = null;
@@ -142,14 +226,20 @@ const launch = async () => {
       : r.note || 'Отправлено';
   });
 };
-const sendComment = () => act('comment', async () => { await tasks.comment(taskId.value, commentText.value); commentText.value = ''; });
+const sendComment = () => act('comment', async () => {
+  await tasks.comment(taskId.value, commentText.value);
+  commentText.value = '';
+  loadComments();
+});
 const refresh = () => { loadDetail(true); board.load(true); };
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
   if (id) {
-    detail.value = null; launchMsg.value = null;
+    detail.value = null; launchMsg.value = null; sandboxMsg.value = null;
     triage.value = null; showNote.value = false;
+    mtab.value = 'triage'; comments.value = null; clarifyAtts.value = []; clarifySaved.value = '';
+    loadClarifications();
     loadDetail();
     loadConveyor();
     loadTriage();
@@ -193,16 +283,29 @@ watch(taskId, (id) => {
 
         <p v-if="cleanDesc" class="desc" v-html="descHtml"></p>
 
+        <!-- Табы: Триаж | Комментарии -->
+        <nav class="mtabs">
+          <button class="mtab" :class="{ active: mtab === 'triage' }" @click="mtab = 'triage'">Триаж</button>
+          <button class="mtab" :class="{ active: mtab === 'comments' }" @click="mtab = 'comments'">
+            Комментарии<template v-if="comments?.length"> ({{ comments.length }})</template>
+          </button>
+        </nav>
+
         <!-- Триаж: оценка сложности/рисков без стенда -->
-        <div class="triage">
+        <div v-show="mtab === 'triage'" class="triage">
           <div class="thead2">
             <span class="tlbl">Триаж</span>
             <template v-if="triage?.analysis">
-              <span class="tchip" :class="triage.analysis.complexity >= 4 ? 'warn' : triage.analysis.complexity === 3 ? 'acc' : ''">сложность {{ triage.analysis.complexity }}/5</span>
-              <span class="tchip" :class="triage.analysis.risk >= 4 ? 'bad' : triage.analysis.risk === 3 ? 'warn' : ''">риск {{ triage.analysis.risk }}/5</span>
-              <span class="tchip">дифф {{ triage.analysis.diff_size }}</span>
-              <span class="tchip">{{ triage.analysis.route_guess }}</span>
-              <span v-if="triage.analysis.confidence !== 'high'" class="tchip" :class="triage.analysis.confidence === 'low' ? 'warn' : ''">уверенность: {{ triage.analysis.confidence }}</span>
+              <!-- Пока идёт переоценка, старые чипсы притушены + явный индикатор: иначе
+                   «нажал уточнить — и ничего не изменилось» (оценка-то на экране осталась). -->
+              <span class="tchips" :class="{ dim: triageBusy }">
+                <span class="tchip" :class="triage.analysis.complexity >= 4 ? 'warn' : triage.analysis.complexity === 3 ? 'acc' : ''">сложность {{ triage.analysis.complexity }}/5</span>
+                <span class="tchip" :class="triage.analysis.risk >= 4 ? 'bad' : triage.analysis.risk === 3 ? 'warn' : ''">риск {{ triage.analysis.risk }}/5</span>
+                <span class="tchip">дифф {{ triage.analysis.diff_size }}</span>
+                <span class="tchip">{{ triage.analysis.route_guess }}</span>
+                <span v-if="triage.analysis.confidence !== 'high'" class="tchip" :class="triage.analysis.confidence === 'low' ? 'warn' : ''">уверенность: {{ triage.analysis.confidence }}</span>
+              </span>
+              <span v-if="triageBusy" class="tmuted"><span class="spin"></span> {{ triageState === 'running' ? 'переоценка идёт…' : 'переоценка в очереди…' }}</span>
             </template>
             <span v-else-if="triageBusy" class="tmuted"><span class="spin"></span> {{ triageState === 'running' ? 'разведка идёт…' : 'в очереди…' }}</span>
             <span v-else-if="triageState === 'failed'" class="terr" :title="triage?.status?.error">триаж упал: {{ (triage?.status?.error || '').slice(0, 80) }}</span>
@@ -223,13 +326,39 @@ watch(taskId, (id) => {
             <ul v-if="triage.analysis.questions?.length" class="tlist q">
               <li v-for="qq in triage.analysis.questions" :key="qq">? {{ qq }}</li>
             </ul>
-            <div v-if="triage.analysis.questions?.length || triage.analysis.needs_clarification" class="clarify">
-              <textarea v-model="clarifyText" rows="2"
-                        placeholder="Ответ на вопросы (текст обсуждения, детали) — уйдёт комментарием в задачу…"></textarea>
-              <button class="btn tbtn" :disabled="busy === 'clarify' || triageBusy || !clarifyText.trim()" @click="sendClarify">
-                {{ busy === 'clarify' ? '…' : '↻ Уточнить и переоценить' }}
-              </button>
+            <div v-if="triage.analysis.questions?.length || triage.analysis.needs_clarification"
+                 class="clarify" :class="{ drag: clarifyDrag }"
+                 @dragover.prevent="clarifyDrag = true" @dragleave="clarifyDrag = false" @drop.prevent="onClarifyDrop">
+              <div class="clarify-row">
+                <textarea v-model="clarifyText" rows="2"
+                          placeholder="Ответ на вопросы — сохранится локально для агентов, в B24 не уйдёт… (Ctrl+V — скрин, Ctrl+Enter — отправить)"
+                          @paste="onClarifyPaste"
+                          @keydown.ctrl.enter.prevent="sendClarify"></textarea>
+                <HelpTip text="Фото для агента: скрин переписки или бага. Можно вставить из буфера (Ctrl+V) или перетащить сюда." align="right">
+                  <label class="attachbtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                    <input type="file" accept="image/*" multiple hidden @change="onClarifyFiles" />
+                  </label>
+                </HelpTip>
+                <button class="btn tbtn" :disabled="busy === 'clarify' || triageBusy || clarifyUploading || (!clarifyText.trim() && !clarifyAtts.length)" @click="sendClarify">
+                  {{ busy === 'clarify' ? '…' : '↻ Уточнить и переоценить' }}
+                </button>
+              </div>
+              <div v-if="clarifyAtts.length || clarifyUploading" class="attrow">
+                <span v-for="a in clarifyAtts" :key="a.file" class="attchip">
+                  <img :src="a.url" :alt="a.name" />
+                  <span class="attname">{{ a.name }}</span>
+                  <button class="attx" title="Убрать" @click="dropClarifyAtt(a.file)">✕</button>
+                </span>
+                <span v-if="clarifyUploading" class="tmuted"><span class="spin"></span> загрузка…</span>
+              </div>
             </div>
+            <details v-if="clarifySaved" class="clhist">
+              <summary>Внутренние уточнения (локально, для агентов — заказчик не видит)</summary>
+              <div class="clhist-body">{{ clarifySaved }}</div>
+            </details>
             <button v-if="triage.note" class="tnote-toggle" @click="showNote = !showNote">
               {{ showNote ? '▾ Свернуть разведноту' : '▸ Разведнота (карта кода для планировщика)' }}
             </button>
@@ -239,6 +368,30 @@ watch(taskId, (id) => {
               <template v-if="triage.analysis.meta">· {{ triage.analysis.meta.model }} · {{ Math.round((triage.analysis.meta.duration_ms || 0) / 60000) }} мин<template v-if="triage.analysis.meta.cost_usd"> · ${{ triage.analysis.meta.cost_usd.toFixed(2) }}</template></template>
             </p>
           </template>
+        </div>
+
+        <!-- Комментарии задачи (таб): список из B24 + добавление -->
+        <div v-show="mtab === 'comments'" class="comtab">
+          <div v-if="comLoading && comments === null" class="tmuted"><span class="spin"></span> загрузка комментариев…</div>
+          <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
+          <div v-else-if="comments" class="comlist">
+            <div v-for="c in comments" :key="c.mid" class="com">
+              <div class="comhead">
+                <b>{{ c.author }}</b>
+                <span class="comtime mono">{{ c.time }}</span>
+              </div>
+              <div class="comtext">{{ c.text }}</div>
+              <div v-if="c.attachments?.length" class="comatts">
+                <span v-for="a in c.attachments" :key="a.attachedId" class="comatt">📎 {{ a.name || `файл ${a.attachedId}` }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="comment">
+            <textarea v-model="commentText" rows="2" placeholder="Добавить комментарий…"></textarea>
+            <button class="btn" :disabled="busy === 'comment' || !commentText.trim()" @click="sendComment">
+              {{ busy === 'comment' ? 'Отправка…' : 'Отправить' }}
+            </button>
+          </div>
         </div>
 
         <!-- Управление -->
@@ -254,25 +407,32 @@ watch(taskId, (id) => {
             <button class="btn good" :disabled="busy === 'complete'" @click="complete">
               {{ busy === 'complete' ? '…' : '✓ Завершить' }}
             </button>
-            <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован -->
-            <button v-if="conveyor" class="btn onconv" @click="openConveyor"
-                    :title="`Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`">
-              🏭 {{ conveyor.daemonAlive ? 'Идёт на конвейере' : 'Уже на конвейере' }} →
+            <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован.
+                 Затык виден прямо на кнопке: карточку задачи открывают чаще, чем конвейер, а
+                 «Уже на конвейере» одинаково выглядело и у идущей задачи, и у вставшей — из-за
+                 этого #7800 час ждал человека, и никто не заметил. -->
+            <button v-if="conveyor" class="btn onconv" :class="{ stalled: conveyor.stall }" @click="openConveyor"
+                    :title="conveyor.stall
+                      ? `${conveyor.stall.title} — ${conveyor.stall.hint}`
+                      : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`">
+              {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
+                 : conveyor.daemonAlive ? '🏭 Идёт на конвейере' : '🏭 Уже на конвейере' }} →
             </button>
             <button v-else class="btn launch" :disabled="busy === 'launch'" @click="launch" title="Запустить фабрику по задаче">
               {{ busy === 'launch' ? '…' : '🏭 На конвейер' }}
             </button>
+            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
+                 задачу, и ради одной кнопки идти в конвейер незачем. -->
+            <button v-if="sandbox" class="btn sbdown" :class="{ busy: sandboxBusy }" :disabled="sandboxBusy"
+                    :title="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+                    @click="sandboxDown">
+              <span v-if="sandboxBusy"><span class="sbspin"></span> сношу стенд…</span>
+              <span v-else>⏏ Снести стенд</span>
+            </button>
             <OpenDiffButton :task-id="taskId" />
           </div>
           <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
-        </div>
-
-        <!-- Комментарий -->
-        <div class="comment">
-          <textarea v-model="commentText" rows="2" placeholder="Добавить комментарий…"></textarea>
-          <button class="btn" :disabled="busy === 'comment' || !commentText.trim()" @click="sendComment">
-            {{ busy === 'comment' ? 'Отправка…' : 'Отправить' }}
-          </button>
+          <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
         </div>
       </div>
     </div>
@@ -304,6 +464,8 @@ watch(taskId, (id) => {
   display: flex; flex-direction: column; gap: 8px; }
 .thead2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tlbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); margin-right: 4px; }
+.tchips { display: contents; }
+.tchips.dim { display: inline-flex; gap: 6px; flex-wrap: wrap; opacity: .45; }
 .tchip { font-size: 12px; font-family: var(--mono, monospace); color: var(--ink-mid);
   border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
 .tchip.acc { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -316,7 +478,44 @@ watch(taskId, (id) => {
 .tstale { margin: 0; font-size: 12px; color: var(--warn); }
 .tlist { margin: 0; padding: 0 0 0 4px; list-style: none; font-size: 12px; color: var(--ink-mid); display: flex; flex-direction: column; gap: 3px; }
 .tlist.q li { color: var(--warn); }
-.clarify { display: flex; gap: 8px; align-items: flex-end; }
+.clarify { display: flex; flex-direction: column; gap: 8px; border-radius: 10px; }
+.clarify.drag { outline: 2px dashed var(--accent); outline-offset: 3px; }
+.clarify-row { display: flex; gap: 8px; align-items: flex-end; }
+/* В ряду уточнения кнопка стоит вплотную к скрепке (auto-margin — только в шапке триажа),
+   все контролы одной высоты. */
+.clarify-row .tbtn { margin-left: 0; height: 36px; }
+.clarify-row textarea { min-height: 58px; }
+.clhist { border: 1px dashed var(--line); border-radius: 9px; padding: 7px 11px; }
+.clhist summary { cursor: pointer; font-size: 12.5px; color: var(--ink-mid); user-select: none; }
+.clhist-body { margin-top: 6px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 220px; overflow-y: auto; }
+.attachbtn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); cursor: pointer;
+  color: var(--ink-mid); }
+.attachbtn svg { width: 17px; height: 17px; }
+.attachbtn:hover { border-color: var(--accent); color: var(--accent); }
+.attrow { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
+.attchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
+  border-radius: 8px; padding: 3px 8px 3px 3px; background: var(--surface-2); font-size: 12px; }
+.attchip img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; }
+.attname { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-mid); }
+.attx { background: none; border: none; color: var(--ink-mid); cursor: pointer; padding: 0 2px; }
+.attx:hover { color: var(--bad); }
+/* ── Табы модалки ── */
+.mtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.mtab { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--ink-mid); font-size: 13px; padding: 7px 12px; cursor: pointer; }
+.mtab:hover { color: var(--ink); }
+.mtab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+/* ── Таб комментариев ── */
+.comtab { display: flex; flex-direction: column; gap: 12px; }
+.comlist { display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; }
+.com { background: var(--ground); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+.comhead { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.comtime { color: var(--ink-mid); font-size: 11.5px; }
+.comtext { margin-top: 4px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comatts { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.comatt { font-size: 12px; color: var(--ink-mid); border: 1px dashed var(--line); border-radius: 7px; padding: 2px 8px; }
 .clarify textarea { flex: 1; resize: vertical; padding: 8px 10px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--surface-2); color: var(--ink); font-family: inherit; font-size: 13px; }
 .clarify textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -347,6 +546,17 @@ watch(taskId, (id) => {
 .btn.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .btn.onconv:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.btn.onconv.stalled { background: color-mix(in srgb, var(--bad) 16%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); color: var(--bad); }
+.btn.onconv.stalled:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
+/* Снос стенда — действие необратимое: обычная кнопка, краснеет под курсором (как на конвейере). */
+.btn.sbdown { color: var(--ink-mid); }
+.btn.sbdown:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
+.btn.sbdown.busy { color: var(--bad); border-color: var(--bad); opacity: .85; }
+.sbspin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--bad);
+  border-top-color: transparent; border-radius: 50%; vertical-align: -1px; margin-right: 6px;
+  animation: sbspin .8s linear infinite; }
+@keyframes sbspin { to { transform: rotate(360deg); } }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
 .comment { display: flex; gap: 8px; align-items: flex-end; }
 .comment textarea { flex: 1; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);
