@@ -7,15 +7,19 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { parsePipeline } from '../lib/pipeline-parse.js';
 import { parseStagesLog } from '../lib/stages-parse.js';
+import { detectStall } from '../lib/stall.js';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factory-graph.js';
 
 // Этапы конвейера по маршрутам (порядок ключей реестра). Держим здесь, чтобы
 // собирать статус-карту предсказуемо; форма графа (координаты) придёт из
 // profiles/<profile>.graph.json на этапе модуля «Конвейер».
+// DEMO-ключей здесь нет намеренно: демо убрано из цепочки фабрики (2026-07-27) и снимается
+// по кнопке плагина «Демо» (factory <task> demo). Пока они числились этапами маршрута,
+// прогресс feature не доходил до 100%, а дошедшая до ретро задача выглядела недоделанной.
 const ROUTE_STAGES = {
   feature: ['SCOUT', 'PLAN', 'SKEPTIC', 'VALIDATE', 'TRANSLATOR', 'GATE_PLAN', 'TESTS',
     'TCRITIC', 'BUILD', 'SIMPLIFY', 'REVIEW', 'TRACE', 'PHPCHECK', 'LINT', 'BROWSER',
-    'GATE_ACCEPT', 'SHIP', 'DEMO_ASK', 'DEMO', 'GATE_DEMO', 'RETRO'],
+    'GATE_ACCEPT', 'SHIP', 'RETRO'],
   debug: ['SCOUT', 'REPRO', 'INSTRUMENT', 'DIAGNOSE', 'HYPOSKEPTIC', 'PROOF', 'TRANSLATOR',
     'GATE_CAUSE', 'TESTS', 'BUILD', 'REVIEW', 'MEASURE', 'PHPCHECK', 'LINT',
     'GATE_ACCEPT', 'SHIP', 'RETRO'],
@@ -116,19 +120,31 @@ export class FactoryStateAdapter {
     return { route, stages, map };
   }
 
+  /** Таймлайн задачи из stages.log (пусто, если журнала нет). */
+  async readTimeline(task) {
+    try { return parseStagesLog(await fsp.readFile(path.join(this.logsDir, `t${task}.stages.log`), 'utf8')); }
+    catch { return []; }
+  }
+
   /** Краткая карточка задачи для списка. */
   async getTaskSummary(task) {
     const { registry, mtime } = await this.readRegistry(task);
     const { route, stages, map } = this.buildStageMap(registry);
+    const daemonAlive = this.isDaemonAlive(registry.ORCH_PID, task);
+    // Причина остановки идёт В СВОДКУ, а не только в деталь задачи: затык надо видеть
+    // в списке, не открывая карточку. Иначе повторяется #7800 — движок час ждал
+    // человека, а в интерфейсе это выглядело обычным «○ стоит», как у доделанной задачи.
+    const timeline = await this.readTimeline(task);
     return {
       task,
       route,
       profile: registry.PROFILE || null,
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
-      daemonAlive: this.isDaemonAlive(registry.ORCH_PID, task),
+      daemonAlive,
       needsRun: registry.NEEDS_RUN === '1',
       stalledHuman: registry.STALLED_HUMAN === '1',
+      stall: detectStall({ registry, timeline, daemonAlive }),
       stages,
       stageMap: map,
       updatedAt: mtime,
@@ -139,14 +155,7 @@ export class FactoryStateAdapter {
   async getTaskDetail(task) {
     const summary = await this.getTaskSummary(task);
     const { registry } = await this.readRegistry(task);
-    let timeline = [];
-    try {
-      const log = await fsp.readFile(path.join(this.logsDir, `t${task}.stages.log`), 'utf8');
-      timeline = parseStagesLog(log);
-    } catch {
-      timeline = [];
-    }
-    return { ...summary, registry, timeline };
+    return { ...summary, registry, timeline: await this.readTimeline(task) };
   }
 
   /**
@@ -179,9 +188,17 @@ export class FactoryStateAdapter {
     // (при живом демоне), демон умер посреди сборки → fail. Иначе — как посчитала цепочка.
     const alive = this.isDaemonAlive(registry.ORCH_PID, task);
     const sandbox = env.FE_PORT ? null : await this.readSandboxStage(task);
+    const stall = detectStall({ registry, timeline: await this.readTimeline(task), daemonAlive: alive });
     if ('sandbox' in def.pos) {
       if (env.FE_PORT) statuses.sandbox = 'done';
       else if (sandbox) statuses.sandbox = alive ? 'run' : 'fail';
+      // Файла прогресса может не быть вовсе (его затирали битой ссылкой — см.
+      // _ars_link_state в профиле arsenkin). Тогда решает журнал: раз конвейер встал
+      // на подъёме стенда, ромб обязан гореть провалом. Без этой ветки статус падал
+      // на догадку computeNodeStatuses «цепочка тронута → песочница готова», и
+      // упавший стенд #7789 показывался зелёным.
+      else if (stall?.stage === 'SANDBOX') statuses.sandbox = 'fail';
+      else if (!alive && !env.FE_PORT && statuses.sandbox === 'done') statuses.sandbox = 'pending';
     }
 
     // Прогресс: done/skip/idle из узлов маршрута.
@@ -199,6 +216,9 @@ export class FactoryStateAdapter {
         fanout: registry[`FANOUT_${key}`] ? Number(registry[`FANOUT_${key}`]) : null,
         fails: registry[`${key}_FAILS`] ? Number(registry[`${key}_FAILS`]) : 0,
         tokens: registry[`TOKENS_${key}`] ? Number(registry[`TOKENS_${key}`]) : null,
+        // Объяснение статуса от движка/агента: причина пропуска, замечание провалившегося
+        // этапа. Раньше жило только в журнале прогона — на схеме было голое «пропущен».
+        comment: registry[`${key}_COMMENT`] || null,
       };
     }
 

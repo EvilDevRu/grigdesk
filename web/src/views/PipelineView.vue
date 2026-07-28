@@ -6,9 +6,13 @@ import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useChatStore } from '../stores/chat.js';
-import { secToHMS } from '../shared/format.js';
+import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
+import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';
 import { sandboxUrl } from '../shared/sandbox.js';
+// «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
+// цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
+import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -32,7 +36,7 @@ const outsideTimers = computed(() => {
   return (d.tasks || []).filter((t) => t.timerRunning && !factoryIds.value.has(t.id));
 });
 function outsideElapsed(t) {
-  return (t.timerElapsed || 0) + (now.value - (board.loadedAt || now.value)) / 1000;
+  return liveTimerSec(t, now.value);
 }
 
 let ticker = null;
@@ -62,6 +66,13 @@ function toggleCard(task) {
 }
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
 const waitingCount = computed(() => filteredTasks.value.filter((t) => waitingReason(t.graph)).length);
+// Встали — это НЕ то же, что «ждут тебя». У ворот конвейер стоит штатно и с кнопкой,
+// а тут движок упёрся и сам позвал человека (или оборвался). Раньше эта разница нигде
+// не отражалась: #7800 час стоял с REPRO failed под тем же значком «○ стоит», что и
+// доделанная задача, и никто не заметил, что от него чего-то ждут.
+const stalledCount = computed(() => filteredTasks.value.filter((t) => t.stall).length);
+const stalledTitles = computed(() => filteredTasks.value
+  .filter((t) => t.stall).map((t) => `#${t.task}: ${t.stall.title}`).join('\n'));
 
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref(null);
@@ -85,6 +96,7 @@ const STAGE_HINT = {
   done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
   skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
   skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
+  fail: 'провалился — стенд не поднялся',
 };
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
 
@@ -124,43 +136,60 @@ watch(() => stageActivity.value?.live?.actions?.length, () => {
 async function gateDecide(decision) {
   stageBusy.value = 'gate';
   try { await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value }); await load(); closeStage(); }
-  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 async function forceStatus(status) {
-  if (!confirm(`Принудительно: этап «${stage.value.label}» → ${status}?`)) return;
+  if (!await confirmDialog(`Принудительно: этап «${stage.value.label}» → ${status}?`, { okText: 'Выполнить' })) return;
   stageBusy.value = 'force';
   try { await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`); await load(); closeStage(); }
-  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 async function saveInstruction() {
   stageBusy.value = 'instr';
   try { await api.post(`/api/tasks/${stage.value.task}/instruction`, { text: stageInstruction.value }); }
-  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 
-// «Ждёт тебя» — по узлу-воротам в статусе wait/premature.
-const GATE_REASON = {
-  gate_accept: 'принять работу — проверить в браузере', gate_plan: 'утвердить план работ',
-  gate_cause: 'подтвердить причину', gate_demo: 'посмотреть демо-видео', gate_demo_ok: 'принять демо',
-};
-function waitingReason(g) {
-  for (const nid of Object.keys(g.pos)) {
-    const s = g.statuses[nid];
-    if ((s === 'wait' || s === 'premature') && nid.startsWith('gate_')) {
-      return { text: GATE_REASON[nid] || stripEmoji(g.nodes[nid]?.[1]) || nid, premature: s === 'premature' };
-    }
-  }
-  return null;
-}
-
+// Снос идёт до пары минут (docker + схемы БД) — на это время кнопка превращается
+// в индикатор «сношу…», повторный клик заблокирован.
+const sandboxBusy = ref(new Set());
 async function sandboxDown(task) {
-  if (!confirm(`Снести стенд задачи #${task}? Действие необратимо.`)) return;
-  try { await api.post(`/api/tasks/${task}/sandbox/down`); load(); }
-  catch (e) { alert(e.status === 501 ? 'Снос стенда не настроен (COCKPIT_SANDBOX_DOWN_CMD).' : `Ошибка: ${e.message}`); }
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(`Снести стенд задачи #${task}? Действие необратимо.`, { danger: true, okText: 'Снести' })) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try { await api.post(`/api/tasks/${task}/sandbox/down`); await load(); }
+  catch (e) { alertDialog(e.status === 501 ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.' : `Ошибка: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
+// Стенд не поднялся — вернуть задачу в работу одной кнопкой. Двумя действиями это было
+// невозможно: «снести стенд» показывается только у живого стенда, а его-то и нет.
+// Пересборки стенда отдельно от прогона в движке не существует, поэтому здесь именно
+// перезапуск конвейера (resume) — со сносом остатков упавшей песочницы перед ним.
+async function sandboxRetry(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Перезапустить стенд задачи #${task}? Остатки упавшей песочницы будут снесены, конвейер продолжит с того места, где встал.`,
+    { okText: 'Перезапустить' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try {
+    const r = await api.post(`/api/tasks/${task}/sandbox/retry`);
+    await load();
+    // Снос мог оставить за собой worktree с незакоммиченными изменениями — тогда новый
+    // подъём упрётся в тот же гард. Сказать об этом надо сразу, а не через двадцать минут
+    // провижининга: в плашке это будет выглядеть как «стенд опять не поднялся» без причины.
+    const warn = (r.downOutput || '').split('\n').filter((s) => s.includes('ВНИМАНИЕ')).join('\n');
+    if (warn) alertDialog(`Конвейер перезапущен, но снос сообщил:\n${warn}`);
+    else if (r.note) alertDialog(r.note);
+  } catch (e) {
+    alertDialog(e.status === 501
+      ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      : `Не удалось перезапустить: ${e.message}`);
+  } finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
 const ROUTE_ICON = { feature: '✨', debug: '🔍', trivial: '⚡', dev: '🛠', quick: '⚡' };
-function stripEmoji(s) { return (s || '').replace(/^[^\wА-Яа-яЁё]+/, '').trim(); }
 
 async function load() {
   try {
@@ -211,6 +240,7 @@ function cardState(g) {
       <div class="tbrow">
         <h2 class="ttl">Задачи в работе <span class="cnt">{{ filteredTasks.length }}</span>
           <span v-if="waitingCount" class="needme">⏳ ждут тебя: {{ waitingCount }}</span>
+          <span v-if="stalledCount" class="stalledme" :title="stalledTitles">🛑 встали: {{ stalledCount }}</span>
         </h2>
         <div class="tools">
           <button :class="{ on: loopsOn }" @click="toggleLoops">↻ петли</button>
@@ -238,7 +268,9 @@ function cardState(g) {
         <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
         <button v-if="title(t.task)" class="ctitle" :title="title(t.task)" @click="ui.openTask(t.task)">{{ title(t.task) }}</button>
         <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
-        <span class="daemon" :class="t.daemonAlive ? 'alive' : 'idle'">{{ t.daemonAlive ? '● идёт' : '○ стоит' }}</span>
+        <span class="daemon" :class="t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle')">
+          {{ t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
+        </span>
       </header>
 
       <div class="progress">
@@ -256,6 +288,31 @@ function cardState(g) {
         <span v-if="waitingReason(t.graph).premature" class="pm">(преждевременно — хвост не доделан)</span>
       </div>
 
+      <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
+           пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
+           вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
+           затык надо замечать в списке, а не открывая карточку. -->
+      <div v-if="t.stall" class="stalled" :class="t.stall.kind">
+        <div class="srow">
+          <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
+          <span class="stitle">{{ t.stall.title }}</span>
+          <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
+        </div>
+        <div class="shint">{{ t.stall.hint }}</div>
+        <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
+        <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
+             Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
+             к живому порту фронта, — поэтому починка живёт в самой плашке. -->
+        <div v-if="t.stall.stage === 'SANDBOX'" class="sfix">
+          <button class="sbretry" :class="{ busy: sandboxBusy.has(t.task) }"
+                  :disabled="sandboxBusy.has(t.task)" @click="sandboxRetry(t.task)">
+            <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> перезапускаю…</span>
+            <span v-else>↻ перезапустить стенд</span>
+          </button>
+          <span class="sfixhint">снесёт остатки песочницы и продолжит конвейер с этого места</span>
+        </div>
+      </div>
+
       <div v-if="!isCollapsed(t.task)" class="gwrap">
         <FactoryGraph :graph="t.graph" :loops-on="loopsOn" @node="(n) => openStage(t, n)" />
       </div>
@@ -271,7 +328,11 @@ function cardState(g) {
           <span class="spin"></span>
           стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
         </span>
-        <button v-if="t.graph.fePort" class="sbdown" @click="sandboxDown(t.task)">⏏ снести стенд</button>
+        <button v-if="t.graph.fePort" class="sbdown" :class="{ busy: sandboxBusy.has(t.task) }"
+          :disabled="sandboxBusy.has(t.task)" @click="sandboxDown(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> сношу стенд…</span>
+          <span v-else>⏏ снести стенд</span>
+        </button>
         <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
         <span v-if="t.graph.halted" class="chunk bad">⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}</span>
       </footer>
@@ -306,6 +367,14 @@ function cardState(g) {
           <span v-if="stage.meta.fails" class="smchip bad">{{ stage.meta.fails }} возвр.</span>
           <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
           <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ stageActivity.journalFresh ? 'агент пишет' : 'тихо' }}</span>
+        </div>
+
+        <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.
+             Для skipped это единственное, что отличает «нечего было проверять» от
+             «агент сдался» — раньше оно оставалось в журнале прогона. -->
+        <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
+          <span class="sclbl">{{ stage.status === 'skip' || stage.status === 'skipbad' ? 'Почему пропущен' : 'Замечание' }}</span>
+          {{ stage.meta.comment }}
         </div>
 
         <div class="sb">
@@ -388,6 +457,7 @@ function cardState(g) {
 .tbrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-mid); margin: 0; display: flex; align-items: center; gap: 10px; }
 .needme { color: var(--warn); text-transform: none; letter-spacing: 0; font-size: 12px; }
+.stalledme { color: var(--bad); text-transform: none; letter-spacing: 0; font-size: 12px; margin-left: 8px; cursor: help; }
 .projects { display: flex; flex-wrap: wrap; gap: 6px; }
 .pchip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   border-radius: 999px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; }
@@ -401,9 +471,34 @@ function cardState(g) {
   border-radius: 8px; padding: 6px 10px; }
 .waitme.premature { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .waitme .pm { color: var(--bad); }
+
+/* Затык: сильнее «ждёт тебя» по тону — у ворот конвейер стоит штатно, а здесь он упёрся. */
+.stalled { margin: 6px 0 0; font-size: 12.5px; color: var(--bad); border-radius: 8px; padding: 6px 10px;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); }
+.stalled.crashed { color: var(--ink-mid);
+  background: color-mix(in srgb, var(--ink-mid) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ink-mid) 30%, transparent); }
+.stalled .srow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.stalled .stitle { font-weight: 600; }
+.stalled .ssince { margin-left: auto; opacity: .7; font-size: 11.5px; }
+.stalled .shint { margin-top: 2px; opacity: .85; }
+.stalled .scomment { margin-top: 2px; opacity: .85; font-style: italic; }
+.stalled .sfix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.stalled .sfixhint { opacity: .75; font-size: 11.5px; }
+.sbretry { background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  color: var(--ink); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.sbretry:hover { border-color: var(--accent); color: var(--accent); }
+.sbretry.busy { border-color: var(--accent); color: var(--accent); cursor: default; opacity: .85; }
+.sbretry .sbspin { border-color: var(--accent); border-top-color: transparent; }
 .sbdown { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .sbdown:hover { color: var(--bad); border-color: var(--bad); }
+.sbdown.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
+.sbspin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--bad);
+  border-top-color: transparent; border-radius: 50%; vertical-align: -1px;
+  animation: sbspin .8s linear infinite; }
+@keyframes sbspin { to { transform: rotate(360deg); } }
 .cnt { color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
 .tools { display: flex; gap: 6px; }
 .tools button { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
@@ -423,9 +518,10 @@ function cardState(g) {
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
 .spacer { flex: 1; }
-.daemon { font-size: 12px; }
+.daemon { font-size: 12px; white-space: nowrap; }
 .daemon.alive { color: var(--good); }
 .daemon.idle { color: var(--ink-mid); }
+.daemon.stall { color: var(--bad); font-weight: 600; }
 
 .progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .pbar-wrap { flex: 1; height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
@@ -486,6 +582,10 @@ function cardState(g) {
 .sbadge.skip { background: var(--surface-2); color: var(--ink-mid); }
 .smchip { font-size: 11.5px; color: var(--ink-mid); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; }
 .smchip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.scomment { margin: 8px 14px 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+  color: var(--ink-mid); background: var(--surface-2); border-left: 3px solid var(--line); }
+.scomment.bad { color: var(--ink); border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, transparent); }
+.sclbl { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); opacity: .75; margin-bottom: 2px; }
 .jf { font-size: 11px; color: var(--ink-mid); padding: 2px 8px; border-radius: 6px;
   background: var(--surface-2); text-transform: none; letter-spacing: 0; margin-left: auto; }
 .jf.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }

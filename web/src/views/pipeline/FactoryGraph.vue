@@ -137,6 +137,11 @@ const nodeEls = computed(() => {
   filter: drop-shadow(0 0 9px var(--warn)); animation: nodepulse 2.2s ease-in-out infinite; }
 .ns-stall rect, .ns-stall polygon, .ns-premature rect, .ns-premature polygon {
   stroke: var(--bad); stroke-width: 2.2; filter: drop-shadow(0 0 8px var(--bad)); }
+/* Провал узла: сплошной красный, без прозрачности — упавший стенд должен бросаться
+   в глаза, а не теряться среди непройденных этапов. */
+.ns-fail rect, .ns-fail polygon { stroke: var(--bad); stroke-width: 2.2; fill: #2a1113; }
+.ns-fail { opacity: 1; }
+.mk-fail { fill: var(--bad); }
 .ns-skipbad rect, .ns-skipbad polygon { stroke: var(--bad); stroke-dasharray: 5 4;
   filter: drop-shadow(0 0 6px var(--bad)); }
 

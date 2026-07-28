@@ -1,18 +1,20 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
-import { hoursToHM, secToHMS, signed } from '../shared/format.js';
+import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.js';
 import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
 import { useAnalysisStore } from '../stores/analysis.js';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
+import { api } from '../shared/api-client.js';
+import { useSse } from '../composables/useSse.js';
 
 const ui = useUiStore();
 
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
-const { data, error, loading, loadedAt } = storeToRefs(board);
+const { data, error, loading } = storeToRefs(board);
 const now = ref(Date.now());
 const period = ref('day');
 
@@ -22,11 +24,30 @@ const STATUS_COLOR = {
 };
 function statusColor(kind) { return STATUS_COLOR[kind] || 'var(--ink-mid)'; }
 
-// Живой тик таймера: timerElapsed уже включает текущую сессию на момент загрузки,
-// поэтому добавляем секунды, прошедшие с момента загрузки.
+// Задачи на конвейере фабрики: id → жив ли демон. Точка статуса в списке берёт
+// цвет конвейера (зелёный — идёт, оранжевый — стоит/ждёт), как на странице конвейера.
+const conveyor = ref(new Map());
+async function loadConveyor() {
+  try {
+    const { tasks } = await api.get('/api/tasks');
+    conveyor.value = new Map((tasks || []).map((t) => [String(t.task), !!t.daemonAlive]));
+  } catch { /* фабрика недоступна — точки остаются статусными */ }
+}
+useSse((name) => { if (name === 'state-change') loadConveyor(); });
+function dotColor(t) {
+  const k = String(t.id);
+  if (conveyor.value.has(k)) return conveyor.value.get(k) ? 'var(--good)' : 'var(--warn)';
+  return statusColor(t.statusKind);
+}
+function dotTitle(t) {
+  const k = String(t.id);
+  if (conveyor.value.has(k)) return conveyor.value.get(k) ? 'На конвейере — идёт' : 'На конвейере — стоит (ждёт/прерван)';
+  return t.statusLabel;
+}
+
+// Живой тик таймера: считается от timer_started_at из B24 — см. liveTimerSec.
 function liveElapsed(t) {
-  const extra = t.timerRunning ? (now.value - loadedAt.value) / 1000 : 0;
-  return (t.timerElapsed || 0) + extra;
+  return liveTimerSec(t, now.value);
 }
 
 // Иконки плиток (Lucide-контуры, stroke=currentColor).
@@ -137,7 +158,7 @@ function onTasksScroll(e) {
 const chart = computed(() => data.value?.charts?.[period.value] || null);
 
 let ticker = null;
-onMounted(() => { board.load(); analysis.startPolling(); ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
+onMounted(() => { board.load(); analysis.startPolling(); loadConveyor(); ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
 onUnmounted(() => { if (ticker) clearInterval(ticker); });
 </script>
 
@@ -185,7 +206,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
         <span class="atimer mono">{{ secToHMS(liveElapsed(activeTask)) }}</span>
       </section>
 
-      <div class="cols">
+      <div class="cols" :class="{ solo: !(data.toReview.length || data.created.length) }">
         <!-- Мои задачи — основной блок -->
         <section class="col primary">
           <div class="colhead">
@@ -213,7 +234,8 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
           </div>
           <ul class="tasks scroller" @scroll="onTasksScroll">
             <li v-for="t in visibleTasks" :key="t.id" class="trow">
-              <span class="tstat" :style="{ background: statusColor(t.statusKind) }" :title="t.statusLabel"></span>
+              <span class="tstat" :class="{ conv: conveyor.has(String(t.id)) }"
+                    :style="{ background: dotColor(t) }" :title="dotTitle(t)"></span>
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
               <TriageBadge :row="triageOf(t)" />
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
@@ -226,8 +248,8 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
           </ul>
         </section>
 
-        <!-- Контроль / поставленные -->
-        <section class="col">
+        <!-- Контроль / поставленные: блок скрыт, когда обе секции пусты -->
+        <section v-if="data.toReview.length || data.created.length" class="col">
           <h3 class="h">Ждут моего контроля <span class="cnt">{{ data.toReview.length }}</span></h3>
           <ul class="tasks" v-if="data.toReview.length">
             <li v-for="t in data.toReview" :key="t.id" class="trow">
@@ -311,6 +333,8 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 
 .cols { display: grid; gap: 18px; grid-template-columns: 1fr; align-items: start; }
 @media (min-width: 860px) { .cols { grid-template-columns: 2fr 1fr; } }
+/* Правой колонки нет (нечего контролировать/не ставил задач) — задачи на всю ширину */
+.cols.solo { grid-template-columns: 1fr; }
 .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 /* Основной блок «Мои задачи» — в карточке, чтобы визуально доминировал */
 .col.primary { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px 12px; }
@@ -346,6 +370,9 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .trow:hover { background: var(--surface); }
 .trow + .trow { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 55%, transparent); }
 .tstat { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
+/* Задача на конвейере: точка чуть крупнее и «дышит» — видно с первого взгляда */
+.tstat.conv { width: 9px; height: 9px; animation: convpulse 2s ease-in-out infinite; }
+@keyframes convpulse { 50% { opacity: .45; } }
 .ttext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;
   background: none; border: none; color: var(--ink); text-align: left; padding: 0; cursor: pointer; }
 .ttext:hover { color: var(--accent); }
