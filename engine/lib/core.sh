@@ -165,7 +165,7 @@ _rewind_route_to_stage() {
   local key found=0
   for key in "$@"; do
     [[ "$key" == "$target" ]] && found=1
-    (( found )) && set_st "$t" "$key" pending
+    (( found )) && set_st "$t" "$key" pending "${key}_RETRIES" 0
   done
   if (( ! found )); then
     set_st "$t" REWIND_STAGE ""
