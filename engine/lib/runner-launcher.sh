@@ -28,6 +28,7 @@ runner_launch() {
   local run_dir=$8 run_id=$9 epoch=${10} status_token=${11}
   local module control_root token_file token_fd pid identity pgid starttime rc result_class own_pgid
   local capabilities status_mode=status_fd request_dir="" request_rc=0 consume_rc=0
+  local terminal_state=""
   module=$(runner_module_path "$runner_id") || return 2
   runner_contract_check "$runner_id" || return 2
   mkdir -p "$run_dir"
@@ -144,10 +145,14 @@ runner_launch() {
     consume_rc=$?
     [[ "$request_rc" -ne 0 ]] || request_rc=$consume_rc
     rmdir "$request_dir" 2>/dev/null || true
-    if [[ "$request_rc" -ne 0 ]]; then
+    terminal_state=$(_run_state_get "$(run_state_active_file "$task" "$stage")" STATE)
+    if [[ "$rc" -eq 0 && "$terminal_state" == committed ]]; then
+      # Терминальный CAS уже принят: отдельный повреждённый progress-request не имеет
+      # права задним числом превратить завершённый этап в provider failure.
+      request_rc=0
+    elif [[ "$request_rc" -ne 0 ]]; then
       rc=76
-    elif [[ "$rc" -eq 0 &&
-            "$(_run_state_get "$(run_state_active_file "$task" "$stage")" STATE)" != committed ]]; then
+    elif [[ "$rc" -eq 0 && "$terminal_state" != committed ]]; then
       # Provider ответил успешно, но stage-result не был вызван: это ошибка протокола,
       # а не успешное выполнение этапа.
       rc=76

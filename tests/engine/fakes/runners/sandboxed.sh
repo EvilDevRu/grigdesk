@@ -27,6 +27,13 @@ runner_sandboxed_run() {
   done
   [[ "$visible" == 1 ]] || return 70
   printf 'visible\n' >"$run_dir/progress-visible"
+  # Даже если отдельный progress-request оказался повреждён и был убран, принятый
+  # позднее terminal result остаётся источником истины и не должен превращаться в stall.
+  local corrupt="$FACTORY_STATUS_REQUEST_DIR/000-corrupt.request"
+  printf 'SCHEMA=1\nTYPE=corrupt\nTASK=%s\nSTAGE=%s\nRUN_ID=%s\nEPOCH=%s\n' \
+    "$FACTORY_RUN_TASK" "$FACTORY_RUN_STAGE" "$FACTORY_RUN_ID" "$FACTORY_RUN_EPOCH" >"$corrupt"
+  sleep 0.2
+  rm -f -- "$corrupt"
   FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" \
     --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
     --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" done "sandbox completed" || return
