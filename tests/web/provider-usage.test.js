@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { providerUsageView } from '../../web/src/shared/provider-usage.js';
+import {
+  prepareUsageControl,
+  usageControlConfirmation,
+} from '../../web/src/shared/provider-usage-actions.js';
 
 test('missing usage data has visible loading copy', () => {
   const view = providerUsageView(null, { name: 'Claude' });
@@ -41,4 +45,60 @@ test('unsupported provider usage is a normal explicit state', () => {
   }, { name: 'Локальный ИИ' });
   assert.equal(view.tone, 'muted');
   assert.match(view.message, /не отдаёт/i);
+});
+
+test('provider usage view keeps generic resources without knowing the vendor', () => {
+  const resource = {
+    key: 'kimi-balance',
+    label: 'Баланс Kimi',
+    summary: '12 CNY',
+    controls: [{ id: 'top-up', kind: 'link', label: 'Пополнить', href: 'https://example.test' }],
+  };
+  const view = providerUsageView({
+    state: 'ok',
+    bars: [],
+    resources: [resource],
+  }, { name: 'Kimi' });
+
+  assert.deepEqual(view.resources, [resource]);
+});
+
+test('generic usage controls build provider action payloads and confirmations', () => {
+  const control = {
+    id: 'limit',
+    kind: 'number',
+    action: 'configure-extra-usage',
+    field: 'limit',
+    unit: 'EUR',
+    minExclusive: 0,
+    confirm: {
+      text: 'Поставить потолок {value} {unit}?',
+      label: 'Поставить',
+    },
+  };
+
+  assert.deepEqual(prepareUsageControl(control, '12,50'), {
+    ok: true,
+    actionId: 'configure-extra-usage',
+    payload: { limit: 12.5 },
+    value: 12.5,
+  });
+  assert.deepEqual(usageControlConfirmation(control, 12.5), {
+    text: 'Поставить потолок 12.5 EUR?',
+    label: 'Поставить',
+    danger: false,
+  });
+  assert.equal(prepareUsageControl(control, '0').ok, false);
+
+  const toggle = {
+    kind: 'toggle',
+    action: 'configure-auto-top-up',
+    field: 'enabled',
+    confirm: {
+      on: { text: 'Включить?', label: 'Включить' },
+      off: { text: 'Выключить?', label: 'Выключить', danger: true },
+    },
+  };
+  assert.deepEqual(prepareUsageControl(toggle, false).payload, { enabled: false });
+  assert.equal(usageControlConfirmation(toggle, false).danger, true);
 });

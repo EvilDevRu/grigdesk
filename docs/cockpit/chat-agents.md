@@ -162,14 +162,18 @@ coverage и error policy; он описан в [multi-AI контракте дв
   `initialize`, читает `rateLimitsByLimitId` (либо совместимый `rateLimits`) и завершает
   только свой дочерний процесс. Ни thread, ни turn, ни вызов модели не создаются; файлы
   диалогов не читаются. Имена отдельных модельных семейств приходят от OpenAI и появляются
-  в шапке без хардкода и релиза Cockpit.
-- **Доплата управляется прямо из шапки** (`POST /api/providers/:id/credits` → `setCredits`
-  исполнителя): тумблер вкл/выкл и месячный потолок. Бар `extra_usage` показывается ВСЕГДА,
-  даже выключенным (на нём висят органы управления), и несёт блок `credits` — по нему UI
-  понимает, что полоса управляемая. Ручки приватные, сняты с бинаря CLI (это его
-  `/usage-credits`): `POST/PUT /api/oauth/organizations/<uuid>/{setup_overage_billing,
-  overage_spend_limit}`, авторизация — OAuth-токеном хостового CLI, uuid организации из
-  `~/.claude.json` (`oauthAccount.organizationUuid`), суммы — в минорных единицах.
+  в шапке без хардкода и релиза Cockpit. Из того же ответа показываются купленные ChatGPT
+  credits. Если `rateLimitResetCredits.availableCount > 0`, появляется подтверждаемая кнопка
+  расхода заработанного сброса; `account/rateLimitResetCredit/consume` получает стабильный
+  `requestId` как `idempotencyKey`, после успеха лимиты перечитываются. Покупка и
+  автопополнение остаются по ссылке на `chatgpt.com/codex/settings/usage`: документированного
+  тумблера сверхлимита в Codex app-server нет.
+- **Доплата Claude управляется прямо из шапки**: тумблер вкл/выкл и месячный потолок.
+  `extra_usage` приходит как account resource с общими контролами, а не как особый тип
+  полосы во фронте. Ручки приватные, сняты с бинаря CLI (это его `/usage-credits`):
+  `POST/PUT /api/oauth/organizations/<uuid>/{setup_overage_billing, overage_spend_limit}`,
+  авторизация — OAuth-токеном хостового CLI, uuid организации из `~/.claude.json`
+  (`oauthAccount.organizationUuid`), суммы — в минорных единицах.
   При ПЕРВОМ включении сначала `setup_overage_billing`, потом флаг — иначе доплата не заведена.
   Выключение (`is_enabled:false`) сам CLI не зовёт (у него это только через claude.ai): поле
   в схеме есть, но при отказе API текст ошибки показываем как есть, а рядом всегда висит
@@ -177,6 +181,49 @@ coverage и error policy; он описан в [multi-AI контракте дв
   поддержано: счёт без верхней границы заводят осознанно на сайте, а не тумблером в шапке.
   Подтверждение спрашивается ВНУТРИ всплывашки: модалка забрала бы фокус, всплывашка
   закрылась бы — и ни вопроса, ни результата человек не увидит.
+
+### Модульное подключение нового ИИ
+
+Реестр сканирует `server/src/lib/executors/*.js`; отдельной регистрации Kimi в Fastify и Vue
+не требуется. Адаптер экспортирует базовый контракт `id/name/vendor/color/bin/probe/auth/
+seedModels/run`, а при наличии API аккаунта добавляет:
+
+```js
+{
+  async usage() {
+    return {
+      state: 'ok',
+      bars: [{ key: 'month', label: 'Месяц', pct: 24 }],
+      resources: [{
+        key: 'balance',
+        label: 'Баланс Kimi',
+        summary: '12 CNY',
+        controls: [
+          { id: 'top-up', kind: 'link', label: 'Пополнить', href: 'https://…' },
+          {
+            id: 'auto-top-up',
+            kind: 'toggle',
+            label: 'автопополнение',
+            value: false,
+            action: 'configure-auto-top-up',
+            field: 'enabled',
+            confirm: { on: { text: '…', label: 'Включить' }, off: { text: '…', label: 'Выключить' } },
+          },
+        ],
+      }],
+    };
+  },
+  usageActions: {
+    'configure-auto-top-up': async ({ payload, requestId, config, deps }) => {
+      // Адаптер валидирует payload и вызывает только API своего провайдера.
+    },
+  },
+}
+```
+
+Ядро нормализует ресурсы, отбрасывает не-HTTPS ссылки и неизвестные controls. Внешний клиент
+не может передать произвольный метод: выполняются только ключи из `usageActions` конкретного
+адаптера. `requestId` обязателен на границе UI для идемпотентных денежных/расходуемых операций.
 - **Недоставленные ответы**: если клиент умер во время работы агента (F5/закрытие вкладки),
   сервер по завершении видит `request.socket.destroyed` и пишет ответ в `chats/pending/<id>.json`
   (+SSE `chat-orphan` живым окнам). Фронт при `_load()` и по этому событию забирает

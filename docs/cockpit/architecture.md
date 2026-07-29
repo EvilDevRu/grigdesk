@@ -30,7 +30,7 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission | выбранный executor + `chats/` ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
 | `routes` | `/api/profiles`, CRUD `/api/routes/:profile[/:id]`, `POST …/reseed` | `routes/<профиль>/` + `profiles/*/graph.json` |
-| `providers` | `/api/providers*` (модели, usage, credits, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
+| `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
 | `projects`, `code` | `/api/projects*`, read-only `/api/code/:project/*` | профили/prefs + git/worktree |
 | `plugins`, `demo` | `/api/plugins*`, `/api/demo*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
@@ -72,7 +72,12 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
 `account/rateLimits/read` официального `codex app-server`; кэш 60с). Запрос Codex не создаёт
 ход и не вызывает модель. Ответ всегда структурирован: бары не исчезают при временной ошибке,
 а помечаются устаревшими; 401/403, 429, отсутствие авторизации и отсутствие usage API имеют
-отдельные сообщения и действия.
+отдельные сообщения и действия. Баланс, платное продолжение и заработанные сбросы описываются
+provider-neutral массивом `resources`; его `toggle`/`number`/`button`/`link` контролы рисует
+общий компонент. Мутации идут через
+`POST /api/providers/:id/usage-actions/:actionId`: ядро разрешает только action из явного
+`executor.usageActions`, а смысл и валидация принадлежат адаптеру. Поэтому новый исполнитель
+не добавляет vendor-ветки в Fastify или Vue.
 
 Модельный селектор использует каталоги исполнителей, а не список из компонентов: Claude
 сканирует установленный бинарь, Codex читает read-only `model/list` app-server с доступом

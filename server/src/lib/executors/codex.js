@@ -4,6 +4,7 @@
 // `codex exec resume <thread_id>`. Песочница read-only: своей всплывашки разрешений
 // у codex-exec нет, действия за пределами чтения не даём.
 import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,6 +64,66 @@ export function parseCodexRateLimits(result) {
   return bars;
 }
 
+export function parseCodexUsageResources(result) {
+  if (!result || typeof result !== 'object') return [];
+  const buckets = [
+    result.rateLimits,
+    ...Object.values(result.rateLimitsByLimitId || {}),
+  ].filter((bucket) => bucket && typeof bucket === 'object');
+  const creditState = [result.credits, ...buckets.map((bucket) => bucket.credits)]
+    .find((credits) => credits && typeof credits === 'object');
+  const resources = [];
+
+  if (creditState) {
+    const balance = creditState.balance;
+    const summary = creditState.unlimited
+      ? 'Без ограничений'
+      : `Баланс: ${balance ?? (creditState.hasCredits ? 'доступен' : '0')}`;
+    resources.push({
+      key: 'chatgpt-credits',
+      label: 'Дополнительные кредиты',
+      summary,
+      tone: creditState.unlimited || creditState.hasCredits ? 'ok' : 'muted',
+      note: 'Покупка и автопополнение управляются в ChatGPT.',
+      controls: [{
+        id: 'manage-credits',
+        kind: 'link',
+        label: 'Купить / управлять кредитами',
+        href: 'https://chatgpt.com/codex/settings/usage',
+      }],
+    });
+  }
+
+  const resetState = result.rateLimitResetCredits;
+  const count = Number(resetState?.availableCount);
+  if (Number.isFinite(count) && count > 0) {
+    const first = Array.isArray(resetState.credits)
+      ? resetState.credits.find((credit) => credit?.status === 'available' && credit.id)
+      : null;
+    resources.push({
+      key: 'rate-limit-resets',
+      label: 'Сброс лимита',
+      summary: `Доступно: ${Math.floor(count)}`,
+      tone: 'ok',
+      note: first?.description || 'Сбрасывает подходящее окно лимита и расходует один заработанный сброс.',
+      controls: [{
+        id: 'consume-rate-limit-reset',
+        kind: 'button',
+        label: 'Использовать сброс лимита',
+        action: 'consume-rate-limit-reset',
+        ...(first?.id && { payload: { creditId: String(first.id) } }),
+        confirm: {
+          text: 'Использовать один заработанный сброс лимита Codex? Отменить расход после подтверждения OpenAI нельзя.',
+          label: 'Использовать',
+          danger: true,
+        },
+      }],
+    });
+  }
+
+  return resources;
+}
+
 export function classifyCodexUsageResponse({ result = null, error = null } = {}) {
   const detail = String(error?.message || error || '').slice(0, 500);
   if (error) {
@@ -94,15 +155,17 @@ export function classifyCodexUsageResponse({ result = null, error = null } = {})
   }
 
   const bars = parseCodexRateLimits(result);
-  if (!bars.length) {
+  const resources = parseCodexUsageResources(result);
+  if (!bars.length && !resources.length) {
     return {
       state: 'unavailable',
       bars: [],
+      resources: [],
       message: 'OpenAI не вернул данные о лимитах Codex.',
       action: null,
     };
   }
-  return { state: 'ok', bars, message: '', action: null };
+  return { state: 'ok', bars, resources, message: '', action: null };
 }
 
 /**
@@ -260,6 +323,31 @@ export function readCodexRateLimits(bin, options = {}) {
   return codexAppServerRequest(bin, { method: 'account/rateLimits/read' }, options);
 }
 
+export async function consumeCodexRateLimitReset(bin, {
+  requestId = '',
+  creditId = '',
+} = {}, {
+  request = codexAppServerRequest,
+} = {}) {
+  const response = await request(bin, {
+    method: 'account/rateLimitResetCredit/consume',
+    params: {
+      idempotencyKey: String(requestId || randomUUID()),
+      ...(String(creditId || '') && { creditId: String(creditId) }),
+    },
+  });
+  if (response?.error) {
+    return { ok: false, error: response.error.message || 'Codex не применил сброс лимита' };
+  }
+  const outcome = response?.result?.outcome;
+  if (outcome === 'reset' || outcome === 'alreadyRedeemed') return { ok: true, outcome };
+  const messages = {
+    nothingToReset: 'Сейчас нет окна лимита, которое можно сбросить.',
+    noCredit: 'Доступных сбросов лимита больше нет.',
+  };
+  return { ok: false, error: messages[outcome] || 'Codex не применил сброс лимита', outcome };
+}
+
 async function readCodexModelCatalog(bin) {
   const data = [];
   let cursor = null;
@@ -317,6 +405,13 @@ export default {
    */
   async usage(config) {
     return classifyCodexUsageResponse(await readCodexRateLimits(config.codexBin));
+  },
+
+  usageActions: {
+    'consume-rate-limit-reset': ({ config, payload, requestId }) => consumeCodexRateLimitReset(
+      config.codexBin,
+      { requestId, creditId: payload.creditId },
+    ),
   },
 
   /**

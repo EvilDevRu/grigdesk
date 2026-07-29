@@ -12,9 +12,9 @@ import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useChatStore } from '../../stores/chat.js';
 import { providerUsageView } from '../provider-usage.js';
 import ProviderIcon from '../ProviderIcon.vue';
+import ProviderUsageResources from '../ProviderUsageResources.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
 import HelpTip from '../ui/HelpTip.vue';
-import ToggleSwitch from '../ui/ToggleSwitch.vue';
 
 const route = useRoute();
 const health = ref(null);
@@ -59,63 +59,6 @@ function resetIn(iso) {
   if (h >= 48) return `сброс через ${Math.round(h / 24)}д`;
   if (h >= 1) return `сброс через ${h}ч`;
   return `сброс через ${Math.max(1, Math.round(ms / 60_000))}м`;
-}
-
-// ── Доплата сверх лимитов (extra usage) ──
-// Полоса, у которой сервер прислал `credits`, — управляемая: тумблер вкл/выкл и месячный
-// потолок. Это РЕАЛЬНЫЕ деньги, поэтому каждое действие — через подтверждение, и оно
-// спрашивается ПРЯМО ВО ВСПЛЫВАШКЕ: модалка забирает фокус, всплывашка при этом
-// закрывается — человек не увидел бы ни вопроса, ни ответа. Состояние после действия
-// перечитываем с сервера, оптимистично не рисуем: списания — не то место для догадок.
-const CREDITS_URL = 'https://claude.ai/settings/usage';
-const credits = ref({}); // id исполнителя → { busy, msg, limit, ask }
-const crOf = (id) => credits.value[id] || { busy: false, msg: null, limit: '', ask: null };
-function setCr(id, patch) { credits.value = { ...credits.value, [id]: { ...crOf(id), ...patch } }; }
-
-// В поле потолка — то, что человек набрал; пока не трогал — факт со счёта.
-const limitValue = (p, b) => (crOf(p.id).limit !== '' ? crOf(p.id).limit : (b.credits?.limit ?? ''));
-
-function askCredits(p, b, on) {
-  const c = b.credits || {};
-  const cur = c.currency || 'в валюте счёта';
-  setCr(p.id, {
-    msg: null,
-    ask: on
-      ? {
-        text: `Кончатся лимиты подписки — работа продолжится за деньги с карты аккаунта Anthropic.`
-          + ` Месячный потолок ${c.limit ? `${c.limit} ${cur}` : `20 ${cur}`}, поменять можно тут же.`,
-        ok: 'Включить',
-        patch: { enabled: true },
-      }
-      : {
-        text: 'Списаний больше не будет: кончатся лимиты подписки — агенты встанут до сброса.',
-        ok: 'Выключить',
-        danger: true,
-        patch: { enabled: false },
-      },
-  });
-}
-
-function askLimit(p, b) {
-  const v = Number(String(limitValue(p, b)).replace(',', '.'));
-  if (!(v > 0)) { setCr(p.id, { msg: 'Потолок — положительное число', ask: null }); return; }
-  setCr(p.id, {
-    msg: null,
-    ask: {
-      text: `Доплата будет останавливаться на ${v} ${b.credits?.currency || ''} в месяц.`.replace(/ +/g, ' '),
-      ok: 'Поставить',
-      patch: { limit: v },
-    },
-  });
-}
-
-async function applyCredits(p) {
-  const { ask, busy } = crOf(p.id);
-  if (!ask || busy) return;
-  setCr(p.id, { busy: true, ask: null });
-  const r = await prov.setCredits(p.id, ask.patch);
-  // Успех — поле потолка чистим, чтобы показывать снова факт со счёта.
-  setCr(p.id, { busy: false, msg: r.ok ? null : (r.error || 'не получилось'), ...(r.ok && { limit: '' }) });
 }
 
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
@@ -325,36 +268,11 @@ const { connected } = useSse((name) => {
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
                 <span class="pu">
                   <span v-for="b in usageOf(p).bars" :key="b.key" class="pu-row">
-                    <!-- У выключенной доплаты процент бессмыслен: там не «0% потрачено», а «не считается» -->
-                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.credits && !b.credits.enabled ? '—' : `${b.pct}%` }}</b></span>
+                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                     <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
-                    <!-- Управляемая полоса (доплата сверх лимитов): тумблер и месячный потолок -->
-                    <span v-if="b.credits" class="pu-cr">
-                      <ToggleSwitch :model-value="b.credits.enabled"
-                                    :label="crOf(p.id).busy ? 'применяю…' : (b.credits.enabled ? 'доплата включена' : 'доплата выключена')"
-                                    @update:model-value="(v) => askCredits(p, b, v)" />
-                      <span v-if="b.credits.enabled && !crOf(p.id).ask" class="pu-lim">
-                        <span>потолок</span>
-                        <input :value="limitValue(p, b)" inputmode="decimal" aria-label="Месячный потолок доплаты"
-                               @input="setCr(p.id, { limit: $event.target.value })" @keyup.enter="askLimit(p, b)" />
-                        <span class="cur">{{ b.credits.currency }}</span>
-                        <button :disabled="crOf(p.id).busy" @click="askLimit(p, b)">Сохранить</button>
-                      </span>
-                      <span v-if="b.credits.unlimited" class="pu-reset">потолка нет — тратится без верхней границы</span>
-                      <span v-if="b.credits.disabledReason" class="pu-reset">причина отказа: {{ b.credits.disabledReason }}</span>
-                      <!-- Подтверждение — здесь же: модалка закрыла бы всплывашку -->
-                      <span v-if="crOf(p.id).ask" class="pu-ask">
-                        <span>{{ crOf(p.id).ask.text }}</span>
-                        <span class="pu-ask-a">
-                          <button class="ok" :class="{ danger: crOf(p.id).ask.danger }" @click="applyCredits(p)">{{ crOf(p.id).ask.ok }}</button>
-                          <button @click="setCr(p.id, { ask: null })">Отмена</button>
-                        </span>
-                      </span>
-                      <span v-if="crOf(p.id).msg" class="pu-err">{{ crOf(p.id).msg }}</span>
-                      <a class="pu-link" :href="CREDITS_URL" target="_blank" rel="noopener">карта, история и доплата без потолка — на claude.ai</a>
-                    </span>
                   </span>
+                  <ProviderUsageResources :provider-id="p.id" :resources="usageOf(p).resources" />
                   <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
                     <span>{{ usageOf(p).message }}</span>
                     <span v-if="usageOf(p).note" class="pu-reset">{{ usageOf(p).note }}</span>
@@ -505,34 +423,6 @@ const { connected } = useSse((name) => {
 }
 .pu-state button:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Управление доплатой: живёт внутри всплывашки, поэтому всё компактное */
-.pu-cr { display: flex; flex-direction: column; gap: 6px; margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--line); }
-.pu-lim { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-mid); }
-.pu-lim input {
-  width: 62px; padding: 3px 7px; border-radius: 7px;
-  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
-  font-family: var(--mono); font-size: 11.5px; text-align: right;
-}
-.pu-lim input:focus { outline: none; border-color: var(--accent); }
-.pu-lim button {
-  margin-left: auto; padding: 3px 9px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); font-size: 11.5px;
-}
-.pu-lim button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.pu-lim button:disabled { opacity: .5; cursor: default; }
-
-.pu-ask { display: flex; flex-direction: column; gap: 7px; font-size: 11px; line-height: 1.45; color: var(--ink); }
-.pu-ask-a { display: flex; gap: 6px; }
-.pu-ask-a button {
-  padding: 4px 11px; border-radius: 7px; cursor: pointer; font-size: 11.5px;
-  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
-}
-.pu-ask-a button.ok { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-.pu-ask-a button.ok.danger { background: var(--bad); border-color: var(--bad); }
-
-.pu-err { font-size: 10.5px; line-height: 1.45; color: var(--bad); overflow-wrap: anywhere; }
-.pu-link { font-size: 10.5px; color: var(--ink-mid); text-decoration: underline; }
-.pu-link:hover { color: var(--accent); }
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).
    Селекторы с тегом: иначе .pu-head b перебивает .lv-* по специфичности. */
 .pu-fill.lv-warn { background: var(--warn); }

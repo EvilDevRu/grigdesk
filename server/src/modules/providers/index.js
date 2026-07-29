@@ -10,6 +10,7 @@ import { getExecutors } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { isOutdated } from '../../lib/executors/_npm-latest.js';
 import {
+  executeProviderUsageAction,
   mergeProviderUsage,
   normalizeProviderUsage,
   unsupportedProviderUsage,
@@ -131,31 +132,35 @@ async function providersModule(fastify, opts) {
       }
       usage[ex.id] = mergeProviderUsage(usageCache?.usage?.[ex.id], current);
     }
-    // Сетевой сбой не затирает прошлые бары, но сам сбой остаётся видимым состоянием.
+    // Сетевой сбой не затирает прошлые бары/ресурсы, но остаётся видимым состоянием.
     usageCache = { at: checkedAt, usage };
     return { usage: usageCache.usage };
   });
 
   /**
-   * Управление доплатой сверх лимитов подписки (полоса «Extra usage» в топбаре).
-   * Модуль не знает, что это и у кого бывает: спрашивает исполнителя, умеет ли он
-   * (`setCredits`), и передаёт намерение как есть. Тело: `{ enabled?, limit? }`.
-   * Действие тратит РЕАЛЬНЫЕ деньги, поэтому кэш потребления сбрасываем сразу —
-   * человек должен увидеть в шапке то, что теперь на счёте, а не минутной давности.
+   * Generic provider-account action. The route knows neither billing semantics
+   * nor vendor APIs: each executor exposes an explicit usageActions allow-list.
+   * requestId crosses the boundary for idempotent irreversible actions.
    */
-  fastify.post('/api/providers/:id/credits', async (request, reply) => {
+  fastify.post('/api/providers/:id/usage-actions/:actionId', async (request, reply) => {
     const ex = (await getExecutors()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
-    if (typeof ex.setCredits !== 'function') {
-      return reply.code(400).send({ error: 'no_credits', message: `у исполнителя ${ex.name} нет доплаты сверх лимитов` });
-    }
-    const { enabled, limit } = request.body || {};
-    const r = await ex.setCredits(config, deps, {
-      ...(enabled !== undefined && { enabled: !!enabled }),
-      ...(limit !== undefined && limit !== null && { limit: Number(limit) }),
+    const body = request.body || {};
+    const r = await executeProviderUsageAction(ex, {
+      actionId: request.params.actionId,
+      payload: body.payload,
+      requestId: body.requestId,
+      config,
+      deps,
     });
+    if (r?.error === 'unknown_usage_action') {
+      return reply.code(400).send({
+        error: r.error,
+        message: `исполнитель ${ex.name} не поддерживает это действие`,
+      });
+    }
     if (r?.ok) usageCache = null;
-    else fastify.log.warn({ provider: ex.id, err: r?.error }, 'доплата сверх лимитов не изменена');
+    else fastify.log.warn({ provider: ex.id, action: request.params.actionId, err: r?.error }, 'действие usage не выполнено');
     return r;
   });
 

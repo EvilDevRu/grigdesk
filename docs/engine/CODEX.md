@@ -16,6 +16,9 @@
   OAuth usage, Codex — через read-only `account/rateLimits/read` официального app-server;
   актуальные или последние успешные бары, необходимость входа, отказ аккаунта, rate limit
   либо отсутствие usage API; для истёкшей CLI-сессии доступна команда повторного входа;
+  account resources и действия провайдера имеют единый контракт без vendor-веток в UI:
+  у Claude это Extra usage и потолок, у Codex — баланс ChatGPT credits, ссылка управления
+  и расход заработанного reset credit при наличии;
 - модельный селектор Codex строится по живому `model/list` его app-server, а не по
   захардкоженному seed; rollout, эффорты, default/hidden и рекомендуемые замены обновляются
   без релиза Cockpit, дублирующие алиасы схлопываются;

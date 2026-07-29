@@ -89,14 +89,17 @@ export const useProvidersStore = defineStore('providers', {
       } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
     },
     /**
-     * Доплата сверх лимитов подписки: включить/выключить, сменить месячный потолок.
-     * Тратит РЕАЛЬНЫЕ деньги — зовётся только из явного действия человека, подтверждение
-     * спрашивает UI. Текст ошибки от Anthropic отдаём наверх как есть: ручки приватные,
-     * и «что именно не так» знает только их ответ.
+     * Declarative account action exposed by one provider adapter. requestId is
+     * generated once per click so a provider can make irreversible calls idempotent.
      */
-    async setCredits(providerId, patch) {
+    async runUsageAction(providerId, actionId, payload = {}, requestId = '') {
+      const operationId = requestId || globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       try {
-        const r = await api.post(`/api/providers/${providerId}/credits`, patch);
+        const r = await api.post(
+          `/api/providers/${encodeURIComponent(providerId)}/usage-actions/${encodeURIComponent(actionId)}`,
+          { requestId: operationId, payload },
+        );
         if (r?.ok) await this.loadUsage(true);
         return r || { ok: false, error: 'сервер не ответил' };
       } catch (e) {

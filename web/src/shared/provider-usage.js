@@ -5,6 +5,7 @@ export function providerUsageView(entry, provider = {}) {
     return {
       state: 'loading',
       bars: [],
+      resources: [],
       message: 'Данные о лимитах ещё не получены.',
       note: '',
       tone: 'muted',
@@ -27,6 +28,7 @@ export function providerUsageView(entry, provider = {}) {
   return {
     ...entry,
     bars: Array.isArray(entry.bars) ? entry.bars : [],
+    resources: Array.isArray(entry.resources) ? entry.resources : [],
     message: entry.message || fallback,
     note: entry.stale ? 'Показываем последние успешно полученные значения.' : '',
     tone,

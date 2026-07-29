@@ -154,18 +154,6 @@ export function parseClaudeUsagePayload(d) {
     });
   }
 
-  const c = creditsOf(d);
-  if (c) {
-    bars.push({
-      key: 'extra_usage',
-      label: 'Extra usage (доплата)',
-      pct: c.enabled && c.utilization !== null ? clamp(c.utilization) : 0,
-      resetsAt: null,
-      note: creditsNote(c),
-      credits: c,
-    });
-  }
-
   if (!bars.length) {
     for (const [key, value] of Object.entries(d || {})) {
       if (!value || typeof value !== 'object' || typeof value.utilization !== 'number') continue;
@@ -178,6 +166,69 @@ export function parseClaudeUsagePayload(d) {
     }
   }
   return bars;
+}
+
+/**
+ * Account-level usage resources are separate from quota meters. Controls are
+ * declarative: the web UI renders them generically, while the executor owns
+ * action ids, confirmation copy and the actual vendor calls.
+ */
+export function parseClaudeUsageResources(d) {
+  const c = creditsOf(d);
+  if (!c) return [];
+  const cur = c.currency || 'в валюте счёта';
+  return [{
+    key: 'extra-usage',
+    label: 'Extra usage (доплата)',
+    summary: creditsNote(c),
+    tone: c.enabled ? 'ok' : 'muted',
+    ...(c.enabled && c.utilization !== null
+      && { percent: Math.max(0, Math.min(100, Math.round(c.utilization))) }),
+    note: c.unlimited
+      ? 'Потолка нет — расходы не ограничены сверху.'
+      : (c.disabledReason ? `Причина отказа: ${c.disabledReason}` : ''),
+    controls: [
+      {
+        id: 'extra-usage-toggle',
+        kind: 'toggle',
+        label: c.enabled ? 'доплата включена' : 'доплата выключена',
+        value: c.enabled,
+        action: 'configure-extra-usage',
+        field: 'enabled',
+        confirm: {
+          on: {
+            text: `Кончатся лимиты подписки — работа продолжится за деньги с карты аккаунта Anthropic. Месячный потолок ${c.limit ? `${c.limit} ${cur}` : `20 ${cur}`}.`,
+            label: 'Включить',
+          },
+          off: {
+            text: 'Списаний больше не будет: кончатся лимиты подписки — агенты встанут до сброса.',
+            label: 'Выключить',
+            danger: true,
+          },
+        },
+      },
+      ...(c.enabled ? [{
+        id: 'extra-usage-limit',
+        kind: 'number',
+        label: 'потолок',
+        value: c.limit,
+        unit: c.currency,
+        minExclusive: 0,
+        action: 'configure-extra-usage',
+        field: 'limit',
+        confirm: {
+          text: 'Доплата будет останавливаться на {value} {unit} в месяц.',
+          label: 'Поставить',
+        },
+      }] : []),
+      {
+        id: 'manage-extra-usage',
+        kind: 'link',
+        label: 'Карта, история и доплата без потолка — на claude.ai',
+        href: 'https://claude.ai/settings/usage',
+      },
+    ],
+  }];
 }
 
 function usageErrorMessage(data) {
@@ -211,15 +262,17 @@ export function classifyClaudeUsageResponse({
   }
   if (status === 200) {
     const bars = parseClaudeUsagePayload(data);
-    if (!bars.length) {
+    const resources = parseClaudeUsageResources(data);
+    if (!bars.length && !resources.length) {
       return {
         state: 'unavailable',
         bars: [],
+        resources: [],
         message: 'Anthropic не вернул данные о лимитах Claude.',
         action: null,
       };
     }
-    return { state: 'ok', bars, message: '', action: null };
+    return { state: 'ok', bars, resources, message: '', action: null };
   }
   if (status === 401) {
     return {
@@ -295,6 +348,54 @@ async function orgCall(tok, org, method, sub, body) {
   throw new Error(`${r.status} ${msg || text.slice(0, 300) || r.statusText}`.trim());
 }
 
+/**
+ * Configure Claude overage. Kept outside the executor object so the provider
+ * action map remains a thin, explicit allow-list rather than a generic RPC.
+ */
+async function configureClaudeExtraUsage(patch = {}) {
+  const tok = await cliToken();
+  if (!tok) return { ok: false, error: 'Нет токена хостового CLI — авторизуйся на хосте: claude login' };
+
+  const before = await fetchUsage();
+  const state = creditsOf(before.status === 200 ? before.data : null);
+  if (!state) return { ok: false, error: 'Anthropic не отдал состояние доплаты — попробуй позже' };
+
+  const wantEnabled = patch.enabled === undefined ? state.enabled : !!patch.enabled;
+  const limit = patch.limit;
+  if (limit !== undefined && !(typeof limit === 'number' && limit > 0)) {
+    return { ok: false, error: 'Месячный потолок — положительное число' };
+  }
+  if (limit !== undefined && !wantEnabled) {
+    return { ok: false, error: 'Сначала включи доплату — потом меняй потолок' };
+  }
+  const minor = limit === undefined ? null : Math.round(limit * state.minor);
+
+  const org = await orgUuid(tok);
+  if (!org) return { ok: false, error: 'Не удалось определить организацию аккаунта' };
+
+  try {
+    if (!wantEnabled) {
+      await orgCall(tok, org, 'PUT', '/overage_spend_limit', { is_enabled: false });
+    } else {
+      if (!state.enabled) {
+        await orgCall(tok, org, 'POST', '/setup_overage_billing', {
+          org_monthly_spend_limit: minor ?? DEFAULT_LIMIT_MINOR,
+        }).catch(() => null);
+      }
+      const body = { is_enabled: true };
+      if (minor !== null) {
+        body.monthly_credit_limit = minor;
+        if (state.currency) body.currency = state.currency;
+      }
+      await orgCall(tok, org, 'PUT', '/overage_spend_limit', body);
+    }
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+  const after = await fetchUsage();
+  return { ok: true, resource: parseClaudeUsageResources(after.status === 200 ? after.data : null)[0] || null };
+}
+
 export default {
   id: 'claude',
   name: 'Claude',
@@ -363,59 +464,11 @@ export default {
   },
 
   /**
-   * Управление доплатой сверх лимитов — то же, что `/usage-credits` в CLI.
-   * `patch`: `{ enabled?: boolean, limit?: number }` (потолок — в валюте счёта).
-   *
-   * Порядок вызовов повторяет CLI: при ПЕРВОМ включении доплату сначала надо завести
-   * (`setup_overage_billing`), и только потом поднимать флаг. Повторный setup на уже
-   * заведённом аккаунте безобиден — его ошибку глотаем, решает следующий PUT.
-   *
-   * Снятие потолка («без ограничения») сознательно не поддержано: это счёт без верхней
-   * границы, такое делают на claude.ai осознанно, а не тумблером в шапке.
+   * Mutating account actions are an explicit adapter-owned allow-list. Core sees
+   * only the action id and never branches on Claude, Codex or a future Kimi.
    */
-  async setCredits(config, deps, patch = {}) {
-    const tok = await cliToken();
-    if (!tok) return { ok: false, error: 'Нет токена хостового CLI — авторизуйся на хосте: claude login' };
-
-    const before = await fetchUsage();
-    const state = creditsOf(before.status === 200 ? before.data : null);
-    if (!state) return { ok: false, error: 'Anthropic не отдал состояние доплаты — попробуй позже' };
-
-    const wantEnabled = patch.enabled === undefined ? state.enabled : !!patch.enabled;
-    const limit = patch.limit;
-    if (limit !== undefined && !(typeof limit === 'number' && limit > 0)) {
-      return { ok: false, error: 'Месячный потолок — положительное число' };
-    }
-    // Менять потолок у выключенной доплаты бессмысленно: PUT поднял бы её молча.
-    if (limit !== undefined && !wantEnabled) {
-      return { ok: false, error: 'Сначала включи доплату — потом меняй потолок' };
-    }
-    const minor = limit === undefined ? null : Math.round(limit * state.minor);
-
-    const org = await orgUuid(tok);
-    if (!org) return { ok: false, error: 'Не удалось определить организацию аккаунта' };
-
-    try {
-      if (!wantEnabled) {
-        await orgCall(tok, org, 'PUT', '/overage_spend_limit', { is_enabled: false });
-      } else {
-        if (!state.enabled) {
-          await orgCall(tok, org, 'POST', '/setup_overage_billing', {
-            org_monthly_spend_limit: minor ?? DEFAULT_LIMIT_MINOR,
-          }).catch(() => null);
-        }
-        const body = { is_enabled: true };
-        if (minor !== null) {
-          body.monthly_credit_limit = minor;
-          if (state.currency) body.currency = state.currency;
-        }
-        await orgCall(tok, org, 'PUT', '/overage_spend_limit', body);
-      }
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-    const after = await fetchUsage();
-    return { ok: true, credits: creditsOf(after.status === 200 ? after.data : null) };
+  usageActions: {
+    'configure-extra-usage': ({ payload }) => configureClaudeExtraUsage(payload),
   },
 
   /**
