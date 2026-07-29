@@ -10,6 +10,10 @@ import {
   classifyClaudeUsageResponse,
   parseClaudeUsagePayload,
 } from '../../server/src/lib/executors/claude.js';
+import {
+  classifyCodexUsageResponse,
+  parseCodexRateLimits,
+} from '../../server/src/lib/executors/codex.js';
 
 test('usage contract never turns an executor error into an empty popup', () => {
   const status = normalizeProviderUsage({
@@ -43,10 +47,58 @@ test('last successful bars survive a temporary usage failure and are marked stal
 });
 
 test('provider without a usage API is explicit instead of blank', () => {
-  const status = unsupportedProviderUsage('GPT (Codex)', 300);
+  const status = unsupportedProviderUsage('Локальный ИИ', 300);
   assert.equal(status.state, 'unsupported');
   assert.match(status.message, /не отдаёт/i);
   assert.deepEqual(status.bars, []);
+});
+
+test('Codex app-server rate limits become generic and model-family bars', () => {
+  const bars = parseCodexRateLimits({
+    rateLimits: {
+      limitId: 'codex',
+      primary: { usedPercent: 18.4, windowDurationMins: 300, resetsAt: 1_785_900_000 },
+      secondary: { usedPercent: 36.6, windowDurationMins: 10_080, resetsAt: 1_786_000_000 },
+    },
+    rateLimitsByLimitId: {
+      codex: {
+        limitId: 'codex',
+        primary: { usedPercent: 18.4, windowDurationMins: 300, resetsAt: 1_785_900_000 },
+        secondary: { usedPercent: 36.6, windowDurationMins: 10_080, resetsAt: 1_786_000_000 },
+      },
+      codex_spark: {
+        limitId: 'codex_spark',
+        limitName: 'GPT-5.3-Codex-Spark',
+        primary: { usedPercent: 7, windowDurationMins: 10_080, resetsAt: 1_786_100_000 },
+        secondary: null,
+      },
+    },
+  });
+
+  assert.deepEqual(bars.map((bar) => [bar.key, bar.label, bar.pct]), [
+    ['codex:primary', 'Сессия (5ч)', 18],
+    ['codex:secondary', 'Неделя (7д)', 37],
+    ['codex_spark:primary', 'Неделя · GPT-5.3-Codex-Spark', 7],
+  ]);
+  assert.equal(bars[0].resetsAt, '2026-08-05T03:20:00.000Z');
+});
+
+test('Codex usage distinguishes login, old CLI and an empty service response', () => {
+  const login = classifyCodexUsageResponse({
+    error: { code: -32000, message: 'ChatGPT login required' },
+  });
+  assert.equal(login.state, 'auth_required');
+  assert.equal(login.action.command, 'codex login');
+
+  const oldCli = classifyCodexUsageResponse({
+    error: { code: -32601, message: 'Method not found' },
+  });
+  assert.equal(oldCli.state, 'unsupported');
+  assert.match(oldCli.message, /обнов/i);
+
+  const empty = classifyCodexUsageResponse({ result: { rateLimits: null } });
+  assert.equal(empty.state, 'unavailable');
+  assert.match(empty.message, /не вернул/i);
 });
 
 test('Claude usage payload is converted to subscription and scoped family bars', () => {

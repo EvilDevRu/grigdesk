@@ -37,8 +37,8 @@ test('unsupported provider usage is a normal explicit state', () => {
   const view = providerUsageView({
     state: 'unsupported',
     bars: [],
-    message: 'GPT (Codex) CLI не отдаёт данные о лимитах подписки.',
-  }, { name: 'GPT (Codex)' });
+    message: 'Локальный ИИ не отдаёт данные о лимитах подписки.',
+  }, { name: 'Локальный ИИ' });
   assert.equal(view.tone, 'muted');
   assert.match(view.message, /не отдаёт/i);
 });
