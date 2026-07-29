@@ -36,6 +36,7 @@ source "$FACTORY_HOME/lib/core.sh"
 : >"$TEST_ROOT/invocations"
 
 export FAKE_ALPHA_RESULT=limited
+export FAKE_BETA_CAPTURE_ACTIVE_REASON=1
 run_stage 41 BUILD
 assert_rc 0 "$?" "core completes stage through failover"
 assert_eq done "$(get 41 BUILD)" "run-scoped result reaches pipeline view"
@@ -44,12 +45,15 @@ assert_eq $'alpha\nbeta' "$(cat "$TEST_ROOT/invocations")" \
 assert_eq beta "$(get 41 RUNNER_ACTUAL_BUILD)" "actual provider is visible in registry"
 assert_eq alpha "$(get 41 RUNNER_REQUESTED_BUILD)" "requested primary is preserved across failover"
 assert_eq fallback_limit "$(get 41 RUNNER_REASON_BUILD)" "fallback reason is visible in registry"
+assert_eq fallback_limit "$(cat "$TEST_ROOT/beta.active-reason")" \
+  "fallback reason is visible while the reserve is still running"
 assert_eq degraded "$(get 41 PLAN_LEVEL_BUILD)" \
   "missing native fanout degrades instead of blocking fallback"
 assert_contains "$(cat "$TEST_ROOT/beta.prompt")" "последовательно" \
   "degraded execution is explicit in replacement prompt"
 assert_eq 1 "$(get 41 TRY_BUILD)" "provider failover does not spend a stage attempt"
 assert_file_missing "$STATE_DIR/t41.BUILD.status" "protocol v2 ignores fixed marker channel"
+unset FAKE_BETA_CAPTURE_ACTIVE_REASON
 
 alpha_fingerprint=$(printf 'alpha|default' | sha256sum | awk '{print substr($1,1,24)}')
 breaker_clear alpha "$alpha_fingerprint" provider "" ""

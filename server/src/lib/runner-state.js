@@ -139,7 +139,7 @@ export function activeRunnerReason(runner, attempts = []) {
     provider_unavailable: 'fallback_provider_unavailable',
     manual_switch: 'manual_switch',
   };
-  return reasons[previous?.result] || runner.reason || null;
+  return active.reason || reasons[previous?.result] || runner.reason || null;
 }
 
 /**
@@ -165,6 +165,7 @@ export async function readRunnerAttempts(stateDir, task, stage) {
         epoch: /^\d+$/.test(meta.EPOCH || '') ? Number(meta.EPOCH) : null,
         runner: PROVIDER_ID.test(meta.RUNNER || '') ? meta.RUNNER : null,
         model: meta.MODEL || null,
+        reason: meta.ROUTE_REASON || null,
         result: meta.RESULT_CLASS || null,
         rc: /^-?\d+$/.test(meta.RC || '') ? Number(meta.RC) : null,
         source: meta.SOURCE || null,

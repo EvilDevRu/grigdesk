@@ -105,6 +105,7 @@ runner_launch() {
     printf 'STARTTIME=%s\n' "$starttime"
     printf 'MODEL=%s\n' "$model"
     printf 'EFFORT=%s\n' "$effort"
+    printf 'ROUTE_REASON=%s\n' "${FACTORY_DEBUG_REASON:-primary}"
     printf 'CLI_VERSION=%s\n' "${FACTORY_RUNNER_VERSION:-unknown}"
     printf 'SOURCE=runtime\n'
     printf 'STATUS_MODE=%s\n' "$status_mode"
@@ -121,7 +122,7 @@ runner_launch() {
     family "${FACTORY_DEBUG_FAMILY:-unknown}" \
     catalog_revision "${FACTORY_DEBUG_CATALOG_REVISION:-unknown}" \
     plan_level "${FACTORY_DEBUG_PLAN_LEVEL:-unknown}" \
-    reason primary || true
+    reason "${FACTORY_DEBUG_REASON:-primary}" || true
   debug_log_event verbose process_started runner "$runner_id" pid "$pid" pgid "$pgid" \
     stage "$stage" || true
 

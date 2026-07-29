@@ -224,7 +224,7 @@ _multi_request_matches() {
 
 _multi_invoke() {
   local provider=$1 family=$2 model=$3
-  local run_id epoch token run_dir rc result request_id target fanout_count
+  local run_id epoch token run_dir rc result request_id target fanout_count active_reason
   if ! runner_call "$provider" probe >/dev/null 2>&1; then
     DISPATCH_INVOKE_RESULT=unavailable_preflight
     DISPATCH_INVOKE_STARTED=0
@@ -242,7 +242,13 @@ _multi_invoke() {
     DISPATCH_INVOKE_STARTED=0
     return 0
   }
+  # Bash передаёт local-переменные вызывающей функции динамически: dispatcher
+  # держит здесь доказанную причину перехода (limit/preflight/manual). Публикуем
+  # её до запуска provider, иначе весь долгий run Cockpit показывает устаревшую
+  # причину предыдущего этапа.
+  active_reason=${last_switch_reason:-primary}
   set_st "$MULTI_TASK" "RUNNER_ACTUAL_${MULTI_STAGE}" "$provider" \
+    "RUNNER_REASON_${MULTI_STAGE}" "$active_reason" \
     "MODEL_FAMILY_${MULTI_STAGE}" "$family" \
     "MODEL_ACTUAL_${MULTI_STAGE}" "$model" \
     "CATALOG_REVISION_${MULTI_STAGE}" "$MULTI_CATALOG_REVISION" \
@@ -286,6 +292,7 @@ ${plan_note}
   export FACTORY_DEBUG_FAMILY="$family"
   export FACTORY_DEBUG_CATALOG_REVISION="${MULTI_CATALOG_REVISION:-unknown}"
   export FACTORY_DEBUG_PLAN_LEVEL="${MULTI_PLAN_LEVEL[$provider]:-unknown}"
+  export FACTORY_DEBUG_REASON="$active_reason"
   runner_launch "$provider" "$MULTI_TASK" "$prompt" "$MULTI_STAGE" "$model" \
     "${DISPATCH_RESOLVED_EFFORT:-high}" "$MULTI_TIMEOUT" "$run_dir" "$run_id" "$epoch" "$token"
   rc=$?

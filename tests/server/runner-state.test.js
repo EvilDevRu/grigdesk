@@ -69,14 +69,14 @@ test('active failover reason comes from completed primary attempt, not stale reg
   };
   const attempts = [
     { runner: 'claude', result: 'limited' },
-    { runner: 'codex', result: null },
+    { runner: 'codex', reason: null, result: null },
   ];
 
   assert.equal(activeRunnerReason(runner, attempts), 'fallback_limit');
   assert.equal(activeRunnerReason(runner, [
     { runner: 'claude', result: 'limited' },
     { runner: 'codex', result: 'ok' },
-    { runner: 'codex', result: null },
+    { runner: 'codex', reason: 'fallback_limit', result: null },
   ]), 'fallback_limit', 'a retry on the reserve keeps the original switch reason');
   assert.equal(activeRunnerReason(
     { ...runner, actual: 'claude', switched: false },
@@ -101,6 +101,7 @@ test('runner config and attempts are read from canonical profile files', async (
   await mkdir(path.join(runRoot, 'run-a'), { recursive: true });
   await writeFile(path.join(runRoot, 'run-b', 'meta.env'), [
     'SCHEMA=1', 'RUNNER=codex', 'EPOCH=2', 'MODEL=gpt-5.6-sol',
+    'ROUTE_REASON=fallback_limit',
     'RESULT_CLASS=ok', 'RC=0', 'SOURCE=runtime', '',
   ].join('\n'));
   await writeFile(path.join(runRoot, 'run-a', 'meta.env'), [
@@ -110,7 +111,13 @@ test('runner config and attempts are read from canonical profile files', async (
 
   assert.equal(loadRunnerConfig(profilesDir, 'demo').CONFIG_REVISION, '4');
   assert.deepEqual(await readRunnerAttempts(path.join(root, 'state'), '42', 'BUILD'), [
-    { id: 'run-a', epoch: 1, runner: 'claude', model: 'opus', result: 'limited', rc: 1, source: 'runtime' },
-    { id: 'run-b', epoch: 2, runner: 'codex', model: 'gpt-5.6-sol', result: 'ok', rc: 0, source: 'runtime' },
+    {
+      id: 'run-a', epoch: 1, runner: 'claude', model: 'opus', reason: null,
+      result: 'limited', rc: 1, source: 'runtime',
+    },
+    {
+      id: 'run-b', epoch: 2, runner: 'codex', model: 'gpt-5.6-sol',
+      reason: 'fallback_limit', result: 'ok', rc: 0, source: 'runtime',
+    },
   ]);
 });

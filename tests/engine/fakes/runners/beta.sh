@@ -16,6 +16,11 @@ runner_beta_capabilities() {
 runner_beta_run() {
   printf 'beta\n' >>"${TEST_ROOT:?}/invocations"
   printf '%s\n' "$2" >"$TEST_ROOT/beta.prompt"
+  if [[ "${FAKE_BETA_CAPTURE_ACTIVE_REASON:-0}" == 1 ]]; then
+    awk -F= -v key="RUNNER_REASON_${FACTORY_RUN_STAGE}" \
+      '$1 == key { value=$2 } END { print value }' \
+      "$STATE_DIR/t${FACTORY_RUN_TASK}.pipeline" >"$TEST_ROOT/beta.active-reason"
+  fi
   FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" \
     --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
     --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" done
