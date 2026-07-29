@@ -1,36 +1,37 @@
 # Engine — движок конвейера (инструкции для агента)
 
-Движок фабрики задач — **часть кокпита** (каталог `engine/`; переехал сюда из отдельного
-репозитория `~/Workspace/factory` 2026-07-28, тот оставлен как архив до завершения живых
-прогонов). Кокпит — пульт (запускает `engine/bin/factory`, читает реестры), движок — станок.
+Движок фабрики задач — **часть кокпита** и канонически живёт в каталоге `engine/`.
+Кокпит — пульт (запускает `engine/bin/factory`, читает реестры), движок — станок.
+Внешний checkout не является источником кода; он подключается только явными env-override.
 Общение и комментарии в коде — **только на русском**.
 
 ## Прежде чем что-то менять — прочитай
 
 | Документ | О чём |
 |---|---|
-| [docs/ENGINE.md](docs/ENGINE.md) | **как менять этот репозиторий**: инварианты, карта файлов, когда правка вступает в силу, чем проверяться, ловушки |
-| [docs/PROFILE-CONTRACT.md](docs/PROFILE-CONTRACT.md) | что движок ждёт от профиля проекта (переменные, хуки, протокол статусов) |
-| [docs/NEW-PROJECT.md](docs/NEW-PROJECT.md) | как завести конвейер под новый проект — с вопросами, которые надо задать человеку |
+| [../docs/engine/ENGINE.md](../docs/engine/ENGINE.md) | **как менять этот репозиторий**: инварианты, карта файлов, когда правка вступает в силу, чем проверяться, ловушки |
+| [../docs/engine/PROFILE-CONTRACT.md](../docs/engine/PROFILE-CONTRACT.md) | что движок ждёт от профиля проекта (переменные, хуки, протокол статусов) |
+| [../docs/engine/NEW-PROJECT.md](../docs/engine/NEW-PROJECT.md) | как завести конвейер под новый проект — с вопросами, которые надо задать человеку |
 | [README.md](README.md) | что это вообще такое и как выглядит для человека |
 
 ## Три правила, нарушение которых ломает всё
 
 1. **Движок не знает ни одного проекта.** Имена контейнеров, команды стека, пути репозиториев —
-   только в `profiles/<имя>.sh`. Три исторические уступки перечислены в
-   [docs/ENGINE.md](docs/ENGINE.md); новых не добавлять.
-2. **Статусы этапов — только через `lib/pipeline-set.sh`.** Прямая запись в `~/.factory/state/tNNNN.pipeline`
-   теряет телеметрию и ломает граф на дашборде.
+   только в локальном `../profiles/<имя>/profile.sh`; весь `/profiles/` игнорируется Git,
+   новых исключений не добавлять.
+2. **Агент завершает этап только через `lib/stage-result.sh`.** Нетерминальные маршрутные
+   данные идут через `lib/stage-progress.sh`; прямой pipeline writer агенту не выдаётся.
 3. **Документация правится вместе с кодом.** Новый или удалённый хук — в тот же заход в
-   `docs/PROFILE-CONTRACT.md`. Комментарии-объяснения («так столкнулись #7789 и #7804») не удалять:
+   `../docs/engine/PROFILE-CONTRACT.md`. Комментарии-объяснения («так столкнулись #7789 и #7804») не удалять:
    это оплаченный инцидентами контекст.
 
 ## Проверки перед тем, как сказать «готово»
 
 ```bash
-bash -n bin/factory bin/factory-check bin/factory-new lib/*.sh profiles/*.sh
+bash -n bin/factory bin/factory-check bin/factory-new lib/*.sh ../profiles/*/profile.sh
 python3 -m py_compile lib/dashboard.py bin/factory-graph-new
 bin/factory-check --quick        # все профили разом: контракт, промпты, доступы, схема, скорость
+../tests/run-all.sh              # полный offline suite, без Cockpit и model call
 ```
 
 Коммит и пуш — только по явной просьбе человека.
@@ -40,9 +41,10 @@ bin/factory-check --quick        # все профили разом: контр�
 ```
 bin/      factory (CLI+демон), dashboard, factory-new (скелет профиля),
           factory-graph-new (заготовка схемы конвейера), factory-check (проверки)
-lib/      core.sh (ядро), pipeline-set.sh (статусы), dashboard.py (веб), watchdog.sh (сторож)
-profiles/ <имя>.sh (профиль) + <имя>/ (провижн стенда проекта) + <имя>.dashboard.env + <имя>.graph.json
-tests/    проверки профиля и дашборда (гоняются через factory-check)
+lib/      core.sh (ядро), multi-runner.sh (dispatcher), run-state.sh (protocol v2), dashboard.py
+../profiles/<имя>/ локальные profile.sh + обязательные runners.env/graph.json/dashboard.env +
+                    проектные скрипты; каталог целиком вне Git
+../tests/engine/ проверки движка, профилей и дашборда
 ```
 
 Состояние задач — вне репозитория: `~/.factory/state/` (`tNNNN.pipeline`, `logs/`, `archive/`,

@@ -5,33 +5,42 @@
 ```
 web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶  источники
                                      │
-   Pinia stores                      ├─ adapters/factory-state ─▶ ~/.factory/state (файлы)
-   (board, tasks, system, ui, pwa)   ├─ adapters/b24 ──────────▶ B24Client (скрейпер портала)
+   Pinia stores                      ├─ adapters/factory-state ─▶ ~/.factory/state
+   (chat, tasks, providers,          ├─ engine/bin/factory* ────▶ engine + CLI runners
+    plugins, auth, system…)          ├─ adapters/b24 ────────────▶ B24Client (портал)
                                      ├─ adapters/system ───────▶ /proc/meminfo, os.cpus
                                      └─ adapters/media ────────▶ ffmpeg + python whisper
 ```
 
-Сервер — **host-native** (см. [[gotchas]]). Окна (браузер) ходят на сервер по `VITE_BRAIN_URL`
+`*` — встроенный путь по умолчанию; внешний engine возможен только через явный config/env.
+
+Сервер — **host-native** (см. [эксплуатационные грабли](gotchas.md)). Окна (браузер) ходят
+на сервер по `VITE_BRAIN_URL`
 (пусто = тот же origin). Реалтайм — SSE (`/api/events`), `fs.watch` на `~/.factory/state`.
 
 ## Модули сервера (`server/src/modules/`)
 
 | Модуль | Эндпоинты | Источник |
 |--------|-----------|----------|
-| `factory` | `/api/tasks`, `/api/tasks/:id/graph`, `/api/factory/routes`, `/api/factory/stages`, `POST /api/tasks/:id/{launch,sandbox/down,sandbox/retry}` | `~/.factory/state` + `factory bin` |
+| `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots}`, запуск/ворота/этапы/runner switch/стенд | `~/.factory/state` + `<factoryHome>/bin/factory` |
 | `b24` | `/api/b24/{dashboard,task/:id,users}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
-| `system` | `/api/system` (CPU + RAM вкл. swap) | `/proc/meminfo`, `os` |
-| `media` | `/api/media/{doctor,upload,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
-| `settings` | `/api/settings/b24` (+ `/test`) | `CredsStore` (`.state`) |
-| `chat` | `POST /api/chat`, `POST /api/tasks/:id/chat`, `GET/PUT /api/chat/store` | `claude -p` + файлы `chats/` (см. [[chat-agents]]) |
+| `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart` | `/proc`, `os`, systemd/manual launcher |
+| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
+| `settings` | `/api/settings/{prefs,factory-debug,b24}` | prefs, engine debug CLI, `CredsStore` |
+| `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission | выбранный executor + `chats/` ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
-| `routes` | CRUD `/api/routes/:profile[/:id]`, `POST …/reseed` | `routes/<профиль>/<id>.json` + промпты узлов `routes/<профиль>/<id>/<этап>.md` |
-| `providers` | `/api/providers` (реестр LLM-исполнителей, кэш 60с) | probe бинарей + `ClaudeAuthStore` |
+| `routes` | `/api/profiles`, CRUD `/api/routes/:profile[/:id]`, `POST …/reseed` | `routes/<профиль>/` + `profiles/*/graph.json` |
+| `providers` | `/api/providers*` (модели, usage, credits, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
+| `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
+| `projects`, `code` | `/api/projects*`, read-only `/api/code/:project/*` | профили/prefs + git/worktree |
+| `plugins`, `demo` | `/api/plugins*`, `/api/demo*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
+| `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
 | `terminal` | `/api/terminal` (WebSocket) | PTY |
 | `health` | `/api/health` | — |
 
-Плагины: `sse` (fs.watch → broadcast), `auth` (GET свободно / мутации по `X-Cockpit-Token`),
-`static` (web/dist + `/shots` `/demo`, кэш index=no-cache, assets=immutable).
+Fastify-плагины: `sse` (fs.watch → broadcast), `auth` (весь `/api`, WS, `/shots` и `/demo`
+закрыты сессией; исключения — login/setup/state и gateway TLS allow; локальные CLI используют
+`X-Cockpit-Token`), `static` (web/dist, кэш index=no-cache, assets=immutable).
 
 **Триаж (lib/analysis/analyzer.js), устойчивость:** очередь оценок при старте сервера
 ВОССТАНАВЛИВАЕТСЯ из статус-файлов (`queued` → снова в очередь; `running` → interrupted,
@@ -64,7 +73,8 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
 ## Данные фабрики
 
 - Реестр прогона: `~/.factory/state/tNNNN.pipeline` — `KEY=VALUE` (не JSON), парс `lib/pipeline-parse`.
-- Форма графа: `factory/profiles/<profile>.graph.json` (nodes/keys/optional/routes с pos+edges).
+- Форма графа: `<config.profilesDir>/<profile>/graph.json` (по умолчанию локальный корневой
+  `profiles/`, целиком вне Git) (nodes/keys/optional/routes с pos+edges).
 - Статусы узлов: `lib/factory-graph.computeNodeStatuses` — порт `pipeline_statuses` из `dashboard.py`.
 - Возвраты: `parseLoops` из `logs/tNNNN.stages.log`. Порты стенда: `tNNNN.env`.
 - Стадии — глобальный каталог `lib/stages.js` (enum), профиль оверрайдит подпись/тип.
@@ -72,21 +82,23 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
 ## Веб (`web/src/`)
 
 - `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
-  Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью), Diff (git-диф на Monaco),
-  Video (видео→задачи), Terminal, Settings (на табах: Битрикс24 / Исполнители), TaskModal,
-  ChatPanel (плавающий чат на всех страницах, кроме `/chats`).
+  Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
+  Projects, Code (read-only дерево/файл/git), Diff (Monaco), Video, Demo, Terminal,
+  Settings (Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ), Login,
+  TaskModal и ChatPanel.
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
   (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
   (модалка задачи), `pwa` (баннер обновления), `chat` (мультисессии, история на сервере),
-  `diff`, `providers` (реестр исполнителей), `ui-context` (что открыто — для чата),
-  `notify-watch` (что на конвейере встало на человеке).
+  `analysis`, `auth`, `diff`, `plugins`, `providers` (реестр исполнителей),
+  `ui-context` (что открыто — для чата), `notify-watch` (что на конвейере встало на человеке).
 - **Чипы «требует меня» в навигации** (`AppShell.vue`, карта `badges`: пункт → `{n, kind, title}`) —
   одно правило на все разделы. Жёлтый пульсирующий (`wait`) — работа СТОИТ, пока не подойду
   (вопрос агента в чате, ворота конвейера); красный (`stall`) — конвейер упёрся или оборвался,
   своей кнопки там нет, надо разбираться; синий — просто непрочитанное. Видны и в свёрнутом
   сайдбаре, и в нижней навигации на мобиле; подсказка перечисляет задачи поимённо.
-  Источники: чаты — `chat.waitingCount`/`unreadCount` (см. [[chat-agents]]), конвейер —
+  Источники: чаты — `chat.waitingCount`/`unreadCount`
+  (см. [чат с агентами](chat-agents.md)), конвейер —
   `notify-watch` (он и так обходит `/api/tasks` + `/api/tasks/:id/graph` ради оповещений —
   второго обхода ради цифры не заводим; обновляется по SSE `state-change` + 120-секундная
   страховка). Цифра конвейера — ЗАДАЧИ, а не поводы: задача, которая и ждёт у ворот, и числится
@@ -96,23 +108,25 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
   оповещений и чипа: цифра чипа обязана сходиться с «⏳ ждут тебя» на странице. Копий этой
   логики было две, и они уже разошлись в мелочах.
 
-## Гашение b24-mcp
+## Граница B24
 
-Кокпит заместил b24-mcp: доска+действия (перенос `B24Client`), медиа/видео (перенос whisper),
-вход в фабрику (кнопка «На конвейер»). Скиллы `/commit-task` `/pr-fixes` `/b24` → CLI `bin/b24`.
-MCP отключён (регистрация/хуки/контейнеры сняты). Подробности переноса — в CLAUDE.md.
+Доска и действия используют локальный `B24Client`, медиа — локальный pipeline, вход в
+фабрику — `engine/bin/factory`, CLI — `bin/b24`. Резервный
+Python-dashboard тоже использует Cockpit `B24Client` и хранилище кредов, но держит отдельный
+cookie jar, чтобы два процесса не перезаписывали один файл. Прямых путей к внешнему checkout
+в рабочем коде нет; внешние host hooks/settings/containers находятся вне репозитория.
 
-## Плагины кокпита (2026-07-27)
+## Плагины кокпита
 
 Плагин = отключаемый блок: пункт в сайдбаре (под разделителем после основного nav), плашка
 в «Настройки → Плагины», свои API/настройки. Реестр: `lib/plugins-registry.js` (SYSTEM =
-video, demo) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+video, demo, code) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
 в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
-системные модули (media, demo) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
+системные модули (media, demo, code) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
 plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ входит в плагин video — не гейтится.
-Фронт: `stores/plugins.js`, DemoView/VideoView показывают заглушку при выключенном плагине.
+Фронт: `stores/plugins.js`, DemoView/VideoView/CodeView показывают заглушку при выключенном плагине.
 Вкладка «Настройки → Плагины»: карточки горизонтальной сеткой (auto-fill 340px), селекты
 настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
 действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.

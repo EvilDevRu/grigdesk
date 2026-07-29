@@ -1,12 +1,13 @@
 # Порт конвейера (SVG-граф)
 
-Граф конвейера — точный порт `factory/lib/dashboard.py` (server-rendered Python) в Vue+JSON.
+Граф конвейера — порт `engine/lib/dashboard.py` (server-rendered Python) в Vue+JSON.
 Разнесён: **сервер** считает данные, **клиент** рисует геометрию.
 
 ## Сервер (`server/src/lib/factory-graph.js`)
 
-- `loadGraph(factoryHome, profile)` — читает и кеширует `profiles/<profile>.graph.json`.
-- `graphForRoute(g, route)` — узлы (оверрайд профиля поверх каталога `stages.js`), keys, optional, vb, pos, edges.
+- `loadGraph(profilesDir, profile)` — читает и кеширует `profiles/<profile>/graph.json`.
+- `graphForRoute(g, route)` — узлы (оверрайд профиля поверх каталога `stages.js`), status
+  `keys`, route-specific `runnerKeys`, optional, vb, pos, edges.
 - `computeNodeStatuses({ pf, pos, keys, optional, mtimeMs })` — **порт `pipeline_statuses`**:
   - `_ST_MAP`: done/approved→done, running→run, waiting→wait, failed/rejected→stall, blocked→skipbad.
   - `skipped` у optional-узла → `skip`, иначе `skipbad` (аномалия).
@@ -15,8 +16,9 @@
   - инвариант линейности (активен ровно один узел); возврат после reject приёмки.
 - `parseLoops(stagesLog)` — возвраты `возврат в X из-за KEY` → счётчик по узлу; `halted`.
 
-`getTaskGraph(task)` собирает всё + `nodeMeta` (AT/DUR/FANOUT/FAILS/TOKENS для модалки этапа) +
-`progress` (done/total/current) + порты стенда из `tNNNN.env`.
+`getTaskGraph(task)` собирает всё + `nodeMeta` (AT/DUR/FANOUT/FAILS/TOKENS, runner chain,
+семейства моделей, actual/reason и последние attempt из `logs/runs/`) + проектную/задачную
+`runnerPolicy` + `progress` (done/total/current) + порты стенда из `tNNNN.env`.
 
 ## Клиент (`web/src/shared/graph-geom.js`)
 
@@ -29,8 +31,9 @@
 
 `FactoryGraph.vue` рисует: узлы по типу (агент/человек/код — рамки), 9 статусов (`ns-*`: обводка/
 заливка/пульс/свечение), рёбра (`e-off`/`e-on`/`e-flow` «ток» / `e-fail`/`e-loop` возвраты), метки
-(`MARKS`). `reference`-режим — эталонная схема без статусов (раздел «Маршруты»). Клик по узлу →
-`emit('node')` → модалка этапа.
+(`MARKS`) и provider/model agent-узла. `reference`-режим — эталонная схема без статусов
+(раздел «Маршруты»). Клик по узлу → `emit('node')` → модалка этапа с цепочкой, попытками,
+причиной failover и безопасной командой переключения активного run.
 
 ## Палитра
 
@@ -42,4 +45,6 @@ good `#3fb950`, warn(serious) `#e0a33a`, bad(critical) `#f0564c`, рамки у�
 
 `STAGES` — каталог всех стадий (kind + подпись по умолчанию), `StageKind` (agent/human/code).
 Профили ССЫЛАЮТСЯ на id и оверрайдят через graph.json (`resolveNode`). `GET /api/factory/stages`.
-Задел под будущий редактор профилей: стадии выбираются из каталога, не описываются с нуля.
+Редактор «Маршруты» уже использует этот каталог: стадии выбираются из общей библиотеки,
+цепочка/возвраты/промпты сохраняются по проектам. Сам `profiles/<profile>/graph.json` остаётся
+engine-контрактом координат и runtime-графа, а не редактируется как произвольный JSON из UI.

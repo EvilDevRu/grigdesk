@@ -19,13 +19,25 @@
 - **server/** — Fastify (Node ESM, порт **8140**). `src/{app,config}.js`, `plugins/` (sse, auth, static),
   `adapters/` (factory-state, b24, system, media), `lib/` (pipeline/stages/factory-graph парсеры, git,
   `b24/` — перенесённый `B24Client`, `media/` — перенесённый медиа-конвейер, claude-auth-store), `modules/`
-  (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers).
-- **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Diff, Video, Terminal,
-  Settings, TaskModal, ChatPanel), `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
+  (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers,
+  analysis, auth, gateway, plugins, demo, projects — реестр проектов с путями репозиториев,
+  code — плагин «Код»).
+- **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Projects, Code, Diff,
+  Video, Demo, Terminal, Settings, Login, TaskModal, ChatPanel),
+  `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
   ChatSession, ChatTabs, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
-  `stores/` (Pinia: board, tasks, system, ui, pwa, chat, diff, providers, ui-context), `shared/`
-  (api-client, layout, format, graph-geom, route-layout, diff — построчный LCS-дифф, ProviderIcon, ui/).
+  `stores/` (Pinia: analysis, auth, board, chat, diff, notify-watch, plugins, providers, pwa,
+  system, tasks, ui, ui-context), `shared/`
+  (api-client, layout, format, graph-geom, route-layout, diff — построчный LCS-дифф,
+  monaco — общая обвязка Monaco для дифа и «Кода», ProviderIcon, ui/).
 - **bin/b24** — CLI-обёртка к B24-API (в PATH через симлинк). **deploy/** — systemd-юнит + install.sh.
+- **engine/** — канонический движок конвейера (демон задачи, этапы, агенты, стенды), встроенный
+  в этот репозиторий. Свои правила — `engine/CLAUDE.md` и `docs/engine/ENGINE.md`.
+  Профили проектов вынесены в локальный корень: `profiles/<имя>/` с `profile.sh`,
+  `runners.env`, `graph.json`, `dashboard.env` и проектными скриптами. Весь `/profiles/`
+  игнорируется Git и не является частью поставки репозитория. Сервер по умолчанию
+  вызывает `engine/bin/factory`; внешний checkout возможен только через явные `FACTORY_HOME` /
+  `COCKPIT_FACTORY_BIN`. Состояние задач — по-прежнему `~/.factory/state`.
 - **Базы в корне проекта** (самогитигнорятся, свой `.gitignore` внутри): `chats/` — история чатов
   (`YYYY-MM/<id>.json`), `agents/` — ШАБЛОНЫ агентов (`<id>.md`, frontmatter+заготовка промпта; один id =
   один шаблон, без коллизий по профилям), `routes/` — маршруты по проектам (`<профиль>/<id>.json`, цепочка+возвраты)
@@ -36,6 +48,7 @@
 
 - Фабрика: `GET /api/tasks`, `/api/tasks/:id/graph` (схема+статусы+возвраты+nodeMeta),
   `/api/tasks/:id/diff` (git-диф worktree), `/api/factory/routes` (эталонные схемы),
+  `POST /api/tasks/:id/runner/switch` (CAS-защищённое переключение активного runner-а),
   `POST /api/tasks/:id/sandbox/down`, `POST /api/tasks/:id/sandbox/retry` (снос остатков
   упавшей песочницы + resume — кнопка в плашке «стенд не поднялся»).
 - B24: `GET /api/b24/dashboard` (полный «Рабочий стол»), `/api/b24/task/:id`, `/api/b24/users`;
@@ -46,15 +59,16 @@
   `PUT /api/chat/store/chat` (`{chat, archived}`), `DELETE /api/chat/store/chat/:id`,
   `PUT /api/chat/store/meta` (активный чат и дефолты). Полный `PUT /api/chat/store` остался
   только для миграции и восстановления снимка: одним телом история упиралась в лимит
-  запроса — см. gotchas.md. Принимает `context` (UI-контекст страницы)
+  запроса — см. `docs/cockpit/gotchas.md`. Принимает `context` (UI-контекст страницы)
   и `attachments` (вложения). Вложения: `POST /api/chat/upload` (multipart → `chats/attachments/`),
   `GET /api/chat/attachment/:file` (превью). Диктовка: `POST /api/chat/transcribe` (аудио → whisper → текст).
   Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка).
   **Вопрос агента** (AskUserQuestion): SSE `chat-question` → тот же `POST /api/chat/permission/:pid`
-  с `{answers}` (ответ доезжает до агента через `deny.message` — см. chat-agents.md).
-  **Спрос висит до ответа** (таймаута нет): `GET /api/chat/waiting` поднимает висящее после F5,
-  лимит хода не тикает, пока ждём человека, а чаты «ждут тебя» помечены чипами в навигации
-  и в списке чатов — см. chat-agents.md.
+  с `{answers}` (ответ доезжает до агента через `deny.message` — см. `docs/cockpit/chat-agents.md`).
+  **Спрос висит до ответа** в пределах жизни процесса (технический потолок permission-call —
+  сутки): `GET /api/chat/waiting` поднимает висящее после F5, лимит хода не тикает, пока
+  ждём человека, а чаты «ждут тебя» помечены чипами в навигации
+  и в списке чатов — см. `docs/cockpit/chat-agents.md`.
   **Лента хода** (инструменты/размышления, как в чате VS Code): SSE `chat-step`, шаги нормализует
   `lib/chat/stream-steps.js`, рисует `views/chat/StepList.vue`.
 - Исполнители (ИИ): модульно в `server/src/lib/executors/` (один файл = один ИИ; файлы на `_` —
@@ -63,24 +77,42 @@
   захардкоженных версий. `GET /api/providers` отдаёт всё для UI, `POST /api/providers/:id/update`
   обновляет CLI кнопкой из настроек, `POST /api/providers/check-updates` — проверка новых версий
   (она же идёт фоном раз в 6 часов → SSE `providers-update` → точка на иконке в топбаре).
-  **Автообновления нет и не будет: кокпит только сообщает** (см. chat-agents.md).
+  **Автообновления нет и не будет: кокпит только сообщает**
+  (см. `docs/cockpit/chat-agents.md`).
   `GET /api/providers/usage` — полосы потребления лимитов во всплывашке шапки;
   `POST /api/providers/:id/credits` — доплата сверх лимитов (вкл/выкл и месячный потолок).
-  **Доплата тратит реальные деньги: только по подтверждению человека, никогда сама** (chat-agents.md).
-- **Перезапуск сервера — только `bin/restart`** (гасит порт и ждёт освобождения; ручной kill+start
-  между параллельными сессиями ловит EADDRINUSE). **Агент, запущенный ИЗ чата кокпита, — дочерний
-  процесс этого сервера:** перезапуск изнутри такого хода убивает того, кто его ждёт, и ответ не
-  доезжает никуда (даже в `chats/pending`). Правки сервера из чата — только с просьбой к человеку
+  **Доплата тратит реальные деньги: только по подтверждению человека, никогда сама**
+  (`docs/cockpit/chat-agents.md`).
+- **Перезапуск сервера — `bin/restart` или кнопка «Настройки → Сервер»** (`POST /api/system/restart`:
+  под systemd — выход процесса, юнит с `Restart=always` поднимает; при ручном запуске — тот же
+  `bin/restart` отвязанным процессом; режимы НЕ смешивать — см. историю 7553 падений в юните).
+  **Агент, запущенный ИЗ чата кокпита, — дочерний процесс этого сервера:** перезапуск изнутри
+  такого хода (скриптом ли, кнопочным ли API) убивает того, кто его ждёт, и ответ не доезжает
+  никуда (даже в `chats/pending`). Правки сервера из чата — только с просьбой к человеку
   перезапустить.
-- Базы: `GET/POST/PUT/DELETE /api/agents[/:id]` (+`/reseed`), `GET/POST/PUT/DELETE /api/routes[/:id]`,
+- Базы: `GET/POST/PUT/DELETE /api/agents[/:id]` (+`/reseed`);
+  проекты маршрутов — `GET/POST /api/profiles` и
+  `GET/POST /api/routes/:profile`, `PUT/DELETE /api/routes/:profile/:id`,
+  `POST /api/routes/:profile/reseed`.
   `GET /api/providers` (реестр LLM-исполнителей; его же рисует топбар).
+- Проекты: `GET /api/projects` (реестр: пути репозиториев — фабричным проектам их даёт профиль
+  через `lib/analysis/profile.js`, кокпитным — prefs), `PUT /api/projects/:id` (пути кокпитного
+  проекта; фабричному с путями в профиле — 409, источник правды один). Плагин «Код»:
+  `GET /api/code/:project/{repos,ls,file,git}` — read-only просмотр любого дерева репозитория
+  (основное + worktree из `git worktree list`), диф — тем же `lib/git.js`, что приёмка;
+  гейт `pluginEnabled('code')` живой, как у видео/демо.
 - Вход: `GET /api/auth/state` (публичный), `POST /api/auth/{setup,login,logout,logout-all,password}`.
   Гард (`plugins/auth.js`) закрывает **весь** `/api` включая GET и WS-upgrade; публичны только
-  `auth/{state,login,setup}` и `health`. UI — `views/LoginView.vue` + таб «Доступ» в настройках.
+  `auth/{state,login,setup}` и служебный `/api/gateway/tls-allow`; даже `health` требует сессию.
+  UI — `views/LoginView.vue` + таб «Доступ» в настройках.
 - Система: `GET /api/system` (CPU% + RAM: сумма «ОЗУ+swap» для цифры в шапке и разбивка
-  `ram*`/`swap*` для всплывашки с полосками). Медиа: `GET /api/media/doctor`,
+  `ram*`/`swap*` для всплывашки с полосками); `GET /api/system/server` (режим запуска:
+  systemd/вручную, по `INVOCATION_ID`), `POST /api/system/restart` (перезапуск кнопкой). Медиа: `GET /api/media/doctor`,
   `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт).
-- Настройки: `GET/POST /api/settings/b24` + `POST /api/settings/b24/test` (UI настроек — на табах).
+- Настройки: prefs — `GET/POST /api/settings/prefs`; диагностика фабрики —
+  `GET/POST /api/settings/factory-debug`; B24 — `GET/POST /api/settings/b24` +
+  `POST /api/settings/b24/test`; плагины — `/api/plugins*`. В UI табы:
+  Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ.
   Терминал: `GET /api/terminal` (WebSocket, PTY). Реалтайм: `GET /api/events` (SSE).
 
 ## Ключевые решения (почему так)
@@ -89,15 +121,16 @@
   Кокпит закоммичен в dark.
 - **Конвейер — порт `dashboard.py`**: `node_geom`/`edge_path` (12 типов кривых), `pipeline_statuses`
   (9 статусов узлов), `loop_facts` — портированы 1:1 в `lib/factory-graph.js` + `web/shared/graph-geom.js`.
-- **B24 — session-cookie/CSRF-скрейпер** (официального REST в портале нет), перенесён из b24-mcp.
+- **B24 — session-cookie/CSRF-скрейпер** (официального REST в портале нет), встроен в Cockpit.
   **Все вызовы клиента сериализуются очередью `_run`** в адаптере (B24Client не потокобезопасен —
   конкурентные запросы рвут сессию, давали «Client Error»). Кокпит — единственный владелец сессии
   (свой cookie-файл в `.state`).
 - **Мутации фабрики** — через `factory bin` (берёт flock) или прямой upsert `pipeline-set.sh`;
   **flock на `orch.lock` НЕ использовать** (демон держит его весь прогон — дедлок). Контракт запуска —
   машинный (чтение `ORCH_PID`+`/proc`), не парсинг stdout.
-- **Медиа-конвейер** (whisper/ffmpeg) перенесён из b24-mcp; venv (492МБ) и модель (1.5ГБ)
-  **переиспользуются** через `COCKPIT_MEDIA_PYTHON` (не дублируем).
+- **Медиа-конвейер** (whisper/ffmpeg) живёт в Cockpit; runtime-venv хранится в
+  `server/.state/media-venv` (gitignore), воспроизводится из `server/requirements-media.txt`
+  и подключается через `COCKPIT_MEDIA_PYTHON`. Модель остаётся в общем Hugging Face cache.
 - **Вход — один пользователь, пароль scrypt-хешем в `.state`, сессия в httpOnly-cookie.**
   Закрыт весь `/api` (чтение тоже: чаты, дифы, а через терминал — шелл). Экран входа показывает
   само приложение по 401, серверных редиректов НЕТ — они конфликтуют с service worker'ом PWA.
@@ -110,17 +143,18 @@
   (подпуть ломает Vite с `base: '/'`), диапазоны портов ограничены, перед стендами `forward_auth`.
   Режим за шлюзом включается `COCKPIT_TRUST_PROXY=127.0.0.1` (не `true`!) — от него зависят флаг
   `Secure` у cookie и реальный IP для лимита попыток. Первичная настройка пароля — только с
-  localhost. Подробности и грабли — в `.claude/knowledge/gotchas.md`.
+  localhost. Подробности и грабли — в `docs/cockpit/gotchas.md`.
 - **Никаких хардкодов проекта в коде**: профиль из реестра, обнаружение профилей сканом
-  `factory/profiles/*.graph.json`, портал/креды из «Настроек» (`.state`), пути через env. Пустой кокпит
+  `profiles/*/graph.json` через `config.profilesDir`, портал/креды из «Настроек»
+  (`.state`), пути через config/env. Пустой кокпит
   ничего не знает о конкретном проекте.
 
 ## База знаний (как работает и тонкости — чтобы не перечитывать код)
 
-@.claude/knowledge/architecture.md
-@.claude/knowledge/factory-graph.md
-@.claude/knowledge/chat-agents.md
-@.claude/knowledge/gotchas.md
+@docs/cockpit/architecture.md
+@docs/cockpit/factory-graph.md
+@docs/cockpit/chat-agents.md
+@docs/cockpit/gotchas.md
 
 ## Запуск
 
@@ -128,11 +162,14 @@
 deploy/install.sh                 # боевая установка (зависимости, сборка web, systemd, симлинк b24)
 cd server && npm start            # dev-сервер (:8140)
 cd web && npm run dev             # dev-фронт (:5180, проксирует /api на :8140)
+bash tests/run-all.sh             # полный offline suite; без Cockpit и model call
 ```
 Секреты (креды/куки B24) — в `server/.state/` (gitignore).
 
-## Гашение b24-mcp (в процессе)
+## Граница B24
 
-Кокпит замещает b24-mcp. Переведены на `bin/b24`: `/commit-task`, `/pr-fixes`. Медиа-конвейер и
-раздел «Видео» замещают `/video-task`. Осталось: репойнт `/b24` и `factory b24-timer.mjs`, удалить хук
-`<профиль>-b24-factory.sh` + записи в `settings.json`/`~/.claude.json`, погасить контейнеры MCP.
+Доска и мутации идут через сервер/`bin/b24`, медиа — через `server/src/lib/media/`, а
+резервный Python-dashboard использует тот же Cockpit `B24Client` и
+`server/.state/b24-creds.json` через `profiles/arsenkin/b24-timer.mjs`. В репозитории нет
+импортов, путей и чтения `.env` внешнего B24-checkout. Внешние host hooks/settings/containers
+лежат вне репозитория и этой кодовой границей не подтверждаются.

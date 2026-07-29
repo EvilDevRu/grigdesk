@@ -10,15 +10,22 @@
 
 ```
 server/   Fastify (Node ESM, :8140) — API; модули: factory, b24, chat, analysis,
-          agents, routes, providers, media, terminal, settings; исполнители LLM —
-          server/src/lib/executors/ (один файл = один ИИ)
+          agents, routes, providers, projects, code, plugins, auth, gateway, media,
+          terminal, settings; исполнители LLM — server/src/lib/executors/
 web/      Vite + Vue 3 (PWA) — окно; по умолчанию отдаётся самим сервером
+engine/   project-agnostic движок фабрики и CLI
+profiles/ локальные профили проектов: policy, graph, env и скрипты; каталог не коммитится
+docs/     документация по подсистемам; движок — в docs/engine/
+tests/    единый тестовый контур: docs/, engine/, server/, web/
 bin/      скрипты: cockpit (запуск/сборка), restart (перезапуск без гонок), b24 (CLI к Б24)
 deploy/   systemd user-юнит + install.sh
 chats/    история чатов        (данные, самогитигнор)
 agents/   шаблоны агентов      (данные, самогитигнор)
 routes/   маршруты конвейера + промпты узлов схем (данные, самогитигнор)
 ```
+
+Документация начинается с [docs/README.md](docs/README.md), тесты — с
+[tests/README.md](tests/README.md). Полный офлайн-прогон: `bash tests/run-all.sh`.
 
 ## Системные требования
 
@@ -34,8 +41,9 @@ routes/   маршруты конвейера + промпты узлов схе
 
 Не обязательно, но без этого часть разделов пустая:
 
-- **`claude` CLI** — чаты и агенты (`COCKPIT_CLAUDE_BIN`); **`codex` CLI** — провайдер GPT
-  (`npm i -g @openai/codex`), не поставлен — просто не показывается в списке.
+- **`claude` и/или `codex` CLI** — исполнители чатов и этапов фабрики. Недоступный CLI остаётся
+  виден в реестре, но выбрать его для нового запуска нельзя; политика фабрики отдельно проверяется
+  metadata-only preflight.
 - **ffmpeg + ffprobe** и **venv с faster-whisper** (`COCKPIT_MEDIA_PYTHON`) — «Видео» и диктовка;
   чего не хватает, скажет предполётная проверка `lib/media/preflight.js`.
 
@@ -59,11 +67,16 @@ bin/restart            # перезапуск сервера: гасит пор�
 > systemd-юнит. Если юнит при этом включён, он уходит в вечный crashloop по EADDRINUSE
 > (27.07.2026 намотал 8057 падений) и в окна свободного порта успевает его перехватывать.
 > Перед ручной работой: `systemctl --user stop cockpit-server`. Подробности и диагностика —
-> `.claude/knowledge/gotchas.md`, раздел «Два владельца порта 8140».
+> `docs/cockpit/gotchas.md`, раздел «Два владельца порта 8140».
 
 Переменные окружения — `server/src/config.js` (грузятся и из корневого `.env`):
 `COCKPIT_PORT`, `COCKPIT_MEDIA_PYTHON` (venv whisper), `COCKPIT_CHAT_TIMEOUT_MS`,
 `COCKPIT_ANALYSIS_CONCURRENCY`, `COCKPIT_DISCOVER_WITH_CLI_TOKEN` и др.
+По умолчанию сервер использует встроенный `engine/` и локальный корневой `profiles/`.
+Каталог `/profiles/` целиком находится в `.gitignore`: в нём допустимы машинные пути,
+локальные интеграции и скачанные runtime-файлы, но не общая кодовая база.
+`FACTORY_HOME`, `FACTORY_PROFILES_DIR` и `COCKPIT_FACTORY_BIN` нужны только для
+осознанной внешней раскладки.
 
 ## Установка (боевая, host-native)
 
@@ -94,12 +107,13 @@ systemctl --user status cockpit-server
 - **Доска** — «Рабочий стол» Б24 (показатели, таймеры, задачи) + триаж-оценки задач
   агентом (сложность/риск/размер) и запуск на конвейер фабрики.
 - **Конвейер** — живой граф стадий по задачам, возвраты, прогресс, стенды.
-- **Чаты** — мультисессии `claude -p` (и модульно другие ИИ): вложения, диктовка (whisper),
+- **Чаты** — мультисессии доступных CLI-исполнителей (сейчас Claude и Codex): вложения,
+  диктовка (whisper),
   слэш-команды, всплывашка разрешений, живой счётчик токенов, недоставленные ответы
   переживают F5 и рестарты.
 - **Агенты / Маршруты** — редактируемые базы стадий и маршрутов конвейера.
 - **Видео** — запись встречи → транскрипт → черновики задач в Б24.
 - **Терминал** — PTY в браузере (авторизация CLI, ручные операции).
 
-Подробности архитектуры и грабли — `CLAUDE.md` + `.claude/knowledge/` (читается агентами
+Подробности архитектуры и грабли — `CLAUDE.md` + `docs/cockpit/` (читается агентами
 и людьми). Секреты (креды/куки Б24, ключи) — в `server/.state/` (gitignore).
