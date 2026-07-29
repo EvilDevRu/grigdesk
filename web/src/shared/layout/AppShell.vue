@@ -10,6 +10,7 @@ import { useProvidersStore } from '../../stores/providers.js';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useChatStore } from '../../stores/chat.js';
+import { providerUsageView } from '../provider-usage.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
 import HelpTip from '../ui/HelpTip.vue';
@@ -36,6 +37,12 @@ const router = useRouter();
 function toProviders() {
   localStorage.setItem('cockpit-settings-tab', 'providers');
   router.push('/settings');
+}
+const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
+function runUsageAction(action) {
+  if (action?.kind !== 'terminal' || !action.command) return;
+  sessionStorage.setItem('cockpit-term-insert', action.command);
+  router.push('/terminal');
 }
 // «сброс через 2ч» из ISO-даты сброса лимита
 function resetIn(iso) {
@@ -310,8 +317,8 @@ const { connected } = useSse((name) => {
                   Обновить — в «Настройки → Исполнители» (клик по иконке)
                 </span>
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
-                <span v-if="prov.usage[p.id]?.length" class="pu">
-                  <span v-for="b in prov.usage[p.id]" :key="b.key" class="pu-row">
+                <span class="pu">
+                  <span v-for="b in usageOf(p).bars" :key="b.key" class="pu-row">
                     <!-- У выключенной доплаты процент бессмыслен: там не «0% потрачено», а «не считается» -->
                     <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.credits && !b.credits.enabled ? '—' : `${b.pct}%` }}</b></span>
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
@@ -341,6 +348,14 @@ const { connected } = useSse((name) => {
                       <span v-if="crOf(p.id).msg" class="pu-err">{{ crOf(p.id).msg }}</span>
                       <a class="pu-link" :href="CREDITS_URL" target="_blank" rel="noopener">карта, история и доплата без потолка — на claude.ai</a>
                     </span>
+                  </span>
+                  <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
+                    <span>{{ usageOf(p).message }}</span>
+                    <span v-if="usageOf(p).note" class="pu-reset">{{ usageOf(p).note }}</span>
+                    <button v-if="usageOf(p).action" type="button"
+                            @click.stop="runUsageAction(usageOf(p).action)">
+                      {{ usageOf(p).action.label }}
+                    </button>
                   </span>
                 </span>
               </span>
@@ -470,6 +485,19 @@ const { connected } = useSse((name) => {
 .pu-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .pu-fill.hot { background: var(--bad); }
 .pu-reset { font-size: 10.5px; color: var(--ink-mid); }
+.pu-state {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  padding-top: 7px; border-top: 1px solid var(--line);
+  font-size: 11px; line-height: 1.45; color: var(--ink-mid);
+}
+.pu-state.is-bad { color: var(--bad); }
+.pu-state.is-warn { color: var(--warn); }
+.pu-state button {
+  padding: 4px 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
+  font-size: 11px;
+}
+.pu-state button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Управление доплатой: живёт внутри всплывашки, поэтому всё компактное */
 .pu-cr { display: flex; flex-direction: column; gap: 6px; margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--line); }

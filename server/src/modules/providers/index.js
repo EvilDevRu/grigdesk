@@ -9,6 +9,11 @@ import { execFile } from 'node:child_process';
 import { getExecutors } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { isOutdated } from '../../lib/executors/_npm-latest.js';
+import {
+  mergeProviderUsage,
+  normalizeProviderUsage,
+  unsupportedProviderUsage,
+} from '../../lib/provider-usage.js';
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
@@ -105,17 +110,29 @@ async function providersModule(fastify, opts) {
     if (usageCache && Date.now() - usageCache.at < CACHE_MS) return { usage: usageCache.usage };
     const executors = await getExecutors();
     const usage = {};
+    const checkedAt = Date.now();
     for (const ex of executors.values()) {
-      if (typeof ex.usage !== 'function') continue;
-      try {
-        const u = await ex.usage(config, deps);
-        if (u) usage[ex.id] = u;
-      } catch (e) {
-        fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
+      let current;
+      if (typeof ex.usage !== 'function') {
+        current = unsupportedProviderUsage(ex.name, checkedAt);
+      } else {
+        try {
+          current = normalizeProviderUsage(await ex.usage(config, deps), {
+            providerName: ex.name,
+            checkedAt,
+          });
+        } catch (e) {
+          fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
+          current = normalizeProviderUsage({
+            state: 'unavailable',
+            message: `Не удалось получить лимиты ${ex.name}. Повторим проверку автоматически.`,
+          }, { providerName: ex.name, checkedAt });
+        }
       }
+      usage[ex.id] = mergeProviderUsage(usageCache?.usage?.[ex.id], current);
     }
-    // Сетевой сбой не затирает прошлые данные: лучше слегка устаревшие бары, чем пустые.
-    usageCache = { at: Date.now(), usage: Object.keys(usage).length ? usage : (usageCache?.usage || {}) };
+    // Сетевой сбой не затирает прошлые бары, но сам сбой остаётся видимым состоянием.
+    usageCache = { at: checkedAt, usage };
     return { usage: usageCache.usage };
   });
 

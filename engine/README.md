@@ -177,7 +177,6 @@ lib/
   debug-log.sh         typed trace, runtime on/off, redaction, size limit и TTL
   pipeline-set.sh      машина статусов (upsert + телеметрия; --init / --replan / --reject-accept)
   dashboard.py         реализация резервного интерфейса и эталон части логики графа
-  watchdog.sh          пассивный наблюдатель (помечает «нужен запуск», сам ничего не поднимает)
 profiles/                   локальный каталог, целиком вне Git
   <name>/
     profile.sh         стек-контекст, этапы маршрутов, хуки стенда, промпты этапов

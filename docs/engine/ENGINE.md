@@ -119,6 +119,7 @@ Switchable:
 
 - `unavailable_preflight`/`route_unavailable` до model call;
 - доказанный `limited` после начала model call;
+- `provider_unavailable` для 401/403, если event stream доказывает отсутствие model/tool activity;
 - CAS-подтверждённый manual switch.
 
 Non-switchable:
@@ -128,8 +129,10 @@ Non-switchable:
 - permission/safety/policy denied;
 - malformed/stale status;
 - operator cancellation;
+- `context_overflow`/HTTP 413;
+- обычный HTTP 429 без доказанного subscription/weekly limit;
 - outcome unknown после возможного side effect;
-- late auth/transport error после старта.
+- auth/transport error после фактической активности модели.
 
 Breaker scoped по provider/auth profile. Он не является глобальным переключателем всей фабрики.
 

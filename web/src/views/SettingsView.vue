@@ -124,6 +124,18 @@ async function toggleGitRefresh(v) {
     prefsMsg.value = { type: 'ok', text: 'Сохранено.' };
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
+async function toggleAutoRecover(v) {
+  prefsMsg.value = null;
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { autoRecoverPipelines: v });
+    prefsMsg.value = {
+      type: 'ok',
+      text: v
+        ? 'Автовосстановление включено и применится при следующем запуске Cockpit.'
+        : 'Автовосстановление выключено.',
+    };
+  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
+}
 
 // Подробный trace фабрики. Сам файл настроек принадлежит engine writer-у; UI работает
 // только через /api/settings/factory-debug.
@@ -373,6 +385,13 @@ onMounted(() => {
             Перед триажем и конвейером: <code>git fetch</code> всегда; <code>git pull --ff-only</code> —
             только если репозиторий стоит на чистом master (ветка задачи или незакоммиченные
             правки не трогаются, в результате запуска фиксируется причина пропуска).
+          </p>
+          <ToggleSwitch :model-value="prefs.autoRecoverPipelines" label="Продолжать незакрытые конвейеры после запуска Cockpit"
+                        @update:model-value="toggleAutoRecover" />
+          <p class="muted small">
+            Кокпит возобновит только прогон с погибшим демоном. Ворота, остановка для
+            человека, завершённая задача и повторяющийся сбой остаются заблокированными.
+            После трёх аварийных перезапусков потребуется ручное решение.
           </p>
           <p v-if="prefsMsg" class="msg" :class="prefsMsg.type">{{ prefsMsg.text }}</p>
         </template>

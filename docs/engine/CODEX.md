@@ -5,13 +5,18 @@
 - runtime-cutover и protocol v2 реализованы;
 - проектные профили изолированы в локальных `profiles/<name>/`, целиком исключённых из Git;
   engine/server/CLI используют единый `FACTORY_PROFILES_DIR`, плоской legacy-раскладки больше нет;
-- полный offline suite прошёл без запуска Cockpit и без model call;
+- полный offline suite запускается без Cockpit и без model call;
 - live state мигрирован с backup в `~/.factory/state/migrations/`;
 - metadata-only host preflight прошёл для `arsenkin`, `cockpit` и `rdesigner`;
-- Cockpit и реальные модели не запускались, рабочий canary не выполнялся;
+- текущая поставка проверяется без перезапуска Cockpit и без вызова реальных моделей;
 - Cockpit API и UI поднимают canonical runner chain, task/stage override, model family,
   actual provider/model, причину failover и историю attempt; активный run можно безопасно
   переключить на разрешённый резерв;
+- всплывашка исполнителя показывает структурированное состояние лимитов: актуальные или
+  последние успешные бары, необходимость входа, отказ аккаунта, rate limit либо отсутствие
+  usage API; для истёкшего Claude-токена доступна команда `claude login`;
+- незакрытые конвейеры после перезапуска Cockpit возобновляются его собственным механизмом
+  восстановления; human gates и semantic stop не пересекаются, после трёх аварий нужен человек;
 - редактор project/task policy, coverage каждого provider-а и breaker/cooldown в UI остаются
   отдельным этапом; engine CLI и debug-настройки уже доступны.
 - B24 и медиа работают только через код/runtime Cockpit; внешний checkout не является
@@ -122,7 +127,11 @@ BUILD
 Интерфейс различает:
 
 - `limited` после начавшегося model call — можно перейти к следующему совместимому provider-у;
+- `provider_unavailable` для доказанного 401/403 без единого ответа модели или tool call —
+  можно перейти к следующему provider-у без установки breaker;
 - `unavailable_preflight`, `route_unavailable` до model call — можно пропустить кандидата;
+- `context_overflow` (в том числе HTTP 413), обычный `rate_limit` и ошибка после фактической
+  активности модели — переключение запрещено: исход попытки может быть неоднозначным;
 - `task_error`, `tests_failed`, `policy_denied`, `unsafe_action`, `bad_prompt`,
   `status_protocol_error` — переключение запрещено, потому что другой ИИ не исправляет причину;
 - `chain_exhausted` — все разрешённые кандидаты исчерпаны;
@@ -222,6 +231,8 @@ Dispatcher принимает нормализованный результат 
 
 - до model call: `unavailable_preflight` и `route_unavailable`;
 - после начала model call: только доказанный `limited`;
+- при 401/403: строгий `provider_unavailable`, только если event stream доказывает отсутствие
+  ответа модели и запуска инструментов;
 - вручную: только CAS-подтверждённый `manual_switch`.
 
 Переключение запрещено:
@@ -233,13 +244,34 @@ Dispatcher принимает нормализованный результат 
 - stale run/capability;
 - неясно, был ли уже выполнен необратимый side effect;
 - operator отменил run;
-- late auth/transport failure: после старта его нельзя переименовать в preflight error.
+- `context_overflow`/HTTP 413: это слишком большой запрос, а не блокировка аккаунта;
+- обычный HTTP 429 без доказанного subscription/weekly limit;
+- late auth/transport failure после реальной активности модели.
 
 Для сомнительных транспортных сбоев adapter возвращает `outcome_unknown`; автоматический
 повтор другим ИИ запрещён, пока операция не доказана идемпотентной.
 
 Breaker считается отдельно для provider/auth profile. Он не переносит аварию Claude одного
 проекта на Codex другого проекта.
+
+## Восстановление после перезапуска
+
+При запуске Cockpit один раз проверяет все `WF_STATUS=running`. Если демон задачи мёртв,
+локальный профиль полон (`profile.sh`, `runners.env`, `graph.json`) и задача не ждёт человека,
+Cockpit запускает `factory <task> resume` в отдельном systemd scope. Уже выполненные этапы
+остаются в реестре.
+
+Автоматика не возобновляет:
+
+- живой, завершённый или явно остановленный прогон;
+- любое `GATE_*=waiting`;
+- `STALLED_HUMAN=1`;
+- задачу без локального профиля;
+- четвёртую аварию в пределах 15 минут.
+
+Решения видны в `GET /api/factory/recovery` и в полях `RECOVERY_*` реестра. Тумблер
+`Настройки → Запуски → Продолжать незакрытые конвейеры` пишет
+`prefs.autoRecoverPipelines`; старого отдельного watchdog/флага в tmpfs больше нет.
 
 ## Протокол этапа
 
@@ -358,10 +390,13 @@ tests/server/
   runner-state.test.js
   runner-control.test.js
   factory-graph-runner-keys.test.js
+  pipeline-recovery.test.js
+  provider-usage.test.js
   codex-abort.test.js
   b24-timer-boundary.test.js
 
 tests/web/
+  provider-usage.test.js
   runner-display.test.js
 ```
 
@@ -377,7 +412,8 @@ tests/run-all.sh
 - нет прямого Claude-only пути в `core.sh`;
 - project/task/stage routing работает по заявленному precedence;
 - family policy переживает появление новых model id;
-- retry/failover разрешён только для классифицированных provider-сбоев;
+- retry/failover разрешён только для классифицированных provider-сбоев; 401/403 failover
+  требует доказанного отсутствия model/tool activity, 413 не переключает provider;
 - stale result предыдущей попытки отвергается;
 - агент не имеет доступа к общему pipeline writer;
 - Codex получает нужные write roots через `--add-dir` без отключения sandbox;
@@ -385,6 +421,6 @@ tests/run-all.sh
 - debug выключаем, ограничен TTL и не пишет секреты;
 - все тесты зелёные без запуска Cockpit и без model call.
 
-Все runtime-критерии этого раздела подтверждены offline suite 2026-07-29. Multi-AI UI
-проверен unit-тестами и production-сборкой, но сам Cockpit не запускался и визуально в браузере
-не проверялся. Рабочий canary намеренно не выполнялся.
+Runtime-критерии этого раздела проверяются offline suite. Multi-AI UI и восстановление
+проверяются unit-тестами и production-сборкой; текущая версия не перезапускает Cockpit и
+не выполняет рабочий canary.

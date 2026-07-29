@@ -73,16 +73,33 @@ function authHeaders(tok) {
  */
 async function fetchUsage() {
   const tok = await cliToken();
-  if (!tok) return null;
+  if (!tok) return { hasToken: false };
   let r = null;
-  for (let i = 0; i < 2 && !r?.ok; i++) {
-    r = await fetch(`${API}/api/oauth/usage`, {
-      headers: authHeaders(tok),
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => null);
+  let error = null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      r = await fetch(`${API}/api/oauth/usage`, {
+        headers: authHeaders(tok),
+        signal: AbortSignal.timeout(10_000),
+      });
+      // Повтор безопасен только для сетевых/серверных сбоев. 401/403/429 —
+      // самостоятельные состояния интерфейса, повтор их лишь задержит.
+      if (r.status < 500) break;
+    } catch (e) {
+      error = e;
+      r = null;
+    }
   }
-  if (!r?.ok) return null;
-  return r.json().catch(() => null);
+  if (!r) return { hasToken: true, status: 0, error: error?.message || 'network_error' };
+  const text = await r.text().catch(() => '');
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text ? { message: text.slice(0, 500) } : null; }
+  return {
+    hasToken: true,
+    status: r.status,
+    data,
+    retryAfter: r.headers.get('retry-after'),
+  };
 }
 
 /**
@@ -116,6 +133,129 @@ function creditsNote(c) {
   if (c.unlimited) return 'без месячного потолка';
   if (c.limit == null || c.used == null) return '';
   return `${money(c.used)} из ${money(c.limit)} ${c.currency}`.trim();
+}
+
+export function parseClaudeUsagePayload(d) {
+  const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
+  const bars = [];
+  const KIND = { session: 'Сессия (5ч)', weekly_all: 'Неделя (7д)' };
+
+  for (const l of d?.limits || []) {
+    if (typeof l.percent !== 'number') continue;
+    let label = KIND[l.kind] || String(l.kind || '').replace(/_/g, ' ');
+    if (l.kind === 'weekly_scoped') {
+      label = `Неделя · ${l.scope?.model?.display_name || l.scope?.surface || '?'}`;
+    }
+    bars.push({
+      key: l.kind + (l.scope?.model?.display_name || ''),
+      label,
+      pct: clamp(l.percent),
+      resetsAt: l.resets_at || null,
+    });
+  }
+
+  const c = creditsOf(d);
+  if (c) {
+    bars.push({
+      key: 'extra_usage',
+      label: 'Extra usage (доплата)',
+      pct: c.enabled && c.utilization !== null ? clamp(c.utilization) : 0,
+      resetsAt: null,
+      note: creditsNote(c),
+      credits: c,
+    });
+  }
+
+  if (!bars.length) {
+    for (const [key, value] of Object.entries(d || {})) {
+      if (!value || typeof value !== 'object' || typeof value.utilization !== 'number') continue;
+      bars.push({
+        key,
+        label: key.replace(/_/g, ' '),
+        pct: clamp(value.utilization),
+        resetsAt: value.resets_at || null,
+      });
+    }
+  }
+  return bars;
+}
+
+function usageErrorMessage(data) {
+  return data?.error?.message || data?.message || '';
+}
+
+function retryAtOf(value, now) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return now + seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? date : null;
+}
+
+export function classifyClaudeUsageResponse({
+  hasToken,
+  status = 0,
+  data = null,
+  error = '',
+  retryAfter = null,
+  now = Date.now(),
+} = {}) {
+  const login = { kind: 'terminal', label: 'Войти в Claude', command: 'claude login' };
+  if (!hasToken) {
+    return {
+      state: 'auth_required',
+      bars: [],
+      message: 'Claude CLI не авторизован. Выполни claude login.',
+      action: login,
+    };
+  }
+  if (status === 200) {
+    const bars = parseClaudeUsagePayload(data);
+    if (!bars.length) {
+      return {
+        state: 'unavailable',
+        bars: [],
+        message: 'Anthropic не вернул данные о лимитах Claude.',
+        action: null,
+      };
+    }
+    return { state: 'ok', bars, message: '', action: null };
+  }
+  if (status === 401) {
+    return {
+      state: 'auth_required',
+      bars: [],
+      message: 'Авторизация Claude истекла или недействительна. Войди заново.',
+      detail: usageErrorMessage(data),
+      action: login,
+    };
+  }
+  if (status === 403) {
+    return {
+      state: 'blocked',
+      bars: [],
+      message: 'Anthropic отклонил запрос аккаунта. Проверь доступ к Claude и состояние подписки.',
+      detail: usageErrorMessage(data),
+      action: null,
+    };
+  }
+  if (status === 429) {
+    return {
+      state: 'rate_limited',
+      bars: [],
+      message: 'Anthropic временно ограничил запрос проверки лимитов.',
+      detail: usageErrorMessage(data),
+      retryAt: retryAtOf(retryAfter, now),
+      action: null,
+    };
+  }
+  return {
+    state: 'unavailable',
+    bars: [],
+    message: 'Не удалось получить лимиты Claude. Повторим проверку автоматически.',
+    detail: usageErrorMessage(data) || error,
+    action: null,
+  };
 }
 
 /**
@@ -219,47 +359,7 @@ export default {
    * (~/.claude/.credentials.json); пользователь явно попросил эту статистику.
    */
   async usage() {
-    const d = await fetchUsage();
-    if (!d) return null;
-    const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
-    const bars = [];
-    // Каноничный источник — массив limits (из него строится и официальная панель /usage):
-    // session, weekly_all и weekly_scoped с именем модели (например «Fable»).
-    const KIND = { session: 'Сессия (5ч)', weekly_all: 'Неделя (7д)' };
-    for (const l of d.limits || []) {
-      if (typeof l.percent !== 'number') continue;
-      let label = KIND[l.kind] || l.kind.replace(/_/g, ' ');
-      if (l.kind === 'weekly_scoped') label = `Неделя · ${l.scope?.model?.display_name || l.scope?.surface || '?'}`;
-      bars.push({
-        key: l.kind + (l.scope?.model?.display_name || ''),
-        label,
-        pct: clamp(l.percent),
-        resetsAt: l.resets_at || null,
-      });
-    }
-    // Extra usage (доплата сверх лимитов) — отдельной строкой с потраченным бюджетом.
-    // Строка есть ВСЕГДА, даже когда доплата выключена: на ней висит управление
-    // (тумблер и потолок), а управлять невидимым нельзя. `credits` — признак для UI,
-    // что у этой полосы есть органы управления.
-    const c = creditsOf(d);
-    if (c) {
-      bars.push({
-        key: 'extra_usage',
-        label: 'Extra usage (доплата)',
-        pct: c.enabled && c.utilization !== null ? clamp(c.utilization) : 0,
-        resetsAt: null,
-        note: creditsNote(c),
-        credits: c,
-      });
-    }
-    // Фоллбэк на старую плоскую форму, если limits в ответе нет.
-    if (!bars.length) {
-      for (const [k, v] of Object.entries(d || {})) {
-        if (!v || typeof v !== 'object' || typeof v.utilization !== 'number') continue;
-        bars.push({ key: k, label: k.replace(/_/g, ' '), pct: clamp(v.utilization), resetsAt: v.resets_at || null });
-      }
-    }
-    return bars.length ? bars : null;
+    return classifyClaudeUsageResponse(await fetchUsage());
   },
 
   /**
@@ -277,7 +377,8 @@ export default {
     const tok = await cliToken();
     if (!tok) return { ok: false, error: 'Нет токена хостового CLI — авторизуйся на хосте: claude login' };
 
-    const state = creditsOf(await fetchUsage());
+    const before = await fetchUsage();
+    const state = creditsOf(before.status === 200 ? before.data : null);
     if (!state) return { ok: false, error: 'Anthropic не отдал состояние доплаты — попробуй позже' };
 
     const wantEnabled = patch.enabled === undefined ? state.enabled : !!patch.enabled;
@@ -313,7 +414,8 @@ export default {
     } catch (e) {
       return { ok: false, error: e.message };
     }
-    return { ok: true, credits: creditsOf(await fetchUsage()) };
+    const after = await fetchUsage();
+    return { ok: true, credits: creditsOf(after.status === 200 ? after.data : null) };
   },
 
   /**

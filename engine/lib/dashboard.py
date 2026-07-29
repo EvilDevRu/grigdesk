@@ -27,8 +27,6 @@ SB_PREFIX = os.environ.get('FACTORY_SANDBOX_PREFIX', 'ars-sb-t')     # +TASK-app
 TIMER_CMD = os.environ.get('FACTORY_TIMER_CMD', '')                  # трекер времени задачи (опц.)
 STALL_SEC = 15 * 60  # этап без прогресса дольше 15 минут = «застряла»
 # Флаг сторожа: tmpfs, поэтому исчезает при перезагрузке — после ребута фабрика не оживает сама
-WATCHDOG_FLAG = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
-                             'factory-watchdog.on')
 
 
 # --- Проектные параметры берутся ПО ПРОФИЛЮ ЗАДАЧИ ---------------------------------
@@ -1297,13 +1295,7 @@ def render():
                  'значение с пробелом — в кавычках): сводка в шапке недоступна. '
                  'Задачи проектов со своим трекером это не затрагивает">'
                  '&#9888; сводка трекера недоступна</span>')
-    # Сторож: поднимает конвейеры с умершим демоном, но только пока человек за машиной.
-    # Флаг в tmpfs — после перезагрузки сторож всегда спит, пока его не включат заново.
-    wd_on = os.path.exists(WATCHDOG_FLAG)
-    p.append(f'<button class="wd{" on" if wd_on else ""}" onclick="toggleWatchdog()" '
-             f'style="margin-left:auto" title="{"Сторож включён: если демон конвейера умрёт, этап поднимется сам. Выключите, когда уходите от компьютера" if wd_on else "Сторож выключен: умерший конвейер будет ждать вас. Включите, пока работаете"}">'
-             f'{"&#128021; сторож вкл" if wd_on else "&#128164; сторож выкл"}</button>')
-    p.append('<a href="/routes" target="_blank" style="margin-left:14px;font-size:12px">&#128506; маршруты</a>')
+    p.append('<a href="/routes" target="_blank" style="margin-left:auto;font-size:12px">&#128506; маршруты</a>')
     p.append('<a href="/tasks" target="_blank" style="margin-left:14px;font-size:12px">&#128220; задачи</a>')
     p.append('<a href="/stats" style="margin-left:14px;font-size:12px">&#128202; статистика</a>')
     p.append('<button class="thm" onclick="toggleTheme()" title="тема" style="margin-left:14px">&#9681;</button>')
@@ -1701,11 +1693,6 @@ def render():
              'document.addEventListener("keydown",function(e){if(e.key==="Escape")closePlan();});'
              'function toggleTheme(){var t=(localStorage.getItem("factory-theme")||"dark")==="dark"?"light":"dark";'
              'localStorage.setItem("factory-theme",t);document.documentElement.dataset.theme=t;}'
-             'function toggleWatchdog(){var b=document.querySelector(".wd");if(!b)return;'
-             'var on=b.classList.contains("on");'
-             'fetch("/api/watchdog/"+(on?"off":"on"),{method:"POST"}).then(function(r){return r.json();})'
-             '.then(function(d){b.classList.toggle("on",d.on);'
-             'b.innerHTML=d.on?"&#128021; сторож вкл":"&#128164; сторож выкл";});}'
              'function setLive(ok){var e=document.querySelector(".live");if(!e)return;'
              'e.textContent=ok?"● LIVE":"■ FAIL";e.style.color=ok?"":"var(--critical)";'
              'e.style.textShadow=ok?"":"0 0 9px var(--critical)";}'
@@ -3016,20 +3003,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(body))); self.end_headers()
             self.wfile.write(body); return
-        w = re.match(r'^/api/watchdog/(on|off)$', self.path)
-        if w:
-            # Тумблер сторожа. Флаг — файл в tmpfs: не переживает перезагрузку намеренно,
-            # чтобы после ребута фабрика не оживала сама в отсутствие человека.
-            if w.group(1) == 'on':
-                open(WATCHDOG_FLAG, 'w').close()
-            else:
-                try:
-                    os.remove(WATCHDOG_FLAG)
-                except FileNotFoundError:
-                    pass
-            body = json.dumps({'ok': True, 'on': os.path.exists(WATCHDOG_FLAG)}).encode('utf-8')
-            self.send_response(200); self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body); return
         ac = re.match(r'^/api/act/(\d+)/([a-z0-9_]+)/([a-z_]+)$', self.path)
         if ac:
             # Кнопка-действие из окна этапа: «снять демо», «пропустить демо», «начать этап».

@@ -11,6 +11,7 @@ import { taskDiff } from '../../lib/git.js';
 import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
 import { reserveSlot, releaseSlot, slotsOverview, SlotsFullError } from '../../lib/sandbox-slots.js';
+import { recoveryDecision } from '../../lib/pipeline-recovery.js';
 import {
   FactoryRunnerControl,
   RunnerControlCommandError,
@@ -22,6 +23,7 @@ const STAGE_STATUSES = new Set(['pending', 'running', 'done', 'waiting', 'skippe
 
 async function factoryModule(fastify, opts) {
   const { factoryState, config, prefs, b24, analyzer } = opts;
+  const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
   const runnerControl = new FactoryRunnerControl({
     factoryBin: config.factoryBin,
     stateDir: config.stateDir,
@@ -101,7 +103,12 @@ async function factoryModule(fastify, opts) {
   //
   // Контракт: factory bin при ошибке аргументов → rc≠0; при занятом локе → rc=0.
   // Исход читаем из состояния (ORCH_PID + /proc), не из stdout.
-  async function startPipeline(id, { ticket, route, profile: reqProfile } = {}) {
+  async function startPipeline(id, {
+    ticket,
+    route,
+    profile: reqProfile,
+    recovery = false,
+  } = {}) {
     const profile = reqProfile || config.factoryProfile || (await factoryState.primaryProfile());
     if (!profile) return { status: 400, body: { error: 'no_profile', message: 'профиль конвейера не определён' } };
 
@@ -114,7 +121,7 @@ async function factoryModule(fastify, opts) {
     // от локального master). Безопасно: ff-only и только чистый master; сбой
     // обновления запуск не блокирует — фиксируется в ответе.
     let gitRefresh = null;
-    if (prefs?.read().gitRefreshBeforeRun) {
+    if (!recovery && prefs?.read().gitRefreshBeforeRun) {
       try {
         const triageProfile = await loadTriageProfile(config, profile);
         gitRefresh = await refreshRepos(triageProfile.repos);
@@ -240,6 +247,120 @@ async function factoryModule(fastify, opts) {
     return r.status ? reply.code(r.status).send(r.body) : r.body;
   });
 
+  // После перезапуска машины/кокпита незакрытый конвейер мог остаться без демона.
+  // Восстанавливаем только доказанный crash: не пересекаем ворота, human-stall и
+  // завершённые прогоны. Бюджет защищает от цикла, профиль проверяется до запуска.
+  let recoveryReport = {
+    enabled: prefs?.read().autoRecoverPipelines === true,
+    running: false,
+    checkedAt: null,
+    items: [],
+  };
+
+  async function profileAvailable(profile) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(profile || '')) return false;
+    const dir = path.join(config.profilesDir, profile);
+    try {
+      await Promise.all([
+        fs.access(path.join(dir, 'profile.sh')),
+        fs.access(path.join(dir, 'runners.env')),
+        fs.access(path.join(dir, 'graph.json')),
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function recoverPipelines() {
+    const enabled = prefs?.read().autoRecoverPipelines === true;
+    const items = [];
+    recoveryReport = { enabled, running: enabled, checkedAt: Date.now(), items };
+    if (!enabled) {
+      recoveryReport.running = false;
+      return recoveryReport;
+    }
+
+    for (const id of await factoryState.listTaskIds()) {
+      try {
+        const { registry } = await factoryState.readRegistry(id);
+        const alive = factoryState.isDaemonAlive(registry.ORCH_PID, id);
+        const available = await profileAvailable(registry.PROFILE);
+        const decision = recoveryDecision({
+          registry,
+          daemonAlive: alive,
+          profileAvailable: available,
+        });
+        const item = { task: id, ...decision };
+        items.push(item);
+
+        if (decision.action === 'attention') {
+          const pairs = ['NEEDS_RUN', '1', 'RECOVERY_REASON', decision.reason];
+          if (decision.reason === 'restart_limit') pairs.push('STALLED_HUMAN', '1');
+          await setPipeline({ ...cfg, task: id, pairs });
+          fastify.log.warn({ task: id, reason: decision.reason }, 'автовосстановление конвейера требует внимания');
+          continue;
+        }
+        if (decision.action !== 'resume') continue;
+
+        await setPipeline({
+          ...cfg,
+          task: id,
+          pairs: [
+            'RECOVERY_RESTARTS', String(decision.nextCount),
+            'RECOVERY_WINDOW_AT', String(decision.windowAt),
+            'RECOVERY_LAST_AT', String(Date.now()),
+            'RECOVERY_REASON', 'startup_crash',
+            'NEEDS_RUN', '0',
+          ],
+        });
+        const result = await startPipeline(id, {
+          profile: registry.PROFILE,
+          route: registry.ROUTE,
+          recovery: true,
+        });
+        item.outcome = result.body?.outcome || 'unknown';
+        item.ok = !result.status;
+        if (result.status) {
+          item.error = result.body?.message || result.body?.error || `HTTP ${result.status}`;
+          await setPipeline({
+            ...cfg,
+            task: id,
+            pairs: ['NEEDS_RUN', '1', 'RECOVERY_REASON', 'restart_failed'],
+          });
+        }
+        fastify.log[result.status ? 'warn' : 'info'](
+          { task: id, profile: registry.PROFILE, outcome: item.outcome, error: item.error },
+          result.status ? 'автовосстановление конвейера не удалось' : 'конвейер восстановлен после перезапуска',
+        );
+      } catch (e) {
+        items.push({ task: id, action: 'attention', reason: 'recovery_error', error: e.message });
+        fastify.log.error({ task: id, err: e.message }, 'ошибка проверки автовосстановления конвейера');
+      }
+    }
+    recoveryReport = { enabled, running: false, checkedAt: Date.now(), items };
+    return recoveryReport;
+  }
+
+  fastify.get('/api/factory/recovery', async () => recoveryReport);
+
+  let recoveryTimer = null;
+  fastify.addHook('onReady', async () => {
+    recoveryTimer = setTimeout(() => {
+      recoverPipelines().catch((e) => {
+        recoveryReport = {
+          ...recoveryReport,
+          running: false,
+          checkedAt: Date.now(),
+          error: e.message,
+        };
+        fastify.log.error({ err: e.message }, 'автовосстановление конвейеров не выполнено');
+      });
+    }, 1500);
+    recoveryTimer.unref?.();
+  });
+  fastify.addHook('onClose', async () => { if (recoveryTimer) clearTimeout(recoveryTimer); });
+
   // Занятость слотов стенда: чем заняты, что зарезервировано, сколько свободно.
   // Нужна человеку, когда запуск отказал с no_slot — иначе непонятно, что освобождать.
   fastify.get('/api/factory/slots', async (request, reply) => {
@@ -252,8 +373,6 @@ async function factoryModule(fastify, opts) {
       profile,
     });
   });
-
-  const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
 
   // Ворота: принять/отклонить (+ комментарий агенту при отклонении).
   fastify.post('/api/tasks/:id/gate/:key/:decision', async (request, reply) => {
