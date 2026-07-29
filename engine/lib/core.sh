@@ -139,7 +139,10 @@ gate_wait() {
   local t=$1 key=$2 cur
   cur=$(get "$t" "$key")
   case "$cur" in approved|rejected|skipped) GATE_DECISION=$cur; return 0 ;; esac   # уже решено (resume)
-  set_st "$t" "$key" waiting
+  # Новый заход на ворота — новое решение. Комментарий прошлого rejected уже
+  # перенесён в decisions.md и прочитан BUILD; на текущей схеме он не должен
+  # выглядеть причиной ещё не принятого решения.
+  set_st "$t" "$key" waiting "${key}_COMMENT" ""
   flog "$t" "ВОРОТА $key — жду человека (дашборд)"
   while true; do
     cur=$(get "$t" "$key")
