@@ -401,6 +401,7 @@ tests/server/
   pipeline-recovery.test.js
   provider-usage.test.js
   codex-abort.test.js
+  codex-resume-args.test.js
   b24-timer-boundary.test.js
 
 tests/web/

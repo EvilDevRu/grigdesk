@@ -14,6 +14,8 @@ coverage и error policy; он описан в [multi-AI контракте дв
   (`factoryState.readEnv`: обычно `BE_WT`; Claude получает `FE_WT` через `--add-dir`).
   Без задачи cwd = `config.factoryHome`; страница «Агенты» переопределяет его на `agents/`.
   Codex-чат сейчас read-only и не получает Claude-специфичные дополнительные write roots.
+  У продолжения `--sandbox` и `-C` стоят до подкоманды `resume`: это опции родительского
+  `codex exec`, после `resume` актуальный CLI их отвергает ещё до запуска хода.
 - `contextTokens` — вход последнего хода, включая cache read/creation там, где executor это
   отдаёт. Размер окна берётся из записи модели в реестре; `CONTEXT_WINDOW=200000` во фронте —
   только fallback, пока каталог не загружен.

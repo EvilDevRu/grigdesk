@@ -368,6 +368,32 @@ async function readCodexModelCatalog(bin) {
   return parseCodexModelList({ data });
 }
 
+/**
+ * `resume` is an exec subcommand. Sandbox and working-directory flags belong to
+ * the parent `codex exec` parser and therefore must precede `resume`; otherwise
+ * the second chat message fails before a turn starts.
+ */
+export function buildCodexExecArgs({
+  message,
+  cwd,
+  model,
+  effort,
+  sessionId,
+}) {
+  const args = [
+    'exec',
+    '--skip-git-repo-check',
+    '--sandbox', 'read-only',
+    '-C', cwd,
+  ];
+  if (model) args.push('-m', model);
+  if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
+  if (sessionId) args.push('resume', '--json', sessionId);
+  else args.push('--json');
+  args.push(message);
+  return args;
+}
+
 export default {
   id: 'codex',
   name: 'GPT (Codex)',
@@ -445,11 +471,7 @@ export default {
   },
 
   run({ config, message, cwd, model, effort, sessionId, signal }) {
-    const args = sessionId ? ['exec', 'resume', sessionId, '--json'] : ['exec', '--json'];
-    args.push('--skip-git-repo-check', '--sandbox', 'read-only', '-C', cwd);
-    if (model) args.push('-m', model);
-    if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
-    args.push(message);
+    const args = buildCodexExecArgs({ message, cwd, model, effort, sessionId });
 
     return new Promise((resolve, reject) => {
       const child = execFile(config.codexBin, args, {
