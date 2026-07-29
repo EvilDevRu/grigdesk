@@ -10,19 +10,22 @@
 Проверка статическая: собирает хостовые пути из промптов всех этапов всех маршрутов
 и сверяет с выданным доступом.
 
-Запуск: python3 tests/profile-access.py [профиль ...]   (без аргументов — все профили)
+Запуск: python3 tests/engine/profile-access.py [профиль ...]   (без аргументов — все профили)
 """
 import os
 import re
 import subprocess
 import sys
 
-HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HOME = os.environ.get('FACTORY_HOME', os.path.join(PROJECT_ROOT, 'engine'))
+PROFILES = os.environ.get('FACTORY_PROFILES_DIR', os.path.join(PROJECT_ROOT, 'profiles'))
 STATE_DIR = os.environ.get('FACTORY_STATE', os.path.expanduser('~/.factory/state'))
 TASK = '9999'   # фиктивный номер: промпты подставляют его в пути worktree
 
 profiles = sys.argv[1:] or sorted(
-    f[:-3] for f in os.listdir(f'{HOME}/profiles') if f.endswith('.sh'))
+    name for name in os.listdir(PROFILES)
+    if os.path.isfile(os.path.join(PROFILES, name, 'profile.sh')))
 
 # Пути внутри контейнеров и системные — не про доступ агента на хосте.
 HOST_PREFIX = ('/home/', '/tmp/')
@@ -37,7 +40,7 @@ def profile_dump(profile):
     script = f'''
 export STATE_DIR="{STATE_DIR}"
 source "{HOME}/lib/core.sh" 2>/dev/null
-source "{HOME}/profiles/{profile}.sh" 2>/dev/null
+source "{PROFILES}/{profile}/profile.sh" 2>/dev/null
 echo "@@CWD $PROFILE_AGENT_CWD"
 echo "@@DIRS $PROFILE_AGENT_DIRS"
 for v in $(compgen -A variable | grep "^PROFILE_ROUTE_STAGES_"); do
@@ -60,7 +63,7 @@ for profile in profiles:
 
     cwd = re.search(r'@@CWD (.*)', out).group(1).strip()
     dirs = re.search(r'@@DIRS (.*)', out).group(1).strip().split()
-    # HOME движка агенту выдаёт ядро (lib/pipeline-set.sh зовут все этапы)
+    # HOME движка доступен для scoped stage-result/stage-progress и служебных файлов.
     allowed = [p for p in [cwd, STATE_DIR, HOME, *dirs] if p]
 
     if cwd and not os.path.isdir(cwd):
@@ -88,11 +91,6 @@ for profile in profiles:
     else:
         print(f'✓ {profile}: все пути промптов покрыты доступом '
               f'(cwd={cwd or "—"}, доп. каталогов: {len(dirs)})')
-
-    # модели по этапам: без них весь конвейер идёт на самой тяжёлой модели
-    if 'profile_stage_model' not in open(f'{HOME}/profiles/{profile}.sh', encoding='utf-8').read():
-        notes.append(f'{profile}: не задан profile_stage_model — все этапы пойдут '
-                     f'на модели сессии (дорого и медленно на поиске/рутине)')
 
 for n in notes:
     print('⚠ ' + n)

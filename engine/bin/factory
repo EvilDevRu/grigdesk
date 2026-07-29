@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Фабрика задач — движок (project-agnostic). Проектная специфика — в profiles/<name>.sh.
+# Фабрика задач — движок (project-agnostic). Проектная специфика — в
+# <project-root>/profiles/<name>/profile.sh.
 #   factory <TASK> start  --profile <name> [--ticket "текст"] [--route <маршрут>]  — новый конвейер
 #   factory <TASK> resume --profile <name> [--route <маршрут>]  — продолжить (после смерти/ребута)
 #   factory list                                                — активные задачи
@@ -10,6 +11,22 @@
 # Демонизируется (nohup): работа в фоне, вызвавший (кнопка/терминал) не висит.
 set -uo pipefail
 FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+export FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
+
+# Provider routing/configuration commands are synchronous control-plane operations:
+# they never start a project, Cockpit or a model call.
+export STATE_DIR="${STATE_DIR:-${FACTORY_STATE:-$HOME/.factory/state}}"
+export FACTORY_STATE="${FACTORY_STATE:-$STATE_DIR}"
+if [[ "${1:-}" == runners || "${1:-}" == profile || "${1:-}" == settings || \
+      "${2:-}" == runner || "${2:-}" == model || "${2:-}" == debug || \
+      "${1:-}" == help || "${1:-}" == --help || "${1:-}" == -h ]]; then
+  # shellcheck disable=SC1091
+  source "$FACTORY_HOME/lib/runner-cli.sh"
+  factory_runner_cli "$@"
+  rc=$?
+  (( rc == 2 )) && _runner_cli_usage >&2
+  exit "$rc"
+fi
 
 # --- разбор аргументов ---
 TASK=""; MODE=""; PROFILE=""; TICKET=""; ROUTE=""
@@ -26,7 +43,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-export STATE_DIR="${STATE_DIR:-$HOME/.factory/state}"
 mkdir -p "$STATE_DIR/logs"
 
 if [[ "$MODE" == list ]]; then
@@ -48,7 +64,7 @@ fi
 # ему нужна занятость — отсюда и команда. Считает её профиль, движок только сериализует.
 if [[ "$MODE" == slots ]]; then
   [[ -n "$PROFILE" ]] || { echo "использование: factory slots --profile <name>" >&2; exit 1; }
-  PF_FILE="$FACTORY_HOME/profiles/${PROFILE}.sh"
+  PF_FILE="$FACTORY_PROFILES_DIR/${PROFILE}/profile.sh"
   [[ -f "$PF_FILE" ]] || { echo "профиль не найден: $PF_FILE" >&2; exit 1; }
   # shellcheck disable=SC1090
   source "$FACTORY_HOME/lib/core.sh" >/dev/null 2>&1
@@ -81,12 +97,31 @@ fi
 [[ -n "$TASK" && -n "$MODE" ]] || { echo "использование: factory <TASK> start|resume --profile <name> [--ticket ...]"; exit 1; }
 
 # --- профиль ---
-PF_FILE="$FACTORY_HOME/profiles/${PROFILE}.sh"
+PF_FILE="$FACTORY_PROFILES_DIR/${PROFILE}/profile.sh"
 if [[ "$MODE" == resume && -z "$PROFILE" ]]; then
   PROFILE=$(grep '^PROFILE=' "$STATE_DIR/t${TASK}.pipeline" 2>/dev/null | cut -d= -f2)
-  PF_FILE="$FACTORY_HOME/profiles/${PROFILE}.sh"
+  PF_FILE="$FACTORY_PROFILES_DIR/${PROFILE}/profile.sh"
 fi
 [[ -f "$PF_FILE" ]] || { echo "профиль не найден: $PF_FILE (--profile <name>)"; exit 1; }
+RUNNER_CONFIG_FILE="$FACTORY_PROFILES_DIR/${PROFILE}/runners.env"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/profile-config.sh"
+if ! profile_config_validate "$RUNNER_CONFIG_FILE"; then
+  echo "canonical runner config обязателен: $RUNNER_CONFIG_FILE" >&2
+  exit 78
+fi
+if [[ "$(profile_config_get "$RUNNER_CONFIG_FILE" RUNNERS_COVERAGE)" != required ]]; then
+  echo "canonical runner config должен включать RUNNERS_COVERAGE=required: $RUNNER_CONFIG_FILE" >&2
+  exit 78
+fi
+if [[ "$MODE" != start ]]; then
+  current_protocol=$(awk -F= '$1=="RUN_PROTOCOL"{print $2}' \
+    "$STATE_DIR/t${TASK}.pipeline" 2>/dev/null | tail -1)
+  if [[ "$current_protocol" != 2 ]]; then
+    echo "задача t${TASK} не мигрирована на protocol v2; запусти bin/factory-migrate-v2" >&2
+    exit 78
+  fi
+fi
 
 # Маршрут проверяем ДО форка: неизвестный core.sh молча заменит на feature,
 # и человек узнает об этом, только когда конвейер уйдёт не туда.
@@ -137,7 +172,7 @@ source "$FACTORY_HOME/lib/core.sh"
 source "$PF_FILE"
 
 if [[ "$MODE" == start ]]; then
-  set_st "$TASK" --init PROFILE "$PROFILE" TICKET "$TICKET"
+  set_st "$TASK" --init PROFILE "$PROFILE" TICKET "$TICKET" RUN_PROTOCOL 2
 fi
 # Маршрут человека пишем и на resume: так им же чинится задача, которую разведка
 # уже увела не туда (без ручного дёрганья pipeline-set.sh).
@@ -151,12 +186,8 @@ fi
 # --- режим demo: ОДИНОЧНЫЙ прогон демо-агента вне цепочки (кнопка плагина «Демо» в кокпите).
 # Стенд должен быть жив — агент проверит сам и выставит failed, если не отвечает.
 if [[ "$MODE" == demo ]]; then
-  set_st "$TASK" DEMO running
   flog "$TASK" "снимаю демо-видео (по кнопке, вне конвейера)"
-  if run_agent "$TASK" "$(_stage_ctx "$TASK" DEMO)" DEMO; then
-    [[ "$(get "$TASK" DEMO)" == "failed" ]] || set_st "$TASK" DEMO done
-  else
-    set_st "$TASK" DEMO failed
+  if ! run_stage "$TASK" DEMO; then
     flog "$TASK" "демо не сняли (агент завершился с ошибкой)"
   fi
   flog "$TASK" "демо-прогон завершён"
@@ -170,8 +201,7 @@ run_pipeline "$TASK"
 # ни про модель, ни про таймаут, и хвост уходил на самой сильной модели сессии, хотя профиль
 # для SHIP/RETRO назначает sonnet (механика, а не размышление) — цена прогона на ровном месте.
 if [[ "$(get "$TASK" GATE_ACCEPT)" == "approved" && "$(get "$TASK" SHIP)" != "done" ]]; then
-  set_st "$TASK" SHIP running
-  run_agent "$TASK" "$(_stage_ctx "$TASK" SHIP)" SHIP || true
+  run_stage "$TASK" SHIP || true
 fi
 
 # ДЕМО ИЗ ЦЕПОЧКИ УБРАНО (решение человека 2026-07-27): конвейер не должен стоять и ждать
@@ -190,9 +220,7 @@ if [[ "$(get "$TASK" SHIP)" == "done" && "$(get "$TASK" RETRO)" != "done" ]]; th
   # Статус running ОБЯЗАТЕЛЕН: ретро идёт минутами, а на схеме всё это время висело
   # «не начато» — со стороны конвейер выглядел замершим сразу после ship, и человек шёл
   # выяснять, работает ли фабрика вообще (#7800). У ship выше статус ставится, у ретро забыли.
-  set_st "$TASK" RETRO running
-  run_agent "$TASK" "$(_stage_ctx "$TASK" RETRO)" RETRO || true
-  set_st "$TASK" RETRO done
+  run_stage "$TASK" RETRO || true
 fi
 flog "$TASK" "конвейер завершён"
 }

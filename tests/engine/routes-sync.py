@@ -4,7 +4,7 @@
 Именно рассинхрон (этапы правили в профиле, а граф остался общим) дал «кашу»:
 в feature рисовались узлы debug-маршрута. Проверка ловит это до того, как увидит человек.
 
-Запуск: python3 tests/routes-sync.py [профиль]   (по умолчанию arsenkin)
+Запуск: python3 tests/engine/routes-sync.py [профиль]   (по умолчанию arsenkin)
 """
 import importlib.util
 import os
@@ -12,7 +12,9 @@ import re
 import subprocess
 import sys
 
-HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HOME = os.environ.get('FACTORY_HOME', os.path.join(PROJECT_ROOT, 'engine'))
+PROFILES = os.environ.get('FACTORY_PROFILES_DIR', os.path.join(PROJECT_ROOT, 'profiles'))
 PROFILE = sys.argv[1] if len(sys.argv) > 1 else 'arsenkin'
 
 spec = importlib.util.spec_from_file_location('dash', f'{HOME}/lib/dashboard.py')
@@ -41,7 +43,7 @@ SATELLITES = {'simplify': 'BUILD'}
 # Этапы маршрутов читаем у профиля — источник истины именно он.
 out = subprocess.run(
     ['bash', '-c',
-     f'source {HOME}/profiles/{PROFILE}.sh 2>/dev/null\n'
+     f'source {PROFILES}/{PROFILE}/profile.sh 2>/dev/null\n'
      'for v in $(compgen -A variable | grep "^PROFILE_ROUTE_STAGES_"); do\n'
      '  n="$v[@]"; echo "${v#PROFILE_ROUTE_STAGES_} ${!n}"\n'
      'done'],

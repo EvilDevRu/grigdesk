@@ -7,3 +7,6 @@ web/dist/
 .state/
 **/.state/
 __pycache__/
+
+# Local project profiles can contain machine-specific paths, credentials and runtimes.
+/profiles/

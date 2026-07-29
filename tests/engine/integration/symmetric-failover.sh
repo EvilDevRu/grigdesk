@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -uo pipefail
+source "$FACTORY_TESTS_HOME/lib/testlib.sh"
+
+missing=0
+for file in lib/breaker.sh lib/dispatcher.sh lib/runners/policy.sh; do
+  if [[ ! -f "$FACTORY_HOME/$file" ]]; then
+    test_fail "$file exists" "missing $file"
+    missing=1
+  fi
+done
+if (( missing )); then
+  finish_tests
+  exit $?
+fi
+source "$FACTORY_HOME/lib/breaker.sh"
+source "$FACTORY_HOME/lib/dispatcher.sh"
+
+declare -A FIXTURE_RESULT=()
+declare -A FIXTURE_STARTED=()
+declare -A FIXTURE_SCOPE=()
+declare -A FIXTURE_RESOLVE_ERROR=()
+
+fixture_resolve() {
+  local provider=$1 requested_family=${2:-}
+  if [[ "${FIXTURE_RESOLVE_ERROR[$provider]:-}" == invalid_config ]]; then
+    DISPATCH_RESOLVE_RESULT=invalid_config
+    return 4
+  fi
+  case "$provider" in
+    claude)
+      DISPATCH_RESOLVED_FAMILY=${requested_family:-opus}
+      DISPATCH_RESOLVED_MODEL="claude-${DISPATCH_RESOLVED_FAMILY}-actual"
+      DISPATCH_FAMILY_FAILOVER=fable
+      DISPATCH_CREDENTIAL_FINGERPRINT=acct-claude ;;
+    codex)
+      DISPATCH_RESOLVED_FAMILY=${requested_family:-sol}
+      DISPATCH_RESOLVED_MODEL="codex-${DISPATCH_RESOLVED_FAMILY}-actual"
+      DISPATCH_FAMILY_FAILOVER=""
+      DISPATCH_CREDENTIAL_FINGERPRINT=acct-codex ;;
+    *)
+      return 4 ;;
+  esac
+}
+
+fixture_invoke() {
+  local provider=$1 family=$2 model=$3
+  local key="$provider:$family"
+  DISPATCH_INVOKE_RESULT=${FIXTURE_RESULT[$key]:-${FIXTURE_RESULT[$provider]:-ok}}
+  DISPATCH_INVOKE_STARTED=${FIXTURE_STARTED[$key]:-${FIXTURE_STARTED[$provider]:-1}}
+  DISPATCH_LIMIT_SCOPE=${FIXTURE_SCOPE[$key]:-${FIXTURE_SCOPE[$provider]:-provider}}
+  DISPATCH_LIMIT_UNTIL=500
+}
+
+reset_fixture() {
+  FIXTURE_RESULT=()
+  FIXTURE_STARTED=()
+  FIXTURE_SCOPE=()
+  FIXTURE_RESOLVE_ERROR=()
+  breaker_clear claude acct-claude provider "" "" 2>/dev/null || true
+  breaker_clear claude acct-claude family opus "" 2>/dev/null || true
+  breaker_clear codex acct-codex provider "" "" 2>/dev/null || true
+}
+
+reset_fixture
+FIXTURE_RESULT[claude]=limited
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 1 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "Arsenkin survives Claude limit"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "Arsenkin falls back to Codex"
+assert_eq fallback_limit "$DISPATCH_REASON" "limit reason is visible"
+assert_eq 0 "$DISPATCH_TRIES_DELTA" "provider failover spends no stage try"
+
+reset_fixture
+FIXTURE_RESULT[codex]=limited
+FIXTURE_RESULT[claude]=ok
+dispatcher_run_chain 2 PLAN codex claude 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "Rdesigner survives Codex limit"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "Rdesigner falls back to Claude"
+
+reset_fixture
+FIXTURE_RESULT[claude]=unknown
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 3 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 1 "$?" "unknown error stops automatic chain"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "unknown stays with failing provider"
+assert_eq unknown "$DISPATCH_REASON" "non-switching error reason remains visible"
+
+reset_fixture
+FIXTURE_RESOLVE_ERROR[claude]=invalid_config
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 31 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 1 "$?" "invalid model config stops before fallback"
+assert_eq "" "$DISPATCH_RESULT_RUNNER" "invalid config never invokes another provider"
+
+reset_fixture
+FIXTURE_RESULT[claude]=unavailable_preflight
+FIXTURE_STARTED[claude]=0
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 4 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "preflight unavailability can skip provider"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "preflight selects project fallback"
+
+reset_fixture
+FIXTURE_RESULT[claude]=unavailable_preflight
+FIXTURE_STARTED[claude]=1
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 5 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 1 "$?" "late auth error cannot pretend to be preflight"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "late error does not switch provider"
+
+reset_fixture
+FIXTURE_RESULT[claude]=limited
+dispatcher_run_chain 6 PLAN claude "" 200 fixture_resolve fixture_invoke
+assert_rc 2 "$?" "strict project stalls after its only provider limit"
+assert_eq 1 "$DISPATCH_STALLED_HUMAN" "exhausted chain requests human"
+
+reset_fixture
+breaker_record claude acct-claude family opus "" 150 400 fixture-family
+FIXTURE_RESULT[claude:fable]=ok
+dispatcher_run_chain 7 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "family-specific limit can use explicit family fallback"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "family fallback stays on same provider"
+assert_eq fable "$DISPATCH_RESULT_FAMILY" "configured family fallback is selected"
+
+reset_fixture
+FIXTURE_RESULT[claude:opus]=limited
+FIXTURE_SCOPE[claude:opus]=family
+FIXTURE_RESULT[claude:fable]=ok
+dispatcher_run_chain 8 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "fresh family limit retries explicit family fallback immediately"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "fresh family limit stays on Claude"
+assert_eq fable "$DISPATCH_RESULT_FAMILY" "fresh family fallback resolves Fable"
+assert_eq fallback_limit "$DISPATCH_REASON" "family fallback reason is visible"
+
+finish_tests

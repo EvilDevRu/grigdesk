@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Заготовка схемы конвейера профиля: profiles/<имя>.graph.json из его же маршрутов.
+"""Заготовка схемы конвейера профиля: profiles/<имя>/graph.json из его же маршрутов.
 
 Зачем отдельная команда, а не «нарисуй руками»: схема нужна КОКПИТУ (:8140) — он читает
-profiles/*.graph.json без запасного варианта и строит по нему список профилей. Профиль без
+profiles/*/graph.json без запасного варианта и строит по нему список профилей. Профиль без
 схемы в кокпите просто не виден: запрос графа падает, карточка задачи молча отфильтровывается.
 Старый дашборд (lib/dashboard.py) умел автосхему, и на это расхождение легко напороться.
 
@@ -25,6 +25,10 @@ import subprocess
 import sys
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROFILES = os.environ.get(
+    'FACTORY_PROFILES_DIR',
+    os.path.join(os.path.dirname(HOME), 'profiles'),
+)
 
 # Раскладка: шаг между узлами, длина строки, отступы. Подобрано под ширину узлов дашборда.
 STEP_X, STEP_Y, ROW_LEN = 340, 140, 5
@@ -35,7 +39,7 @@ def routes_of(profile):
     """Этапы маршрутов профиля: {маршрут: [ЭТАП, ...]}. Источник истины — сам профиль."""
     out = subprocess.run(
         ['bash', '-c',
-         f'source {HOME}/profiles/{profile}.sh 2>/dev/null\n'
+         f'source {PROFILES}/{profile}/profile.sh 2>/dev/null\n'
          'for v in $(compgen -A variable | grep "^PROFILE_ROUTE_STAGES_"); do\n'
          '  n="$v[@]"; echo "${v#PROFILE_ROUTE_STAGES_} ${!n}"\n'
          'done'],
@@ -76,10 +80,11 @@ def main():
         print('использование: factory-graph-new <профиль> [--force]')
         return 1
     profile = args[0]
-    if not os.path.exists(f'{HOME}/profiles/{profile}.sh'):
-        print(f'✗ нет профиля {profile}: {HOME}/profiles/{profile}.sh')
+    profile_file = f'{PROFILES}/{profile}/profile.sh'
+    if not os.path.exists(profile_file):
+        print(f'✗ нет профиля {profile}: {profile_file}')
         return 1
-    target = f'{HOME}/profiles/{profile}.graph.json'
+    target = f'{PROFILES}/{profile}/graph.json'
     if os.path.exists(target) and not force:
         print(f'✗ схема уже есть: {target}\n  перезаписать — с флагом --force (правки руками пропадут)')
         return 1
@@ -99,7 +104,7 @@ def main():
             'optional: этапы, чей skipped НЕ аномалия — движок это поле не читает, по нему кокпит '
             'решает, красить пропуск серым «осознанно» или красным «аномалия»; пусто = любой пропуск '
             'красный, и это верное умолчание. Узлы обязаны совпадать с PROFILE_ROUTE_STAGES_* '
-            'профиля (сверка — tests/routes-sync.py).'
+            'профиля (сверка — tests/engine/routes-sync.py).'
         ),
         'default_route': sorted(routes)[0],
         'nodes': {},

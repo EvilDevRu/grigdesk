@@ -35,7 +35,7 @@ WATCHDOG_FLAG = os.path.join(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.g
 # На фабрике живут задачи РАЗНЫХ проектов одновременно (#7900 — arsenkin, #101 — rdesigner).
 # Глобальные значения выше — лишь дефолт «профиль не указан»; всё, что зависит от проекта
 # (где worktree, как называется контейнер стенда, есть ли трекер), читается из
-# profiles/<профиль>.dashboard.env для конкретной задачи.
+# profiles/<профиль>/dashboard.env для конкретной задачи.
 _prof_env_cache = {}
 
 
@@ -48,7 +48,7 @@ def prof_env(profile):
         'SB_PREFIX': SB_PREFIX, 'TIMER': TIMER_CMD,
         'STAND': '', 'STAND_FE': '', 'STAND_URL': '',
     }
-    path = os.path.join(FACTORY_HOME, 'profiles', f'{profile}.dashboard.env')
+    path = os.path.join(PROFILES_DIR, profile, 'dashboard.env')
     if profile and os.path.exists(path):
         raw = {}
         for k, v in parse_env_file(path).items():
@@ -200,20 +200,8 @@ def collect_orphan_schemas(known_tasks):
 
 
 def collect_slots():
-    slots = []
-    return slots  # legacy-слоты — проектная специфика, в движке отключены
-    for n in (1, 2, 3):
-        wt = f'{BE}/worktree-{n}'
-        if not os.path.isdir(wt):
-            continue
-        br, dirty = git_info(wt)
-        env = parse_env_file(f'{wt}/.env')
-        slots.append({
-            'n': n, 'branch': br, 'dirty': dirty,
-            'app': docker_state(f'ars-slot-{n}-application-1'),
-            'sandbox': env.get('SANDBOX_ID', ''),
-        })
-    return slots
+    # Проектные слоты публикуются через `factory slots`/profile_slots, а не из движка.
+    return []
 
 
 # ---------- Конвейер фабрики: статусы узлов ----------
@@ -306,7 +294,7 @@ def pipeline_statuses(task, sandbox_status, profile=None, route=None):
     """Статус каждого узла схемы: done|run|wait|pending|stall|skip|skipbad|premature.
 
     Движок НЕ знает этапов конкретного проекта: узлы, их порядок и связь с ключами реестра
-    берутся из схемы профиля (profiles/<имя>.graph.json), а если её нет — из этапов маршрута.
+    берутся из схемы профиля (profiles/<имя>/graph.json), а если её нет — из этапов маршрута.
     Раньше здесь был захардкожен конвейер arsenkin, и у другого проекта весь граф оставался
     серым, кроме случайно совпавших имён.
     """
@@ -456,12 +444,16 @@ MARKS = {'done': ' \u2713', 'run': ' \u25cf', 'wait': ' \u23f3', 'stall': ' \u26
          'route': '', 'noroute': ''}
 START_DOT = (30, 55)
 
-# Схемы конвейеров живут в профилях (profiles/<имя>.graph.json), а не в движке:
+# Схемы конвейеров живут в профилях (profiles/<имя>/graph.json), а не в движке:
 # фабрика ведёт разные проекты, и «встроенный» граф одного из них — источник вранья
 # на карточках всех остальных. Профиль без схемы получает автосхему из своих этапов.
 
 
 FACTORY_HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROFILES_DIR = os.environ.get(
+    'FACTORY_PROFILES_DIR',
+    os.path.join(os.path.dirname(FACTORY_HOME), 'profiles'),
+)
 _PROFILE_GRAPHS = {}
 _PROFILE_DEFAULT_ROUTE = {}
 _PROFILE_META = {}      # профиль → {keys, optional}
@@ -473,7 +465,7 @@ def profile_stages(profile):
     if profile in _PROFILE_STAGES:
         return _PROFILE_STAGES[profile]
     out = {}
-    path = os.path.join(FACTORY_HOME, 'profiles', f'{profile}.sh')
+    path = os.path.join(PROFILES_DIR, profile, 'profile.sh')
     if profile and os.path.exists(path):
         txt = run(['bash', '-c',
                    f'source "{path}" 2>/dev/null\n'
@@ -488,12 +480,12 @@ def profile_stages(profile):
 
 
 def profile_graphs(profile):
-    """Нарисованная схема конвейера проекта: profiles/<профиль>.graph.json."""
+    """Нарисованная схема конвейера проекта: profiles/<профиль>/graph.json."""
     if not profile:
         return {}
     if profile in _PROFILE_GRAPHS:
         return _PROFILE_GRAPHS[profile]
-    path = os.path.join(FACTORY_HOME, 'profiles', f'{profile}.graph.json')
+    path = os.path.join(PROFILES_DIR, profile, 'graph.json')
     data = {}
     try:
         with open(path, encoding='utf-8') as f:
@@ -1266,7 +1258,10 @@ PROJECT_RULES
 
 def project_css():
     """Пара правил на профиль: показать свои карточки и подсветить активный чип."""
-    names = sorted(f[:-3] for f in os.listdir(f'{FACTORY_HOME}/profiles') if f.endswith('.sh'))
+    names = sorted(
+        name for name in os.listdir(PROFILES_DIR)
+        if os.path.isfile(os.path.join(PROFILES_DIR, name, 'profile.sh'))
+    )
     out = []
     for n in names:
         out.append(f':root[data-project="{n}"] .card[data-profile]:not([data-profile="{n}"])'
@@ -1915,9 +1910,8 @@ def render_activity(task):
         if os.path.getmtime(orch_path) > newest_old:
             files = []
     if not files:
-        # Нынешний оркестратор гоняет ОДНОГО агента на этап через claude -p, и весь его
-        # поток (stream-json) пишется в logs/tN.orch.log — старого ACTIVE_DIR с журналами
-        # субагентов просто нет. Показываем активность оттуда.
+        # Оркестратор гоняет один выбранный runner на этап, и его поток пишется в
+        # logs/tN.orch.log. Если отдельного ACTIVE_DIR нет, показываем активность оттуда.
         orch = f'{STATE_DIR}/logs/t{task}.orch.log'
         if os.path.exists(orch):
             age = int(time.time() - os.path.getmtime(orch))
@@ -2004,7 +1998,7 @@ _STAGE_PREFIX_RU = {'DUR': 'агент работал, мин', 'FANOUT': 'су�
 ENGINE_TAIL_KEYS = ('SHIP', 'RETRO')
 
 def pipeline_set(task, key, value):
-    """Запись статуса ТЕМ ЖЕ механизмом, что у агентов, — lib/pipeline-set.sh.
+    """Privileged control-запись через общий writer — lib/pipeline-set.sh.
 
     Свой upsert в дашборде пришлось бы держать в согласии с правилами движка (метка KEY_AT,
     счётчик KEY_FAILS, подмена живого реестра архивным у отгруженной задачи) — две копии
@@ -2218,7 +2212,7 @@ def sandbox_down(task):
     """
     pf = parse_env_file(f'{STATE_DIR}/t{task}.pipeline')
     profile = pf.get('PROFILE', '')
-    path = os.path.join(FACTORY_HOME, 'profiles', f'{profile}.sh')
+    path = os.path.join(PROFILES_DIR, profile, 'profile.sh')
     if not profile or not os.path.exists(path):
         return False, f'профиль задачи неизвестен ({profile or "—"}) — сносить нечем'
     core = os.path.join(FACTORY_HOME, 'lib', 'core.sh')
@@ -2226,7 +2220,9 @@ def sandbox_down(task):
               'declare -F profile_sandbox_down >/dev/null || exit 3; '
               f'profile_sandbox_down {int(task)}')
     try:
-        subprocess.Popen(['bash', '-c', script], env=dict(os.environ, STATE_DIR=STATE_DIR),
+        subprocess.Popen(
+            ['bash', '-c', script],
+            env=dict(os.environ, STATE_DIR=STATE_DIR, FACTORY_PROFILES_DIR=PROFILES_DIR),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
         return True, 'снос запущен'
@@ -2647,7 +2643,10 @@ def render_routes():
                'скриншоты → приёмка.',
         'quick': 'Мелочь с очевидной причиной: сразу внедрить → регресс → показать.',
     }
-    profiles = sorted(f[:-3] for f in os.listdir(f'{FACTORY_HOME}/profiles') if f.endswith('.sh'))
+    profiles = sorted(
+        name for name in os.listdir(PROFILES_DIR)
+        if os.path.isfile(os.path.join(PROFILES_DIR, name, 'profile.sh'))
+    )
     blocks = []
     for prof in profiles:
         routes = profile_stages(prof)

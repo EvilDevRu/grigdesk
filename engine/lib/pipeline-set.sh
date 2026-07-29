@@ -27,6 +27,18 @@ if [[ ! -f "$PF" && -f "$STATE_DIR/archive/t${TASK}.pipeline" && "${1:-}" != "--
   PF="$STATE_DIR/archive/t${TASK}.pipeline"
 fi
 
+# Terminal agent result принимается только через stage-result.sh с run capability.
+if grep -q '^RUN_PROTOCOL=2$' "$PF" 2>/dev/null; then
+  _arg=""
+  for _arg in "$@"; do
+    case "$_arg" in
+      done|failed|skipped|RUN_PROTOCOL|ACTIVE_RUN_*|ACTIVE_EPOCH_*)
+        echo "stale_run: terminal/control write requires protocol v2 API" >&2
+        exit 73 ;;
+    esac
+  done
+fi
+
 if [[ "${1:-}" == "--replan" ]]; then
   shift
   # Новый круг планирования (reject ворот): хвост прошлого круга сбрасывается,

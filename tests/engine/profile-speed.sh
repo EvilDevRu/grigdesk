@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # Скорость конвейера профиля: заявлены ли веер, бюджет и модели по этапам.
 # Без них конвейер идёт одним агентом на самой дорогой модели и копает до таймаута.
-# Запуск: bash tests/profile-speed.sh <профиль>
+# Запуск из корня репозитория: bash tests/engine/profile-speed.sh <профиль>
 set -uo pipefail
-FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+FACTORY_HOME="${FACTORY_HOME:-$(cd "$(dirname "$0")/../../engine" && pwd)}"
+FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
 export STATE_DIR="${FACTORY_STATE:-$HOME/.factory/state}"
 prof="${1:?укажи профиль}"
 
 source "$FACTORY_HOME/lib/core.sh" 2>/dev/null
-source "$FACTORY_HOME/profiles/${prof}.sh" 2>/dev/null
+source "$FACTORY_PROFILES_DIR/${prof}/profile.sh" 2>/dev/null
+source "$FACTORY_HOME/lib/profile-config.sh"
 
 declare -F profile_stage_budget >/dev/null || echo "⚠ нет profile_stage_budget — агенты будут копать до таймаута"
-declare -F profile_stage_model  >/dev/null || echo "⚠ нет profile_stage_model — весь конвейер на самой дорогой модели"
+runner_config="$FACTORY_PROFILES_DIR/${prof}/runners.env"
+if profile_config_validate "$runner_config"; then
+  echo "✓ модели: provider/family policy задана в canonical config"
+else
+  echo "✗ модели: нет валидного canonical config $runner_config"
+  exit 1
+fi
 
 if ! declare -F profile_stage_fanout >/dev/null; then
   echo "⚠ нет profile_stage_fanout — все этапы пойдут одним агентом последовательно"

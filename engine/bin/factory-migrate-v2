@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Одноразовый cutover task state: protocol v2, без fixed markers и файлов-призраков.
+# Все переносимые артефакты сохраняются в STATE_DIR/migrations/protocol-v2-*/.
+set -uo pipefail
+
+FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+STATE_DIR="${FACTORY_STATE:-${STATE_DIR:-${HOME:?}/.factory/state}}"
+FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
+DRY_RUN=0
+[[ "${1:-}" == --dry-run ]] && DRY_RUN=1
+[[ $# -le $DRY_RUN ]] || {
+  echo "использование: factory-migrate-v2 [--dry-run]" >&2
+  exit 2
+}
+
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/profile-config.sh"
+
+_migration_task_id() {
+  local name
+  name=$(basename "$1" .pipeline)
+  printf '%s\n' "${name#t}"
+}
+
+_migration_live() {
+  local file=$1 task=$2 pid cmdline
+  pid=$(awk -F= '$1=="ORCH_PID"{print $2}' "$file" | tail -1)
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [[ -r "$cmdline" ]] || continue
+    local -a argv=()
+    mapfile -d '' argv <"$cmdline" 2>/dev/null || continue
+    [[ "${argv[1]:-}" == */bin/factory && "${argv[2]:-}" == "$task" ]] && return 0
+  done
+  return 1
+}
+
+_migration_write_protocol() {
+  local file=$1 task=$2 lock_fd tmp
+  exec {lock_fd}>"$STATE_DIR/t${task}.pipeline.lock"
+  flock "$lock_fd" || return 1
+  tmp=$(mktemp "$(dirname "$file")/.protocol-v2.XXXXXX")
+  awk -F= '
+    BEGIN { written=0 }
+    $1 == "RUN_PROTOCOL" {
+      if (!written) print "RUN_PROTOCOL=2"
+      written=1
+      next
+    }
+    { print }
+    END { if (!written) print "RUN_PROTOCOL=2" }
+  ' "$file" >"$tmp" || {
+    rm -f -- "$tmp"
+    flock -u "$lock_fd"
+    eval "exec ${lock_fd}>&-"
+    return 1
+  }
+  chmod 600 "$tmp"
+  sync -f "$tmp" 2>/dev/null || true
+  mv -f -- "$tmp" "$file"
+  flock -u "$lock_fd"
+  eval "exec ${lock_fd}>&-"
+}
+
+mapfile -t pipeline_files < <(
+  {
+    find "$STATE_DIR" -maxdepth 1 -type f -regextype posix-extended \
+      -regex '.*/t[0-9]+\.pipeline' 2>/dev/null
+    find "$STATE_DIR/archive" -maxdepth 1 -type f -regextype posix-extended \
+      -regex '.*/t[0-9]+\.pipeline' 2>/dev/null
+  } | sort
+)
+mapfile -t markers < <(
+  find "$STATE_DIR" -maxdepth 1 -type f -regextype posix-extended \
+    -regex '.*/t[0-9]+\.[A-Z0-9_]+\.status' 2>/dev/null | sort
+)
+mapfile -t debris < <(
+  find "$STATE_DIR" -maxdepth 1 -type f -name '*.pipeline' 2>/dev/null |
+    awk '/\/t[0-9]+\.pipeline$/ {next} {print}' | sort
+)
+
+declare -a pending=()
+for file in "${pipeline_files[@]}"; do
+  [[ "$(awk -F= '$1=="RUN_PROTOCOL"{print $2}' "$file" | tail -1)" == 2 ]] || pending+=("$file")
+done
+
+for file in "${pending[@]}"; do
+  task=$(_migration_task_id "$file")
+  profile=$(awk -F= '$1=="PROFILE"{print $2}' "$file" | tail -1)
+  [[ "$profile" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+    echo "t${task}: отсутствует корректный PROFILE, миграция остановлена" >&2
+    exit 78
+  }
+  config="$FACTORY_PROFILES_DIR/$profile/runners.env"
+  profile_config_validate "$config" || {
+    echo "t${task}: canonical runner config невалиден: $config" >&2
+    exit 78
+  }
+  if _migration_live "$file" "$task"; then
+    echo "t${task}: оркестратор жив, миграция остановлена без изменений" >&2
+    exit 76
+  fi
+done
+
+if (( ${#pending[@]} == 0 && ${#markers[@]} == 0 && ${#debris[@]} == 0 )); then
+  echo "protocol v2: изменений нет"
+  exit 0
+fi
+
+if (( DRY_RUN == 1 )); then
+  printf 'protocol v2 dry-run: tasks=%s markers=%s debris=%s\n' \
+    "${#pending[@]}" "${#markers[@]}" "${#debris[@]}"
+  exit 0
+fi
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup="$STATE_DIR/migrations/protocol-v2-${stamp}-$$"
+mkdir -p "$backup/active" "$backup/archive" "$backup/markers" "$backup/debris"
+chmod 700 "$STATE_DIR/migrations" "$backup" "$backup"/* 2>/dev/null || true
+manifest="$backup/manifest.tsv"
+: >"$manifest"
+chmod 600 "$manifest"
+
+for file in "${pending[@]}"; do
+  task=$(_migration_task_id "$file")
+  if [[ "$file" == "$STATE_DIR/archive/"* ]]; then
+    scope=archive
+  else
+    scope=active
+  fi
+  cp -p -- "$file" "$backup/$scope/$(basename "$file")"
+  chmod 600 "$backup/$scope/$(basename "$file")"
+  _migration_write_protocol "$file" "$task" || exit 1
+  printf 'pipeline\t%s\t%s\n' "$file" "$backup/$scope/$(basename "$file")" >>"$manifest"
+done
+
+for file in "${markers[@]}"; do
+  target="$backup/markers/$(basename "$file")"
+  mv -- "$file" "$target"
+  chmod 600 "$target"
+  printf 'marker\t%s\t%s\n' "$file" "$target" >>"$manifest"
+done
+
+for file in "${debris[@]}"; do
+  target="$backup/debris/$(basename "$file")"
+  mv -- "$file" "$target"
+  chmod 600 "$target"
+  printf 'debris\t%s\t%s\n' "$file" "$target" >>"$manifest"
+done
+
+printf 'protocol v2: tasks=%s markers=%s debris=%s backup=%s\n' \
+  "${#pending[@]}" "${#markers[@]}" "${#debris[@]}" "$backup"

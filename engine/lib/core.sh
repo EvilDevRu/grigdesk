@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # Ядро движка фабрики — AGNOSTIC. Не знает о проектах: всё проектное берётся из профиля
-# (см. docs/PROFILE-CONTRACT.md). Здесь: реестр статусов, ворота, resume-цикл, flock, таймауты.
+# (см. ../docs/engine/PROFILE-CONTRACT.md). Здесь: реестр статусов, ворота, resume-цикл, flock, таймауты.
 # Подключается из bin/factory. Требует, чтобы профиль уже был подгружен (source).
 
 FACTORY_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="${STATE_DIR:-$HOME/.factory/state}"
 LOGDIR="$STATE_DIR/logs"; mkdir -p "$LOGDIR" "$STATE_DIR/archive"
 NODE_TIMEOUT="${FACTORY_STAGE_TIMEOUT:-1800}"   # таймаут одного этапа (сек)
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/multi-runner.sh"
 
 # --- реестр статусов (единственный способ менять) ---
 _pf() { echo "$STATE_DIR/t${1}.pipeline"; }
 set_st() { local t=$1; shift; STATE_DIR="$STATE_DIR" bash "$FACTORY_HOME/lib/pipeline-set.sh" "$t" "$@" >/dev/null; }
 get() { grep "^$2=" "$(_pf "$1")" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
+set_stage_terminal() {
+  local t=$1 stage=$2 result=$3; shift 3
+  run_state_control_update "$t" "$stage" "$result" "$@"
+}
 # Пишем ТОЛЬКО в файл: stdout демона и так перенаправлен в этот же журнал (bin/factory),
 # поэтому tee давал каждую строку дважды и журнал читался как «всё случилось два раза».
 flog() { echo "$(date '+%F %T') [t${1}] ${*:2}" >>"$LOGDIR/t${1}.stages.log"; }
@@ -38,7 +44,9 @@ _agent_settings() {
   base+=',"Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(find:*)","Bash(sed:*)","Bash(awk:*)"'
   base+=',"Bash(docker exec:*)","Bash(docker compose exec:*)","Bash(php:*)","Bash(node:*)"'
   base+=',"Bash(npx eslint:*)","Bash(npx vue-tsc:*)","Bash(npm run:*)","Bash(curl:*)","Bash(python3:*)"'
-  rules="\"Bash(bash $FACTORY_HOME/lib/pipeline-set.sh:*)\",\"Bash($FACTORY_HOME/lib/pipeline-set.sh:*)\",$base$extra"
+  rules="\"Bash(bash $FACTORY_HOME/lib/stage-result.sh:*)\",\"Bash($FACTORY_HOME/lib/stage-result.sh:*)\""
+  rules+=",\"Bash(bash $FACTORY_HOME/lib/stage-progress.sh:*)\",\"Bash($FACTORY_HOME/lib/stage-progress.sh:*)\""
+  rules+=",$base$extra"
   # Запреты — второй рубеж после проверки диффа: команды автоформатирования не должны даже
   # запускаться. Профиль добавляет свои через PROFILE_AGENT_DENY.
   local deny='"Bash(npx eslint --fix:*)","Bash(eslint --fix:*)","Bash(npm run lint:fix:*)","Bash(yarn lint --fix:*)","Bash(pnpm lint --fix:*)","Bash(npx prettier --write:*)","Bash(prettier --write:*)"'
@@ -90,9 +98,10 @@ _agent_settings() {
 }
 
 # --- один синхронный прогон агента для этапа ---
-# $1=TASK $2=промпт. claude делает ОДИН этап и завершается; bash ждёт (блокирующе).
+# $1=TASK $2=промпт. Выбранный runner делает ОДИН этап и завершается; bash ждёт.
 run_agent() {
   local t=$1 prompt=$2 stage=${3:-}
+  [[ -n "$stage" ]] || return 2
   # Рабочий каталог — WORKTREE ЗАДАЧИ, если профиль умеет его назвать. Пока cwd был общим
   # репозиторием, агенты складывали туда скриншоты, правили код и запускали eslint --fix
   # по всему проекту: 48 изменённых файлов в бэкенде и 277 во фронте основного стенда.
@@ -102,18 +111,11 @@ run_agent() {
     [[ -n "$c2" && -d "$c2" ]] && cwd="$c2"
   fi
   cd "$cwd" 2>/dev/null || true
-  # Модель на этап: профиль может отдать лёгкие этапы (поиск, скриншоты) младшей модели —
-  # разведка на тяжёлой модели тратит десятки минут там, где хватает быстрой.
-  local model=""
-  if declare -F profile_stage_model >/dev/null && [[ -n "$stage" ]]; then
-    model=$(profile_stage_model "$stage" 2>/dev/null)
-  fi
   # --add-dir ОБЯЗАТЕЛЕН: агент работает в каталоге проекта, а реестр/план/отчёты фабрики лежат
   # в STATE_DIR за его пределами. Без этого песочница режет запись, и агент, отработав десятки
   # минут, не может выставить статус этапа — движок считает этап незавершённым и гоняет его заново
   # (инцидент t8060: 19 минут и $4.65 в мусор на каждой попытке).
-  # FACTORY_HOME — потому что КАЖДЫЙ агент обязан звать lib/pipeline-set.sh, чтобы выставить
-  # статус этапа; это общий контракт движка, а не особенность конкретного проекта.
+  # FACTORY_HOME нужен для run-scoped stage-result/stage-progress и служебных команд движка.
   # Лимит времени этапа: браузерные замеры и прогон сценариев идут дольше правки кода.
   # Убитый по таймауту агент теряет ВСЮ работу этапа, поэтому профиль может поднять лимит.
   local tmo="$NODE_TIMEOUT" t2=""
@@ -121,16 +123,11 @@ run_agent() {
     t2=$(profile_stage_timeout "$stage" 2>/dev/null)
     [[ "$t2" =~ ^[0-9]+$ ]] && tmo="$t2"
   fi
-  # Агент — в фоне + wait: bash НЕ прерывает внешнюю команду по сигналу, он дожидается её конца.
-  # Из-за этого остановка демона выглядела как «молча умер»: причина писалась в журнал только
-  # через десятки минут, когда агент доработает. С wait сигнал доходит сразу.
-  timeout "$tmo" claude -p "$prompt" ${model:+--model "$model"} \
-    --settings "$(_agent_settings "$stage")" \
-    --add-dir "$STATE_DIR" --add-dir "$FACTORY_HOME" ${PROFILE_AGENT_DIRS:+--add-dir $PROFILE_AGENT_DIRS} \
-    --permission-mode acceptEdits --output-format stream-json --verbose \
-    >>"$LOGDIR/t${t}.orch.log" 2>&1 &
-  local apid=$!
-  wait "$apid"
+  export RUNNER_CLAUDE_SETTINGS
+  RUNNER_CLAUDE_SETTINGS=$(_agent_settings "$stage")
+  export RUNNER_CLAUDE_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
+  export RUNNER_CODEX_ADD_DIRS="$STATE_DIR ${PROFILE_AGENT_DIRS:-}"
+  multi_runner_run "$t" "$prompt" "$stage" "$tmo"
 }
 
 # --- ворота: bash ждёт решения человека (дёшево, без висящего агента) ---
@@ -153,7 +150,7 @@ gate_wait() {
 
 # --- общий протокол-обёртка вокруг проектного промпта этапа ---
 _stage_ctx() {
-  local t=$1 stage=$2 body fan=""
+  local t=$1 stage=$2 body fan="" status_contract
   body=$(profile_stage_prompt "$t" "$stage")
   # Веер субагентов. Мягкая формулировка «можно через субагентов» агентом игнорируется:
   # в задаче #8060 разведка ни разу не запустила ни одного, читая файлы 19 минут подряд.
@@ -224,19 +221,15 @@ ${fan}
 может только человек на воротах.
 $(cat "$STATE_DIR/t${t}.decisions.md")"
   fi
+  status_contract="ОТЧЁТ О СТАТУСЕ — ОБЯЗАТЕЛЕН. Точные run-scoped команды stage-result
+и stage-progress движок добавит непосредственно перед запуском. Только stage-result завершает
+этап; fixed status-файлы и terminal-запись через pipeline-set отклоняются."
   cat <<EOF
 Ты — агент ОДНОГО этапа фабрики ($stage) для задачи #${t}.
 Правило: выполни ТОЛЬКО этот этап СИНХРОННО (сам или через параллельных Task-субагентов —
 НЕ запускай фоновый Workflow, он осиротеет).
 
-ОТЧЁТ О СТАТУСЕ — ОБЯЗАТЕЛЕН, без него твоя работа пропадёт и этап запустят заново.
-Основной способ: команда из задания этапа (bash $FACTORY_HOME/lib/pipeline-set.sh ...).
-Запасной, если команда упирается в запрос разрешения (НЕ повторяй её, не жди):
-запиши инструментом Write файл $STATE_DIR/t${t}.${stage}.status, в нём одна строка —
-  done      (этап выполнен)
-  failed    (не получилось; движок вернёт работу назад)
-  skipped <причина>   (этап неприменим — ПРИЧИНА ОБЯЗАТЕЛЬНА, одной строкой)
-Разведка может дописать выбранный маршрут: done ROUTE=<маршрут>.
+${status_contract}
 
 ПРОПУСК ЭТАПА БЕЗ ПРИЧИНЫ — САМА ПО СЕБЕ АВАРИЯ. Человек видит на схеме только слово
 «пропущен» и не может отличить «нечего было проверять» от «агент не справился и сдался»:
@@ -244,8 +237,7 @@ $(cat "$STATE_DIR/t${t}.decisions.md")"
 а в реестре был голый skipped. Пиши причину так, чтобы её хватило человеку на воротах
 приёмки: что именно проверять было нечем и почему («в ветке ноль изменений в коде, который
 этот этап проверяет», «правка целиком фронтовая — здешние тесты её не сторожат»).
-Если статус ставишь командой —
-передай причину вторым ключом: pipeline-set.sh <TASK> <ЭТАП> skipped <ЭТАП>_COMMENT "<причина>".
+Если статус ставишь командой — передай причину предусмотренным этой командой аргументом.
 Пропуск ОБЯЗАТЕЛЬНОГО для маршрута этапа — крайняя мера: сначала ищи, как выполнить его
 по-настоящему, и только если это невозможно — пропускай с объяснением, почему невозможно.
 Уроки прошлых задач учитывай, если профиль их дал.
@@ -274,7 +266,8 @@ _denied_by_sandbox() {
 # Профиль — обычный bash-файл с функциями; повторный source переопределяет их в живом процессе.
 # Молча пропускаем битый файл: половина правки на диске не должна ронять идущую задачу.
 _reload_profile() {
-  local pf="$FACTORY_HOME/profiles/${PROFILE_NAME}.sh"
+  local profiles_dir=${FACTORY_PROFILES_DIR:-"$(cd "$FACTORY_HOME/.." && pwd)/profiles"}
+  local pf="$profiles_dir/${PROFILE_NAME}/profile.sh"
   [[ -f "$pf" ]] || return 0
   if bash -n "$pf" 2>/dev/null; then
     local before="${PROFILE_CTX:0:40}"
@@ -331,11 +324,15 @@ run_stage() {
     # Комментарий прошлого круга гасим на старте: иначе замечание, оставленное этапом
     # в прошлый раз, сойдёт за объяснение нового пропуска. Чужие комментарии не трогаем —
     # BUILD читает REVIEW_COMMENT/GATE_ACCEPT_COMMENT, и они должны его дождаться.
-    set_st "$t" "$key" running "${key}_COMMENT" ""
+    set_st "$t" "$key" running "${key}_COMMENT" "" "TRY_${key}" "$((tries + 1))"
     flog "$t" "этап $key (попытка $((tries+1)))"
     local t0=$SECONDS
     run_agent "$t" "$(_stage_ctx "$t" "$key")" "$key"
     local arc=$?
+    if (( arc == 79 )); then
+      flog "$t" "$key: цепочка исполнителей исчерпана — СТОП, нужен человек"
+      return 2
+    fi
     # 124 = агента убил timeout. Это НЕ «агент не справился»: работа была, но пропала.
     # Различать важно — иначе правишь промпт там, где надо поднять лимит времени этапа.
     (( arc == 124 )) && flog "$t" "$key: агент убит по таймауту — работа этапа потеряна, лимит мал"
@@ -360,72 +357,17 @@ run_stage() {
     fi
     # Инструмент субагентов в журнале называется "Agent" (историческое имя "Task" тоже встречается).
     # Счётчик, знавший только "Task", показывал ноль ВСЕГДА — и врал, что веер не работает.
-    local used; used=$(tail -c 3000000 "$LOGDIR/t${t}.orch.log" 2>/dev/null |
-      grep -o '"name":"\(Agent\|Task\)"' | wc -l)
-    set_st "$t" "FANOUT_${key}" "$used"
+    local used
+    used=$(get "$t" "FANOUT_${key}")
+    [[ "$used" =~ ^[0-9]+$ ]] || used=0
     if declare -F profile_stage_fanout >/dev/null && [[ -n "$(profile_stage_fanout "$key" 2>/dev/null)" ]] && (( used == 0 )); then
       flog "$t" "$key: веер объявлен, но субагентов не запущено — этап шёл последовательно"
-    fi
-    # ФАЙЛ-МАРКЕР вместо bash-команды: агенту в автономном режиме не всегда разрешают
-    # запускать скрипты вне рабочей папки, и он зависает в запросе разрешения на весь
-    # таймаут этапа. Записать файл ему разрешено всегда — принимаем отчёт так.
-    local mark="$STATE_DIR/t${t}.${key}.status"
-    if [[ -f "$mark" ]]; then
-      local mv; mv=$(head -1 "$mark" | tr -d ' \r')
-      # Хвост первой строки — объяснение статуса («skipped правка целиком фронтовая»).
-      # Считаем его ОТДЕЛЬНО от $mv: тот склеен без пробелов ради разбора ROUTE и статуса,
-      # а причину надо сохранить как есть, иначе она превращается в кашу из слов.
-      local mraw why=''
-      mraw=$(head -1 "$mark" | tr -d '\r')
-      mraw="${mraw#"${mraw%%[![:space:]]*}"}"; mraw="${mraw%"${mraw##*[![:space:]]}"}"
-      if [[ "$mraw" == *[[:space:]]* ]]; then
-        why="${mraw#*[[:space:]]}"; why="${why#"${why%%[![:space:]]*}"}"
-      fi
-      case "$mv" in
-        # Маршрут из маркера (пишет скаут) — только пока маршрут никем не закреплён:
-        # человек (ROUTE_BY=human) и эскалация сборки (escalation) главнее. Иначе
-        # повторный скаут на resume/replan откатывал feature обратно в trivial —
-        # и прогон терял ворота плана (деэскалация посреди работы, #7803).
-        *ROUTE=*)
-          local _rby; _rby=$(get "$t" ROUTE_BY)
-          if [[ -z "$_rby" || "$_rby" == scout ]]; then
-            set_st "$t" ROUTE "${mv##*ROUTE=}" ROUTE_BY scout
-          else
-            flog "$t" "$key предложил маршрут ${mv##*ROUTE=}, но маршрут закреплён (${_rby}) — игнорирую"
-          fi ;;
-      esac
-      # Причину из маркера кладём в реестр: без неё объяснение остаётся только в
-      # многомегабайтном журнале прогона, а человек на схеме видит голое «пропущен»
-      # и не отличает «нечего было проверять» от «агент сдался» (#7804 — тесты).
-      # Пишем ТОЛЬКО когда причина в маркере есть: агент мог уже отчитаться командой
-      # с комментарием, а пустышкой из маркера мы бы его затёрли.
-      case "$mv" in
-        done*|*=done*) set_st "$t" "$key" done ;;
-        failed*)
-          if [[ -n "$why" ]]; then set_st "$t" "$key" failed "${key}_COMMENT" "$why"
-          else set_st "$t" "$key" failed; fi ;;
-        skipped*)
-          if [[ -n "$why" ]]; then set_st "$t" "$key" skipped "${key}_COMMENT" "$why"
-          else set_st "$t" "$key" skipped; fi ;;
-      esac
-      # Доп-строки маркера: подэтапы, которые агент вёл внутри этапа (план ведёт
-      # PLANS/SKEPTIC/VALIDATE/TRANSLATOR). Другого канала у headless-агента нет:
-      # bash-команды ему не разрешены, а только running/done подэтапов красят схему
-      # и снимают с ворот ложное «хвост не доделан». Формат: `KEY=done|skipped` по строке.
-      local _ln _k _v2
-      while IFS= read -r _ln; do
-        _ln=$(tr -d ' \r' <<<"$_ln")
-        [[ "$_ln" =~ ^([A-Z_]+)=(done|skipped)$ ]] || continue
-        _k="${BASH_REMATCH[1]}"; _v2="${BASH_REMATCH[2]}"
-        [[ "$_k" == "$key" || "$_k" == ROUTE || "$_k" == WF_STATUS || "$_k" == ORCH_PID ]] && continue
-        set_st "$t" "$_k" "$_v2"
-      done < <(tail -n +2 "$mark")
-      rm -f "$mark"
     fi
     # Проверочный этап не имеет права оставлять правки: откатываем и считаем этап проваленным,
     # иначе «зелёный линт» приезжает на приёмку с чужим переформатированным кодом в диффе.
     if ! _guard_readonly "$t" "$key" "$dirty_before"; then
-      set_st "$t" "$key" failed "${key}_COMMENT" "этап менял файлы вне задачи — правки откачены"
+      set_stage_terminal "$t" "$key" failed "${key}_COMMENT" \
+        "этап менял файлы вне задачи — правки откачены"
       # Виноват САМ этап (не та команда проверки), а не сборка: возвращать работу в BUILD
       # бессмысленно — он не может исправить то, чем линт себя завалил. В #7800 так ушло
       # три круга по 35 минут подряд, каждый раз с тем же `npm run lint`. Повторяем сам
@@ -440,8 +382,7 @@ run_stage() {
       return 1
     fi
     v=$(get "$t" "$key")
-    # Второй канал отчёта — команда pipeline-set.sh напрямую, маркера при ней нет.
-    # Ловим пропуск без причины и здесь: сам факт «объяснить не смог» должен быть
+    # Ловим пропуск без причины: сам факт «объяснить не смог» должен быть
     # виден человеку в реестре, а не теряться между каналами.
     if [[ "$v" == skipped && -z "$(get "$t" "${key}_COMMENT")" ]]; then
       set_st "$t" "${key}_COMMENT" "причина не указана — агент не объяснил пропуск"
@@ -470,7 +411,8 @@ run_stage() {
     esac
   done
   flog "$t" "$key: 3 попытки без результата — СТОП, нужен человек"
-  set_st "$t" "$key" failed STALLED_HUMAN 1; return 2
+  set_stage_terminal "$t" "$key" failed STALLED_HUMAN 1
+  return 2
 }
 
 # --- главный конвейер (agnostic): читает этапы маршрута из профиля ---
