@@ -10,3 +10,7 @@ __pycache__/
 
 # Local project profiles can contain machine-specific paths, credentials and runtimes.
 /profiles/
+
+# Local implementation plans are working notes, not project documentation.
+/docs/cockpit/agents-routes-plan.md
+/docs/cockpit/pr-review-fix-plan.md

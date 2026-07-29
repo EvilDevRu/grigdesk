@@ -111,7 +111,9 @@
   `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт).
 - Настройки: prefs — `GET/POST /api/settings/prefs`; диагностика фабрики —
   `GET/POST /api/settings/factory-debug`; B24 — `GET/POST /api/settings/b24` +
-  `POST /api/settings/b24/test`; плагины — `/api/plugins*`. В UI табы:
+  `POST /api/settings/b24/test`; доверенные каталоги всех чат-исполнителей —
+  `POST /api/settings/trusted-directories` (хранятся в prefs, применяются к новым ходам
+  через `--add-dir`, глобальные конфиги CLI не меняются); плагины — `/api/plugins*`. В UI табы:
   Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ.
   Терминал: `GET /api/terminal` (WebSocket, PTY). Реалтайм: `GET /api/events` (SSE).
 
