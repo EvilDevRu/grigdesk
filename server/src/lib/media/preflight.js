@@ -12,13 +12,13 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-// Python из venv с faster-whisper. Путь ТОЛЬКО из окружения (venv тяжёлый — 492 МБ плюс
-// модель 1.5 ГБ, — переиспользуем существующий; проектных путей в исходнике нет).
+// Python из venv с faster-whisper. Путь ТОЛЬКО из окружения (runtime-venv тяжёлый —
+// около 492 МБ плюс модель в общем cache; машинных путей в исходнике нет).
 //
 // Значения по умолчанию сознательно нет: своего venv у кокпита не бывает, и любой «путь на
 // всякий случай» — это ложь про настроенное окружение. Раньше тут был fallback на
-// `<каталог файла>/../.venv/bin/python` — наследство раскладки b24-mcp, где файл лежал в
-// src/media/ и `..` попадал в корень проекта. После переезда в server/src/lib/media/ он стал
+// `<каталог файла>/../.venv/bin/python` — наследство прежней раскладки, где файл лежал в
+// src/media/ и `..` попадал в корень внешнего проекта. После переезда в server/src/lib/media/ он стал
 // указывать на server/src/lib/.venv, которого нет и не будет: вместо внятного «не настроено»
 // диктовка отвечала `spawn .../lib/.venv/bin/python ENOENT`.
 export const VENV_PYTHON = process.env.COCKPIT_MEDIA_PYTHON || '';
@@ -87,10 +87,10 @@ export function preflightReport(pf) {
     }
     // Уникальные шаги починки в порядке появления (apt раньше настройки путей).
     const fixes = [...new Set(pf.checks.filter((c) => !c.ok).map((c) => c.fix))];
-    // Своего venv кокпит не ставит — он переиспользуется, поэтому подсказываем, где искать готовый.
+    // Runtime не ставится при обычном npm install: подсказываем воспроизводимый локальный путь.
     const venvMissing = pf.checks.some((c) => c.name.startsWith('python venv') && !c.ok);
     const notes = venvMissing
-        ? ['', 'Готовый venv на машине обычно уже есть — найти:  ls -d ~/Workspace/*/.venv ~/Workspace/*/*/.venv']
+        ? ['', 'Создать: python3 -m venv server/.state/media-venv && server/.state/media-venv/bin/pip install -r server/requirements-media.txt']
         : [];
     return [
         '🩺 Окружение для разбора видео НЕ готово:',

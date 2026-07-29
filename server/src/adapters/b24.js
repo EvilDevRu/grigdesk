@@ -1,6 +1,6 @@
 // B24Adapter — изоляция интеграции Битрикс24 от остального сервера.
-// Строит перенесённый B24Client из кредов «Настроек» + СВОЙ cookie-файл (нет конфликта
-// с b24-mcp). Собирает полный DTO «Рабочего стола» из getTodayData + chartDataByPeriod.
+// Строит локальный B24Client из кредов «Настроек» + СВОЙ cookie-файл (нет конфликта
+// между процессами). Собирает полный DTO «Рабочего стола» из getTodayData + chartDataByPeriod.
 import { B24Client } from '../lib/b24/b24-client.js';
 
 export class B24Adapter {
