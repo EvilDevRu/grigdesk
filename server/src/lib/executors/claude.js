@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { claudeCatalog } from './_claude-catalog.js';
 import { npmLatest } from './_npm-latest.js';
-import { toStep } from '../chat/stream-steps.js';
+import { createStepSink } from '../chat/stream-steps.js';
+import { toClaudeSteps } from './_claude-steps.js';
 
 /**
  * probe/efforts гоняют CLI — короткие таймауты, ошибки не роняют реестр.
@@ -507,6 +508,16 @@ export default {
     return claudeCatalog(config);
   },
 
+  /** Стабильное семейство для policy агентов и движка. */
+  modelFamily(model) {
+    const explicit = String(model?.family || '').trim();
+    if (explicit) return explicit;
+    const id = String(model?.id || '').trim();
+    const versioned = /^claude-(opus|sonnet|haiku|fable)-/.exec(id);
+    if (versioned) return versioned[1];
+    return ['opus', 'sonnet', 'haiku'].includes(id) ? id : '';
+  },
+
   /**
    * Обновление CLI (кнопка «Обновить» в настройках → «Исполнители»).
    * Само не запускается — только по нажатию пользователя.
@@ -527,9 +538,9 @@ export default {
    */
   seedModels() {
     return [
-      { id: 'opus', name: 'Opus — последняя', context: 200000, tier: 8995, efforts: null, alias: true },
-      { id: 'sonnet', name: 'Sonnet — последняя', context: 200000, tier: 6995, efforts: null, alias: true },
-      { id: 'haiku', name: 'Haiku — последняя', context: 200000, tier: 3995, efforts: null, alias: true },
+      { id: 'opus', family: 'opus', name: 'Opus — последняя', context: 200000, tier: 8995, efforts: null, alias: true },
+      { id: 'sonnet', family: 'sonnet', name: 'Sonnet — последняя', context: 200000, tier: 6995, efforts: null, alias: true },
+      { id: 'haiku', family: 'haiku', name: 'Haiku — последняя', context: 200000, tier: 3995, efforts: null, alias: true },
     ];
   },
 
@@ -556,7 +567,8 @@ export default {
       let buf = '';
       // Лента шагов хода: копим на сервере (уедет в историю чата) и параллельно
       // отдаём наружу через onStep — окно рисует их по мере поступления.
-      const steps = [];
+      const stepSink = createStepSink(onStep);
+      const { steps } = stepSink;
       // Модель, которой CLI ФАКТИЧЕСКИ отработал: алиас `opus` он резолвит сам,
       // и это единственный способ увидеть рассинхрон с выбором в кокпите.
       let actualModel = '';
@@ -565,12 +577,7 @@ export default {
       // безымянной — следующий вопрос уходил без --resume, и агент забывал разговор.
       let streamSessionId = '';
       const pushSteps = (ev) => {
-        for (const s of toStep(ev)) {
-          // at — чтобы в ленте было видно, сколько агент думал (как «Thought for 49s»).
-          s.at = Date.now();
-          if (steps.length < 400) steps.push(s);
-          try { onStep?.(s); } catch { /* лента не критична для хода */ }
-        }
+        stepSink.emitAll(toClaudeSteps(ev));
       };
       // Своего таймаута у процесса НЕТ: лимит хода считает watchdog в modules/chat —
       // только он знает, что агент не работает, а ждёт ответа человека (это время не в счёт).

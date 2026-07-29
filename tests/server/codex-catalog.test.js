@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  codexModelFamily,
   parseCodexModelList,
 } from '../../server/src/lib/executors/codex.js';
 
@@ -65,13 +66,21 @@ test('Codex model/list becomes a current picker without duplicate aliases', () =
     'gpt-hidden',
   ]);
   assert.deepEqual(models[0].efforts, ['low', 'high', 'ultra']);
+  assert.equal(models[0].family, 'sol');
   assert.equal(models[0].defaultEffort, 'low');
   assert.equal(models[0].isDefault, true);
   assert.deepEqual(models[0].inputModalities, ['text', 'image']);
   assert.deepEqual(models[1].aliases, ['codex-auto-review']);
+  assert.equal(models[1].family, 'terra');
   assert.equal(models[1].extra, false);
   assert.equal(models[2].extra, true, 'model with an official upgrade stays behind “show all”');
   assert.equal(models[3].extra, true, 'hidden app-server model stays behind “show all”');
+});
+
+test('Codex versioned slugs expose a stable family for model policy', () => {
+  assert.equal(codexModelFamily('gpt-5.6-sol'), 'sol');
+  assert.equal(codexModelFamily('gpt-next-terra'), 'terra');
+  assert.equal(codexModelFamily('gpt-5.6'), '');
 });
 
 test('Codex model/list rejects an empty response so the previous catalog survives', () => {

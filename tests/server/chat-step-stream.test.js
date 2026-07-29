@@ -1,0 +1,112 @@
+import assert from 'node:assert/strict';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { createStepSink } from '../../server/src/lib/chat/stream-steps.js';
+import { toClaudeSteps } from '../../server/src/lib/executors/_claude-steps.js';
+import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codex-steps.js';
+import codex from '../../server/src/lib/executors/codex.js';
+
+test('нейтральный sink ставит время и не выпускает шаги сверх лимита', () => {
+  const sent = [];
+  let tick = 100;
+  const sink = createStepSink((step) => sent.push(step), {
+    limit: 2,
+    now: () => ++tick,
+  });
+
+  sink.emit({ k: 'start', model: 'test' });
+  sink.emit({ k: 'think', text: 'проверяю' });
+  sink.emit({ k: 'note', text: 'этот шаг не должен уйти' });
+
+  assert.equal(sink.steps.length, 2);
+  assert.deepEqual(sent, sink.steps);
+  assert.deepEqual(sink.steps.map((step) => step.at), [101, 102]);
+});
+
+test('Claude normalizer сохраняет прежние шаги в общем контракте', () => {
+  const steps = toClaudeSteps({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'thinking', thinking: 'Сначала проверю файл.' },
+        { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'git status' } },
+      ],
+    },
+  });
+
+  assert.deepEqual(steps, [
+    { k: 'think', text: 'Сначала проверю файл.', sub: false },
+    { k: 'tool', id: 'tool-1', name: 'Bash', sub: false, title: 'git status', preview: '', lang: 'bash' },
+  ]);
+});
+
+test('Codex normalizer показывает summary, но никогда raw reasoning', () => {
+  const normalize = createCodexStepNormalizer({ model: 'gpt-requested', cwd: '/work' });
+  const steps = [
+    ...normalize({ type: 'thread.started', thread_id: 'thread-1', model: 'gpt-actual' }),
+    ...normalize({
+      type: 'item.completed',
+      item: {
+        id: 'reason-1', type: 'reasoning', text: 'Проверю изменения и тесты.', raw_content: 'СЕКРЕТНАЯ ВНУТРЕННЯЯ ЦЕПОЧКА',
+      },
+    }),
+  ];
+
+  assert.deepEqual(steps.map((step) => step.k), ['start', 'think']);
+  assert.equal(steps[0].model, 'gpt-actual');
+  assert.equal(steps[0].mode, 'workspace-write');
+  assert.equal(steps[1].text, 'Проверю изменения и тесты.');
+  assert.doesNotMatch(JSON.stringify(steps), /СЕКРЕТНАЯ/);
+});
+
+test('Codex executor передаёт JSONL-шаги живьём и сохраняет их в результате', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-stream-'));
+  const fake = path.join(dir, 'fake-codex');
+  const events = [
+    { type: 'thread.started', thread_id: 'thread-from-stream', model: 'gpt-actual' },
+    {
+      type: 'item.completed',
+      item: {
+        id: 'reason-1', type: 'reasoning', text: 'Сверяю состояние проекта.', raw_content: 'не показывать',
+      },
+    },
+    { type: 'item.started', item: { id: 'cmd-1', type: 'command_execution', command: 'git status', status: 'in_progress' } },
+    { type: 'item.completed', item: { id: 'cmd-1', type: 'command_execution', command: 'git status', aggregated_output: 'M src/app.js\n', exit_code: 0, status: 'completed' } },
+    { type: 'item.started', item: { id: 'file-1', type: 'file_change', changes: [{ path: 'src/app.js', kind: 'update' }], status: 'in_progress' } },
+    { type: 'item.completed', item: { id: 'file-1', type: 'file_change', changes: [{ path: 'src/app.js', kind: 'update' }], status: 'completed' } },
+    { type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'Готово.' } },
+    { type: 'turn.completed', usage: { input_tokens: 17, output_tokens: 3, reasoning_output_tokens: 4 } },
+  ];
+  const first = events.slice(0, 3).map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
+  const rest = events.slice(3).map((event) => `printf '%s\\n' '${JSON.stringify(event)}'`).join('\n');
+  await writeFile(fake, `#!/bin/sh\n${first}\nsleep 0.15\n${rest}\n`);
+  await chmod(fake, 0o755);
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const live = [];
+  const progress = [];
+  const run = codex.run({
+    config: { codexBin: fake }, message: 'test', cwd: dir, model: 'gpt-requested', effort: '',
+    sessionId: null, signal: undefined,
+    onStep: (step) => live.push(step),
+    onProgress: (tokens) => progress.push(tokens),
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(live.map((step) => step.k), ['start', 'think', 'tool']);
+
+  const out = await run;
+  assert.equal(out.reply, 'Готово.');
+  assert.equal(out.sessionId, 'thread-from-stream');
+  assert.equal(out.actualModel, 'gpt-actual');
+  assert.equal(out.contextTokens, 17);
+  assert.equal(out.contextIsEstimate, true);
+  assert.deepEqual(out.steps.map((step) => step.k), ['start', 'think', 'tool', 'res', 'tool', 'res']);
+  assert.deepEqual(live, out.steps);
+  assert.equal(out.steps[1].text, 'Сверяю состояние проекта.');
+  assert.doesNotMatch(JSON.stringify(out.steps), /не показывать/);
+  assert.deepEqual(progress, [7]);
+});

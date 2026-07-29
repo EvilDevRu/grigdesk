@@ -139,7 +139,9 @@ async function build() {
   await fastify.register(demoModule, { config, factoryState });
   await fastify.register(codeModule, { config, prefs });
   await fastify.register(projectsModule, { config, prefs });
-  await fastify.register(chatModule, { factoryState, config, claudeAuth, internalToken });
+  await fastify.register(chatModule, {
+    factoryState, config, claudeAuth, internalToken, prefs,
+  });
   await fastify.register(settingsModule, {
     credsStore, b24, claudeAuth, config, prefs, factoryDebug,
   });

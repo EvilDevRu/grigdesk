@@ -1,8 +1,9 @@
 // Исполнитель GPT (OpenAI Codex CLI).
 // Установка: npm i -g @openai/codex && codex login — после этого провайдер оживает сам.
 // Запуск неинтерактивный: `codex exec --json` (JSONL-события), резюме через
-// `codex exec resume <thread_id>`. Песочница read-only: своей всплывашки разрешений
-// у codex-exec нет, действия за пределами чтения не даём.
+// `codex exec resume <thread_id>`. Песочница workspace-write: текущий cwd и явно
+// доверенные каталоги доступны для правок, сеть включена для gh/git/package CLI,
+// остальная файловая система закрыта.
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -10,6 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { npmLatest } from './_npm-latest.js';
+import { createStepSink } from '../chat/stream-steps.js';
+import { createCodexStepNormalizer } from './_codex-steps.js';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 
@@ -173,6 +176,12 @@ export function classifyCodexUsageResponse({ result = null, error = null } = {})
  * `model` — канонический slug, `id` может быть его алиасом. Алиасы схлопываем,
  * чтобы одна и та же модель не появлялась в интерфейсе дважды.
  */
+export function codexModelFamily(modelId) {
+  const id = String(modelId || '').trim().toLowerCase();
+  const match = /^gpt-(?:\d+(?:\.\d+)*|next)-([a-z][a-z0-9-]*)$/.exec(id);
+  return match?.[1] || '';
+}
+
 export function parseCodexModelList(result) {
   if (!Array.isArray(result?.data) || !result.data.length) return null;
 
@@ -199,6 +208,7 @@ export function parseCodexModelList(result) {
     const exact = group.entries.find((entry) => entry.id === entry.model && !/^codex-/i.test(entry.id || ''))
       || group.entries[0];
     const id = String(exact.model || exact.id);
+    const family = codexModelFamily(id);
     const effortSource = group.entries
       .map((entry) => entry.supportedReasoningEfforts)
       .find((efforts) => Array.isArray(efforts) && efforts.length) || [];
@@ -214,6 +224,7 @@ export function parseCodexModelList(result) {
 
     models.push({
       id,
+      ...(family && { family }),
       name: exact.displayName || id,
       context: Number(exact.contextWindow) || 400_000,
       tier: 10_000 - group.index,
@@ -230,6 +241,16 @@ export function parseCodexModelList(result) {
     });
   }
   return models.sort((a, b) => b.tier - a.tier);
+}
+
+/**
+ * В `codex exec --json` cached_input_tokens — часть input_tokens, а не ещё один
+ * кусок входа. Поток не отдаёт фактическую заполненность context window, поэтому
+ * это только оценка по входу завершённого хода, а не точный размер контекста.
+ */
+export function codexContextEstimateTokens(usage) {
+  const tokens = Number(usage?.input_tokens);
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : 0;
 }
 
 /**
@@ -376,6 +397,7 @@ async function readCodexModelCatalog(bin) {
 export function buildCodexExecArgs({
   message,
   cwd,
+  extraDirs = [],
   model,
   effort,
   sessionId,
@@ -383,9 +405,11 @@ export function buildCodexExecArgs({
   const args = [
     'exec',
     '--skip-git-repo-check',
-    '--sandbox', 'read-only',
+    '--sandbox', 'workspace-write',
+    '-c', 'sandbox_workspace_write.network_access=true',
     '-C', cwd,
   ];
+  for (const dir of extraDirs) args.push('--add-dir', dir);
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
   if (sessionId) args.push('resume', '--json', sessionId);
@@ -449,6 +473,11 @@ export default {
   },
   catalogLive: true,
 
+  /** Стабильное семейство для policy агентов и движка. */
+  modelFamily(model) {
+    return String(model?.family || codexModelFamily(model?.id)).trim();
+  },
+
   /**
    * Обновление CLI (кнопка «Обновить» в настройках → «Исполнители»).
    * Само не запускается — только по нажатию пользователя.
@@ -464,62 +493,139 @@ export default {
 
   seedModels() {
     return [
-      { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol', context: 400000, tier: 100, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-      { id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', context: 400000, tier: 90, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-      { id: 'gpt-5.6-luna', name: 'GPT-5.6-Luna', context: 400000, tier: 80, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+      { id: 'gpt-5.6-sol', family: 'sol', name: 'GPT-5.6-Sol', context: 400000, tier: 100, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+      { id: 'gpt-5.6-terra', family: 'terra', name: 'GPT-5.6-Terra', context: 400000, tier: 90, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+      { id: 'gpt-5.6-luna', family: 'luna', name: 'GPT-5.6-Luna', context: 400000, tier: 80, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     ];
   },
 
-  run({ config, message, cwd, model, effort, sessionId, signal }) {
-    const args = buildCodexExecArgs({ message, cwd, model, effort, sessionId });
+  run({
+    config, message, cwd, extraDirs = [], model, effort, sessionId, signal, onProgress, onStep,
+  }) {
+    const args = buildCodexExecArgs({
+      message, cwd, extraDirs, model, effort, sessionId,
+    });
 
     return new Promise((resolve, reject) => {
-      const child = execFile(config.codexBin, args, {
-        cwd,
-        maxBuffer: 32 * 1024 * 1024,
-        signal,
-      }, (err, stdout, stderr) => {
+      // execFile отдаёт stdout только после завершения, поэтому лента Codex раньше
+      // была пустой. Spawn читается построчно: provider-normalizer превращает каждое
+      // JSONL-событие в общий ChatStep и сразу отправляет его в SSE.
+      const stepSink = createStepSink(onStep);
+      const normalizeStep = createCodexStepNormalizer({ model, cwd });
+      let threadId = sessionId || null;
+      let reply = '';
+      let contextTokens = 0;
+      let actualModel = '';
+      let stderrTail = '';
+      let buffer = '';
+      let settled = false;
+
+      function finishError(error) {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      }
+
+      function finishStopped() {
+        if (settled) return;
+        const stopped = new Error('Ход остановлен.');
+        stopped.stopped = true;
+        stopped.steps = stepSink.steps;
         // Даже оборванный первый ход успевает напечатать thread.started. Сохраняем id:
         // следующий вопрос сможет продолжить тот же разговор после кнопки «стоп».
-        let threadId = sessionId || null;
-        for (const line of (stdout || '').split('\n')) {
-          const t = line.trim();
-          if (!t.startsWith('{')) continue;
-          try {
-            const e = JSON.parse(t);
-            if (e.type === 'thread.started' && e.thread_id) threadId = e.thread_id;
-          } catch { /* неполная последняя JSONL-строка */ }
+        stopped.sessionId = threadId;
+        finishError(stopped);
+      }
+
+      function rememberTail(current, chunk, limit = 4_000) {
+        return `${current}${String(chunk || '')}`.slice(-limit);
+      }
+
+      function consumeEvent(event) {
+        if (event.type === 'thread.started') {
+          threadId = event.thread_id || event.thread?.id || threadId;
         }
-        if (err?.code === 'ABORT_ERR' || signal?.aborted) {
-          const stopped = new Error('Ход остановлен.');
-          stopped.stopped = true;
-          stopped.steps = [];
-          stopped.sessionId = threadId;
-          return reject(stopped);
+        if (typeof event.model === 'string' && event.model) actualModel = event.model;
+        if (typeof event.item?.model === 'string' && event.item.model) actualModel = event.item.model;
+
+        stepSink.emitAll(normalizeStep(event));
+
+        if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+          const text = event.item.text || event.item.content;
+          if (typeof text === 'string' && text.trim()) reply = text;
         }
-        if (err && err.code === 'ENOENT') {
-          return reject(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
-        }
-        if (err && !stdout) return reject(new Error((stderr || err.message).slice(-600)));
-        // JSONL-поток: собираем последний agent_message, thread_id и usage.
-        let reply = '';
-        let contextTokens = 0;
-        for (const line of (stdout || '').split('\n')) {
-          const t = line.trim();
-          if (!t.startsWith('{')) continue;
-          let e;
-          try { e = JSON.parse(t); } catch { continue; }
-          if (e.type === 'thread.started' && e.thread_id) threadId = e.thread_id;
-          if (e.type === 'item.completed' && e.item?.type === 'agent_message' && e.item.text) reply = e.item.text;
-          if (e.type === 'turn.completed' && e.usage) {
-            contextTokens = (e.usage.input_tokens || 0) + (e.usage.cached_input_tokens || 0);
+        if (event.type === 'turn.completed') {
+          if (typeof event.last_agent_message === 'string' && event.last_agent_message.trim()) {
+            reply = event.last_agent_message;
+          }
+          if (event.usage) {
+            contextTokens = codexContextEstimateTokens(event.usage);
+            const spent = Number(event.usage.output_tokens || 0) + Number(event.usage.reasoning_output_tokens || 0);
+            if (Number.isFinite(spent) && spent > 0) {
+              try { onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
+            }
           }
         }
-        if (!reply) return reject(new Error(`codex не вернул ответ: ${(stderr || stdout || '').slice(-300)}`));
-        resolve({ reply, sessionId: threadId, cost: null, contextTokens });
+      }
+
+      function consumeLine(line) {
+        const text = line.trim();
+        if (!text.startsWith('{')) return;
+        let event;
+        try { event = JSON.parse(text); } catch { return; }
+        consumeEvent(event);
+      }
+
+      function consumeBuffer() {
+        let newline;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          consumeLine(line);
+        }
+      }
+
+      let child;
+      try {
+        child = spawn(config.codexBin, args, {
+          cwd,
+          signal,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (error) {
+        finishError(error);
+        return;
+      }
+
+      child.stdout?.on('data', (chunk) => {
+        buffer += String(chunk);
+        consumeBuffer();
       });
-      // stdin не используем — закрываем сразу (codex exec иначе может ждать ввода).
-      child.stdin?.end();
+      child.stderr?.on('data', (chunk) => {
+        stderrTail = rememberTail(stderrTail, chunk);
+      });
+      child.once('error', (error) => {
+        if (error?.code === 'ABORT_ERR' || signal?.aborted) return finishStopped();
+        if (error?.code === 'ENOENT') {
+          return finishError(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
+        }
+        return finishError(new Error((stderrTail || error?.message || 'codex не запустился').slice(-600)));
+      });
+      child.once('close', (code) => {
+        if (buffer.trim()) consumeLine(buffer);
+        buffer = '';
+        if (settled) return;
+        if (signal?.aborted) return finishStopped();
+        if (!reply) {
+          const detail = stderrTail.trim().slice(-300);
+          return finishError(new Error(`codex не вернул ответ${detail ? `: ${detail}` : ` (код ${code ?? '?'})`}`));
+        }
+        settled = true;
+        resolve({
+          reply, sessionId: threadId, cost: null, contextTokens, contextIsEstimate: true,
+          actualModel, steps: stepSink.steps,
+        });
+      });
     });
   },
 };

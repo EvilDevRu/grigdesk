@@ -2,6 +2,7 @@
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
+import { familyModels } from '../shared/model-family.js';
 
 let usageAt = 0;
 
@@ -33,8 +34,8 @@ export const useProvidersStore = defineStore('providers', {
     /**
      * Сохранённый выбор → реальная модель. Алиас CLI (`opus`, `sonnet`, `haiku`) отдельным
      * пунктом не показывается: он привязан к модели, в которую резолвится (`aliases`).
-     * Поэтому старый выбор «opus» показывается и уходит как актуальная Opus установленного
-     * CLI, без ручных миграций сохранённых чатов.
+     * Поэтому старый выбор «opus» и family policy вроде «sol» уходят как актуальная
+     * конкретная модель установленного CLI, без ручных миграций сохранённых чатов.
      */
     resolveModelId: (state) => (id) => {
       if (!id) return '';
@@ -42,6 +43,10 @@ export const useProvidersStore = defineStore('providers', {
         for (const m of p.models || []) {
           if (m.id === id || (m.aliases || []).includes(id)) return m.id;
         }
+      }
+      for (const p of state.providers) {
+        const m = familyModels(p.models || []).find((candidate) => candidate.family === id);
+        if (m) return m.id;
       }
       return id; // реестр не загружен или модель незнакомая — отдаём как есть
     },

@@ -2,6 +2,7 @@
 // Дефолты заданы здесь — отсутствующий файл означает «всё по умолчанию».
 import fs from 'node:fs';
 import path from 'node:path';
+import { normalizeStoredTrustedDirectories } from './trusted-directories.js';
 
 const DEFAULTS = {
   // Перед любым запуском (триаж, конвейер) подтягивать свежий код в репозитории
@@ -13,6 +14,9 @@ const DEFAULTS = {
   // Показывать в выборе модели ВСЕ, что помнит CLI (включая Sonnet 3.7, Opus 4.0…),
   // а не только две свежие версии каждого семейства.
   showAllModels: false,
+  // Дополнительные каталоги хоста, доступные всем ИИ-исполнителям в чатах Cockpit.
+  // Текущий cwd запуска доступен отдельно; здесь — соседние репозитории и общие деревья.
+  trustedDirectories: [],
   // Плагины: вкл/выкл по id (отсутствие ключа = дефолт: системный вкл, пользовательский выкл)
   // и значения их настроек. Схемы настроек — в lib/plugins-registry.js и манифестах.
   plugins: {},
@@ -31,7 +35,12 @@ export class PrefsStore {
 
   read() {
     try {
-      return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(this.prefsPath, 'utf8')) };
+      const loaded = JSON.parse(fs.readFileSync(this.prefsPath, 'utf8'));
+      return {
+        ...DEFAULTS,
+        ...loaded,
+        trustedDirectories: normalizeStoredTrustedDirectories(loaded.trustedDirectories),
+      };
     } catch {
       return { ...DEFAULTS };
     }
@@ -41,7 +50,11 @@ export class PrefsStore {
   write(patch) {
     const next = { ...this.read() };
     for (const k of Object.keys(DEFAULTS)) {
-      if (patch && k in patch) next[k] = patch[k];
+      if (patch && k in patch) {
+        next[k] = k === 'trustedDirectories'
+          ? normalizeStoredTrustedDirectories(patch[k])
+          : patch[k];
+      }
     }
     fs.mkdirSync(path.dirname(this.prefsPath), { recursive: true });
     // Атомарно (tmp+rename): падение в момент записи не бьёт файл настроек.

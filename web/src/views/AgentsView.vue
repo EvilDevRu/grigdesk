@@ -5,6 +5,11 @@ import { confirmDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import NumberField from '../shared/ui/NumberField.vue';
+import {
+  familyLabel,
+  familyModels,
+  resolveModelFamily,
+} from '../shared/model-family.js';
 
 // База агентов (стадий конвейера): слева список, справа редактор карточки.
 // Агент — базовая сущность; принадлежность к маршрутам здесь НЕ настраивается
@@ -27,7 +32,7 @@ const KINDS = [
   { v: 'code', label: '</> Код' },
 ];
 const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
-// Модели и их эффорты — из реестра исполнителей, без хардкода.
+// Семейства и их текущие модели/эффорты — из реестра исполнителей, без хардкода.
 const providers = ref([]);
 const EFFORT_LABEL = { low: 'низкий', medium: 'средний', high: 'высокий', max: 'максимум', xhigh: 'ультра' };
 
@@ -35,7 +40,7 @@ const EFFORT_LABEL = { low: 'низкий', medium: 'средний', high: 'в�
 const HELP = {
   label: 'Название блока — так этап подписан на схеме конвейера.',
   kind: 'Кто выполняет этап: агент Claude, человек (конвейер встаёт и ждёт решения в дашборде) или код (скрипт/проверка). Заодно определяет форму блока на схеме: прямоугольник, пилюля или ромб.',
-  model: 'Какая модель выполняет этап (список — из реестра исполнителей). «Сессионная» — модель, с которой запущен прогон, обычно самая сильная; лёгким механическим этапам (поиск, запуск линтера) хватает моделей попроще.',
+  model: 'Какое семейство модели выполняет этап. Конкретную актуальную версию движок выбирает из живого каталога перед запуском. «Сессионная» — семейство прогона; точный id можно сохранить как явный pin для исключений.',
   effort: 'Сколько модель «думает» на этапе. «Дефолт движка» — не задавать явно. Механическим этапам хватает низкого, проверочным и планирующим — высокий и выше. Доступные ступени зависят от выбранной модели.',
   sub: 'Мелкая приписка под блоком на схеме — подсказка, чем этап занимается (например «pint · eslint»).',
   key: 'Имя ключа в реестре прогона, куда движок и агент пишут статус этапа: running, done, failed. По нему схема красит блок.',
@@ -51,17 +56,38 @@ const groups = computed(() => KINDS
   .map((k) => ({ ...k, items: agents.value.filter((a) => a.kind === k.v) }))
   .filter((g) => g.items.length));
 
-// Модели для селекта: группами по исполнителям (значение = id модели из реестра).
+// По одному актуальному кандидату каждого семейства; значение селекта = family, не exact id.
 const modelGroups = computed(() => providers.value
-  .map((p) => ({ id: p.id, name: p.name, models: p.models || [] }))
+  .map((p) => ({ id: p.id, name: p.name, models: familyModels(p.models || []) }))
   .filter((g) => g.models.length));
+const selectedModel = computed(() => resolveModelFamily(providers.value, form.value?.model));
+const pinnedModel = computed(() => {
+  if (!form.value?.model || !selectedModel.value || form.value.model === selectedModel.value.family) return null;
+  const exact = selectedModel.value.matched?.id === form.value.model;
+  return {
+    value: form.value.model,
+    label: exact
+      ? `${form.value.model} (точный pin)`
+      : selectedModel.value.family
+        ? `${form.value.model} → ${familyLabel(selectedModel.value.family)}`
+        : `${form.value.model} (алиас)`,
+  };
+});
 // Эффорты доступной ступенью зависят от выбранной модели; без модели — объединение всех.
 const effortOptions = computed(() => {
   const all = providers.value.flatMap((p) => p.models || []);
-  const m = all.find((x) => x.id === form.value?.model);
+  const m = pinnedModel.value ? selectedModel.value?.matched : selectedModel.value?.model;
   const list = m?.efforts || [...new Set(all.flatMap((x) => x.efforts || []))];
   return list.length ? list : ['low', 'medium', 'high', 'max'];
 });
+
+function agentModelLabel(agent) {
+  if (!agent?.model) return 'сессия';
+  const resolved = resolveModelFamily(providers.value, agent.model);
+  if (!resolved) return agent.model;
+  if (!resolved.family) return `${agent.model} 🔒`;
+  return `${familyLabel(resolved.family)}${agent.model === resolved.family ? '' : ' 🔒'}`;
+}
 
 const original = computed(() => agents.value.find((a) => a.id === selectedId.value) || null);
 const dirty = computed(() => {
@@ -150,7 +176,7 @@ onMounted(load);
         <button v-for="a in g.items" :key="a.id" class="item" :class="{ sel: a.id === selectedId && !isNew }" @click="select(a.id)">
           <span class="ic" :class="`k-${a.kind}`">{{ KIND_ICON[a.kind] }}</span>
           <span class="nm">{{ a.label || a.id }}</span>
-          <span v-if="a.model || a.effort" class="chip mono">{{ [a.model || 'сессия', a.effort].filter(Boolean).join(' · ') }}</span>
+          <span v-if="a.model || a.effort" class="chip mono">{{ [agentModelLabel(a), a.effort].filter(Boolean).join(' · ') }}</span>
         </button>
       </template>
     </aside>
@@ -186,14 +212,17 @@ onMounted(load);
           </select>
         </label>
         <label class="f">
-          <span class="lbl">Модель <HelpTip :text="HELP.model" /></span>
+          <span class="lbl">Семейство модели <HelpTip :text="HELP.model" /></span>
           <select v-model="form.model" class="fld" @change="onModelChange">
-            <option value="">сессионная (модель прогона)</option>
+            <option value="">сессионное (семейство прогона)</option>
             <optgroup v-for="g in modelGroups" :key="g.id" :label="g.name">
-              <option v-for="m in g.models" :key="m.id" :value="m.id">{{ m.name }}</option>
+              <option v-for="m in g.models" :key="m.id" :value="m.family">
+                {{ familyLabel(m.family) }} · сейчас {{ m.name }}
+              </option>
             </optgroup>
-            <!-- Значение из файла, которого нет в реестре — не терять при сохранении -->
-            <option v-if="form.model && !modelGroups.some((g) => g.models.some((m) => m.id === form.model))"
+            <!-- Старый exact/alias не теряем: он остаётся осознанным pin до смены выбора. -->
+            <option v-if="pinnedModel" :value="pinnedModel.value">{{ pinnedModel.label }}</option>
+            <option v-else-if="form.model && !selectedModel"
                     :value="form.model">{{ form.model }} (нет в реестре)</option>
           </select>
         </label>

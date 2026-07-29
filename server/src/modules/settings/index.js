@@ -4,6 +4,10 @@
 // статус исполнителей отдаёт реестр /api/providers.
 import fp from 'fastify-plugin';
 import { FactoryDebugInputError } from '../../lib/factory-debug.js';
+import {
+  TrustedDirectoryInputError,
+  validateTrustedDirectories,
+} from '../../lib/trusted-directories.js';
 
 async function settingsModule(fastify, opts) {
   const { credsStore, b24, prefs, factoryDebug } = opts;
@@ -11,6 +15,21 @@ async function settingsModule(fastify, opts) {
   // Общие настройки кокпита (правила запусков и пр.).
   fastify.get('/api/settings/prefs', async () => prefs.read());
   fastify.post('/api/settings/prefs', async (request) => prefs.write(request.body || {}));
+
+  // Единый список дополнительных деревьев для всех локальных ИИ. Мы не переписываем
+  // ~/.claude и ~/.codex: проверенный список добавляется флагами к каждому новому ходу.
+  fastify.post('/api/settings/trusted-directories', async (request, reply) => {
+    try {
+      const directories = await validateTrustedDirectories(request.body?.directories);
+      prefs.write({ trustedDirectories: directories });
+      return { directories };
+    } catch (err) {
+      if (err instanceof TrustedDirectoryInputError) {
+        return reply.code(400).send({ error: 'bad_trusted_directory', message: err.message });
+      }
+      throw err;
+    }
+  });
 
   // Диагностические логи фабрики. Источник истины — engine CLI: сервер не читает и
   // не пишет его settings-файлы сам.

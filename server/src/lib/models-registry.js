@@ -5,8 +5,9 @@
 //   • уровни эффорта обнаруживаются динамически (executor.efforts(), например парсинг
 //     `claude --help`) — добавит вендор новый уровень (ultra и т.п.) — подхватится само;
 //   • сортировка по tier (сильнее = больше = выше в списке), тоже данные из файла.
-// У каждой модели: id (что передаём CLI), name (с версией — для UI), context (окно),
-// efforts (уровни; null = взять обнаруженные у исполнителя), tier (ранг силы).
+// У каждой модели: id (что передаём CLI), family (долгоживущая policy), name
+// (с версией — для UI), context (окно), efforts (уровни; null = взять обнаруженные
+// у исполнителя), tier (ранг силы).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getExecutors } from './executors/index.js';
@@ -17,7 +18,7 @@ const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'max'];
 // Версия правил составления каталога. Меняем, когда меняется САМ принцип отбора моделей
 // (например «в кратком списке — только свежая версия семейства») — иначе у работающих
 // кокпитов в реестре останется список, собранный по старым правилам.
-const CATALOG_SCHEMA = 5;
+const CATALOG_SCHEMA = 6;
 
 let cache = null; // { at, registry }
 const CACHE_MS = 60_000;
@@ -157,7 +158,17 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
       try { discovered = await ex.efforts(config); } catch { discovered = null; }
     }
     registry[prov] = (models || [])
-      .map((m) => ({ ...m, efforts: m.efforts || discovered || FALLBACK_EFFORTS }))
+      .map((m) => {
+        let family = String(m.family || '').trim();
+        if (!family && typeof ex?.modelFamily === 'function') {
+          try { family = String(ex.modelFamily(m) || '').trim(); } catch { family = ''; }
+        }
+        return {
+          ...m,
+          ...(family && { family }),
+          efforts: m.efforts || discovered || FALLBACK_EFFORTS,
+        };
+      })
       .sort((a, b) => (b.tier || 0) - (a.tier || 0));
   }
   cache = { at: Date.now(), registry };
@@ -168,15 +179,26 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
  * Запись модели + её исполнитель: { provider, model }. null — модели нет в реестре.
  * Нужна там, где важны свойства модели (уровни эффорта, окно контекста), а не только
  * кому её отдать: неподдерживаемый уровень CLI не проглатывает, а падает с ошибкой валидации.
+ * Точный id/алиас имеет приоритет; семейство (`sol`) выбирает актуальную не-extra модель.
  */
-export async function modelInfo(modelId, config) {
+export function modelInfoFromRegistry(modelId, registry) {
   if (!modelId) return null;
-  const registry = await getModelsRegistry(config);
   for (const [provider, models] of Object.entries(registry)) {
     // Алиас CLI (`opus`) отдельной записи не имеет — он привязан к модели, в которую
     // резолвится: запрос со старым выбором всё равно находит свойства нужной модели.
     const model = models.find((m) => m.id === modelId || (m.aliases || []).includes(modelId));
     if (model) return { provider, model };
   }
+  for (const [provider, models] of Object.entries(registry)) {
+    const candidates = models.filter((m) => m.family === modelId);
+    const model = candidates.sort((a, b) =>
+      Number(!!a.extra) - Number(!!b.extra) || Number(b.tier || 0) - Number(a.tier || 0))[0];
+    if (model) return { provider, model };
+  }
   return null;
+}
+
+export async function modelInfo(modelId, config) {
+  if (!modelId) return null;
+  return modelInfoFromRegistry(modelId, await getModelsRegistry(config));
 }

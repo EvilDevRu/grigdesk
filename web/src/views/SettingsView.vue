@@ -113,9 +113,59 @@ async function updateProvider(p) {
 // ── Запуски (правила перед стартом триажа/конвейера) ──
 const prefs = ref(null);
 const prefsMsg = ref(null);
+const trustedDirectories = ref([]);
+const trustedDirectoryInput = ref('');
+const trustedDirectoriesBusy = ref(false);
+const trustedDirectoriesMsg = ref(null);
 async function loadPrefs() {
-  try { prefs.value = await api.get('/api/settings/prefs'); } catch { prefs.value = null; }
+  try {
+    prefs.value = await api.get('/api/settings/prefs');
+    trustedDirectories.value = [...(prefs.value.trustedDirectories || [])];
+  } catch {
+    prefs.value = null;
+    trustedDirectories.value = [];
+  }
 }
+
+function addTrustedDirectory() {
+  const value = trustedDirectoryInput.value.trim();
+  trustedDirectoriesMsg.value = null;
+  if (!value) return true;
+  if (!value.startsWith('/')) {
+    trustedDirectoriesMsg.value = { type: 'err', text: 'Укажите абсолютный путь, начиная с /.' };
+    return false;
+  }
+  if (!trustedDirectories.value.includes(value)) trustedDirectories.value.push(value);
+  trustedDirectoryInput.value = '';
+  return true;
+}
+
+function removeTrustedDirectory(index) {
+  trustedDirectories.value.splice(index, 1);
+  trustedDirectoriesMsg.value = null;
+}
+
+async function applyTrustedDirectories() {
+  if (!addTrustedDirectory()) return;
+  trustedDirectoriesBusy.value = true;
+  trustedDirectoriesMsg.value = null;
+  try {
+    const result = await api.post('/api/settings/trusted-directories', {
+      directories: trustedDirectories.value,
+    });
+    trustedDirectories.value = [...result.directories];
+    if (prefs.value) prefs.value.trustedDirectories = [...result.directories];
+    trustedDirectoriesMsg.value = {
+      type: 'ok',
+      text: 'Применено. Новые ходы всех ИИ получат доступ к этим каталогам.',
+    };
+  } catch (e) {
+    trustedDirectoriesMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally {
+    trustedDirectoriesBusy.value = false;
+  }
+}
+
 async function toggleGitRefresh(v) {
   prefsMsg.value = null;
   try {
@@ -367,6 +417,49 @@ onMounted(() => {
           исполнителя в шапке). Обновление ставится только по кнопке.
         </p>
       </div>
+      <div class="card">
+        <div>
+          <b>Доверенные каталоги</b>
+          <p class="muted small trusted-copy">
+            Дополнительные деревья, которые Cockpit открывает каждому новому ходу Claude,
+            Codex и будущих локальных исполнителей. Текущий каталог проекта доступен и без
+            этого списка; корень <code>/</code> добавить нельзя.
+          </p>
+        </div>
+        <div v-if="trustedDirectories.length" class="trusted-list">
+          <div v-for="(directory, index) in trustedDirectories" :key="directory" class="trusted-item">
+            <code :title="directory">{{ directory }}</code>
+            <button type="button" :disabled="trustedDirectoriesBusy" @click="removeTrustedDirectory(index)">
+              Убрать
+            </button>
+          </div>
+        </div>
+        <p v-else class="muted small">Дополнительных каталогов пока нет.</p>
+        <div class="trusted-add">
+          <input v-model="trustedDirectoryInput"
+                 :disabled="trustedDirectoriesBusy"
+                 placeholder="/home/user/Workspace"
+                 aria-label="Абсолютный путь к доверенному каталогу"
+                 @keyup.enter="addTrustedDirectory" />
+          <button type="button"
+                  :disabled="trustedDirectoriesBusy || !trustedDirectoryInput.trim()"
+                  @click="addTrustedDirectory">
+            Добавить
+          </button>
+        </div>
+        <div class="row">
+          <button class="primary" type="button" :disabled="trustedDirectoriesBusy" @click="applyTrustedDirectories">
+            {{ trustedDirectoriesBusy ? 'Применяю…' : 'Применить ко всем ИИ' }}
+          </button>
+        </div>
+        <p class="muted small">
+          Настройка действует внутри Cockpit и не переписывает глобальные конфиги CLI.
+          Режим подтверждений выбранного исполнителя продолжает действовать отдельно.
+        </p>
+        <p v-if="trustedDirectoriesMsg" class="msg" :class="trustedDirectoriesMsg.type">
+          {{ trustedDirectoriesMsg.text }}
+        </p>
+      </div>
     </section>
 
     <!-- Запуски: обязательные правила перед стартом триажа/конвейера -->
@@ -580,6 +673,17 @@ input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; ba
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .debug-copy { margin: 5px 0 0; }
+.trusted-copy { margin: 5px 0 0; }
+.trusted-list { display: grid; gap: 7px; }
+.trusted-item { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+.trusted-item code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; background: var(--ground); border: 1px solid var(--line);
+  border-radius: 7px; padding: 0 9px; height: 36px; box-sizing: border-box;
+  display: flex; align-items: center; font-size: 12px; }
+.trusted-item button { flex: none; height: 36px; box-sizing: border-box; padding: 0 10px; font-size: 12px; }
+.trusted-add { display: flex; align-items: stretch; gap: 8px; }
+.trusted-add input { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; }
+.trusted-add button { height: 38px; box-sizing: border-box; }
 .debug-setting { display: flex; align-items: end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .debug-setting label { min-width: 230px; }
 .debug-effective { font-size: 12px; padding-bottom: 8px; color: var(--ink-mid); }

@@ -108,6 +108,7 @@ export async function claudeCatalog(config) {
         if (vi === 0 && !m.big && !latestOf.has(family)) latestOf.set(family, m.id);
         models.push({
           id: m.id,
+          family: m.family,
           name: modelName(m.family, m.major, m.minor, m.big),
           context: m.big ? 1000000 : 200000,
           tier: modelTier(m.family, m.major, m.minor, m.big),

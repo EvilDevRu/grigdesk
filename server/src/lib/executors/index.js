@@ -14,11 +14,16 @@
 //   catalog?(config)         — полный список моделей, поддерживаемых установленным CLI
 //                              (обновляется при смене версии; см. models-registry)
 //   catalogLive?             — каталог зависит от rollout/аккаунта, опрашивать каждый кэш-цикл
+//   modelFamily?(model)      — стабильное семейство записи каталога для model policy
 //   usage?()                 — состояние лимитов + provider-neutral account resources
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
 //   updateCmd?               — команда обновления CLI (кнопка «Обновить» в настройках)
-//   run(opts)                — выполнить сообщение → { reply, sessionId, contextTokens, cost }
-//                              opts.onStep — колбэк живых шагов хода (лента как в VS Code)
+//   run(opts)                — выполнить сообщение → { reply, sessionId, contextTokens, contextIsEstimate?, cost }
+//                              opts.extraDirs — единый список доверенных/служебных каталогов
+//                              opts.onStep — колбэк нейтральных шагов хода:
+//                              start/think/text/tool/res/note. Каждый executor сам
+//                              разбирает свой CLI-поток и показывает только
+//                              опубликованное provider-ом резюме рассуждений.
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
