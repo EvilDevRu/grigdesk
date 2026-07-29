@@ -57,7 +57,7 @@ runner_codex_family_alias() {
 }
 
 runner_codex_capabilities() {
-  printf 'status_fd sandbox tools structured_output\n'
+  printf 'status status_request sandbox tools structured_output\n'
 }
 
 runner_codex_run() {

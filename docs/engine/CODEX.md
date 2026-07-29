@@ -221,7 +221,8 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check --host-preflight
 ```
 
 Preflight не отправляет prompt и не делает model call. Он проверяет локальные CLI, auth
-metadata, каталоги моделей и capabilities, после чего пишет короткоживущие coverage artifacts.
+metadata, каталоги моделей и capabilities, после чего пишет coverage artifacts на 6 часов
+по умолчанию (`FACTORY_HOST_PREFLIGHT_TTL`, максимум сутки).
 
 При `RUNNERS_COVERAGE=required` запуск запрещён, если:
 

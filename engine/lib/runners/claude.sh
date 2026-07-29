@@ -23,7 +23,7 @@ runner_claude_family_alias() {
 }
 
 runner_claude_capabilities() {
-  printf 'status_fd sandbox tools structured_output fanout\n'
+  printf 'status status_fd sandbox tools structured_output fanout\n'
 }
 
 runner_claude_run() {

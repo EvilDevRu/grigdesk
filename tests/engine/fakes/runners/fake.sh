@@ -9,7 +9,7 @@ runner_fake_catalog() {
 }
 
 runner_fake_capabilities() {
-  printf 'status_fd foreground structured_output\n'
+  printf 'status status_fd foreground structured_output\n'
 }
 
 runner_fake_run() {

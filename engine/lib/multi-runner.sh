@@ -103,7 +103,9 @@ _multi_catalog_cleanup() {
 }
 
 _multi_execution_plan() {
-  local provider=$1 caps required=status_fd degradable="" requirements plan
+  # Этапу нужен терминальный status transport, а его реализация provider-specific:
+  # Claude сохраняет capability FD, Codex использует deferred request из sandbox.
+  local provider=$1 caps required=status degradable="" requirements plan
   caps=$(runner_call "$provider" capabilities 2>/dev/null | tr ' \n' ',' | sed 's/,,*/,/g; s/,$//')
   if declare -F profile_stage_fanout >/dev/null &&
      [[ -n "$(profile_stage_fanout "$MULTI_STAGE" 2>/dev/null)" ]]; then

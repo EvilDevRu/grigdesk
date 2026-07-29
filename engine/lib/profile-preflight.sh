@@ -21,8 +21,15 @@ _profile_preflight_providers() {
   )
 }
 
+profile_preflight_ttl() {
+  local ttl=${1:-${FACTORY_HOST_PREFLIGHT_TTL:-21600}}
+  [[ "$ttl" =~ ^[0-9]+$ && "$ttl" -gt 0 && "$ttl" -le 86400 ]] || return 2
+  printf '%s\n' "$ttl"
+}
+
 profile_runner_host_preflight() {
-  local profile=$1 now=${2:-$(date +%s)} ttl=${3:-900}
+  local profile=$1 now=${2:-$(date +%s)} ttl
+  ttl=$(profile_preflight_ttl "${3:-}") || return
   [[ "$profile" =~ ^[A-Za-z0-9._-]+$ &&
      "$now" =~ ^[0-9]+$ && "$ttl" =~ ^[0-9]+$ ]] || return 2
   local profiles_dir=${FACTORY_PROFILES_DIR:-"$(cd "$FACTORY_HOME/.." && pwd)/profiles"}

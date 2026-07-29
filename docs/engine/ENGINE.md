@@ -183,7 +183,9 @@ key; writers не должны использовать ad-hoc `sed` вне stor
 ## Coverage gate
 
 `factory-check --host-preflight` проверяет CLI/catalog/capabilities без prompt и model call.
-Artifacts привязаны к config revision и имеют TTL.
+Artifacts привязаны к config revision и по умолчанию действуют 6 часов
+(`FACTORY_HOST_PREFLIGHT_TTL`, не более суток). Этого хватает на рабочую сессию и длинный
+этап, но проверка всё равно регулярно подтверждает состояние CLI/auth/catalog.
 
 `RUNNERS_COVERAGE=required` означает fail-closed:
 

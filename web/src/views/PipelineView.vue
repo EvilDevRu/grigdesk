@@ -10,6 +10,7 @@ import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';
 import { sandboxUrl } from '../shared/sandbox.js';
+import { agentActivityLabel } from '../shared/agent-activity.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
 import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
@@ -408,7 +409,7 @@ function cardState(g) {
           <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
           <span v-if="stage.meta.fails" class="smchip bad">{{ stage.meta.fails }} возвр.</span>
           <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
-          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ stageActivity.journalFresh ? 'агент пишет' : 'тихо' }}</span>
+          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ agentActivityLabel(stageActivity) }}</span>
         </div>
 
         <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.

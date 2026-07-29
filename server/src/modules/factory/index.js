@@ -457,7 +457,7 @@ async function factoryModule(fastify, opts) {
     try {
       const { registry } = await factoryState.readRegistry(id);
       const activity = readActivity({ ...cfg, task: id, registry });
-      const live = readAgentLive({ stateDir: cfg.stateDir, task: id });
+      const live = readAgentLive({ stateDir: cfg.stateDir, task: id, registry });
       return { ...activity, live };
     } catch (err) { return reply.code(404).send({ error: 'not_found', message: err.message }); }
   });

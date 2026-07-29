@@ -10,7 +10,7 @@ runner_alpha_catalog() {
 }
 
 runner_alpha_capabilities() {
-  printf 'status_fd foreground structured_output fanout\n'
+  printf 'status status_fd foreground structured_output fanout\n'
 }
 
 runner_alpha_run() {

@@ -10,7 +10,7 @@ runner_beta_catalog() {
 }
 
 runner_beta_capabilities() {
-  printf 'status_fd foreground structured_output\n'
+  printf 'status status_fd foreground structured_output\n'
 }
 
 runner_beta_run() {
