@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  activeRunnerReason,
   loadRunnerConfig,
   readRunnerAttempts,
   resolveRunnerState,
@@ -57,6 +58,25 @@ test('runner state falls back from stage policy to project policy', () => {
   assert.equal(resolveRunnerState(profile, {}, 'REVIEW').source, 'profile-stage');
   assert.deepEqual(resolveRunnerState(profile, {}, 'BUILD').chain, ['codex', 'claude', 'local']);
   assert.equal(resolveRunnerState(profile, {}, 'BUILD').source, 'profile-project');
+});
+
+test('active failover reason comes from completed primary attempt, not stale registry data', () => {
+  const runner = {
+    primary: 'claude',
+    actual: 'codex',
+    switched: true,
+    reason: 'transient',
+  };
+  const attempts = [
+    { runner: 'claude', result: 'limited' },
+    { runner: 'codex', result: null },
+  ];
+
+  assert.equal(activeRunnerReason(runner, attempts), 'fallback_limit');
+  assert.equal(activeRunnerReason(
+    { ...runner, actual: 'claude', switched: false },
+    attempts,
+  ), 'transient');
 });
 
 test('runner config and attempts are read from canonical profile files', async (t) => {

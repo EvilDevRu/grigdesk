@@ -121,6 +121,25 @@ export function resolveRunnerState(profileConfig, registry, stage) {
 }
 
 /**
+ * Пока резервный runner ещё работает, dispatcher не успел записать финальную
+ * RUNNER_REASON_<STAGE>. Причину берём из завершённой попытки перед активной,
+ * иначе UI несколько минут показывает stale-ошибку прошлого прогона.
+ */
+export function activeRunnerReason(runner, attempts = []) {
+  const active = attempts.at(-1);
+  if (!runner?.switched || !active || active.runner !== runner.actual || active.result != null) {
+    return runner?.reason || null;
+  }
+  const previous = attempts.slice(0, -1).findLast((attempt) => attempt.result != null);
+  const reasons = {
+    limited: 'fallback_limit',
+    provider_unavailable: 'fallback_provider_unavailable',
+    manual_switch: 'manual_switch',
+  };
+  return reasons[previous?.result] || runner.reason || null;
+}
+
+/**
  * История реально стартовавших процессов этапа. meta.env пишет runner-launcher;
  * это диагностические данные, поэтому битый/исчезнувший run не ломает весь граф.
  */

@@ -10,6 +10,7 @@ import { parseStagesLog } from '../lib/stages-parse.js';
 import { detectStall } from '../lib/stall.js';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factory-graph.js';
 import {
+  activeRunnerReason,
   loadRunnerConfig,
   readRunnerAttempts,
   resolveRunnerState,
@@ -260,13 +261,16 @@ export class FactoryStateAdapter {
       // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
       if (def.nodes[nid]?.[0] === 'agent') {
-        nodeMeta[nid].runner = resolveRunnerState(runnerConfig, registry, runnerKey);
-        nodeMeta[nid].runner.stage = runnerKey;
-        nodeMeta[nid].runner.attempts = await readRunnerAttempts(
+        const runner = resolveRunnerState(runnerConfig, registry, runnerKey);
+        const attempts = await readRunnerAttempts(
           this.stateDir,
           task,
           runnerKey,
         );
+        runner.stage = runnerKey;
+        runner.attempts = attempts;
+        runner.reason = activeRunnerReason(runner, attempts);
+        nodeMeta[nid].runner = runner;
       }
     }));
 
