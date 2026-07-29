@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: 413 Request too large"}],"usage":{"input_tokens":0,"output_tokens":0}}}

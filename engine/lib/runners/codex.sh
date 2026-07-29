@@ -80,6 +80,39 @@ _runner_codex_meta() {
     "$run_dir/meta.env" 2>/dev/null
 }
 
+_runner_codex_no_model_activity() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+for line in source:
+    if not line.strip():
+        continue
+    try:
+        event = json.loads(line)
+    except (TypeError, ValueError):
+        raise SystemExit(1)
+    kind = event.get("type", "")
+    item = event.get("item") or {}
+    if kind in {"item.started", "item.completed"} and item.get("type") in {
+        "agent_message", "command_execution", "file_change", "mcp_tool_call",
+    }:
+        raise SystemExit(1)
+    usage = event.get("usage") or {}
+    if kind == "turn.completed" and any(
+        isinstance(value, (int, float)) and value > 0 for value in usage.values()
+    ):
+        raise SystemExit(1)
+raise SystemExit(0)
+PYTHON
+}
+
 runner_codex_classify() {
   local run_dir=$1 rc=$2 version verified source_kind
   [[ "$rc" == 0 ]] && { printf 'ok\n'; return; }
@@ -93,11 +126,36 @@ runner_codex_classify() {
     printf 'denied\n'
     return
   fi
-  if [[ "${RUNNER_CODEX_LIMIT_SIGNATURE_ENABLED:-0}" == 1 &&
-        ( "$verified" == 1 || "$source_kind" == runtime ) ]] && \
-     grep -q '"type":"usage_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null; then
+  if [[ "$verified" != 1 && "$source_kind" != runtime ]]; then
+    printf 'unknown\n'
+    return
+  fi
+  if grep -qiE -e '(^|[^0-9])413([^0-9]|$)' -e 'request too large' \
+      -e 'context[_ -]length[_ -]exceeded' -e 'context window.*exceed' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    printf 'context_overflow\n'
+    return
+  fi
+  if grep -q '"type":"usage_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null || \
+     grep -qiE '429.*(weekly|subscription|usage).*(limit|reached)|\
+(weekly|subscription|usage).*limit.*(reached|reset)' \
+       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
     printf 'limited\n'
     return
+  fi
+  if grep -qiE '(^|[^0-9])429([^0-9]|$)|"type":"rate_limit_error"|too many requests' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    printf 'transient\n'
+    return
+  fi
+  if grep -qiE -e '(^|[^0-9])(401|403)([^0-9]|$)' -e 'unauthorized' \
+      -e 'authentication.*(expired|required)' -e 'request not allowed' \
+      -e 'run codex login' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    if _runner_codex_no_model_activity "$run_dir"; then
+      printf 'provider_unavailable\n'
+      return
+    fi
   fi
   printf 'unknown\n'
 }

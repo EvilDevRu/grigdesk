@@ -3,7 +3,8 @@
 runner_result_class_valid() {
   case "${1:-}" in
     ok|limited|unavailable_preflight|route_unavailable|manual_switch|agent_failed|\
-missing_status|denied|timeout|transient|invalid_config|context_overflow|crashed|unknown)
+provider_unavailable|missing_status|denied|timeout|transient|invalid_config|\
+context_overflow|crashed|unknown)
       return 0 ;;
     *) return 1 ;;
   esac
@@ -18,6 +19,8 @@ runner_transition_allowed() {
     preflight:auto:unavailable_preflight:*|preflight:auto:route_unavailable:*)
       return 0 ;;
     started:auto:limited:*)
+      return 0 ;;
+    started:auto:provider_unavailable:*)
       return 0 ;;
     started:manual:manual_switch:1)
       return 0 ;;

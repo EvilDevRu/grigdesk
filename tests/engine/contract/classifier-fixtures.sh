@@ -39,8 +39,18 @@ check_fixture() {
 }
 
 check_fixture claude claude-synthetic-limit
+check_fixture claude claude-auth-expired
+check_fixture claude claude-auth-corrupt-stream
+check_fixture claude claude-request-not-allowed
+check_fixture claude claude-request-not-allowed-after-work
+check_fixture claude claude-context-overflow
+check_fixture claude claude-weekly-limit
+check_fixture claude claude-rate-limit
 check_fixture codex codex-synthetic-limit
 check_fixture codex codex-denied
+check_fixture codex codex-auth-expired
+check_fixture codex codex-auth-corrupt-stream
+check_fixture codex codex-context-overflow
 
 unknown="$TEST_ROOT/unknown-version"
 cp -a "$FACTORY_TESTS_HOME/fixtures/classifiers/codex-denied" "$unknown"

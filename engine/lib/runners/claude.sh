@@ -46,6 +46,43 @@ _runner_fixture_meta() {
     "$run_dir/meta.env" 2>/dev/null
 }
 
+_runner_claude_no_model_activity() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+for line in source:
+    if not line.strip():
+        continue
+    try:
+        event = json.loads(line)
+    except (TypeError, ValueError):
+        # Повреждённый stream не доказывает, что до 401/403 ничего не случилось.
+        raise SystemExit(1)
+    if event.get("type") == "assistant":
+        message = event.get("message") or {}
+        model = message.get("model")
+        content = message.get("content") or []
+        if model and model != "<synthetic>":
+            raise SystemExit(1)
+        if any(isinstance(block, dict) and block.get("type") == "tool_use"
+               for block in content):
+            raise SystemExit(1)
+    if event.get("type") == "user":
+        content = (event.get("message") or {}).get("content") or []
+        if any(isinstance(block, dict) and block.get("type") == "tool_result"
+               for block in content):
+            raise SystemExit(1)
+raise SystemExit(0)
+PYTHON
+}
+
 runner_claude_classify() {
   local run_dir=$1 rc=$2 version verified source_kind
   [[ "$rc" == 0 ]] && { printf 'ok\n'; return; }
@@ -58,11 +95,41 @@ runner_claude_classify() {
     printf 'denied\n'
     return
   fi
-  if [[ "${RUNNER_CLAUDE_LIMIT_SIGNATURE_ENABLED:-0}" == 1 &&
-        ( "$verified" == 1 || "$source_kind" == runtime ) ]] && \
-     grep -q '"type":"subscription_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null; then
+  # Любая новая сигнатура допускается только из runtime или проверенной fixture.
+  # Непроверенный текст «usage limit» остаётся unknown и никогда не меняет ИИ.
+  if [[ "$verified" != 1 && "$source_kind" != runtime ]]; then
+    printf 'unknown\n'
+    return
+  fi
+  if grep -qiE -e 'API Error:[[:space:]]*413' -e 'status["=: ]+413' \
+      -e 'request too large' -e 'context[_ -]length[_ -]exceeded' \
+      -e 'context window.*exceed' -e 'prompt is too long' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    printf 'context_overflow\n'
+    return
+  fi
+  if grep -q '"type":"subscription_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null || \
+     grep -qiE '429.*(weekly|subscription|usage).*(limit|reached)|\
+(weekly|subscription|usage).*limit.*(reached|reset)' \
+       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
     printf 'limited\n'
     return
+  fi
+  if grep -qiE -e 'API Error:[[:space:]]*429' -e 'status["=: ]+429' \
+      -e '"type":"rate_limit_error"' -e 'too many requests' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    printf 'transient\n'
+    return
+  fi
+  if grep -qiE -e 'API Error:[[:space:]]*(401|403)' \
+      -e 'status["=: ]+(401|403)' -e 'invalid authentication credentials' \
+      -e 'authentication.*(expired|required)' -e 'request not allowed' \
+      -e 'run claude login' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    if _runner_claude_no_model_activity "$run_dir"; then
+      printf 'provider_unavailable\n'
+      return
+    fi
   fi
   printf 'unknown\n'
 }

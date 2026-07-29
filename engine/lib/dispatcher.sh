@@ -89,6 +89,16 @@ dispatcher_run_chain() {
         DISPATCH_REASON=$result
         return 1
       fi
+      # 401/403 разрешают переход только как отдельный строгий класс:
+      # classifier обязан доказать, что текущая попытка не получила ни одного
+      # реального ответа модели и не запустила инструмент. Никакого breaker здесь
+      # нет: после повторного входа provider должен ожить сразу.
+      if [[ "$result" == provider_unavailable ]] &&
+         runner_transition_allowed started "$result" auto 0; then
+        last_switch_reason=fallback_provider_unavailable
+        skip_provider=1
+        break
+      fi
       if runner_transition_allowed started "$result" auto 0 && [[ "$result" == limited ]]; then
           scope=${DISPATCH_LIMIT_SCOPE:-provider}
           case "$scope" in

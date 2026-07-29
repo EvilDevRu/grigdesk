@@ -22,6 +22,8 @@ check_transition 1 preflight limited auto 0 "fresh limited classification is not
 check_transition 1 preflight manual_switch manual 1 "manual switch is not forged before active run"
 
 check_transition 0 started limited auto 0 "proven limit can fail over after model start"
+check_transition 0 started provider_unavailable auto 0 \
+  "proven provider refusal without model activity can fail over"
 check_transition 0 started manual_switch manual 1 "matching manual switch can replace active run"
 check_transition 1 started manual_switch manual 0 "unmatched manual switch is rejected"
 check_transition 1 started unavailable_preflight auto 0 "late auth error is not relabeled preflight"
