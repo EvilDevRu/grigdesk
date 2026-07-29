@@ -108,10 +108,12 @@ runner_claude_classify() {
     printf 'context_overflow\n'
     return
   fi
-  if grep -q '"type":"subscription_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null || \
-     grep -qiE '429.*(weekly|subscription|usage).*(limit|reached)|\
-(weekly|subscription|usage).*limit.*(reached|reset)' \
-       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+  if grep -qiE \
+      -e '"type":"subscription_limit_reached"' \
+      -e '"type":"rate_limit_event".*"status":"rejected".*"rateLimitType":"seven_day"' \
+      -e '429.*(weekly|subscription|usage).*(limit|reached)' \
+      -e '(weekly|subscription|usage).*limit.*(reached|reset)' \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
     printf 'limited\n'
     return
   fi

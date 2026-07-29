@@ -122,6 +122,33 @@ assert_eq $'alpha\nalpha\nalpha' "$(cat "$TEST_ROOT/invocations")" \
 assert_contains "$(cat "$STATE_DIR/logs/t47.stages.log")" "таймауту" \
   "normalized timeout remains visible in stage log"
 
+# run_stage уже поставил STALLED_HUMAN и вернул rc=2: внешний pipeline обязан
+# завершиться сразу. Иначе он начинает новый пакет из трёх попыток и молотит provider
+# бесконечно — именно так исторический REVIEW #7379 накопил 113 сбоев.
+breaker_clear alpha "$alpha_fingerprint" provider "" ""
+: >"$STATE_DIR/t48.pipeline"
+: >"$TEST_ROOT/invocations"
+set_st 48 ROUTE feature BUILD pending
+PROFILE_ROUTE_STAGES_feature=(BUILD)
+profile_sandbox_exists() { printf 'ready\n'; }
+export FAKE_ALPHA_RESULT=unknown
+run_pipeline 48 >"$TEST_ROOT/pipeline-human-stall.out" 2>&1 &
+pipeline_pid=$!
+for _poll in {1..200}; do
+  kill -0 "$pipeline_pid" 2>/dev/null || break
+  sleep 0.01
+done
+if kill -0 "$pipeline_pid" 2>/dev/null; then
+  kill -TERM "$pipeline_pid" 2>/dev/null || true
+  wait "$pipeline_pid" 2>/dev/null || true
+  test_fail "pipeline exits at the human-stall boundary" "run_pipeline repeated a stalled stage"
+else
+  wait "$pipeline_pid" 2>/dev/null || true
+  test_ok "pipeline exits at the human-stall boundary"
+fi
+assert_eq $'alpha\nalpha\nalpha' "$(cat "$TEST_ROOT/invocations")" \
+  "human-stall never starts a fourth provider attempt"
+
 printf 'RUNNERS_COVERAGE=required\n' >>"$config"
 : >"$STATE_DIR/t45.pipeline"
 : >"$TEST_ROOT/invocations"

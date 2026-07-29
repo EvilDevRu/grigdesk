@@ -1,0 +1,2 @@
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","isUsingOverage":false}}
+{"is_error":true,"api_error_status":429,"result":"You've hit your weekly limit · resets Jul 31"}

@@ -45,6 +45,7 @@ check_fixture claude claude-request-not-allowed
 check_fixture claude claude-request-not-allowed-after-work
 check_fixture claude claude-context-overflow
 check_fixture claude claude-weekly-limit
+check_fixture claude claude-runtime-weekly-limit
 check_fixture claude claude-rate-limit
 check_fixture codex codex-synthetic-limit
 check_fixture codex codex-denied
