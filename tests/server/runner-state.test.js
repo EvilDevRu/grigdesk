@@ -73,6 +73,11 @@ test('active failover reason comes from completed primary attempt, not stale reg
   ];
 
   assert.equal(activeRunnerReason(runner, attempts), 'fallback_limit');
+  assert.equal(activeRunnerReason(runner, [
+    { runner: 'claude', result: 'limited' },
+    { runner: 'codex', result: 'ok' },
+    { runner: 'codex', result: null },
+  ]), 'fallback_limit', 'a retry on the reserve keeps the original switch reason');
   assert.equal(activeRunnerReason(
     { ...runner, actual: 'claude', switched: false },
     attempts,
