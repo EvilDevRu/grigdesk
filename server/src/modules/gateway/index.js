@@ -54,7 +54,8 @@ async function gatewayModule(fastify, opts) {
   //
   // Отдельный эндпоинт, а НЕ `/api/auth/state`: тот отвечает 200 и невошедшему (в теле
   // `authenticated: false`), а `forward_auth` смотрит только на код — и пускал бы всех.
-  // Здесь всё решает гард: без сессии сюда просто не доходит (401), с сессией — 204 без тела.
+  // Здесь всё решает гард: без ограниченной gateway-cookie сюда запрос не
+  // доходит (401), с ней — 204. Полную cockpit_sid поддомены не получают.
   fastify.get('/api/gateway/authz', async (request, reply) => reply.code(204).send());
 
   // Caddy зовёт как `GET /api/gateway/tls-allow?domain=<host>`: 200 — выдавать, иначе отказ.

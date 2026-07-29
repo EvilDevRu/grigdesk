@@ -34,7 +34,9 @@ async function ssePlugin(fastify, opts) {
     const res = reply.raw;
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      // Поток сигнализирует в том числе об изменении приватных review-данных.
+      // Прокси и браузер не должны сохранять его тело даже как revalidation-cache.
+      'Cache-Control': 'no-store',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });

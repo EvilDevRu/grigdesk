@@ -401,20 +401,33 @@ export function buildCodexExecArgs({
   model,
   effort,
   sessionId,
+  sandbox = 'workspace-write',
+  networkAccess = true,
+  ephemeral = false,
+  ignoreUserConfig = false,
+  ignoreRules = false,
+  disabledFeatures = [],
+  messageViaStdin = false,
+  configOverrides = [],
 }) {
   const args = [
     'exec',
     '--skip-git-repo-check',
-    '--sandbox', 'workspace-write',
-    '-c', 'sandbox_workspace_write.network_access=true',
+    '--sandbox', sandbox,
+    '-c', `sandbox_workspace_write.network_access=${networkAccess ? 'true' : 'false'}`,
     '-C', cwd,
   ];
+  for (const override of configOverrides) args.push('-c', String(override));
+  if (ephemeral) args.push('--ephemeral');
+  if (ignoreUserConfig) args.push('--ignore-user-config');
+  if (ignoreRules) args.push('--ignore-rules');
+  for (const feature of disabledFeatures) args.push('--disable', feature);
   for (const dir of extraDirs) args.push('--add-dir', dir);
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
   if (sessionId) args.push('resume', '--json', sessionId);
   else args.push('--json');
-  args.push(message);
+  args.push(messageViaStdin ? '-' : message);
   return args;
 }
 
@@ -501,9 +514,13 @@ export default {
 
   run({
     config, message, cwd, extraDirs = [], model, effort, sessionId, signal, onProgress, onStep,
+    sandbox, networkAccess, ephemeral, ignoreUserConfig, ignoreRules, disabledFeatures,
+    messageViaStdin, configOverrides, env,
   }) {
     const args = buildCodexExecArgs({
-      message, cwd, extraDirs, model, effort, sessionId,
+      message, cwd, extraDirs, model, effort, sessionId, sandbox, networkAccess,
+      ephemeral, ignoreUserConfig, ignoreRules, disabledFeatures, messageViaStdin,
+      configOverrides,
     });
 
     return new Promise((resolve, reject) => {
@@ -589,9 +606,11 @@ export default {
       try {
         child = spawn(config.codexBin, args, {
           cwd,
+          ...(env ? { env } : {}),
           signal,
-          stdio: ['ignore', 'pipe', 'pipe'],
+          stdio: [messageViaStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         });
+        if (messageViaStdin) child.stdin.end(message);
       } catch (error) {
         finishError(error);
         return;

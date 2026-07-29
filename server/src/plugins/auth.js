@@ -12,6 +12,7 @@
 import fp from 'fastify-plugin';
 
 export const SESSION_COOKIE = 'cockpit_sid';
+export const GATEWAY_COOKIE = 'cockpit_gateway';
 
 // Эндпоинты, доступные без сессии: ТОЛЬКО то, что нужно экрану входа.
 // `/api/health` сознательно НЕ здесь: он отдаёт имя хоста и абсолютные пути (`stateDir`,
@@ -30,6 +31,8 @@ const PUBLIC_API = new Set([
 // Имена предсказуемы (`t<номер задачи>-…`), листинг не нужен. Закрываем наравне с API:
 // раньше они отдавались без сессии (проверено — реальный PNG приходил анонимно).
 const PROTECTED_STATIC = ['/shots/', '/demo/'];
+const INTERNAL_PERMISSION_ROUTE = '/api/chat/permission-request';
+const CLI_ROUTE_PREFIX = '/api/b24/';
 
 /**
  * Значение одной cookie из заголовка. Своими руками, чтобы не тащить @fastify/cookie:
@@ -80,18 +83,19 @@ export function isLocalRequest(request) {
 }
 
 /**
- * Область действия сессионной cookie.
+ * Область действия ограниченной gateway-cookie.
  *
- * По умолчанию cookie host-only — она уедет только на тот хост, что её поставил. Стенды за
+ * Полная cookie Cockpit host-only — она уедет только на тот хост, что её поставил. Стенды за
  * шлюзом живут на ПОДДОМЕНАХ (`p5191.<домен>`), и без явного `Domain` браузер к ним cookie
- * не отправит: `forward_auth` не увидит сессию и стенды окажутся недоступны.
+ * не отправит ограниченный gateway token: `forward_auth` не увидит право входа.
  *
  * Ставим `Domain` только когда запрос действительно пришёл на публичный домен. На localhost
  * и на адрес в локальной сети он не нужен и вреден: cookie с чужим `Domain` браузер отбросит,
  * и вход сломается молча.
  *
- * Цена: cookie становится видна всем поддоменам публичного домена. Все они наши (стенды),
- * а `HttpOnly` не даёт прочитать её из JS — приемлемо.
+ * Важно: этот Domain применяется только к ограниченной gateway-cookie. Полная
+ * `cockpit_sid` всегда host-only: код проверяемого PR не должен получить сессию,
+ * которой можно принять или опубликовать review-run.
  */
 export function cookieDomain(request, publicDomain) {
   if (!publicDomain) return '';
@@ -102,11 +106,11 @@ export function cookieDomain(request, publicDomain) {
 }
 
 /**
- * Заголовок Set-Cookie для сессии.
+ * Заголовок Set-Cookie для полной host-only сессии Cockpit.
  * Secure ставим только когда браузер реально говорит по https: на http он cookie с Secure
  * выбрасывает, и вход сломался бы молча.
  */
-export function sessionCookie(id, { maxAgeSec, secure, domain }) {
+export function sessionCookie(id, { maxAgeSec, secure }) {
   const parts = [
     `${SESSION_COOKIE}=${encodeURIComponent(id)}`,
     'Path=/',
@@ -114,14 +118,44 @@ export function sessionCookie(id, { maxAgeSec, secure, domain }) {
     'SameSite=Lax',
     `Max-Age=${maxAgeSec}`,
   ];
-  if (domain) parts.push(`Domain=${domain}`);
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-export function clearCookie({ secure, domain }) {
+export function gatewayCookie(id, {
+  maxAgeSec,
+  secure,
+  domain,
+}) {
+  if (!id || !domain) return '';
+  const parts = [
+    `${GATEWAY_COOKIE}=${encodeURIComponent(id)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${maxAgeSec}`,
+    `Domain=${domain}`,
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+export function clearCookie({ secure }) {
   const parts = [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
-  if (domain) parts.push(`Domain=${domain}`);
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+export function clearDomainCookie(name, { secure, domain }) {
+  if (!domain) return '';
+  const parts = [
+    `${name}=`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=0',
+    `Domain=${domain}`,
+  ];
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
@@ -169,18 +203,39 @@ async function authPlugin(fastify, opts) {
 
     if (PUBLIC_API.has(routeUrl)) return;
 
+    // Стенд получает отдельный audience-limited token. Даже если код PR
+    // доберётся до его значения, этот token не является сессией Cockpit.
+    if (routeUrl === '/api/gateway/authz') {
+      const gatewayToken = readCookie(request.headers.cookie, GATEWAY_COOKIE);
+      if (authStore.isValidGatewayToken?.(gatewayToken)) return;
+      return reply.code(401).send({
+        error: 'unauthorized',
+        message: 'Для стенда требуется действующая gateway-сессия.',
+      });
+    }
+
     const sid = readCookie(request.headers.cookie, SESSION_COOKIE);
     if (authStore.isValidSession(sid)) return;
 
-    // Внутренние запросы САМОГО сервера: permission-prompt-tool чата живёт в дочернем
-    // процессе claude, cookie у него нет и быть не может, а спросить разрешение он должен.
-    // Пускаем по секрету, который живёт только в памяти процесса и передаётся тому child'у.
-    if (internalToken && request.headers['x-cockpit-internal'] === internalToken) return;
+    // Внутренний секрет — НЕ общая серверная сессия. Он попадает в дочерний MCP-процесс
+    // чата и потому является узкой capability ровно на создание permission prompt.
+    // Даже утечка секрета из argv/env дочернего процесса не должна позволить принять scope,
+    // запустить исправление или опубликовать review-run.
+    if (
+      routeUrl === INTERNAL_PERMISSION_ROUTE
+      && request.method === 'POST'
+      && internalToken
+      && request.headers['x-cockpit-internal'] === internalToken
+    ) return;
 
-    // Локальные CLI-потребители (bin/b24, ship-этап фабрики, скиллы): токен из файла 0600
-    // в .state — прочитать его может только владелец машины, которому и так принадлежит
-    // всё содержимое .state. Cookie у CLI нет, а публиковать PR/комментарии он обязан.
-    if (cliToken && request.headers['x-cockpit-token'] === cliToken) return;
+    // CLI-token из файла 0600 — capability только для bin/b24. Он не является общей
+    // сессией Cockpit: украденный token не открывает terminal, настройки, Project binding
+    // или review API. Новому CLI-клиенту нужен отдельный явный route/capability.
+    if (
+      routeUrl.startsWith(CLI_ROUTE_PREFIX)
+      && cliToken
+      && request.headers['x-cockpit-token'] === cliToken
+    ) return;
 
     // 401 и на upgrade вебсокета тоже: хуки Fastify выполняются и для WS-роутов,
     // так что терминал закрыт тем же гардом, без токена в query (тот утекал в логи).

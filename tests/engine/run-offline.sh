@@ -7,6 +7,7 @@ FACTORY_TESTS_HOME="$PROJECT_ROOT/tests/engine"
 TEST_FILTER="${1:-}"
 RC=0
 CURRENT_TEST_ROOT=""
+HOST_NODE_BIN=$(command -v node 2>/dev/null || true)
 
 cleanup_test_root() {
   case "${CURRENT_TEST_ROOT:-}" in
@@ -59,6 +60,7 @@ for test_file in "${TEST_FILES[@]}"; do
     XDG_STATE_HOME="$test_root/xdg-state" \
     XDG_CACHE_HOME="$test_root/xdg-cache" \
     TEST_ROOT="$test_root" \
+    NODE_BIN="$HOST_NODE_BIN" \
     bash --noprofile --norc "$test_file" || RC=1
   cleanup_test_root
 done

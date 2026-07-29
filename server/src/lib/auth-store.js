@@ -24,6 +24,15 @@ const SCRYPT_MAXMEM = 64 * 1024 * 1024;
 
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000; // 30 дней: пульт открывают с планшета, каждый день логиниться незачем
 const SESSION_ID_BYTES = 32;
+const GATEWAY_TOKEN_CONTEXT = 'cockpit-gateway-session:v1\0';
+
+function gatewayTokenFor(id) {
+  return crypto
+    .createHash('sha256')
+    .update(GATEWAY_TOKEN_CONTEXT)
+    .update(String(id || ''))
+    .digest('hex');
+}
 
 /**
  * Хеш пароля в самодостаточном виде: параметры + соль + хеш в одной строке.
@@ -154,6 +163,43 @@ export class AuthStore {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Ограниченный токен для forward_auth стендов.
+   *
+   * Это односторонний digest сессионного ID с отдельным контекстом: стенд не
+   * может превратить его обратно в `cockpit_sid` и вызвать API Cockpit.
+   */
+  gatewayTokenForSession(id) {
+    return this.isValidSession(id) ? gatewayTokenFor(id) : '';
+  }
+
+  /** Валиден ли ограниченный gateway token хотя бы одной живой сессии. */
+  isValidGatewayToken(token) {
+    if (!/^[a-f0-9]{64}$/.test(String(token || ''))) return false;
+    const supplied = Buffer.from(token, 'hex');
+    let expired = false;
+    const now = Date.now();
+    for (const [id, exp] of this.sessions) {
+      if (exp <= now) {
+        this.sessions.delete(id);
+        expired = true;
+        continue;
+      }
+      const expected = Buffer.from(gatewayTokenFor(id), 'hex');
+      if (crypto.timingSafeEqual(supplied, expected)) {
+        if (expired) this._saveSessions();
+        return true;
+      }
+    }
+    if (expired) this._saveSessions();
+    return false;
+  }
+
+  sessionMaxAgeSec(id) {
+    if (!this.isValidSession(id)) return 0;
+    return Math.max(1, Math.floor((this.sessions.get(id) - Date.now()) / 1000));
   }
 
   dropSession(id) {

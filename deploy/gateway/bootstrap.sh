@@ -262,13 +262,19 @@ https:// {
 		#
 		# Цель — /api/gateway/authz, а НЕ /api/auth/state: тот отвечает 200 и невошедшему,
 		# а forward_auth смотрит только на код и пускал бы всех. authz стоит под гардом:
-		# без сессии 401, с сессией 204. Cookie исходного запроса Caddy пересылает сам.
+		# без ограниченной gateway-cookie 401, с ней 204. Полная cockpit_sid
+		# остаётся host-only и на поддомен не отправляется.
 		forward_auth 127.0.0.1:$PORT_APP {
 			uri /api/gateway/authz
 		}
 
 		reverse_proxy 127.0.0.1:$PORT_SANDBOX {
 			header_up X-Forwarded-Proto {scheme}
+			# Forward-auth cookies нужны только Caddy. Код проверяемого PR не
+			# должен получить ни старую полную сессию, ни gateway capability.
+			# Остальные cookies самого приложения стенда сохраняем.
+			header_up Cookie "(^|;[ ]*)cockpit_sid=[^;]*" ""
+			header_up Cookie "(^|;[ ]*)cockpit_gateway=[^;]*" ""
 		}
 	}
 

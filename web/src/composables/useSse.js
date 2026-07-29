@@ -12,6 +12,7 @@ const EVENT_NAMES = [
   'hello', 'state-change', 'providers-update',
   'chat-permission', 'chat-question', 'chat-permission-done',
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan',
+  'reviews-change',
 ];
 
 const connected = ref(false);

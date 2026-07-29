@@ -12,6 +12,7 @@ const routes = [
   { path: '/terminal', name: 'terminal', component: () => import('./views/TerminalView.vue'), meta: { title: 'Терминал' } },
   { path: '/routes', name: 'routes', component: () => import('./views/RoutesView.vue'), meta: { title: 'Маршруты' } },
   { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Проекты' } },
+  { path: '/reviews', name: 'reviews', component: () => import('./views/ReviewsView.vue'), meta: { title: 'Ревью' } },
   { path: '/code', name: 'code', component: () => import('./views/CodeView.vue'), meta: { title: 'Код' } },
   { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { title: 'Видео' } },
   { path: '/demo', name: 'demo', component: () => import('./views/DemoView.vue'), meta: { title: 'Демо' } },

@@ -77,6 +77,19 @@ function toolOf(item) {
     return { id, name: 'WebSearch', title: cut(item.query || item.search_query || '', 200) };
   }
 
+  // Новые Codex tool-items должны fail closed в контурах, где tools запрещены.
+  // Обычные agent/reasoning messages обработаны ниже отдельно; всё похожее на
+  // image/browser/computer/tool нельзя молча потерять из audit trail.
+  const type = String(item.type || '').toLowerCase();
+  if (/(?:tool|image|browser|computer|exec|command|file_change|web_search)/.test(type)) {
+    return {
+      id,
+      name: 'UnknownTool',
+      title: cut(type || 'неизвестный инструмент', 200),
+      preview: cut(textOf(item?.arguments ?? item?.input ?? item?.params ?? ''), 600),
+    };
+  }
+
   return null;
 }
 

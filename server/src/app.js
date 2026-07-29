@@ -42,6 +42,23 @@ import demoModule from './modules/demo/index.js';
 import projectsModule from './modules/projects/index.js';
 import codeModule from './modules/code/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
+import { ReviewStore } from './lib/reviews/store.js';
+import { ReviewControlStore } from './lib/reviews/control-store.js';
+import { createGhRunner, GitHubReviewAdapter } from './lib/reviews/github.js';
+import { ReviewAnalysisQueue } from './lib/reviews/analyzer.js';
+import { ReviewTranslatorQueue } from './lib/reviews/translator.js';
+import { ReviewWatcher } from './lib/reviews/watcher.js';
+import { createReviewModelAdapter } from './lib/reviews/model-adapter.js';
+import { createReviewBuildAgent } from './lib/reviews/build-agent.js';
+import { createReviewRunner } from './lib/reviews/runner.js';
+import { createReviewPublisher } from './lib/reviews/publisher.js';
+import { createDegradedReviewService } from './lib/reviews/degraded.js';
+import {
+  ReviewService,
+  createReviewRepositoryProvider,
+  createReviewSourceSnapshot,
+} from './lib/reviews/service.js';
+import reviewsModule from './modules/reviews/index.js';
 
 /**
  * Опции TLS, если сертификат задан в конфиге. Читаем синхронно на старте: без сертификата
@@ -126,6 +143,75 @@ async function build() {
   await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, trustProxy: config.trustProxy, internalToken, cliToken });
   await fastify.register(ssePlugin, { stateDir: config.stateDir });
 
+  // Автоматическое ревью — отдельный durable-контур. Он не использует номера
+  // задач Factory и не трогает t<TASK>.pipeline.
+  const reviewStore = new ReviewStore({ stateDir: config.reviewsDir });
+  const reviewControl = new ReviewControlStore({ stateDir: config.reviewsDir });
+  const reviewRepositories = createReviewRepositoryProvider({ config, prefs });
+  const reviewModel = createReviewModelAdapter({ config });
+  const reviewTranslator = new ReviewTranslatorQueue({
+    store: reviewStore,
+    model: reviewModel,
+  });
+  const reviewAnalysis = new ReviewAnalysisQueue({
+    store: reviewStore,
+    model: reviewModel,
+    translatorQueue: reviewTranslator,
+  });
+  const reviewGitHub = new GitHubReviewAdapter({
+    runner: createGhRunner(),
+    log: fastify.log,
+  });
+  const reviewRunner = createReviewRunner({
+    stateDir: config.reviewsDir,
+    worktreeRoot: path.join(config.reviewsDir, 'worktrees'),
+    agentAdapter: createReviewBuildAgent({ config }),
+  });
+  let reviews = null;
+  const reviewPublisher = createReviewPublisher({
+    store: reviewRunner.store,
+    beforePush: (state) => reviews.revalidatePublication(state),
+  });
+  const reviewWatcher = new ReviewWatcher({
+    store: reviewStore,
+    github: reviewGitHub,
+    repositories: reviewRepositories,
+    analysisQueue: reviewAnalysis,
+    sourceSnapshot: createReviewSourceSnapshot,
+    intervalMs: config.reviewPollMs,
+    coalesceMs: config.reviewDebounceMs,
+    log: fastify.log,
+    onChange: (event) => fastify.sse.broadcast('reviews-change', {
+      at: Date.now(),
+      ...event,
+    }),
+  });
+  const activeReviews = new ReviewService({
+    store: reviewStore,
+    controlStore: reviewControl,
+    watcher: reviewWatcher,
+    analysisQueue: reviewAnalysis,
+    translatorQueue: reviewTranslator,
+    runner: reviewRunner,
+    publisher: reviewPublisher,
+    repositoryProvider: reviewRepositories,
+    sse: fastify.sse,
+    log: fastify.log,
+    modelConcurrency: config.reviewAnalysisConcurrency,
+  });
+  reviews = activeReviews;
+  try {
+    await activeReviews.init();
+  } catch (error) {
+    fastify.log.error({
+      code: error?.code,
+      err: error?.message,
+    }, 'Review subsystem запущена в degraded-режиме');
+    await activeReviews.close().catch(() => {});
+    reviews = createDegradedReviewService(error);
+  }
+  fastify.addHook('onClose', async () => reviews.close());
+
   // Модули.
   await fastify.register(authModule, { authStore, config });
   await fastify.register(gatewayModule, { config });
@@ -138,7 +224,8 @@ async function build() {
   await fastify.register(mediaModule, { media });
   await fastify.register(demoModule, { config, factoryState });
   await fastify.register(codeModule, { config, prefs });
-  await fastify.register(projectsModule, { config, prefs });
+  await fastify.register(projectsModule, { config, prefs, reviews });
+  await fastify.register(reviewsModule, { reviews });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs,
   });

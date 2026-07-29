@@ -551,16 +551,27 @@ export default {
    * и размышлений в чате, как в VS Code).
    * Возвращает { reply, sessionId, contextTokens, cost, actualModel, steps } или бросает Error.
    */
-  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress, onStep, signal }) {
+  async run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress, onStep, signal }) {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
-    if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
+    // В MCP-конфиге есть узкая внутренняя capability для permission-request. JSON в argv
+    // читается через /proc/<pid>/cmdline, поэтому секрет туда не кладём: Claude умеет
+    // принимать путь к JSON-файлу. Каталог 0700 и файл 0600 закрывают его от других uid,
+    // а после завершения/остановки хода всё удаляется.
+    let privateMcpDir = '';
+    if (mcpConfig) {
+      privateMcpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-mcp-'));
+      await fs.chmod(privateMcpDir, 0o700);
+      const privateMcpPath = path.join(privateMcpDir, 'config.json');
+      await fs.writeFile(privateMcpPath, JSON.stringify(mcpConfig), { mode: 0o600, flag: 'wx' });
+      args.push('--mcp-config', privateMcpPath);
+    }
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     if (sessionId) args.push('--resume', sessionId);
     for (const d of extraDirs) args.push('--add-dir', d);
 
-    return new Promise((resolve, reject) => {
+    const execution = new Promise((resolve, reject) => {
       let resultEv = null;
       let spentTokens = 0;
       let lastTurnInput = 0;
@@ -668,6 +679,9 @@ export default {
           }
         }
       });
+    });
+    return execution.finally(async () => {
+      if (privateMcpDir) await fs.rm(privateMcpDir, { recursive: true, force: true });
     });
   },
 };

@@ -82,6 +82,20 @@ export const config = {
   // Параллельных оценок триажа: 1 воркер на очереди в 70 задач — это часы ожидания.
   analysisConcurrency: Number(process.env.COCKPIT_ANALYSIS_CONCURRENCY) || 2,
 
+  // Автоматическое ревью GitHub PR. Это отдельное состояние: оно не создаёт и не
+  // переписывает t<TASK>.pipeline фабрики. В каталоге лежат снимки, рекомендации,
+  // review-runs и их изолированные worktree.
+  reviewsDir: process.env.COCKPIT_REVIEWS_DIR || path.join(__dirname, '..', '.state', 'reviews'),
+  reviewPollMs: Number(process.env.COCKPIT_REVIEW_POLL_MS) || 5 * 60 * 1000,
+  reviewDebounceMs: Number(process.env.COCKPIT_REVIEW_DEBOUNCE_MS) || 45 * 1000,
+  reviewAnalysisConcurrency: Number(process.env.COCKPIT_REVIEW_ANALYSIS_CONCURRENCY) || 1,
+  reviewAnalysisTimeoutMs: Number(process.env.COCKPIT_REVIEW_ANALYSIS_TIMEOUT_MS) || 30 * 60 * 1000,
+  // Анализатор и переводчик запускаются новыми read-only сессиями Codex. Модель
+  // меняется окружением без хардкода проектного профиля.
+  reviewProvider: process.env.COCKPIT_REVIEW_PROVIDER || 'codex',
+  reviewModel: process.env.COCKPIT_REVIEW_MODEL || 'gpt-5.6-sol',
+  reviewEffort: process.env.COCKPIT_REVIEW_EFFORT || 'high',
+
   // Команда сноса стенда (проектно-специфична) — задаётся окружением, {task} подставляется.
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.COCKPIT_SANDBOX_DOWN_CMD || '',
