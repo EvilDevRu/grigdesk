@@ -89,9 +89,8 @@ async function checkUpdates() {
   finally { checking.value = false; }
 }
 
-// Обновление CLI исполнителя. Версия CLI определяет и набор моделей: пока на хосте
-// старый claude, алиас `opus` резолвится в старую модель, а новых в каталоге нет.
-// После обновления кокпит пересобирает каталог моделей из нового бинаря.
+// Обновление CLI исполнителя. Версия CLI и доступ аккаунта определяют набор моделей:
+// после обновления Кокпит принудительно перечитывает каталог самого исполнителя.
 const updating = ref('');
 const updMsg = ref({});
 async function updateProvider(p) {
@@ -341,7 +340,7 @@ onMounted(() => {
               <span class="dot"></span>{{ p.available ? 'доступен' : 'недоступен' }}
             </span>
             <button v-if="p.installed && p.canUpdate" class="upd" :class="{ hot: p.updateAvailable }" :disabled="!!updating"
-                    title="Обновить CLI исполнителя. Версия CLI задаёт и список моделей — после обновления каталог пересобирается."
+                    title="Обновить CLI исполнителя. После обновления каталог моделей перечитается."
                     @click="updateProvider(p)">
               {{ updating === p.id ? 'Обновление…' : 'Обновить' }}
             </button>
@@ -349,12 +348,12 @@ onMounted(() => {
         </div>
         <!-- Что показывать в выборе модели: только свежие версии или вообще всё, что помнит CLI -->
         <div class="prow">
-          <ToggleSwitch :model-value="prefs?.showAllModels === true" label="Показывать все модели: старые версии и алиасы"
+          <ToggleSwitch :model-value="prefs?.showAllModels === true" label="Показывать все модели: скрытые и старые версии"
                         @update:model-value="toggleShowAllModels" />
           <div class="muted small">
-            По умолчанию в выборе — только свежая модель каждого семейства (Opus 4.6, Sonnet 4.6 и
-            её 1M-вариант, Haiku 4.5). Скрыты старые версии (Sonnet 3.7, Opus 4.0…) и алиасы
-            «— последняя»: алиас указывает на ту же модель, что уже есть в списке.
+            По умолчанию в выборе — актуальные модели из каталогов установленных исполнителей.
+            Скрытые, устаревающие и старые версии доступны по этому флажку; дублирующие алиасы
+            схлопываются с канонической моделью.
           </div>
           <p v-if="modelsMsg" class="msg" :class="modelsMsg.type">{{ modelsMsg.text }}</p>
         </div>

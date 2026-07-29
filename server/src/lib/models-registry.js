@@ -17,7 +17,7 @@ const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'max'];
 // Версия правил составления каталога. Меняем, когда меняется САМ принцип отбора моделей
 // (например «в кратком списке — только свежая версия семейства») — иначе у работающих
 // кокпитов в реестре останется список, собранный по старым правилам.
-const CATALOG_SCHEMA = 4;
+const CATALOG_SCHEMA = 5;
 
 let cache = null; // { at, registry }
 const CACHE_MS = 60_000;
@@ -81,10 +81,10 @@ async function mergeDiscovered(file, prov, ex, config) {
 }
 
 /**
- * Каталог установленного CLI (executor.catalog) — ГЛАВНЫЙ источник правды о моделях:
- * что CLI знает, то и показываем, с именами, выведенными из id. Скан дорогой, поэтому
- * гоняем его только при смене версии CLI (`_meta[prov].catalogVersion`) — то есть
- * сразу после обновления исполнителя список сам становится актуальным.
+ * Каталог executor-а — ГЛАВНЫЙ источник правды о моделях: что CLI/аккаунт знает, то и
+ * показываем. Локальные каталоги (`catalogLive !== true`) опрашиваем при смене версии
+ * CLI; живые — при обновлении минутного кэша реестра, чтобы rollout новой модели
+ * появился без обновления Cockpit.
  *
  * Мёрж, а не перезапись: новые модели добавляются, у известных освежаются name/context/tier
  * (кроме записей с `custom: true` — они правлены руками), пропавшие из каталога помечаются
@@ -99,7 +99,8 @@ async function mergeCatalog(file, prov, ex, config) {
   const list = (file[prov] ||= []);
   // Пересобираем и когда сменилась версия CLI, и когда поменялись правила составления
   // каталога (CATALOG_SCHEMA) — иначе у уже работающих кокпитов остался бы старый список.
-  if (list.length && pm.catalogVersion === version && pm.catalogSchema === CATALOG_SCHEMA) return false;
+  const metadataChanged = pm.catalogVersion !== version || pm.catalogSchema !== CATALOG_SCHEMA;
+  if (!ex.catalogLive && list.length && !metadataChanged) return false;
 
   let catalog = null;
   try { catalog = await ex.catalog(config); } catch { catalog = null; }
@@ -120,10 +121,11 @@ async function mergeCatalog(file, prov, ex, config) {
   for (const m of list) {
     if (!inCatalog.has(m.id) && m.custom) next.push({ ...m, unknown: true });
   }
+  const listChanged = JSON.stringify(list) !== JSON.stringify(next);
   file[prov] = next;
   pm.catalogVersion = version;
   pm.catalogSchema = CATALOG_SCHEMA;
-  return true;
+  return metadataChanged || listChanged;
 }
 
 /**

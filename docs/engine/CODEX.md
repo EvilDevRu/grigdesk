@@ -16,6 +16,9 @@
   OAuth usage, Codex — через read-only `account/rateLimits/read` официального app-server;
   актуальные или последние успешные бары, необходимость входа, отказ аккаунта, rate limit
   либо отсутствие usage API; для истёкшей CLI-сессии доступна команда повторного входа;
+- модельный селектор Codex строится по живому `model/list` его app-server, а не по
+  захардкоженному seed; rollout, эффорты, default/hidden и рекомендуемые замены обновляются
+  без релиза Cockpit, дублирующие алиасы схлопываются;
 - незакрытые конвейеры после перезапуска Cockpit возобновляются его собственным механизмом
   восстановления; human gates и semantic stop не пересекаются, после трёх аварий нужен человек;
 - редактор project/task policy, coverage каждого provider-а и breaker/cooldown в UI остаются
@@ -388,6 +391,7 @@ tests/engine/integration/
   coverage-gate.sh
 
 tests/server/
+  codex-catalog.test.js
   runner-state.test.js
   runner-control.test.js
   factory-graph-runner-keys.test.js

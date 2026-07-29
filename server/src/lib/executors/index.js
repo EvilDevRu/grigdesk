@@ -13,6 +13,7 @@
 //   seedModels()             — стартовый список моделей для models.json
 //   catalog?(config)         — полный список моделей, поддерживаемых установленным CLI
 //                              (обновляется при смене версии; см. models-registry)
+//   catalogLive?             — каталог зависит от rollout/аккаунта, опрашивать каждый кэш-цикл
 //   updateCmd?               — команда обновления CLI (кнопка «Обновить» в настройках)
 //   run(opts)                — выполнить сообщение → { reply, sessionId, contextTokens, cost }
 //                              opts.onStep — колбэк живых шагов хода (лента как в VS Code)

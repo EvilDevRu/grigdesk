@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api-client.js';
@@ -27,6 +27,12 @@ const plugins = usePluginsStore();
 plugins.load();
 prov.load();
 prov.loadUsage();
+// Каталог Codex зависит не только от версии CLI, но и от rollout/доступа аккаунта.
+// Пока приложение открыто, перечитываем реестр раз в минуту: новая модель появляется
+// в селекторе без F5 и без обновления Cockpit.
+const providersTimer = setInterval(() => { prov.load(); }, 60_000);
+providersTimer.unref?.();
+onUnmounted(() => clearInterval(providersTimer));
 function provTitle(p) {
   return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
     + (p.version ? ` · ${p.version}` : '');

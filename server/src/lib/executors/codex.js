@@ -106,11 +106,75 @@ export function classifyCodexUsageResponse({ result = null, error = null } = {})
 }
 
 /**
+ * Каталог для модельного селектора из документированного `model/list`.
+ * `model` — канонический slug, `id` может быть его алиасом. Алиасы схлопываем,
+ * чтобы одна и та же модель не появлялась в интерфейсе дважды.
+ */
+export function parseCodexModelList(result) {
+  if (!Array.isArray(result?.data) || !result.data.length) return null;
+
+  const entries = result.data
+    .filter((entry) => entry && typeof entry === 'object' && (entry.model || entry.id));
+  const canonicalByName = new Map(entries
+    .filter((entry) => entry.id === entry.model && !/^codex-/i.test(entry.id || ''))
+    .map((entry) => [String(entry.displayName || '').trim().toLowerCase(), entry.model]));
+  const groups = new Map();
+  entries.forEach((entry, index) => {
+    const slug = String(entry.model || entry.id).trim();
+    const name = String(entry.displayName || '').trim().toLowerCase();
+    // Некоторые rollout-алиасы (`codex-auto-review`) приходят отдельной строкой с
+    // собственным slug, но теми же displayName/возможностями, что канонический GPT.
+    const canonical = /^codex-/i.test(slug) && canonicalByName.get(name)
+      ? canonicalByName.get(name)
+      : slug;
+    if (!groups.has(canonical)) groups.set(canonical, { index, entries: [] });
+    groups.get(canonical).entries.push(entry);
+  });
+
+  const models = [];
+  for (const group of groups.values()) {
+    const exact = group.entries.find((entry) => entry.id === entry.model && !/^codex-/i.test(entry.id || ''))
+      || group.entries[0];
+    const id = String(exact.model || exact.id);
+    const effortSource = group.entries
+      .map((entry) => entry.supportedReasoningEfforts)
+      .find((efforts) => Array.isArray(efforts) && efforts.length) || [];
+    const efforts = [...new Set(effortSource
+      .map((effort) => effort?.reasoningEffort)
+      .filter((effort) => typeof effort === 'string' && effort))];
+    const aliases = [...new Set(group.entries
+      .flatMap((entry) => [entry.id, entry.model])
+      .filter((alias) => alias && alias !== id))];
+    const upgrade = exact.upgrade
+      || group.entries.find((entry) => entry.upgrade)?.upgrade
+      || null;
+
+    models.push({
+      id,
+      name: exact.displayName || id,
+      context: Number(exact.contextWindow) || 400_000,
+      tier: 10_000 - group.index,
+      efforts: efforts.length ? efforts : null,
+      defaultEffort: exact.defaultReasoningEffort || null,
+      description: exact.description || '',
+      inputModalities: Array.isArray(exact.inputModalities) ? exact.inputModalities : ['text', 'image'],
+      isDefault: group.entries.some((entry) => entry.isDefault === true),
+      // hidden — не входит в официальный picker; upgrade — оставлен только для миграции.
+      // Оба доступны по общему флажку «Показывать все модели».
+      extra: group.entries.every((entry) => entry.hidden === true) || !!upgrade,
+      upgrade,
+      ...(aliases.length && { aliases }),
+    });
+  }
+  return models.sort((a, b) => b.tier - a.tier);
+}
+
+/**
  * Одноразовый read-only JSON-RPC клиент. Он не создаёт thread/turn и не вызывает
- * модель: поднимает `codex app-server`, читает только лимиты аккаунта и завершает
+ * модель: поднимает `codex app-server`, выполняет один безопасный метод и завершает
  * именно запущенный им дочерний процесс.
  */
-export function readCodexRateLimits(bin, {
+export function codexAppServerRequest(bin, { method, params } = {}, {
   timeoutMs = APP_SERVER_TIMEOUT_MS,
   spawnProcess = spawn,
 } = {}) {
@@ -172,7 +236,7 @@ export function readCodexRateLimits(bin, {
         }
         requestSent = true;
         send({ method: 'initialized', params: {} });
-        send({ method: 'account/rateLimits/read', id: 2 });
+        send({ method, id: 2, ...(params !== undefined && { params }) });
       } else if (message.id === 2) {
         finish(message.error ? { error: message.error } : { result: message.result });
       }
@@ -190,6 +254,30 @@ export function readCodexRateLimits(bin, {
       },
     });
   });
+}
+
+export function readCodexRateLimits(bin, options = {}) {
+  return codexAppServerRequest(bin, { method: 'account/rateLimits/read' }, options);
+}
+
+async function readCodexModelCatalog(bin) {
+  const data = [];
+  let cursor = null;
+  for (let page = 0; page < 10; page++) {
+    const response = await codexAppServerRequest(bin, {
+      method: 'model/list',
+      params: {
+        limit: 100,
+        includeHidden: true,
+        ...(cursor && { cursor }),
+      },
+    });
+    if (response.error || !Array.isArray(response.result?.data)) return null;
+    data.push(...response.result.data);
+    cursor = response.result.nextCursor || null;
+    if (!cursor) break;
+  }
+  return parseCodexModelList({ data });
 }
 
 export default {
@@ -232,23 +320,13 @@ export default {
   },
 
   /**
-   * Живой список моделей OpenAI (/v1/models) — новые GPT появятся сами.
-   * Нужен OPENAI_API_KEY в окружении (OAuth-токен codex для platform-API не подходит).
-   * Фильтруем не-чатовые модели (audio/realtime/tts и пр.).
+   * Модели, доступные именно этому Codex-аккаунту. App-server сам учитывает версию
+   * CLI, авторизацию, rollout и скрытые модели; API-ключ Platform не нужен.
    */
-  async discoverModels() {
-    const key = process.env.OPENAI_API_KEY;
-    if (!key) return null;
-    const r = await fetch('https://api.openai.com/v1/models', {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!r.ok) return null;
-    const d = await r.json();
-    return (d.data || [])
-      .filter((m) => /^gpt-/.test(m.id) && !/(audio|realtime|image|tts|transcribe|search|embed|moderation)/.test(m.id))
-      .map((m) => ({ id: m.id, name: m.id, createdAt: m.created ? new Date(m.created * 1000).toISOString() : '' }));
+  catalog(config) {
+    return readCodexModelCatalog(config.codexBin);
   },
+  catalogLive: true,
 
   /**
    * Обновление CLI (кнопка «Обновить» в настройках → «Исполнители»).
@@ -265,9 +343,9 @@ export default {
 
   seedModels() {
     return [
-      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', context: 400000, tier: 85, efforts: ['low', 'medium', 'high', 'xhigh'] },
-      { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', context: 400000, tier: 70, efforts: ['low', 'medium', 'high', 'xhigh'] },
-      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', context: 400000, tier: 40, efforts: ['low', 'medium', 'high'] },
+      { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol', context: 400000, tier: 100, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+      { id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', context: 400000, tier: 90, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
+      { id: 'gpt-5.6-luna', name: 'GPT-5.6-Luna', context: 400000, tier: 80, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     ];
   },
 
