@@ -14,11 +14,18 @@ import { ingestRecording } from '../../lib/media/ingest.js';
 import { getExecutor } from '../../lib/executors/index.js';
 import { modelInfo } from '../../lib/models-registry.js';
 import { ChatHistoryStore } from '../../lib/chat/history-store.js';
+import {
+  finishChatTitleHook,
+  visibleChatTitleStep,
+  withChatTitleHook,
+} from '../../lib/chat/title-hook.js';
 
 const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
 
 async function chatModule(fastify, opts) {
-  const { factoryState, config, claudeAuth, internalToken } = opts;
+  const {
+    factoryState, config, claudeAuth, internalToken, prefs,
+  } = opts;
 
   /**
    * Режим страницы по UI-контексту: подсказка агенту о том, что открыто, и —
@@ -299,13 +306,19 @@ async function chatModule(fastify, opts) {
     return enqueueTurn(chatKey, () => runChatTurn(reply, request, { ...opts, queued }));
   }
 
-  async function runChatTurn(reply, request, { id, message, model, effort, mode: wantMode, sessionId, context, attachments, chatKey, queued }) {
+  async function runChatTurn(reply, request, {
+    id, message, model, effort, mode: wantMode, sessionId, context, attachments,
+    chatKey, queued, requestTitle,
+  }) {
+    const wantsTitle = requestTitle === true;
     // Сообщение ждало в очереди — его sessionId устарел: пока оно стояло, предыдущий ход
     // мог завести новый id, и запуск со старым потерял бы контекст разговора. Пустой
     // sessionId не трогаем: это осознанный старт нового разговора, а не устаревшая копия.
     if (queued && sessionId && lastSession.get(chatKey)) sessionId = lastSession.get(chatKey);
     let cwd = config.factoryHome;
-    const extraDirs = [];
+    // Настройка читается перед каждым ходом: кнопка в настройках действует сразу,
+    // без рестарта сервера и без изменения глобальных конфигов конкретных CLI.
+    const extraDirs = [...(prefs?.read().trustedDirectories || [])];
     if (id) {
       const env = await factoryState.readEnv(id);
       if (env.BE_WT) cwd = env.BE_WT;
@@ -324,7 +337,13 @@ async function chatModule(fastify, opts) {
       extraDirs.push(attachDir);
       attachBlock = `[Вложения]\nПользователь приложил файлы (открой их инструментом Read):\n${attachPaths.map((p) => `- ${p}`).join('\n')}\n[/Вложения]\n\n`;
     }
-    const fullMessage = contextPrefix(context, mode.hint) + attachBlock + (message || 'Посмотри вложения.');
+    // Один и тот же каталог может прийти из доверенного списка, worktree и вложений.
+    // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
+    const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
+    const fullMessage = withChatTitleHook(
+      contextPrefix(context, mode.hint) + attachBlock + (message || 'Посмотри вложения.'),
+      wantsTitle,
+    );
 
     // Исполнитель — по модели из реестра (lib/models-registry). Неизвестная модель → claude.
     const info = await modelInfo(model, config);
@@ -385,7 +404,7 @@ async function chatModule(fastify, opts) {
         env: { ...baseEnv, MCP_TOOL_TIMEOUT: String(PERM_WAIT_MS) },
         message: fullMessage,
         cwd,
-        extraDirs,
+        extraDirs: uniqueExtraDirs,
         model,
         effort: safeEffort,
         sessionId,
@@ -402,9 +421,12 @@ async function chatModule(fastify, opts) {
         // Лента хода (размышления, инструменты, их результаты) — живьём в окно.
         // Копия в activeRuns: перезагрузка страницы посреди хода не теряет показанное.
         onStep: chatKey ? (step) => {
+          // Служебный маркер заголовка не показываем ни в живой ленте, ни после F5.
+          const visibleStep = visibleChatTitleStep(step, wantsTitle);
+          if (!visibleStep) return;
           const a = activeRuns.get(chatKey);
-          if (a && a.steps.length < 400) a.steps.push(step);
-          fastify.sse.broadcast('chat-step', { chatKey, step });
+          if (a && a.steps.length < 400) a.steps.push(visibleStep);
+          fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
         } : undefined,
       };
       let out = await executor.run(runArgs);
@@ -415,6 +437,8 @@ async function chatModule(fastify, opts) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         out = await executor.run(runArgs);
       }
+      // Название — метаданные Cockpit, маркер из видимого ответа/истории уже удалён.
+      out = finishChatTitleHook(out, wantsTitle);
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
@@ -422,7 +446,8 @@ async function chatModule(fastify, opts) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'assistant', ...out, model: model || null, effort: safeEffort || null, userText: message || '', at: Date.now() });
+          chatKey, role: 'assistant', ...out, model: model || null, effort: safeEffort || null,
+          userText: message || '', hadAttachments: !!attachments?.length, at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
@@ -440,8 +465,10 @@ async function chatModule(fastify, opts) {
         // sessionId — тот, что CLI успел завести в этом ходе (executor ловит его из потока).
         // Раньше сюда уходил ВХОДНОЙ id, а у первого хода в чате он пустой: после «стопа»
         // следующий вопрос шёл без --resume, и агент не помнил ничего из разговора.
-        const stoppedOut = { reply: stopReply, steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
-          contextTokens: 0, cost: null, model: model || null, effort: safeEffort || null, stopped: true };
+        const stoppedOut = finishChatTitleHook({
+          reply: stopReply, steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
+          contextTokens: 0, cost: null, model: model || null, effort: safeEffort || null, stopped: true,
+        }, wantsTitle);
         // Оборванный ход всё равно завёл разговор: следующему из очереди нужен ЕГО id,
         // иначе сообщение уйдёт со старым и агент не вспомнит, на чём его прервали.
         if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
@@ -540,16 +567,24 @@ async function chatModule(fastify, opts) {
   fastify.post('/api/tasks/:id/chat', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const { message, model, effort, mode, sessionId, context, attachments, chatKey } = request.body || {};
+    const {
+      message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+    } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, request, { id, message, model, effort, mode, sessionId, context, attachments, chatKey });
+    return runChat(reply, request, {
+      id, message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+    });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
-    const { message, model, effort, mode, sessionId, context, attachments, chatKey } = request.body || {};
+    const {
+      message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+    } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
-    return runChat(reply, request, { id: null, message, model, effort, mode, sessionId, context, attachments, chatKey });
+    return runChat(reply, request, {
+      id: null, message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+    });
   });
 
   // ── Хранилище истории чатов: файлы chats/YYYY-MM/<id>.json (см. lib/chat/history-store) ──

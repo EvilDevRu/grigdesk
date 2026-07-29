@@ -11,6 +11,7 @@ import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import HelpTip from '../../shared/ui/HelpTip.vue';
 import { mdToHtml } from '../../shared/md.js';
+import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
 
 // Одна сессия чата. Переиспользуется в плавающей панели и на странице «Агенты».
 const props = defineProps({
@@ -55,22 +56,14 @@ const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
 const modelUnknown = computed(() => !!currentModel.value?.unknown);
-// Чем CLI отработал на самом деле (из потока последнего ответа) — алиасы он резолвит сам,
-// поэтому «Opus — последняя» может оказаться какой угодно версией.
-const lastRun = computed(() => {
-  const msgs = sess.value?.messages || [];
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'assistant' && msgs[i].actualModel) return msgs[i];
-  }
-  return null;
-});
-// Рассинхрон выбора и факта: для алиаса это норма (он и должен резолвиться),
-// для конкретной модели — повод показать, чем на самом деле считали.
-const modelMismatch = computed(() => {
-  const a = lastRun.value?.actualModel;
-  const want = lastRun.value?.model;
-  if (!a || !want) return false;
-  return !a.startsWith(String(want).replace(/\[1m\]$/, '')) && a !== want;
+// Последний завершённый ход с моделью. Claude сообщает `actualModel` из потока,
+// Codex JSONL пока его не отдаёт — у него честно показываем «запрошено», иначе
+// поиск последнего непустого факта откатывался к старому Claude-ответу.
+const lastRun = computed(() => lastModelRun(sess.value?.messages || []));
+const lastRunView = computed(() => modelRunView(lastRun.value));
+const lastRequestedName = computed(() => {
+  const id = lastRun.value?.model;
+  return id ? (prov.modelOf(id).model?.name || id) : '';
 });
 function onModelChange(e) {
   const oldProv = current.value.provider?.id;
@@ -118,6 +111,17 @@ function onTaskChange(e) {
 // ── Контекст (окно — у каждой модели своё, из реестра) ──
 const ctxPct = computed(() => Math.min(100, Math.round(((sess.value?.contextTokens || 0) / ctxWindow.value) * 100)));
 const ctxClass = computed(() => (ctxPct.value >= 85 ? 'hi' : ctxPct.value >= 60 ? 'mid' : ''));
+// Codex в exec --json не сообщает фактическую заполненность окна. Даже старые
+// сохранённые GPT-чаты без флага показываем честно, узнавая executor по модели.
+const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate || current.value?.provider?.id === 'codex');
+const ctxTitle = computed(() => {
+  const tokens = (sess.value?.contextTokens || 0).toLocaleString('ru');
+  if (!sess.value?.sessionId) return 'Контекст: пусто';
+  if (ctxIsEstimate.value) {
+    return `Ввод последнего хода: ${tokens} токенов (≈${ctxPct.value}% окна) · Codex не отдаёт точную заполненность контекста · клик — сбросить`;
+  }
+  return `Контекст: ${tokens} токенов (${ctxPct.value}%) · клик — сбросить`;
+});
 // Кольцо-индикатор контекста (клик — сброс контекста).
 const RING_C = 2 * Math.PI * 9;
 const ringDash = computed(() => RING_C * (1 - ctxPct.value / 100));
@@ -409,9 +413,9 @@ async function toConveyor() {
           </select>
         </div>
         <EffortSlider :model-value="sess.effort" :levels="effortLevels" @update:model-value="chat.setEffort(sid, $event)" />
-        <!-- Контекст: маленькое кольцо-заполнение; клик — сброс контекста -->
-        <button class="ctx-ring" :class="ctxClass" :disabled="!sess.sessionId"
-                :title="`Контекст: ${(sess.contextTokens || 0).toLocaleString('ru')} токенов (${ctxPct}%)` + (sess.sessionId ? ' · клик — сбросить' : ' · пусто')"
+        <!-- Контекст: кольцо показывает точное значение либо явно помеченную оценку Codex. -->
+        <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate }]" :disabled="!sess.sessionId"
+                :title="ctxTitle" :aria-label="ctxTitle"
                 @click="chat.resetContext(sid)">
           <svg viewBox="0 0 24 24">
             <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
@@ -420,15 +424,15 @@ async function toConveyor() {
           </svg>
         </button>
       </div>
-      <!-- Что реально ушло в запуск: модель, которой CLI отработал, и уровень усилия.
-           Здесь виден любой рассинхрон между выбором в кокпите и фактом. -->
-      <div v-if="lastRun || modelUnknown" class="factbar">
+      <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
+           иначе показываем запрошенный id и не откатываемся к старому ходу другого ИИ. -->
+      <div v-if="lastRunView.model || modelUnknown" class="factbar">
         <template v-if="lastRun">
-          <span class="fb" :class="{ warn: modelMismatch }">
-            факт: <b>{{ lastRun.actualModel }}</b>
+          <span class="fb" :class="{ warn: lastRunView.mismatch }">
+            последний ход · {{ lastRunView.source }}: <b>{{ lastRunView.model }}</b>
             <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
           </span>
-          <span v-if="modelMismatch" class="fb warn">— выбрано «{{ currentModel?.name || lastRun.model }}»</span>
+          <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
         </template>
         <span v-if="modelUnknown" class="fb warn">установленный CLI не знает эту модель — обнови его в настройках</span>
       </div>
@@ -462,7 +466,9 @@ async function toConveyor() {
               <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
             </svg>
             <span>Агент</span>
-            <span v-if="m.actualModel" class="amodel">{{ m.actualModel }}<template v-if="m.effort"> · {{ m.effort }}</template></span>
+            <span v-if="m.actualModel || m.model" class="amodel">
+              {{ m.actualModel || m.model }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
+            </span>
           </div>
           <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
                а не наперегонки (два CLI на одну сессию убивают друг друга). -->
@@ -470,7 +476,7 @@ async function toConveyor() {
           <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
           <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
           <div v-if="m.text" class="mrow">
-            <!-- Ответ агента — маркдауном (заголовки/списки/код), текст экранируется в md.js -->
+            <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md" v-html="mdToHtml(m.text)"></div>
             <div v-else class="text">{{ m.text }}</div>
             <button class="copy" :class="{ done: copiedIdx === i }"
@@ -628,6 +634,8 @@ async function toConveyor() {
 .ctx-ring .rfg { stroke: var(--good); transition: stroke-dashoffset .3s; }
 .ctx-ring.mid .rfg { stroke: var(--warn); }
 .ctx-ring.hi .rfg { stroke: var(--bad); }
+/* У Codex это не порог заполненности, а только вход последнего хода — не тревожим красным. */
+.ctx-ring.estimate .rfg { stroke: var(--accent); opacity: .8; }
 .ctx-ring:not(:disabled):hover { background: var(--surface-2); }
 .ctx-ring:disabled { cursor: default; opacity: .7; }
 
@@ -666,11 +674,11 @@ async function toConveyor() {
 .ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
   letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
 .ahead svg { width: 12px; height: 12px; color: #d97757; }
-/* Модель, которой ответ реально посчитан (из потока CLI) */
+/* Модель хода: факт из потока CLI либо честно помеченный запрос */
 .amodel { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .75;
   font-family: var(--mono, monospace); font-size: 10.5px; }
 
-/* Строка факта под панелью управления: что ушло в запуск на самом деле */
+/* Строка последнего хода под панелью управления */
 .factbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--ink-mid); }
 .fb b { font-weight: 600; font-family: var(--mono, monospace); color: var(--ink); }
 .fb.warn { color: var(--warn, #e0a33a); }
@@ -678,13 +686,25 @@ async function toConveyor() {
 /* Маркдаун ответа */
 .text.md :deep(p) { margin: 0 0 8px; }
 .text.md :deep(p:last-child) { margin-bottom: 0; }
-.text.md :deep(h3), .text.md :deep(h4), .text.md :deep(h5), .text.md :deep(h6) { margin: 14px 0 6px; font-size: 14px; }
-.text.md :deep(ul) { margin: 4px 0 8px; padding-left: 20px; }
+.text.md :deep(h1), .text.md :deep(h2), .text.md :deep(h3),
+.text.md :deep(h4), .text.md :deep(h5), .text.md :deep(h6) {
+  margin: 14px 0 6px; font-size: 14px; line-height: 1.35; }
+.text.md :deep(ul), .text.md :deep(ol) { margin: 4px 0 8px; padding-left: 20px; }
 .text.md :deep(li) { margin: 2px 0; }
+.text.md :deep(a) { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.text.md :deep(a:hover) { color: color-mix(in srgb, var(--accent) 75%, white); }
+.text.md :deep(blockquote) { margin: 6px 0 8px; padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--line); color: var(--ink-mid); }
 .text.md :deep(code) { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 .text.md :deep(pre) { background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
   padding: 10px 12px; overflow-x: auto; margin: 6px 0 8px; }
 .text.md :deep(pre code) { background: none; padding: 0; }
+.text.md :deep(table) { display: block; max-width: 100%; overflow-x: auto;
+  border-collapse: collapse; margin: 6px 0 8px; }
+.text.md :deep(th), .text.md :deep(td) { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+.text.md :deep(th) { background: var(--surface-2); }
+.text.md :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.text.md :deep(img) { display: block; max-width: min(100%, 760px); height: auto; border-radius: 8px; margin: 6px 0 8px; }
 /* md-текст не pre-wrap (маркдаун сам управляет блоками) */
 .msg.assistant .text.md { white-space: normal; }
 /* Ошибка — компактная плашка по содержимому, а не баннер во всю ширину */

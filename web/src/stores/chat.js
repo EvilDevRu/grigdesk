@@ -10,6 +10,12 @@ import { useUiContextStore } from './ui-context.js';
 import { useProvidersStore } from './providers.js';
 import { notify } from '../shared/notify.js';
 import { sseSubscribe } from '../composables/useSse.js';
+import {
+  applyGeneratedChatTitle,
+  firstMessageTitle,
+  provisionalChatTitle,
+  shouldRequestChatTitle,
+} from '../shared/chat-title.js';
 
 const EFFORTS = ['low', 'medium', 'high', 'max'];
 // Оценочное окно контекста модели — для индикатора заполнения.
@@ -51,8 +57,16 @@ function slimOf(s) {
   return {
     id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
     messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
+    contextIsEstimate: !!s.contextIsEstimate,
     draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
   };
+}
+
+// Архив сохраняем тем же узким снимком, что и активный чат, плюс момент закрытия.
+// Сам объект в памяти может продолжать получать ответ агента уже после архивирования,
+// но рантайм-поля (sending/error/steps) в файл истории попадать не должны.
+function archivedSlimOf(s) {
+  return { ...slimOf(s), closedAt: s.closedAt || s.updatedAt || s.createdAt || Date.now() };
 }
 
 // ── Страховочный снимок истории в браузере ────────────────────────────────────
@@ -123,10 +137,10 @@ export const useChatStore = defineStore('chat', {
       .find((p) => p.kind === 'perm' && (!p.chatKey || p.chatKey === chatKey)) || null,
     questionFor: (s) => (chatKey) => Object.values(s.pending)
       .find((p) => p.kind === 'question' && (!p.chatKey || p.chatKey === chatKey)) || null,
-    // Единый список чатов для телеграм-сайдбара: открытые + архив, свежие сверху.
-    // Без запроса — все чаты со сниппетом последнего сообщения; с запросом — фильтр
-    // по названию и тексту сообщений (сниппет — фрагмент совпадения).
-    list(s) { return (q) => {
+    // Список чатов для телеграм-сайдбара: обычный режим показывает открытые чаты,
+    // режим архива — только архивные. Без запроса показываем сниппет последнего
+    // сообщения; с запросом фильтруем по названию и тексту переписки.
+    list(s) { return (q, showArchived = false) => {
       const t = q.trim().toLowerCase();
       const waiting = this.waitingChats;
       const row = (sess, archived) => {
@@ -155,12 +169,17 @@ export const useChatStore = defineStore('chat', {
           taskId: sess.taskId, sending: !!sess.sending, unread: !!sess.unread,
           // Агент в этом чате упёрся в вопрос и стоит — строке нужен чип «ждёт ответа».
           waiting: waiting.has(sess.id),
-          ts: sess.updatedAt || sess.closedAt || 0,
+          // В архиве важнее момент архивирования: только что убранный старый разговор
+          // должен оказаться сверху, а не провалиться к дате последнего сообщения.
+          ts: archived ? (sess.closedAt || sess.updatedAt || 0) : (sess.updatedAt || 0),
         };
       };
       const out = [];
-      s.sessions.forEach((x) => { const h = row(x, false); if (h) out.push(h); });
-      (s.archived || []).forEach((x) => { const h = row(x, true); if (h) out.push(h); });
+      const source = showArchived ? (s.archived || []) : s.sessions;
+      source.forEach((x) => {
+        const h = row(x, showArchived);
+        if (h) out.push(h);
+      });
       // Ждущие ответа — наверх: пока не ответишь, работа в них стоит.
       out.sort((a, b) => (b.waiting - a.waiting) || (b.ts - a.ts));
       return out;
@@ -224,6 +243,12 @@ export const useChatStore = defineStore('chat', {
       if (!j?.pending?.length) return;
       for (const p of j.pending) {
         const s = this._get(p.chatKey) || this.archived.find((x) => x.id === p.chatKey);
+        // Ответ мог прийти после F5: применяем семантическое имя, только если человек
+        // не заменил временный заголовок вручную, пока агент работал.
+        if (s && p.title) {
+          const provisional = provisionalChatTitle(p.userText, { hasAttachments: !!p.hadAttachments });
+          applyGeneratedChatTitle(s, p.title, provisional);
+        }
         if (s && !(s.messages || []).some((m) => m.pid === p.id)) {
           // Гонка last-write-wins могла затереть сам вопрос — восстанавливаем его перед ответом.
           if (p.userText && !(s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === p.userText)) {
@@ -234,7 +259,10 @@ export const useChatStore = defineStore('chat', {
             steps: p.steps || [], model: p.model || '', actualModel: p.actualModel || '', effort: p.effort || '',
           });
           if (p.sessionId) s.sessionId = p.sessionId;
-          if (typeof p.contextTokens === 'number' && p.contextTokens > 0) s.contextTokens = p.contextTokens;
+          if (typeof p.contextTokens === 'number' && p.contextTokens > 0) {
+            s.contextTokens = p.contextTokens;
+            s.contextIsEstimate = !!p.contextIsEstimate;
+          }
           // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
           if (p.effort && p.effort !== s.effort) s.effort = p.effort;
           // Ответ доехал, пока мы смотрели в другое место — чат становится непрочитанным.
@@ -253,8 +281,9 @@ export const useChatStore = defineStore('chat', {
       clearTimeout(persistTimer);
       const write = () => {
         const slim = this.sessions.map(slimOf);
+        const archivedSlim = (this.archived || []).map(archivedSlimOf);
         const payload = {
-          sessions: slim, archived: this.archived, activeId: this.activeId,
+          sessions: slim, archived: archivedSlim, activeId: this.activeId,
           defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
         };
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
@@ -273,7 +302,7 @@ export const useChatStore = defineStore('chat', {
             .then(() => { sentChats.set(c.id, json); }));
         };
         slim.forEach((c) => push(c, false));
-        (this.archived || []).forEach((c) => push(c, true));
+        archivedSlim.forEach((c) => push(c, true));
         // Чат исчез из стора (удалили, вытеснили из архива) — убираем и на сервере.
         for (const id of [...sentChats.keys()]) {
           if (alive.has(id)) continue;
@@ -306,7 +335,7 @@ export const useChatStore = defineStore('chat', {
     _markSent() {
       sentChats.clear();
       this.sessions.forEach((s) => sentChats.set(s.id, JSON.stringify(slimOf(s))));
-      (this.archived || []).forEach((c) => sentChats.set(c.id, JSON.stringify(c)));
+      (this.archived || []).forEach((c) => sentChats.set(c.id, JSON.stringify(archivedSlimOf(c))));
       sentMeta = JSON.stringify({
         activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
       });
@@ -334,6 +363,7 @@ export const useChatStore = defineStore('chat', {
       for (const s of list || []) {
         s.messages ||= [];
         s.contextTokens ??= 0;
+        s.contextIsEstimate ??= false;
         s.sending = false;
         s.error ??= null;
         s.steps ||= [];
@@ -366,7 +396,8 @@ export const useChatStore = defineStore('chat', {
         // и отправке. Фиксировать здесь нельзя — реестр к этому моменту может не загрузиться.
         model: this.defModel, effort: this.defEffort, mode: this.defMode,
         createdAt: Date.now(), updatedAt: Date.now(),
-        messages: [], sessionId: null, contextTokens: 0, sending: false, error: null, draft: '',
+        messages: [], sessionId: null, contextTokens: 0, contextIsEstimate: false,
+        sending: false, error: null, draft: '',
       };
       this.sessions.push(s);
       this.activeId = s.id;
@@ -501,36 +532,43 @@ export const useChatStore = defineStore('chat', {
       if (!this.sessions.length) this.newSession();
       else if (!this._get(this.activeId)) this.activeId = this.sessions[0].id;
     },
-    closeSession(id) {
+    /**
+     * Унести активный чат в архив. keepEmpty=true используется явным действием
+     * «удалить»: пользователь попросил сохранить в архиве даже пустой разговор.
+     * Обычное закрытие пустой вкладки по-прежнему просто убирает её.
+     */
+    _archiveSession(id, keepEmpty = false) {
       const i = this.sessions.findIndex((s) => s.id === id);
-      if (i < 0) return;
+      if (i < 0) return false;
       const [s] = this.sessions.splice(i, 1);
-      // Чат с историей не удаляем, а уносим в архив — поиск его найдёт, можно восстановить.
-      if (s.messages?.length) {
-        this.archived.unshift({
-          id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
-          messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
-          createdAt: s.createdAt, closedAt: Date.now(),
-        });
-        if (this.archived.length > 50) this.archived.length = 50;
+      // Черновик — тоже содержимое: закрытие вкладки не должно молча его терять.
+      if (keepEmpty || s.messages?.length || (s.draft || '').trim()) {
+        delete s.archived;
+        s.closedAt = Date.now();
+        this.archived.unshift(s);
       }
       if (this.activeId === id) this.activeId = this.sessions[Math.max(0, i - 1)]?.id || null;
       if (!this.sessions.length) this.newSession();
       this._persist();
+      return true;
     },
+    closeSession(id) { this._archiveSession(id); },
     // Вернуть чат из архива в открытые вкладки.
     restoreArchived(id) {
       const i = this.archived.findIndex((s) => s.id === id);
       if (i < 0) return;
       const [a] = this.archived.splice(i, 1);
-      a.sending = false; a.error = null;
+      delete a.archived;
+      delete a.closedAt;
+      a.sending ??= false;
+      a.error ??= null;
       this.sessions.push(a);
       this.activeId = a.id;
       this._persist();
     },
     setActive(id) { if (this._get(id)) { this.activeId = id; this._persist(); } },
     setTitle(id, title) { const s = this._get(id); if (!s) return; s.title = title; this._persist(); },
-    // Выбор чата из сайдбара: открытый — активируем, архивный — прозрачно восстанавливаем.
+    // Выбор чата из сайдбара: открытый — активируем, архивный — восстанавливаем.
     selectChat(id) {
       if (this._get(id)) { this.activeId = id; this._persist(); return; }
       this.restoreArchived(id);
@@ -542,18 +580,15 @@ export const useChatStore = defineStore('chat', {
       s.title = title;
       this._persist();
     },
-    // Безвозвратное удаление чата (открытого или архивного).
+    // Двухступенчатое удаление: активный чат сначала уходит в архив; только повторное
+    // удаление из архива стирает его безвозвратно (и серверный файл — через _persist).
     deleteChat(id) {
-      const i = this.sessions.findIndex((x) => x.id === id);
-      if (i >= 0) {
-        this.sessions.splice(i, 1);
-        if (this.activeId === id) this.activeId = this.sessions[0]?.id || null;
-        if (!this.sessions.length) this.newSession();
-      } else {
-        const j = this.archived.findIndex((x) => x.id === id);
-        if (j >= 0) this.archived.splice(j, 1);
-      }
+      if (this._get(id)) return this._archiveSession(id, true) ? 'archived' : null;
+      const j = this.archived.findIndex((x) => x.id === id);
+      if (j < 0) return null;
+      this.archived.splice(j, 1);
       this._persist();
+      return 'deleted';
     },
 
     // Плавающая панель.
@@ -596,7 +631,14 @@ export const useChatStore = defineStore('chat', {
     setEffort(id, e) { const s = this._get(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
     cycleEffort(id) { const s = this._get(id); if (!s) return; this.setEffort(id, EFFORTS[(EFFORTS.indexOf(s.effort) + 1) % EFFORTS.length]); },
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
-    resetContext(id) { const s = this._get(id); if (!s) return; s.sessionId = null; s.contextTokens = 0; this._persist(); },
+    resetContext(id) {
+      const s = this._get(id);
+      if (!s) return;
+      s.sessionId = null;
+      s.contextTokens = 0;
+      s.contextIsEstimate = false;
+      this._persist();
+    },
 
     /**
      * Стоп работающего (или зависшего) агента: сервер убивает процесс CLI, ход
@@ -613,6 +655,11 @@ export const useChatStore = defineStore('chat', {
     async send(id, text, attachments = []) {
       const s = this._get(id); if (!s) return;
       if (!text.trim() && !attachments.length) return;
+      // Cockpit просит семантическое имя только в первом ходе безымянного чата.
+      // Пока агент работает, мгновенно показываем локальный запасной вариант.
+      const requestTitle = shouldRequestChatTitle(s);
+      const autoTitle = firstMessageTitle(s, text, attachments);
+      if (autoTitle) s.title = autoTitle;
       // Писать во время хода МОЖНО: человек готовит следующее сообщение, пока агент работает.
       // Сервер выстроит ходы в очередь (см. modules/chat: два CLI на одну сессию не живут),
       // а здесь помечаем сообщение «ждёт очереди», чтобы было видно — оно принято, но ещё не в работе.
@@ -642,14 +689,20 @@ export const useChatStore = defineStore('chat', {
         const provStore = useProvidersStore();
         const r = await api.post(url, {
           message: text, model: provStore.modelOf(s.model).id, effort: s.effort, mode: s.mode || '',
-          sessionId: s.sessionId, context, chatKey: id,
+          sessionId: s.sessionId, context, chatKey: id, requestTitle,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
+        // Сервер вырезал служебный маркер из ответа и вернул готовое трёхсловное имя.
+        // Ручное переименование, сделанное во время хода, не перетираем.
+        if (requestTitle) applyGeneratedChatTitle(s, r.title, autoTitle);
         // Пустой id не затираем: у оборванного хода («стоп», лимит) его может не быть,
         // а прежняя сессия жива — иначе следующий вопрос уйдёт без --resume и агент
         // не вспомнит ничего из разговора.
         if (r.sessionId) s.sessionId = r.sessionId;
-        if (typeof r.contextTokens === 'number' && r.contextTokens > 0) s.contextTokens = r.contextTokens;
+        if (typeof r.contextTokens === 'number' && r.contextTokens > 0) {
+          s.contextTokens = r.contextTokens;
+          s.contextIsEstimate = !!r.contextIsEstimate;
+        }
         // Лента хода переезжает в сообщение (серверная копия полнее: SSE мог что-то не донести),
         // actualModel/effort — чем CLI отработал на самом деле (алиасы он резолвит сам).
         s.messages.push({

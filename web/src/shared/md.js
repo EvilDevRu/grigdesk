@@ -1,38 +1,55 @@
-// Мини-рендер markdown для разведнот триажа (заголовки/списки/код/жирный).
-// Пакета для markdown в проекте нет и ради одного экрана не заводим.
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Общий безопасный Markdown-рендерер для ответов чата, документов этапов и триажа.
+// Raw HTML показываем текстом, а ссылки пропускаем только через явный белый список:
+// результат вставляется через v-html, поэтому доверять модельному ответу нельзя.
+import { marked, Renderer } from 'marked';
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-export function mdToHtml(src) {
-  const lines = esc(src || '').split('\n');
-  const out = [];
-  let inCode = false;
-  let inList = false;
-  const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
-  for (const raw of lines) {
-    if (raw.trim().startsWith('```')) {
-      closeList();
-      out.push(inCode ? '</code></pre>' : '<pre><code>');
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) { out.push(raw); continue; }
-    const line = raw
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
-    const h = line.match(/^(#{1,4})\s+(.*)$/);
-    if (h) { closeList(); out.push(`<h${h[1].length + 2}>${h[2]}</h${h[1].length + 2}>`); continue; }
-    const li = line.match(/^\s*[-*]\s+(.*)$/);
-    if (li) {
-      if (!inList) { out.push('<ul>'); inList = true; }
-      out.push(`<li>${li[1]}</li>`);
-      continue;
-    }
-    closeList();
-    if (line.trim()) out.push(`<p>${line}</p>`);
+function safeHref(value, { image = false } = {}) {
+  const href = String(value || '').trim();
+  if (!href || /[\u0000-\u001f\u007f]/.test(href)) return '';
+  if (/^https?:\/\//i.test(href)) return href;
+  if (!image && /^mailto:/i.test(href)) return href;
+  if (/^(?:#|\?|\/(?!\/)|\.{1,2}\/)/.test(href)) return href;
+  // Обычный относительный путь без схемы. HTML-сущности в схеме не разрешаем:
+  // браузер не должен получить замаскированный javascript:/data: URL.
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('//') && !href.includes('&#')) {
+    return href;
   }
-  closeList();
-  if (inCode) out.push('</code></pre>');
-  return out.join('\n');
+  return '';
+}
+
+const renderer = new Renderer();
+
+renderer.html = ({ text }) => escapeHtml(text);
+
+renderer.link = function ({ href, title, tokens }) {
+  const text = this.parser.parseInline(tokens);
+  const safe = safeHref(href);
+  if (!safe) return text;
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+  return `<a href="${escapeHtml(safe)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+};
+
+renderer.image = ({ href, title, text }) => {
+  const safe = safeHref(href, { image: true });
+  if (!safe) return escapeHtml(text || '');
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+  return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text || '')}"${titleAttr} loading="lazy">`;
+};
+
+export function mdToHtml(src) {
+  return marked.parse(String(src || ''), {
+    renderer,
+    gfm: true,
+    breaks: true,
+    async: false,
+  });
 }
