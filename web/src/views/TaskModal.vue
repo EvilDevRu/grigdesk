@@ -431,6 +431,10 @@ watch(taskId, (id) => {
             </button>
             <OpenDiffButton :task-id="taskId" />
           </div>
+          <div v-if="conveyor?.stall" class="convstall">
+            <b>{{ conveyor.stall.title }}</b>
+            <span>{{ conveyor.stall.hint }}</span>
+          </div>
           <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
         </div>
@@ -549,6 +553,11 @@ watch(taskId, (id) => {
 .btn.onconv.stalled { background: color-mix(in srgb, var(--bad) 16%, transparent);
   border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); color: var(--bad); }
 .btn.onconv.stalled:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
+.convstall { display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 6px;
+  padding: 7px 10px; border-radius: 8px; color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); font-size: 12px; }
+.convstall span { color: var(--ink-mid); }
 /* Снос стенда — действие необратимое: обычная кнопка, краснеет под курсором (как на конвейере). */
 .btn.sbdown { color: var(--ink-mid); }
 .btn.sbdown:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }

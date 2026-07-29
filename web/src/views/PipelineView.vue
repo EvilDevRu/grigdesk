@@ -253,6 +253,7 @@ function progressClass(g) {
   const s = cur ? g.statuses[cur] : 'done';
   if (s === 'run') return 'pk-run';
   if (s === 'wait' || s === 'premature') return 'pk-wait';
+  if (['stall', 'fail', 'skipbad'].includes(s)) return 'pk-stall';
   return 'pk-done';
 }
 function currentLabel(g) {
@@ -264,6 +265,7 @@ function loopList(g) {
 }
 function cardState(g) {
   const vals = Object.values(g.statuses);
+  if (vals.some((s) => ['stall', 'fail', 'skipbad'].includes(s))) return 'stall';
   if (vals.includes('wait') || vals.includes('premature')) return 'attn';
   if (vals.includes('run')) return 'act';
   return '';
@@ -332,7 +334,7 @@ function cardState(g) {
            пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
            вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
            затык надо замечать в списке, а не открывая карточку. -->
-      <div v-if="t.stall" class="stalled" :class="t.stall.kind">
+      <div v-if="t.stall && isCollapsed(t.task)" class="stalled" :class="t.stall.kind">
         <div class="srow">
           <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
           <span class="stitle">{{ t.stall.title }}</span>
@@ -415,6 +417,11 @@ function cardState(g) {
         <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
           <span class="sclbl">{{ stage.status === 'skip' || stage.status === 'skipbad' ? 'Почему пропущен' : 'Замечание' }}</span>
           {{ stage.meta.comment }}
+        </div>
+        <div v-if="stage.meta.stall" class="scomment bad">
+          <span class="sclbl">Почему этап остановился</span>
+          <b>{{ stage.meta.stall.title }}</b>
+          <div>{{ stage.meta.stall.hint }}</div>
         </div>
 
         <div class="sb">
@@ -596,6 +603,7 @@ function cardState(g) {
   padding: 14px 16px; box-shadow: var(--shadow); border-left: 3px solid var(--line); }
 .card.attn { border-left-color: var(--warn); }
 .card.act { border-left-color: var(--accent); }
+.card.stall { border-left-color: var(--bad); }
 
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .task { font-weight: 650; font-size: 15px; background: none; border: none; color: var(--ink); cursor: pointer; padding: 0; }
@@ -615,6 +623,7 @@ function cardState(g) {
 .pbar { height: 100%; border-radius: 999px; transition: width .3s; }
 .pbar.pk-run { background: var(--accent); }
 .pbar.pk-wait { background: var(--warn); }
+.pbar.pk-stall { background: var(--bad); }
 .pbar.pk-done { background: var(--good); }
 .pnum { font-size: 12px; color: var(--ink-mid); flex: none; }
 .pw { font-size: 12px; color: var(--ink); flex: none; }

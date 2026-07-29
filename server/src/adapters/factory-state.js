@@ -31,6 +31,22 @@ const ROUTE_STAGES = {
   trivial: ['SCOUT', 'BUILD', 'REVIEW', 'PHPCHECK', 'LINT', 'GATE_ACCEPT', 'SHIP', 'RETRO'],
 };
 
+// Находим визуальный узел, соответствующий остановившемуся движковому этапу.
+// runnerKeys важны для составных этапов: один PLAN может обслуживать несколько
+// узлов схемы. В таком случае сначала берём реально активный узел.
+function stallNodeId(def, statuses, stage) {
+  if (!stage) return null;
+  const candidates = Object.keys(def.pos).filter((nid) => [
+    def.keys[nid],
+    def.runnerKeys[nid],
+    nid.toUpperCase(),
+  ].includes(stage));
+  return candidates.find((nid) => ['run', 'wait', 'premature', 'stall'].includes(statuses[nid]))
+    || candidates.find((nid) => def.keys[nid] === stage)
+    || candidates[0]
+    || null;
+}
+
 export class FactoryStateAdapter {
   /** @param {{ stateDir: string, profilesDir: string }} opts */
   constructor({ stateDir, profilesDir }) {
@@ -194,7 +210,16 @@ export class FactoryStateAdapter {
     // (при живом демоне), демон умер посреди сборки → fail. Иначе — как посчитала цепочка.
     const alive = this.isDaemonAlive(registry.ORCH_PID, task);
     const sandbox = env.FE_PORT ? null : await this.readSandboxStage(task);
-    const stall = detectStall({ registry, timeline: await this.readTimeline(task), daemonAlive: alive });
+    const detectedStall = detectStall({
+      registry,
+      timeline: await this.readTimeline(task),
+      daemonAlive: alive,
+    });
+    const stallNode = stallNodeId(def, statuses, detectedStall?.stage);
+    const stall = detectedStall ? { ...detectedStall, node: stallNode } : null;
+    // Реестр остаётся `running`, когда движок после исчерпания попыток ставит
+    // STALLED_HUMAN. Для схемы это не «идёт»: красим точный узел остановкой/обрывом.
+    if (stallNode) statuses[stallNode] = stall.kind === 'human' ? 'stall' : 'fail';
     if ('sandbox' in def.pos) {
       if (env.FE_PORT) statuses.sandbox = 'done';
       else if (sandbox) statuses.sandbox = alive ? 'run' : 'fail';
@@ -210,7 +235,9 @@ export class FactoryStateAdapter {
     // Прогресс: done/skip/idle из узлов маршрута.
     const chain = Object.keys(def.pos).filter((n) => n !== 'sandbox');
     const doneCount = chain.filter((n) => ['done', 'skip', 'idle'].includes(statuses[n])).length;
-    const cur = chain.find((n) => ['run', 'wait', 'premature'].includes(statuses[n])) || null;
+    const cur = chain.find((n) => [
+      'run', 'wait', 'premature', 'stall', 'fail', 'skipbad',
+    ].includes(statuses[n])) || null;
 
     // Мета каждого узла (для модалки этапа): время/длительность/фанаут/возвраты/токены.
     const nodeMeta = {};
@@ -226,6 +253,9 @@ export class FactoryStateAdapter {
         // Объяснение статуса от движка/агента: причина пропуска, замечание провалившегося
         // этапа. Раньше жило только в журнале прогона — на схеме было голое «пропущен».
         comment: registry[`${key}_COMMENT`] || null,
+        // Причина привязана к конкретному узлу, чтобы модалка этапа и сам SVG не
+        // пытались повторно угадывать её по строкам журнала.
+        stall: stall?.node === nid ? stall : null,
       };
       // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
@@ -260,6 +290,7 @@ export class FactoryStateAdapter {
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
       daemonAlive: alive,
+      stall,
       fePort: env.FE_PORT || null,
       apiPort: env.API_PORT || null,
       // Стенд ещё строится (портов нет) — отдаём прогресс сборки для футера карточки.
