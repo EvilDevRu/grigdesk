@@ -10,6 +10,7 @@ import { useProvidersStore } from '../../stores/providers.js';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useChatStore } from '../../stores/chat.js';
+import { useBoardStore } from '../../stores/board.js';
 import { providerUsageView } from '../provider-usage.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../ProviderUsageResources.vue';
@@ -96,6 +97,23 @@ const chatsBadgeTitle = computed(() => (waitingChats.value
   ? `ждут твоего ответа: ${waitingChats.value}` + (unreadChats.value ? ` · непрочитанных: ${unreadChats.value}` : '')
   : `непрочитанные чаты: ${unreadChats.value}`));
 
+// Доска: число в чипе — задачи с живым таймером; зелёная точка — таймер идёт;
+// синяя точка — после последнего просмотра появилась новая задача.
+const boardStore = useBoardStore();
+const boardNavActivity = computed(() => boardStore.activity);
+const boardChipVisible = computed(() => {
+  const a = boardNavActivity.value;
+  return !!(a.activeTimerCount || a.unseenCount);
+});
+const boardChipTitle = computed(() => {
+  const a = boardNavActivity.value;
+  const parts = [a.activeTimerCount
+    ? `сейчас с таймером: ${a.activeTimerCount}`
+    : 'активных задач с таймером нет'];
+  if (a.unseenCount) parts.push(`новых задач: ${a.unseenCount}`);
+  return parts.join(' · ');
+});
+
 // Конвейер: задачи, которые встали на человеке — ворота ждут решения или движок упёрся.
 // Считает вотчер оповещений: он и так обходит все задачи, второго обхода не заводим.
 const notifyWatch = useNotifyWatchStore();
@@ -175,9 +193,24 @@ const { connected } = useSse((name) => {
         <span class="name">Кокпит</span>
       </div>
       <nav class="nav">
-        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active"
+                     :title="item.to === '/board' && boardChipVisible ? `${item.label} · ${boardChipTitle}` : item.label">
           <span class="icwrap">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+            <span v-if="item.to === '/board' && boardChipVisible"
+                  class="boardchip"
+                  :class="{
+                    timing: boardNavActivity.activeTimerCount,
+                    'only-new': !boardNavActivity.activeTimerCount,
+                  }"
+                  role="status" :aria-label="boardChipTitle" :title="boardChipTitle">
+              <span v-if="boardNavActivity.activeTimerCount">
+                {{ boardNavActivity.activeTimerCount > 99 ? '99+' : boardNavActivity.activeTimerCount }}
+              </span>
+              <span v-if="boardNavActivity.activeTimerCount" class="boardtimer" aria-hidden="true"></span>
+              <span v-if="boardNavActivity.unseenCount && boardNavActivity.activeTimerCount"
+                    class="boardnew" aria-hidden="true"></span>
+            </span>
             <!-- Требует человека: жёлтый — работа стоит и ждёт меня (вопрос агента,
                  ворота конвейера), красный — конвейер встал, синий — непрочитанное -->
             <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
@@ -262,8 +295,7 @@ const { connected } = useSse((name) => {
                 <span>{{ provTitle(p) }}</span>
                 <!-- Индикатор новой версии. Кокпит НИЧЕГО не обновляет сам — только сообщает. -->
                 <span v-if="p.updateAvailable" class="pupd">
-                  Доступно обновление: <b>{{ p.latest }}</b> (стоит {{ (p.version || '').split(' ')[0] || '?' }})<br>
-                  Обновить — в «Настройки → Исполнители» (клик по иконке)
+                  Доступно обновление: <b>{{ p.latest }}</b>
                 </span>
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
                 <span class="pu">
@@ -346,6 +378,30 @@ const { connected } = useSse((name) => {
 .navitem.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .ic { width: 19px; height: 19px; flex: none; }
 .icwrap { position: relative; display: inline-flex; flex: none; }
+/* Чип доски совмещает число задач с живым таймером (зелёная точка)
+   и новую непросмотренную задачу (синяя точка сверху). */
+.boardchip {
+  position: absolute; top: -6px; right: -16px; min-width: 17px; height: 16px; padding: 0 4px;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-2); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  font-size: 9.5px; font-weight: 750; font-variant-numeric: tabular-nums; line-height: 1;
+  box-shadow: 0 0 0 2px var(--sidebar); z-index: 1;
+}
+.boardchip.timing { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); }
+.boardtimer {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--good);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--good) 75%, transparent);
+  animation: boardtimerpulse 1.6s ease-in-out infinite;
+}
+.boardnew {
+  position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--sidebar);
+}
+.boardchip.only-new {
+  top: -4px; right: -6px; width: 8px; min-width: 8px; height: 8px; padding: 0;
+  border: 0; background: var(--accent);
+}
+@keyframes boardtimerpulse { 50% { opacity: .35; } }
 /* Бейдж «N непрочитанных чатов» — виден и в свёрнутом сайдбаре. Без анимации:
    непрочитанное висит до прочтения, пульсировать всё это время незачем. */
 .navbadge { position: absolute; top: -5px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px;
@@ -361,7 +417,9 @@ const { connected } = useSse((name) => {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse, var(--warn, #e0a33a)) 65%, transparent); }
   60% { box-shadow: 0 0 0 5px transparent; }
 }
-@media (prefers-reduced-motion: reduce) { .navbadge.wait, .navbadge.stall { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .boardtimer, .navbadge.wait, .navbadge.stall { animation: none; }
+}
 .nav-bottom { margin-top: auto; }
 .collapse-btn { margin-top: 4px; }
 

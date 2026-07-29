@@ -18,6 +18,14 @@ const { data, error, loading } = storeToRefs(board);
 const now = ref(Date.now());
 const period = ref('day');
 
+// Пока доска открыта, её актуальный список считается просмотренным. Снимок нужен
+// навигационному чипу, чтобы на других страницах заметить появившиеся задачи.
+watch(
+  () => (data.value?.tasks || []).map((task) => String(task.id)).join(','),
+  () => board.markTasksSeen(),
+  { immediate: true },
+);
+
 const STATUS_COLOR = {
   running: 'var(--accent)', overdue: 'var(--bad)', my_review: 'var(--warn)',
   waiting: 'var(--warn)', deferred: 'var(--idle)', completed: 'var(--good)', done: 'var(--good)',
@@ -77,8 +85,8 @@ const monthPct = computed(() => {
   return Math.round((m.hours / m.norm) * 100);
 });
 const activeTask = computed(() => {
-  const d = data.value; if (!d?.activeTimer) return null;
-  return d.tasks.find((t) => t.id === d.activeTimer.task_id) || null;
+  const d = data.value; if (!d?.tasks) return null;
+  return d.tasks.find((task) => task.timerRunning) || null;
 });
 // Поиск по «Моим задачам» (88 штук — без фильтра неудобно).
 const q = ref('');
