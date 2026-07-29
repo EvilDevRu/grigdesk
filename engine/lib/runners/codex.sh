@@ -64,6 +64,9 @@ runner_codex_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   local sandbox=${RUNNER_CODEX_SANDBOX:-workspace-write}
   local -a args=(codex exec --json --skip-git-repo-check --sandbox "$sandbox")
+  if [[ "$sandbox" == workspace-write ]]; then
+    args+=(-c 'sandbox_workspace_write.network_access=true')
+  fi
   [[ -z "$model" ]] || args+=(-m "$model")
   [[ -z "$effort" ]] || args+=(-c "model_reasoning_effort=\"$effort\"")
   local add_dir

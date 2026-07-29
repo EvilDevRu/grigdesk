@@ -22,6 +22,8 @@ assert_contains "$argv" "$state_root" "Codex sandbox receives writable state roo
 assert_contains "$argv" "$project_extra" "Codex sandbox receives profile write root"
 add_count=$(grep -c '^--add-dir$' "$TEST_ROOT/codex-argv" || true)
 assert_eq 2 "$add_count" "Codex emits one add-dir flag per writable root"
+assert_contains "$argv" "sandbox_workspace_write.network_access=true" \
+  "Codex factory runner keeps network access inside workspace-write sandbox"
 
 grep -q '^danger-full-access$' "$TEST_ROOT/codex-argv"
 assert_rc 1 "$?" "Codex runner never disables the sandbox for extra roots"
