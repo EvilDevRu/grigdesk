@@ -85,4 +85,23 @@ assert_rc 0 "$rc" "launcher works with the default per-user config root"
 export FACTORY_CONFIG_ROOT=$saved_config_root
 export HOME=$saved_home
 
+# Ошибка до снятия launch barrier не должна навечно оставить stopped-child:
+# TERM остаётся pending у процесса в состоянии T и обычный wait() зависает.
+bash -c 'trap "exit 0" TERM; kill -STOP "$$"; while :; do sleep 1; done' &
+barrier_pid=$!
+for _poll in {1..100}; do
+  [[ "$(awk '{print $3}' "/proc/$barrier_pid/stat" 2>/dev/null)" == T ]] && break
+  sleep 0.01
+done
+if declare -F _runner_terminate_barrier_child >/dev/null; then
+  _runner_terminate_barrier_child "$barrier_pid"
+  kill -0 "$barrier_pid" 2>/dev/null
+  assert_rc 1 "$?" "launcher termination releases and reaps a stopped barrier child"
+else
+  test_fail "launcher termination releases and reaps a stopped barrier child" \
+    "missing _runner_terminate_barrier_child"
+  kill -KILL "$barrier_pid" 2>/dev/null || true
+  wait "$barrier_pid" 2>/dev/null || true
+fi
+
 finish_tests

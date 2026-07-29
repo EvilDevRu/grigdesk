@@ -23,6 +23,20 @@ runner_process_matches() {
   [[ "$pgid" == "$expected_pgid" && "$starttime" == "$expected_starttime" ]]
 }
 
+_runner_terminate_barrier_child() {
+  local pid=${1:?pid} poll
+  # TERM не будит SIGSTOP-процесс: сигнал остаётся pending, а wait() висит вечно.
+  # Сначала снимаем внутренний launch barrier, затем завершаем и дожидаемся child.
+  kill -CONT "$pid" 2>/dev/null || true
+  kill -TERM "$pid" 2>/dev/null || true
+  for poll in {1..100}; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
 runner_launch() {
   local runner_id=$1 task=$2 prompt=$3 stage=$4 model=$5 effort=$6 timeout_s=$7
   local run_dir=$8 run_id=$9 epoch=${10} status_token=${11}
@@ -86,8 +100,7 @@ runner_launch() {
   read -r pgid starttime <<<"$identity"
   own_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
   if [[ -z "$own_pgid" || "$pgid" == "$own_pgid" ]]; then
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    _runner_terminate_barrier_child "$pid"
     exec {token_fd}<&-
     echo "runner launcher refused shared PGID $pgid" >&2
     return 76
