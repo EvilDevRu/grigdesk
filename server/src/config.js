@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
+const rootDir = path.join(__dirname, '..', '..');
+const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
 
 export const config = {
   // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось через Tailscale.
@@ -13,9 +15,16 @@ export const config = {
   host: process.env.COCKPIT_HOST || '0.0.0.0',
 
   // Пути «мозга».
+  // Корень репозитория кокпита — от него считаются bin/restart, plugins/ и базы в корне.
+  rootDir,
   stateDir: process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state'),
-  factoryHome: process.env.FACTORY_HOME || path.join(home, 'Workspace', 'factory'),
-  factoryBin: process.env.COCKPIT_FACTORY_BIN || path.join(process.env.FACTORY_HOME || path.join(home, 'Workspace', 'factory'), 'bin', 'factory'),
+  // Движок входит в этот же репозиторий. Внешний checkout поддерживается только явным env.
+  factoryHome,
+  // Проектные профили живут отдельно от движка, в корне репозитория.
+  profilesDir: process.env.FACTORY_PROFILES_DIR || path.join(rootDir, 'profiles'),
+  factoryBin: process.env.COCKPIT_FACTORY_BIN || path.join(factoryHome, 'bin', 'factory'),
+  // Debug settings принадлежат engine writer-у, Cockpit передаёт этот root его CLI.
+  factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(home, '.factory', 'config'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
   factoryProfile: process.env.COCKPIT_FACTORY_PROFILE || '',
   // Бинарь Claude для чата с агентом по задаче.
@@ -48,7 +57,7 @@ export const config = {
   agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
 
   // База маршрутов конвейера — папка в корне проекта (внутри свой .gitignore):
-  // каждый маршрут — файл routes/<id>.json (цепочка агентов + возвраты).
+  // routes/<профиль>/<id>.json + сайдкары промптов routes/<профиль>/<id>/<этап>.md.
   routesDir: process.env.COCKPIT_ROUTES_DIR || path.join(__dirname, '..', '..', 'routes'),
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
@@ -77,8 +86,8 @@ export const config = {
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.COCKPIT_SANDBOX_DOWN_CMD || '',
 
-  // Медиа-конвейер (распознавание речи). Python venv — через COCKPIT_MEDIA_PYTHON
-  // (venv тяжёлый, переиспользуем; читается в media/preflight.js). Хранилище job'ов/медиа.
+  // Медиа-конвейер (распознавание речи). Runtime-venv из server/.state подключается через
+  // COCKPIT_MEDIA_PYTHON; читается в media/preflight.js. Хранилище job'ов/медиа.
   mediaDir: process.env.COCKPIT_MEDIA_DIR || path.join(__dirname, '..', '.state', 'media'),
   mediaPython: process.env.COCKPIT_MEDIA_PYTHON || '',
 

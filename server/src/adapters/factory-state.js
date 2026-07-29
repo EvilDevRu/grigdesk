@@ -9,10 +9,15 @@ import { parsePipeline } from '../lib/pipeline-parse.js';
 import { parseStagesLog } from '../lib/stages-parse.js';
 import { detectStall } from '../lib/stall.js';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factory-graph.js';
+import {
+  loadRunnerConfig,
+  readRunnerAttempts,
+  resolveRunnerState,
+} from '../lib/runner-state.js';
 
 // Этапы конвейера по маршрутам (порядок ключей реестра). Держим здесь, чтобы
 // собирать статус-карту предсказуемо; форма графа (координаты) придёт из
-// profiles/<profile>.graph.json на этапе модуля «Конвейер».
+// profiles/<profile>/graph.json на этапе модуля «Конвейер».
 // DEMO-ключей здесь нет намеренно: демо убрано из цепочки фабрики (2026-07-27) и снимается
 // по кнопке плагина «Демо» (factory <task> demo). Пока они числились этапами маршрута,
 // прогресс feature не доходил до 100%, а дошедшая до ретро задача выглядела недоделанной.
@@ -27,10 +32,10 @@ const ROUTE_STAGES = {
 };
 
 export class FactoryStateAdapter {
-  /** @param {{ stateDir: string, factoryHome: string }} opts */
-  constructor({ stateDir, factoryHome }) {
+  /** @param {{ stateDir: string, profilesDir: string }} opts */
+  constructor({ stateDir, profilesDir }) {
     this.stateDir = stateDir;
-    this.factoryHome = factoryHome;
+    this.profilesDir = profilesDir;
     this.logsDir = path.join(stateDir, 'logs');
   }
 
@@ -166,9 +171,10 @@ export class FactoryStateAdapter {
     const { registry, mtime } = await this.readRegistry(task);
     const profile = registry.PROFILE;
     if (!profile) throw new Error(`у задачи t${task} нет PROFILE в реестре`);
-    const g = loadGraph(this.factoryHome, profile);
+    const g = loadGraph(this.profilesDir, profile);
     const route = registry.ROUTE || g.default_route;
     const def = graphForRoute(g, route);
+    const runnerConfig = loadRunnerConfig(this.profilesDir, profile);
     const statuses = computeNodeStatuses({
       pf: registry, pos: def.pos, keys: def.keys, optional: def.optional, mtimeMs: mtime,
     });
@@ -208,8 +214,9 @@ export class FactoryStateAdapter {
 
     // Мета каждого узла (для модалки этапа): время/длительность/фанаут/возвраты/токены.
     const nodeMeta = {};
-    for (const nid of Object.keys(def.pos)) {
+    await Promise.all(Object.keys(def.pos).map(async (nid) => {
       const key = def.keys[nid] || nid.toUpperCase();
+      const runnerKey = def.runnerKeys[nid] || key;
       nodeMeta[nid] = {
         at: registry[`${key}_AT`] || null,
         dur: registry[`DUR_${key}`] ? Number(registry[`DUR_${key}`]) : null,
@@ -220,7 +227,18 @@ export class FactoryStateAdapter {
         // этапа. Раньше жило только в журнале прогона — на схеме было голое «пропущен».
         comment: registry[`${key}_COMMENT`] || null,
       };
-    }
+      // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
+      // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
+      if (def.nodes[nid]?.[0] === 'agent') {
+        nodeMeta[nid].runner = resolveRunnerState(runnerConfig, registry, runnerKey);
+        nodeMeta[nid].runner.stage = runnerKey;
+        nodeMeta[nid].runner.attempts = await readRunnerAttempts(
+          this.stateDir,
+          task,
+          runnerKey,
+        );
+      }
+    }));
 
     return {
       task,
@@ -232,7 +250,11 @@ export class FactoryStateAdapter {
       edges: def.edges,
       statuses,
       nodeMeta,
+      // Глобальный override задачи важнее project policy и должен быть виден уже
+      // в шапке карточки. Stage override остаётся только на соответствующем узле.
+      runnerPolicy: resolveRunnerState(runnerConfig, registry, ''),
       keys: def.keys,
+      runnerKeys: def.runnerKeys,
       loops: loops.loops,
       halted: loops.halted,
       wfStatus: registry.WF_STATUS || null,
@@ -247,12 +269,14 @@ export class FactoryStateAdapter {
     };
   }
 
-  /** Профили, у которых есть схема (сканирует factory/profiles/*.graph.json). */
+  /** Профили, у которых есть корневая схема profiles/<name>/graph.json. */
   discoverProfiles() {
     try {
-      return fs.readdirSync(path.join(this.factoryHome, 'profiles'))
-        .filter((f) => f.endsWith('.graph.json'))
-        .map((f) => f.replace('.graph.json', ''));
+      return fs.readdirSync(this.profilesDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory()
+          && fs.existsSync(path.join(this.profilesDir, entry.name, 'graph.json')))
+        .map((entry) => entry.name)
+        .sort();
     } catch { return []; }
   }
 
@@ -269,7 +293,7 @@ export class FactoryStateAdapter {
   /** Эталонные схемы всех маршрутов профиля (для раздела «Маршруты»). */
   getRoutes(profile) {
     if (!profile) throw new Error('профиль не указан');
-    const g = loadGraph(this.factoryHome, profile);
+    const g = loadGraph(this.profilesDir, profile);
     const routes = {};
     for (const route of Object.keys(g.routes)) {
       const def = graphForRoute(g, route);

@@ -120,7 +120,7 @@ export class Analyzer {
   async profile() {
     if (!this._profile) {
       const name = this.config.factoryProfile || (await this.factoryState.primaryProfile().catch(() => '')) || '';
-      this._profile = await loadTriageProfile(this.config.factoryHome, name);
+      this._profile = await loadTriageProfile(this.config, name);
     }
     return this._profile;
   }

@@ -1,5 +1,5 @@
 // Проекты (профили): у каждого — свой набор маршрутов; агенты — общая библиотека.
-// Список — объединение профилей фабрики (factory/profiles/*.graph.json) и проектов,
+// Список — объединение корневых profiles/<name>/graph.json и проектов,
 // заведённых в кокпите (подпапки routes/). Хардкода имён нет.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -7,10 +7,18 @@ import path from 'node:path';
 export const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 
 /** Профили фабрики (по наличию схемы) — используются для автопосева. */
-export async function listFactoryProfiles(factoryHome) {
+export async function listFactoryProfiles(profilesDir) {
   try {
-    const files = await fs.readdir(path.join(factoryHome, 'profiles'));
-    return files.filter((f) => f.endsWith('.graph.json')).map((f) => f.replace('.graph.json', ''));
+    const entries = await fs.readdir(profilesDir, { withFileTypes: true });
+    const candidates = entries
+      .filter((entry) => entry.isDirectory() && PROFILE_RE.test(entry.name))
+      .map((entry) => entry.name);
+    const present = await Promise.all(candidates.map(async (name) => (
+      fs.access(path.join(profilesDir, name, 'graph.json'))
+        .then(() => name)
+        .catch(() => null)
+    )));
+    return present.filter(Boolean);
   } catch { return []; }
 }
 
@@ -23,9 +31,9 @@ async function listBaseDirs(dir) {
 }
 
 /** Все проекты: фабрика + заведённые в кокпите (объединение, отсортировано). */
-export async function listProjects({ factoryHome, routesDir }) {
+export async function listProjects({ profilesDir, routesDir }) {
   const all = new Set([
-    ...(await listFactoryProfiles(factoryHome)),
+    ...(await listFactoryProfiles(profilesDir)),
     ...(await listBaseDirs(routesDir)),
   ]);
   return [...all].sort();

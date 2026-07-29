@@ -16,7 +16,7 @@ async function agentsModule(fastify, opts) {
   // Автопосев пустой библиотеки из профилей фабрики.
   if (await store.isEmpty()) {
     try {
-      const { n } = await seedAgents(store, config.factoryHome, fastify.log);
+      const { n } = await seedAgents(store, config, fastify.log);
       fastify.log.info({ n }, 'библиотека агентов засеяна из фабрики');
     } catch (e) {
       fastify.log.warn({ err: e.message }, 'посев библиотеки агентов не удался — база пустая');
@@ -57,7 +57,7 @@ async function agentsModule(fastify, opts) {
 
   // Пересев библиотеки из фабрики по явной просьбе (перетирает файлы стадий, кастомных не трогает).
   fastify.post('/api/agents/reseed', async () => {
-    const { n } = await seedAgents(store, config.factoryHome, fastify.log);
+    const { n } = await seedAgents(store, config, fastify.log);
     return { ok: true, n };
   });
 }

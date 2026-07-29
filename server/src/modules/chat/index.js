@@ -1,10 +1,9 @@
-// Модуль chat — интерактивное обсуждение с агентом (Claude) прямо из кокпита.
+// Модуль chat — интерактивное обсуждение с CLI-агентом прямо из кокпита.
 // Два режима:
-//   • по задаче  — `claude -p` в worktree задачи (агент видит код, контекст через --resume);
-//   • без задачи — свободный вопрос, `claude -p` в корне фабрики.
-// Права: permission-mode default + свой permission-prompt-tool (lib/chat/permission-mcp.js) —
-// чтение свободно, а на действия (Bash/правки) агент спрашивает разрешение всплывашкой
-// в браузере (SSE `chat-permission` → POST /api/chat/permission/:pid).
+//   • по задаче  — выбранный executor в worktree задачи, контекст через его sessionId;
+//   • без задачи — свободный вопрос в корне фабрики (страница Agents переопределяет cwd).
+// Интерактивные права реализованы Claude executor-ом через permission-prompt-tool
+// (lib/chat/permission-mcp.js): запрос показывается всплывашкой в браузере.
 import fp from 'fastify-plugin';
 import { promises as fs, createWriteStream, rmSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
@@ -58,7 +57,7 @@ async function chatModule(fastify, opts) {
   }
 
   /**
-   * Единый запуск claude -p. cwd/доп-директории зависят от наличия задачи
+   * Единый запуск выбранного executor-а. cwd/доп-директории зависят от наличия задачи
    * и UI-контекста (страницы, с которой пишет пользователь).
    * Возвращает { reply, sessionId, cost, contextTokens } или reply-ошибку.
    */
@@ -120,7 +119,8 @@ async function chatModule(fastify, opts) {
   }));
 
   /**
-   * Стоп: агент ушёл не туда или завис. Убиваем процесс CLI — ход завершится
+   * Стоп: агент ушёл не туда или завис. Executor, который поддерживает AbortSignal,
+   * убивает процесс CLI — ход завершится
    * ошибкой `stopped`, и чат покажет «Ход остановлен» вместо бесконечного «думает…».
    * Ждущий ответа запрос разрешения тоже снимаем: отвечать уже некому.
    */

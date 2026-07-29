@@ -35,6 +35,14 @@ export const SYSTEM = [
     nav: { path: '/demo', label: 'Демо', icon: 'demo' },
     settings: [],
   },
+  {
+    id: 'code',
+    name: 'Код',
+    version: '1.0.0',
+    description: 'Просмотр кода и гита проектов как в VS Code: дерево файлов и несохранённые изменения любого дерева — основного репозитория или worktree. Только чтение. Пути репозиториев — в разделе «Проекты».',
+    nav: { path: '/code', label: 'Код', icon: 'code' },
+    settings: [],
+  },
 ];
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;

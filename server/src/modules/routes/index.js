@@ -123,10 +123,10 @@ async function routesModule(fastify, opts) {
    * промпты узлов — из bash-профиля фабрики (сайдкарами в папку каждой схемы).
    */
   async function seed(profile) {
-    const p = path.join(config.factoryHome, 'profiles', `${profile}.graph.json`);
+    const p = path.join(config.profilesDir, profile, 'graph.json');
     const g = JSON.parse(await fs.readFile(p, 'utf8'));
     let profilePrompts = {};
-    try { profilePrompts = await extractProfilePrompts(config.factoryHome, profile); }
+    try { profilePrompts = await extractProfilePrompts(config, profile); }
     catch (e) { fastify.log.warn({ err: e.message, profile }, 'посев маршрутов: промпты профиля не извлеклись'); }
     let n = 0;
     for (const [name, r] of Object.entries(g.routes || {})) {
@@ -145,7 +145,7 @@ async function routesModule(fastify, opts) {
   }
 
   // Автопосев пустых баз проектов фабрики.
-  for (const profile of await listFactoryProfiles(config.factoryHome)) {
+  for (const profile of await listFactoryProfiles(config.profilesDir)) {
     await ensureDir(profile);
     if (!(await fs.readdir(dirOf(profile))).some((f) => f.endsWith('.json'))) {
       try {

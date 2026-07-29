@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { nodeGeom, edgePath, computeViewBox, MARKS, START_DOT } from '../../shared/graph-geom.js';
+import { runnerChainLabel, runnerModelLabel, runnerNodeLabel } from '../../shared/runner-display.js';
 
 // graph — ответ /api/tasks/:id/graph; loopsOn — показывать потенциальные fail-рёбра.
 const props = defineProps({
@@ -57,14 +58,22 @@ const nodeEls = computed(() => {
     const sub = def[2] || '';
     const { cx, cy, hw, hh } = nodeGeom(nid, g.pos, g.nodes);
     const status = props.reference ? 'ref' : ((g.statuses || {})[nid] || 'pending');
+    const runnerMeta = g.nodeMeta?.[nid]?.runner || null;
+    const runner = runnerMeta ? runnerNodeLabel(runnerMeta) : '';
+    const runnerModel = runnerMeta ? runnerModelLabel(runnerMeta) : '';
     const rx = kind === 'human' ? hh : 6;
     const points = kind === 'code'
       ? `${cx},${cy - hh} ${cx + hw},${cy} ${cx},${cy + hh} ${cx - hw},${cy}`
       : null;
     return {
       nid, kind, label, sub, cx, cy, hw, hh, rx, points, status,
+      runner, runnerModel, runnerSwitched: !!runnerMeta?.switched,
+      runnerTitle: runnerMeta
+        ? `${runnerChainLabel(runnerMeta)}${runnerModel ? ` · модель ${runnerModel}` : ''}`
+        : '',
       mark: MARKS[status] || '',
       subY: kind === 'code' ? cy + hh + 12 : cy + hh + 13,
+      runnerY: cy + hh + (sub ? 24 : 13),
     };
   });
 });
@@ -92,10 +101,15 @@ const nodeEls = computed(() => {
     <!-- узлы -->
     <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`, { clickable: interactive || !reference }]"
        @click="(interactive || !reference) && emit('node', n, $event)">
+      <title v-if="n.runnerTitle">{{ n.runnerTitle }}</title>
       <polygon v-if="n.points" :points="n.points" />
       <rect v-else :x="n.cx - n.hw" :y="n.cy - n.hh" :width="n.hw * 2" :height="n.hh * 2" :rx="n.rx" />
       <text :x="n.cx" :y="n.cy + 4" text-anchor="middle" class="nlbl">{{ n.label }}<tspan class="mk" :class="`mk-${n.status}`"> {{ n.mark }}</tspan></text>
       <text v-if="n.sub" :x="n.cx" :y="n.subY" text-anchor="middle" class="sub">{{ n.sub }}</text>
+      <text v-if="n.runner" :x="n.cx" :y="n.runnerY" text-anchor="middle"
+            class="runner" :class="{ switched: n.runnerSwitched }">
+        {{ n.runner }}<tspan v-if="n.runnerModel"> · {{ n.runnerModel }}</tspan>
+      </text>
     </g>
   </svg>
 </template>
@@ -116,6 +130,8 @@ const nodeEls = computed(() => {
 .nt-code rect, .nt-code polygon { stroke: var(--node-code); }
 .nlbl { fill: var(--ink); font-size: 11px; font-family: var(--sans); }
 .sub { fill: var(--ink-mid); font-size: 9.5px; font-family: var(--mono); }
+.runner { fill: var(--accent); font-size: 8.5px; font-family: var(--mono); }
+.runner.switched { fill: var(--warn); font-weight: 650; }
 .mk { font-size: 11px; }
 .mk-done { fill: var(--good); }
 .mk-run { fill: var(--accent); }

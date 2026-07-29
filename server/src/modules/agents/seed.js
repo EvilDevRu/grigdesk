@@ -3,7 +3,7 @@
 // промпта); боевой промпт каждого этапа принадлежит СХЕМЕ и лежит сайдкаром
 // routes/<профиль>/<маршрут>/<этап>.md (см. модуль routes).
 //
-// Метаданные — из profiles/<профиль>.graph.json; настройки и промпты — из bash-функций
+// Метаданные — из profiles/<профиль>/graph.json; настройки и промпты — из bash-функций
 // профиля (profile_stage_*): профиль сорсится с заглушками движка, переменные окружения
 // подставляются плейсхолдерами {{TASK}}, {{STATE_DIR}} — на выходе готовые шаблоны.
 //
@@ -28,9 +28,9 @@ function runBash(script) {
 }
 
 /** Читает graph.json профиля: sub-сноски, ключи реестра, optional-этапы. */
-async function readGraph(factoryHome, profile) {
+async function readGraph(profilesDir, profile) {
   try {
-    const p = path.join(factoryHome, 'profiles', `${profile}.graph.json`);
+    const p = path.join(profilesDir, profile, 'graph.json');
     return JSON.parse(await fs.readFile(p, 'utf8'));
   } catch { return {}; }
 }
@@ -39,15 +39,16 @@ async function readGraph(factoryHome, profile) {
  * Извлечение настроек и промптов всех стадий одним вызовом bash.
  * @param {Array<{id: string, k1: string, k2: string}>} stages — id + два кандидата ключа
  */
-async function extractFromProfile(factoryHome, profile, stages) {
+async function extractFromProfile({ factoryHome, profilesDir }, profile, stages) {
   const entries = stages.map((s) => `'${s.id}|${s.k1}|${s.k2}'`).join(' ');
   const script = `
 set +e
 export FACTORY_HOME='${factoryHome}'
+export FACTORY_PROFILES_DIR='${profilesDir}'
 export STATE_DIR='{{STATE_DIR}}'
 get() { echo ""; }
 flog() { :; }
-source "$FACTORY_HOME/profiles/${profile}.sh" 2>/dev/null
+source "$FACTORY_PROFILES_DIR/${profile}/profile.sh" 2>/dev/null
 first() { local f=$1 k1=$2 k2=$3 v; v=$("$f" "$k1" 2>/dev/null); [ -n "$v" ] || v=$("$f" "$k2" 2>/dev/null); echo "$v"; }
 for E in ${entries}; do
   IFS='|' read -r ID K1 K2 <<< "$E"
@@ -90,11 +91,11 @@ function stagesOf(g) {
  * Промпты всех стадий профиля: { <id этапа>: текст }. Используется посевом
  * маршрутов — тексты уезжают сайдкарами в папки схем.
  */
-export async function extractProfilePrompts(factoryHome, profile) {
-  const g = await readGraph(factoryHome, profile);
+export async function extractProfilePrompts(config, profile) {
+  const g = await readGraph(config.profilesDir, profile);
   const stages = stagesOf(g);
   if (!stages.length) return {};
-  const { byId } = await extractFromProfile(factoryHome, profile, stages);
+  const { byId } = await extractFromProfile(config, profile, stages);
   return Object.fromEntries(stages.map(({ id }) => [id, byId[id]?.prompt || '']));
 }
 
@@ -103,18 +104,18 @@ export async function extractProfilePrompts(factoryHome, profile) {
  * повторное появление id в другом профиле шаблон не перетирает.
  * @returns {{n: number}}
  */
-export async function seedAgents(store, factoryHome, log) {
+export async function seedAgents(store, config, log) {
   const claimed = new Set();
   let n = 0;
-  for (const profile of (await listFactoryProfiles(factoryHome)).sort()) {
-    const g = await readGraph(factoryHome, profile);
+  for (const profile of (await listFactoryProfiles(config.profilesDir)).sort()) {
+    const g = await readGraph(config.profilesDir, profile);
     const stages = stagesOf(g);
     if (!stages.length) continue;
     const optional = new Set(Object.values(g.optional || {}).flat());
 
     let extracted = { byId: {} };
     try {
-      extracted = await extractFromProfile(factoryHome, profile, stages);
+      extracted = await extractFromProfile(config, profile, stages);
     } catch (e) {
       log?.warn({ err: e.message, profile }, 'посев агентов: профиль не прочитался, сею только метаданные');
     }

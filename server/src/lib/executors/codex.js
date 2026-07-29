@@ -80,7 +80,7 @@ export default {
     ];
   },
 
-  run({ config, message, cwd, model, effort, sessionId }) {
+  run({ config, message, cwd, model, effort, sessionId, signal }) {
     const args = sessionId ? ['exec', 'resume', sessionId, '--json'] : ['exec', '--json'];
     args.push('--skip-git-repo-check', '--sandbox', 'read-only', '-C', cwd);
     if (model) args.push('-m', model);
@@ -88,14 +88,35 @@ export default {
     args.push(message);
 
     return new Promise((resolve, reject) => {
-      const child = execFile(config.codexBin, args, { cwd, timeout: config.chatTimeoutMs || 3600000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const child = execFile(config.codexBin, args, {
+        cwd,
+        maxBuffer: 32 * 1024 * 1024,
+        signal,
+      }, (err, stdout, stderr) => {
+        // Даже оборванный первый ход успевает напечатать thread.started. Сохраняем id:
+        // следующий вопрос сможет продолжить тот же разговор после кнопки «стоп».
+        let threadId = sessionId || null;
+        for (const line of (stdout || '').split('\n')) {
+          const t = line.trim();
+          if (!t.startsWith('{')) continue;
+          try {
+            const e = JSON.parse(t);
+            if (e.type === 'thread.started' && e.thread_id) threadId = e.thread_id;
+          } catch { /* неполная последняя JSONL-строка */ }
+        }
+        if (err?.code === 'ABORT_ERR' || signal?.aborted) {
+          const stopped = new Error('Ход остановлен.');
+          stopped.stopped = true;
+          stopped.steps = [];
+          stopped.sessionId = threadId;
+          return reject(stopped);
+        }
         if (err && err.code === 'ENOENT') {
           return reject(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
         }
         if (err && !stdout) return reject(new Error((stderr || err.message).slice(-600)));
         // JSONL-поток: собираем последний agent_message, thread_id и usage.
         let reply = '';
-        let threadId = sessionId || null;
         let contextTokens = 0;
         for (const line of (stdout || '').split('\n')) {
           const t = line.trim();

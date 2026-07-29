@@ -8,6 +8,8 @@ import ProviderIcon from '../shared/ProviderIcon.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
+import { confirmDialog } from '../shared/ui/confirm.js';
+import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
 const TABS = [
@@ -15,6 +17,7 @@ const TABS = [
   { id: 'providers', label: 'Исполнители' },
   { id: 'runs', label: 'Запуски' },
   { id: 'plugins', label: 'Плагины' },
+  { id: 'server', label: 'Сервер' },
   { id: 'access', label: 'Доступ' },
 ];
 const tab = ref(localStorage.getItem('cockpit-settings-tab') || 'b24');
@@ -122,6 +125,42 @@ async function toggleGitRefresh(v) {
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
 
+// Подробный trace фабрики. Сам файл настроек принадлежит engine writer-у; UI работает
+// только через /api/settings/factory-debug.
+const factoryDebug = ref(null);
+const factoryDebugBusy = ref(false);
+const factoryDebugMsg = ref(null);
+
+async function loadFactoryDebug({ keepMessage = false } = {}) {
+  try {
+    factoryDebug.value = await api.get('/api/settings/factory-debug?scope=global');
+    if (!keepMessage) factoryDebugMsg.value = null;
+  } catch (e) {
+    factoryDebug.value = null;
+    factoryDebugMsg.value = { type: 'err', text: e.message };
+  }
+}
+
+async function saveFactoryDebug(level) {
+  factoryDebugBusy.value = true;
+  factoryDebugMsg.value = null;
+  try {
+    factoryDebug.value = await api.post(
+      '/api/settings/factory-debug',
+      factoryDebugPayload(level),
+    );
+    factoryDebugMsg.value = {
+      type: 'ok',
+      text: level === 'off' ? 'Подробное логирование выключено.' : 'Уровень логирования сохранён.',
+    };
+  } catch (e) {
+    factoryDebugMsg.value = { type: 'err', text: e.message };
+    await loadFactoryDebug({ keepMessage: true });
+  } finally {
+    factoryDebugBusy.value = false;
+  }
+}
+
 // Сколько моделей исполнителя сейчас скрыто из выбора — считаем тем же правилом,
 // по которому строится селект в чате (стор providers), а не своей копией условия.
 function hiddenCount(p) {
@@ -179,7 +218,53 @@ async function savePlugin(p) {
   setTimeout(() => { if (plugMsg.value === p.id) plugMsg.value = null; }, 2000);
 }
 
-onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); pluginsStore.load(); acc.value.login = auth.login || ''; });
+// ── Сервер (режим запуска и перезапуск) ──
+const srv = ref(null);          // { systemd, pid, uptimeSec }
+const restarting = ref(false);
+const srvMsg = ref(null);
+
+async function loadServer() { try { srv.value = await api.get('/api/system/server'); } catch { srv.value = null; } }
+
+function fmtUptime(s) {
+  if (s >= 86400) return `${Math.floor(s / 86400)}д ${Math.floor((s % 86400) / 3600)}ч`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}ч ${Math.floor((s % 3600) / 60)}м`;
+  if (s >= 60) return `${Math.floor(s / 60)}м`;
+  return `${s}с`;
+}
+
+async function restartServer() {
+  // Рестарт обрывает идущие ходы агентов в чатах (они — дочерние процессы сервера):
+  // честно предупреждаем числом, а не общими словами.
+  let active = 0;
+  try { active = ((await api.get('/api/chat/active')).active || []).length; } catch { /* счётчик не критичен */ }
+  const mode = srv.value?.systemd
+    ? 'Сервер выйдет, юнит systemd поднимет его сам.'
+    : 'Сервер запущен вручную — перезапустится через bin/restart.';
+  const warn = active ? ` Сейчас идут ходы агентов: ${active} — они ОБОРВУТСЯ.` : '';
+  if (!(await confirmDialog(`Перезапустить сервер кокпита? ${mode}${warn}`, { danger: !!active, okText: 'Перезапустить' }))) return;
+  restarting.value = true; srvMsg.value = null;
+  try { await api.post('/api/system/restart'); } catch { /* процесс мог умереть раньше ответа — это норм */ }
+  // Ждём возвращения по публичному /api/auth/state (как bin/restart) и перезагружаем
+  // страницу — она подтянет свежий бандл; ради применения нового кода кнопка и нужна.
+  const t0 = Date.now();
+  while (Date.now() - t0 < 40_000) {
+    await new Promise((r) => { setTimeout(r, 1000); });
+    try { await api.get('/api/auth/state'); location.reload(); return; }
+    catch { /* ещё поднимается */ }
+  }
+  restarting.value = false;
+  srvMsg.value = { type: 'err', text: 'Сервер не вернулся за 40 секунд — смотри journalctl --user -u cockpit-server или server/.state/cockpit-server.log.' };
+}
+
+onMounted(() => {
+  loadCurrent();
+  prov.load();
+  loadPrefs();
+  loadFactoryDebug();
+  pluginsStore.load();
+  loadServer();
+  acc.value.login = auth.login || '';
+});
 </script>
 
 <template>
@@ -292,6 +377,43 @@ onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); pluginsStore.load(); 
           <p v-if="prefsMsg" class="msg" :class="prefsMsg.type">{{ prefsMsg.text }}</p>
         </template>
       </div>
+      <div class="card">
+        <div>
+          <b>Диагностическое логирование фабрики</b>
+          <p class="muted small debug-copy">
+            Помогает разбирать выбор модели, переключение ИИ и ошибки runner-а.
+            Не меняет маршрут или результат этапа. Короткий обязательный audit остаётся
+            даже в режиме «Выключено».
+          </p>
+        </div>
+        <div v-if="!factoryDebug && !factoryDebugMsg" class="muted">Загрузка…</div>
+        <div v-else class="debug-setting">
+          <label>
+            Уровень
+            <select class="settings-select"
+                    :value="factoryDebug?.effective || 'off'"
+                    :disabled="factoryDebugBusy"
+                    @change="saveFactoryDebug($event.target.value)">
+              <option v-for="level in FACTORY_DEBUG_LEVELS"
+                      :key="level.value"
+                      :value="level.value">
+                {{ level.label }}
+              </option>
+            </select>
+          </label>
+          <span v-if="factoryDebug" class="debug-effective">
+            действует: <b>{{ factoryDebug.effective }}</b>
+            <span class="muted"> · источник: {{ factoryDebug.source }}</span>
+          </span>
+        </div>
+        <p class="muted small">
+          Подробные журналы имеют ограничение размера и срок хранения; prompt, credentials
+          и status/control tokens в них не записываются. Выключение не удаляет уже созданные логи.
+        </p>
+        <p v-if="factoryDebugMsg" class="msg" :class="factoryDebugMsg.type">
+          {{ factoryDebugMsg.text }}
+        </p>
+      </div>
     </section>
 
     <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
@@ -328,6 +450,34 @@ onMounted(() => { loadCurrent(); prov.load(); loadPrefs(); pluginsStore.load(); 
             <span v-if="plugMsg === p.id" class="msg ok">Сохранено</span>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
+    <section v-else-if="tab === 'server'">
+      <p class="muted">
+        Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
+        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки) —
+        ручные запуски не нужны. Кнопка ниже применяет новый код: свежие плагины и правки
+        сервера подхватываются перезапуском.
+      </p>
+      <div class="card">
+        <div v-if="!srv" class="muted">Загрузка…</div>
+        <template v-else>
+          <p class="srvline">
+            Режим: <b>{{ srv.systemd ? 'демон systemd' : 'запущен вручную' }}</b>
+            <span class="muted"> · PID {{ srv.pid }} · работает {{ fmtUptime(srv.uptimeSec) }}</span>
+          </p>
+          <p v-if="!srv.systemd" class="muted small">
+            Ручной запуск — режим разработки. Чтобы демон поднимался сам, один раз выполни
+            <code>deploy/install.sh</code>. Режимы не смешивать: ручной экземпляр держит порт,
+            и юнит будет падать в цикле (уже наступали — 7553 падения).
+          </p>
+          <button class="btn" :disabled="restarting" @click="restartServer">
+            {{ restarting ? 'Перезапускаю… жду возвращения' : 'Перезапустить сервер' }}
+          </button>
+          <p v-if="srvMsg" class="msg" :class="srvMsg.type">{{ srvMsg.text }}</p>
+        </template>
       </div>
     </section>
 
@@ -411,6 +561,18 @@ label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color:
 input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.debug-copy { margin: 5px 0 0; }
+.debug-setting { display: flex; align-items: end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.debug-setting label { min-width: 230px; }
+.debug-effective { font-size: 12px; padding-bottom: 8px; color: var(--ink-mid); }
+.settings-select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--ground) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888da8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
+  padding: 9px 32px 9px 11px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.settings-select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.settings-select:disabled { opacity: .55; cursor: default; }
 /* Настройка показа моделей — отделена от списка исполнителей */
 .prow { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; display: grid; gap: 6px; }
 button { padding: 9px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 14px; cursor: pointer; }
@@ -450,4 +612,8 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .pvinstall code.click { background: var(--ground); border: 1px solid var(--line); border-radius: 5px;
   padding: 2px 7px; font-size: 11.5px; cursor: pointer; user-select: all; }
 .pvinstall code.click:hover { border-color: var(--line-2); color: var(--ink); }
+
+/* Сервер: строка режима + кнопка перезапуска */
+.srvline { margin: 0; font-size: 13.5px; }
+.srvline b { font-weight: 640; }
 </style>

@@ -17,6 +17,7 @@ import { MediaAdapter } from './adapters/media.js';
 import { CredsStore } from './lib/b24/creds-store.js';
 import { ClaudeAuthStore } from './lib/claude-auth-store.js';
 import { PrefsStore } from './lib/prefs-store.js';
+import { FactoryDebugSettings } from './lib/factory-debug.js';
 
 import authPlugin from './plugins/auth.js';
 import ssePlugin from './plugins/sse.js';
@@ -38,6 +39,8 @@ import authModule from './modules/auth/index.js';
 import gatewayModule from './modules/gateway/index.js';
 import pluginsModule from './modules/plugins/index.js';
 import demoModule from './modules/demo/index.js';
+import projectsModule from './modules/projects/index.js';
+import codeModule from './modules/code/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 
 /**
@@ -80,13 +83,22 @@ async function build() {
   await fastify.register(websocket, { options: { maxPayload: 1 * 1024 ** 2 } });
 
   // Адаптеры (изоляция источников).
-  const factoryState = new FactoryStateAdapter({ stateDir: config.stateDir, factoryHome: config.factoryHome });
+  const factoryState = new FactoryStateAdapter({
+    stateDir: config.stateDir,
+    profilesDir: config.profilesDir,
+  });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
   const system = new SystemAdapter();
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
   const prefs = new PrefsStore({ prefsPath: config.prefsPath });
+  const factoryDebug = new FactoryDebugSettings({
+    factoryBin: config.factoryBin,
+    stateDir: config.stateDir,
+    configRoot: config.factoryConfigRoot,
+    profilesDir: config.profilesDir,
+  });
   const analyzer = new Analyzer({ config, claudeAuth, b24, factoryState, prefs, log: fastify.log });
   const authStore = new AuthStore({
     accountPath: config.authAccountPath,
@@ -120,13 +132,17 @@ async function build() {
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register(factoryModule, { factoryState, config, prefs, b24, analyzer });
   await fastify.register(b24Module, { b24 });
-  await fastify.register(systemModule, { system });
+  await fastify.register(systemModule, { system, config });
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, { config, prefs });
   await fastify.register(mediaModule, { media });
   await fastify.register(demoModule, { config, factoryState });
+  await fastify.register(codeModule, { config, prefs });
+  await fastify.register(projectsModule, { config, prefs });
   await fastify.register(chatModule, { factoryState, config, claudeAuth, internalToken });
-  await fastify.register(settingsModule, { credsStore, b24, claudeAuth, config, prefs });
+  await fastify.register(settingsModule, {
+    credsStore, b24, claudeAuth, config, prefs, factoryDebug,
+  });
   await fastify.register(terminalModule);
   await fastify.register(agentsModule, { config });
   await fastify.register(routesModule, { config });

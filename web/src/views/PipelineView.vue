@@ -13,6 +13,14 @@ import { sandboxUrl } from '../shared/sandbox.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
 import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
+import {
+  attemptResultLabel,
+  providerLabel,
+  runnerChainLabel,
+  runnerModelLabel,
+  runnerNodeLabel,
+  runnerReasonLabel,
+} from '../shared/runner-display.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -99,6 +107,12 @@ const STAGE_HINT = {
   fail: 'провалился — стенд не поднялся',
 };
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
+const RUNNER_SOURCE = {
+  'profile-project': 'политика проекта',
+  'profile-stage': 'политика этапа',
+  task: 'переопределение задачи',
+  'task-stage': 'переопределение этапа задачи',
+};
 
 const LIVE_ICONS = { tool: '⚙', subagent: '🤖', text: '💬', think: '🧠' };
 function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
@@ -106,6 +120,9 @@ function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
 function openStage(t, node) {
   stage.value = {
     task: t.task, id: node.nid, key: t.graph.keys?.[node.nid] || node.nid.toUpperCase(),
+    runnerKey: t.graph.runnerKeys?.[node.nid]
+      || t.graph.keys?.[node.nid]
+      || node.nid.toUpperCase(),
     isGate: node.nid.startsWith('gate_'), label: stripEmoji(node.label), sub: node.sub,
     status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
   };
@@ -143,6 +160,25 @@ async function forceStatus(status) {
   stageBusy.value = 'force';
   try { await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`); await load(); closeStage(); }
   catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+}
+async function switchRunner(target) {
+  if (!await confirmDialog(
+    `Остановить текущий запуск ${providerLabel(stage.value.meta.runner.actual)} и продолжить этап через ${providerLabel(target)}?`,
+    { okText: 'Переключить' },
+  )) return;
+  stageBusy.value = 'runner-switch';
+  try {
+    await api.post(`/api/tasks/${stage.value.task}/runner/switch`, {
+      stage: stage.value.runnerKey,
+      target,
+    });
+    await load();
+    closeStage();
+  } catch (e) {
+    alertDialog(`Не удалось переключить исполнителя: ${e.message}`);
+  } finally {
+    stageBusy.value = null;
+  }
 }
 async function saveInstruction() {
   stageBusy.value = 'instr';
@@ -266,6 +302,10 @@ function cardState(g) {
         </button>
         <button class="task mono" title="Свернуть/развернуть" @click="toggleCard(t.task)">#{{ t.task }}</button>
         <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
+        <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
+              :title="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
+          ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
+        </span>
         <button v-if="title(t.task)" class="ctitle" :title="title(t.task)" @click="ui.openTask(t.task)">{{ title(t.task) }}</button>
         <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
         <span class="daemon" :class="t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle')">
@@ -378,6 +418,51 @@ function cardState(g) {
         </div>
 
         <div class="sb">
+          <!-- Та же runner-chain, по которой движок реально принимает решение. -->
+          <div v-if="stage.meta.runner" class="sect runner-sect">
+            <div class="secth">
+              Исполнитель
+              <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
+            </div>
+            <div class="runner-chain">
+              <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
+                <span v-if="i" class="runner-arrow">→</span>
+                <span class="runner-hop"
+                      :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }">
+                  <b>{{ providerLabel(id) }}</b>
+                  <small v-if="runnerModelLabel(stage.meta.runner, id)">{{ runnerModelLabel(stage.meta.runner, id) }}</small>
+                </span>
+              </template>
+            </div>
+            <div v-if="stage.meta.runner.actual" class="runner-current"
+                 :class="{ switched: stage.meta.runner.switched }">
+              Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
+              <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
+            </div>
+            <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
+              <div class="runner-attempt-title">Попытки запуска</div>
+              <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
+                <span class="mono">#{{ a.epoch ?? '—' }}</span>
+                <b>{{ providerLabel(a.runner) }}</b>
+                <span v-if="a.model" class="mono">{{ a.model }}</span>
+                <span class="runner-result" :class="{
+                  good: a.result === 'ok',
+                  switched: a.result === 'manual_switch',
+                  bad: a.result && !['ok', 'manual_switch'].includes(a.result),
+                }">
+                  {{ attemptResultLabel(a.result) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="stage.status === 'run' && stage.meta.runner.actual" class="runner-switches">
+              <button v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
+                      :key="id" class="btn runner-switch"
+                      :disabled="stageBusy === 'runner-switch'" @click="switchRunner(id)">
+                {{ stageBusy === 'runner-switch' ? 'переключаю…' : `Переключить сейчас на ${providerLabel(id)}` }}
+              </button>
+            </div>
+          </div>
+
           <!-- Ворота: принять/отклонить — первым делом, если ждёт решения -->
           <div v-if="stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect gate-sect">
             <div class="secth">Ворота — твоё решение</div>
@@ -517,6 +602,8 @@ function cardState(g) {
 .task:hover { color: var(--accent); }
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
+.runner-policy { font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
+  background: var(--surface-2); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .spacer { flex: 1; }
 .daemon { font-size: 12px; white-space: nowrap; }
 .daemon.alive { color: var(--good); }
@@ -591,6 +678,33 @@ function cardState(g) {
 .jf.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 
 .sb { padding: 12px 16px; display: flex; flex-direction: column; }
+
+/* Фактическая multi-AI цепочка этапа и история аварийных переключений. */
+.runner-sect { margin-top: 0; padding: 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ground); }
+.runner-source { margin-left: auto; font-size: 10.5px; text-transform: none;
+  letter-spacing: 0; font-weight: 400; opacity: .75; }
+.runner-chain { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.runner-arrow { color: var(--ink-mid); align-self: center; }
+.runner-hop { display: flex; flex-direction: column; gap: 1px; min-width: 92px;
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-mid); }
+.runner-hop small { font: 10.5px var(--mono); color: var(--ink-mid); }
+.runner-hop.reserve { border-style: dashed; }
+.runner-hop.actual { color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.runner-current { font-size: 12px; color: var(--ink-mid); }
+.runner-current.switched { color: var(--warn); }
+.runner-attempts { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line);
+  padding-top: 7px; }
+.runner-attempt-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-mid); }
+.runner-attempt { display: grid; grid-template-columns: 34px 72px minmax(110px, 1fr) auto;
+  align-items: baseline; gap: 7px; font-size: 11.5px; color: var(--ink-mid); }
+.runner-result.good { color: var(--good); }
+.runner-result.switched { color: var(--accent); }
+.runner-result.bad { color: var(--warn); }
+.runner-switches { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+.runner-switch { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
 
 /* Живая лента действий */
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad);

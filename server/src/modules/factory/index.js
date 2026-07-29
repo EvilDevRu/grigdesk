@@ -11,12 +11,23 @@ import { taskDiff } from '../../lib/git.js';
 import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
 import { reserveSlot, releaseSlot, slotsOverview, SlotsFullError } from '../../lib/sandbox-slots.js';
+import {
+  FactoryRunnerControl,
+  RunnerControlCommandError,
+  RunnerControlInputError,
+} from '../../lib/runner-control.js';
 
 // Допустимые статусы для ручного перехода (форс).
 const STAGE_STATUSES = new Set(['pending', 'running', 'done', 'waiting', 'skipped', 'failed', 'approved', 'rejected']);
 
 async function factoryModule(fastify, opts) {
   const { factoryState, config, prefs, b24, analyzer } = opts;
+  const runnerControl = new FactoryRunnerControl({
+    factoryBin: config.factoryBin,
+    stateDir: config.stateDir,
+    configRoot: config.factoryConfigRoot,
+    profilesDir: config.profilesDir,
+  });
 
   // Список всех задач с картой статусов этапов.
   fastify.get('/api/tasks', async () => {
@@ -105,7 +116,7 @@ async function factoryModule(fastify, opts) {
     let gitRefresh = null;
     if (prefs?.read().gitRefreshBeforeRun) {
       try {
-        const triageProfile = await loadTriageProfile(config.factoryHome, profile);
+        const triageProfile = await loadTriageProfile(config, profile);
         gitRefresh = await refreshRepos(triageProfile.repos);
         fastify.log.info({ task: id, gitRefresh }, 'репозитории обновлены перед конвейером');
       } catch (e) {
@@ -150,7 +161,13 @@ async function factoryModule(fastify, opts) {
     // передали конвейеру. Дальше стенд подтвердит слот в реестре, и резервация снимется.
     let slot = { k: null, source: 'none' };
     try {
-      slot = await reserveSlot({ factoryBin: config.factoryBin, stateDir: config.stateDir, profile, task: id });
+      slot = await reserveSlot({
+        factoryBin: config.factoryBin,
+        stateDir: config.stateDir,
+        profilesDir: config.profilesDir,
+        profile,
+        task: id,
+      });
     } catch (e) {
       // Слотов нет — отказываем СРАЗУ и по-человечески. Раньше это выяснялось только
       // через двадцать минут клонирования БД, докерной ошибкой в логе оркестратора.
@@ -165,6 +182,12 @@ async function factoryModule(fastify, opts) {
     // source='registry' — стенд уже поднят и слот за ним закреплён: подсказывать нечего,
     // а навязанный индекс сломал бы проверку занятости внутри подъёма.
     const slotEnv = (slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {};
+    const launchEnv = {
+      ...slotEnv,
+      FACTORY_PROFILES_DIR: config.profilesDir,
+      FACTORY_STATE: config.stateDir,
+      STATE_DIR: config.stateDir,
+    };
     // КРИТИЧНО: оркестратор живёт ЧАСЫ и обязан пережить рестарт кокпита.
     // Прогон #7803 умер именно так: сервер работал под systemd-юнитом, фабрика
     // родилась в его cgroup, и при рестарте systemd зачистил cgroup целиком (TERM
@@ -176,14 +199,14 @@ async function factoryModule(fastify, opts) {
     const haveScope = await new Promise((res) => execFile('systemd-run', ['--version'], (err) => res(!err)));
     // Слот передаётся ДВАЖДЫ намеренно: env — для случая без systemd, --setenv — потому
     // что transient scope не обязан донести окружение вызывающего до самой команды.
-    const scopeEnv = Object.entries(slotEnv).map(([k, v]) => `--setenv=${k}=${v}`);
+    const scopeEnv = Object.entries(launchEnv).map(([k, v]) => `--setenv=${k}=${v}`);
     const [bin, argv] = haveScope
       ? ['systemd-run', ['--user', '--scope', '--quiet', '--collect', ...scopeEnv, `--unit=factory-t${id}`, config.factoryBin, ...args]]
       : [config.factoryBin, args];
     const child = spawn(bin, argv, {
       detached: true,
       stdio: ['ignore', out.fd, out.fd],
-      env: { ...process.env, ...slotEnv },
+      env: { ...process.env, ...launchEnv },
     });
     child.unref();
     let exited = null; // быстрый выход = ошибка аргументов/профиля
@@ -222,7 +245,12 @@ async function factoryModule(fastify, opts) {
   fastify.get('/api/factory/slots', async (request, reply) => {
     const profile = request.query.profile || config.factoryProfile || (await factoryState.primaryProfile());
     if (!profile) return reply.code(400).send({ error: 'no_profile', message: 'профиль конвейера не определён' });
-    return slotsOverview({ factoryBin: config.factoryBin, stateDir: config.stateDir, profile });
+    return slotsOverview({
+      factoryBin: config.factoryBin,
+      stateDir: config.stateDir,
+      profilesDir: config.profilesDir,
+      profile,
+    });
   });
 
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
@@ -253,6 +281,46 @@ async function factoryModule(fastify, opts) {
     if (!STAGE_STATUSES.has(status)) return reply.code(400).send({ error: 'bad_status' });
     try { await setPipeline({ ...cfg, task: id, pairs: [key, status] }); return { ok: true, key, status }; }
     catch (err) { return reply.code(500).send({ error: 'stage_failed', message: err.message }); }
+  });
+
+  // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
+  // разрешённой цепочки этого этапа. Сам engine применяет CAS к run/epoch и завершает
+  // точную process group; Cockpit не пишет control-файлы напрямую.
+  fastify.post('/api/tasks/:id/runner/switch', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    const stage = String(request.body?.stage || '').toUpperCase();
+    const target = String(request.body?.target || '');
+    if (!id || !/^[A-Z][A-Z0-9_]*$/.test(stage) || !/^[a-z][a-z0-9_-]*$/.test(target)) {
+      return reply.code(400).send({ error: 'bad_runner_switch' });
+    }
+    try {
+      const graph = await factoryState.getTaskGraph(id);
+      const nodeId = Object.keys(graph.runnerKeys || {}).find((nid) => graph.runnerKeys[nid] === stage)
+        || Object.keys(graph.keys || {}).find((nid) => graph.keys[nid] === stage)
+        || Object.keys(graph.nodes || {}).find((nid) => nid.toUpperCase() === stage);
+      const runner = nodeId ? graph.nodeMeta?.[nodeId]?.runner : null;
+      if (!runner?.actual) {
+        return reply.code(409).send({
+          error: 'runner_not_active',
+          message: 'У этапа нет активного запуска для переключения.',
+        });
+      }
+      if (target === runner.actual || !runner.chain.includes(target)) {
+        return reply.code(409).send({
+          error: 'runner_not_allowed',
+          message: 'Исполнитель не входит в разрешённую резервную цепочку этапа.',
+        });
+      }
+      return await runnerControl.switch({ task: id, stage, target });
+    } catch (err) {
+      if (err instanceof RunnerControlInputError) {
+        return reply.code(400).send({ error: 'bad_runner_switch', message: err.message });
+      }
+      if (err instanceof RunnerControlCommandError) {
+        return reply.code(409).send({ error: 'runner_switch_rejected', message: err.message });
+      }
+      return reply.code(500).send({ error: 'runner_switch_failed', message: err.message });
+    }
   });
 
   // Указание агенту (side-файл, читается на границе этапов). Пусто — снять.
@@ -287,7 +355,7 @@ async function factoryModule(fastify, opts) {
     if (config.sandboxDownCmd) return config.sandboxDownCmd.replaceAll('{task}', id);
     let profile = '';
     try { profile = (await factoryState.readRegistry(id)).registry.PROFILE || ''; } catch { /* реестра нет */ }
-    const script = profile && path.join(config.factoryHome, 'profiles', profile, 'down.sh');
+    const script = profile && path.join(config.profilesDir, profile, 'down.sh');
     if (script && await fs.access(script).then(() => true).catch(() => false)) return `bash ${script} ${id}`;
     return null;
   }

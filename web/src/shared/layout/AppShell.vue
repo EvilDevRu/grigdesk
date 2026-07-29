@@ -174,6 +174,8 @@ const ICONS = {
   chats: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
   agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
+  projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z',
+  code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
   settings: 'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
@@ -188,8 +190,13 @@ const nav = [
   { to: '/chats', label: 'Чаты', icon: 'chats' },
   { to: '/agents', label: 'Агенты', icon: 'agents' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
+  { to: '/projects', label: 'Проекты', icon: 'projects' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
 ];
+// Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У пользовательских
+// плагинов фронтовых страниц пока не бывает (только роуты /api/ext/…), а пункт с мёртвой
+// ссылкой хуже отсутствующего — такие скрываем, пока страница не появится в бандле.
+const pluginNav = computed(() => plugins.navItems.filter((i) => router.resolve(i.to).matched.length));
 // Служебные пункты — прижаты к низу сайдбара.
 const navBottom = [
   { to: '/terminal', label: 'Терминал', icon: 'terminal' },
@@ -223,9 +230,9 @@ const { connected } = useSse((name) => {
           <span class="lbl">{{ item.label }}</span>
         </router-link>
         <!-- Плагины: под основными разделами, за разделителем. Состав живёт в «Настройки → Плагины». -->
-        <template v-if="plugins.navItems.length">
+        <template v-if="pluginNav.length">
           <div class="navsep"></div>
-          <router-link v-for="item in plugins.navItems" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
             <span class="lbl">{{ item.label }}</span>
           </router-link>

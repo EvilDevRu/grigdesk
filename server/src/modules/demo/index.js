@@ -62,10 +62,20 @@ async function demoModule(fastify, opts) {
     const out = await fs.open(launchLog, 'a');
     const haveScope = await new Promise((res) => execFile('systemd-run', ['--version'], (err) => res(!err)));
     const args = [id, 'demo', '--profile', reg.PROFILE || ''];
+    const launchEnv = {
+      FACTORY_PROFILES_DIR: config.profilesDir,
+      FACTORY_STATE: config.stateDir,
+      STATE_DIR: config.stateDir,
+    };
+    const scopeEnv = Object.entries(launchEnv).map(([k, v]) => `--setenv=${k}=${v}`);
     const [bin, argv] = haveScope
-      ? ['systemd-run', ['--user', '--scope', '--quiet', '--collect', `--unit=factory-demo-t${id}`, config.factoryBin, ...args]]
+      ? ['systemd-run', ['--user', '--scope', '--quiet', '--collect', ...scopeEnv, `--unit=factory-demo-t${id}`, config.factoryBin, ...args]]
       : [config.factoryBin, args];
-    const child = spawn(bin, argv, { detached: true, stdio: ['ignore', out.fd, out.fd] });
+    const child = spawn(bin, argv, {
+      detached: true,
+      stdio: ['ignore', out.fd, out.fd],
+      env: { ...process.env, ...launchEnv },
+    });
     child.unref();
     await out.close();
     return { outcome: 'launched' };

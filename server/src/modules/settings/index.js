@@ -3,13 +3,43 @@
 // Авторизация Claude настраивается не здесь: чат использует хостовый CLI (claude login),
 // статус исполнителей отдаёт реестр /api/providers.
 import fp from 'fastify-plugin';
+import { FactoryDebugInputError } from '../../lib/factory-debug.js';
 
 async function settingsModule(fastify, opts) {
-  const { credsStore, b24, prefs } = opts;
+  const { credsStore, b24, prefs, factoryDebug } = opts;
 
   // Общие настройки кокпита (правила запусков и пр.).
   fastify.get('/api/settings/prefs', async () => prefs.read());
   fastify.post('/api/settings/prefs', async (request) => prefs.write(request.body || {}));
+
+  // Диагностические логи фабрики. Источник истины — engine CLI: сервер не читает и
+  // не пишет его settings-файлы сам.
+  fastify.get('/api/settings/factory-debug', async (request, reply) => {
+    const { scope = 'global', profile, task } = request.query || {};
+    try {
+      return await factoryDebug.show({ scope, profile, task });
+    } catch (err) {
+      if (err instanceof FactoryDebugInputError) {
+        return reply.code(400).send({ error: 'bad_debug_setting', message: err.message });
+      }
+      return reply.code(502).send({ error: 'factory_debug_failed', message: err.message });
+    }
+  });
+
+  fastify.post('/api/settings/factory-debug', async (request, reply) => {
+    const {
+      scope = 'global', profile, task, level, duration, clear = false,
+    } = request.body || {};
+    try {
+      if (clear) return await factoryDebug.clear({ scope, profile, task });
+      return await factoryDebug.set({ scope, profile, task, level, duration });
+    } catch (err) {
+      if (err instanceof FactoryDebugInputError) {
+        return reply.code(400).send({ error: 'bad_debug_setting', message: err.message });
+      }
+      return reply.code(502).send({ error: 'factory_debug_failed', message: err.message });
+    }
+  });
 
   // Текущие настройки B24 (без пароля).
   fastify.get('/api/settings/b24', async () => credsStore.publicView());

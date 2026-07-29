@@ -72,11 +72,20 @@ async function withLock(dir, fn) {
  * распределитель выдал бы резервацию на слот, который up.sh считает занятым.
  * @returns {Promise<{range:[number,number], used:Array<{k:number,by:string,why:string}>, free:number[]}>}
  */
-export function listSlots({ factoryBin, stateDir, profile }) {
+export function listSlots({
+  factoryBin, stateDir, profilesDir = '', profile,
+}) {
   return new Promise((resolve, reject) => {
     execFile(
       factoryBin, ['slots', '--profile', profile],
-      { env: { ...process.env, STATE_DIR: stateDir }, timeout: 20000 },
+      {
+        env: {
+          ...process.env,
+          STATE_DIR: stateDir,
+          ...(profilesDir ? { FACTORY_PROFILES_DIR: profilesDir } : {}),
+        },
+        timeout: 20000,
+      },
       (err, stdout, stderr) => {
         const out = String(stdout || '').trim();
         // Профиль без хука слотов — не авария: распределять просто нечего.
@@ -122,11 +131,15 @@ function readReservations(dir, ttlMs = RESERVATION_TTL_MS) {
  *          source='registry' — стенд уже поднят и слот за ним закреплён, подсказывать нечего.
  * @throws {SlotsFullError} свободных слотов нет
  */
-export async function reserveSlot({ factoryBin, stateDir, profile, task, ttlMs = RESERVATION_TTL_MS }) {
+export async function reserveSlot({
+  factoryBin, stateDir, profilesDir = '', profile, task, ttlMs = RESERVATION_TTL_MS,
+}) {
   const dir = slotsDir(stateDir);
   let slots;
   try {
-    slots = await listSlots({ factoryBin, stateDir, profile });
+    slots = await listSlots({
+      factoryBin, stateDir, profilesDir, profile,
+    });
   } catch (e) {
     // Профиль без слотов (или опрос сломался) — не повод не пустить конвейер:
     // он сам выберет индекс, как делал раньше. Гонка возвращается, но отказ хуже.
@@ -177,11 +190,15 @@ export function releaseSlot({ stateDir, task }) {
 }
 
 /** Занятость + резервации одним ответом — для диагностики и UI. */
-export async function slotsOverview({ factoryBin, stateDir, profile }) {
+export async function slotsOverview({
+  factoryBin, stateDir, profilesDir = '', profile,
+}) {
   const dir = slotsDir(stateDir);
   const reserved = [...readReservations(dir).values()];
   try {
-    const slots = await listSlots({ factoryBin, stateDir, profile });
+    const slots = await listSlots({
+      factoryBin, stateDir, profilesDir, profile,
+    });
     const takenByOthers = new Set(reserved.map((r) => r.k));
     return { ...slots, reserved, free: (slots.free || []).filter((k) => !takenByOthers.has(k)) };
   } catch (e) {
