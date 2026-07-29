@@ -23,6 +23,8 @@ runner_launch sandboxed "$task" "finish the stage" "$stage" sandboxed-model high
 rc=$?
 
 assert_rc 0 "$rc" "sandboxed runner completes without inherited status FD"
+assert_eq 0 "$(find "$run_dir/control-requests" -type f 2>/dev/null | wc -l)" \
+  "invalid deferred progress never enters the request queue"
 assert_file_exists "$run_dir/progress-visible" "deferred progress is applied while the runner is alive"
 assert_eq feature "$(pipeline_store_get "$task" ROUTE)" "deferred progress reaches the registry"
 assert_eq done "$(pipeline_store_get "$task" "$stage")" "deferred terminal result reaches the registry"

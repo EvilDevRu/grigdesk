@@ -132,11 +132,10 @@ run_state_apply_result() {
   return "$rc"
 }
 
-run_state_apply_progress() {
-  local task=$1 stage=$2 run_id=$3 epoch=$4 token=$5; shift 5
+run_state_validate_progress() {
+  local stage=$1; shift
   (( $# >= 2 && $# % 2 == 0 )) || return 2
   local key value
-  local -a updates=()
   while (( $# >= 2 )); do
     key=$1; value=$2; shift 2
     [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ && "$key" != "$stage" ]] || return 2
@@ -154,8 +153,13 @@ run_state_apply_progress() {
       *)
         return 2 ;;
     esac
-    updates+=("$key" "$value")
   done
+}
+
+run_state_apply_progress() {
+  local task=$1 stage=$2 run_id=$3 epoch=$4 token=$5; shift 5
+  run_state_validate_progress "$stage" "$@" || return
+  local -a updates=("$@")
 
   local lock_fd file active_run active_epoch expected_hash state rc
   pipeline_lock_acquire "$task" lock_fd || return

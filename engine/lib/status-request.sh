@@ -59,7 +59,7 @@ status_request_result() {
 
 status_request_progress() {
   local task=${1#[tT]} stage=$2 run_id=$3 epoch=$4; shift 4
-  (( $# >= 2 && $# % 2 == 0 )) || return 2
+  run_state_validate_progress "$stage" "$@" || return
   status_request_context_valid "$task" "$stage" "$run_id" "$epoch" || return 74
   local dir count=$(( $# / 2 )) index=0 key value
   local -a lines=(

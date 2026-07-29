@@ -12,6 +12,10 @@ runner_sandboxed_run() {
   exec 7<&-
   FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-progress.sh" \
     --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
+    --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" REVIEW_BE running
+  [[ "$?" == 2 ]] || return 71
+  FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-progress.sh" \
+    --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
     --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" ROUTE feature || return
   local visible=0
   for _poll in {1..20}; do
