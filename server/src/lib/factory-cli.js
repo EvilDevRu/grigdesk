@@ -125,8 +125,25 @@ function readRunModel(runDir) {
 }
 
 function shortText(value, limit = 120) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  let source = value;
+  if (source == null) source = '';
+  else if (typeof source === 'object') {
+    try { source = JSON.stringify(source); } catch { source = String(source); }
+  }
+  const text = String(source).replace(/\s+/g, ' ').trim();
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+function fileChangeText(item) {
+  if (item.path) return shortText(item.path);
+  const changes = Array.isArray(item.changes)
+    ? item.changes
+    : item.changes ? [item.changes] : [];
+  const paths = changes.map((change) => {
+    if (typeof change === 'string') return change;
+    return change?.path || change?.file_path || change?.move_path || '';
+  }).filter(Boolean);
+  return paths.length ? shortText(paths.join(', ')) : shortText(item.changes);
 }
 
 function codexAction(item, status) {
@@ -161,7 +178,7 @@ function codexAction(item, status) {
     case 'web_search':
       return { type: 'tool', name: 'Поиск в интернете', desc: shortText(item.query), status: mappedStatus };
     case 'file_change':
-      return { type: 'tool', name: 'Изменение файлов', desc: shortText(item.path || item.changes), status: mappedStatus };
+      return { type: 'tool', name: 'Изменение файлов', desc: fileChangeText(item), status: mappedStatus };
     default:
       return null;
   }

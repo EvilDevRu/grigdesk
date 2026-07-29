@@ -47,6 +47,15 @@ test('activity follows the active run and renders Codex JSONL events', async (t)
       type: 'item.started',
       item: { id: 'item-3', type: 'collab_tool_call', tool: 'wait', status: 'in_progress' },
     }),
+    JSON.stringify({
+      type: 'item.completed',
+      item: {
+        id: 'item-4',
+        type: 'file_change',
+        changes: [{ path: '/workspace/src/activity.js', kind: 'update' }],
+        status: 'completed',
+      },
+    }),
     '',
   ].join('\n'));
 
@@ -67,9 +76,12 @@ test('activity follows the active run and renders Codex JSONL events', async (t)
     { type: 'text', status: undefined },
     { type: 'tool', status: 'error' },
     { type: 'tool', status: 'run' },
+    { type: 'tool', status: 'done' },
   ]);
   assert.equal(live.actions[0].text, 'Проверяю изменённые файлы.');
   assert.equal(live.actions[1].name, 'Команда');
   assert.match(live.actions[1].desc, /npm test/);
   assert.equal(live.actions[2].name, 'Ожидание субагентов');
+  assert.equal(live.actions[3].name, 'Изменение файлов');
+  assert.equal(live.actions[3].desc, '/workspace/src/activity.js');
 });
