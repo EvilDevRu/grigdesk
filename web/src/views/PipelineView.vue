@@ -530,7 +530,7 @@ function cardState(g) {
           <div class="sect sactions">
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
             <OpenDiffButton :task-id="stage.task" />
-            <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Сделать этот этап текущим">
+            <button v-if="!stage.isGate" class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Вернуть конвейер на этот этап">
               {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
             </button>
           </div>

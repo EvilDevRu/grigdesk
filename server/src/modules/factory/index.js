@@ -18,6 +18,10 @@ import {
   RunnerControlCommandError,
   RunnerControlInputError,
 } from '../../lib/runner-control.js';
+import {
+  ManualStageTransitionError,
+  manualStageTransitionPairs,
+} from '../../lib/factory-transition.js';
 
 // Допустимые статусы для ручного перехода (форс).
 const STAGE_STATUSES = new Set(['pending', 'running', 'done', 'waiting', 'skipped', 'failed', 'approved', 'rejected']);
@@ -394,8 +398,18 @@ async function factoryModule(fastify, opts) {
     const status = request.params.status;
     if (!id || !key) return reply.code(400).send({ error: 'bad_input' });
     if (!STAGE_STATUSES.has(status)) return reply.code(400).send({ error: 'bad_status' });
-    try { await setPipeline({ ...cfg, task: id, pairs: [key, status] }); return { ok: true, key, status }; }
-    catch (err) { return reply.code(500).send({ error: 'stage_failed', message: err.message }); }
+    try {
+      const { registry } = await factoryState.readRegistry(id);
+      const { stages } = factoryState.buildStageMap(registry);
+      const pairs = manualStageTransitionPairs({ registry, stages, key, status });
+      await setPipeline({ ...cfg, task: id, pairs });
+      return { ok: true, key, status };
+    } catch (err) {
+      if (err instanceof ManualStageTransitionError) {
+        return reply.code(409).send({ error: err.code, message: err.message });
+      }
+      return reply.code(500).send({ error: 'stage_failed', message: err.message });
+    }
   });
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже

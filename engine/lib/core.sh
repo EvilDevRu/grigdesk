@@ -136,7 +136,9 @@ run_agent() {
 # ожидание в сабшелл, а родитель блокируется чтением пайпа — и TERM-trap демона
 # не срабатывает, пока ворота ждут (демона на воротах было не остановить).
 gate_wait() {
-  local t=$1 key=$2 cur
+  local t=$1 key=$2 cur rewind
+  rewind=$(get "$t" REWIND_STAGE)
+  if [[ -n "$rewind" ]]; then GATE_DECISION=rewind; return 0; fi
   cur=$(get "$t" "$key")
   case "$cur" in approved|rejected|skipped) GATE_DECISION=$cur; return 0 ;; esac   # уже решено (resume)
   # Новый заход на ворота — новое решение. Комментарий прошлого rejected уже
@@ -145,10 +147,31 @@ gate_wait() {
   set_st "$t" "$key" waiting "${key}_COMMENT" ""
   flog "$t" "ВОРОТА $key — жду человека (дашборд)"
   while true; do
+    rewind=$(get "$t" REWIND_STAGE)
+    if [[ -n "$rewind" ]]; then GATE_DECISION=rewind; return 0; fi
     cur=$(get "$t" "$key")
     case "$cur" in approved|rejected|skipped) GATE_DECISION=$cur; return 0 ;; esac
     sleep 10
   done
+}
+
+# Ручной возврат от ворот: выбранный этап и весь хвост активного маршрута
+# становятся неактуальны. Сначала pending для каждого узла, затем running только
+# для цели — граф не должен показывать одновременно старые «готово» и новый запуск.
+# $1=TASK $2=цель $3...=этапы активного маршрута
+_rewind_route_to_stage() {
+  local t=$1 target=$2
+  shift 2
+  local key found=0
+  for key in "$@"; do
+    [[ "$key" == "$target" ]] && found=1
+    (( found )) && set_st "$t" "$key" pending
+  done
+  if (( ! found )); then
+    set_st "$t" REWIND_STAGE ""
+    return 1
+  fi
+  set_st "$t" "$target" running REWIND_STAGE ""
 }
 
 # --- общий протокол-обёртка вокруг проектного промпта этапа ---
@@ -479,7 +502,14 @@ run_pipeline() {
         [[ "$v" == "approved" ]] && continue
         done_all=0
         local dec; gate_wait "$t" "$key"; dec=$GATE_DECISION
-        if [[ "$dec" == rejected ]]; then
+        if [[ "$dec" == rewind ]]; then
+          local rewind; rewind=$(get "$t" REWIND_STAGE)
+          if _rewind_route_to_stage "$t" "$rewind" "${STAGES[@]}"; then
+            flog "$t" "$key: ручной возврат на $rewind"
+          else
+            flog "$t" "$key: проигнорирован возврат на неизвестный этап $rewind"
+          fi
+        elif [[ "$dec" == rejected ]]; then
           case "$key" in
             GATE_PLAN)  set_st "$t" --replan ;;
             GATE_CAUSE) set_st "$t" GATE_CAUSE pending DIAGNOSE pending HYPOSKEPTIC pending PROOF pending ;;
