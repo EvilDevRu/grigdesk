@@ -12,6 +12,7 @@ import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
 import { reserveSlot, releaseSlot, slotsOverview, SlotsFullError } from '../../lib/sandbox-slots.js';
 import { recoveryDecision } from '../../lib/pipeline-recovery.js';
+import { factoryLaunchEnv } from '../../lib/factory-launch.js';
 import {
   FactoryRunnerControl,
   RunnerControlCommandError,
@@ -189,12 +190,7 @@ async function factoryModule(fastify, opts) {
     // source='registry' — стенд уже поднят и слот за ним закреплён: подсказывать нечего,
     // а навязанный индекс сломал бы проверку занятости внутри подъёма.
     const slotEnv = (slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {};
-    const launchEnv = {
-      ...slotEnv,
-      FACTORY_PROFILES_DIR: config.profilesDir,
-      FACTORY_STATE: config.stateDir,
-      STATE_DIR: config.stateDir,
-    };
+    const launchEnv = factoryLaunchEnv(config, slotEnv);
     // КРИТИЧНО: оркестратор живёт ЧАСЫ и обязан пережить рестарт кокпита.
     // Прогон #7803 умер именно так: сервер работал под systemd-юнитом, фабрика
     // родилась в его cgroup, и при рестарте systemd зачистил cgroup целиком (TERM

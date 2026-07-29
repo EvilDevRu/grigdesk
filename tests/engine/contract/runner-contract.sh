@@ -67,4 +67,22 @@ fi
 kill -0 "$pid" 2>/dev/null
 assert_rc 1 "$?" "foreground runner is reaped before launcher returns"
 
+# Обычный `factory N resume` из терминала не обязан заранее экспортировать
+# FACTORY_CONFIG_ROOT. Launcher должен получить безопасный персональный default,
+# а не падать до запуска provider с `parameter null or not set`.
+saved_config_root=$FACTORY_CONFIG_ROOT
+saved_home=${HOME:-}
+unset FACTORY_CONFIG_ROOT FACTORY_CONTROL_ROOT
+export HOME="$TEST_ROOT/home"
+fallback_run_dir="$STATE_DIR/logs/runs/t42/CHECK/run-home-default"
+runner_launch fake 42 "hello" CHECK fake-model high 5 \
+  "$fallback_run_dir" run-home-default 2 "$status_token"
+rc=$?
+assert_rc 0 "$rc" "launcher works with the default per-user config root"
+[[ -d "$HOME/.factory/config/control/tokens" ]] \
+  && test_ok "launcher default keeps control data under the config root" \
+  || test_fail "launcher default keeps control data under the config root"
+export FACTORY_CONFIG_ROOT=$saved_config_root
+export HOME=$saved_home
+
 finish_tests

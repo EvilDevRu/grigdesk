@@ -17,6 +17,9 @@ export FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && 
 # they never start a project, Cockpit or a model call.
 export STATE_DIR="${STATE_DIR:-${FACTORY_STATE:-$HOME/.factory/state}}"
 export FACTORY_STATE="${FACTORY_STATE:-$STATE_DIR}"
+# Источник control-capabilities и debug-настроек. Явный default нужен не только
+# Cockpit/systemd, но и штатному `factory N resume` из обычного терминала.
+export FACTORY_CONFIG_ROOT="${FACTORY_CONFIG_ROOT:-$HOME/.factory/config}"
 if [[ "${1:-}" == runners || "${1:-}" == profile || "${1:-}" == settings || \
       "${2:-}" == runner || "${2:-}" == model || "${2:-}" == debug || \
       "${1:-}" == help || "${1:-}" == --help || "${1:-}" == -h ]]; then

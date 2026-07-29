@@ -31,7 +31,11 @@ runner_launch() {
   : >"$run_dir/events.jsonl"
   : >"$run_dir/stderr.log"
 
-  control_root="${FACTORY_CONTROL_ROOT:-${FACTORY_CONFIG_ROOT:?}/control}"
+  # CLI фабрики экспортирует FACTORY_CONFIG_ROOT, но launcher остаётся пригодным
+  # для отдельного вызова/контрактного теста: персональный default не должен
+  # превращать отсутствие необязательной env-переменной в падение до provider.
+  local config_root="${FACTORY_CONFIG_ROOT:-${HOME:?HOME or FACTORY_CONFIG_ROOT is required}/.factory/config}"
+  control_root="${FACTORY_CONTROL_ROOT:-$config_root/control}"
   mkdir -p "$control_root/tokens"
   chmod 700 "$control_root" "$control_root/tokens" 2>/dev/null || true
   token_file=$(mktemp "$control_root/tokens/.capability.XXXXXX")
