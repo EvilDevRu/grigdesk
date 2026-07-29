@@ -5,11 +5,13 @@ import { factoryLaunchEnv } from '../../server/src/lib/factory-launch.js';
 
 test('Cockpit passes every factory runtime root into the detached pipeline scope', () => {
   assert.deepEqual(factoryLaunchEnv({
+    factoryHome: '/engine',
     profilesDir: '/profiles',
     stateDir: '/state',
     factoryConfigRoot: '/config',
   }, { FACTORY_SB_K: '7' }), {
     FACTORY_SB_K: '7',
+    FACTORY_HOME: '/engine',
     FACTORY_PROFILES_DIR: '/profiles',
     FACTORY_STATE: '/state',
     STATE_DIR: '/state',

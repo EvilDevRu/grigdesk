@@ -3,6 +3,7 @@
 export function factoryLaunchEnv(config, extra = {}) {
   return {
     ...extra,
+    FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_STATE: config.stateDir,
     STATE_DIR: config.stateDir,
