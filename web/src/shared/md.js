@@ -53,3 +53,44 @@ export function mdToHtml(src) {
     async: false,
   });
 }
+
+// Однострочные превью не должны показывать служебный синтаксис Markdown:
+// у ссылки оставляем подпись, у картинки — alt, у выделения и кода — содержимое.
+// Разбираем Markdown тем же lexer'ом, что и основное сообщение, вместо набора regex:
+// так вложенные конструкции и незакрытая разметка деградируют предсказуемо.
+function inlineTokenText(token) {
+  if (!token) return '';
+  if (token.type === 'br') return ' ';
+  if (token.type === 'image') return token.text || '';
+  if (Array.isArray(token.tokens)) return token.tokens.map(inlineTokenText).join('');
+  return token.text || '';
+}
+
+function blockTokenText(token) {
+  if (!token || token.type === 'space' || token.type === 'hr') return '';
+  if (token.type === 'list') return (token.items || []).map(blockTokenText).filter(Boolean).join(' ');
+  if (token.type === 'table') {
+    return [
+      ...(token.header || []),
+      ...(token.rows || []).flat(),
+    ].map(inlineTokenText).filter(Boolean).join(' ');
+  }
+  if (['paragraph', 'heading', 'text'].includes(token.type) && Array.isArray(token.tokens)) {
+    return token.tokens.map(inlineTokenText).join('');
+  }
+  if (Array.isArray(token.tokens)) {
+    const nested = token.tokens.map(blockTokenText).filter(Boolean).join(' ');
+    return nested || token.tokens.map(inlineTokenText).join('');
+  }
+  return token.text || '';
+}
+
+export function mdToText(src) {
+  const tokens = marked.lexer(String(src || ''), { gfm: true, breaks: true });
+  return tokens
+    .map(blockTokenText)
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

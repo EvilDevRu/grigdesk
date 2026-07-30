@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mdToHtml } from '../../web/src/shared/md.js';
+import { mdToHtml, mdToText } from '../../web/src/shared/md.js';
 
 test('GFM рендерит ссылки, списки, таблицы и inline code', () => {
   const html = mdToHtml([
@@ -40,4 +40,25 @@ test('обычная внешняя ссылка защищена от дост�
   const html = mdToHtml('[OpenAI](https://openai.com)');
   assert.match(html, /target="_blank"/);
   assert.match(html, /rel="noopener noreferrer"/);
+});
+
+test('превью превращает Markdown в чистый однострочный текст', () => {
+  const text = mdToText([
+    '**Технический план**: [`ChatSession.vue`](/home/user/ChatSession.vue:60)',
+    '',
+    '- первый пункт',
+    '- второй `пункт`',
+    '',
+    '![схема](https://example.com/diagram.png)',
+  ].join('\n'));
+
+  assert.equal(
+    text,
+    'Технический план: ChatSession.vue первый пункт второй пункт схема',
+  );
+});
+
+test('превью сохраняет текст блоков кода и схлопывает переносы', () => {
+  const text = mdToText('Ответ:\n\n```js\nconst value = 1;\n```');
+  assert.equal(text, 'Ответ: const value = 1;');
 });

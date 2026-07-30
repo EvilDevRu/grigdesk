@@ -10,6 +10,7 @@ import { useUiContextStore } from './ui-context.js';
 import { useProvidersStore } from './providers.js';
 import { notify } from '../shared/notify.js';
 import { sseSubscribe } from '../composables/useSse.js';
+import { mdToText } from '../shared/md.js';
 import {
   applyGeneratedChatTitle,
   firstMessageTitle,
@@ -162,7 +163,7 @@ export const useChatStore = defineStore('chat', {
           snippet = (last.role === 'user' ? 'Ты: ' : last.role === 'error' ? '⚠ ' : '') + last.text;
         }
         return {
-          id: sess.id, title, snippet: snippet.replace(/\s+/g, ' '), archived,
+          id: sess.id, title, snippet: mdToText(snippet), archived,
           draft: !t && !!(sess.draft || '').trim(),
           // Модель чата — для иконки исполнителя и подписи в строке списка.
           model: sess.model || '',
