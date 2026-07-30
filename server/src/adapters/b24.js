@@ -10,6 +10,7 @@ export class B24Adapter {
     this.cookiePath = cookiePath;
     this._client = null;
     this._sig = null;
+    this._identity = null;
     this._chain = Promise.resolve(); // очередь: B24Client не потокобезопасен (общая сессия/куки)
   }
 
@@ -36,6 +37,19 @@ export class B24Adapter {
   invalidate() {
     this._client = null;
     this._sig = null;
+    this._identity = null;
+  }
+
+  /** Текущая область пользовательских B24-данных; кеш сбрасывается вместе с credentials. */
+  async accountIdentity() {
+    return this._run(async () => {
+      if (this._identity) return { ...this._identity };
+      const client = this.client();
+      const userId = await client.discoverUserId();
+      if (!userId) return null;
+      this._identity = { baseUrl: client.baseUrl, userId };
+      return { ...this._identity };
+    });
   }
 
   /** Проверка авторизации: логинится и возвращает { ok, userId } или { ok:false, error }. */
@@ -58,6 +72,7 @@ export class B24Adapter {
   async _getDashboard() {
     const client = this.client();
     const uid = (await client.discoverUserId()) ?? 0;
+    if (uid > 0) this._identity = { baseUrl: client.baseUrl, userId: uid };
     const resp = await client.apiGet(
       `/local/ajax/dashboard.php?action=getTodayData&user_id=${uid}&project_id=0&show_all_tasks=1`,
     );

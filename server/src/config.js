@@ -70,6 +70,10 @@ export const config = {
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),
+  // Личная подборка B24-задач. Отдельно от prefs: это пользовательские данные,
+  // а не настройки интерфейса.
+  taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH
+    || path.join(__dirname, '..', '.state', 'task-favorites.json'),
 
   // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
   // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.

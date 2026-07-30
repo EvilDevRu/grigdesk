@@ -18,6 +18,8 @@ import { CredsStore } from './lib/b24/creds-store.js';
 import { ClaudeAuthStore } from './lib/claude-auth-store.js';
 import { PrefsStore } from './lib/prefs-store.js';
 import { FactoryDebugSettings } from './lib/factory-debug.js';
+import { TaskFavoritesStore } from './lib/task-favorites-store.js';
+import { TaskFavoritesService } from './lib/task-favorites-service.js';
 
 import authPlugin from './plugins/auth.js';
 import ssePlugin from './plugins/sse.js';
@@ -26,6 +28,7 @@ import staticPlugin from './plugins/static.js';
 import healthModule from './modules/health/index.js';
 import factoryModule from './modules/factory/index.js';
 import b24Module from './modules/b24/index.js';
+import taskFavoritesModule from './modules/task-favorites/index.js';
 import systemModule from './modules/system/index.js';
 import mediaModule from './modules/media/index.js';
 import chatModule from './modules/chat/index.js';
@@ -110,6 +113,8 @@ async function build() {
   const system = new SystemAdapter();
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
   const prefs = new PrefsStore({ prefsPath: config.prefsPath });
+  const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
+  const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
   const factoryDebug = new FactoryDebugSettings({
     factoryBin: config.factoryBin,
     stateDir: config.stateDir,
@@ -218,6 +223,7 @@ async function build() {
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register(factoryModule, { factoryState, config, prefs, b24, analyzer });
   await fastify.register(b24Module, { b24 });
+  await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
   await fastify.register(systemModule, { system, config });
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, { config, prefs });
