@@ -34,7 +34,6 @@ const KINDS = [
 const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
 // Семейства и их текущие модели/эффорты — из реестра исполнителей, без хардкода.
 const providers = ref([]);
-const EFFORT_LABEL = { low: 'низкий', medium: 'средний', high: 'высокий', max: 'максимум', xhigh: 'ультра' };
 
 // Описания настроек для тултипов — языком человека, не движка.
 const HELP = {
@@ -78,7 +77,7 @@ const effortOptions = computed(() => {
   const all = providers.value.flatMap((p) => p.models || []);
   const m = pinnedModel.value ? selectedModel.value?.matched : selectedModel.value?.model;
   const list = m?.efforts || [...new Set(all.flatMap((x) => x.efforts || []))];
-  return list.length ? list : ['low', 'medium', 'high', 'max'];
+  return list;
 });
 
 function agentModelLabel(agent) {
@@ -230,7 +229,7 @@ onMounted(load);
           <span class="lbl">Эффорт <HelpTip :text="HELP.effort" /></span>
           <select v-model="form.effort" class="fld">
             <option value="">дефолт движка</option>
-            <option v-for="e in effortOptions" :key="e" :value="e">{{ EFFORT_LABEL[e] || e }}</option>
+            <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
           </select>
         </label>
       </div>

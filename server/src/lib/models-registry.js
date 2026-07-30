@@ -12,9 +12,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getExecutors } from './executors/index.js';
 
-// Дефолт, если и файла нет, и динамическое обнаружение не сработало.
-const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'max'];
-
 // Версия правил составления каталога. Меняем, когда меняется САМ принцип отбора моделей
 // (например «в кратком списке — только свежая версия семейства») — иначе у работающих
 // кокпитов в реестре останется список, собранный по старым правилам.
@@ -113,11 +110,7 @@ async function mergeCatalog(file, prov, ex, config) {
   // из выбора уходит. Иначе список копит всё, что когда-либо видел любой CLI, и превращается
   // в свалку. Исключение — записи с `custom: true`: их добавил человек, их не трогаем.
   const prevById = new Map(list.map((m) => [m.id, m]));
-  const next = catalog.map((m) => {
-    const cur = prevById.get(m.id);
-    // Ручные правки (имя, окно, свои efforts) переживают пересборку.
-    return cur?.custom ? { ...m, ...cur, unknown: false } : { ...m, efforts: cur?.efforts ?? m.efforts };
-  });
+  const next = catalog.map((m) => mergeCatalogModel(m, prevById.get(m.id)));
   const inCatalog = new Set(catalog.map((m) => m.id));
   for (const m of list) {
     if (!inCatalog.has(m.id) && m.custom) next.push({ ...m, unknown: true });
@@ -127,6 +120,19 @@ async function mergeCatalog(file, prov, ex, config) {
   pm.catalogVersion = version;
   pm.catalogSchema = CATALOG_SCHEMA;
   return metadataChanged || listChanged;
+}
+
+export function mergeCatalogModel(model, current) {
+  // Только явно custom-запись перекрывает живой каталог. Обычная сохранённая копия
+  // не должна удерживать старый список efforts после обновления CLI.
+  return current?.custom ? { ...model, ...current, unknown: false } : { ...model };
+}
+
+export function resolveModelEfforts(modelEfforts, discoveredEfforts, custom = false) {
+  if (custom && Array.isArray(modelEfforts)) return modelEfforts;
+  if (Array.isArray(discoveredEfforts)) return discoveredEfforts;
+  if (Array.isArray(modelEfforts)) return modelEfforts;
+  return [];
 }
 
 /**
@@ -166,7 +172,7 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
         return {
           ...m,
           ...(family && { family }),
-          efforts: m.efforts || discovered || FALLBACK_EFFORTS,
+          efforts: resolveModelEfforts(m.efforts, discovered, m.custom),
         };
       })
       .sort((a, b) => (b.tier || 0) - (a.tier || 0));

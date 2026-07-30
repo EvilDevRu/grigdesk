@@ -41,7 +41,7 @@ const provGroups = computed(() => prov.providers
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
-const effortLevels = computed(() => currentModel.value?.efforts || ['low', 'medium', 'high', 'max']);
+const effortLevels = computed(() => currentModel.value?.efforts || []);
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
 const modes = computed(() => prov.modesOf(sess.value?.model));
@@ -74,12 +74,21 @@ function onModelChange(e) {
   if (oldProv && newProv && oldProv !== newProv && sess.value?.sessionId) {
     chat.resetContext(props.sid);
   }
-  // У новой модели может не быть текущего уровня эффорта — подгоняем.
+  // У новой модели может не быть текущего уровня эффорта — снимаем явный выбор.
+  // Выбирать другую ступень за пользователя нельзя.
   const lv = effortLevels.value;
-  if (sess.value && !lv.includes(sess.value.effort)) {
-    chat.setEffort(props.sid, lv.includes('high') ? 'high' : lv[lv.length - 1]);
+  if (sess.value?.effort && lv.length && !lv.includes(sess.value.effort)) {
+    chat.setEffort(props.sid, '');
   }
 }
+
+// Реестр загружается асинхронно и может обновиться уже после открытия чата.
+// Когда он принёс достоверный список, старое неподдерживаемое значение не сохраняем.
+watch(effortLevels, (levels) => {
+  if (sess.value?.effort && levels.length && !levels.includes(sess.value.effort)) {
+    chat.setEffort(props.sid, '');
+  }
+}, { immediate: true });
 
 // ── Список задач для селекта (с ЗАГОЛОВКАМИ, не только номером) ──
 let taskListPromise = null;
@@ -412,7 +421,8 @@ async function toConveyor() {
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
           </select>
         </div>
-        <EffortSlider :model-value="sess.effort" :levels="effortLevels" @update:model-value="chat.setEffort(sid, $event)" />
+        <EffortSlider v-if="effortLevels.length" :model-value="sess.effort" :levels="effortLevels"
+                      @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: кольцо показывает точное значение либо явно помеченную оценку Codex. -->
         <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate }]" :disabled="!sess.sessionId"
                 :title="ctxTitle" :aria-label="ctxTitle"

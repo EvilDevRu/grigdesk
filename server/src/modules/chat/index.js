@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { ingestRecording } from '../../lib/media/ingest.js';
 import { getExecutor } from '../../lib/executors/index.js';
 import { modelInfo } from '../../lib/models-registry.js';
+import { resolveRequestedEffort } from '../../lib/model-effort.js';
 import { ChatHistoryStore } from '../../lib/chat/history-store.js';
 import {
   finishChatTitleHook,
@@ -331,13 +332,19 @@ async function chatModule(fastify, opts) {
     const permissionMode = (await allowedMode(executor, wantMode)) || mode.permissionMode;
     if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
 
-    // Уровень эффорта CLI не прощает: `--effort xhigh` для claude — не «игнор»,
-    // а падение с ошибкой валидации. Шлём только то, что модель реально поддерживает.
+    // Уровень эффорта CLI не прощает: неизвестное значение приводит к ошибке
+    // валидации. Не придумываем замену — принимаем только точное значение каталога.
     const levels = info?.model?.efforts || [];
-    const safeEffort = !effort || (levels.length && !levels.includes(effort)) ? (levels.includes('high') ? 'high' : levels[levels.length - 1] || undefined) : effort;
-    if (effort && safeEffort !== effort) {
-      fastify.log.warn({ model, effort, safeEffort }, 'чат: уровень эффорта не поддержан моделью, заменён');
+    const resolvedEffort = resolveRequestedEffort(effort, levels);
+    if (!resolvedEffort.ok) {
+      return reply.code(400).send({
+        error: 'unsupported_effort',
+        message: levels.length
+          ? `Уровень effort «${effort}» не поддерживается моделью ${model}. Доступно: ${levels.join(', ')}`
+          : `Модель ${model} не сообщила поддерживаемые уровни effort. Отправь запрос без явного effort.`,
+      });
     }
+    const runEffort = resolvedEffort.effort;
 
     // Разрешения (claude): default-режим, на действия агент спрашивает через
     // наш MCP-инструмент → всплывашка в браузере.
@@ -381,7 +388,7 @@ async function chatModule(fastify, opts) {
         cwd,
         extraDirs: uniqueExtraDirs,
         model,
-        effort: safeEffort,
+        effort: runEffort,
         sessionId,
         permissionMode,
         mcpConfig,
@@ -421,14 +428,14 @@ async function chatModule(fastify, opts) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'assistant', ...out, model: model || null, effort: safeEffort || null,
+          chatKey, role: 'assistant', ...out, model: model || null, effort: runEffort || null,
           userText: message || '', hadAttachments: !!attachments?.length, at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
       // model — что просили, actualModel — чем CLI отработал (алиас он резолвит сам),
       // effort — что реально ушло в запуск. По этой тройке в UI видно любой рассинхрон.
-      return { ...out, model: model || null, effort: safeEffort || null };
+      return { ...out, model: model || null, effort: runEffort || null };
     } catch (err) {
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
@@ -438,7 +445,7 @@ async function chatModule(fastify, opts) {
         // следующий вопрос шёл без --resume, и агент не помнил ничего из разговора.
         const stoppedOut = finishChatTitleHook({
           reply: '⏹ Ход остановлен.', steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
-          contextTokens: 0, cost: null, model: model || null, effort: safeEffort || null, stopped: true,
+          contextTokens: 0, cost: null, model: model || null, effort: runEffort || null, stopped: true,
         }, wantsTitle);
         // Оборванный ход всё равно завёл разговор: следующему из очереди нужен ЕГО id,
         // иначе сообщение уйдёт со старым и агент не вспомнит, на чём его прервали.

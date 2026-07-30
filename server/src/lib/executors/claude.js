@@ -22,6 +22,20 @@ function exec(bin, args, { timeout = 15_000, anyExit = false } = {}) {
   });
 }
 
+export function parseClaudeEfforts(help) {
+  const block = String(help || '').match(
+    /^[ \t]*--effort\b[^\r\n]*(?:\r?\n(?![ \t]*--)[ \t]+[^\r\n]*){0,3}/mi,
+  )?.[0];
+  const choices = block?.match(/\(([^)\r\n]+)\)/)?.[1];
+  if (!choices) return null;
+
+  const levels = choices
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => /^[a-z][a-z0-9_-]*$/i.test(value));
+  return levels.length ? levels : null;
+}
+
 // Подписи режимов прав для UI. Список режимов приходит из CLI (modes()), а человеческие
 // названия и пояснения — здесь: CLI их не отдаёт. Незнакомый режим покажется как есть.
 // order — порядок в селекте: от самого осторожного к самому свободному, план — первым
@@ -427,15 +441,12 @@ export default {
   },
 
   /**
-   * Уровни эффорта — из `claude --help` («--effort <level> … (low, medium, high, max)»):
+   * Уровни эффорта — из списка допустимых значений `--effort` в `claude --help`:
    * добавит Anthropic новый уровень — подхватится без правок кода.
    */
   async efforts(config) {
     const out = await exec(config.claudeBin, ['--help']);
-    const m = (out || '').match(/--effort[^\n]*\(([^)]+)\)/);
-    if (!m) return null;
-    const levels = m[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-    return levels.length ? levels : null;
+    return parseClaudeEfforts(out);
   },
 
   /**

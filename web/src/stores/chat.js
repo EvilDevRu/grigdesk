@@ -18,7 +18,6 @@ import {
   shouldRequestChatTitle,
 } from '../shared/chat-title.js';
 
-const EFFORTS = ['low', 'medium', 'high', 'max'];
 // Оценочное окно контекста модели — для индикатора заполнения.
 export const CONTEXT_WINDOW = 200000;
 // Старое браузерное хранилище — остаётся только как источник одноразовой миграции.
@@ -33,7 +32,7 @@ function pickStore(j) {
     activeId: j?.activeId || null,
     // Пусто = «ещё не выбирали»: модель нового чата возьмётся из реестра (см. defaultModelId).
     defModel: j?.defModel || '',
-    defEffort: j?.defEffort || 'max',
+    defEffort: j?.defEffort || '',
     // Режим прав по умолчанию для новых чатов (пусто = как решит сервер по странице).
     defMode: j?.defMode || '',
   };
@@ -630,7 +629,6 @@ export const useChatStore = defineStore('chat', {
       this._persist();
     },
     setEffort(id, e) { const s = this._get(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
-    cycleEffort(id) { const s = this._get(id); if (!s) return; this.setEffort(id, EFFORTS[(EFFORTS.indexOf(s.effort) + 1) % EFFORTS.length]); },
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
     resetContext(id) {
       const s = this._get(id);
@@ -688,8 +686,13 @@ export const useChatStore = defineStore('chat', {
         // Модель: сохранённый алиас резолвим в конкретную (что показано в селекте, то и считает),
         // пустое значение — модель по умолчанию из реестра.
         const provStore = useProvidersStore();
+        const resolvedModel = provStore.modelOf(s.model);
+        const effortLevels = resolvedModel.model?.efforts || [];
+        // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
+        // явный effort не отправляем: CLI применит собственный актуальный дефолт.
+        const requestEffort = effortLevels.includes(s.effort) ? s.effort : '';
         const r = await api.post(url, {
-          message: text, model: provStore.modelOf(s.model).id, effort: s.effort, mode: s.mode || '',
+          message: text, model: resolvedModel.id, effort: requestEffort, mode: s.mode || '',
           sessionId: s.sessionId, context, chatKey: id, requestTitle,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
@@ -709,7 +712,8 @@ export const useChatStore = defineStore('chat', {
         s.messages.push({
           role: 'assistant', text: r.reply || '(пусто)', cost: r.cost,
           steps: (r.steps?.length ? r.steps : s.steps) || [],
-          model: r.model || s.model, actualModel: r.actualModel || '', effort: r.effort || s.effort,
+          model: r.model || s.model, actualModel: r.actualModel || '',
+          effort: Object.hasOwn(r, 'effort') ? (r.effort || '') : requestEffort,
         });
         // Сервер мог подменить эффорт (модель не тянет выбранный уровень) — подтягиваем
         // слайдер под реальность, чтобы UI не врал. Пишем в сессию напрямую, НЕ через

@@ -6,23 +6,22 @@ import { computed } from 'vue';
 // УРОВНИ НЕ ЗАХАРДКОЖЕНЫ: приходят пропсом levels из реестра моделей
 // (у каждой модели свой набор; появится новый уровень — отрисуется сам).
 const props = defineProps({
-  modelValue: { type: String, default: 'high' },
-  levels: { type: Array, default: () => ['low', 'medium', 'high', 'max'] },
+  modelValue: { type: String, default: '' },
+  levels: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['update:modelValue']);
 
-// Красивые подписи известных уровней; неизвестный — капитализируем как есть.
-const KNOWN = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Ultra', max: 'Max', minimal: 'Min' };
-function labelOf(l) { return KNOWN[l] || (l ? l[0].toUpperCase() + l.slice(1) : ''); }
 const idx = computed(() => {
-  const i = props.levels.indexOf(props.modelValue);
-  return i < 0 ? Math.min(2, props.levels.length - 1) : i;
+  return props.levels.indexOf(props.modelValue);
 });
-const pct = computed(() => (idx.value / Math.max(1, props.levels.length - 1)) * 100);
+const pct = computed(() => (idx.value < 0 ? 0 : (idx.value / Math.max(1, props.levels.length - 1)) * 100));
 function posOf(i) { return (i / Math.max(1, props.levels.length - 1)) * 100; }
-function set(i) { emit('update:modelValue', props.levels[i]); }
+function set(i) {
+  if (i >= 0 && i < props.levels.length) emit('update:modelValue', props.levels[i]);
+}
 // Клик по треку — ближайшая точка.
 function onTrack(e) {
+  if (!props.levels.length) return;
   const r = e.currentTarget.getBoundingClientRect();
   const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
   set(Math.round(f * (props.levels.length - 1)));
@@ -30,15 +29,15 @@ function onTrack(e) {
 </script>
 
 <template>
-  <div class="eff" :data-lvl="modelValue" :title="`Усилие рассуждения: ${labelOf(modelValue)}`">
+  <div class="eff" :data-lvl="modelValue" :title="modelValue ? `Усилие рассуждения: ${modelValue}` : 'Усилие рассуждения: дефолт CLI'">
     <span class="cap">эффорт</span>
     <div class="track" @click="onTrack">
       <div class="rail"></div>
       <div class="fill" :style="{ width: pct + '%' }"></div>
       <button v-for="(l, i) in levels" :key="l" type="button" class="node" :class="{ on: i <= idx, cur: i === idx }"
-              :style="{ left: posOf(i) + '%' }" :aria-label="labelOf(l)" @click.stop="set(i)"></button>
+              :style="{ left: posOf(i) + '%' }" :aria-label="l" @click.stop="set(i)"></button>
     </div>
-    <span class="val">{{ labelOf(modelValue) }}</span>
+    <span class="val">{{ modelValue || '—' }}</span>
   </div>
 </template>
 

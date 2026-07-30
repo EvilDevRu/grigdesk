@@ -506,9 +506,9 @@ export default {
 
   seedModels() {
     return [
-      { id: 'gpt-5.6-sol', family: 'sol', name: 'GPT-5.6-Sol', context: 400000, tier: 100, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-      { id: 'gpt-5.6-terra', family: 'terra', name: 'GPT-5.6-Terra', context: 400000, tier: 90, efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] },
-      { id: 'gpt-5.6-luna', family: 'luna', name: 'GPT-5.6-Luna', context: 400000, tier: 80, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+      { id: 'gpt-5.6-sol', family: 'sol', name: 'GPT-5.6-Sol', context: 400000, tier: 100, efforts: null },
+      { id: 'gpt-5.6-terra', family: 'terra', name: 'GPT-5.6-Terra', context: 400000, tier: 90, efforts: null },
+      { id: 'gpt-5.6-luna', family: 'luna', name: 'GPT-5.6-Luna', context: 400000, tier: 80, efforts: null },
     ];
   },
 
