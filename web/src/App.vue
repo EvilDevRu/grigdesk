@@ -9,6 +9,7 @@ import DiffModal from './views/DiffModal.vue';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
+import { useTaskFavoritesStore } from './stores/task-favorites.js';
 
 const auth = useAuthStore();
 
@@ -32,6 +33,7 @@ watch(() => auth.authenticated, (on, was) => {
   if (!on && was) {
     useBoardStore().stopPolling();
     useSystemStore().stopPolling();
+    useTaskFavoritesStore().clear();
   }
 });
 </script>

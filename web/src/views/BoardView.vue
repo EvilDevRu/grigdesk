@@ -5,10 +5,13 @@ import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.js';
 import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
 import { useAnalysisStore } from '../stores/analysis.js';
+import { useTaskFavoritesStore } from '../stores/task-favorites.js';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
+import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 import { api } from '../shared/api-client.js';
 import { useSse } from '../composables/useSse.js';
+import { boardTaskListResetKey, selectBoardTasks } from '../shared/board-task-list.js';
 
 const ui = useUiStore();
 
@@ -93,6 +96,8 @@ const q = ref('');
 
 // Триаж: бейджи оценок + сортировка/фильтры по ним. Выбор запоминается.
 const analysis = useAnalysisStore();
+const favorites = useTaskFavoritesStore();
+const favoriteOnly = ref(false);
 const TRIAGE_LS = 'board.triage';
 const saved = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
 const sortBy = ref(saved.sortBy || 'b24');   // b24 | risk | complexity | size | fresh
@@ -103,20 +108,7 @@ watch([sortBy, onlyUnrated, onlyNeedsInfo], () => {
     sortBy: sortBy.value, onlyUnrated: onlyUnrated.value, onlyNeedsInfo: onlyNeedsInfo.value,
   }));
 });
-const SIZE_ORD = { S: 1, M: 2, L: 3, XL: 4 };
 const triageOf = (t) => analysis.byTask[t.id] || null;
-// Метрика сортировки; неоценённые — в конец списка.
-function metric(t) {
-  const a = triageOf(t)?.analysis;
-  if (!a) return -1;
-  switch (sortBy.value) {
-    case 'risk': return a.risk || 0;
-    case 'complexity': return a.complexity || 0;
-    case 'size': return SIZE_ORD[a.diff_size] || 0;
-    case 'fresh': return Date.parse(a.generated_at || 0) || 0;
-    default: return 0;
-  }
-}
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
 const unrated = computed(() => (data.value?.tasks || []).filter((t) => {
   const r = triageOf(t);
@@ -132,31 +124,41 @@ async function analyzeAllUnrated() {
 }
 
 const myTasks = computed(() => {
-  let list = data.value?.tasks || [];
-  const s = q.value.trim().toLowerCase();
-  if (s) {
-    // Ищем по номеру задачи, названию и группе.
-    list = list.filter((t) => String(t.id).includes(s)
-      || (t.title || '').toLowerCase().includes(s)
-      || (t.group || '').toLowerCase().includes(s));
-  }
-  if (onlyUnrated.value) list = list.filter((t) => !triageOf(t)?.analysis);
-  if (onlyNeedsInfo.value) {
-    list = list.filter((t) => {
-      const a = triageOf(t)?.analysis;
-      return a && (a.needs_clarification || a.confidence === 'low');
-    });
-  }
-  if (sortBy.value !== 'b24') {
-    list = [...list].sort((a, b) => metric(b) - metric(a));
-  }
-  return list;
+  return selectBoardTasks({
+    tasks: data.value?.tasks || [],
+    analysisByTask: analysis.byTask,
+    query: q.value,
+    sortBy: sortBy.value,
+    onlyUnrated: onlyUnrated.value,
+    onlyNeedsInfo: onlyNeedsInfo.value,
+    favoriteOnly: favoriteOnly.value,
+    favoriteTaskIds: favorites.taskIds,
+  });
 });
+const currentFavoriteCount = computed(() => {
+  const ids = new Set(favorites.taskIds.map(String));
+  return (data.value?.tasks || []).filter((task) => ids.has(String(task.id))).length;
+});
+const hasFavoriteMatchesBeforeSearch = computed(() => selectBoardTasks({
+  tasks: data.value?.tasks || [],
+  analysisByTask: analysis.byTask,
+  favoriteOnly: true,
+  favoriteTaskIds: favorites.taskIds,
+}).length > 0);
+const toggleFavorite = (task) => favorites.toggle(task.id);
 // Пагинация по скроллу: рисуем первые N, при докрутке до низа добавляем ещё.
 const PAGE = 40;
 const visibleCount = ref(PAGE);
 const visibleTasks = computed(() => myTasks.value.slice(0, visibleCount.value));
-watch([q, () => data.value?.tasks?.length], () => { visibleCount.value = PAGE; });
+const listResetKey = computed(() => boardTaskListResetKey({
+  query: q.value,
+  onlyUnrated: onlyUnrated.value,
+  onlyNeedsInfo: onlyNeedsInfo.value,
+  favoriteOnly: favoriteOnly.value,
+  sortBy: sortBy.value,
+  taskCount: data.value?.tasks?.length || 0,
+}));
+watch(listResetKey, () => { visibleCount.value = PAGE; });
 function onTasksScroll(e) {
   const el = e.target;
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && visibleCount.value < myTasks.value.length) {
@@ -166,7 +168,13 @@ function onTasksScroll(e) {
 const chart = computed(() => data.value?.charts?.[period.value] || null);
 
 let ticker = null;
-onMounted(() => { board.load(); analysis.startPolling(); loadConveyor(); ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
+onMounted(() => {
+  board.load();
+  favorites.load(true);
+  analysis.startPolling();
+  loadConveyor();
+  ticker = setInterval(() => { now.value = Date.now(); }, 1000);
+});
 onUnmounted(() => { if (ticker) clearInterval(ticker); });
 </script>
 
@@ -227,6 +235,16 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
                 <option value="size">по размеру</option>
                 <option value="fresh">по свежести оценки</option>
               </select>
+              <button class="trif trif-ic favfilter" :class="{ on: favoriteOnly }"
+                      :disabled="!favorites.loaded || favorites.loading" :aria-pressed="String(favoriteOnly)"
+                      :title="favorites.loaded ? 'Только избранные задачи' : 'Избранное загружается'"
+                      @click="favoriteOnly = !favoriteOnly">
+                <svg viewBox="0 0 24 24" :fill="favoriteOnly ? 'currentColor' : 'none'"
+                     stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m12 2.7 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
+                </svg>
+                избранные {{ currentFavoriteCount }}
+              </button>
               <button class="trif" :class="{ on: onlyUnrated }" title="Только неоценённые" @click="onlyUnrated = !onlyUnrated; if (onlyUnrated) onlyNeedsInfo = false;">без оценки</button>
               <button class="trif" :class="{ on: onlyNeedsInfo }" title="Триаж просит уточнений" @click="onlyNeedsInfo = !onlyNeedsInfo; if (onlyNeedsInfo) onlyUnrated = false;">уточнить</button>
               <button v-if="unrated.length" class="trif trif-ic" title="Оценить все неоценённые (очередь)" @click="analyzeAllUnrated">
@@ -240,16 +258,29 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
               <button v-if="q" class="clr" title="Сбросить" @click="q = ''">✕</button>
             </div>
           </div>
+          <div v-if="favorites.error" class="faverror" role="alert">
+            <span>Избранное: {{ favorites.error }}</span>
+            <button type="button" :disabled="favorites.loading" @click="favorites.load(true)">
+              {{ favorites.loading ? 'Повторяю…' : 'Повторить' }}
+            </button>
+          </div>
           <ul class="tasks scroller" @scroll="onTasksScroll">
             <li v-for="t in visibleTasks" :key="t.id" class="trow">
               <span class="tstat" :class="{ conv: conveyor.has(String(t.id)) }"
                     :style="{ background: dotColor(t) }" :title="dotTitle(t)"></span>
+              <TaskFavoriteButton :active="favorites.isFavorite(t.id)"
+                                  :pending="!favorites.loaded || favorites.loading || favorites.isPending(t.id)"
+                                  :task-title="t.title" @toggle="toggleFavorite(t)" />
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
               <TriageBadge :row="triageOf(t)" />
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
               <span class="ttime mono muted">{{ secToHMS(liveElapsed(t)) }}</span>
             </li>
-            <li v-if="!myTasks.length" class="muted empty">Ничего не найдено</li>
+            <li v-if="!myTasks.length" class="muted empty">
+              <template v-if="favoriteOnly && !hasFavoriteMatchesBeforeSearch">В текущем списке избранных задач нет</template>
+              <template v-else-if="favoriteOnly">Избранные задачи не подходят под поиск или фильтры</template>
+              <template v-else>Ничего не найдено</template>
+            </li>
             <li v-else-if="visibleTasks.length < myTasks.length" class="more muted">
               Показано {{ visibleTasks.length }} из {{ myTasks.length }} — прокрути ниже
             </li>
@@ -363,6 +394,8 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 }
 .trif:hover { color: var(--ink); }
 .trif.on { border-color: var(--accent); color: var(--accent); }
+.trif:disabled { opacity: .55; cursor: wait; }
+.favfilter.on { border-color: var(--warn); color: var(--warn); }
 .trif-ic { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
 .trif-ic svg { width: 13px; height: 13px; }
 .search { display: flex; align-items: center; gap: 8px; height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 0 11px; flex: 1; max-width: 340px; }
@@ -371,10 +404,20 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .search input { background: none; border: none; color: var(--ink); font-size: 14px; flex: 1; min-width: 0; outline: none; }
 .search .clr { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 12px; padding: 0 2px; flex: none; }
 .search .clr:hover { color: var(--ink); }
+.faverror {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 2px 0 4px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
+  border-radius: 8px; color: var(--bad); font-size: 12px;
+}
+.faverror button {
+  border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; padding: 2px 4px;
+}
+.faverror button:disabled { opacity: .55; cursor: wait; }
 .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .scroller { max-height: min(58vh, 560px); overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
 .more { font-size: 12px; text-align: center; padding: 10px 0 4px; }
 .trow { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 8px; }
+.trow > :deep(.favbtn) { margin: -7px -7px -7px -5px; }
 .trow:hover { background: var(--surface); }
 .trow + .trow { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 55%, transparent); }
 .tstat { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
@@ -387,6 +430,12 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .badge { font-size: 11px; background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; flex: none; }
 .ttime { font-size: 12px; flex: none; }
 .empty { font-size: 13px; padding: 4px 0 8px; }
+
+@media (max-width: 900px) {
+  .colhead { flex-wrap: wrap; }
+  .search { order: 3; max-width: none; flex-basis: 100%; }
+  .tritools { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+}
 
 .charts-head { display: flex; align-items: center; justify-content: space-between; }
 .periods { display: flex; gap: 4px; }

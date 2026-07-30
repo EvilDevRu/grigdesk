@@ -9,15 +9,18 @@ import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useAnalysisStore } from '../stores/analysis.js';
+import { useTaskFavoritesStore } from '../stores/task-favorites.js';
 import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import OpenDiffButton from './OpenDiffButton.vue';
+import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 
 const router = useRouter();
 
 const ui = useUiStore();
 const tasks = useTasksStore();
 const board = useBoardStore();
+const favorites = useTaskFavoritesStore();
 const { taskId } = storeToRefs(ui);
 
 const detail = ref(null);
@@ -232,6 +235,7 @@ const sendComment = () => act('comment', async () => {
   loadComments();
 });
 const refresh = () => { loadDetail(true); board.load(true); };
+const toggleFavorite = () => favorites.toggle(taskId.value);
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
@@ -241,6 +245,7 @@ watch(taskId, (id) => {
     mtab.value = 'triage'; comments.value = null; clarifyAtts.value = []; clarifySaved.value = '';
     loadClarifications();
     loadDetail();
+    favorites.load(true);
     loadConveyor();
     loadTriage();
     if (!ticker) ticker = setInterval(() => { now.value = Date.now(); }, 1000);
@@ -267,12 +272,17 @@ watch(taskId, (id) => {
       <header class="mhead">
         <span class="mid mono">#{{ taskId }}</span>
         <h3 class="mtitle"><span v-if="loading && !detail" class="spin"></span> {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}</h3>
+        <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
+                            :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
+                            :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
+                            @toggle="toggleFavorite" />
         <button class="icon" title="Обновить" @click="refresh">⟳</button>
         <button class="icon" title="Закрыть" @click="ui.close()">✕</button>
       </header>
 
       <div class="mbody">
         <p v-if="err" class="err">{{ err }}</p>
+        <p v-if="favorites.error" class="err">Избранное: {{ favorites.error }}</p>
 
         <div class="meta">
           <span v-if="detail?.status_label" class="tag">{{ detail.status_label }}</span>
