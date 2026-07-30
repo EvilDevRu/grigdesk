@@ -20,6 +20,17 @@ export function cut(value, limit = STEP_TEXT_LIMIT) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
+// Для длинной команды важны обе стороны: начало объясняет запуск, конец —
+// цепочку проверок и финальные аргументы, которые не помещаются в строку ленты.
+export function cutMiddle(value, limit = STEP_TEXT_LIMIT) {
+  const text = String(value ?? '');
+  if (text.length <= limit) return text;
+  const marker = '\n… сокращено …\n';
+  const available = Math.max(0, limit - marker.length);
+  const head = Math.ceil(available / 2);
+  return `${text.slice(0, head)}${marker}${text.slice(-(available - head))}`;
+}
+
 export function base(filePath) {
   return String(filePath || '').split('/').filter(Boolean).pop() || String(filePath || '');
 }

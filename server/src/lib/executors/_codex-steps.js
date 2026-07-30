@@ -2,7 +2,7 @@
 // Показываем только краткое reasoning-поле, которое отдал сам Codex; raw_content
 // намеренно игнорируем, чтобы не превращать ленту в раскрытие приватной цепочки мыслей.
 import {
-  base, cut, lineCount, STEP_TEXT_LIMIT,
+  base, cut, cutMiddle, lineCount, STEP_TEXT_LIMIT,
 } from '../chat/stream-steps.js';
 
 function textOf(value) {
@@ -49,6 +49,7 @@ function toolOf(item) {
     const command = commandOf(item);
     return {
       id, name: 'Bash', title: cut(command.split('\n')[0], 200),
+      command: cutMiddle(command, STEP_TEXT_LIMIT),
       preview: cut(item?.description || '', 200), lang: 'bash',
     };
   }

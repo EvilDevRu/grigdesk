@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createStepSink } from '../../server/src/lib/chat/stream-steps.js';
+import {
+  createStepSink, cutMiddle, STEP_TEXT_LIMIT,
+} from '../../server/src/lib/chat/stream-steps.js';
 import { toClaudeSteps } from '../../server/src/lib/executors/_claude-steps.js';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codex-steps.js';
 import codex from '../../server/src/lib/executors/codex.js';
@@ -39,8 +41,41 @@ test('Claude normalizer сохраняет прежние шаги в общем
 
   assert.deepEqual(steps, [
     { k: 'think', text: 'Сначала проверю файл.', sub: false },
-    { k: 'tool', id: 'tool-1', name: 'Bash', sub: false, title: 'git status', preview: '', lang: 'bash' },
+    {
+      k: 'tool', id: 'tool-1', name: 'Bash', sub: false, title: 'git status',
+      command: 'git status', preview: '', lang: 'bash',
+    },
   ]);
+});
+
+test('нормализаторы сохраняют полную многострочную Bash-команду для раскрытия в UI', () => {
+  const command = 'node --test tests/server/chat-step-stream.test.js\nprintf done';
+  const claude = toClaudeSteps({
+    type: 'assistant',
+    message: {
+      content: [{ type: 'tool_use', id: 'claude-cmd', name: 'Bash', input: { command } }],
+    },
+  });
+  const normalize = createCodexStepNormalizer();
+  const codex = normalize({
+    type: 'item.started',
+    item: { id: 'codex-cmd', type: 'command_execution', command },
+  });
+
+  assert.equal(claude[0].title, command.split('\n')[0]);
+  assert.equal(claude[0].command, command);
+  assert.equal(codex.find((step) => step.k === 'tool')?.title, command.split('\n')[0]);
+  assert.equal(codex.find((step) => step.k === 'tool')?.command, command);
+});
+
+test('очень длинная команда сокращается посередине и сохраняет видимый конец', () => {
+  const command = `node -e "${'x'.repeat(STEP_TEXT_LIMIT)}" && npm run final-check`;
+  const visible = cutMiddle(command);
+
+  assert.equal(visible.length, STEP_TEXT_LIMIT);
+  assert.match(visible, /… сокращено …/);
+  assert.ok(visible.startsWith('node -e "'));
+  assert.ok(visible.endsWith('&& npm run final-check'));
 });
 
 test('Codex normalizer показывает summary, но никогда raw reasoning', () => {

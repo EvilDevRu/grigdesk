@@ -1,7 +1,7 @@
 // Нормализация Claude stream-json в нейтральную ленту хода Cockpit.
 // Файл начинается с _, поэтому загрузчик executors не считает его отдельным ИИ.
 import {
-  base, cut, lineCount, STEP_DIFF_LIMIT,
+  base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT,
 } from '../chat/stream-steps.js';
 
 /**
@@ -12,7 +12,12 @@ function describeTool(name, input = {}) {
   const i = input || {};
   switch (name) {
     case 'Bash':
-      return { title: cut((i.command || '').split('\n')[0], 200), preview: cut(i.description || '', 200), lang: 'bash' };
+      return {
+        title: cut((i.command || '').split('\n')[0], 200),
+        command: cutMiddle(i.command || '', STEP_TEXT_LIMIT),
+        preview: cut(i.description || '', 200),
+        lang: 'bash',
+      };
     case 'Read':
       return { title: base(i.file_path), sub: i.file_path || '' };
     case 'Write':
