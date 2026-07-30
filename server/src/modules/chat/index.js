@@ -148,12 +148,6 @@ async function chatModule(fastify, opts) {
   // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
   const PERM_WAIT_MS = 24 * 60 * 60 * 1000;
 
-  /** Есть ли у этого чата запрос, ждущий человека (вопрос или разрешение). */
-  function waitsForHuman(chatKey) {
-    for (const p of pendingPerms.values()) if (p.chatKey === chatKey) return true;
-    return false;
-  }
-
   /** Снять висящие запросы чата: ход кончился или остановлен — отвечать уже некому. */
   function dropPending(chatKey, message) {
     for (const [pid, p] of pendingPerms) {
@@ -172,24 +166,6 @@ async function chatModule(fastify, opts) {
       ...(p.isQuestion ? { questions: p.input?.questions || [] } : { tool: p.tool, input: p.input }),
     })),
   }));
-
-  // ── Лимит длительности хода ──────────────────────────────────────────────────
-  // Время ожидания ответа человека В ЛИМИТ НЕ ИДЁТ: иначе «отошёл на час» убивало бы
-  // ход вместе с висящим вопросом. Поэтому таймаута у execFile больше нет — тикаем
-  // здесь и только пока агент реально работает.
-  const WATCH_TICK_MS = 30_000;
-  const watchdog = setInterval(() => {
-    for (const [chatKey, run] of activeRuns) {
-      if (waitsForHuman(chatKey)) continue;
-      run.leftMs -= WATCH_TICK_MS;
-      if (run.leftMs > 0) continue;
-      run.timedOut = true;
-      run.ac?.abort();
-      fastify.log.warn({ chatKey }, 'чат: ход не уложился в лимит — прерван');
-    }
-  }, WATCH_TICK_MS);
-  watchdog.unref();
-  fastify.addHook('onClose', () => clearInterval(watchdog));
 
   /**
    * Ответ пользователя на вопрос агента (AskUserQuestion) в виде текста для агента.
@@ -388,8 +364,7 @@ async function chatModule(fastify, opts) {
     // Ход можно оборвать кнопкой «стоп»: контроллер живёт в activeRuns, POST /api/chat/stop
     // дёргает abort, execFile убивает CLI.
     const ac = new AbortController();
-    // leftMs — остаток лимита хода; его тикает watchdog и НЕ тикает, пока ждём человека.
-    const runRec = { startedAt: Date.now(), tokens: 0, steps: [], ac, leftMs: config.chatTimeoutMs || 3600000 };
+    const runRec = { startedAt: Date.now(), tokens: 0, steps: [], ac };
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
       // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
@@ -458,15 +433,11 @@ async function chatModule(fastify, opts) {
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
       if (err.stopped) {
-        // Тем же путём (abort) ход прерывает watchdog — тогда это не «кнопка», а лимит.
-        const stopReply = runRec.timedOut
-          ? `⏹ Ход прерван: агент работал дольше лимита (${Math.round((config.chatTimeoutMs || 3600000) / 60000)} мин). Ожидание твоего ответа в лимит не входит.`
-          : '⏹ Ход остановлен.';
         // sessionId — тот, что CLI успел завести в этом ходе (executor ловит его из потока).
         // Раньше сюда уходил ВХОДНОЙ id, а у первого хода в чате он пустой: после «стопа»
         // следующий вопрос шёл без --resume, и агент не помнил ничего из разговора.
         const stoppedOut = finishChatTitleHook({
-          reply: stopReply, steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
+          reply: '⏹ Ход остановлен.', steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
           contextTokens: 0, cost: null, model: model || null, effort: safeEffort || null, stopped: true,
         }, wantsTitle);
         // Оборванный ход всё равно завёл разговор: следующему из очереди нужен ЕГО id,

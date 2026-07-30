@@ -70,7 +70,7 @@ bin/restart            # перезапуск сервера: гасит пор�
 > `docs/cockpit/gotchas.md`, раздел «Два владельца порта 8140».
 
 Переменные окружения — `server/src/config.js` (грузятся и из корневого `.env`):
-`COCKPIT_PORT`, `COCKPIT_MEDIA_PYTHON` (venv whisper), `COCKPIT_CHAT_TIMEOUT_MS`,
+`COCKPIT_PORT`, `COCKPIT_MEDIA_PYTHON` (venv whisper),
 `COCKPIT_ANALYSIS_CONCURRENCY`, `COCKPIT_DISCOVER_WITH_CLI_TOKEN` и др.
 По умолчанию сервер использует встроенный `engine/` и локальный корневой `profiles/`.
 Каталог `/profiles/` целиком находится в `.gitignore`: в нём допустимы машинные пути,

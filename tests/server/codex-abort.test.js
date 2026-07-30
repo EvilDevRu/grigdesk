@@ -18,7 +18,7 @@ exec sleep 30
 
   const ac = new AbortController();
   const run = codex.run({
-    config: { codexBin: fake, chatTimeoutMs: 30_000 },
+    config: { codexBin: fake },
     message: 'test',
     cwd: dir,
     model: '',
