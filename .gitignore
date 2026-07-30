@@ -13,4 +13,5 @@ __pycache__/
 
 # Local implementation plans are working notes, not project documentation.
 /docs/cockpit/agents-routes-plan.md
+/docs/cockpit/agents-routes-plan-human.md
 /docs/cockpit/pr-review-fix-plan.md
