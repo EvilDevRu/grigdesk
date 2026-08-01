@@ -6,8 +6,14 @@ export FACTORY_V2_STATE_DIR="$STATE_DIR"
 source "$FACTORY_HOME/lib/route-runtime-v2.sh"
 
 routes_dir="$TEST_ROOT/routes-v2"
+publisher="$FACTORY_TESTS_HOME/fixtures/routes-v2-catalog-publish.mjs"
+profile_id=demo-profile
+debug_task=9001
+retry_task=9002
+exhausted_task=9003
+instrumentation_marker="FACTORY-TRACE:t${debug_task}"
 base_repo="$TEST_ROOT/source"
-worktree="$TEST_ROOT/worktree-t8166"
+worktree="$TEST_ROOT/worktree-t${debug_task}"
 scope="$worktree/trace.php"
 FIXTURE_CONTEXT="$TEST_ROOT/context.json"
 export ROUTE_V2_INSTRUMENTATION_SCOPE_FILE="$TEST_ROOT/instrumentation-scope.txt"
@@ -28,34 +34,31 @@ git -C "$base_repo" worktree add -qb route-v2 "$worktree"
 printf '%s\n' "$scope" >"$ROUTE_V2_INSTRUMENTATION_SCOPE_FILE"
 
 published=$(
-  "$NODE_BIN" "$FACTORY_HOME/../profiles/arsenkin/routes-v2/publish.mjs" \
-    --publish \
-    --base-dir "$routes_dir" \
-    --expected-catalog-hash null
+  "$NODE_BIN" "$publisher" "$routes_dir" null
 )
 assert_rc 0 "$?" "all v2 routes publish into an isolated store"
 
-ATTEMPT_STATE_ID_OVERRIDE=a_81668166816681668166816681668166
-attempt=$(attempt_state_begin_v2 8166 arsenkin "$routes_dir")
+ATTEMPT_STATE_ID_OVERRIDE=a_90019001900190019001900190019001
+attempt=$(attempt_state_begin_v2 "$debug_task" "$profile_id" "$routes_dir")
 begin_rc=$?
 unset ATTEMPT_STATE_ID_OVERRIDE
 assert_rc 0 "$begin_rc" "isolated v2 attempt begins"
-attempt_state_select_route_v2 8166 "$attempt" debug >/dev/null
+attempt_state_select_route_v2 "$debug_task" "$attempt" debug >/dev/null
 assert_rc 0 "$?" "human-selected route is pinned"
 
 ACCEPTANCE=pending
 cat >"$FIXTURE_CONTEXT" <<JSON
 {
-  "task": {"id": 8166, "title": "debug"},
+  "task": {"id": $debug_task, "title": "debug"},
   "attempt": {"id": "$attempt"},
-  "project": {"profile": "arsenkin"},
+  "project": {"profile": "$profile_id"},
   "workspace": {"backend": {"path": "$worktree"}, "frontend": {"path": "$worktree"}},
   "services": {"apiUrl": "unavailable"},
   "artifacts": {"root": "$STATE_DIR"},
   "diagnosis": {"kind": "functional"},
   "instrumentation": {
     "allowedFiles": ["$scope"],
-    "marker": "FACTORY-TRACE:t8166",
+    "marker": "$instrumentation_marker",
     "scopeFile": "$ROUTE_V2_INSTRUMENTATION_SCOPE_FILE"
   },
   "evidence": {"eventCount": 0},
@@ -68,7 +71,7 @@ cat >"$FIXTURE_CONTEXT" <<JSON
     "mode": "publish",
     "actions": ["commit", "push", "pull-request"],
     "targetBranches": {"be": "master"},
-    "sourceBranch": "task-8166-v2"
+    "sourceBranch": "fixture-${debug_task}-v2"
   },
   "routeCatalog": {"debug": "$(json_field "$published" routeHashes debug)"},
   "stage": {"id": "placeholder", "runKey": "PLACEHOLDER"}
@@ -100,7 +103,7 @@ run_agent() {
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   case "$stage" in
     INSTRUMENT)
-      printf '// FACTORY-TRACE:t8166 temporary\n' >>"$scope"
+      printf '// %s temporary\n' "$instrumentation_marker" >>"$scope"
       ;;
     TESTS)
       printf '<?php return 2;\n' >"$worktree/product-change.php"
@@ -118,30 +121,30 @@ run_agent() {
     committed "$result"
 }
 
-bootstrap=$(route_v2_dispatch_bootstrap 8166 "$attempt")
+bootstrap=$(route_v2_dispatch_bootstrap "$debug_task" "$attempt")
 assert_rc 0 "$?" "bootstrap accepts the route pinned from a three-route catalog"
 assert_eq done "$(json_field "$bootstrap" result)" \
   "bootstrap records a committed result"
 assert_eq debug "$(json_field "$bootstrap" routeId)" \
   "bootstrap keeps the human-selected route"
 
-attempt_stage_state_init_v2 8166 "$attempt" debug >/dev/null
+attempt_stage_state_init_v2 "$debug_task" "$attempt" debug >/dev/null
 assert_rc 0 "$?" "trusted route cursor initializes after bootstrap"
 
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "state-only reproduction commits"
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "transactional instrumentation commits"
-assert_contains "$(cat "$scope")" "FACTORY-TRACE:t8166" \
+assert_contains "$(cat "$scope")" "$instrumentation_marker" \
   "instrumentation remains visible through the proof window"
 
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "diagnosis runs against the instrumented workspace"
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "hypothesis skeptic commits"
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "proof closes the instrumentation transaction"
-if grep -Fq 'FACTORY-TRACE:t8166' "$scope"; then
+if grep -Fq "$instrumentation_marker" "$scope"; then
   test_fail "proof removes transaction-owned instrumentation"
 else
   test_ok "proof removes transaction-owned instrumentation"
@@ -149,29 +152,29 @@ fi
 assert_eq '<?php return 1;' "$(tr -d '\n' <"$scope")" \
   "transaction cleanup restores the exact source baseline"
 
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "translator commits"
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 20 "$?" "cause gate pauses without polling"
-route_v2_gate_decide 8166 "$attempt" gate_cause approved >/dev/null
+route_v2_gate_decide "$debug_task" "$attempt" gate_cause approved >/dev/null
 assert_rc 0 "$?" "approved cause gate advances"
 
 for expected in build review measure phpcheck lint gate_accept; do
-  advanced=$(route_v2_dispatch_next 8166 "$attempt")
+  advanced=$(route_v2_dispatch_next "$debug_task" "$attempt")
   assert_rc 0 "$?" "agent node advances under its declared filesystem policy"
   assert_eq "$expected" "$(json_field "$advanced" currentNode)" \
     "route advances to $expected"
 done
-route_v2_dispatch_next 8166 "$attempt" >/dev/null
+route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 20 "$?" "acceptance gate pauses before SHIP"
-route_v2_gate_decide 8166 "$attempt" gate_accept approved >/dev/null
+route_v2_gate_decide "$debug_task" "$attempt" gate_accept approved >/dev/null
 assert_rc 0 "$?" "accepted diff advances to SHIP"
 ACCEPTANCE=approved
 
-route_v2_dispatch_until_pause 8166 "$attempt" 8 >/dev/null
+route_v2_dispatch_until_pause "$debug_task" "$attempt" 8 >/dev/null
 assert_rc 21 "$?" "normal v2 executes SHIP and RETRO through terminal done"
 assert_eq 1 "$SHIP_CALLED" "SHIP is executed rather than hard-stopped"
-terminal=$(attempt_stage_state_read_v2 8166 "$attempt")
+terminal=$(attempt_stage_state_read_v2 "$debug_task" "$attempt")
 assert_eq stopped "$(json_field "$terminal" state)" \
   "trusted cursor reaches a terminal state"
 assert_eq done "$(json_field "$terminal" stop)" \
@@ -179,8 +182,8 @@ assert_eq done "$(json_field "$terminal" stop)" \
 
 # Узел обязан гореть на доске ДО запуска агента, а не с момента, когда раннер забрал запуск:
 # между входом в узел и стартом агента идут рендер промпта, открытие транзакции и снимок
-# рабочих деревьев — на приёмке t8165 это заняло двадцать минут, и всё это время доска
-# показывала прошлый узел. Фейковый агент run_state_begin не зовёт вовсе, поэтому running
+# рабочих деревьев, и всё это время доска иначе показывает прошлый узел. Фейковый агент
+# run_state_begin не зовёт вовсе, поэтому running
 # в реестре здесь может взяться только из пометки на входе.
 not_running=$(grep -v '=running$' "$STATUS_AT_START" || true)
 assert_eq "" "$not_running" "узел помечен running до вызова агента"
@@ -213,42 +216,42 @@ run_agent() {
     committed done
 }
 
-ATTEMPT_STATE_ID_OVERRIDE=a_81678167816781678167816781678167
-retry_attempt=$(attempt_state_begin_v2 8167 arsenkin "$routes_dir")
+ATTEMPT_STATE_ID_OVERRIDE=a_90029002900290029002900290029002
+retry_attempt=$(attempt_state_begin_v2 "$retry_task" "$profile_id" "$routes_dir")
 begin_rc=$?
 unset ATTEMPT_STATE_ID_OVERRIDE
 assert_rc 0 "$begin_rc" "retry scenario attempt begins"
-attempt_state_select_route_v2 8167 "$retry_attempt" trivial >/dev/null
+attempt_state_select_route_v2 "$retry_task" "$retry_attempt" trivial >/dev/null
 assert_rc 0 "$?" "trivial route pins for retry scenario"
-route_v2_dispatch_bootstrap 8167 "$retry_attempt" >/dev/null
+route_v2_dispatch_bootstrap "$retry_task" "$retry_attempt" >/dev/null
 assert_rc 0 "$?" "retry scenario bootstrap commits"
-attempt_stage_state_init_v2 8167 "$retry_attempt" trivial >/dev/null
+attempt_stage_state_init_v2 "$retry_task" "$retry_attempt" trivial >/dev/null
 assert_rc 0 "$?" "retry scenario cursor initializes"
 
 SILENT_LEFT=2
 : >"$CALLS_LOG"
-advanced=$(route_v2_dispatch_next 8167 "$retry_attempt")
+advanced=$(route_v2_dispatch_next "$retry_task" "$retry_attempt")
 assert_rc 0 "$?" "no-result attempts are retried within the bundle budget"
 assert_eq 3 "$(wc -l <"$CALLS_LOG")" \
   "two silent attempts consume retry budget before the committed one"
 assert_eq review "$(json_field "$advanced" currentNode)" \
   "retried node commits done and the route advances"
 
-ATTEMPT_STATE_ID_OVERRIDE=a_81688168816881688168816881688168
-exhausted_attempt=$(attempt_state_begin_v2 8168 arsenkin "$routes_dir")
+ATTEMPT_STATE_ID_OVERRIDE=a_90039003900390039003900390039003
+exhausted_attempt=$(attempt_state_begin_v2 "$exhausted_task" "$profile_id" "$routes_dir")
 begin_rc=$?
 unset ATTEMPT_STATE_ID_OVERRIDE
 assert_rc 0 "$begin_rc" "exhausted scenario attempt begins"
-attempt_state_select_route_v2 8168 "$exhausted_attempt" trivial >/dev/null
+attempt_state_select_route_v2 "$exhausted_task" "$exhausted_attempt" trivial >/dev/null
 assert_rc 0 "$?" "trivial route pins for exhausted scenario"
-route_v2_dispatch_bootstrap 8168 "$exhausted_attempt" >/dev/null
+route_v2_dispatch_bootstrap "$exhausted_task" "$exhausted_attempt" >/dev/null
 assert_rc 0 "$?" "exhausted scenario bootstrap commits"
-attempt_stage_state_init_v2 8168 "$exhausted_attempt" trivial >/dev/null
+attempt_stage_state_init_v2 "$exhausted_task" "$exhausted_attempt" trivial >/dev/null
 assert_rc 0 "$?" "exhausted scenario cursor initializes"
 
 SILENT_LEFT=99
 : >"$CALLS_LOG"
-stopped=$(route_v2_dispatch_next 8168 "$exhausted_attempt")
+stopped=$(route_v2_dispatch_next "$exhausted_task" "$exhausted_attempt")
 assert_rc 0 "$?" "burned budget commits a synthetic exhausted outcome"
 assert_eq 3 "$(wc -l <"$CALLS_LOG")" \
   "exhausted fires only after the full declared budget"
@@ -256,7 +259,7 @@ assert_eq stopped "$(json_field "$stopped" state)" \
   "exhausted transition stops the route"
 assert_eq human "$(json_field "$stopped" stop)" \
   "bundle routes exhausted to a human stop"
-route_v2_dispatch_next 8168 "$exhausted_attempt" >/dev/null
+route_v2_dispatch_next "$exhausted_task" "$exhausted_attempt" >/dev/null
 assert_rc 21 "$?" "stopped cursor reports terminal state on the next dispatch"
 
 finish_tests

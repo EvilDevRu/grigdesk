@@ -216,8 +216,8 @@ instrumentation_tx_checkpoint 50 trace-ignored
 assert_rc 75 "$?" "checkpoint rejects an ignored out-of-scope change"
 
 # --- изменчивые пути, объявленные профилем (PROFILE_VOLATILE_PATHS) ---
-# Стенд поднят всю транзакцию и пишет логи сам: приёмка t8165 встала на 177 файлах
-# storage/debugbar, ни одного исходника. Объявленное профилем не попадает в
+# Стенд поднят всю транзакцию и пишет логи сам: сторож может встать на сотнях файлов
+# storage/debugbar без единого исходника. Объявленное профилем не попадает в
 # чувствительное множество вовсе; всё остальное ignored остаётся под наблюдением.
 mkdir -p "$repo/ignored-logs"
 printf 'ignored baseline\n' >"$repo/ignored-runtime"

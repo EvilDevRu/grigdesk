@@ -15,9 +15,9 @@ _runner_process_full_identity() {
   # умерший между глобом и чтением, печатает ошибку в лог этапа.
   read -r stat 2>/dev/null <"/proc/$pid/stat" || return 1
   [[ -n "$stat" ]] || return 1
-  # comm is enclosed in parentheses and may itself contain spaces or ')'.
-  # Everything after the final ") " has stable proc(5) field positions:
-  # state, ppid, pgrp, session, ... starttime.
+  # Поле comm заключено в скобки и само может содержать пробелы или `)`.
+  # После последнего `) ` идут поля proc(5) со стабильными позициями:
+  # состояние, PID родителя, PGID, сессия, ... время запуска.
   tail=${stat##*) }
   read -r -a fields <<<"$tail"
   (( ${#fields[@]} >= 20 )) || return 1
@@ -60,8 +60,8 @@ runner_process_full_matches() {
 # ровно под один запуск, а не группа процессов её лидера: GNU timeout ставит
 # провайдеру собственную группу (setpgid), поэтому дерево агента живёт в другой
 # группе той же сессии. Пока проверка смотрела только на группу лидера, пустая
-# группа ложно доказывала тишину — на t8165 так пережили TERM claude, его MCP
-# и docker, а launcher уже снял trusted identity.
+# группа ложно доказывала тишину: claude, MCP и docker могли пережить TERM,
+# когда launcher уже снял trusted identity.
 # Печатает уникальные PGID живых процессов сессии; 1 — в сессии никого нет.
 # Обход отдан awk одним форком: на тысяче процессов чтение /proc средствами
 # bash стоило 0,1–0,3 с (herestring на каждый процесс — это временный файл),
@@ -72,7 +72,7 @@ runner_process_full_matches() {
 # ошибка», после которой он обрывает обработку целиком и не печатает ничего.
 # Одного такого процесса на машине хватало, чтобы скан объявил живую сессию
 # пустой, а это ложное доказательство тишины: launcher снимал trusted identity
-# при живом дереве агента — ровно регресс t8165, ради которого скан и написан.
+# при живом дереве агента. Ради этого скан и написан.
 # getline на исчезнувшем файле — просто «не прочиталось», такой pid пропускаем.
 _runner_session_pgids() {
   local expected_session=${1:?session} pgids
@@ -221,8 +221,8 @@ _runner_quiesce_owned_runtime() {
   # остановленному на барьере, TERM ставится в очередь и доставляется ровно в
   # момент разморозки. Обратный порядок оставлял окно между CONT и TERM, в
   # которое размороженный мост успевал вызвать provider CLI мимо барьера, —
-  # это и ловил мигающий ассерт runner-contract «deferred signal stops the
-  # runner before provider code crosses the barrier».
+  # это и ловил мигающий ассерт runner-contract «отложенный сигнал останавливает
+  # раннер до того, как код провайдера пересечёт барьер».
   groups=$(_runner_runtime_groups "$pgid" "$session")
   _runner_signal_groups TERM "$groups"
   _runner_signal_groups CONT "$groups"
@@ -241,9 +241,9 @@ _runner_quiesce_owned_runtime() {
     (( poll == polls )) || sleep 0.05
   done
 
-  # The original, exact group was signalled while its leader identity still
-  # belonged to this launcher. A surviving member keeps the PGID/session alive,
-  # so KILL cannot target a newly recycled, unrelated group.
+  # Исходной точной группе отправили сигнал, пока идентичность её лидера ещё принадлежала
+  # этому запускателю. Выживший процесс сохраняет PGID/session, поэтому KILL не может
+  # попасть в новую постороннюю группу, повторно получившую тот же идентификатор.
   groups=$(_runner_runtime_groups "$pgid" "$session")
   _runner_signal_groups KILL "$groups"
   for poll in {1..100}; do
@@ -414,9 +414,8 @@ runner_trusted_identity_clear() {
   # успех, а не отказ; чужая (73) и недоверенная (78) identity остаются ошибкой:
   # снимать не своё нельзя. Без этого проигравший гонку отчитывался ошибкой об
   # успешной работе: CLI отдавал 3 после состоявшегося переключения, а launcher
-  # ловил group_rc=3 и подменял результат этапа на 76 (t44 краснел 5 раз из 24
-  # параллельных прогонов, при этом alpha честно получал TERM, RESULT_CLASS
-  # оставался manual_switch и beta доводил этап до done).
+  # ловил group_rc=3 и подменял результат этапа на 76, хотя alpha честно получал TERM,
+  # RESULT_CLASS оставался manual_switch и beta доводил этап до done.
   (( rc == 3 )) && return 0
   (( rc == 0 )) || return "$rc"
   [[ "$existing" == "$stage $run_id $epoch $runner $pid $pgid $session $starttime" ]] ||
@@ -445,9 +444,9 @@ _runner_launch_restore_signal_traps() {
   else
     trap - INT
   fi
-  # Read the deferred slot only after both original traps are restored. A
-  # signal delivered between the caller's last command and either restoration
-  # must not be erased by an earlier snapshot of this variable.
+  # Отложенный слот читается только после восстановления обоих исходных trap. Сигнал,
+  # пришедший между последней командой вызывающей стороны и любым из восстановлений,
+  # нельзя стереть более ранним снимком этой переменной.
   pending=$RUNNER_LAUNCH_DEFERRED_SIGNAL
   RUNNER_LAUNCH_DEFERRED_SIGNAL=""
   [[ -z "$pending" ]] || kill -s "$pending" "$BASHPID"
@@ -460,9 +459,8 @@ runner_inflight_barrier_quiesce() {
   case "$RUNNER_LAUNCH_STATE" in
     idle) return 3 ;;
     preparing)
-      # A signal landed in the fork/publication critical section. Absence of a
-      # PID is not proof that fork did not happen; fail closed and leave the
-      # instrumentation baseline untouched.
+      # Сигнал пришёл в критической секции fork/публикации. Отсутствие PID не доказывает,
+      # что fork не произошёл; закрываемся отказом и не трогаем базовую линию инструментации.
       return 79
       ;;
     barrier|published|running|quiescing) ;;
@@ -492,8 +490,8 @@ _runner_terminate_barrier_child() {
   read -r pgid session starttime state ppid <<<"$identity"
   own_pgid=$(ps -o pgid= -p "$BASHPID" 2>/dev/null | tr -d ' ')
   if [[ -n "$own_pgid" && "$pgid" == "$own_pgid" ]]; then
-    # Unit callers may hand us a stopped ordinary child rather than a setsid
-    # runner. Never signal the launcher's own process group in that case.
+    # Unit-тест может передать остановленного обычного потомка вместо setsid-раннера.
+    # В таком случае нельзя посылать сигнал собственной группе процессов запускателя.
     kill -CONT "$pid" 2>/dev/null || true
     kill -TERM "$pid" 2>/dev/null || true
     for poll in {1..100}; do
@@ -532,9 +530,9 @@ runner_launch() {
   # для отдельного вызова/контрактного теста: персональный default не должен
   # превращать отсутствие необязательной env-переменной в падение до provider.
   local config_root="${FACTORY_CONFIG_ROOT:-${HOME:?HOME or FACTORY_CONFIG_ROOT is required}/.factory/config}"
-  # Bash functions use dynamic scope, so trusted-identity helpers called later
-  # resolve the same fallback root even when the standalone caller did not
-  # export FACTORY_CONFIG_ROOT.
+  # Функции Bash используют динамическую область видимости, поэтому вызванные позже
+  # helpers доверенной идентичности видят тот же резервный корень, даже если отдельный
+  # вызывающий процесс не экспортировал FACTORY_CONFIG_ROOT.
   local FACTORY_CONFIG_ROOT="${FACTORY_CONFIG_ROOT:-$config_root}"
   control_root=$(factory_control_root) || return 78
   mkdir -p "$control_root/tokens"
@@ -705,10 +703,10 @@ runner_launch() {
     wait "$pid"; rc=$?
   fi
 
-  # Reaping the session leader is not enough: a TERM-ignoring descendant can
-  # retain the PGID and write after the orchestrator starts restoring a
-  # transaction baseline. The trusted launcher owns this exact PGID/session and
-  # does not retire its identity until every member has disappeared.
+  # Забрать статус лидера сессии недостаточно: игнорирующий TERM потомок может сохранить
+  # PGID и писать после начала восстановления базовой линии транзакции. Доверенный
+  # запускатель владеет именно этими PGID/session и не снимает идентичность,
+  # пока не исчезнет каждый участник.
   RUNNER_LAUNCH_STATE=quiescing
   if _runner_runtime_present "$pgid" "$session" "$starttime"; then
     _runner_quiesce_owned_runtime "$pid" "$pgid" "$session" "$starttime" 1 ||

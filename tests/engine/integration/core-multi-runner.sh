@@ -100,8 +100,8 @@ assert_eq alpha "$(cat "$TEST_ROOT/invocations")" \
 trusted_record=$(runner_trusted_identity_read 44)
 read -r trusted_stage trusted_run trusted_epoch trusted_runner old_pid \
   trusted_pgid trusted_session trusted_starttime <<<"$trusted_record"
-# Simulate a provider rewriting its writable diagnostic metadata. The control
-# CLI must ignore these values and terminate only the trusted exact identity.
+# Имитируем перезапись провайдером доступных ему диагностических метаданных.
+# Управляющий CLI должен игнорировать их и завершить только точный доверенный процесс.
 sed -i \
   -e 's/^PID=.*/PID=1/' \
   -e 's/^PGID=.*/PGID=1/' \
@@ -143,7 +143,7 @@ assert_contains "$(cat "$STATE_DIR/logs/t47.stages.log")" "таймауту" \
 
 # run_stage уже поставил STALLED_HUMAN и вернул rc=2: внешний pipeline обязан
 # завершиться сразу. Иначе он начинает новый пакет из трёх попыток и молотит provider
-# бесконечно — именно так исторический REVIEW #7379 накопил 113 сбоев.
+# бесконечно, накапливая повторные сбои.
 breaker_clear alpha "$alpha_fingerprint" provider "" ""
 : >"$STATE_DIR/t48.pipeline"
 : >"$TEST_ROOT/invocations"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline reader/renderer immutable route bundles v2.
+"""Офлайн-чтение и рендеринг неизменяемых бандлов маршрутов v2.
 
 Сервер публикует bundles, но runtime не доверяет одному факту их наличия: перед pin/render
 этот инструмент заново проверяет manifest, hashes, набор файлов и исполняемые инварианты.

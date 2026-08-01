@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Provider-neutral foreground launcher for immutable route protocol v2.
+# Независимый от провайдера запускатель неизменяемого протокола маршрутов v2 без ухода в фон.
 #
-# It deliberately does not daemonize, select a provider or weaken SHIP. Provider
-# choice and failover come only from profiles/<profile>/runners.env. Project
-# provisioning remains in the project profile; this wrapper only requests a
-# fresh generation=v2 sandbox and never tears it down automatically.
+# Он намеренно не уходит в фон, не выбирает провайдера и не ослабляет SHIP. Выбор
+# провайдера и failover задаются только в profiles/<profile>/runners.env. Подготовка
+# проекта остаётся обязанностью профиля; эта обёртка лишь запрашивает свежую песочницу
+# generation=v2 и никогда не удаляет её автоматически.
 set -uo pipefail
 
 FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
@@ -491,8 +491,8 @@ V2_SCOPE_EXPECTED_HASH=""
 V2_FE_PORT=""
 V2_API_PORT=""
 
-# The legacy profile hook points at worktree-t<TASK>. V2 owns a different,
-# generation-specific worktree and must never fall back to an older sandbox.
+# Старый хук профиля указывает на worktree-t<TASK>. V2 владеет другим рабочим деревом,
+# привязанным к поколению, и никогда не должен откатываться к старой песочнице.
 profile_agent_cwd() {
   [[ -d "$V2_BE_WORKTREE" ]] && printf '%s\n' "$V2_BE_WORKTREE"
 }
@@ -660,8 +660,8 @@ v2_install_scope_spec() {
   local destination tmp spec parsed
   destination="$(v2_attempt_artifacts)/instrumentation-scope.tsv"
   # Артефакт создаётся только когда scope задан (--instrumentation-file, т.е. debug):
-  # у feature на старте scope пуст ЗАКОННО — TRACE возьмёт его из диффа. Найдено
-  # живым прогоном t8165: безусловная ветка требовала непустой scope и валила start.
+  # у feature на старте scope пуст ЗАКОННО — TRACE возьмёт его из диффа. Безусловная
+  # ветка требовала непустой scope и из-за этого валила start.
   if [[ "$MODE" == start && ${#INSTRUMENTATION_SPECS[@]} -gt 0 ]]; then
     tmp=$(mktemp "$(dirname "$destination")/.scope-spec.XXXXXX") || return 1
     for spec in "${INSTRUMENTATION_SPECS[@]}"; do
@@ -1001,6 +1001,10 @@ route_v2_context_for_node() {
     --container-name "$V2_CONTAINER"
     --frontend-port "$V2_FE_PORT"
     --api-port "$V2_API_PORT"
+    # Имя хоста стенда — слово профиля. Порт свой у каждой песочницы, а вот петля
+    # это или localhost, знает только проект: приложение вправе включать продовую
+    # авторизацию по window.location.hostname (инцидент t8165).
+    --service-host "${PROFILE_SERVICE_HOST:-127.0.0.1}"
     --transaction-id "$transaction_id"
     --instrumentation-phase "$instrumentation_phase"
     --event-count "$event_count"
@@ -1398,7 +1402,6 @@ print(",".join(chain[chain.index(target):]))
   # delivery, scope, diagnosis) — иначе попытка тупиковая: resume только
   # проверяет артефакты и создавать их не имеет права. Результаты работы
   # (bootstrap.json) намеренно не переносятся: recovery = чистый bootstrap.
-  # Найдено живым прогоном t8165.
   old_artifacts="$(attempt_state_v2_task_root "$TASK")/attempts/$EXPECTED_ATTEMPT/artifacts"
   V2_ATTEMPT=$out
   new_artifacts=$(v2_attempt_artifacts) || return 78
@@ -1412,8 +1415,8 @@ print(",".join(chain[chain.index(target):]))
     }
   done
   v2_quarantine_state_artifacts "$EXPECTED_ATTEMPT" || return
-  # Реестр — проекция для кокпита, но его читают и агенты: на живом прогоне t8165
-  # PLAN увидел в нём TESTS=done/TCRITIC=done от отменённой попытки и полез искать
+  # Реестр — проекция для кокпита, но его читают и агенты: PLAN может увидеть в нём
+  # TESTS=done/TCRITIC=done от отменённой попытки и полезть искать
   # несуществующие тесты. Новая попытка обязана начинать с pending по всем узлам
   # своего маршрута, иначе «чистый bootstrap» врёт и человеку, и агентам.
   if [[ -f "$STATE_DIR/t${TASK}.pipeline" ]]; then

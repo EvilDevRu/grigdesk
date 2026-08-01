@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Читатель trusted identity против publish/clear: снятие файла под читателем —
-# штатная часть протокола, и отвечать на неё «идентити недоверена» (78) нельзя.
-# Именно так `factory <task> runner switch` падал под нагрузкой (t44, ~1 из 8).
+# штатная часть протокола, и отвечать на неё «идентити недоверена» (78) нельзя,
+# иначе `factory <task> runner switch` падает под нагрузкой.
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 source "$FACTORY_HOME/lib/runner-launcher.sh"

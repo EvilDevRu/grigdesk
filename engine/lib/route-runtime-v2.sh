@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# Trusted dispatcher for an immutable route-v2 attempt.
+# Доверенный диспетчер неизменяемой попытки route-v2.
 #
-# This file is sourced after the project profile and core.sh.  It intentionally
-# does not know how a project builds typed context: the host wrapper must provide
+# Этот файл подключается после профиля проекта и core.sh. Он намеренно не знает,
+# как проект формирует типизированный контекст: хостовая обёртка должна предоставить
 # `route_v2_context_for_node TASK ATTEMPT NODE RUN_KEY OUTPUT`.
 #
-# Public API:
+# Публичный API:
 #   route_v2_dispatch_bootstrap TASK ATTEMPT
 #   route_v2_dispatch_next TASK ATTEMPT
 #   route_v2_dispatch_until_pause TASK ATTEMPT [MAX_STEPS]
 #   route_v2_gate_decide TASK ATTEMPT NODE approved|rejected
 #
-# Return codes:
-#   0   one node was committed / loop reached its requested boundary
-#   20  paused at a human gate
-#   21  route already reached a terminal stop
-#   75  trusted CAS/workspace/transaction conflict
-#   78  invalid or unsupported runtime state
+# Коды возврата:
+#   0   зафиксирован один узел / цикл достиг запрошенной границы
+#   20  пауза на человеческих воротах
+#   21  маршрут уже достиг терминальной остановки
+#   75  конфликт доверенного CAS, рабочего дерева или транзакции
+#   78  недопустимое или неподдерживаемое состояние исполняющей среды
 #
-# Required host contract:
-#   FACTORY_V2_STATE_DIR is an existing, dedicated absolute directory and equals
-#   STATE_DIR.  It must not be the legacy ~/.factory/state.
-#   route_v2_context_for_node ... writes a regular typed-context JSON file.
-#   route_v2_workspace_roots prints the exact isolated git worktree roots.
+# Обязательный контракт хоста:
+#   FACTORY_V2_STATE_DIR — существующий выделенный абсолютный каталог, совпадающий
+#   с STATE_DIR. Это не должен быть старый ~/.factory/state.
+#   route_v2_context_for_node ... записывает обычный типизированный JSON-файл.
+#   route_v2_workspace_roots выводит точные корни изолированных рабочих деревьев Git.
 
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/attempt-stage-state.sh"
@@ -455,8 +455,8 @@ _route_v2_node_caps_guard() {
 # Узел зажигается на доске в момент ВХОДА, а не когда стартовал раннер. До старта успевает
 # пройти вечность: рендер промпта, открытие инструментальной транзакции и снимок обоих рабочих
 # деревьев. Пока статус оставался pending, доска показывала конвейер замершим на ПРОШЛОМ узле —
-# на приёмке t8165 после REVIEW было двадцать минут тишины, и это читалось как «всё встало»,
-# хотя движок в это время считал хеши. v1 так и делал (run_stage выставляет running перед
+# это читалось как «всё встало», хотя движок в это время считал хеши. v1 так и делал
+# (run_stage выставляет running перед
 # run_agent); v2 потерял пометку, когда диспетчером стал маршрутный рантайм.
 #
 # run_state_begin выставит running ещё раз, уже вместе с раннером и эпохой: статус узла и
@@ -519,8 +519,8 @@ _route_v2_transaction_before() {
   fi
 }
 
-# Сторож валит прогон fail-closed, а в журнал уходил один код возврата. Приёмка t8165
-# встала на 181 записи мусора стенда, и чтобы это увидеть, пришлось руками разбирать
+# Сторож валит прогон fail-closed, а в журнал уходил один код возврата. При мусоре стенда
+# причину приходилось выяснять, вручную разбирая
 # base64 в снимках транзакции. Пишем причину и каталоги — без хешей и содержимого.
 _route_v2_log_transaction_stall() {
   local task=$1 txid=$2 dir reason newest candidate summary
@@ -552,8 +552,8 @@ _route_v2_transaction_after() {
     _route_v2_log_transaction_stall "$task" "$txid"
     return "$rc"
   }
-  # Debug keeps one transaction open from INSTRUMENT through PROOF. Any other
-  # transactional node (for example feature TRACE) owns a complete transaction.
+  # В debug-маршруте одна транзакция остаётся открытой от INSTRUMENT до PROOF. Любой другой
+  # транзакционный узел, например TRACE в feature, владеет отдельной полной транзакцией.
   if [[ "$node" != instrument ]]; then
     instrumentation_tx_cleanup "$task" "$txid" || {
       rc=$?
@@ -658,8 +658,8 @@ _route_v2_run_agent_node() {
   # 79 — отказ ХОСТА/КОНФИГА (нет свежего coverage, провайдер недоступен, denied),
   # а не «агент не отчитался»: ретраить бессмысленно, а исчерпание бюджета
   # закоммитило бы exhausted и убило попытку из-за временной проблемы окружения.
-  # Так и вышло на прогоне t8165: правка runners.env на ходу обесценила coverage,
-  # скептик сжёг три попытки и маршрут встал терминально. Останавливаемся
+  # Правка runners.env на ходу может обесценить coverage, после чего скептик сожжёт
+  # все попытки и маршрут встанет терминально. Останавливаемся
   # fail-closed, оставляя узел невыполненным: после починки конфига resume продолжит.
   if (( agent_rc == 79 )); then
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
@@ -691,8 +691,8 @@ _route_v2_run_agent_node() {
   }
   if ! IFS=$'\t' read -r result run_id < <(_route_v2_active_result "$active"); then
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
-    # Незакрытый запуск (STATE=active) — раннер умер, не отчитавшись: у обоих
-    # провайдеров кончился лимит (прогон t8165). Это «результата нет», а не
+    # Незакрытый запуск (STATE=active) — раннер умер, не отчитавшись, например из-за
+    # исчерпания лимита у всех провайдеров. Это «результата нет», а не
     # повреждение состояния: ретраим по бюджету, дальше exhausted к человеку.
     if [[ "$(awk -F= '$1 == "STATE" {print $2; exit}' "$active" 2>/dev/null)" == active ]]; then
       ROUTE_V2_NO_RESULT=1
@@ -974,7 +974,7 @@ route_v2_dispatch_next() {
   # вырабатывает ДОВЕРЕННЫЙ рантайм, а не агент. Committed failed повторяется
   # только в пределах productFailure-бюджета.
   # Номер захода и причина повтора уезжают агенту: повтор, не знающий о следах
-  # предыдущего захода, переделывает работу с нуля (t8165, 26 минут второго BUILD).
+  # предыдущего захода, переделывает работу с нуля.
   local outcome="" cleanup_rc attempt_no=1 retry_reason=""
   local tries_left=$(( 1 + retry_no_result + provider_attempts ))
   local product_left=$retry_product
@@ -1030,12 +1030,12 @@ route_v2_dispatch_next() {
   attempt_stage_state_commit_v2 \
     "$task" "$attempt" "$node" "$outcome" || return
   # Черновик хода снимаем ТОЛЬКО после УСПЕШНОГО терминального коммита: между заходами он
-  # нужен (обрыв на t8165), а после закрытого узла становится чужими заметками для того,
+  # нужен после обрыва, а после закрытого узла становится чужими заметками для того,
   # кто вернётся сюда по человеческому goto.
   # failed/exhausted — не «закрыто», а «остановлено и передано человеку»: узел ещё будут
-  # переигрывать, и черновик — единственная запись о том, где именно застряли. Приёмочный
-  # прогон t8165: TESTS отчитался «детали и остаток — t8165.tests.checkpoint.md», движок
-  # стёр файл следующей же строкой, и человек у остановленного маршрута остался с одним
+  # переигрывать, и черновик — единственная запись о том, где именно застряли. Если TESTS
+  # отчитается «детали и остаток — t<TASK>.tests.checkpoint.md», а движок сразу сотрёт файл,
+  # человек у остановленного маршрута останется с одним
   # предложением комментария вместо разбора (что доказано, что нет, что осталось сделать).
   if [[ "$outcome" != failed && "$outcome" != exhausted ]]; then
     declare -F _stage_checkpoint_clear >/dev/null &&
@@ -1090,10 +1090,10 @@ route_v2_gate_decide() {
   attempt_stage_state_commit_v2 "$task" "$attempt" "$node" "$outcome"
 }
 
-# Abort the transaction owned by this exact attempt.  A fresh checkpoint first
-# attributes only declared-scope writes to the interrupted provider; any
-# out-of-scope write stalls fail-closed.  Durable `cleaning` is resumed directly
-# after SIGKILL, while `completed` only repairs a stale active pointer.
+# Отменяет транзакцию, которой владеет именно эта попытка. Сначала свежая контрольная точка
+# относит к прерванному провайдеру только записи в заявленной области; любая запись вне
+# области приводит к закрытому отказу. Устойчивое состояние `cleaning` продолжается после
+# SIGKILL напрямую, а `completed` лишь исправляет устаревший указатель active.
 route_v2_cleanup_active_instrumentation() {
   local task attempt txid dir state rc
   _route_v2_require_isolation || return
@@ -1148,12 +1148,11 @@ _route_v2_completed_instrumentation_for_attempt() {
   printf '%s\n' "$found"
 }
 
-# A resume may follow SIGKILL, so neither EXIT traps nor the ordinary
-# runner-launch return path can be assumed to have run.  If the launcher had
-# already published an exact process identity, retire that complete runner
-# group before inspecting or restoring any instrumentation state.  The
-# pre-publication window is covered by the required systemd control-group
-# trusted runner lifecycle; a provider-writable PID file is never used.
+# После SIGKILL может последовать resume, поэтому нельзя считать, что сработали EXIT-trap
+# или обычный путь возврата runner-launch. Если запускатель уже опубликовал точную
+# идентичность процесса, перед проверкой или восстановлением инструментации нужно завершить
+# всю эту группу раннера. Окно до публикации закрывает обязательный доверенный жизненный
+# цикл control-group systemd; доступный провайдеру PID-файл никогда не используется.
 _route_v2_quiesce_runner_before_recovery() {
   local task=$1 root identity_file rc grace_s=${FACTORY_RECOVERY_GRACE_SECONDS:-5}
   [[ "$grace_s" =~ ^[0-9]+$ ]] || return 78
@@ -1166,10 +1165,10 @@ _route_v2_quiesce_runner_before_recovery() {
   (( rc == 0 || rc == 3 )) || return "$rc"
 }
 
-# Called only by explicit resume/gate lifecycle paths.  It never creates an
-# attempt and loads the exact active pins before touching a transaction.  If a
-# crash happened in the instrumentation window, cleanup is completed first and
-# the pinned route's own `failed` transition CAS-rewinds to `instrument`.
+# Вызывается только из явных путей resume/gate. Функция не создаёт попытку и перед
+# обращением к транзакции загружает точные активные пины. Если сбой произошёл в окне
+# инструментации, сначала завершается очистка, затем переход `failed` закреплённого
+# маршрута CAS-возвратом переводит курсор на `instrument`.
 route_v2_recover_instrumentation() {
   local task attempt cleanup_rc cursor_tmp state node sequence completed rc
   _route_v2_require_isolation || return
@@ -1195,9 +1194,8 @@ route_v2_recover_instrumentation() {
   }
   rm -f -- "$cursor_tmp"
 
-  # A crash before the instrument commit leaves the cursor at instrument: the
-  # clean baseline is already the correct retry position and no fake ledger
-  # transition is needed.
+  # Сбой до фиксации instrument оставляет курсор на instrument: чистая базовая линия уже
+  # является правильной точкой повтора, поэтому фиктивный переход журнала не нужен.
   [[ "$state" == ready ]] || return 0
   [[ "$node" != instrument ]] || return 0
   case "$node" in

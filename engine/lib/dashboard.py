@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Живой дашборд песочниц и конвейера фабрики Arsenkin.
+Живой дашборд песочниц и конвейера фабрики.
 Собирает состояние на каждый GET (docker/redis/git/реестры) и отдаёт HTML
 с авто-обновлением каждые 5 секунд. Конвейер задачи рисуется SVG-графом
 с подсветкой активных узлов. Только stdlib.
-Запуск: dashboard.sh [порт]  (по умолчанию 8070)
+Запуск: dashboard [профиль] [порт]
 """
 import html
 import http.server
@@ -17,20 +17,21 @@ import time
 
 # Движок: STATE_DIR — где реестры задач (общий для всех профилей).
 STATE_DIR = os.environ.get('FACTORY_STATE', os.path.expanduser('~/.factory/state'))
-# Проектные пути/контейнеры/трекер — из env (задаёт профиль через systemd/env-файл).
-# Дефолты — arsenkin, чтобы текущий стенд работал без настройки.
-BE = os.environ.get('FACTORY_BE_ROOT', '/home/evildev/Workspace/arsenkin/be')
-FE = os.environ.get('FACTORY_FE_ROOT', '/home/evildev/Workspace/arsenkin/fe')
-DATA_MYSQL = os.environ.get('FACTORY_MYSQL_CONTAINER', 'arsenkin-mysql-1')
-DATA_REDIS = os.environ.get('FACTORY_REDIS_CONTAINER', 'arsenkin-redis-1')
-SB_PREFIX = os.environ.get('FACTORY_SANDBOX_PREFIX', 'ars-sb-t')     # +TASK-application-1
+# Проектные пути/контейнеры/трекер — из env или dashboard.env профиля.
+# Пустой дашборд не угадывает проект и не обращается к чужим каталогам/контейнерам.
+BE = os.environ.get('FACTORY_BE_ROOT', '')
+FE = os.environ.get('FACTORY_FE_ROOT', '')
+DATA_MYSQL = os.environ.get('FACTORY_MYSQL_CONTAINER', '')
+DATA_REDIS = os.environ.get('FACTORY_REDIS_CONTAINER', '')
+SB_PREFIX = os.environ.get('FACTORY_SANDBOX_PREFIX', 'sandbox-t')   # +TASK-application-1
 TIMER_CMD = os.environ.get('FACTORY_TIMER_CMD', '')                  # трекер времени задачи (опц.)
+TASK_BASE_URL = os.environ.get('FACTORY_TASK_BASE_URL', '')          # база ссылок на задачи (опц.)
 STALL_SEC = 15 * 60  # этап без прогресса дольше 15 минут = «застряла»
 # Флаг сторожа: tmpfs, поэтому исчезает при перезагрузке — после ребута фабрика не оживает сама
 
 
 # --- Проектные параметры берутся ПО ПРОФИЛЮ ЗАДАЧИ ---------------------------------
-# На фабрике живут задачи РАЗНЫХ проектов одновременно (#7900 — arsenkin, #101 — rdesigner).
+# На фабрике одновременно живут задачи разных проектов и профилей.
 # Глобальные значения выше — лишь дефолт «профиль не указан»; всё, что зависит от проекта
 # (где worktree, как называется контейнер стенда, есть ли трекер), читается из
 # profiles/<профиль>/dashboard.env для конкретной задачи.
@@ -43,7 +44,7 @@ def prof_env(profile):
         return _prof_env_cache[profile]
     env = {
         'BE': BE, 'FE': FE, 'MYSQL': DATA_MYSQL, 'REDIS': DATA_REDIS,
-        'SB_PREFIX': SB_PREFIX, 'TIMER': TIMER_CMD,
+        'SB_PREFIX': SB_PREFIX, 'TIMER': TIMER_CMD, 'TASK_BASE_URL': TASK_BASE_URL,
         'STAND': '', 'STAND_FE': '', 'STAND_URL': '',
     }
     path = os.path.join(PROFILES_DIR, profile, 'dashboard.env')
@@ -57,6 +58,7 @@ def prof_env(profile):
             'REDIS': raw.get('FACTORY_REDIS_CONTAINER', DATA_REDIS),
             'SB_PREFIX': raw.get('FACTORY_SANDBOX_PREFIX', SB_PREFIX),
             'TIMER': raw.get('FACTORY_TIMER_CMD', ''),
+            'TASK_BASE_URL': raw.get('FACTORY_TASK_BASE_URL', TASK_BASE_URL),
             'STAND': raw.get('FACTORY_STAND_CONTAINER', ''),
             'STAND_FE': raw.get('FACTORY_STAND_FE_CONTAINER', ''),
             'STAND_URL': raw.get('FACTORY_STAND_URL', ''),
@@ -90,8 +92,10 @@ def docker_state(name):
     return run(['docker', 'inspect', '-f', '{{.State.Status}}', name]) or ''
 
 
-def redis_cli(n, *args):
-    return run(['docker', 'exec', DATA_REDIS, 'redis-cli', '-n', str(n), *args])
+def redis_cli(container, n, *args):
+    if not container:
+        return ''
+    return run(['docker', 'exec', container, 'redis-cli', '-n', str(n), *args])
 
 
 def git_info(wt):
@@ -100,13 +104,13 @@ def git_info(wt):
     return br, len(dirty.splitlines()) if dirty else 0
 
 
-def queue_depths(n):
-    keys = redis_cli(n, '--scan', '--pattern', '_database_queue:*').splitlines()
+def queue_depths(container, n):
+    keys = redis_cli(container, n, '--scan', '--pattern', '_database_queue:*').splitlines()
     res = []
     for k in keys:
         if ':reserved' in k or ':delayed' in k or k.endswith(':notify'):
             continue
-        depth = redis_cli(n, 'llen', k)
+        depth = redis_cli(container, n, 'llen', k)
         if depth.isdigit() and int(depth) > 0:
             res.append((k.split(':', 1)[1], int(depth)))
     return sorted(res, key=lambda x: -x[1])
@@ -168,12 +172,17 @@ def collect_sandboxes():
             'stage_age': stage_age, 'app': app, 'fe': fe_c, 'state': state,
             'branch': '', 'dirty': 0, 'queues': [], 'horizon': False,
         }
-        wt = state.get('BE_WT') or f'{prof_env(profile)["BE"]}/worktree-t{task}'
+        pe = prof_env(profile)
+        wt = state.get('BE_WT') or (
+            os.path.join(pe['BE'], f'worktree-t{task}') if pe['BE'] else ''
+        )
         if os.path.isdir(wt):
             info['branch'], info['dirty'] = git_info(wt)
         if status == 'run' and state.get('REDIS_N'):
-            info['queues'] = queue_depths(state['REDIS_N'])
-            info['horizon'] = redis_cli(state['REDIS_N'], 'exists', '_database_masters') == '1'
+            info['queues'] = queue_depths(pe['REDIS'], state['REDIS_N'])
+            info['horizon'] = redis_cli(
+                pe['REDIS'], state['REDIS_N'], 'exists', '_database_masters',
+            ) == '1'
         boxes.append(info)
     return boxes
 
@@ -182,19 +191,28 @@ def collect_orphan_schemas(known_tasks):
     q = ("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE "
          "SCHEMA_NAME LIKE 'db\\_t%' OR SCHEMA_NAME LIKE 'tools\\_t%' "
          "OR (SCHEMA_NAME LIKE 'user\\_db\\_21%' AND LENGTH(SCHEMA_NAME) >= 18)")
-    out = run(['docker', 'exec', DATA_MYSQL, 'mysql', '-uroot', '-proot', '-N', '-e', q], timeout=6)
     orphans = []
-    for s in out.splitlines():
-        task = None
-        m1 = re.match(r'^(?:db|tools)_t(\d+)$', s)
-        m2 = re.match(r'^user_db_(\d+)$', s)
-        if m1:
-            task = m1.group(1)
-        elif m2 and int(m2.group(1)) >= 2100000000:
-            task = str(int(m2.group(1)) - 2100000000)
-        if task and task not in known_tasks:
-            orphans.append(s)
-    return orphans
+    containers = {DATA_MYSQL} if DATA_MYSQL else set()
+    containers.update(
+        prof_env(task_profile(task))['MYSQL'] for task in known_tasks
+        if prof_env(task_profile(task))['MYSQL']
+    )
+    for container in sorted(containers):
+        out = run(
+            ['docker', 'exec', container, 'mysql', '-uroot', '-proot', '-N', '-e', q],
+            timeout=6,
+        )
+        for schema in out.splitlines():
+            task = None
+            m1 = re.match(r'^(?:db|tools)_t(\d+)$', schema)
+            m2 = re.match(r'^user_db_(\d+)$', schema)
+            if m1:
+                task = m1.group(1)
+            elif m2 and int(m2.group(1)) >= 2100000000:
+                task = str(int(m2.group(1)) - 2100000000)
+            if task and task not in known_tasks:
+                orphans.append(schema)
+    return sorted(set(orphans))
 
 
 def collect_slots():
@@ -279,7 +297,8 @@ def fe_dirty_count(task):
     c = _dirty_cache.get(task)
     if c and now - c[0] < 30:
         return c[1]
-    wt = f'{FE}/worktree-t{task}'
+    fe_root = prof_env(task_profile(task))['FE']
+    wt = os.path.join(fe_root, f'worktree-t{task}') if fe_root else ''
     n = 0
     if os.path.isdir(wt):
         out = run(['git', '-C', wt, 'status', '--porcelain'], timeout=6)
@@ -293,7 +312,7 @@ def pipeline_statuses(task, sandbox_status, profile=None, route=None):
 
     Движок НЕ знает этапов конкретного проекта: узлы, их порядок и связь с ключами реестра
     берутся из схемы профиля (profiles/<имя>/graph.json), а если её нет — из этапов маршрута.
-    Раньше здесь был захардкожен конвейер arsenkin, и у другого проекта весь граф оставался
+    Раньше здесь был захардкожен конвейер одного профиля, и у остальных весь граф оставался
     серым, кроме случайно совпавших имён.
     """
     pf = parse_env_file(f'{STATE_DIR}/t{task}.pipeline')
@@ -319,9 +338,9 @@ def pipeline_statuses(task, sandbox_status, profile=None, route=None):
         raw = pf[key]
         if raw == 'skipped':
             # штатно пропускаемый этап — «—»; обязательный пропущенный — аномалия.
-            # Браузерная проверка пропускается штатно ТОЛЬКО когда фронт не менялся:
-            # в #7900 агент пропустил её при 285 изменённых файлах, и схема показывала
-            # спокойное «—» — человек на воротах не увидел бы, что UI никто не смотрел.
+            # Браузерная проверка пропускается штатно ТОЛЬКО когда фронт не менялся.
+            # Иначе схема показывает спокойное «—», и человек на воротах не увидит,
+            # что UI никто не смотрел.
             ok_to_skip = nid in optional
             if nid == 'browser' and ok_to_skip and task and fe_dirty_count(task) > 0:
                 ok_to_skip = False
@@ -774,7 +793,7 @@ def render_graph(statuses, task=None, plan_exists=False, route=None, profile=Non
 
 # ---------- Таймер B24 ----------
 
-# Трекер времени — проектный (arsenkin: b24-timer.mjs). Формат FACTORY_TIMER_CMD:
+# Трекер времени — проектный. Формат FACTORY_TIMER_CMD:
 # 'node /path/b24-timer.mjs' — дашборд добавит <action> <task>. Пусто = без таймеров.
 _TIMER = TIMER_CMD.split() if TIMER_CMD else []
 _timer_cache = {}  # task -> (monotonic_ts, elapsed_s, running)
@@ -782,8 +801,8 @@ _timer_cache = {}  # task -> (monotonic_ts, elapsed_s, running)
 
 def task_timer_cmd(task):
     """Команда трекера ДЛЯ ЭТОЙ задачи. У проекта трекера может не быть — тогда пусто.
-    Раньше трекер был один на фабрику, и про задачу #101 из rdesigner спрашивали B24 arsenkin,
-    получая чужую задачу с тем же номером."""
+    Раньше трекер был один на фабрику, поэтому для задачи одного проекта могли спросить
+    трекер другого и получить чужую задачу с тем же номером."""
     cmd = prof_env(task_profile(task))['TIMER']
     return cmd.split() if cmd else []
 
@@ -875,7 +894,7 @@ def refresh_task_info(task):
     if not cmd:
         # Проект без трекера: название лежит в реестре прогона — читаем ВСЕГДА, без TTL.
         # Номера прогонов переиспользуются, и кэш переживал смену задачи: карточка нового
-        # прогона показывала заголовок предыдущего (#102 «окна» подписан как «встать в комнату»).
+        # прогона показывала заголовок предыдущего.
         tk = parse_env_file(f'{STATE_DIR}/t{task}.pipeline').get('TICKET', '').strip()
         if tk and (_info_cache.get(task, (0.0, {}))[1] or {}).get('title') != tk:
             _info_cache[task] = (time.time(), {'title': tk, 'description': ''})
@@ -1275,7 +1294,7 @@ def render():
     boxes = collect_sandboxes()
     slots = collect_slots()
     orphans = collect_orphan_schemas({b['task'] for b in boxes})
-    main_br, _ = git_info(f'{BE}/html')
+    main_br, _ = git_info(os.path.join(BE, 'html')) if BE else ('', 0)
 
     p = []
     p.append('<!doctype html><html lang="ru"><head><meta charset="utf-8">')
@@ -1344,8 +1363,9 @@ def render():
                    '<span class="vc">&#9776; компактно</span>'
                    '<span class="vd">&#9638; подробно</span></span>'
                  + '</div>')
-    p.append(f'<div class="sub" data-key="sub">авто-обновление 5 с{pr_line} · arsenkin/master: '
-             f'{html.escape(main_br or "?")}{b24_line}</div>')
+    branch_line = f' · основная ветка: {html.escape(main_br)}' if main_br else ''
+    p.append(f'<div class="sub" data-key="sub">авто-обновление 5 с{pr_line}'
+             f'{branch_line}{b24_line}</div>')
 
     # --- Задачи: граф конвейера + инфо песочницы в ОДНОЙ карточке ---
     def sandbox_strip(b):
@@ -1532,13 +1552,13 @@ def render():
             # ── Предупреждения собираем здесь, а показываем в подвале: в шапке они забивали заголовок
             alerts = []
             # Демон умер, а этап помечен запущенным: работать некому, но реестр этого не знает
-            # и задача «выполняется» бесконечно. Молчать нельзя — человек узнаёт об этом,
-            # только когда сам спросит (#8060: замер висел мёртвым 16 минут).
+            # и задача «выполняется» бесконечно. Молчать нельзя — иначе человек узнаёт об этом
+            # только когда сам спросит.
             #
             # Но живого ORCH_PID недостаточно как признак работы: конвейер часто ведут РУКАМИ
             # из чата, там демона нет вовсе, а реестр обновляется через pipeline-set.sh.
-            # Поэтому смерть = мёртвый PID И застывший реестр (#7787: алерт врал сутки,
-            # пока задача активно двигалась вручную). Порог 30 минут: дольше без единой
+            # Поэтому смерть = мёртвый PID И застывший реестр; иначе алерт врёт,
+            # пока задача активно двигается вручную. Порог 30 минут: дольше без единой
             # отметки в реестре не идёт ни один этап конвейера.
             try:
                 idle_sec = time.time() - os.path.getmtime(f'{STATE_DIR}/t{b["task"]}.pipeline')
@@ -2569,7 +2589,19 @@ def render_task_info(task):
                        ('Постановщик', 'creator'), ('Ответственный', 'responsible')):
         if info.get(key):
             rows.append(f'<span>{label}</span><span>{html.escape(str(info[key]))}</span>')
-    link = f'<a href="https://b24.discript.ru{html.escape(info["url"])}" target="_blank">открыть в B24 &#8599;</a>' if info.get('url') else ''
+    raw_url = str(info.get('url') or '').strip()
+    base_url = prof_env(task_profile(task))['TASK_BASE_URL'].rstrip('/')
+    if base_url and not re.match(r'^https?://', base_url, flags=re.I):
+        base_url = ''
+    if re.match(r'^https?://', raw_url, flags=re.I):
+        task_url = raw_url
+    elif raw_url and base_url:
+        task_url = f'{base_url}/{raw_url.lstrip("/")}'
+    else:
+        task_url = ''
+    link = (f'<a href="{html.escape(task_url, quote=True)}" target="_blank" '
+            f'rel="noopener noreferrer">'
+            f'открыть задачу &#8599;</a>') if task_url else ''
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Задача {task}</title>'
             f'<style>{CSS}{DOC_CSS}</style><script>if (window.self !== window.top) document.documentElement.classList.add("in-frame");</script></head><body><div id="app">'
             f'<div class="top"><h1>&#128196; #{html.escape(task)} · {html.escape(info.get("title", "?"))}</h1></div>'
@@ -2695,8 +2727,10 @@ def render_tasks():
         if not cur:
             cur = 'готово' if pf.get('RETRO') == 'done' else '—'
         pe = prof_env(pf.get('PROFILE', ''))   # у каждого проекта свои корни репозиториев
-        be_wt = pf.get('BE_WT') or f'{pe["BE"]}/worktree-t{task}'
-        fe_wt = f'{pe["FE"]}/worktree-t{task}'
+        be_wt = pf.get('BE_WT') or (
+            os.path.join(pe['BE'], f'worktree-t{task}') if pe['BE'] else ''
+        )
+        fe_wt = os.path.join(pe['FE'], f'worktree-t{task}') if pe['FE'] else ''
         diffs = []
         for lbl, wt in (('BE', be_wt), ('FE', fe_wt)):
             if os.path.isdir(wt):
@@ -2705,8 +2739,8 @@ def render_tasks():
                 untr = run(['git', '-C', wt, 'ls-files', '--others', '--exclude-standard'], timeout=6).splitlines()
                 extra = f' · +{len(untr)} новых' if untr else ''
                 br = run(['git', '-C', wt, 'branch', '--show-current'], timeout=4)
-                # Ветка на сотни файлов — почти всегда след автоформатирования, а не работы задачи
-                # (#7900: 282 файла во фронте от eslint --fix). Такое надо видеть до приёмки, а не в PR.
+                # Ветка на сотни файлов — почти всегда след автоформатирования, а не работы задачи.
+                # Такое надо видеть до приёмки, а не в PR.
                 m = re.match(r'(\d+) files? changed', summ)
                 nfiles = int(m.group(1)) if m else 0
                 word = 'файл' if nfiles % 10 == 1 and nfiles % 100 != 11 else (
@@ -2892,7 +2926,7 @@ def render_plan(task, doc='plan'):
         buttons = f'<div class="gatebar sub gate-{cls}">Статус: {label}{via}</div>'
     gate_js = ('<script>function gate(t,d){var c="";'
                # Отклонение без замечаний бесполезно: конвейер вернёт работу в сборку, а агент
-               # не узнает, что чинить, и переделает то же самое (инцидент #8060).
+               # не узнает, что чинить, и переделает то же самое.
                'if(d==="reject"){c=prompt("Что не так? Агент переделает по этим замечаниям:");'
                'if(c===null)return;c=c.trim();'
                'if(c.length<5){alert("Без замечаний отклонять нельзя: агент не поймёт, что исправлять.");return;}}'
@@ -3148,7 +3182,7 @@ if __name__ == '__main__':
     _load_info_cache()   # названия из прошлого запуска — видны сразу, без ожидания сети
     _load_stats_cache()
     threading.Thread(target=b24_refresher, daemon=True).start()
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8070
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('FACTORY_DASHBOARD_PORT', '8070'))
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', port), Handler)
     print(f'Дашборд фабрики: http://localhost:{port}')
     srv.serve_forever()

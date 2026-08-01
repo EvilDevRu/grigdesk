@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build provider-neutral typed context for an immutable route-v2 attempt."""
+"""Формирует независимый от провайдера типизированный контекст для неизменяемой попытки route-v2."""
 
 from __future__ import annotations
 
@@ -21,6 +21,9 @@ RUN_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 TASK_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 PORT_RE = re.compile(r"^[1-9][0-9]{0,4}$")
 STAGE_RESULT_RE = re.compile(r"^([a-z0-9][a-z0-9_-]{0,40}):([a-z][a-z-]{0,20}):([0-9]{1,6})$")
+# Имя хоста стенда: буквы, цифры, точка и дефис. Схема, порт и слэши запрещены —
+# их добавляет сам движок, а «http://…» в значении дало бы http://http://host:5192.
+SERVICE_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?$")
 URL_RE = re.compile(r"^https?://[A-Za-z0-9.:[\]-]+(?:/.*)?$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
 MAX_JSON_BYTES = 256 * 1024
@@ -187,6 +190,18 @@ def optional_port(value: str, label: str) -> int | None:
     return port
 
 
+def service_host(value: str, label: str) -> str:
+    # Под каким именем агент открывает стенд. Не косметика: фронт вправе решать
+    # «локалка или прод» по window.location.hostname, и тогда 127.0.0.1 вместо
+    # localhost уводит приложение в продовую ветку авторизации. Инцидент t8165:
+    # приёмка открыла стенд по IP, фронт посчитал себя продом, ушёл на несуществующий
+    # /tools/login и зациклил редиректы — узел browser 90 минут висел на мёртвой
+    # странице, не проверив ни одного сценария.
+    if not SERVICE_HOST_RE.fullmatch(value):
+        fail(f"{label}: нужно имя хоста или адрес без схемы, порта и слэшей")
+    return value
+
+
 def parse_targets(values: list[str], mode: str) -> dict[str, str]:
     result: dict[str, str] = {}
     for index, value in enumerate(values):
@@ -306,6 +321,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
         fail("stage-result: записи должны идти по возрастанию sequence")
     frontend_port = optional_port(args.frontend_port, "frontend-port")
     api_port = optional_port(args.api_port, "api-port")
+    host = service_host(args.service_host, "service-host")
 
     actions = list(dict.fromkeys(args.delivery_action))
     if any(action not in DELIVERY_ACTIONS for action in actions):
@@ -362,12 +378,12 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
         },
         "services": {
             "frontendUrl": (
-                f"http://127.0.0.1:{frontend_port}"
+                f"http://{host}:{frontend_port}"
                 if frontend_port
                 else "unavailable"
             ),
             "apiUrl": (
-                f"http://127.0.0.1:{api_port}"
+                f"http://{host}:{api_port}"
                 if api_port
                 else "unavailable"
             ),
@@ -445,6 +461,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--container-name", required=True)
     result.add_argument("--frontend-port", default="")
     result.add_argument("--api-port", default="")
+    # Умолчание петлевое: движок не знает, как проект отличает локальный запуск.
+    # Имя объявляет профиль (PROFILE_SERVICE_HOST) — см. PROFILE-CONTRACT.
+    result.add_argument("--service-host", default="127.0.0.1")
     result.add_argument("--allowed-file", action="append", default=[])
     result.add_argument("--scope-file", default="")
     result.add_argument("--transaction-id", default="")

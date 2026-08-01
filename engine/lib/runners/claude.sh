@@ -26,8 +26,8 @@ runner_claude_family_alias() {
 }
 
 runner_claude_capabilities() {
-  # status_request обязателен: текущий Claude CLI не наследует fd 7 в тул-шелл
-  # (найдено живым прогоном t8165), fd-транспорт остаётся быстрым путём там,
+  # status_request обязателен: текущий Claude CLI не наследует fd 7 в тул-шелл;
+  # fd-транспорт остаётся быстрым путём там,
   # где он ещё жив, — stage-result сам выбирает доступный.
   printf 'status status_fd status_request sandbox tools structured_output fanout\n'
 }

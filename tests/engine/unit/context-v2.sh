@@ -18,27 +18,27 @@ ticket="$root/ticket.json"
 cat >"$ticket" <<'JSON'
 {
   "schema": 1,
-  "taskId": "8166",
+  "taskId": "42",
   "title": "Проверить вычисления",
   "description": "Исправить расчёт и доказать корректность трассировкой.",
   "acceptanceCriteria": [
     "Расчёт совпадает с ожидаемым",
     "Временная инструментация удалена"
   ],
-  "sourceUrl": "https://portal.example.test/tasks/8166"
+  "sourceUrl": "https://portal.example.test/tasks/42"
 }
 JSON
 
 attempt="a_11111111111111111111111111111111"
 catalog="$(printf 'a%.0s' {1..64})"
 route_hash="$(printf 'b%.0s' {1..64})"
-scope="$state/t8166.instrumentation-scope.list"
+scope="$state/t42.instrumentation-scope.list"
 allowed="$be_worktree/app/Calculation.php"
 printf '%s\n' "$allowed" >"$scope"
 
 common=(
-  --task 8166
-  --profile arsenkin
+  --task 42
+  --profile demo-profile
   --attempt "$attempt"
   --catalog-hash "$catalog"
   --route feature
@@ -52,7 +52,7 @@ common=(
   --frontend-worktree "$fe_worktree"
   --state-dir "$state"
   --sandbox-generation v2
-  --container-name ars-sb-t8166-application-1
+  --container-name demo-sb-t42-application-1
   --frontend-port 5192
   --api-port 8092
   --allowed-file "$allowed"
@@ -70,27 +70,44 @@ common=(
   --delivery-action pull-request
   --delivery-target be=master
   --delivery-target fe=main
-  --source-branch task-8166-v2
+  --source-branch task-42-v2
 )
 
 output=$("$tool" "${common[@]}")
 assert_rc 0 "$?" "provider-neutral typed context is built"
-assert_eq "8166" "$(jq -r '.task.id' <<<"$output")" \
+assert_eq "42" "$(jq -r '.task.id' <<<"$output")" \
   "context keeps the task id as data"
 assert_eq v2 "$(jq -r '.workspace.generation' <<<"$output")" \
   "context identifies the fresh sandbox generation"
 assert_eq "$allowed" "$(jq -r '.instrumentation.allowedFiles[0]' <<<"$output")" \
   "context includes the trusted transaction scope"
-assert_eq FACTORY-TRACE:t8166 "$(jq -r '.instrumentation.marker' <<<"$output")" \
+assert_eq FACTORY-TRACE:t42 "$(jq -r '.instrumentation.marker' <<<"$output")" \
   "marker is engine-owned rather than provider-owned"
 assert_eq publish "$(jq -r '.delivery.mode' <<<"$output")" \
   "normal v2 delivery is enabled"
 assert_eq approved "$(jq -r '.decisions.acceptance.status' <<<"$output")" \
   "accepted gate is represented as typed data"
-assert_eq task-8166-v2 "$(jq -r '.delivery.sourceBranch' <<<"$output")" \
+assert_eq task-42-v2 "$(jq -r '.delivery.sourceBranch' <<<"$output")" \
   "SHIP receives the exact source branch"
 assert_eq "http://127.0.0.1:5192" "$(jq -r '.services.frontendUrl' <<<"$output")" \
   "validated port becomes a local service URL"
+
+# Хост стенда объявляет профиль: приложение может отличать локальный запуск от прода
+# по имени хоста, и петлевой адрес тогда открывает не тот же стенд, а другой режим.
+named_host=("${common[@]}" --service-host localhost)
+named_output=$("$tool" "${named_host[@]}")
+assert_rc 0 "$?" "declared service host is accepted"
+assert_eq "http://localhost:5192" "$(jq -r '.services.frontendUrl' <<<"$named_output")" \
+  "profile-declared host reaches the browser stage"
+assert_eq "http://localhost:8092" "$(jq -r '.services.apiUrl' <<<"$named_output")" \
+  "api url follows the same declared host"
+
+# Схему и порт подставляет движок, поэтому в значении их быть не может: иначе агент
+# получит неоткрываемый адрес и узнает об этом, уже стоя перед мёртвой страницей.
+for bad_host in "http://localhost" "localhost:5192" "local host" "локалхост" ""; do
+  "$tool" "${common[@]}" --service-host "$bad_host" >/dev/null 2>&1
+  assert_rc 78 "$?" "service host rejects «$bad_host»"
+done
 
 without_push=()
 skip_next=0
@@ -109,7 +126,7 @@ done
 assert_rc 78 "$?" "publish refuses a delivery contract without required actions"
 
 bad_branch=("${common[@]}")
-bad_branch[${#bad_branch[@]}-1]='task-8166..escape'
+bad_branch[${#bad_branch[@]}-1]='task-42..escape'
 "$tool" "${bad_branch[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "unsafe source branch is rejected"
 

@@ -16,7 +16,7 @@ ENVF="$PROFILE_DIR/dashboard.env"
 GRAPHF="$PROFILE_DIR/graph.json"
 RUNNERSF="$PROFILE_DIR/runners.env"
 [[ -e "$PF" || -e "$RUNNERSF" ]] && { echo "профиль уже есть: $PF"; exit 1; }
-ROOT="${ROOT:-/home/$USER/Workspace/$NAME}"
+ROOT="${ROOT:-${HOME:?HOME не задан}/Workspace/$NAME}"
 mkdir -p "$PROFILE_DIR"
 
 # Этапы скелета задаются ОДИН раз: отсюда их берут и профиль, и схема графа.
@@ -38,6 +38,10 @@ PROFILE_AGENT_DIRS=""
 # относительно корня рабочего дерева. Пусто — сторож приёмки будет считать мусор поднятого
 # стенда правкой агента и остановит конвейер (см. PROFILE-CONTRACT, PROFILE_VOLATILE_PATHS).
 PROFILE_VOLATILE_PATHS=""
+# Имя, под которым агент открывает стенд (порт движок подставит сам). Умолчание петлевое.
+# Ставь localhost, если приложение отличает локальный запуск по имени хоста: по IP такой
+# фронт включит продовую авторизацию и приёмка утонет в редиректах вместо проверки.
+PROFILE_SERVICE_HOST="127.0.0.1"
 # Команды сверх личных настроек пользователя, например запуск тестов в контейнере:
 # PROFILE_AGENT_ALLOW=("Bash(docker exec ${NAME}-app:*)")
 
@@ -69,7 +73,7 @@ profile_sandbox_exists() { echo 1; }       # непусто = стенд уже 
 # возьмут один индекс, и вторая умрёт на «Address already in use».
 # profile_slots() {
 #   echo "RANGE 0 5"
-#   echo "USED 2 t1234 task"     # <k> <кто занял> <task|port|ip>
+#   echo "USED 2 t<TASK> task"   # <k> <кто занял> <task|port|ip>
 # }
 
 # --- что показывать кокпиту (движок это не использует) ---
@@ -185,6 +189,8 @@ FACTORY_SANDBOX_PREFIX=${NAME}
 # Контейнер стенда: с {task} — песочница на задачу, без него — общий постоянный стенд.
 FACTORY_STAND_CONTAINER=${NAME}
 FACTORY_STAND_URL=
+# База для относительных ссылок на задачи, например https://tracker.example.test.
+FACTORY_TASK_BASE_URL=
 # Трекер задач (необязателен). Без него название прогона берётся из текста тикета.
 FACTORY_TIMER_CMD=
 EOF

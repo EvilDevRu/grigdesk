@@ -212,7 +212,7 @@ bin/factory <TASK> start --profile <имя> --ticket "…"
 - **`profiles/<имя>/profile.sh`** — контекст стека, маршруты (`PROFILE_ROUTE_STAGES_<маршрут>`), промпты
   этапов, хуки стенда и доступ агента (`PROFILE_AGENT_DIRS` / `PROFILE_AGENT_ALLOW`);
 - **`profiles/<имя>/runners.env`** — обязательные primary/failover и family policy моделей;
-- **`profiles/<имя>/dashboard.env`** — пути, контейнер стенда и трекер для дашборда;
+- **`profiles/<имя>/dashboard.env`** — пути, контейнер стенда, трекер и базовый URL задач;
 - **`profiles/<имя>/graph.json`** — схема конвейера: узлы, петли возврата и `optional` (этапы,
   чей пропуск не аномалия). Нужна обязательно — кокпит без неё профиль не показывает.
   Заготовку из маршрутов делает `bin/factory-graph-new <имя>`, дальше подписи и петли — руками.

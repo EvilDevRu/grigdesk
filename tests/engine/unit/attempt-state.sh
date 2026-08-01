@@ -188,7 +188,7 @@ assert_rc 0 "$?" "recovery attempt can be abandoned independently"
 
 # Выходы этапов предшественницы не должны достаться новой попытке: CLI отказывается
 # перезаписывать непрочитанный файл, и агент либо принимает чужой артефакт за свой,
-# либо дописывает к нему свой (живой прогон t8165).
+# либо дописывает к нему свой.
 printf 'разведка прошлой попытки\n' >"$STATE_DIR/t42.recon.md"
 printf 'FE_PORT=5192\n' >"$STATE_DIR/t42.env"
 printf 'лог оркестратора\n' >"$STATE_DIR/t42.orch.log"
@@ -219,7 +219,7 @@ legacy_after=$(sha256sum "$STATE_DIR/t42.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \
   "all v2 operations leave the v1 pipeline byte-for-byte untouched"
 
-# Corruption and invalid paths fail closed.
+# Повреждения и недопустимые пути приводят к закрытому отказу.
 ATTEMPT_STATE_ID_OVERRIDE=a_55555555555555555555555555555555
 tampered=$(attempt_state_begin_v2 43 demo-profile "$routes_dir")
 tampered_begin_rc=$?

@@ -236,7 +236,7 @@ _multi_invoke() {
   # Счётчик из реестра — provider-writable и может отстать: новый start после
   # abandon создаёт чистый реестр, и эпохи откатывались бы к 1 против уже
   # записанных в доверенном run-state — тогда run_state_begin отбивает КАЖДЫЙ
-  # запуск кодом 73 и задача не стартует вовсе (найдено живым прогоном t8165).
+  # запуск кодом 73 и задача не стартует вовсе.
   # Доверенный control plane — источник истины: берём максимум, эпоха не убывает.
   local trusted_file trusted_epoch
   trusted_file=$(run_state_active_file "$MULTI_TASK" "$MULTI_STAGE" 2>/dev/null || true)

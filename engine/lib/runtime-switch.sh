@@ -104,8 +104,8 @@ runtime_interrupt_and_wait() {
   [[ -n "$own_pgid" && "$pgid" != "$own_pgid" ]] || return 73
   if ! runner_process_full_matches \
     "$pid" "$pgid" "$expected_session" "$starttime"; then
-    # The leader may have completed between the trusted read and the signal.
-    # That race is safe only when the exact PGID/session is already empty.
+    # Лидер мог завершиться между доверенным чтением и отправкой сигнала.
+    # Такая гонка безопасна, только если точные PGID/session уже пусты.
     runner_runtime_absent "$pgid" "$expected_session" "$starttime" && return 0
     return 73
   fi

@@ -54,7 +54,7 @@ assert_eq 4 "$count" "parallel breaker merge loses no entries"
 
 # Предохранитель без известного срока сброса НЕ бессрочен: адаптеры провайдеров
 # время сброса не сообщают, и «навсегда» выключало живой провайдер до ручной
-# чистки файла (прогон t8165 — Claude отлежал лимит, а конвейер его не брал).
+# чистки файла, даже когда Claude уже отлежал лимит.
 FACTORY_BREAKER_COOLDOWN_S=900
 breaker_record claude acct111 provider "" "" 1000 "" classifier
 breaker_match claude acct111 opus opus 1200

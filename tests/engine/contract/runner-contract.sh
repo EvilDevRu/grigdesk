@@ -105,10 +105,10 @@ else
   wait "$barrier_pid" 2>/dev/null || true
 fi
 
-# Widen the fork-to-barrier interval with trusted module initialization, then
-# signal the launcher inside that interval. The signal must be replayed only
-# after the exact control-root identity exists; provider run code must never
-# cross the barrier.
+# Расширяем окно между fork и барьером доверенной инициализацией модуля, затем
+# посылаем запускателю сигнал внутри этого окна. Сигнал должен быть воспроизведён
+# только после появления точной идентичности в корне управления; код провайдера
+# не должен пересечь барьер.
 slow_module="$TEST_ROOT/slow-barrier-runner.sh"
 printf '%s\n' \
   'if [[ "${FACTORY_LAUNCH_BARRIER:-0}" == 1 ]]; then' \
@@ -158,9 +158,9 @@ assert_file_missing "$(runner_trusted_identity_file 43)" \
 assert_eq idle "$RUNNER_LAUNCH_STATE" \
   "launcher leaves the signal critical section in a quiescent state"
 
-# Reproduce the restore seam directly: TERM restoration itself delivers INT
-# while INT still points at the temporary deferral trap. The helper must read
-# the deferred slot after restoring both handlers and replay that late signal.
+# Воспроизводим непосредственно окно восстановления: восстановление TERM само
+# отправляет INT, пока INT ещё указывает на временный trap отложенного сигнала.
+# Helper должен прочитать слот после восстановления обоих обработчиков и повторить сигнал.
 late_restore_handler() {
   printf 'replayed\n' >"$TEST_ROOT/late-restore-signal"
 }

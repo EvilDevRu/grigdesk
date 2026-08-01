@@ -88,8 +88,8 @@ assert_rc 0 "$?" "stubborn runner is killed after grace"
 kill -0 "$stubborn" 2>/dev/null
 assert_rc 1 "$?" "KILLed runner is reaped"
 
-# Регресс t8165: GNU timeout ставит провайдеру СВОЮ группу процессов внутри
-# сессии setsid-моста, поэтому «группа лидера пуста» никогда не было
+# GNU timeout ставит провайдеру СВОЮ группу процессов внутри сессии setsid-моста,
+# поэтому «группа лидера пуста» никогда не было
 # доказательством тишины — дерево агента (claude + MCP + docker) пережило TERM,
 # а launcher уже снял trusted identity. Граница остановки — сессия.
 leaked_file="$TEST_ROOT/leaked-group.pid"

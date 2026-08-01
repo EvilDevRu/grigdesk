@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Trusted execution cursor for a pinned route-v2 attempt.
+# Доверенный курсор выполнения для попытки с закреплённым маршрутом v2.
 #
-# Public API:
+# Публичный API:
 #   attempt_stage_state_init_v2 TASK ATTEMPT_ID ROUTE_ID
 #   attempt_stage_state_read_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
 #   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME
 #
-# The mutable cursor and its append-only, hash-chained event ledger live only in
+# Изменяемый курсор и его только дополняемый журнал событий с цепочкой хешей хранятся только в
 # <control-root>/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT>/stage-results.
-# This module deliberately never opens or writes legacy STATE_DIR/t*.pipeline files.
+# Этот модуль намеренно не открывает и не изменяет старые файлы STATE_DIR/t*.pipeline.
 #
-# Return codes follow attempt-state.sh:
-#   2  invalid caller input
-#   73 execution cursor has not been initialized
-#   75 stale active-attempt/current-node/state CAS
-#   78 corrupt state, bundle, transition, or unsafe filesystem object
+# Коды возврата соответствуют attempt-state.sh:
+#   2  неверные входные данные вызывающей стороны
+#   73 курсор выполнения не инициализирован
+#   75 устаревший CAS active-attempt/current-node/state
+#   78 повреждённое состояние, бандл или переход либо небезопасный объект файловой системы
 
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/attempt-state.sh"
@@ -223,8 +223,8 @@ def validate_action(value):
         if value["stop"] not in STOP_TARGETS:
             fail()
     else:
-        # A selected route is immutable for the lifetime of the attempt. Route
-        # escalation needs a separate, explicit attempt/route selection protocol.
+        # Выбранный маршрут неизменяем на всём протяжении попытки. Для перехода
+        # на другой маршрут нужен отдельный явный протокол выбора попытки/маршрута.
         fail()
     return mode
 
@@ -877,8 +877,8 @@ else:
 PY
 }
 
-# Populates ASTAGE_* globals after verifying the active attempt, immutable pins,
-# terminal state, selected route, and the pinned route bundle itself.
+# Заполняет глобальные ASTAGE_* после проверки активной попытки, неизменяемых пинов,
+# терминального состояния, выбранного маршрута и самого закреплённого бандла.
 _attempt_stage_state_load_locked() {
   local task=$1 attempt=$2 expected_route=${3:-}
   local root dir profile routes catalog route_pin route route_hash

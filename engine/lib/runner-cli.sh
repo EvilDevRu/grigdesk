@@ -397,9 +397,9 @@ _runner_cli_task() {
       active=$(run_state_active_file "$task" "$stage")
       run_id=$(_run_state_get "$active" RUN_ID)
       epoch=$(_run_state_get "$active" EPOCH)
-      # STATE_DIR is intentionally writable by the provider. Process identity
-      # therefore comes only from the exact control-plane record published
-      # while the runner was still behind its launch barrier.
+      # STATE_DIR намеренно доступен провайдеру для записи. Поэтому идентичность процесса
+      # берётся только из точной записи управляющего контура, опубликованной, пока раннер
+      # ещё находился за барьером запуска.
       identity=$(runner_trusted_identity_read "$task" "$stage" "$run_id" "$epoch") || {
         echo "trusted process identity активного runner недоступна" >&2
         return 73

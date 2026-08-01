@@ -36,7 +36,7 @@ assert_rc 0 "$?" "immutable route fixture is published"
 catalog_hash=$(json_field "$published" catalogHash)
 route_hash=$(json_field "$published" routeHash)
 
-# A legacy registry exists beside control state and must remain byte-identical.
+# Рядом с управляющим состоянием существует старый реестр; он должен остаться побайтно неизменным.
 printf 'PROFILE=legacy\nROUTE=feature\nBUILD=done\n' >"$STATE_DIR/t51.pipeline"
 legacy_before=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 
@@ -157,7 +157,7 @@ assert_rc 0 "$?" "read verifies the complete hash chain and pointer checksum"
 assert_eq "$after_replay" "$read_back" \
   "verified read returns the durable runtime exactly"
 
-# A stop action is derived and remains idempotent.
+# Действие остановки выводится из состояния и остаётся идемпотентным.
 stop_attempt=$(begin_selected 52 a_22222222222222222222222222222222)
 assert_rc 0 "$?" "stop scenario attempt is prepared"
 stop_dir="$(attempt_state_v2_task_root 52)/attempts/$stop_attempt"
@@ -177,7 +177,7 @@ assert_eq "$stopped" "$stopped_again" \
 assert_eq 2 "$(event_count "$stop_dir")" \
   "terminal idempotence does not append"
 
-# Same concurrent request has one durable event and two successful idempotent results.
+# Для одинаковых конкурентных запросов создаётся одно устойчивое событие и возвращаются два успешных идемпотентных результата.
 race_attempt=$(begin_selected 53 a_33333333333333333333333333333333)
 assert_rc 0 "$?" "same-outcome race attempt is prepared"
 race_dir="$(attempt_state_v2_task_root 53)/attempts/$race_attempt"
@@ -204,7 +204,7 @@ assert_eq 2 "$(event_count "$race_dir")" \
 assert_eq "$(cat "$TEST_ROOT/same-a.out")" "$(cat "$TEST_ROOT/same-b.out")" \
   "concurrent identical commits return the same durable cursor"
 
-# Conflicting concurrent outcomes have one winner and one stale-CAS loser.
+# У конфликтующих конкурентных исходов один победитель и один проигравший из-за устаревшего CAS.
 conflict_attempt=$(begin_selected 54 a_44444444444444444444444444444444)
 assert_rc 0 "$?" "conflicting race attempt is prepared"
 conflict_dir="$(attempt_state_v2_task_root 54)/attempts/$conflict_attempt"
@@ -229,7 +229,7 @@ assert_eq 0,75 "$conflict_codes" \
 assert_eq 2 "$(event_count "$conflict_dir")" \
   "losing concurrent outcome cannot append"
 
-# Corruption fails closed before any further transition.
+# Повреждение приводит к закрытому отказу до следующего перехода.
 corrupt_event_attempt=$(begin_selected 55 a_55555555555555555555555555555555)
 assert_rc 0 "$?" "event-corruption attempt is prepared"
 corrupt_event_dir="$(attempt_state_v2_task_root 55)/attempts/$corrupt_event_attempt"
@@ -257,7 +257,7 @@ chmod 400 "$pointer"
 attempt_stage_state_read_v2 56 "$corrupt_pointer_attempt" >/dev/null 2>&1
 assert_rc 78 "$?" "runtime checksum corruption fails closed"
 
-# Active-attempt CAS rejects stale readers after explicit abandonment.
+# CAS активной попытки отклоняет устаревших читателей после явной отмены.
 stale_attempt=$(begin_selected 57 a_77777777777777777777777777777777)
 assert_rc 0 "$?" "stale-attempt scenario is prepared"
 attempt_stage_state_init_v2 57 "$stale_attempt" debug >/dev/null
@@ -271,7 +271,7 @@ assert_rc 75 "$?" "stale attempt cannot commit"
 # Указание человека при возврате курсора: журнал — единственный его носитель, и оно
 # обязано доехать до промпта того захода, ради которого узел вернули. До этого канала
 # свободный человеческий текст был только у ворот, а разбор к обычному узлу приходилось
-# протаскивать через черновик хода — то есть мимо журнала (приёмка t8165).
+# протаскивать через черновик хода — то есть мимо журнала.
 note_attempt=$(begin_selected 58 a_88888888888888888888888888888888)
 assert_rc 0 "$?" "попытка для указания человека подготовлена"
 attempt_stage_state_init_v2 58 "$note_attempt" debug >/dev/null

@@ -4,7 +4,7 @@
 Именно рассинхрон (этапы правили в профиле, а граф остался общим) дал «кашу»:
 в feature рисовались узлы debug-маршрута. Проверка ловит это до того, как увидит человек.
 
-Запуск: python3 tests/engine/routes-sync.py [профиль]   (по умолчанию arsenkin)
+Запуск: python3 tests/engine/routes-sync.py <профиль>
 """
 import importlib.util
 import os
@@ -15,7 +15,10 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 HOME = os.environ.get('FACTORY_HOME', os.path.join(PROJECT_ROOT, 'engine'))
 PROFILES = os.environ.get('FACTORY_PROFILES_DIR', os.path.join(PROJECT_ROOT, 'profiles'))
-PROFILE = sys.argv[1] if len(sys.argv) > 1 else 'arsenkin'
+PROFILE = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('FACTORY_PROFILE', '')
+if not PROFILE:
+    print('профиль обязателен: передайте аргумент или FACTORY_PROFILE', file=sys.stderr)
+    sys.exit(2)
 
 spec = importlib.util.spec_from_file_location('dash', f'{HOME}/lib/dashboard.py')
 dash = importlib.util.module_from_spec(spec)
@@ -25,10 +28,10 @@ spec.loader.exec_module(dash)
 # (PLAN = дуэль планов + скептик + валидация + переводчик; BUILD = сборка + симплифаер).
 # Этап → узлы схемы. По умолчанию узел = lower(этап); отклонения профиль объявляет в
 # graph.json (keys) — здесь достаточно перечислить случаи «один этап рисуется НЕСКОЛЬКИМИ
-# узлами» (у arsenkin PLAN — это дуэль планов, скептик, валидация и переводчик).
+# узлами» (например, PLAN может включать планы, скептика, валидацию и переводчика).
 # SPLIT — ФОЛБЭК для профилей, не объявивших этап в keys: объявленное в graph.json главнее
-# (иначе арсенкинская четвёрка узлов требовалась бы от ЛЮБОГО профиля с этапом PLAN —
-# у cockpit план один, и он говорит об этом явной строкой keys {"plan": "PLAN"}).
+# (иначе эта четвёрка узлов требовалась бы от ЛЮБОГО профиля с этапом PLAN; простой
+# профиль может объявить один узел явной строкой keys {"plan": "PLAN"}).
 SPLIT = {'PLAN': ['plan', 'skeptic', 'validate', 'translator']}
 # Узлы вне конвейера этапов: их ставит сам движок (не профиль). Это подъём стенда и хвост
 # после конвейера — ENGINE_TAIL_KEYS в lib/dashboard.py. Список должен покрывать хвост
