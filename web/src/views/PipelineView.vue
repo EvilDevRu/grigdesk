@@ -76,9 +76,8 @@ function toggleCard(task) {
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
 const waitingCount = computed(() => filteredTasks.value.filter((t) => waitingReason(t.graph)).length);
 // Встали — это НЕ то же, что «ждут тебя». У ворот конвейер стоит штатно и с кнопкой,
-// а тут движок упёрся и сам позвал человека (или оборвался). Раньше эта разница нигде
-// не отражалась: #7800 час стоял с REPRO failed под тем же значком «○ стоит», что и
-// доделанная задача, и никто не заметил, что от него чего-то ждут.
+// а тут движок упёрся и сам позвал человека (или оборвался). Без этого различия REPRO failed
+// выглядит под тем же значком «○ стоит», что и доделанная задача, и ожидание человека незаметно.
 const stalledCount = computed(() => filteredTasks.value.filter((t) => t.stall).length);
 const stalledTitles = computed(() => filteredTasks.value
   .filter((t) => t.stall).map((t) => `#${t.task}: ${t.stall.title}`).join('\n'));
@@ -152,8 +151,7 @@ async function pollActivity() {
 }
 // Модалка живёт дольше этапа: её открывают на бегущем узле и не закрывают. Статус в ней
 // обязан идти за графом, иначе она навсегда остаётся «выполняется сейчас» и продолжает
-// опрашивать активность уже закончившегося этапа (прогон t8165: Скептик закрылся в 12:51,
-// конвейер встал у ворот, а модалка показывала работу).
+// опрашивать активность уже закончившегося этапа, пока конвейер стоит у ворот.
 const stageLive = computed(() => {
   if (!stage.value) return null;
   const g = tasks.value.find((x) => Number(x.task) === Number(stage.value.task))?.graph;

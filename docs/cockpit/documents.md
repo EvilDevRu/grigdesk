@@ -16,13 +16,13 @@
 Постоянный адрес использует не абсолютный путь хоста, а `DocumentRef`:
 
 ```text
-{ source: "cockpit", path: "docs/cockpit/kimi-integration-plan.md" }
+{ source: "cockpit", path: "docs/cockpit/architecture.md" }
 ```
 
 Ему соответствует route:
 
 ```text
-#/documents?source=cockpit&path=docs%2Fcockpit%2Fkimi-integration-plan.md
+#/documents?source=cockpit&path=docs%2Fcockpit%2Farchitecture.md
 ```
 
 Старые ответы агентов уже содержат ссылки вида `/home/.../file.md`. Chat renderer превращает

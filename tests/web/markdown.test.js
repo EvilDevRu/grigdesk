@@ -5,7 +5,7 @@ import { mdToHtml, mdToText } from '../../web/src/shared/md.js';
 
 test('GFM рендерит ссылки, списки, таблицы и inline code', () => {
   const html = mdToHtml([
-    '**Важно**: [`ChatSession.vue`](/home/evildev/Workspace/cockpit/web/src/views/chat/ChatSession.vue:60)',
+    '**Важно**: [`ChatSession.vue`](/home/user/Workspace/project/web/src/views/chat/ChatSession.vue:60)',
     '',
     '1. первый',
     '2. второй',
@@ -16,7 +16,7 @@ test('GFM рендерит ссылки, списки, таблицы и inline 
   ].join('\n'));
 
   assert.match(html, /<strong>Важно<\/strong>/);
-  assert.match(html, /<a href="\/home\/evildev\/Workspace\/cockpit\/web\/src\/views\/chat\/ChatSession\.vue:60"/);
+  assert.match(html, /<a href="\/home\/user\/Workspace\/project\/web\/src\/views\/chat\/ChatSession\.vue:60"/);
   assert.match(html, /<code>ChatSession\.vue<\/code>/);
   assert.match(html, /<ol>/);
   assert.match(html, /<table>/);

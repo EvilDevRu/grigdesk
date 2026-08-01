@@ -39,4 +39,9 @@ const pwa = usePwaStore();
   animation: sp .7s linear infinite;
 }
 @keyframes sp { to { transform: rotate(360deg); } }
+@media (max-width: 639px) {
+  .updbar { top: 7px; gap: 0; padding: 4px; box-shadow: 0 5px 18px #0008; }
+  .updbar > span { display: none; }
+  .updbar button { min-height: 36px; padding: 6px 13px; }
+}
 </style>

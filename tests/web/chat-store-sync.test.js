@@ -5,7 +5,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
+import {
+  apiHarness,
+  chatNotifications,
+  chatStoreFixture,
+  sseOf,
+} from './helpers/chat-store.js';
 
 const CHAT = {
   id: 'c1', taskId: null, title: 'Чат', messages: [{ role: 'user', text: 'Привет' }],
@@ -200,4 +205,55 @@ test('WEB-10: ход в ещё неизвестном чате тянет и с�
   assert.ok(added, 'чат подтянулся по событию хода');
   assert.equal(added.sending, true, 'и сразу с «думает…» — событие о старте мы уже пропустили');
   assert.equal(added.progressTokens, 12);
+});
+
+test('WEB-11: ответ, пришедший синхронизацией в фоновую PWA, показывает одно оповещение', async () => {
+  const chat = await fixture();
+  chat._visible = () => false;
+  const sse = sseOf(chat);
+  serveChat({
+    ...CHAT,
+    messages: [
+      ...CHAT.messages,
+      { role: 'assistant', text: 'Готово на другом устройстве' },
+    ],
+    updatedAt: 300,
+  });
+
+  sse('chat-store', { id: 'c1', archived: false, origin: 'другое-окно', at: 10 });
+  await new Promise(setImmediate);
+
+  assert.equal(chatNotifications().length, 1);
+  assert.match(chatNotifications()[0][0], /Агент ответил/);
+  assert.equal(chatNotifications()[0][1], 'Готово на другом устройстве');
+  assert.equal(chat.sessions[0].unread, true);
+
+  // Повторное SSE того же состояния не должно звонить снова.
+  sse('chat-store', { id: 'c1', archived: false, origin: 'другое-окно', at: 11 });
+  await new Promise(setImmediate);
+  assert.equal(chatNotifications().length, 1);
+});
+
+test('WEB-12: ответ из pending после обрыва фонового запроса тоже показывает оповещение', async () => {
+  const chat = await fixture({ sending: true, offline: true });
+  chat._visible = () => false;
+  apiHarness.get = async (url) => {
+    assert.equal(url, '/api/chat/pending');
+    return {
+      pending: [{
+        id: 'orphan-1', chatKey: 'c1', role: 'assistant', reply: 'Дошло после сна', at: 400,
+      }],
+    };
+  };
+
+  await chat._collectPending();
+
+  assert.equal(chatNotifications().length, 1);
+  assert.equal(chatNotifications()[0][1], 'Дошло после сна');
+  assert.equal(chat.sessions[0].unread, true);
+  assert.equal(chat.sessions[0].offline, false);
+
+  // Тот же pending до подтверждения DELETE может попасть в следующую сверку.
+  await chat._collectPending();
+  assert.equal(chatNotifications().length, 1);
 });

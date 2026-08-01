@@ -14,6 +14,7 @@ const PINIA_URL = pathToFileURL(PINIA_PATH).href;
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
 export const apiHarness = {};
 globalThis.__chatApi = apiHarness;
+globalThis.__chatNotifications = [];
 
 let patchedSource;
 let instance = 0;
@@ -24,14 +25,18 @@ function patch(source) {
     .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__chatApi;')
     .replace(
       "import { router } from '../router.js';",
-      "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };",
+      "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
+      + ' const document = { hidden: false };',
     )
     .replace("import { useUiContextStore } from './ui-context.js';", 'const useUiContextStore = () => ({});')
     .replace(
       "import { useProvidersStore } from './providers.js';",
       'const useProvidersStore = () => ({ modelOf: (id) => ({ id, model: {} }) });',
     )
-    .replace("import { notify } from '../shared/notify.js';", 'const notify = () => {};')
+    .replace(
+      "import { notify } from '../shared/notify.js';",
+      'const notify = (...args) => globalThis.__chatNotifications.push(args);',
+    )
     .replace(
       "import { sseSubscribe } from '../composables/useSse.js';",
       'const sseSubscribe = (fn) => { globalThis.__chatSse = fn; return () => {}; };',
@@ -53,6 +58,7 @@ function patch(source) {
  * @returns {Promise<object>} стор, уже помеченный как загруженный и синхронный с сервером
  */
 export async function chatStoreFixture(state = {}) {
+  globalThis.__chatNotifications = [];
   if (!patchedSource) patchedSource = patch(await readFile(STORE_PATH, 'utf8'));
   const [{ createPinia, setActivePinia }, { useChatStore }] = await Promise.all([
     import(pathToFileURL(PINIA_PATH).href),
@@ -74,6 +80,10 @@ export async function chatStoreFixture(state = {}) {
   // как «у нас есть несохранённое» (см. `_dirty`).
   chat._markSent();
   return chat;
+}
+
+export function chatNotifications() {
+  return globalThis.__chatNotifications;
 }
 
 /** Обработчик SSE, который стор зарегистрировал через initPerms(). */

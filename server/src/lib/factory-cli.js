@@ -56,15 +56,63 @@ function activeRunArtifacts({ stateDir, task, registry = {} }) {
     const eventsFile = path.join(runDir, 'events.jsonl');
     try {
       const stat = fs.statSync(eventsFile);
-      candidates.push({ runDir, eventsFile, mtimeMs: stat.mtimeMs });
+      candidates.push({ stage, runDir, eventsFile, mtimeMs: stat.mtimeMs });
     } catch { /* run успел зарегистрироваться, но launcher ещё не создал журнал */ }
   }
   return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0] || null;
 }
 
+// Хвоста в несколько десятков килобайт хватает: хартбит — короткая запись, а нужен
+// только сплошной их блок в самом конце журнала.
+const SILENCE_TAIL_BYTES = 32 * 1024;
+
+/**
+ * Сколько активный ход МОЛЧИТ — то есть не производит осмысленного вывода.
+ *
+ * Свежесть файла на этот вопрос не отвечает. Зависший вызов инструмента печатает
+ * хартбит каждые 30 секунд, journal всё время выглядит свежим, и кокпит рисует бодрое
+ * «агент пишет» над намертво вставшим агентом. Так и вышло в t8165: браузерная приёмка
+ * полтора часа простояла на мёртвой странице, конвейер выглядел работающим, и заметить
+ * это было нечем — движок ставит STALLED_HUMAN только после того, как сдастся сам, а
+ * здесь он честно ждал лимита этапа. Поэтому молчание считаем по последней ОСМЫСЛЕННОЙ
+ * записи, а длительность висящего вызова берём из самого хартбита: он её и сообщает.
+ *
+ * Исполнитель без хартбитов (Codex) даёт хвост из обычных событий, и ответ вырождается
+ * в прежний возраст файла — то есть правило не требует ничего от нового исполнителя.
+ *
+ * @returns {null | {stage: string, sec: number, tool: string|null}}
+ *          null — активного хода нет: молчать некому.
+ */
+export function readRunSilence({ stateDir, task, registry = {}, now = Date.now() }) {
+  const active = activeRunArtifacts({ stateDir, task, registry });
+  if (!active) return null;
+  const fileAgeSec = Math.max(0, Math.floor((now - active.mtimeMs) / 1000));
+  const tail = readTail(active.eventsFile, SILENCE_TAIL_BYTES);
+  const lines = tail ? tail.raw.split('\n') : [];
+  // Первая строка хвоста может быть обрезана посередине — она не наша.
+  if (tail?.truncated) lines.shift();
+
+  // Идём с конца, пока идут хартбиты: висеть может сразу несколько вызовов (модель
+  // просит инструменты пачкой), и честный ответ — по самому старому из них. Первая же
+  // осмысленная запись означает, что после неё ход снова что-то сказал.
+  let hangingSec = 0;
+  let hangingTool = null;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) continue;
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (!ev.heartbeat) break;
+    const sec = Number(ev.elapsed_time_seconds) || 0;
+    if (sec >= hangingSec) { hangingSec = sec; hangingTool = ev.tool_name || null; }
+  }
+  return { stage: active.stage, sec: Math.max(hangingSec, fileAgeSec), tool: hangingTool };
+}
+
 /**
  * Живая активность прогона: хвост stages.log (человекочитаемый) + свежесть журнала агента.
- * @returns {{ tail: Array<{ts,event}>, journalFresh: boolean, journalAgeSec: number|null, wfStatus: string }}
+ * @returns {{ tail: Array<{ts,event}>, journalFresh: boolean, journalAgeSec: number|null,
+ *            silentTool: string|null, wfStatus: string }}
  */
 export function readActivity({ stateDir, task, registry }) {
   let tail = [];
@@ -73,12 +121,12 @@ export function readActivity({ stateDir, task, registry }) {
     tail = parseStagesLog(log).slice(-12).map((e) => ({ ts: e.ts, event: e.event }));
   } catch { /* журнала нет */ }
 
-  // «Агент пишет» = свежая запись в events.jsonl канонического активного run.
+  // «Агент пишет» = свежая ОСМЫСЛЕННАЯ запись в events.jsonl канонического активного run:
+  // хартбиты висящего вызова активностью не считаются (см. readRunSilence).
   // Старые ACTIVE_DIR/JOURNAL и orch.log нужны для уже созданных legacy-прогонов.
   let journalFresh = false;
   let journalMtimeMs = null;
-  const active = activeRunArtifacts({ stateDir, task, registry });
-  if (active) journalMtimeMs = active.mtimeMs;
+  const silence = readRunSilence({ stateDir, task, registry });
 
   // На protocol v2 каждый ход обязан зарегистрировать ACTIVE_RUN, поэтому его отсутствие —
   // это «сейчас никто не пишет», а не «поищи где-нибудь ещё». Запасные пути тут только
@@ -86,7 +134,7 @@ export function readActivity({ stateDir, task, registry }) {
   // в тревожное «нет событий N мин».
   const legacy = registry.RUN_PROTOCOL !== '2';
   const adir = legacy && (registry.ACTIVE_DIR || (registry.JOURNAL ? path.dirname(registry.JOURNAL) : ''));
-  if (journalMtimeMs == null && adir) {
+  if (!silence && adir) {
     try {
       for (const f of fs.readdirSync(adir)) {
         if (!f.endsWith('.jsonl')) continue;
@@ -95,16 +143,24 @@ export function readActivity({ stateDir, task, registry }) {
       }
     } catch { /* нет каталога */ }
   }
-  if (journalMtimeMs == null && legacy) {
+  if (!silence && journalMtimeMs == null && legacy) {
     try {
       journalMtimeMs = fs.statSync(path.join(stateDir, 'logs', `t${task}.orch.log`)).mtimeMs;
     } catch { /* лога агента нет */ }
   }
-  const journalAgeSec = journalMtimeMs == null
+  const journalAgeSec = silence ? silence.sec : (journalMtimeMs == null
     ? null
-    : Math.max(0, Math.floor((Date.now() - journalMtimeMs) / 1000));
+    : Math.max(0, Math.floor((Date.now() - journalMtimeMs) / 1000)));
   journalFresh = journalAgeSec != null && journalAgeSec < 60;
-  return { tail, journalFresh, journalAgeSec, wfStatus: registry.WF_STATUS || null };
+  return {
+    tail,
+    journalFresh,
+    journalAgeSec,
+    // Чем именно занят молчащий ход: имя висящего вызова отличает честную сборку
+    // от мёртвого браузера лучше любой цифры.
+    silentTool: silence?.tool || null,
+    wfStatus: registry.WF_STATUS || null,
+  };
 }
 
 function readTail(logFile, maxBytes) {

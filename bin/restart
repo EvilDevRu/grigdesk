@@ -3,19 +3,25 @@
 # гасим все процессы на портах, ЖДЁМ освобождения, только потом стартуем новый.
 set -euo pipefail
 
-PORT="${COCKPIT_PORT:-8140}"
-# Второй сокет (локальный HTTPS). Ждать его тоже обязательно: сокеты закрываются не
-# одновременно, и новый процесс успевал стартовать, пока старый ещё держал 8143 — https
-# молча не поднимался, а в UI это выглядело как «сертификат не работает».
-TLS_PORT="${COCKPIT_TLS_PORT:-8143}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${COCKPIT_LOG:-$ROOT/server/.state/cockpit-server.log}"
+
+# node нужен и серверу, и безопасному чтению корневого .env.
+if ! command -v node >/dev/null 2>&1; then
+  echo "node не найден в PATH" >&2
+  exit 1
+fi
 
 # Машинные настройки — из корневого .env, как у bin/cockpit и systemd-юнита. Раньше путь к
 # venv распознавания был прописан прямо здесь, и работа диктовки зависела от способа запуска:
 # поднятый этим скриптом кокпит распознавал, поднятый systemd падал со spawn ... ENOENT.
-ENV_ARG=()
-[ -f "$ROOT/.env" ] && ENV_ARG=(--env-file "$ROOT/.env")
+source "$ROOT/bin/lib/runtime-env.sh"
+cockpit_load_runtime_env "$ROOT"
+PORT="$COCKPIT_EFFECTIVE_PORT"
+# Второй сокет (локальный HTTPS). Ждать его тоже обязательно: сокеты закрываются не
+# одновременно, и новый процесс может стартовать, пока старый ещё держит этот порт.
+TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
+ENV_ARG=("${COCKPIT_NODE_ENV_ARGS[@]}")
 
 listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
 busy() { listening "$PORT" || listening "$TLS_PORT"; }

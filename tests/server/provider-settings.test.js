@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { applyProviderSetting, resolveProviderSettings } from '../../server/src/lib/provider-settings.js';
-import claude from '../../server/src/lib/executors/claude.js';
+import claude, { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
 
 const EXECUTOR = {
   id: 'demo',
@@ -48,4 +48,21 @@ test('ускоренный вывод Claude объявлен выключенн
   assert.equal(fast.kind, 'toggle');
   assert.equal(fast.value, false);          // выключено по умолчанию…
   assert.notEqual(fast.disabled, true);     // …но именно выключено, а не заблокировано
+  assert.doesNotMatch(fast.label, /×|\b\d+(?:\.\d+)?\b/);
+  assert.doesNotMatch(fast.hint, /Opus\s+\d|\b\d+\.\d+\b/);
+});
+
+test('настройка fastMode явно передаётся каждому headless-запуску Claude', () => {
+  assert.deepEqual(claudeProviderSettingsArgs({ fastMode: true }), [
+    '--settings',
+    '{"fastMode":true}',
+  ]);
+  assert.deepEqual(claudeProviderSettingsArgs({ fastMode: false }), [
+    '--settings',
+    '{"fastMode":false}',
+  ]);
+  assert.deepEqual(claudeProviderSettingsArgs(), [
+    '--settings',
+    '{"fastMode":false}',
+  ]);
 });

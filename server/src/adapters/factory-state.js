@@ -8,6 +8,7 @@ import path from 'node:path';
 import { parsePipeline } from '../lib/pipeline-parse.js';
 import { parseStagesLog } from '../lib/stages-parse.js';
 import { detectStall } from '../lib/stall.js';
+import { readRunSilence } from '../lib/factory-cli.js';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factory-graph.js';
 import { buildV2RouteDef, v2StageKeys } from '../lib/route-v2-graph.js';
 import { RoutesV2Store } from '../modules/routes/store-v2.js';
@@ -228,6 +229,11 @@ export class FactoryStateAdapter {
       needsRun: registry.NEEDS_RUN === '1',
       stalledHuman: registry.STALLED_HUMAN === '1',
       stall: detectStall({ registry, timeline, daemonAlive }),
+      // Молчание идущего хода. detectStall сюда не дотягивается по устройству: он
+      // отвечает на «почему конвейер СТОИТ», а зависший агент формально работает —
+      // демон жив, этап running, флага остановки нет. Порог не применяем, отдаём
+      // замер: решение «это уже висяк» одно на всех и живёт в настройках.
+      silence: readRunSilence({ stateDir: await this.taskStateDir(task), task, registry }),
       stages,
       stageMap: map,
       updatedAt: mtime,

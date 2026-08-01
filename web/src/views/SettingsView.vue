@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watchEffect } from 'vue';
+import { computed, nextTick, ref, onMounted, onUnmounted, watchEffect } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
 import { useProvidersStore } from '../stores/providers.js';
@@ -16,16 +16,66 @@ import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-deb
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
 const TABS = [
-  { id: 'app', label: 'Приложение' },
-  { id: 'b24', label: 'Битрикс24' },
-  { id: 'providers', label: 'Исполнители' },
-  { id: 'runs', label: 'Запуски' },
-  { id: 'plugins', label: 'Плагины' },
-  { id: 'server', label: 'Сервер' },
-  { id: 'access', label: 'Доступ' },
+  {
+    id: 'app', label: 'Приложение', group: 'Основное', short: 'Экран и PWA',
+    description: 'Поведение Cockpit на этом устройстве: экран, установка и локальные возможности браузера.',
+    icon: 'M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M9 21h6 M12 17v4',
+  },
+  {
+    id: 'b24', label: 'Битрикс24', group: 'Основное', short: 'Портал и сессия',
+    description: 'Подключение к порталу и проверка серверной сессии Битрикс24.',
+    icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M8 8h8 M8 12h5 M8 16h3',
+  },
+  {
+    id: 'providers', label: 'Исполнители', group: 'Автоматизация', short: 'ИИ и модели',
+    description: 'Состояние CLI-исполнителей, доступные модели, обновления и общие каталоги.',
+    icon: 'M12 3v3 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
+  },
+  {
+    id: 'runs', label: 'Запуски', group: 'Автоматизация', short: 'Правила и контекст',
+    description: 'Правила подготовки запусков, восстановление конвейеров и диагностика фабрики.',
+    icon: 'M8 5v14l11-7z M4 5v14',
+  },
+  {
+    id: 'plugins', label: 'Плагины', group: 'Автоматизация', short: 'Модули Cockpit',
+    description: 'Включение системных и пользовательских модулей и их собственные параметры.',
+    icon: 'M8 3v4 M16 3v4 M5 7h14v4a7 7 0 0 1-14 0z M12 18v3',
+  },
+  {
+    id: 'server', label: 'Сервер', group: 'Система', short: 'Процесс и рестарт',
+    description: 'Состояние процесса Cockpit и безопасное применение серверных обновлений.',
+    icon: 'M5 4h14v6H5z M5 14h14v6H5z M8 7h.01 M8 17h.01',
+  },
+  {
+    id: 'access', label: 'Доступ', group: 'Система', short: 'Вход, HTTPS и шлюз',
+    description: 'Учётная запись, активные способы подключения и сертификаты для других устройств.',
+    icon: 'M7 10V7a5 5 0 0 1 10 0v3 M5 10h14v11H5z M12 14v3',
+  },
 ];
-const tab = ref(localStorage.getItem('cockpit-settings-tab') || 'b24');
-function setTab(id) { tab.value = id; localStorage.setItem('cockpit-settings-tab', id); }
+const TAB_GROUPS = ['Основное', 'Автоматизация', 'Система'].map((label) => ({
+  label,
+  items: TABS.filter((item) => item.group === label),
+}));
+const savedTab = localStorage.getItem('cockpit-settings-tab');
+const tab = ref(TABS.some((item) => item.id === savedTab) ? savedTab : 'app');
+const currentTab = computed(() => TABS.find((item) => item.id === tab.value) || TABS[0]);
+const settingsNav = ref(null);
+function revealTab(id, smooth = true) {
+  nextTick(() => {
+    const nav = settingsNav.value;
+    const button = nav?.querySelector(`[data-settings-tab="${id}"]`);
+    if (!nav || !button || nav.scrollWidth <= nav.clientWidth) return;
+    nav.scrollTo({
+      left: button.offsetLeft - (nav.clientWidth - button.offsetWidth) / 2,
+      behavior: smooth ? 'smooth' : 'auto',
+    });
+  });
+}
+function setTab(id) {
+  tab.value = id;
+  localStorage.setItem('cockpit-settings-tab', id);
+  revealTab(id);
+}
 
 // Репортим открытый таб в UI-контекст — чат с агентом знает, что открыто.
 const ui = useUiContextStore();
@@ -35,6 +85,7 @@ onUnmounted(() => ui.clear('settings'));
 // ── Приложение (настройки именно этого окна/устройства) ──
 const pwa = usePwaStore();
 const wakeLockNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;
+const notificationNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;
 
 // ── Битрикс24 ──
 const form = ref({ baseUrl: '', login: '', password: '' });
@@ -209,6 +260,25 @@ async function saveCompactWindow() {
       text: value
         ? `Чаты будут сжиматься при ${value.toLocaleString('ru')} токенах контекста. Применится к новым ходам.`
         : 'Порог снят: у каждого CLI останется свой (у Claude — почти у самого потолка окна модели).',
+    };
+  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
+}
+// Порог молчания хода конвейера. Секунды в поле показываем минутами: человек мыслит
+// «полчаса висит», а не «1800».
+const silenceWindowMin = ref(0);
+watchEffect(() => {
+  silenceWindowMin.value = Math.round((Number(prefs.value?.runSilenceWindow) || 0) / 60);
+});
+async function saveSilenceWindow() {
+  prefsMsg.value = null;
+  const value = Math.max(0, Math.round(Number(silenceWindowMin.value) || 0)) * 60;
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { runSilenceWindow: value });
+    prefsMsg.value = {
+      type: 'ok',
+      text: value
+        ? `Позовём, если ход конвейера замолчит дольше ${value / 60} мин.`
+        : 'Оповещение о зависших ходах выключено.',
     };
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
@@ -460,6 +530,7 @@ async function restartServer() {
 }
 
 onMounted(() => {
+  revealTab(tab.value, false);
   loadCurrent();
   prov.load();
   loadPrefs();
@@ -472,21 +543,74 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- Таб исполнителей шире остальных: плашки ИИ идут горизонтальным рядом -->
-  <div class="settings" :class="{ wide: tab === 'providers' }">
-    <nav class="tabs">
-      <button v-for="t in TABS" :key="t.id" class="tabbtn" :class="{ active: tab === t.id }" @click="setTab(t.id)">
-        {{ t.label }}
-      </button>
-    </nav>
+  <div class="settings">
+    <header class="settings-hero">
+      <div>
+        <p class="eyebrow">Центр управления</p>
+        <h2>Настройте Cockpit под свой процесс</h2>
+        <p>
+          Подключения, исполнители и системные параметры собраны в одном месте.
+          Изменения применяются только там, где это явно указано.
+        </p>
+      </div>
+      <div class="hero-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6h10 M18 6h2 M10 12h10 M4 12h2 M4 18h7 M15 18h5 M14 4v4 M6 10v4 M11 16v4" />
+        </svg>
+      </div>
+    </header>
+
+    <div class="settings-layout">
+      <aside class="settings-nav-wrap">
+        <nav ref="settingsNav" class="settings-nav" aria-label="Разделы настроек">
+          <div v-for="group in TAB_GROUPS" :key="group.label" class="nav-group">
+            <div class="nav-group-label">{{ group.label }}</div>
+            <button
+              v-for="item in group.items"
+              :key="item.id"
+              type="button"
+              class="settings-nav-item"
+              :data-settings-tab="item.id"
+              :class="{ active: tab === item.id }"
+              :aria-current="tab === item.id ? 'page' : undefined"
+              @click="setTab(item.id)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path :d="item.icon" />
+              </svg>
+              <span>
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.short }}</small>
+              </span>
+            </button>
+          </div>
+        </nav>
+      </aside>
+
+      <div class="settings-workspace" :class="{ wide: tab === 'providers' || tab === 'plugins' }">
+        <header class="section-intro">
+          <span class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path :d="currentTab.icon" />
+            </svg>
+          </span>
+          <div>
+            <p class="eyebrow">{{ currentTab.group }}</p>
+            <h2>{{ currentTab.label }}</h2>
+            <p>{{ currentTab.description }}</p>
+          </div>
+        </header>
 
     <!-- Приложение: локальные настройки устройства, не уезжают на другие окна -->
     <section v-if="tab === 'app'">
-      <p class="muted">
-        Эти настройки относятся только к текущему устройству и не меняют поведение
-        кокпита на других компьютерах и планшетах.
-      </p>
       <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Экран устройства</h3>
+            <p class="muted small">Локальная настройка — не влияет на другие компьютеры и планшеты.</p>
+          </div>
+          <span class="scope-pill">Это устройство</span>
+        </div>
         <div class="mode">
           <ToggleSwitch
             :model-value="pwa.wakeLockEnabled"
@@ -509,19 +633,60 @@ onMounted(() => {
         <p v-else-if="pwa.wakeLockEnabled" class="muted small">
           Блокировка включится, когда приложение снова станет активным.
         </p>
+
+        <div class="mode notification-mode">
+          <div class="notification-line">
+            <div>
+              <b>Системные оповещения</b>
+              <p class="muted small">
+                Ответы агентов, вопросы и остановки конвейера, пока приложение запущено.
+              </p>
+            </div>
+            <button
+              :disabled="pwa.notificationBusy || !pwa.notificationSupported"
+              @click="pwa.testNotification"
+            >
+              {{ pwa.notificationBusy
+                ? 'Проверяю…'
+                : (pwa.notificationPermission === 'granted' ? 'Проверить' : 'Включить и проверить') }}
+            </button>
+          </div>
+          <p v-if="pwa.notificationPermission === 'granted'" class="msg ok">
+            Оповещения разрешены на этом устройстве.
+          </p>
+          <p v-else-if="pwa.notificationError" class="msg err">{{ pwa.notificationError }}</p>
+          <p v-else-if="!pwa.notificationSupported" class="msg warn">
+            {{ notificationNeedsHttps
+              ? 'Оповещения доступны только при открытии кокпита через HTTPS.'
+              : 'Этот браузер не поддерживает системные оповещения.' }}
+          </p>
+          <p v-else class="muted small">
+            Разрешение спрашивается только по этой кнопке — автоматический запрос PWA браузер блокирует.
+          </p>
+        </div>
       </div>
     </section>
 
     <!-- Битрикс24 -->
     <section v-else-if="tab === 'b24'">
-      <p class="muted">Кокпит — единственный владелец сессии портала. Креды хранятся на сервере (не в git).</p>
       <div class="card">
-        <label>Портал<input v-model="form.baseUrl" placeholder="https://ваш-портал.bitrix24.ru" /></label>
-        <label>Логин<input v-model="form.login" autocomplete="username" placeholder="user@example.com" /></label>
-        <label>Пароль
-          <input v-model="form.password" type="password" autocomplete="current-password"
-                 :placeholder="configured ? '•••••• (задан, введите новый для замены)' : 'пароль портала'" />
-        </label>
+        <div class="card-head">
+          <div>
+            <h3>Подключение к порталу</h3>
+            <p class="muted small">Учётные данные хранятся только на сервере и не попадают в git.</p>
+          </div>
+          <span class="status-pill" :class="configured ? 'ok' : 'neutral'">
+            <span class="dot"></span>{{ configured ? 'Настроено' : 'Не настроено' }}
+          </span>
+        </div>
+        <div class="form-grid">
+          <label class="full">Портал<input v-model="form.baseUrl" placeholder="https://ваш-портал.bitrix24.ru" /></label>
+          <label>Логин<input v-model="form.login" autocomplete="username" placeholder="user@example.com" /></label>
+          <label>Пароль
+            <input v-model="form.password" type="password" autocomplete="current-password"
+                   :placeholder="configured ? '•••••• (задан, введите новый для замены)' : 'пароль портала'" />
+          </label>
+        </div>
         <div class="row">
           <button class="primary" :disabled="saving || !form.login || !form.password" @click="save">{{ saving ? 'Сохранение…' : 'Сохранить' }}</button>
           <button :disabled="testing || !configured" @click="testAuth">{{ testing ? 'Проверка…' : 'Проверить авторизацию' }}</button>
@@ -532,7 +697,7 @@ onMounted(() => {
 
     <!-- Исполнители: реестр LLM-агентов (/api/providers) -->
     <section v-else-if="tab === 'providers'">
-      <p class="muted">
+      <p class="section-note">
         Реестр агентов-исполнителей. Его же читают топбар (иконки) и в перспективе схемы —
         исполнителем шага сможет быть не только Claude. Авторизация — на хосте
         (<code>claude login</code>), кокпит только показывает статус.
@@ -668,11 +833,13 @@ onMounted(() => {
 
     <!-- Запуски: обязательные правила перед стартом триажа/конвейера -->
     <section v-else-if="tab === 'runs'">
-      <p class="muted">
-        Правила, которые кокпит применяет перед каждым запуском — триажем задачи
-        и стартом конвейера фабрики.
-      </p>
       <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Поведение запусков</h3>
+            <p class="muted small">Действует перед триажем задачи и стартом конвейера фабрики.</p>
+          </div>
+        </div>
         <div v-if="!prefs" class="muted">Загрузка…</div>
         <template v-else>
           <ToggleSwitch :model-value="prefs.gitRefreshBeforeRun" label="Обновлять репозитории перед запуском"
@@ -702,11 +869,25 @@ onMounted(() => {
             на окне 1M — около 950 000 токенов. А дорожает чат гораздо раньше — примерно
             с 250 000: кокпит поднимает процесс агента на каждое сообщение, и выше этого
             порога переписка перестаёт читаться из кэша и пишется в него заново по двойному
-            тарифу. Замер 31.07.2026: чат с контекстом 794 000 отдал на такие перезаписи
-            94% всего объёма записи кэша. <b>0</b> — не вмешиваться. Настройка применяется
+            тарифу. <b>0</b> — не вмешиваться. Настройка применяется
             к тем CLI, у которых есть эта ручка (сейчас — Claude); Codex её не предлагает.
             По этому же порогу краснеет кольцо контекста в чате — у моделей с маленьким
             окном оно не ждёт порога, а срабатывает на 80% окна, что бы здесь ни стояло.
+          </p>
+          <div class="compact-setting">
+            <label>
+              Звать, если ход конвейера молчит дольше
+              <NumberField v-model="silenceWindowMin" :min="0" :step="5" placeholder="0 — не звать" />
+              <span class="unit">мин</span>
+            </label>
+            <button class="btn" @click="saveSilenceWindow">Сохранить</button>
+          </div>
+          <p class="muted small">
+            Зависший вызов инструмента не выглядит аварией: демон жив, этап работает,
+            а движок вмешается только когда сгорит весь лимит этапа — это часы.
+            Замер по прошлым прогонам: законное молчание доходит до 10 минут (сборка,
+            прогон тестов), зависший вызов упирается в 30 — потолок MCP. <b>0</b> — не звать.
+            Кокпит только оповещает: остановить ход и решить, что с ним делать, — твоё.
           </p>
           <p v-if="prefsMsg" class="msg" :class="prefsMsg.type">{{ prefsMsg.text }}</p>
         </template>
@@ -753,7 +934,7 @@ onMounted(() => {
     <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
          папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера. -->
     <section v-else-if="tab === 'plugins'">
-      <p class="muted">
+      <p class="section-note">
         Плагин — отключаемый раздел кокпита: пункт в сайдбаре (под разделителем), свои API и настройки.
         Свой плагин — папка <code>plugins/&lt;id&gt;/</code> с манифестом <code>plugin.json</code>
         (+ опционально <code>server.js</code>), появится здесь после рестарта сервера.
@@ -789,13 +970,22 @@ onMounted(() => {
 
     <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
     <section v-else-if="tab === 'server'">
-      <p class="muted">
+      <p class="section-note">
         Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
         дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки) —
         ручные запуски не нужны. Кнопка ниже применяет новый код: свежие плагины и правки
         сервера подхватываются перезапуском.
       </p>
       <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Процесс Cockpit</h3>
+            <p class="muted small">Перезапуск применяет свежий серверный код и состав плагинов.</p>
+          </div>
+          <span v-if="srv" class="status-pill" :class="srv.systemd ? 'ok' : 'warn'">
+            <span class="dot"></span>{{ srv.systemd ? 'Под управлением systemd' : 'Ручной запуск' }}
+          </span>
+        </div>
         <div v-if="!srv" class="muted">Загрузка…</div>
         <template v-else>
           <p class="srvline">
@@ -805,7 +995,7 @@ onMounted(() => {
           <p v-if="!srv.systemd" class="muted small">
             Ручной запуск — режим разработки. Чтобы демон поднимался сам, один раз выполни
             <code>deploy/install.sh</code>. Режимы не смешивать: ручной экземпляр держит порт,
-            и юнит будет падать в цикле (уже наступали — 7553 падения).
+            и юнит будет падать в цикле.
           </p>
           <button class="btn" :disabled="restarting" @click="restartServer">
             {{ restarting ? 'Перезапускаю… жду возвращения' : 'Перезапустить сервер' }}
@@ -817,7 +1007,7 @@ onMounted(() => {
 
     <!-- Доступ: вход в сам кокпит (один пользователь) -->
     <section v-else-if="tab === 'access'">
-      <p class="muted">
+      <p class="section-note">
         Вход в кокпит. Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер
         не попадает — клиент получает только сессионную cookie.
       </p>
@@ -829,16 +1019,25 @@ onMounted(() => {
       </p>
 
       <div class="card">
-        <label>Логин<input v-model="acc.login" autocomplete="username" placeholder="необязательно" /></label>
-        <label>Текущий пароль
-          <input v-model="acc.currentPassword" type="password" autocomplete="current-password" />
-        </label>
-        <label>Новый пароль
-          <input v-model="acc.password" type="password" autocomplete="new-password" placeholder="минимум 8 символов" />
-        </label>
-        <label>Новый пароль ещё раз
-          <input v-model="acc.password2" type="password" autocomplete="new-password" />
-        </label>
+        <div class="card-head">
+          <div>
+            <h3>Учётная запись</h3>
+            <p class="muted small">Один пользователь Cockpit и его активные сессии.</p>
+          </div>
+          <span class="scope-pill">Сервер</span>
+        </div>
+        <div class="form-grid">
+          <label class="full">Логин<input v-model="acc.login" autocomplete="username" placeholder="необязательно" /></label>
+          <label class="full">Текущий пароль
+            <input v-model="acc.currentPassword" type="password" autocomplete="current-password" />
+          </label>
+          <label>Новый пароль
+            <input v-model="acc.password" type="password" autocomplete="new-password" placeholder="минимум 8 символов" />
+          </label>
+          <label>Новый пароль ещё раз
+            <input v-model="acc.password2" type="password" autocomplete="new-password" />
+          </label>
+        </div>
         <p class="muted small">
           Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
           Текущее устройство останется в системе.
@@ -848,7 +1047,7 @@ onMounted(() => {
             {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
           </button>
           <button @click="auth.doLogout()">Выйти</button>
-          <button @click="logoutAll">Выйти со всех устройств</button>
+          <button class="danger-ghost" @click="logoutAll">Выйти со всех устройств</button>
         </div>
         <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
       </div>
@@ -960,7 +1159,7 @@ onMounted(() => {
             <button class="primary" :disabled="tlsBusy || !tlsPicked.length || !tls.openssl" @click="generateTls">
               {{ tlsBusy ? 'Выпускаю…' : (tls.leaf.exists ? 'Перевыпустить сертификат' : 'Выпустить сертификат') }}
             </button>
-            <button v-if="tls.enabled" :disabled="tlsBusy" @click="dropTlsCertificate">Удалить сертификат</button>
+            <button v-if="tls.enabled" class="danger-ghost" :disabled="tlsBusy" @click="dropTlsCertificate">Удалить сертификат</button>
           </div>
           <p v-if="tlsMsg" class="msg" :class="tlsMsg.type">{{ tlsMsg.text }}</p>
         </div>
@@ -1015,29 +1214,213 @@ onMounted(() => {
         </p>
       </div>
       </template>
-    </section>
+        </section>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.settings { max-width: 56ch; display: flex; flex-direction: column; gap: 16px; }
-/* Широкий режим таба: ряд плашек. Пояснения и формы внутри всё равно держим узкими
-   (.narrow, section > p.muted) — длинная строка текста через весь экран не читается. */
-.settings.wide { max-width: 1180px; }
-.settings.wide section > p.muted { max-width: 56ch; }
-.settings.wide .card.narrow { max-width: 640px; }
-section { display: flex; flex-direction: column; gap: 8px; }
+.settings {
+  width: min(100%, 1280px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.settings-hero {
+  position: relative;
+  min-height: 150px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 28px 30px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 82% 20%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 28%),
+    linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, var(--accent)) 0%, var(--surface) 72%);
+  box-shadow: var(--shadow);
+}
+.settings-hero::after {
+  content: '';
+  position: absolute;
+  inset: auto -70px -110px auto;
+  width: 280px;
+  height: 220px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 50%;
+}
+.settings-hero > div:first-child { position: relative; z-index: 1; max-width: 680px; }
+.settings-hero h2, .section-intro h2 { margin: 0; letter-spacing: -.025em; }
+.settings-hero h2 { font-size: clamp(23px, 2vw, 30px); line-height: 1.2; }
+.settings-hero p:last-child { max-width: 620px; margin: 10px 0 0; color: var(--ink-mid); }
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: .095em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.hero-mark {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--ground));
+  color: var(--accent);
+  transform: rotate(3deg);
+}
+.hero-mark svg { width: 34px; height: 34px; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.tabbtn { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
-  color: var(--ink-mid); font-size: 14px; padding: 8px 12px 9px; cursor: pointer; white-space: nowrap; }
-.tabbtn:hover { color: var(--ink); }
-.tabbtn.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.settings-layout {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+}
+.settings-nav-wrap { min-width: 0; }
+.settings-nav {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 14px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+}
+.nav-group { display: grid; gap: 3px; }
+.nav-group-label {
+  padding: 5px 10px 4px;
+  color: var(--ink-mid);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.settings-nav-item {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-mid);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.settings-nav-item::before {
+  content: '';
+  position: absolute;
+  left: -11px;
+  width: 3px;
+  height: 22px;
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+}
+.settings-nav-item:hover { border-color: var(--line); background: var(--surface-2); color: var(--ink); }
+.settings-nav-item.active {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 11%, var(--surface-2));
+  color: var(--ink);
+}
+.settings-nav-item.active::before { background: var(--accent); }
+.settings-nav-item svg { flex: none; width: 20px; height: 20px; color: currentColor; }
+.settings-nav-item.active svg { color: var(--accent); }
+.settings-nav-item > span { min-width: 0; display: grid; gap: 1px; }
+.settings-nav-item strong { overflow: hidden; font-size: 13.5px; font-weight: 630; text-overflow: ellipsis; }
+.settings-nav-item small { overflow: hidden; color: var(--ink-mid); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.settings-workspace { min-width: 0; max-width: 860px; }
+.settings-workspace.wide { max-width: none; }
+.section-intro {
+  min-height: 80px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 2px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+.section-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  color: var(--accent);
+}
+.section-icon svg { width: 21px; height: 21px; }
+.section-intro h2 { font-size: 22px; line-height: 1.2; }
+.section-intro p:last-child { max-width: 700px; margin: 5px 0 0; color: var(--ink-mid); font-size: 13.5px; }
+section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
+.section-note {
+  max-width: 760px;
+  margin: 0;
+  padding: 11px 13px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 58%, var(--line));
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--ink-mid);
+  font-size: 12.5px;
+}
+.section-note code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 
 .muted code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.card {
+  min-width: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff) 0%, var(--surface) 100%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  box-shadow: inset 0 1px 0 #ffffff08;
+}
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.card-head h3 { margin: 0; font-size: 14px; font-weight: 660; letter-spacing: -.01em; }
+.card-head p { margin: 4px 0 0; }
+.scope-pill, .status-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 25px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ground);
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-mid); }
+.status-pill.ok { border-color: color-mix(in srgb, var(--good) 34%, var(--line)); color: var(--good); }
+.status-pill.ok .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 55%, transparent); }
+.status-pill.warn { border-color: color-mix(in srgb, var(--warn) 38%, var(--line)); color: var(--warn); }
+.status-pill.warn .dot { background: var(--warn); }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.form-grid .full { grid-column: 1 / -1; }
 /* Карточки плагинов — горизонтальной линией, с переносом на узких экранах. */
-.plugcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
+.plugcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; align-items: start; }
 .plugcard { gap: 8px; }
 .plughead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .plugver { color: var(--mut); font-size: 12px; margin-left: 8px; }
@@ -1048,6 +1431,7 @@ section { display: flex; flex-direction: column; gap: 8px; }
 .plugrow { display: flex; align-items: center; gap: 10px; }
 .plugrow label { min-width: 140px; color: var(--mut); font-size: 13px; }
 .plugrow .inp { max-width: 220px; }
+.plugrow input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
 /* Нормальный селект вместо нативного: свой фон, рамка и шеврон. */
 .plugrow select.inp {
   appearance: none; -webkit-appearance: none;
@@ -1057,8 +1441,8 @@ section { display: flex; flex-direction: column; gap: 8px; }
 }
 .plugrow select.inp:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .plugrow select.inp:focus { outline: none; border-color: var(--accent); }
-label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
-input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
+label { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
+input { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .debug-copy { margin: 5px 0 0; }
@@ -1096,14 +1480,16 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .prow.first { border-top: none; margin-top: 0; padding-top: 0; }
 button { padding: 9px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 14px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.primary { background: var(--accent); color: #07101d; border-color: var(--accent); font-weight: 650; }
+button.danger-ghost { border-color: color-mix(in srgb, var(--bad) 42%, var(--line)); color: color-mix(in srgb, var(--bad) 82%, #fff); }
+button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 10%, var(--surface-2)); border-color: var(--bad); }
 .msg { font-size: 13px; margin: 0; }
 .small { font-size: 12px; line-height: 1.5; }
 .msg.ok { color: var(--good); }
 .msg.err { color: var(--bad); }
 
 /* Плашка исполнителя: у каждого ИИ своя карточка, карточки — горизонтальным рядом */
-.pvcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
+.pvcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 14px; align-items: start; }
 .pvcard { gap: 10px; }
 .pvhead { display: flex; align-items: center; gap: 10px; }
 .pvtitle { flex: 1; min-width: 0; }
@@ -1154,6 +1540,11 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .mode { display: grid; gap: 2px; }
 .mode > p { margin: 0 0 0 39px; }
 .mode + .mode { border-top: 1px solid var(--line); padding-top: 12px; }
+.notification-mode > p { margin-left: 0; }
+.notification-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.notification-line > div { display: grid; gap: 2px; }
+.notification-line p { margin: 0; }
+.notification-line button { flex: none; }
 .tlsline { margin: 0; font-size: 13.5px; }
 .tlsline b { font-weight: 640; }
 .tlsline b.ok { color: var(--good); }
@@ -1172,4 +1563,85 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
   color: var(--ink-mid); }
 .tlssteps code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 .fp { font-size: 11px; }
+
+/* Планшет: вертикальная рейка превращается в липкую горизонтальную навигацию. */
+@media (max-width: 1099px) {
+  .settings { gap: 18px; }
+  .settings-layout { display: block; }
+  .settings-nav-wrap {
+    position: sticky;
+    top: -1px;
+    z-index: 20;
+    margin: 0 -1px;
+    padding: 8px 1px;
+    background: linear-gradient(var(--ground) 78%, transparent);
+  }
+  .settings-nav {
+    position: static;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 7px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .nav-group { display: contents; }
+  .nav-group-label { display: none; }
+  .settings-nav-item {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 132px;
+    padding: 9px 11px;
+    scroll-snap-align: start;
+  }
+  .settings-nav-item::before { display: none; }
+  .settings-workspace, .settings-workspace.wide { max-width: 920px; margin: 16px auto 0; }
+}
+
+/* Мобильный: одна колонка без горизонтального переполнения и с крупными действиями. */
+@media (max-width: 639px) {
+  .settings { gap: 12px; }
+  .settings-hero { min-height: 0; padding: 19px; border-radius: 14px; }
+  .settings-hero h2 { font-size: 21px; }
+  .settings-hero p:last-child { display: none; }
+  .hero-mark { width: 48px; height: 48px; border-radius: 14px; }
+  .hero-mark svg { width: 24px; height: 24px; }
+  .settings-nav-wrap { margin: 0 -16px; padding: 7px 16px; }
+  .settings-nav { margin: 0 -7px; }
+  .settings-nav-item { min-width: auto; padding: 9px 11px; }
+  .settings-nav-item small { display: none; }
+  .section-intro { min-height: 0; gap: 11px; padding: 4px 0 16px; }
+  .section-icon { width: 38px; height: 38px; border-radius: 10px; }
+  .section-intro h2 { font-size: 19px; }
+  .section-intro p:last-child { font-size: 12.5px; }
+  section { gap: 12px; padding-top: 14px; }
+  .card { padding: 15px; border-radius: 12px; }
+  .card-head { flex-wrap: wrap; gap: 10px; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .form-grid .full { grid-column: auto; }
+  .pvcards, .plugcards { grid-template-columns: minmax(0, 1fr); }
+  .pvhead { align-items: flex-start; flex-wrap: wrap; }
+  .pvstate { margin-left: 44px; }
+  .plughead { align-items: flex-start; }
+  .plugrow { align-items: stretch; flex-direction: column; gap: 5px; }
+  .plugrow label, .plugrow .inp { min-width: 0; max-width: none; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .row > button { width: 100%; }
+  .compact-setting { align-items: stretch; flex-direction: column; }
+  .compact-setting label { align-items: stretch; flex-direction: column; }
+  .compact-setting label :deep(.nf) { width: 100%; }
+  .trusted-add { flex-direction: column; }
+  .trusted-add button { width: 100%; }
+  .debug-setting { align-items: stretch; flex-direction: column; }
+  .debug-setting label { min-width: 0; }
+  .mode > p { margin-left: 0; padding-left: 39px; }
+  .notification-line { align-items: stretch; flex-direction: column; }
+  .notification-line button { width: 100%; }
+  .tlsaddr { flex-wrap: wrap; }
+  .tlsqr { display: grid; justify-items: center; }
+  .tlsqr img { width: min(180px, 100%); height: auto; }
+  .tlssteps { min-width: 0; width: 100%; }
+  .fp { overflow-wrap: anywhere; }
+}
 </style>

@@ -42,7 +42,7 @@ async function fixture(t) {
   ].join('\n'));
 
   // Задача v2 — в отдельном дереве, с маркерами протокола route-v2.
-  await writeFile(path.join(stateV2Dir, 't8165.pipeline'), [
+  await writeFile(path.join(stateV2Dir, 't8.pipeline'), [
     'PROFILE=demo',
     'ROUTE=feature',
     'RUN_PROTOCOL=2',
@@ -55,14 +55,14 @@ async function fixture(t) {
     'BUILD=running',
     '',
   ].join('\n'));
-  await writeFile(path.join(stateV2Dir, 't8165.env'), [
+  await writeFile(path.join(stateV2Dir, 't8.env'), [
     'FE_PORT=8461',
     'API_PORT=8462',
     'BE_WT=/tmp/nowhere-be',
     '',
   ].join('\n'));
-  await writeFile(path.join(stateV2Dir, 'logs', 't8165.stages.log'), [
-    '2026-07-31 12:00:00 [t8165] v2: attempt начат',
+  await writeFile(path.join(stateV2Dir, 'logs', 't8.stages.log'), [
+    '2026-07-31 12:00:00 [t8] v2: attempt начат',
     '',
   ].join('\n'));
 
@@ -81,19 +81,19 @@ async function fixture(t) {
 test('VIS-01: список задач сливает оба поколения состояния', async (t) => {
   const { stateDir, stateV2Dir, profilesDir } = await fixture(t);
   const adapter = new FactoryStateAdapter({ stateDir, stateV2Dir, profilesDir });
-  assert.deepEqual(await adapter.listTaskIds(), ['7', '8165']);
+  assert.deepEqual(await adapter.listTaskIds(), ['7', '8']);
 });
 
 test('VIS-02: сводка и граф v2-задачи читаются из state-v2 с меткой поколения', async (t) => {
   const { stateDir, stateV2Dir, profilesDir } = await fixture(t);
   const adapter = new FactoryStateAdapter({ stateDir, stateV2Dir, profilesDir });
 
-  const summary = await adapter.getTaskSummary('8165');
+  const summary = await adapter.getTaskSummary('8');
   assert.equal(summary.generation, 'v2');
   assert.equal(summary.profile, 'demo');
   assert.equal(summary.stageMap.BUILD.status, 'running');
 
-  const graph = await adapter.getTaskGraph('8165');
+  const graph = await adapter.getTaskGraph('8');
   assert.equal(graph.generation, 'v2');
   assert.equal(graph.statuses.build, 'run');
   assert.equal(graph.fePort, '8461');
@@ -134,16 +134,16 @@ test('VIS-04: мутации v1-CLI по v2-задаче отклоняются 
   const list = await app.inject({ method: 'GET', url: '/api/tasks' });
   assert.equal(list.statusCode, 200);
   const tasks = list.json().tasks.map((x) => [x.task, x.generation]);
-  assert.deepEqual(tasks, [['7', 'v1'], ['8165', 'v2']]);
+  assert.deepEqual(tasks, [['7', 'v1'], ['8', 'v2']]);
 
   // Ворота v2 — НЕ отказ, а мост в factory-v2 (см. VIS-05 ниже).
   const cases = [
-    ['POST', '/api/tasks/8165/stage/BUILD/done'],
-    ['POST', '/api/tasks/8165/stage/BUILD/skipped'],
-    ['POST', '/api/tasks/8165/sandbox/down'],
-    ['POST', '/api/tasks/8165/sandbox/retry'],
-    ['POST', '/api/tasks/8165/launch'],
-    ['POST', '/api/tasks/8165/instruction', { text: 'нельзя' }],
+    ['POST', '/api/tasks/8/stage/BUILD/done'],
+    ['POST', '/api/tasks/8/stage/BUILD/skipped'],
+    ['POST', '/api/tasks/8/sandbox/down'],
+    ['POST', '/api/tasks/8/sandbox/retry'],
+    ['POST', '/api/tasks/8/launch'],
+    ['POST', '/api/tasks/8/instruction', { text: 'нельзя' }],
   ];
   for (const [method, url, body] of cases) {
     const res = await app.inject({ method, url, ...(body ? { payload: body } : {}) });
@@ -152,24 +152,24 @@ test('VIS-04: мутации v1-CLI по v2-задаче отклоняются 
   }
 
   // Документы этапа читаются из дерева v2 (доки гейтов человеку нужны и там).
-  await writeFile(path.join(stateV2Dir, 't8165.plan.md'), 'план из v2');
-  const doc = await app.inject({ method: 'GET', url: '/api/tasks/8165/doc/plan' });
+  await writeFile(path.join(stateV2Dir, 't8.plan.md'), 'план из v2');
+  const doc = await app.inject({ method: 'GET', url: '/api/tasks/8/doc/plan' });
   assert.equal(doc.json().text, 'план из v2');
 
   // VIS-05: ворота v2 применяются мостом через factory-v2 с pin-ом попытки.
   const gate = await app.inject({
     method: 'POST',
-    url: '/api/tasks/8165/gate/GATE_ACCEPT/approve',
+    url: '/api/tasks/8/gate/GATE_ACCEPT/approve',
     payload: { comment: 'ок' },
   });
   assert.equal(gate.statusCode, 200, 'v2 gate проходит мостом, а не 409');
   assert.equal(gate.json().generation, 'v2');
   const calls = await readFile(path.join(root, 'bin', 'calls.log'), 'utf8');
-  assert.match(calls, /8165 gate --profile demo --attempt a_0123456789abcdef0123456789abcdef --node gate_accept --decision approved --commit-only --comment ок/,
+  assert.match(calls, /8 gate --profile demo --attempt a_0123456789abcdef0123456789abcdef --node gate_accept --decision approved --commit-only --comment ок/,
     'мост передаёт pin попытки, узел и решение');
   // Без --commit-only gate сам ведёт маршрут дальше и живёт столько, сколько
-  // работает следующий этап: http-таймаут кокпита убивал оркестратор посреди
-  // прогона, раннер оставался сиротой, а решение уже было записано (t8165).
+  // работает следующий этап: http-таймаут кокпита убивает оркестратор посреди
+  // прогона, раннер остаётся сиротой, а решение уже записано.
   assert.ok(calls.split('\n').filter((line) => / gate /.test(line))
     .every((line) => line.includes('--commit-only')),
   'синхронный вызов ворот не имеет права тянуть за собой прогон маршрута');

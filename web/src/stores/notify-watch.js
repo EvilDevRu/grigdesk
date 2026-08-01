@@ -6,22 +6,26 @@
 // по SSE state-change (AppShell) + редкий страховочный интервал.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
-import { notify, ensureNotifyPermission } from '../shared/notify.js';
+import { notify } from '../shared/notify.js';
 import { waitingReason } from '../shared/pipeline-wait.js';
+import { silenceReason } from '../shared/agent-activity.js';
 
 let started = false;
 let checking = false;
 const notified = new Set(); // задачи, о которых уже звонили (чтобы не звонить каждую проверку)
+const silenceNotified = new Set(); // то же для молчащих ходов, ключ «задача:этап»
 
 export const useNotifyWatchStore = defineStore('notifyWatch', {
-  // Две разные беды, поэтому и два списка: waiting — конвейер стоит на воротах и ждёт
+  // Три разные беды, поэтому и три списка: waiting — конвейер стоит на воротах и ждёт
   // РЕШЕНИЯ (это штатно, в интерфейсе есть кнопка); stalled — движок упёрся или оборвался
-  // (кнопки нет, надо разбираться). Смешивать их в одну цифру нельзя — см. #7800.
-  state: () => ({ waiting: [], stalled: [] }),
+  // (кнопки нет, надо разбираться); silent — формально всё идёт, но агент молчит дольше
+  // порога, и без звонка это заметно только по сгоревшему лимиту этапа. Смешивать их
+  // в одну цифру нельзя.
+  state: () => ({ waiting: [], stalled: [], silent: [] }),
   getters: {
     // Цифра чипа: сколько ЗАДАЧ требуют человека. Задача может одновременно ждать у ворот
     // и числиться вставшей — в чипе она одна.
-    attentionCount: (s) => new Set([...s.waiting, ...s.stalled].map((x) => x.task)).size,
+    attentionCount: (s) => new Set([...s.waiting, ...s.stalled, ...s.silent].map((x) => x.task)).size,
     // Подсказка чипа: сводка + поимённо, чтобы не открывать конвейер ради «кто именно».
     attentionTitle: (s) => {
       const lines = [];
@@ -33,6 +37,10 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         lines.push(`🛑 встали: ${s.stalled.length}`);
         lines.push(...s.stalled.map((x) => `#${x.task}: ${x.title}`));
       }
+      if (s.silent.length) {
+        lines.push(`💤 молчат: ${s.silent.length}`);
+        lines.push(...s.silent.map((x) => `#${x.task}: ${x.text}`));
+      }
       return lines.join('\n');
     },
   },
@@ -40,7 +48,6 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
     start() {
       if (started) return;
       started = true;
-      ensureNotifyPermission();
       this.check(true);
       // Страховка на случай пропущенных SSE (событие дергает check из AppShell)
       setInterval(() => this.check(), 120_000);
@@ -53,13 +60,26 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
       if (checking) return;
       checking = true;
       try {
-        const { tasks } = await api.get('/api/tasks');
+        // Порог молчания приходит вместе со списком: он общий для всех окон и лежит
+        // в настройках сервера, а не в голове клиента.
+        const { tasks, silenceWindow } = await api.get('/api/tasks');
         const waiting = [];
         const stalled = [];
+        const silentRuns = [];
         for (const t of tasks || []) {
           const id = String(t.task);
           // Затык виден уже в сводке задачи — графа для него не нужно.
           if (t.stall) stalled.push({ task: id, kind: t.stall.kind, title: t.stall.title });
+          const q = silenceReason(t, silenceWindow);
+          if (q) {
+            silentRuns.push({ task: id, stage: q.stage, text: q.text });
+            // Звоним на переходе и отдельно по каждому этапу: следующий узел, зависший
+            // так же, — это новая беда, а не продолжение старой.
+            const key = `${id}:${q.stage}`;
+            if (!silenceNotified.has(key) && !silent) {
+              notify(`Ход завис — #${id}`, q.text, `silence-${key}`);
+            }
+          }
           let g = null;
           try { g = await api.get(`/api/tasks/${id}/graph`); } catch { continue; }
           const w = waitingReason(g);
@@ -70,8 +90,12 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         // Право на звонок возвращается, как только задача ушла с ворот.
         notified.clear();
         waiting.forEach((w) => notified.add(w.task));
+        // Тем же порядком по молчанию: заговорил — забыли, замолчит снова — позвоним.
+        silenceNotified.clear();
+        silentRuns.forEach((x) => silenceNotified.add(`${x.task}:${x.stage}`));
         this.waiting = waiting;
         this.stalled = stalled;
+        this.silent = silentRuns;
       } catch { /* сервер недоступен — оставляем прошлую картину, проверим в следующий раз */ }
       finally { checking = false; }
     },

@@ -156,8 +156,8 @@ test('ChatSession передаёт в тултип полное загружен
   const browser = await browserHarness(t);
   const title = 'Ключевые фразы | Сохранить полный заголовок без обрезания';
   const session = {
-    id: 'chat-7785',
-    taskId: '7785',
+    id: 'chat-42',
+    taskId: '42',
     title: 'Широкий селект задачи',
     model: '',
     effort: '',
@@ -172,7 +172,7 @@ test('ChatSession передаёт в тултип полное загружен
   globalThis.__chatTaskTooltipApi = {
     async get(path) {
       assert.equal(path, '/api/tasks');
-      return { tasks: [{ task: '7785', route: 'arsenkin' }] };
+      return { tasks: [{ task: '42', route: 'demo-profile' }] };
     },
   };
   globalThis.__chatTaskTooltipChatStore = () => ({
@@ -187,7 +187,7 @@ test('ChatSession передаёт в тултип полное загружен
   });
   globalThis.__chatTaskTooltipTasksStore = () => ({
     async load(id) {
-      assert.equal(String(id), '7785');
+      assert.equal(String(id), '42');
       return { title };
     },
   });
@@ -224,8 +224,8 @@ test('ChatSession передаёт в тултип полное загружен
   await flushPromises();
 
   const tip = wrapper.find('.help-tip-stub');
-  assert.equal(tip.attributes('data-text'), `#7785 · ${title}`);
+  assert.equal(tip.attributes('data-text'), `#42 · ${title}`);
   assert.equal(Object.hasOwn(tip.attributes(), 'data-fixed'), true);
   assert.equal(tip.attributes('data-focusable'), 'false');
-  assert.equal(wrapper.find('.sel.task option[value="7785"]').text(), `#7785 · ${title}`);
+  assert.equal(wrapper.find('.sel.task option[value="42"]').text(), `#42 · ${title}`);
 });

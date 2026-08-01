@@ -51,7 +51,9 @@ async function factoryModule(fastify, opts) {
   // Список всех задач с картой статусов этапов.
   fastify.get('/api/tasks', async () => {
     const tasks = await factoryState.listTasks();
-    return { tasks };
+    // Порог молчания едет вместе со списком: «этот ход завис» обязаны считать одинаково
+    // чип в навигации, оповещение и карточка задачи, а хранится он в настройках.
+    return { tasks, silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0) };
   });
 
   // Деталь одной задачи: реестр + карта этапов + таймлайн.

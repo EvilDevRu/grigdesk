@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Запуск кокпита локально (host-native, без systemd).
 #
-#   bin/cockpit            собрать web и запустить сервер (прод-режим, один origin :8140)
+#   bin/cockpit            собрать web и запустить сервер (прод-режим, один origin)
 #   bin/cockpit dev        dev-режим: vite (:5180) + сервер с автоперезапуском
 #   bin/cockpit build      только собрать web
 #   bin/cockpit deps       установить зависимости server + web
@@ -11,17 +11,20 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD="${1:-run}"
-PORT="${COCKPIT_PORT:-8140}"
-
-# Корневой .env (если есть) грузим в сервер через нативный --env-file Node (≥20.6).
-ENV_ARG=()
-[ -f "$DIR/.env" ] && ENV_ARG=(--env-file "$DIR/.env")
 
 # node обязателен и должен быть в PATH (в «голом» шелле nvm-node может быть не подхвачен).
 if ! command -v node >/dev/null 2>&1; then
   echo "✗ node не найден в PATH. Загрузи nvm (напр. 'nvm use') или укажи node вручную." >&2
   exit 1
 fi
+
+# Корневой .env читаем штатным парсером Node, не исполняя его как shell-код.
+# Экспортированное окружение имеет приоритет. Те же аргументы передаём серверу.
+source "$DIR/bin/lib/runtime-env.sh"
+cockpit_load_runtime_env "$DIR"
+PORT="$COCKPIT_EFFECTIVE_PORT"
+TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
+ENV_ARG=("${COCKPIT_NODE_ENV_ARGS[@]}")
 
 # Занят ли порт (сервер уже запущен другим процессом/вкладкой).
 port_busy() { command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q "[:.]${PORT}[[:space:]]"; }
@@ -43,7 +46,7 @@ case "$CMD" in
     ;;
   dev)
     ensure_deps
-    echo "→ Dev: vite :5180 + сервер (--watch) :8140"
+    echo "→ Dev: vite :5180 + сервер (--watch) :$PORT"
     ( cd "$DIR/web" && npm run dev ) &
     VITE_PID=$!
     trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT INT TERM
@@ -58,7 +61,7 @@ case "$CMD" in
     ensure_deps; build_web
     # С планшета — по https: без него нет PWA (secure context), а http из сети сам уводит
     # редиректом на защищённый порт. Сертификат — «Настройки → Доступ → Локальный HTTPS».
-    echo "→ Сервер поднят: http://localhost:$PORT  (с планшета — https://<адрес мозга>:${COCKPIT_TLS_PORT:-8143})"
+    echo "→ Сервер поднят: http://localhost:$PORT  (с планшета — https://<адрес мозга>:$TLS_PORT)"
     cd "$DIR/server" && exec node "${ENV_ARG[@]}" src/app.js
     ;;
   *)

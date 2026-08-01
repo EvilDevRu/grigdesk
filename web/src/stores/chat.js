@@ -52,6 +52,22 @@ const sentChats = new Map();
 let sentMeta = '';
 let saveWarned = false;
 
+// Ответ может приехать тремя путями: прямо в send(), из chats/pending после обрыва
+// вкладки или синхронизацией истории с другого устройства. Ключи не дают одному ответу
+// зазвонить дважды, если пути пересеклись. Set ограничиваем, чтобы долгая вкладка не росла.
+const notifiedReplies = new Set();
+function rememberReplyNotice(key) {
+  if (!key || notifiedReplies.has(key)) return false;
+  notifiedReplies.add(key);
+  if (notifiedReplies.size > 500) notifiedReplies.delete(notifiedReplies.values().next().value);
+  return true;
+}
+
+function messageNoticeKey(chatId, message, index) {
+  if (message?.pid) return `${chatId}:pid:${message.pid}`;
+  return `${chatId}:message:${index}:${message?.role || ''}:${message?.text || ''}`;
+}
+
 // Когда историю последний раз сверяли с сервером целиком. Нужно, чтобы первое `hello`
 // (оно приходит сразу после загрузки) не тянуло всю историю по второму разу.
 let storeSyncedAt = 0;
@@ -307,11 +323,11 @@ export const useChatStore = defineStore('chat', {
           // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
           if (p.effort && p.effort !== s.effort) s.effort = p.effort;
           // Ответ доехал, пока мы смотрели в другое место — чат становится непрочитанным.
-          if (!this._visible(p.chatKey)) s.unread = true;
           s.sending = false;
           // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
           s.offline = false;
           s.updatedAt = p.at || Date.now();
+          this._notifyReply(s, p.reply || '(пусто)', `${p.chatKey}:pid:${p.id}`);
         }
         api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
       }
@@ -435,6 +451,21 @@ export const useChatStore = defineStore('chat', {
       if (!s?.unread) return;
       s.unread = false;
       this._persist();
+    },
+
+    /**
+     * Единая точка оповещения об ответе. Нужна не только send(): мобильная PWA часто
+     * теряет длинный HTTP-запрос в фоне, а готовый ответ потом забирает из pending или
+     * общей истории. Раньше эти два пути обновляли сообщения, но вообще не звонили.
+     */
+    _notifyReply(s, text, noticeKey = '') {
+      if (!s || this._visible(s.id)) return false;
+      const key = noticeKey
+        || messageNoticeKey(s.id, { role: 'assistant', text }, (s.messages || []).length - 1);
+      if (!rememberReplyNotice(key)) return false;
+      s.unread = true;
+      notify(`Агент ответил — ${this.tabLabel(s)}`, String(text || '').slice(0, 120), `chat-${s.id}`);
+      return true;
     },
 
     newSession(opts = {}) {
@@ -639,6 +670,9 @@ export const useChatStore = defineStore('chat', {
      */
     _applyRemoteChat(chat, archived) {
       this.archived ||= [];
+      const localBefore = this._get(chat.id) || this.archived.find((c) => c.id === chat.id);
+      const knownMessages = new Set((localBefore?.messages || [])
+        .map((message, index) => messageNoticeKey(chat.id, message, index)));
       const target = archived ? this.archived : this.sessions;
       const source = archived ? this.sessions : this.archived;
       const next = { ...chat };
@@ -660,6 +694,13 @@ export const useChatStore = defineStore('chat', {
       // Копия пришла с сервера — значит она там и лежит: помечаем отправленной, иначе
       // ближайший persist погнал бы её обратно и разбудил остальные окна вхолостую.
       const applied = live || next;
+      // В чужой копии мог появиться готовый ответ. Берём только последний НОВЫЙ ответ:
+      // при восстановлении связи несколько старых сообщений не должны высыпаться пачкой.
+      const freshReply = (applied.messages || [])
+        .map((message, index) => ({ message, key: messageNoticeKey(applied.id, message, index) }))
+        .filter(({ message, key }) => message.role === 'assistant' && !knownMessages.has(key))
+        .at(-1);
+      if (freshReply) this._notifyReply(applied, freshReply.message.text, freshReply.key);
       sentChats.set(applied.id, JSON.stringify(archived ? archivedSlimOf(applied) : slimOf(applied)));
     },
     /** Чат удалили в другом окне — убираем и здесь (удаление всегда осознанное действие). */
@@ -1016,17 +1057,14 @@ export const useChatStore = defineStore('chat', {
         s.steps = [];
         // Пользователь не смотрит на этот чат (другая вкладка ОС, другой раздел с закрытой
         // панелью или другой активный чат) — метка «непрочитано» и оповещение.
-        if (!this._visible(id)) {
-          s.unread = true;
-          notify(`Агент ответил — ${this.tabLabel(s)}`, (r.reply || '').slice(0, 120), `chat-${id}`);
-        }
+        this._notifyReply(s, r.reply || '(пусто)');
       } catch (e) {
         s.error = e.message;
         // Оборвалась СВЯЗЬ — это не провал хода: ход живёт в процессе сервера, а не в этой
         // вкладке, и его ответ доедет через chats/pending. Раньше сюда падала запись
         // `role:'error'`, она уезжала в общую историю, и живой ход выглядел проваленным на
-        // всех устройствах разом (01.08.2026 — три чата подряд: `вопрос → ⚠ Failed to fetch
-        // → ответ`, причём ответ был на месте). Отличаем по `status`: он есть только когда
+        // всех устройствах разом (`вопрос → ⚠ Failed to fetch → ответ`). Отличаем по `status`:
+        // он есть только когда
         // ответил сам сервер; у оборванного fetch (TypeError) и таймаута его нет.
         // Признак локальный (в историю не едет — см. slimOf): порвалось у ЭТОГО окна.
         if (e?.status === undefined) s.offline = true;

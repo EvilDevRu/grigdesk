@@ -16,6 +16,7 @@ import {
   parseClaudeUsagePayload,
   parseClaudeUsageResources,
 } from '../../server/src/lib/executors/claude.js';
+import { claudeOauthMetadata } from '../../server/src/lib/executors/_claude-catalog.js';
 import {
   classifyCodexUsageResponse,
   consumeCodexRateLimitReset,
@@ -289,6 +290,8 @@ test('Claude usage refreshes an expired CLI token instead of asking for login', 
   const usage = await fetchClaudeUsage({
     credentialsPath,
     now: () => now,
+    oauthClientId: 'fixture-client-id',
+    oauthTokenUrl: 'https://auth.example.test/v1/oauth/token',
     fetchImpl: async (url, init) => {
       calls.push({ url, init });
       if (url.endsWith('/v1/oauth/token')) {
@@ -312,6 +315,7 @@ test('Claude usage refreshes an expired CLI token instead of asking for login', 
   const refreshBody = JSON.parse(calls[0].init.body);
   assert.equal(refreshBody.grant_type, 'refresh_token');
   assert.equal(refreshBody.refresh_token, 'working-refresh');
+  assert.equal(refreshBody.client_id, 'fixture-client-id');
   assert.equal(refreshBody.scope, 'user:profile user:inference');
 
   const stored = JSON.parse(await readFile(credentialsPath, 'utf8'));
@@ -339,6 +343,8 @@ test('temporary Claude token refresh failure is not reported as logout', async (
   const raw = await fetchClaudeUsage({
     credentialsPath,
     now: () => now,
+    oauthClientId: 'fixture-client-id',
+    oauthTokenUrl: 'https://auth.example.test/v1/oauth/token',
     fetchImpl: async () => { throw new Error('network offline'); },
   });
   const status = classifyClaudeUsageResponse(raw);
@@ -347,6 +353,48 @@ test('temporary Claude token refresh failure is not reported as logout', async (
   assert.equal(raw.status, 0);
   assert.equal(status.state, 'unavailable');
   assert.equal(status.action, null);
+});
+
+test('OAuth-пара Claude извлекается из установленного бинаря единым источником', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-bin-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const bin = path.join(dir, 'claude-fixture');
+  await writeFile(bin, Buffer.from([
+    'https://auth.example.test/v1/oauth/token',
+    'https://auth.example.test/oauth/code/callback',
+    '12345678-1234-5678-9abc-123456789abc',
+  ].join('\0')));
+
+  assert.deepEqual(await claudeOauthMetadata({ claudeBin: bin }), {
+    tokenUrl: 'https://auth.example.test/v1/oauth/token',
+    clientId: '12345678-1234-5678-9abc-123456789abc',
+  });
+});
+
+test('без полной OAuth-пары refresh завершается до сетевого запроса', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const bin = path.join(dir, 'claude-without-oauth');
+  await writeFile(bin, 'нет oauth metadata');
+  await writeFile(credentialsPath, JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'expired-access',
+      refreshToken: 'working-refresh',
+      expiresAt: 1,
+    },
+  }));
+  let fetched = false;
+
+  const raw = await fetchClaudeUsage({
+    credentialsPath,
+    claudeBin: bin,
+    now: () => 10_000,
+    fetchImpl: async () => { fetched = true; throw new Error('не вызывать'); },
+  });
+
+  assert.equal(fetched, false);
+  assert.equal(raw.error, 'oauth_refresh_metadata_missing');
 });
 
 test('Claude usage payload is converted to subscription and scoped family bars', () => {

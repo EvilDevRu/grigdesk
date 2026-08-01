@@ -1,5 +1,6 @@
 // Состояние PWA: обновление, установка и локальные возможности текущего устройства.
 import { defineStore } from 'pinia';
+import { ensureNotifyPermission, notify } from '../shared/notify.js';
 
 const WAKE_LOCK_KEY = 'cockpit-screen-wake-lock';
 
@@ -23,6 +24,16 @@ function wakeLockSupported() {
   return typeof navigator !== 'undefined' && typeof navigator.wakeLock?.request === 'function';
 }
 
+function notificationSupported() {
+  return typeof window !== 'undefined'
+    && window.isSecureContext !== false
+    && 'Notification' in window;
+}
+
+function notificationPermission() {
+  return notificationSupported() ? window.Notification.permission : 'unsupported';
+}
+
 export const usePwaStore = defineStore('pwa', {
   state: () => ({
     needRefresh: false,
@@ -42,6 +53,13 @@ export const usePwaStore = defineStore('pwa', {
     wakeLockBusy: false,
     wakeLockError: '',
     wakeLockInitialized: false,
+    // Разрешение браузера нельзя спрашивать на старте: мобильные браузеры принимают
+    // запрос только из явного действия пользователя. Кнопка живёт в настройках устройства.
+    notificationSupported: notificationSupported(),
+    notificationPermission: notificationPermission(),
+    notificationBusy: false,
+    notificationError: '',
+    notificationInitialized: false,
   }),
   getters: {
     // Можно ли предложить установку прямо сейчас.
@@ -163,6 +181,59 @@ export const usePwaStore = defineStore('pwa', {
       if (lock && !lock.released) {
         try { await lock.release(); }
         catch { /* браузер мог освободить блокировку одновременно с нами */ }
+      }
+    },
+
+    // После возврата из системных настроек перечитываем permission: пользователь мог
+    // разрешить или запретить уведомления снаружи PWA.
+    initNotifications() {
+      if (this.notificationInitialized || typeof document === 'undefined') return;
+      this.notificationInitialized = true;
+      this.syncNotificationPermission();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.syncNotificationPermission();
+      });
+    },
+
+    syncNotificationPermission() {
+      this.notificationSupported = notificationSupported();
+      this.notificationPermission = notificationPermission();
+      if (this.notificationPermission === 'granted') this.notificationError = '';
+    },
+
+    // Вызывается только кнопкой в настройках — иначе Chrome/Android молча блокирует prompt.
+    async requestNotificationPermission() {
+      this.notificationBusy = true;
+      this.notificationError = '';
+      try {
+        const granted = await ensureNotifyPermission();
+        this.syncNotificationPermission();
+        if (!granted) {
+          this.notificationError = this.notificationPermission === 'denied'
+            ? 'Оповещения заблокированы. Разреши их в системных настройках приложения или браузера.'
+            : 'Браузер не выдал разрешение на оповещения.';
+        }
+        return granted;
+      } finally {
+        this.notificationBusy = false;
+      }
+    },
+
+    async testNotification() {
+      this.notificationError = '';
+      if (this.notificationPermission !== 'granted'
+          && !(await this.requestNotificationPermission())) return false;
+      this.notificationBusy = true;
+      try {
+        const shown = await notify(
+          'Оповещения работают',
+          'Кокпит сообщит, когда агент ответит или работа потребует тебя.',
+          'cockpit-notification-test',
+        );
+        if (!shown) this.notificationError = 'Браузер не смог показать тестовое оповещение.';
+        return shown;
+      } finally {
+        this.notificationBusy = false;
       }
     },
 

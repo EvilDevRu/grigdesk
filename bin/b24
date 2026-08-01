@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CLI-обёртка к B24-API Cockpit для хуков и скиллов.
-# Кокпит — единственный владелец сессии портала; всё идёт через :8140.
+# Кокпит — единственный владелец сессии портала; всё идёт через его локальный HTTP-порт.
 #   b24 dashboard                 — доска (мои задачи, показатели, графики)
 #   b24 task <id>                 — детали задачи
 #   b24 comment <id> <текст...>   — комментарий к задаче
@@ -12,13 +12,20 @@
 #   b24 users [запрос]            — ростер/поиск исполнителя
 set -uo pipefail
 
-BASE="${COCKPIT_URL:-http://localhost:8140}"
+# Скрипт может быть симлинком (~/.local/bin/b24) — корень ищем от РЕАЛЬНОГО файла.
+_self="$(readlink -f "$0")"
+_root="$(cd "$(dirname "$_self")/.." && pwd)"
+_port=8140
+if command -v node >/dev/null 2>&1; then
+  source "$_root/bin/lib/runtime-env.sh"
+  cockpit_load_runtime_env "$_root" || exit 1
+  _port="$COCKPIT_EFFECTIVE_PORT"
+fi
+BASE="${COCKPIT_URL:-http://localhost:$_port}"
 # Токен: из окружения, иначе — файл .state/cli-token (создаётся сервером, 0600).
-# Скрипт может быть симлинком (~/.local/bin/b24) — путь ищем от РЕАЛЬНОГО файла.
 TOKEN="${COCKPIT_TOKEN:-}"
 if [ -z "$TOKEN" ]; then
-  _self="$(readlink -f "$0")"
-  _tf="$(dirname "$_self")/../server/.state/cli-token"
+  _tf="$_root/server/.state/cli-token"
   [ -r "$_tf" ] && TOKEN="$(cat "$_tf")"
 fi
 AUTH=(); [ -n "$TOKEN" ] && AUTH=(-H "X-Cockpit-Token: $TOKEN")

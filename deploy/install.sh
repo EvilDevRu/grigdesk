@@ -10,6 +10,13 @@ NODE_DIR="$(dirname "$NODE_BIN")"   # в PATH сервиса: nvm-каталог
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="cockpit-server.service"
 
+# Сообщения после установки должны показывать те же порты, что прочитает сервер.
+# .env разбирает Node: его содержимое не исполняется shell'ом.
+source "$COCKPIT_DIR/bin/lib/runtime-env.sh"
+cockpit_load_runtime_env "$COCKPIT_DIR"
+PORT="$COCKPIT_EFFECTIVE_PORT"
+TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
+
 echo "→ Кокпит: $COCKPIT_DIR"
 echo "→ node:   $NODE_BIN ($(node -v))"
 
@@ -35,7 +42,7 @@ systemctl --user enable --now "$UNIT"
 echo "✓ Готово. Статус:"
 systemctl --user --no-pager status "$UNIT" | head -n 6 || true
 echo "  Логи:  journalctl --user -u $UNIT -f"
-echo "  URL:   http://localhost:8140"
+echo "  URL:   http://localhost:$PORT"
 echo
 # Вход в кокпит: пароль НЕ генерируем и в файлы не пишем — его задаёт человек при первом
 # открытии (экран первичной настройки). Пока пароль не задан, весь /api закрыт, а `setup`
@@ -43,7 +50,7 @@ echo
 if [ -f "$COCKPIT_DIR/server/.state/auth-account.json" ]; then
   echo "  Вход:  пароль уже задан (Настройки → Доступ, чтобы сменить)"
 else
-  echo "  Вход:  открой http://localhost:8140 и задай пароль — до этого API закрыт."
+  echo "  Вход:  открой http://localhost:$PORT и задай пароль — до этого API закрыт."
   echo "         ВАЖНО: сделай это ДО того, как откроешь кокпит из сети: экран первичной"
   echo "         настройки доступен любому, кто зайдёт первым."
 fi
@@ -51,5 +58,5 @@ echo
 echo "  Доступ из сети: нужен HTTPS, иначе пароль уйдёт открытым текстом."
 echo "                  «Настройки → Доступ»: включить режим «Из домашней сети», выпустить"
 echo "                  сертификат, поставить корень на планшет по QR, перезапустить сервер"
-echo "                  (второй порт — 8143). Без включённого режима кокпит слушает только 8140."
+echo "                  (второй порт — $TLS_PORT). Без включённого режима кокпит слушает только $PORT."
 echo "                  Готовый сертификат подключается через COCKPIT_TLS_KEY/COCKPIT_TLS_CERT."

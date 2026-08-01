@@ -1,7 +1,7 @@
 // Push-обновления обязаны покрывать ОБА поколения состояния. Маршруты v2 пишут реестр
 // в отдельный каталог (движок требует непересечения с legacy), а fs.watch висел только
-// на legacy: страница конвейера жила до ручного F5. На приёмочном прогоне t8165 это
-// выглядело так: Скептик закончился, конвейер встал у ворот плана, чип в навигации
+// на legacy: страница конвейера жила до ручного F5. Скептик уже заканчивался, конвейер
+// вставал у ворот плана, чип в навигации
 // (он опрашивает сам, раз в две минуты) зажёгся — а на схеме Скептик «горел» дальше.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,7 +57,7 @@ test('SSE watches both state generations', async (t) => {
 
   const second = await fetch(`${url}/api/events`);
   // Изменение в каталоге v2 обязано разбудить окно так же, как в legacy.
-  await writeFile(path.join(stateV2Dir, 't8165.pipeline'), 'GATE_PLAN=waiting\n');
+  await writeFile(path.join(stateV2Dir, 't42.pipeline'), 'GATE_PLAN=waiting\n');
   assert.equal(
     await waitForEvent(second.body, 'state-change', 5000),
     true,
@@ -65,7 +65,7 @@ test('SSE watches both state generations', async (t) => {
   );
 
   const third = await fetch(`${url}/api/events`);
-  await writeFile(path.join(stateDir, 't7379.pipeline'), 'BUILD=running\n');
+  await writeFile(path.join(stateDir, 't41.pipeline'), 'BUILD=running\n');
   assert.equal(
     await waitForEvent(third.body, 'state-change', 5000),
     true,
@@ -86,6 +86,6 @@ test('a missing state directory does not break the remaining watchers', async (t
   const url = await app.listen({ port: 0, host: '127.0.0.1' });
 
   const res = await fetch(`${url}/api/events`);
-  await writeFile(path.join(stateDir, 't7379.pipeline'), 'BUILD=running\n');
+  await writeFile(path.join(stateDir, 't41.pipeline'), 'BUILD=running\n');
   assert.equal(await waitForEvent(res.body, 'state-change', 5000), true);
 });

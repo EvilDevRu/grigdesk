@@ -252,4 +252,24 @@ test('TLS-SRC-02: сертификат из окружения тумблеро�
     }),
     /COCKPIT_TLS_KEY/,
   );
+
+  // Неполная env-пара не должна тихо проваливаться в локальный сертификат или http.
+  assert.throws(
+    () => loadTlsSource({
+      keyPath: path.join(dir, 'key.pem'),
+      certPath: '',
+      modeEnabled: true,
+      localTls,
+    }),
+    /должны быть заданы вместе/,
+  );
+  assert.throws(
+    () => loadTlsSource({
+      keyPath: '',
+      certPath: path.join(dir, 'cert.pem'),
+      modeEnabled: true,
+      localTls,
+    }),
+    /должны быть заданы вместе/,
+  );
 });

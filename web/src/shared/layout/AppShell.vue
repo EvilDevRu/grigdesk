@@ -132,7 +132,8 @@ const badges = computed(() => {
     out['/pipeline'] = {
       n: notifyWatch.attentionCount,
       // Вставший конвейер тревожнее ждущих ворот: у ворот есть кнопка, а тут — авария.
-      kind: notifyWatch.stalled.length ? 'stall' : 'wait',
+      // Зависший ход туда же: он жжёт лимит этапа прямо сейчас.
+      kind: notifyWatch.stalled.length || notifyWatch.silent.length ? 'stall' : 'wait',
       title: notifyWatch.attentionTitle,
     };
   }
@@ -152,7 +153,7 @@ const ICONS = {
   code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
-  settings: 'M21 4h-7 M10 4H3 M21 12h-9 M8 12H3 M21 20h-5 M12 20H3 M14 2v4 M8 10v4 M16 18v4',
+  settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
   demo: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M10 9l5 3-5 3V9z',
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
@@ -165,7 +166,6 @@ const nav = [
   { to: '/agents', label: 'Агенты', icon: 'agents' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
   { to: '/projects', label: 'Проекты', icon: 'projects' },
-  { to: '/settings', label: 'Настройки', icon: 'settings' },
 ];
 // Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У пользовательских
 // плагинов фронтовых страниц пока не бывает (только роуты /api/ext/…), а пункт с мёртвой
@@ -340,6 +340,14 @@ const { connected } = useSse((name) => {
           </span>
         </HelpTip>
       </div>
+      <router-link to="/settings" class="settings-link" active-class="active"
+                   title="Настройки" aria-label="Настройки">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="ICONS.settings" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </router-link>
     </header>
 
     <main class="content"><slot /></main>
@@ -359,7 +367,7 @@ const { connected } = useSse((name) => {
 
 <style scoped>
 .shell {
-  display: grid; height: 100%;
+  display: grid; height: 100%; min-width: 0; overflow: hidden;
   grid-template-columns: 216px 1fr;
   grid-template-rows: 54px 1fr;
 }
@@ -449,6 +457,13 @@ const { connected } = useSse((name) => {
 .mlogo { display: none; color: var(--accent); font-size: 18px; }
 .page { margin: 0; font-size: 15px; font-weight: 640; letter-spacing: -.01em; }
 .status { display: flex; align-items: center; gap: 14px; font-size: 12px; white-space: nowrap; }
+.settings-link {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center;
+  border-radius: 8px; color: var(--ink-mid); transition: background .12s, color .12s;
+}
+.settings-link .ic { width: 16px; height: 16px; }
+.settings-link:hover { background: var(--surface); color: var(--ink); }
+.settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
 .metric { color: var(--ink-mid); font-variant-numeric: tabular-nums; }
 .metric b { font-weight: 600; }
 .sep { color: var(--ink-mid); margin: 0 -4px; }
@@ -516,6 +531,20 @@ const { connected } = useSse((name) => {
 
 .content { grid-row: 2; grid-column: 2; overflow-y: auto; padding: 22px; }
 
+/* Планшет: полная рейка съедает четверть экрана и выталкивает рабочую область.
+   Оставляем узнаваемые иконки и все пункты, но освобождаем 154 px контенту. */
+@media (min-width: 760px) and (max-width: 1099px) {
+  .shell, .shell.collapsed { grid-template-columns: 62px minmax(0, 1fr); }
+  .brand .name, .lbl { display: none; }
+  .brand { justify-content: center; padding: 8px 0 16px; }
+  .navitem, .collapse-btn { justify-content: center; padding: 10px 0; gap: 0; }
+  .content { padding: 18px; }
+  .topbar { padding-inline: 18px; }
+}
+@media (min-width: 760px) and (max-width: 899px) {
+  .metric, .netbox .ip { display: none; }
+}
+
 /* Плашка установки — снизу, чтобы не спорить с баннером обновления сверху.
    На мобиле поднята над нижней навигацией. */
 .instbar {
@@ -530,16 +559,22 @@ const { connected } = useSse((name) => {
 @media (max-width: 759px) {
   .instbar { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
+@media (max-width: 639px) {
+  .instbar { gap: 3px; padding: 5px; }
+  .instbar > span { display: none; }
+  .instbar button { min-height: 36px; }
+}
 
 /* ── Мобайл: сайдбар → нижняя навигация ── */
 @media (max-width: 759px) {
   .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: 52px 1fr auto; }
-  .sidebar { grid-row: 3; grid-column: 1; flex-direction: row; padding: 0; border-right: none; border-top: 1px solid var(--line);
-    padding-bottom: env(safe-area-inset-bottom, 0); }
+  .sidebar { grid-row: 3; grid-column: 1; flex-direction: row; overflow-x: auto; padding: 0; border-right: none; border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom, 0); scrollbar-width: none; }
+  .sidebar::-webkit-scrollbar { display: none; }
   .brand, .collapse-btn { display: none; }
   /* На мобиле обе навигации сливаются в один нижний ряд */
   .nav, .nav-bottom { display: contents; }
-  .navitem { flex: 1; flex-direction: column; gap: 3px; font-size: 11px; padding: 9px 0; border-radius: 0; }
+  .navitem { flex: 0 0 62px; min-width: 62px; flex-direction: column; gap: 3px; font-size: 10px; padding: 9px 2px; border-radius: 0; }
   .navitem.active { background: none; }
   .topbar { grid-row: 1; grid-column: 1; padding: 0 16px; }
   .mlogo { display: inline; }
