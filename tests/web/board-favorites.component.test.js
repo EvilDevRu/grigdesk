@@ -178,6 +178,16 @@ test('UI-04/07: BoardView переключает favoriteOnly и передаё�
   assert.match(filter.text(), /1/);
   assert.equal(filter.attributes('aria-pressed'), 'false');
 
+  const projectBadges = wrapper.findAll('.project-badge');
+  assert.deepEqual(projectBadges.map((badge) => badge.text()), ['A', 'B']);
+  assert.equal(projectBadges[0].attributes('title'), 'Проект: A');
+  assert.equal(projectBadges[0].attributes('aria-label'), 'Проект: A');
+  const firstRowChildren = [...wrapper.get('li.trow').element.children];
+  assert.ok(firstRowChildren.indexOf(wrapper.get('button.stub-fav').element)
+    < firstRowChildren.indexOf(projectBadges[0].element));
+  assert.ok(firstRowChildren.indexOf(projectBadges[0].element)
+    < firstRowChildren.indexOf(wrapper.get('button.ttext').element));
+
   await filter.trigger('click');
   await flushPromises();
   assert.equal(filter.attributes('aria-pressed'), 'true');

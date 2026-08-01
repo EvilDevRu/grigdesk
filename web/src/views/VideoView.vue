@@ -9,7 +9,6 @@ if (!plugins.loaded) plugins.load();
 const pluginOff = computed(() => plugins.loaded && !plugins.enabled('video'));
 
 const BASE = (import.meta.env.VITE_BRAIN_URL || '').replace(/\/$/, '');
-const TOKEN = import.meta.env.VITE_COCKPIT_TOKEN || '';
 
 const doctorOk = ref(null);
 const uploading = ref(false);
@@ -37,8 +36,11 @@ async function onFile(e) {
   try {
     const fd = new FormData();
     fd.append('file', file);
+    // Авторизация — сессионной cookie (у fetch она уходит по умолчанию на своём origin).
+    // Заголовка `X-Cockpit-Token` здесь быть не должно: он теперь принадлежит локальным CLI,
+    // а из клиентского кода его значение пришлось бы класть в публичный бандл.
     const res = await fetch(`${BASE}/api/media/upload`, {
-      method: 'POST', body: fd, headers: TOKEN ? { 'X-Cockpit-Token': TOKEN } : {},
+      method: 'POST', body: fd, credentials: 'include',
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);

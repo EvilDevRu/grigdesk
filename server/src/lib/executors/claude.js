@@ -1,9 +1,10 @@
 // Исполнитель Claude (Anthropic, Claude Code CLI).
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { claudeCatalog } from './_claude-catalog.js';
+import { claudeCatalog, claudeOauthMetadata } from './_claude-catalog.js';
 import { npmLatest } from './_npm-latest.js';
 import { createStepSink } from '../chat/stream-steps.js';
 import { toClaudeSteps } from './_claude-steps.js';
@@ -64,14 +65,285 @@ const SYNTHETIC_MODEL = '<synthetic>';
 // установленного CLI — Anthropic его не документирует, поэтому ошибки НЕ глотаем:
 // поменяют ручку — человек должен увидеть, что именно отвалилось.
 const API = 'https://api.anthropic.com';
+const OAUTH_REFRESH_SKEW_MS = 5 * 60 * 1000;
 // Дефолтный месячный потолок при первом включении доплаты — как у CLI (2000 = 20.00).
 const DEFAULT_LIMIT_MINOR = 2000;
 
-async function cliToken() {
+function defaultCredentialsPath() {
+  return path.join(os.homedir(), '.claude', '.credentials.json');
+}
+
+async function readCliCredentials(credentialsPath) {
   try {
-    const creds = JSON.parse(await fs.readFile(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8'));
-    return creds?.claudeAiOauth?.accessToken || null;
-  } catch { return null; } // CLI-кредов нет
+    return JSON.parse(await fs.readFile(credentialsPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function tokenNeedsRefresh(oauth, now) {
+  if (!oauth?.accessToken) return true;
+  const expiresAt = Number(oauth.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= now + OAUTH_REFRESH_SKEW_MS;
+}
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Claude Code вращает refresh token и защищает это общей директорией-lock.
+ * Используем тот же lock, иначе одновременный ход CLI и фоновая проверка Cockpit
+ * могут оба обновить один refresh token и затереть рабочие credentials.
+ */
+async function acquireOauthRefreshLock(credentialsPath, sleep = wait) {
+  const lockPath = path.join(path.dirname(credentialsPath), '.oauth_refresh.lock');
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await fs.mkdir(lockPath, { mode: 0o700 });
+      return async () => {
+        try { await fs.rmdir(lockPath); } catch { /* lock уже снят */ }
+      };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      await sleep(250);
+    }
+  }
+  return null;
+}
+
+async function writeCliCredentials(credentialsPath, credentials) {
+  const tmp = path.join(
+    path.dirname(credentialsPath),
+    `.${path.basename(credentialsPath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    await fs.writeFile(tmp, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 });
+    await fs.rename(tmp, credentialsPath);
+  } finally {
+    try { await fs.unlink(tmp); } catch { /* rename уже убрал временный файл */ }
+  }
+}
+
+function refreshFailure({ hasCredentials = true, refreshable = true, error, invalid = false }) {
+  return { token: null, hasCredentials, refreshable, error, invalid };
+}
+
+async function oauthRefreshConfig(oauth, {
+  claudeBin,
+  oauthClientId,
+  oauthTokenUrl,
+}) {
+  if (oauthClientId || oauthTokenUrl) {
+    return oauthClientId && oauthTokenUrl
+      ? { clientId: oauthClientId, tokenUrl: oauthTokenUrl }
+      : { error: 'oauth_refresh_config_incomplete' };
+  }
+  if (oauth?.clientId || oauth?.tokenUrl) {
+    return oauth.clientId && oauth.tokenUrl
+      ? { clientId: oauth.clientId, tokenUrl: oauth.tokenUrl }
+      : { error: 'oauth_refresh_credentials_metadata_incomplete' };
+  }
+  const detected = await claudeOauthMetadata({ claudeBin }).catch(() => null);
+  return detected || { error: 'oauth_refresh_metadata_missing' };
+}
+
+/**
+ * Возвращает актуальный OAuth access token хостового Claude CLI.
+ * Access token короткоживущий; наличие истёкшего access token при живом refresh token
+ * означает нормальную авторизованную сессию, а не повод отправлять человека в login.
+ */
+export async function resolveClaudeCliToken({
+  credentialsPath = defaultCredentialsPath(),
+  fetchImpl = globalThis.fetch,
+  now = Date.now,
+  sleep = wait,
+  forceRefresh = false,
+  failedAccessToken = null,
+  claudeBin = 'claude',
+  oauthClientId = '',
+  oauthTokenUrl = '',
+} = {}) {
+  let credentials = await readCliCredentials(credentialsPath);
+  let oauth = credentials?.claudeAiOauth;
+  const hasCredentials = !!(oauth?.accessToken || oauth?.refreshToken);
+  if (!hasCredentials) {
+    return refreshFailure({
+      hasCredentials: false,
+      refreshable: false,
+      error: 'missing_credentials',
+    });
+  }
+  if (failedAccessToken && oauth.accessToken && oauth.accessToken !== failedAccessToken) {
+    return {
+      token: oauth.accessToken,
+      hasCredentials: true,
+      refreshable: !!oauth.refreshToken,
+      error: '',
+      invalid: false,
+    };
+  }
+  if (!forceRefresh && !tokenNeedsRefresh(oauth, now())) {
+    return {
+      token: oauth.accessToken,
+      hasCredentials: true,
+      refreshable: !!oauth.refreshToken,
+      error: '',
+      invalid: false,
+    };
+  }
+  if (!oauth.refreshToken) {
+    return {
+      token: oauth.accessToken || null,
+      hasCredentials: true,
+      refreshable: false,
+      error: 'missing_refresh_token',
+      invalid: false,
+    };
+  }
+
+  const refreshConfig = await oauthRefreshConfig(oauth, {
+    claudeBin,
+    oauthClientId,
+    oauthTokenUrl,
+  });
+  if (refreshConfig.error) return refreshFailure({ error: refreshConfig.error });
+
+  let release;
+  try {
+    release = await acquireOauthRefreshLock(credentialsPath, sleep);
+  } catch (error) {
+    return refreshFailure({
+      error: `oauth_refresh_lock_${String(error?.code || 'failed').toLowerCase()}`,
+    });
+  }
+  if (!release) {
+    credentials = await readCliCredentials(credentialsPath);
+    oauth = credentials?.claudeAiOauth;
+    if (oauth?.accessToken && oauth.accessToken !== failedAccessToken && !tokenNeedsRefresh(oauth, now())) {
+      return {
+        token: oauth.accessToken,
+        hasCredentials: true,
+        refreshable: !!oauth.refreshToken,
+        error: '',
+        invalid: false,
+      };
+    }
+    return refreshFailure({ error: 'oauth_refresh_busy' });
+  }
+
+  try {
+    // Пока ждали lock, сам CLI мог уже обновить и повернуть токены.
+    credentials = await readCliCredentials(credentialsPath);
+    oauth = credentials?.claudeAiOauth;
+    const observedAccessToken = failedAccessToken || oauth?.accessToken;
+    if (!oauth?.refreshToken) {
+      return refreshFailure({
+        hasCredentials: !!oauth?.accessToken,
+        refreshable: false,
+        error: 'missing_refresh_token',
+      });
+    }
+    if (
+      oauth.accessToken
+      && (
+        (failedAccessToken && oauth.accessToken !== failedAccessToken)
+        || (!forceRefresh && !tokenNeedsRefresh(oauth, now()))
+      )
+    ) {
+      return {
+        token: oauth.accessToken,
+        hasCredentials: true,
+        refreshable: true,
+        error: '',
+        invalid: false,
+      };
+    }
+
+    const refreshToken = oauth.refreshToken;
+    const scopes = Array.isArray(oauth.scopes) ? oauth.scopes.filter(Boolean) : [];
+    let response;
+    try {
+      const body = {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: refreshConfig.clientId,
+      };
+      if (scopes.length) body.scope = scopes.join(' ');
+      response = await fetchImpl(refreshConfig.tokenUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      return refreshFailure({ error: error?.message || 'oauth_refresh_network_error' });
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const code = String(data?.error || '');
+      const invalid = response.status === 401
+        || ['invalid_grant', 'invalid_refresh_token', 'expired_refresh_token'].includes(code);
+      return refreshFailure({
+        error: code ? `oauth_refresh_${code}` : `oauth_refresh_http_${response.status}`,
+        invalid,
+      });
+    }
+
+    const expiresIn = Number(data?.expires_in);
+    if (!data?.access_token || !(expiresIn > 0)) {
+      return refreshFailure({ error: 'oauth_refresh_invalid_response' });
+    }
+
+    // CAS поверх файла: процесс, который не знает о нашем lock, мог успеть повернуть
+    // refresh token. Его более свежую пару в этом случае не перезаписываем.
+    const latest = await readCliCredentials(credentialsPath);
+    const latestOauth = latest?.claudeAiOauth;
+    if (latestOauth?.refreshToken !== refreshToken) {
+      if (latestOauth?.accessToken && latestOauth.accessToken !== observedAccessToken) {
+        return {
+          token: latestOauth.accessToken,
+          hasCredentials: true,
+          refreshable: !!latestOauth.refreshToken,
+          error: '',
+          invalid: false,
+        };
+      }
+      return refreshFailure({ error: 'oauth_refresh_raced' });
+    }
+
+    const refreshedAt = now();
+    const returnedScopes = typeof data.scope === 'string'
+      ? data.scope.split(/\s+/).filter(Boolean)
+      : scopes;
+    const refreshExpiresIn = Number(data.refresh_token_expires_in);
+    const nextOauth = {
+      ...latestOauth,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || refreshToken,
+      expiresAt: refreshedAt + expiresIn * 1000,
+      scopes: returnedScopes,
+      ...(refreshExpiresIn > 0
+        ? { refreshTokenExpiresAt: refreshedAt + refreshExpiresIn * 1000 }
+        : {}),
+    };
+    await writeCliCredentials(credentialsPath, {
+      ...latest,
+      claudeAiOauth: nextOauth,
+    });
+    return {
+      token: nextOauth.accessToken,
+      hasCredentials: true,
+      refreshable: true,
+      error: '',
+      invalid: false,
+    };
+  } finally {
+    await release();
+  }
+}
+
+async function cliToken(options) {
+  return (await resolveClaudeCliToken(options)).token;
 }
 
 function authHeaders(tok) {
@@ -86,14 +358,12 @@ function authHeaders(tok) {
  * Сырой ответ ручки потребления. Сеть до api.anthropic.com бывает нестабильна (VPN) —
  * пробуем дважды.
  */
-async function fetchUsage() {
-  const tok = await cliToken();
-  if (!tok) return { hasToken: false };
+async function requestUsage(tok, fetchImpl) {
   let r = null;
   let error = null;
   for (let i = 0; i < 2; i++) {
     try {
-      r = await fetch(`${API}/api/oauth/usage`, {
+      r = await fetchImpl(`${API}/api/oauth/usage`, {
         headers: authHeaders(tok),
         signal: AbortSignal.timeout(10_000),
       });
@@ -105,7 +375,12 @@ async function fetchUsage() {
       r = null;
     }
   }
-  if (!r) return { hasToken: true, status: 0, error: error?.message || 'network_error' };
+  return { response: r, error: error?.message || '' };
+}
+
+async function usageResponse(result) {
+  const r = result.response;
+  if (!r) return { hasToken: true, status: 0, error: result.error || 'network_error' };
   const text = await r.text().catch(() => '');
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text ? { message: text.slice(0, 500) } : null; }
@@ -115,6 +390,56 @@ async function fetchUsage() {
     data,
     retryAfter: r.headers.get('retry-after'),
   };
+}
+
+export async function fetchClaudeUsage({
+  credentialsPath = defaultCredentialsPath(),
+  fetchImpl = globalThis.fetch,
+  now = Date.now,
+  sleep = wait,
+  claudeBin = 'claude',
+  oauthClientId = '',
+  oauthTokenUrl = '',
+} = {}) {
+  const tokenOpts = {
+    credentialsPath,
+    fetchImpl,
+    now,
+    sleep,
+    claudeBin,
+    oauthClientId,
+    oauthTokenUrl,
+  };
+  const auth = await resolveClaudeCliToken(tokenOpts);
+  if (!auth.token) {
+    if (!auth.hasCredentials) return { hasToken: false };
+    return {
+      hasToken: true,
+      status: auth.invalid ? 401 : 0,
+      error: auth.error,
+    };
+  }
+
+  let result = await requestUsage(auth.token, fetchImpl);
+  if (result.response?.status === 401 && auth.refreshable) {
+    const refreshed = await resolveClaudeCliToken({
+      ...tokenOpts,
+      forceRefresh: true,
+      failedAccessToken: auth.token,
+    });
+    if (refreshed.token && refreshed.token !== auth.token) {
+      result = await requestUsage(refreshed.token, fetchImpl);
+    } else if (!refreshed.invalid) {
+      // Живая OAuth-сессия, которую сейчас не удалось обновить, — временный сбой,
+      // а не команда человеку повторно логиниться.
+      return {
+        hasToken: true,
+        status: 0,
+        error: refreshed.error || 'oauth_refresh_failed',
+      };
+    }
+  }
+  return usageResponse(result);
 }
 
 /**
@@ -367,11 +692,16 @@ async function orgCall(tok, org, method, sub, body) {
  * Configure Claude overage. Kept outside the executor object so the provider
  * action map remains a thin, explicit allow-list rather than a generic RPC.
  */
-async function configureClaudeExtraUsage(patch = {}) {
-  const tok = await cliToken();
+async function configureClaudeExtraUsage(patch = {}, config = {}) {
+  const tokenOpts = {
+    claudeBin: config.claudeBin,
+    oauthClientId: config.claudeOauthClientId,
+    oauthTokenUrl: config.claudeOauthTokenUrl,
+  };
+  const tok = await cliToken(tokenOpts);
   if (!tok) return { ok: false, error: 'Нет токена хостового CLI — авторизуйся на хосте: claude login' };
 
-  const before = await fetchUsage();
+  const before = await fetchClaudeUsage(tokenOpts);
   const state = creditsOf(before.status === 200 ? before.data : null);
   if (!state) return { ok: false, error: 'Anthropic не отдал состояние доплаты — попробуй позже' };
 
@@ -407,8 +737,13 @@ async function configureClaudeExtraUsage(patch = {}) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
-  const after = await fetchUsage();
+  const after = await fetchClaudeUsage(tokenOpts);
   return { ok: true, resource: parseClaudeUsageResources(after.status === 200 ? after.data : null)[0] || null };
+}
+
+/** Аргументы CLI для настроек, которыми управляет Cockpit. */
+export function claudeProviderSettingsArgs(settings = {}) {
+  return ['--settings', JSON.stringify({ fastMode: settings.fastMode === true })];
 }
 
 export default {
@@ -418,6 +753,32 @@ export default {
   color: '#d97757',
   order: 1,
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
+
+  // Свои настройки Claude — плашка «Настройки → Исполнители». Список объявляет сам
+  // исполнитель: у каждого ИИ ручки разные, UI про вендоров не знает и рисует по kind.
+  // Ручка живая: выбор хранится в prefs и передаётся каждому headless-запуску через
+  // `--settings {"fastMode":…}`. Доступность режима окончательно проверяет сам CLI.
+  settings: [
+    {
+      id: 'fastMode',
+      kind: 'toggle',
+      label: 'Ускоренный вывод',
+      hint: 'Fast mode ускоряет выдачу той же модели без подмены на более слабую. '
+        + 'Доступность и возможное списание usage credits определяет установленный Claude CLI.',
+      value: false,
+    },
+  ],
+
+  // Порог автокомпакта. Переменная перебивает и настройку самого CLI, и окно модели —
+  // именно это нужно кокпиту: на модели с окном 1M собственный порог CLI ~950k, а
+  // дорого становится с ~250k (см. chatAutoCompactWindow в lib/prefs-store.js).
+  autoCompactEnv: 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
+
+  // Родной компакт: слэш-команда работает и в режиме `-p --resume`; в сессии появляются
+  // compact_boundary/isCompactSummary, id разговора
+  // не меняется. НО stdout такого хода ПУСТОЙ (весь вывод команды локальный), поэтому
+  // текст для ленты чата подставляет вызывающий, а не CLI.
+  compaction: { kind: 'native', message: '/compact' },
 
   bin(config) { return config.claudeBin; },
 
@@ -471,8 +832,12 @@ export default {
    * «Неделя» и пр. Ручка OAuth-подписки — работает только с токеном хостового CLI
    * (~/.claude/.credentials.json); пользователь явно попросил эту статистику.
    */
-  async usage() {
-    return classifyClaudeUsageResponse(await fetchUsage());
+  async usage(config) {
+    return classifyClaudeUsageResponse(await fetchClaudeUsage({
+      claudeBin: config.claudeBin,
+      oauthClientId: config.claudeOauthClientId,
+      oauthTokenUrl: config.claudeOauthTokenUrl,
+    }));
   },
 
   /**
@@ -480,7 +845,7 @@ export default {
    * only the action id and never branches on Claude, Codex or a future Kimi.
    */
   usageActions: {
-    'configure-extra-usage': ({ payload }) => configureClaudeExtraUsage(payload),
+    'configure-extra-usage': ({ payload, config }) => configureClaudeExtraUsage(payload, config),
   },
 
   /**
@@ -530,6 +895,19 @@ export default {
   },
 
   /**
+   * Класс семейства — для сверки рекомендаций глобальных шаблонов агентов с
+   * политикой профиля. Шаблон хранит класс («нужен рассуждающий»), профиль —
+   * конкретное семейство; сопоставить их может только тот, кто знает свои модели.
+   * Fable и Opus в одном классе намеренно: класс говорит о требуемой силе узла,
+   * а какой моделью её закрыть — решает runners.env проекта.
+   */
+  familyClass(family) {
+    return {
+      opus: 'reasoning', fable: 'reasoning', sonnet: 'balanced', haiku: 'cheap',
+    }[String(family || '').trim().toLowerCase()] || '';
+  },
+
+  /**
    * Обновление CLI (кнопка «Обновить» в настройках → «Исполнители»).
    * Само не запускается — только по нажатию пользователя.
    */
@@ -562,27 +940,17 @@ export default {
    * и размышлений в чате, как в VS Code).
    * Возвращает { reply, sessionId, contextTokens, cost, actualModel, steps } или бросает Error.
    */
-  async run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, log, onProgress, onStep, signal }) {
+  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal }) {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
-    // В MCP-конфиге есть узкая внутренняя capability для permission-request. JSON в argv
-    // читается через /proc/<pid>/cmdline, поэтому секрет туда не кладём: Claude умеет
-    // принимать путь к JSON-файлу. Каталог 0700 и файл 0600 закрывают его от других uid,
-    // а после завершения/остановки хода всё удаляется.
-    let privateMcpDir = '';
-    if (mcpConfig) {
-      privateMcpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-mcp-'));
-      await fs.chmod(privateMcpDir, 0o700);
-      const privateMcpPath = path.join(privateMcpDir, 'config.json');
-      await fs.writeFile(privateMcpPath, JSON.stringify(mcpConfig), { mode: 0o600, flag: 'wx' });
-      args.push('--mcp-config', privateMcpPath);
-    }
+    args.push(...claudeProviderSettingsArgs(providerSettings));
+    if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     if (sessionId) args.push('--resume', sessionId);
     for (const d of extraDirs) args.push('--add-dir', d);
 
-    const execution = new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       let resultEv = null;
       let spentTokens = 0;
       let lastTurnInput = 0;
@@ -621,6 +989,10 @@ export default {
             stopped.steps = steps;
             // Сессия оборванного хода — живая: по ней продолжится следующий вопрос.
             stopped.sessionId = streamSessionId || sessionId || null;
+            // Размер контекста у оборванного хода известен: его сообщил поток. Без него
+            // кольцо после «стопа» показывало прежнюю (а у свежей сессии — нулевую) цифру,
+            // и чат с реальными 80k выглядел пустым.
+            stopped.contextTokens = lastTurnInput;
             return reject(stopped);
           }
           if (err?.killed) return reject(new Error('Процесс агента убит извне (сигнал или переполнение буфера вывода).'));
@@ -690,9 +1062,6 @@ export default {
           }
         }
       });
-    });
-    return execution.finally(async () => {
-      if (privateMcpDir) await fs.rm(privateMcpDir, { recursive: true, force: true });
     });
   },
 };

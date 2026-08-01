@@ -97,6 +97,59 @@ test('Codex normalizer показывает summary, но никогда raw rea
   assert.doesNotMatch(JSON.stringify(steps), /СЕКРЕТНАЯ/);
 });
 
+test('Codex normalizer показывает произвольные tool-call события по данным провайдера', () => {
+  const normalize = createCodexStepNormalizer();
+  const steps = [
+    ...normalize({
+      type: 'item.started',
+      item: {
+        id: 'collab-1',
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        prompt: 'Проверь тесты чата.',
+        status: 'in_progress',
+      },
+    }),
+    ...normalize({
+      type: 'item.completed',
+      item: {
+        id: 'collab-1',
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        status: 'completed',
+      },
+    }),
+    ...normalize({
+      type: 'item.started',
+      item: {
+        id: 'future-1',
+        type: 'future_tool_call',
+        tool_name: 'inspect_queue',
+        input: { queue: 'reviews' },
+        status: 'in_progress',
+      },
+    }),
+  ];
+
+  assert.deepEqual(steps.find((step) => step.id === 'collab-1' && step.k === 'tool'), {
+    k: 'tool',
+    id: 'collab-1',
+    name: 'spawn_agent',
+    title: 'Проверь тесты чата.',
+    sub: 'collab',
+    preview: 'Проверь тесты чата.',
+  });
+  assert.deepEqual(steps.find((step) => step.id === 'future-1' && step.k === 'tool'), {
+    k: 'tool',
+    id: 'future-1',
+    name: 'inspect_queue',
+    title: '{"queue":"reviews"}',
+    sub: 'future',
+    preview: '{"queue":"reviews"}',
+  });
+  assert.doesNotMatch(JSON.stringify(steps), /UnknownTool/);
+});
+
 test('Codex executor передаёт JSONL-шаги живьём и сохраняет их в результате', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-stream-'));
   const fake = path.join(dir, 'fake-codex');

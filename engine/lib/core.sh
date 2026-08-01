@@ -9,6 +9,18 @@ LOGDIR="$STATE_DIR/logs"; mkdir -p "$LOGDIR" "$STATE_DIR/archive"
 NODE_TIMEOUT="${FACTORY_STAGE_TIMEOUT:-1800}"   # таймаут одного этапа (сек)
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/multi-runner.sh"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/workspace-guard.sh"
+CONTROL_DIR=$(factory_control_root) || {
+  echo "Некорректный FACTORY_CONTROL_ROOT: control metadata не должна пересекаться с STATE_DIR" >&2
+  return 78 2>/dev/null || exit 78
+}
+mkdir -p "$CONTROL_DIR"
+[[ ! -L "$CONTROL_DIR" && "$(realpath -e -- "$CONTROL_DIR" 2>/dev/null)" == "$CONTROL_DIR" ]] || {
+  echo "Небезопасный FACTORY_CONTROL_ROOT: symlink запрещён" >&2
+  return 78 2>/dev/null || exit 78
+}
+chmod 700 "$CONTROL_DIR" 2>/dev/null || true
 
 # --- реестр статусов (единственный способ менять) ---
 _pf() { echo "$STATE_DIR/t${1}.pipeline"; }
@@ -29,7 +41,7 @@ flog() { echo "$(date '+%F %T') [t${1}] ${*:2}" >>"$LOGDIR/t${1}.stages.log"; }
 # Профиль может добавить свои команды через массив PROFILE_AGENT_ALLOW (например прогон тестов).
 _agent_settings() {
   local stage=${1:-}
-  local f="$STATE_DIR/agent-settings-${stage:-any}.json" rules extra=""
+  local f="$CONTROL_DIR/agent-settings-${stage:-any}.json" rules extra=""
   if declare -p PROFILE_AGENT_ALLOW >/dev/null 2>&1; then
     local r
     for r in "${PROFILE_AGENT_ALLOW[@]}"; do extra+=",\"$r\""; done
@@ -54,12 +66,26 @@ _agent_settings() {
     local r
     for r in "${PROFILE_AGENT_DENY[@]}"; do deny+=",\"$r\""; done
   fi
+  # Браузер — по явному разрешению узла маршрута (v2 `policy.browser`), а не по
+  # факту наличия MCP-сервера у CLI. Разведка t8165 накликала 23 клика по живому
+  # приложению песочницы: этап только читает код, а данные стенда менял живьём.
+  # Legacy без переменной ведёт себя как раньше (v1 сам не различает браузер).
+  if [[ "${FACTORY_ROUTE_BROWSER_POLICY:-}" == forbid ]]; then
+    deny+=',"mcp__playwright","mcp__playwright__*"'
+  fi
+
   # ГЛАВНЫЙ рубеж для проверочных этапов: запрет ПИСАТЬ в каталоги проекта вообще.
   # Списка команд мало — он ловит «eslint --fix», но не «eslint . --fix» и не правку файла
   # редактором напрямую. Линт дважды (21.07 и 22.07) переформатировал 278-280 чужих файлов
   # в ветке задачи, хотя запрет в промпте стоял: просьба не работает, работает отсутствие прав.
-  if [[ -n "$stage" ]] && declare -F profile_stage_readonly >/dev/null \
-     && [[ -n "$(profile_stage_readonly "$stage" 2>/dev/null)" ]]; then
+  # Route v2 owns the filesystem policy. Legacy profiles keep their existing hook;
+  # an explicit v2 state-only policy can only tighten it and never makes a legacy
+  # readonly stage writable.
+  if [[ -n "$stage" ]] && {
+       [[ "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" == state-only ]] ||
+       { declare -F profile_stage_readonly >/dev/null &&
+         [[ -n "$(profile_stage_readonly "$stage" 2>/dev/null)" ]]; }
+     }; then
     local d
     for d in ${PROFILE_AGENT_DIRS:-}; do
       deny+=",\"Edit(${d}/**)\",\"Write(${d}/**)\",\"NotebookEdit(${d}/**)\""
@@ -84,6 +110,13 @@ _agent_settings() {
     # Инлайн-интерпретаторы: запуск СКРИПТА проверочному этапу нужен, однострочник с
     # записью — нет. Форма `-e/-r/-c` отсекается, `node script.mjs` остаётся рабочим.
     deny+=',"Bash(node -e:*)","Bash(php -r:*)","Bash(python3 -c:*)"'
+    # Обёртки, запускающие ЛЮБУЮ команду под своим именем. Правило сверяет ПРЕФИКС, поэтому
+    # `timeout 60 sed -i …` не совпадает ни с одним запретом выше и проходит целиком. Хуже:
+    # в личных настройках человека `Bash(timeout:*)` стоит в allow — то есть весь список
+    # запретов обходится одним словом, и обходится молча. Запрещаем сами обёртки: этапу,
+    # который только читает, они не нужны ни одной.
+    deny+=',"Bash(timeout:*)","Bash(env:*)","Bash(xargs:*)","Bash(nohup:*)","Bash(setsid:*)"'
+    deny+=',"Bash(stdbuf:*)","Bash(nice:*)","Bash(sudo:*)","Bash(sh -c:*)","Bash(bash -c:*)"'
     # Скрипты-обёртки package.json: что внутри — знает только сам package.json. В #7800
     # `npm run lint` фронта оказался объявлен как `eslint . --fix`, и автофикс переписал
     # 276 чужих файлов, хотя флага --fix в команде агента не было и запрет на него стоял
@@ -93,8 +126,177 @@ _agent_settings() {
     deny+=',"Bash(npm run lint)","Bash(npm run lint:*)","Bash(npm run format:*)","Bash(npm run fix:*)"'
     deny+=',"Bash(yarn lint:*)","Bash(pnpm lint:*)","Bash(npm exec eslint:*)"'
   fi
-  printf '{"permissions":{"allow":[%s],"deny":[%s]}}' "$rules" "$deny" > "$f"
+  printf '{"permissions":{"allow":[%s],"deny":[%s]}}' "$rules" "$deny" >"$f"
   echo "$f"
+}
+
+# --- лимит времени этапа ---
+# Источник правды — КЛАСС узла из бандла маршрута (policy.timeoutClass), а не имя этапа:
+# время диктует РОЛЬ узла (планирование, сборка, браузерная приёмка), и одна и та же схема
+# должна вести себя одинаково у всех проектов. Дефолты ниже покрывают классы канонических
+# маршрутов и намеренно повторяют тайминги, которые до переезда задавал profile_stage_timeout:
+# смена источника правды не должна менять поведение работающих конвейеров.
+_stage_timeout_class_default() {
+  case "$1" in
+    planning|standard|review|delivery|check) echo 1800 ;;
+    test|build)                              echo 3600 ;;
+    diagnostic|browser)                      echo 5400 ;;
+    *)                                       echo ''   ;;
+  esac
+}
+
+# $1=TASK $2=этап; echo секунды. Порядок: класс узла → хук профиля по классу →
+# legacy-хук по имени этапа (v1-маршруты и узлы без класса) → NODE_TIMEOUT.
+_stage_timeout() {
+  local t=${1:-} stage=${2:-} cls="${FACTORY_ROUTE_TIMEOUT_CLASS:-}" tmo="$NODE_TIMEOUT" v=""
+  if [[ -n "$cls" ]]; then
+    v=$(_stage_timeout_class_default "$cls")
+    if [[ "$v" =~ ^[0-9]+$ ]]; then
+      tmo="$v"
+    else
+      # Бандл объявил класс, которого движок не знает: молча взять дефолт — значит
+      # дать узлу чужой лимит и потерять его работу по таймауту. Пишем в журнал.
+      [[ -n "$t" ]] && flog "$t" "ЛИМИТ: неизвестный timeoutClass=$cls, беру $tmo с"
+    fi
+    # Проект вправе переопределить класс: у одного тесты идут пять минут, у другого час.
+    if declare -F profile_timeout_class >/dev/null; then
+      v=$(profile_timeout_class "$cls" 2>/dev/null)
+      [[ "$v" =~ ^[0-9]+$ ]] && tmo="$v"
+    fi
+  elif declare -F profile_stage_timeout >/dev/null && [[ -n "$stage" ]]; then
+    v=$(profile_stage_timeout "$stage" 2>/dev/null)
+    [[ "$v" =~ ^[0-9]+$ ]] && tmo="$v"
+  fi
+  printf '%s' "$tmo"
+}
+
+# --- черновик хода этапа ---
+# Единственный терминальный канал — stage-result, и он срабатывает В КОНЦЕ. Между началом
+# этапа и этим вызовом у движка нет ничего: убитый по таймауту агент уносит с собой всё, что
+# успел понять. stage-progress сюда не годится — он маршрутный (ROUTE/SIZE/PLANS) и валидирует
+# фиксированный список ключей, произвольную запись не принимает и принимать не должен.
+# Поэтому черновик — обычный файл в STATE_DIR: агент уже имеет туда запись (см. _agent_settings),
+# файл переживает и таймаут, и SIGKILL, и его же читает следующий заход.
+# Имя детерминированное — по задаче и этапу: следующий заход должен НАЙТИ файл, не зная run_id.
+_stage_checkpoint_path() {
+  local t=$1 stage=${2:-any} lc
+  lc=$(printf '%s' "${stage,,}" | tr -c 'a-z0-9_' '_')
+  printf '%s/t%s.%s.checkpoint.md' "$STATE_DIR" "$t" "$lc"
+}
+
+# Черновик снимается, когда узел ЗАКРЫТ терминально (см. route-runtime-v2): иначе повторный
+# заход на тот же узел через полгода получит чужие заметки и примет их за свои.
+_stage_checkpoint_clear() {
+  local f; f=$(_stage_checkpoint_path "$1" "${2:-}")
+  [[ -f "$f" && ! -L "$f" ]] && rm -f -- "$f"
+  return 0
+}
+
+# --- регламент времени в промпт ---
+# Лимит знал только движок, агент работал вслепую и планировал проверки без оглядки на
+# срок. На t8165 это стоило двух часов: реализация заняла 8 минут, дальше агент ушёл в
+# необязательную регрессию и был убит за ~40 секунд до того, как отчитался бы, — этап
+# целиком ушёл в мусор вместе с готовым кодом. Отдельного канала до агента нет, промпт
+# нигде не хешируется, поэтому регламент приписывается служебным блоком в конец.
+# Мягкий срок — 4/5 лимита: остаток нужен на саму фиксацию результата, она не мгновенная.
+_stage_time_budget_block() {
+  local tmo=$1 soft=$(( $1 * 4 / 5 )) ckpt=${2:-}
+  cat <<EOF
+---
+
+## Регламент времени этапа (от движка, не от автора промпта)
+
+Жёсткий предел — **$(( tmo / 60 )) мин** с начала этапа. По его истечении процесс
+обрывается без предупреждения.
+
+Всё, что не зафиксировано через \`stage-result\`, пропадает целиком: движок считает
+такой этап невыполненным и запускает его заново с нуля, ничего не переиспользуя.
+Правки в рабочем дереве при этом остаются, но следующий заход о них не знает.
+
+Планируй так, чтобы результат был зафиксирован к **$(( soft / 60 )) мин**. Если к
+этому сроку главное сделано, а проверки нет — фиксируй сделанное и опиши остаток
+в отчёте. Не начинай длинную проверку, которая заведомо не уложится в остаток.
+
+ЧЕРНОВИК ХОДА — \`${ckpt}\`. Дописывай туда строку каждый раз, когда закончил
+осмысленный кусок: что сделано, где лежит, что проверено и что осталось. Это дёшево
+(одна строка) и это единственное, что переживёт обрыв: файл достанется следующему
+заходу дословно. Черновик ничего не завершает — этап закрывает только \`stage-result\`.
+EOF
+}
+
+# --- черновик предыдущего захода в промпт ---
+# Файл достаётся заходу целиком, но с хвоста и с потолком: журнал на мегабайт вытеснит
+# из окна само задание этапа, а ценен в нём именно конец — то, на чём заход оборвался.
+_stage_checkpoint_block() {
+  local f=$1 body
+  body=$(tail -c 6000 -- "$f" 2>/dev/null) || return 0
+  [[ -n "$body" ]] || return 0
+  cat <<EOF
+---
+
+## Черновик незакрытого захода этого этапа
+
+Этап уже начинали, и он оборвался, не зафиксировав результат. Вот что успел записать
+предыдущий заход (файл \`$f\`, последние строки):
+
+\`\`\`
+$body
+\`\`\`
+
+Это заметки, а не доказательство: сначала проверь, что описанное действительно на месте
+(\`git status\`, \`git diff\`, файлы отчётов), и только потом продолжай с этого места.
+Расхождение черновика с рабочим деревом — само по себе находка, назови её в отчёте.
+EOF
+}
+
+# --- контекст повтора в промпт ---
+# Ретрай начинается с чистого листа: движок помнит, что заход не первый, а агент — нет.
+# На t8165 второй заход BUILD 26 минут переделывал уже написанный код, потому что не знал
+# о нём ничего. Следы предыдущего захода никуда не делись — заставляем сначала посмотреть.
+_stage_retry_block() {
+  local n=$1 reason=$2 what
+  case "$reason" in
+    no-result) what='оборвался, не зафиксировав результат (таймаут или падение процесса)' ;;
+    failed)    what='закончился отказом по существу задачи' ;;
+    *)         what='не довёл этап до конца' ;;
+  esac
+  cat <<EOF
+---
+
+## Это повтор этапа (заход $n)
+
+Предыдущий заход $what. Движок считает этап невыполненным, но следы работы остались:
+правки в рабочем дереве, черновики, записи в артефактах.
+
+Начни с осмотра сделанного — \`git status\` и \`git diff\` в рабочем дереве, отчёты
+предыдущих узлов. Доделай недостающее и проверь целостность, а не переписывай заново:
+переделка с нуля стоит столько же, сколько первый заход, и так же рискует не уложиться.
+EOF
+}
+
+# --- указание человека при возврате курсора в промпт ---
+# Свободный текст от человека доезжал до агента только через решения ВОРОТ. У обычного
+# узла канала не было: кнопка «перейти сюда» писала причину в журнал попытки и на этом
+# всё — агент входил с тем же заданием и повторял ту же ошибку. На t8165 разбор пришлось
+# протаскивать через черновик хода, то есть мимо журнала, а журнал — главный инвариант.
+# Блок идёт ПОСЛЕДНИМ и прямо объявляет приоритет: черновик выше по промпту зовёт
+# «продолжай с этого места», а человек мог вернуть узел именно чтобы свернуть с него.
+_stage_human_note_block() {
+  local note=$1
+  cat <<EOF
+---
+
+## Указание человека при возврате на этот узел
+
+Узел не пришёл сюда сам: человек вернул на него курсор и оставил указание.
+
+> $note
+
+Это главное в задании. Если оно расходится с черновиком предыдущего захода или с
+отчётами прошлых узлов — прав человек, а расхождение назови в отчёте. Если указание
+невыполнимо или неверно по фактам, не выполняй его молча и не выдумывай обход:
+зафиксируй результат с объяснением, что именно не сходится.
+EOF
 }
 
 # --- один синхронный прогон агента для этапа ---
@@ -117,11 +319,24 @@ run_agent() {
   # (инцидент t8060: 19 минут и $4.65 в мусор на каждой попытке).
   # FACTORY_HOME нужен для run-scoped stage-result/stage-progress и служебных команд движка.
   # Лимит времени этапа: браузерные замеры и прогон сценариев идут дольше правки кода.
-  # Убитый по таймауту агент теряет ВСЮ работу этапа, поэтому профиль может поднять лимит.
-  local tmo="$NODE_TIMEOUT" t2=""
-  if declare -F profile_stage_timeout >/dev/null && [[ -n "$stage" ]]; then
-    t2=$(profile_stage_timeout "$stage" 2>/dev/null)
-    [[ "$t2" =~ ^[0-9]+$ ]] && tmo="$t2"
+  # Убитый по таймауту агент теряет ВСЮ работу этапа, поэтому лимит должен быть осознанным.
+  local tmo; tmo=$(_stage_timeout "$t" "$stage")
+  local ckpt; ckpt=$(_stage_checkpoint_path "$t" "$stage")
+  export FACTORY_STAGE_CHECKPOINT="$ckpt"
+  prompt+=$'\n\n'"$(_stage_time_budget_block "$tmo" "$ckpt")"
+  local retry_no="${FACTORY_STAGE_RETRY:-}"
+  if [[ "$retry_no" =~ ^[2-9]|^[0-9]{2,}$ ]]; then
+    prompt+=$'\n\n'"$(_stage_retry_block "$retry_no" "${FACTORY_STAGE_RETRY_REASON:-}")"
+  fi
+  # Черновик отдаём по НАЛИЧИЮ файла, а не по счётчику захода: после убитого оркестратора
+  # resume входит в узел заново с номером 1, и на t8165 это был как раз тот случай.
+  if [[ -s "$ckpt" && ! -L "$ckpt" ]]; then
+    prompt+=$'\n\n'"$(_stage_checkpoint_block "$ckpt")"
+  fi
+  # Последним — чтобы не потеряться за черновиком и регламентом: это единственный блок,
+  # который написал человек, а не движок.
+  if [[ -n "${FACTORY_STAGE_HUMAN_NOTE:-}" ]]; then
+    prompt+=$'\n\n'"$(_stage_human_note_block "${FACTORY_STAGE_HUMAN_NOTE}")"
   fi
   export RUNNER_CLAUDE_SETTINGS
   RUNNER_CLAUDE_SETTINGS=$(_agent_settings "$stage")
@@ -306,35 +521,73 @@ _reload_profile() {
 }
 
 # --- контроль побочных правок на проверочных этапах ------------------------------
-# Линт с автофиксом переформатировал 277 файлов основного репозитория и 235 файлов в ветке
-# задачи. Запрет в тексте промпта агент проигнорировал, поэтому запрет теперь МЕХАНИЧЕСКИЙ:
-# профиль объявляет этап проверочным (profile_stage_readonly), ядро снимает список изменённых
-# файлов ДО и ПОСЛЕ, и всё, что этап тронул сверх работы задачи, откатывает.
-_dirty_snapshot() {
-  declare -F profile_dirty_files >/dev/null || return 0
-  profile_dirty_files "$1" 2>/dev/null | sort
+# Это compatibility-backstop, а не обещание host-level state-only. Он снимает точный
+# baseline git diff/index/untracked/symlink и чувствительных ignored-файлов. Если runner
+# всё же записал в source tree, этап останавливается для человека. Движок ничего не
+# откатывает автоматически: без transaction ownership это могло бы стереть чужую правку.
+_stage_is_readonly() {
+  local key=$1
+  declare -F profile_stage_readonly >/dev/null &&
+    [[ -n "$(profile_stage_readonly "$key" 2>/dev/null)" ]]
+}
+
+_profile_source_roots() {
+  local t=$1 candidate root
+  if declare -F profile_source_roots >/dev/null; then
+    profile_source_roots "$t" 2>/dev/null
+    return
+  fi
+
+  # Временный fallback для старых профилей. Новый профиль обязан перечислить roots
+  # явно: PROFILE_AGENT_DIRS может быть родительской папкой нескольких репозиториев.
+  candidate="${PROFILE_AGENT_CWD:-}"
+  if declare -F profile_agent_cwd >/dev/null; then
+    local task_cwd
+    task_cwd=$(profile_agent_cwd "$t" 2>/dev/null || true)
+    [[ -n "$task_cwd" ]] && candidate="$task_cwd"
+  fi
+  for candidate in "$candidate" ${PROFILE_AGENT_DIRS:-}; do
+    [[ -n "$candidate" ]] || continue
+    root=$(workspace_guard_repo_root "$candidate" 2>/dev/null || true)
+    [[ -n "$root" ]] && printf '%s\n' "$root"
+  done
+}
+
+_readonly_guard_capture() {
+  local t=$1 key=$2 try=$3 side=$4
+  local dir="$CONTROL_DIR/guards/t${t}/${key}" output="$CONTROL_DIR/guards/t${t}/${key}/try-${try}.${side}.tsv"
+  local sensitive="$dir/try-${try}.sensitive.list"
+  local -a roots=()
+  mkdir -p "$dir"
+  mapfile -t roots < <(_profile_source_roots "$t" | awk 'NF && !seen[$0]++')
+  if (( ${#roots[@]} == 0 )); then
+    flog "$t" "$key: проверочный этап не запущен — профиль не дал ни одного git root для точного baseline"
+    return 2
+  fi
+
+  rm -f -- "$sensitive"
+  if declare -F profile_sensitive_files >/dev/null; then
+    profile_sensitive_files "$t" 2>/dev/null | awk '/^\// && !seen[$0]++' >"$sensitive"
+  fi
+  WORKSPACE_GUARD_SENSITIVE_LIST_FILE="$sensitive" \
+    workspace_guard_snapshot "$output" "${roots[@]}" || {
+      flog "$t" "$key: не удалось снять точный ${side}-baseline исходных файлов"
+      return 2
+    }
+  printf '%s\n' "$output"
 }
 
 _guard_readonly() {
-  local t=$1 key=$2 before=$3
-  declare -F profile_stage_readonly >/dev/null || return 0
-  [[ -n "$(profile_stage_readonly "$key" 2>/dev/null)" ]] || return 0
-  local after; after=$(_dirty_snapshot "$t")
-  local extra; extra=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | grep -v '^$' || true)
-  [[ -z "$extra" ]] && return 0
-  local n; n=$(grep -c . <<<"$extra")
-  flog "$t" "$key: этап проверочный, но изменил $n файл(ов) — этап провален, работа человека не тронута"
-  printf '%s\n' "$extra" | head -20 | while read -r f; do
-    [[ -n "$f" ]] && flog "$t" "  тронул: $f"
-  done
-  # ОТКАТ ПО УМОЛЧАНИЮ ВЫКЛЮЧЕН. Движок НЕ трогает файлы в рабочих копиях: ошибка в определении
-  # «побочных» правок стоила бы потерянной работы. Он лишь фиксирует нарушение и валит этап —
-  # решение, что делать с файлами, остаётся за человеком.
-  # Включить автооткат осознанно: FACTORY_AUTOREVERT=1 (например, на чистом CI-прогоне).
-  if [[ "${FACTORY_AUTOREVERT:-0}" == "1" ]] && declare -F profile_revert_files >/dev/null; then
-    flog "$t" "$key: FACTORY_AUTOREVERT=1 — откатываю перечисленные файлы"
-    profile_revert_files "$t" "$extra" 2>/dev/null || true
-  fi
+  local t=$1 key=$2 try=$3 before=$4 after diff_file
+  _stage_is_readonly "$key" || return 0
+  after=$(_readonly_guard_capture "$t" "$key" "$try" after) || return 2
+  workspace_guard_compare "$before" "$after" && return 0
+
+  diff_file="$CONTROL_DIR/guards/t${t}/${key}/try-${try}.diff"
+  workspace_guard_diff_summary "$before" "$after" >"$diff_file" 2>/dev/null || true
+  chmod 600 "$diff_file" 2>/dev/null || true
+  flog "$t" "$key: проверочный этап изменил source baseline — СТОП; автоматический откат запрещён"
+  flog "$t" "$key: безопасная сводка изменений: $diff_file"
   return 1
 }
 
@@ -346,7 +599,13 @@ run_stage() {
   local route0; route0=$(get "$t" ROUTE)
   while (( tries < 3 )); do
     _reload_profile "$t"        # свежие промпты/модели/бюджеты без перезапуска демона
-    local dirty_before; dirty_before=$(_dirty_snapshot "$t")
+    local guard_before=""
+    if _stage_is_readonly "$key"; then
+      guard_before=$(_readonly_guard_capture "$t" "$key" "$((tries + 1))" before) || {
+        set_st "$t" STALLED_HUMAN 1
+        return 2
+      }
+    fi
     # Комментарий прошлого круга гасим на старте: иначе замечание, оставленное этапом
     # в прошлый раз, сойдёт за объяснение нового пропуска. Чужие комментарии не трогаем —
     # BUILD читает REVIEW_COMMENT/GATE_ACCEPT_COMMENT, и они должны его дождаться.
@@ -389,23 +648,14 @@ run_stage() {
     if declare -F profile_stage_fanout >/dev/null && [[ -n "$(profile_stage_fanout "$key" 2>/dev/null)" ]] && (( used == 0 )); then
       flog "$t" "$key: веер объявлен, но субагентов не запущено — этап шёл последовательно"
     fi
-    # Проверочный этап не имеет права оставлять правки: откатываем и считаем этап проваленным,
-    # иначе «зелёный линт» приезжает на приёмку с чужим переформатированным кодом в диффе.
-    if ! _guard_readonly "$t" "$key" "$dirty_before"; then
+    # Проверочный этап не имеет права оставлять правки. Сравниваем содержимое, index,
+    # untracked и symlink, а не только список грязных имён. Не откатываем: этот guard
+    # не владеет изменением и не может отличить запись агента от параллельной правки человека.
+    if ! _guard_readonly "$t" "$key" "$((tries + 1))" "$guard_before"; then
       set_stage_terminal "$t" "$key" failed "${key}_COMMENT" \
-        "этап менял файлы вне задачи — правки откачены"
-      # Виноват САМ этап (не та команда проверки), а не сборка: возвращать работу в BUILD
-      # бессмысленно — он не может исправить то, чем линт себя завалил. В #7800 так ушло
-      # три круга по 35 минут подряд, каждый раз с тем же `npm run lint`. Повторяем сам
-      # этап, а исчерпав попытки, цикл ниже позовёт человека. Повтор осмыслен только при
-      # автооткате: без него чужие правки останутся в рабочей копии и станут «фоном»
-      # для следующего снимка — нарушение просто перестанет быть видимым.
-      if [[ "${FACTORY_AUTOREVERT:-0}" == "1" ]]; then
-        tries=$((tries+1))
-        flog "$t" "$key: повторяю сам этап — сборка тут ни при чём"
-        continue
-      fi
-      return 1
+        "source baseline изменился; автоматический откат не выполнялся"
+      set_st "$t" STALLED_HUMAN 1
+      return 2
     fi
     v=$(get "$t" "$key")
     # Ловим пропуск без причины: сам факт «объяснить не смог» должен быть
@@ -415,7 +665,12 @@ run_stage() {
       flog "$t" "$key → skipped БЕЗ ПРИЧИНЫ — агент не объяснил, почему этап неприменим"
     fi
     case "$v" in
-      done|skipped) flog "$t" "$key → $v"; return 0 ;;
+      # Черновик хода снимаем только на УСПЕШНОМ терминальном исходе: между попытками он и
+      # нужен (следующий заход читает его как заметки предыдущего), а после закрытого этапа
+      # стал бы чужим текстом для того, кто вернётся сюда возвратом с другого этапа.
+      # На failed черновик ОСТАЁТСЯ: этап не закрыт, его будут переигрывать, и заметки —
+      # единственная запись остатка работы (см. route-runtime-v2.sh, инцидент t8165).
+      done|skipped) _stage_checkpoint_clear "$t" "$key"; flog "$t" "$key → $v"; return 0 ;;
       failed) flog "$t" "$key → failed"; return 1 ;;
       *)
         # Эскалация маршрута: этап сменил ROUTE и штатно вышел без статуса
@@ -436,6 +691,8 @@ run_stage() {
         tries=$((tries+1)); flog "$t" "$key без статуса ($v) — повтор" ;;
     esac
   done
+  # Черновик здесь НЕ снимаем намеренно: этап встал под человека, он же и вернёт задачу в
+  # этот самый узел — заметки трёх заходов ему нужнее, чем чистый каталог.
   flog "$t" "$key: 3 попытки без результата — СТОП, нужен человек"
   set_stage_terminal "$t" "$key" failed STALLED_HUMAN 1
   return 2
@@ -446,13 +703,20 @@ run_pipeline() {
   local t=$1
   # flock: один демон на задачу
   exec 9>"$STATE_DIR/t${t}.orch.lock"
-  flock -n 9 || { echo "оркестратор t${t} уже держит лок"; return 0; }
+  flock -n 9 || { echo "оркестратор t${t} уже держит лок"; return 73; }
   set_st "$t" ORCH_PID "$$" NEEDS_RUN 0 STALLED_HUMAN 0
   # Демон, умерший молча, выглядит как «фабрика нестабильна». Пишем, каким сигналом и на чём.
   # pkill -P: без него bash ждёт завершения текущего агента (до часа), и запись о причине
   # появлялась с огромной задержкой — со стороны выглядело как «просто умер молча».
-  trap 'flog '"$t"' "демон остановлен сигналом TERM (перезапуск или kill)"; pkill -P $$ 2>/dev/null; exit 143' TERM
-  trap 'flog '"$t"' "демон прерван (Ctrl-C)"; pkill -P $$ 2>/dev/null; exit 130' INT
+  # Цель pkill — $BASHPID, а НЕ $$: в сабшелле ($$ там остаётся PID-ом родителя — фон,
+  # конвейер, $( )) `pkill -P $$` перечисляет детей РОДИТЕЛЯ, то есть шлёт TERM самому
+  # обработчику. Тот входит сам в себя и молотит журнал вместо выхода: сценарий t48 так
+  # висел 122 с и писал тысячи строк «демон остановлен сигналом TERM». В главной оболочке
+  # (боевой путь bin/factory) значения совпадают, поведение не меняется.
+  # `trap - СИГНАЛ` первой командой: повторный сигнал (сторож, kill по группе) не запускает
+  # обработчик заново поверх уже идущего.
+  trap 'trap - TERM; flog '"$t"' "демон остановлен сигналом TERM (перезапуск или kill)"; pkill -P $BASHPID 2>/dev/null; exit 143' TERM
+  trap 'trap - INT; flog '"$t"' "демон прерван (Ctrl-C)"; pkill -P $BASHPID 2>/dev/null; exit 130' INT
   trap 'flog '"$t"' "терминал закрыт (SIGHUP) — работа прервана"; exit 129' HUP
   # Стираем PID, только если в реестре ВСЁ ЕЩЁ наш: умирающий старый демон затирал запись,
   # уже сделанную новым, — дашборд считал живую задачу брошенной, а сторож поднимал дубль.
@@ -531,6 +795,14 @@ run_pipeline() {
       done_all=0
       if run_stage "$t" "$key"; then continue; else
         local rc=$?
+        # Эскалация — управляющий исход, а не human stall. run_stage возвращает rc=2
+        # и меняет ROUTE; сначала даём внешнему циклу перечитать route stages, и лишь
+        # потом трактуем остальные rc=2 как безопасную остановку.
+        local stage_route
+        stage_route=$(get "$t" ROUTE)
+        if [[ -n "$stage_route" && "$stage_route" != "$route" ]]; then
+          break
+        fi
         # rc=2 — run_stage уже исчерпал безопасные попытки или получил ошибку,
         # которую запрещено переносить на другой ИИ, и поставил STALLED_HUMAN.
         # Продолжение внешнего while запускало новый пакет попыток: REVIEW #7379
@@ -583,13 +855,4 @@ run_pipeline() {
   done
 
   flog "$t" "все этапы маршрута пройдены"
-
-  # Прогон завершён — убираем карточку с дашборда (реестр уезжает в архив, телеметрия
-  # и отчёт остаются). Включается профилем: у проектов с задачами карточка может жить
-  # дольше (демо, ретро), а у прогонов по промпту показывать нечего.
-  if [[ "${PROFILE_ARCHIVE_ON_FINISH:-0}" == 1 ]]; then
-    mkdir -p "$STATE_DIR/archive"
-    mv -f "$STATE_DIR/t${t}.pipeline" "$STATE_DIR/archive/t${t}.pipeline" 2>/dev/null \
-      && flog "$t" "прогон завершён — карточка убрана с дашборда (реестр в архиве)"
-  fi
 }

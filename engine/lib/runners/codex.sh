@@ -74,7 +74,9 @@ runner_codex_run() {
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
   args+=(-o "$run_dir/last.md" -)
-  factory_exec provider timeout "$timeout_s" "${args[@]}" <<<"$prompt"
+  # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
+  # застрявшего провайдера жить с занятым слотом.
+  factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
 }
 
 _runner_codex_meta() {

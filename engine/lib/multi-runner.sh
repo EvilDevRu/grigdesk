@@ -233,6 +233,17 @@ _multi_invoke() {
 
   epoch=$(get "$MULTI_TASK" "ACTIVE_EPOCH_${MULTI_STAGE}")
   [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
+  # Счётчик из реестра — provider-writable и может отстать: новый start после
+  # abandon создаёт чистый реестр, и эпохи откатывались бы к 1 против уже
+  # записанных в доверенном run-state — тогда run_state_begin отбивает КАЖДЫЙ
+  # запуск кодом 73 и задача не стартует вовсе (найдено живым прогоном t8165).
+  # Доверенный control plane — источник истины: берём максимум, эпоха не убывает.
+  local trusted_file trusted_epoch
+  trusted_file=$(run_state_active_file "$MULTI_TASK" "$MULTI_STAGE" 2>/dev/null || true)
+  if [[ -n "$trusted_file" && -f "$trusted_file" && ! -L "$trusted_file" ]]; then
+    trusted_epoch=$(awk -F= '$1 == "EPOCH" { sub(/^[^=]*=/, ""); print; exit }' "$trusted_file")
+    [[ "$trusted_epoch" =~ ^[0-9]+$ ]] && (( trusted_epoch > epoch )) && epoch=$trusted_epoch
+  fi
   epoch=$((epoch + 1))
   run_id=$(_multi_new_id)
   token=$(_multi_new_token)

@@ -22,8 +22,12 @@ import { TaskFavoritesStore } from './lib/task-favorites-store.js';
 import { TaskFavoritesService } from './lib/task-favorites-service.js';
 
 import authPlugin from './plugins/auth.js';
+import httpScopePlugin from './plugins/http-scope.js';
 import ssePlugin from './plugins/sse.js';
 import staticPlugin from './plugins/static.js';
+import { LocalTls } from './lib/tls/local.js';
+import { loadTlsSource } from './lib/tls/source.js';
+import { startHttpsListener } from './lib/tls/https-listener.js';
 
 import healthModule from './modules/health/index.js';
 import factoryModule from './modules/factory/index.js';
@@ -44,43 +48,37 @@ import pluginsModule from './modules/plugins/index.js';
 import demoModule from './modules/demo/index.js';
 import projectsModule from './modules/projects/index.js';
 import codeModule from './modules/code/index.js';
+import documentsModule from './modules/documents/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
-import { ReviewStore } from './lib/reviews/store.js';
-import { ReviewControlStore } from './lib/reviews/control-store.js';
-import { createGhRunner, GitHubReviewAdapter } from './lib/reviews/github.js';
-import { ReviewAnalysisQueue } from './lib/reviews/analyzer.js';
-import { ReviewTranslatorQueue } from './lib/reviews/translator.js';
-import { ReviewWatcher } from './lib/reviews/watcher.js';
-import { createReviewModelAdapter } from './lib/reviews/model-adapter.js';
-import { createReviewBuildAgent } from './lib/reviews/build-agent.js';
-import { createReviewRunner } from './lib/reviews/runner.js';
-import { createReviewPublisher } from './lib/reviews/publisher.js';
-import { createDegradedReviewService } from './lib/reviews/degraded.js';
-import {
-  ReviewService,
-  createReviewRepositoryProvider,
-  createReviewSourceSnapshot,
-} from './lib/reviews/service.js';
-import reviewsModule from './modules/reviews/index.js';
+import { DocumentReader } from './lib/documents/reader.js';
 
-/**
- * Опции TLS, если сертификат задан в конфиге. Читаем синхронно на старте: без сертификата
- * сервер поднимать нельзя, а падать надо сразу с понятной ошибкой, а не на первом запросе.
- */
-function tlsOptions() {
-  if (!config.tlsKeyPath || !config.tlsCertPath) return null;
-  try {
-    return { key: readFileSync(config.tlsKeyPath), cert: readFileSync(config.tlsCertPath) };
-  } catch (err) {
-    throw new Error(`Не читается TLS-сертификат (COCKPIT_TLS_KEY / COCKPIT_TLS_CERT): ${err.message}`);
-  }
-}
+// Настройки нужны ещё до сборки приложения: тумблер режима доступа решает, поднимать ли
+// https-сокет, а сокет создаётся один раз при старте.
+const prefs = new PrefsStore({ prefsPath: config.prefsPath });
+
+// Локальный HTTPS: выпуск сертификата из «Настроек» и состояние https-сокета в рантайме.
+// `tlsRuntime` — общий мутируемый объект: его читают и плагин области http-сокета, и
+// `/api/settings/tls` (чтобы отличать «файлы на диске» от «процесс действительно слушает»).
+const localTls = new LocalTls({ dir: config.tlsDir, caDir: config.tlsCaDir });
+const tlsLoaded = loadTlsSource({
+  keyPath: config.tlsKeyPath,
+  certPath: config.tlsCertPath,
+  modeEnabled: prefs.read().accessLocalHttps === true,
+  localTls,
+});
+const tlsRuntime = {
+  source: tlsLoaded.source,
+  port: config.tlsPort,
+  httpPort: config.port,
+  up: false,
+  error: tlsLoaded.error || '',
+  fingerprint: '',
+  server: null,
+};
 
 async function build() {
-  const https = tlsOptions();
   const fastify = Fastify({
     logger: { level: config.isDev ? 'debug' : 'info' },
-    ...(https ? { https } : {}),
     // trustProxy — только по явной настройке и только для адреса шлюза (см. config.trustProxy).
     // Без неё заголовки `X-Forwarded-*` игнорируются: иначе клиент сам назначал бы себе адрес.
     ...(config.trustProxy ? { trustProxy: config.trustProxy } : {}),
@@ -105,6 +103,8 @@ async function build() {
   // Адаптеры (изоляция источников).
   const factoryState = new FactoryStateAdapter({
     stateDir: config.stateDir,
+    stateV2Dir: config.stateV2Dir,
+    routesV2Dir: config.routesV2Dir,
     profilesDir: config.profilesDir,
   });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
@@ -112,7 +112,6 @@ async function build() {
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
   const system = new SystemAdapter();
   const media = new MediaAdapter({ mediaDir: config.mediaDir });
-  const prefs = new PrefsStore({ prefsPath: config.prefsPath });
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
   const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
   const factoryDebug = new FactoryDebugSettings({
@@ -125,6 +124,11 @@ async function build() {
   const authStore = new AuthStore({
     accountPath: config.authAccountPath,
     sessionsPath: config.authSessionsPath,
+  });
+  // Просмотрщик ничего не знает о структуре Cockpit: приложение подключает первый
+  // источник явно. Следующие корни/источники добавляются здесь provider-функциями.
+  const documentReader = new DocumentReader({
+    rootProviders: [() => [{ id: 'cockpit', label: 'Cockpit', path: config.rootDir }]],
   });
 
   // Секрет ЭТОГО процесса для внутренних запросов: permission-prompt-tool чата работает
@@ -144,78 +148,22 @@ async function build() {
     writeFileSync(config.cliTokenPath, cliToken + '\n', { mode: 0o600 });
   }
 
-  // Плагины платформы. Гард — первым: он закрывает весь /api, включая upgrade вебсокета.
-  await fastify.register(authPlugin, { authStore, tlsEnabled: !!https, trustProxy: config.trustProxy, internalToken, cliToken });
-  await fastify.register(ssePlugin, { stateDir: config.stateDir });
-
-  // Автоматическое ревью — отдельный durable-контур. Он не использует номера
-  // задач Factory и не трогает t<TASK>.pipeline.
-  const reviewStore = new ReviewStore({ stateDir: config.reviewsDir });
-  const reviewControl = new ReviewControlStore({ stateDir: config.reviewsDir });
-  const reviewRepositories = createReviewRepositoryProvider({ config, prefs });
-  const reviewModel = createReviewModelAdapter({ config });
-  const reviewTranslator = new ReviewTranslatorQueue({
-    store: reviewStore,
-    model: reviewModel,
+  // Плагины платформы.
+  // Область http-сокета — ПЕРЕД гардом: разлогиненное устройство из сети должно получить
+  // редирект на https, а не 401, иначе оно не доберётся даже до экрана входа.
+  await fastify.register(httpScopePlugin, { tlsRuntime });
+  // Гард — сразу следом: он закрывает весь /api, включая upgrade вебсокета.
+  await fastify.register(authPlugin, {
+    authStore,
+    tlsEnabled: tlsLoaded.source !== 'none',
+    trustProxy: config.trustProxy,
+    internalToken,
+    cliToken,
   });
-  const reviewAnalysis = new ReviewAnalysisQueue({
-    store: reviewStore,
-    model: reviewModel,
-    translatorQueue: reviewTranslator,
-  });
-  const reviewGitHub = new GitHubReviewAdapter({
-    runner: createGhRunner(),
-    log: fastify.log,
-  });
-  const reviewRunner = createReviewRunner({
-    stateDir: config.reviewsDir,
-    worktreeRoot: path.join(config.reviewsDir, 'worktrees'),
-    agentAdapter: createReviewBuildAgent({ config }),
-  });
-  let reviews = null;
-  const reviewPublisher = createReviewPublisher({
-    store: reviewRunner.store,
-    beforePush: (state) => reviews.revalidatePublication(state),
-  });
-  const reviewWatcher = new ReviewWatcher({
-    store: reviewStore,
-    github: reviewGitHub,
-    repositories: reviewRepositories,
-    analysisQueue: reviewAnalysis,
-    sourceSnapshot: createReviewSourceSnapshot,
-    intervalMs: config.reviewPollMs,
-    coalesceMs: config.reviewDebounceMs,
-    log: fastify.log,
-    onChange: (event) => fastify.sse.broadcast('reviews-change', {
-      at: Date.now(),
-      ...event,
-    }),
-  });
-  const activeReviews = new ReviewService({
-    store: reviewStore,
-    controlStore: reviewControl,
-    watcher: reviewWatcher,
-    analysisQueue: reviewAnalysis,
-    translatorQueue: reviewTranslator,
-    runner: reviewRunner,
-    publisher: reviewPublisher,
-    repositoryProvider: reviewRepositories,
-    sse: fastify.sse,
-    log: fastify.log,
-    modelConcurrency: config.reviewAnalysisConcurrency,
-  });
-  reviews = activeReviews;
-  try {
-    await activeReviews.init();
-  } catch (error) {
-    fastify.log.error({
-      code: error?.code,
-      err: error?.message,
-    }, 'Review subsystem запущена в degraded-режиме');
-    await activeReviews.close().catch(() => {});
-    reviews = createDegradedReviewService(error);
-  }
-  fastify.addHook('onClose', async () => reviews.close());
+  // Оба поколения состояния: маршруты v2 пишут реестр в отдельный каталог, и без него
+  // страница конвейера не обновляется вовсе — Скептик уже закончен, ворота ждут,
+  // а на схеме он продолжает «гореть» до ручного F5.
+  await fastify.register(ssePlugin, { stateDirs: [config.stateDir, config.stateV2Dir] });
 
   // Модули.
   await fastify.register(authModule, { authStore, config });
@@ -230,24 +178,60 @@ async function build() {
   await fastify.register(mediaModule, { media });
   await fastify.register(demoModule, { config, factoryState });
   await fastify.register(codeModule, { config, prefs });
-  await fastify.register(projectsModule, { config, prefs, reviews });
-  await fastify.register(reviewsModule, { reviews });
+  await fastify.register(documentsModule, { reader: documentReader });
+  await fastify.register(projectsModule, { config, prefs });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs,
   });
   await fastify.register(settingsModule, {
-    credsStore, b24, claudeAuth, config, prefs, factoryDebug,
+    credsStore, b24, claudeAuth, config, prefs, factoryDebug, localTls, tlsRuntime,
   });
   await fastify.register(terminalModule);
   await fastify.register(agentsModule, { config });
-  await fastify.register(routesModule, { config });
+  await fastify.register(routesModule, { config, prefs });
   await fastify.register(providersModule, { config, claudeAuth, prefs });
   await fastify.register(analysisModule, { analyzer });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });
 
+  // Второй сокет закрываем вместе с сервером: иначе `bin/restart` поднимет новый процесс,
+  // а тот упрётся в EADDRINUSE на порту, который скрипт даже не проверяет.
+  fastify.addHook('onClose', async () => {
+    if (!tlsRuntime.server) return;
+    await new Promise((resolve) => tlsRuntime.server.close(resolve));
+    tlsRuntime.server = null;
+    tlsRuntime.up = false;
+  });
+
   return fastify;
+}
+
+/**
+ * Поднять https и записать результат в `tlsRuntime` — от него зависит область http-сокета.
+ * Вызывать ПОСЛЕ `listen()`: до готовности приложения плагин вебсокета ещё не повесил upgrade.
+ */
+async function startHttps(app) {
+  if (!tlsLoaded.key) {
+    if (tlsRuntime.error) {
+      app.log.error(`HTTPS не поднят: ${tlsRuntime.error}. Кокпит работает по http — сертификат можно перевыпустить в «Настройки → Доступ».`);
+    }
+    return;
+  }
+  const result = await startHttpsListener({
+    app, key: tlsLoaded.key, cert: tlsLoaded.cert, port: config.tlsPort, host: config.host,
+  });
+  if (!result.ok) {
+    // Занятый порт или отказ в биндинге — не повод убивать процесс: http живёт, UI доступен
+    // с мозга, причина видна в «Настройки → Доступ».
+    tlsRuntime.error = result.error;
+    app.log.error(`HTTPS не поднят на :${config.tlsPort}: ${result.error}`);
+    return;
+  }
+  tlsRuntime.server = result.server;
+  tlsRuntime.up = true;
+  tlsRuntime.fingerprint = tlsLoaded.fingerprint;
+  app.log.info(`HTTPS слушает :${config.tlsPort} (сертификат из «${tlsLoaded.source}»); http на :${config.port} — loopback и корневой сертификат.`);
 }
 
 const app = await build();
@@ -257,3 +241,4 @@ try {
   app.log.error(err);
   process.exit(1);
 }
+await startHttps(app);

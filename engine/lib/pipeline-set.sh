@@ -74,13 +74,32 @@ fi
 if [[ "${1:-}" == "--init" ]]; then
   shift
   touch "$PF"
-  # Полный скелет: каждый узел графа обязан иметь ключ, иначе статусы теряются
-  for kv in WF_STATUS=running SCOUT=pending PLANS=pending SKEPTIC=pending VALIDATE=pending \
-            TRANSLATOR=pending GATE_PLAN=pending TESTS=pending TCRITIC=pending BUILD=pending \
-            SIMPLIFY=pending REVIEW=pending TRACE=pending PHPCHECK=pending LINT=pending \
-            GATE_CAUSE=pending GATE_ACCEPT=pending SHIP=pending RETRO=pending; do
-    upsert "$PF" "${kv%%=*}" "${kv#*=}"
-  done
+  if [[ "${1:-}" == "--stages" ]]; then
+    # Свой скелет узлов (route v2): ключи приходят из ЗАКРЕПЛЁННОГО бандла —
+    # в реестре не должно быть узлов, которых нет в маршруте (v1-список ниже
+    # рисовал в UI «пропущенные» несуществующие этапы — живой прогон t8165).
+    shift
+    for k in ${1:-}; do
+      [[ "$k" =~ ^[A-Z][A-Z0-9_]{0,63}$ ]] || continue
+      upsert "$PF" "$k" pending
+      # Отметку времени перехода сбрасываем вместе со статусом: на recovery реестр
+      # переинициализируется поверх прошлой попытки, и «GATE_PLAN=pending» с датой
+      # позавчерашнего approve — ровно та подсказка, по которой человек жмёт не глядя.
+      # ACTIVE_RUN_*/ACTIVE_EPOCH_* здесь НЕ трогаем: на них держится fencing старых
+      # прогонов, сброс эпохи вернул бы к жизни убитый ход прошлой попытки.
+      if grep -q "^${k}_AT=" "$PF" 2>/dev/null; then upsert "$PF" "${k}_AT" ""; fi
+    done
+    shift
+    upsert "$PF" WF_STATUS running
+  else
+    # Полный v1-скелет: каждый узел графа обязан иметь ключ, иначе статусы теряются
+    for kv in WF_STATUS=running SCOUT=pending PLANS=pending SKEPTIC=pending VALIDATE=pending \
+              TRANSLATOR=pending GATE_PLAN=pending TESTS=pending TCRITIC=pending BUILD=pending \
+              SIMPLIFY=pending REVIEW=pending TRACE=pending PHPCHECK=pending LINT=pending \
+              GATE_CAUSE=pending GATE_ACCEPT=pending SHIP=pending RETRO=pending; do
+      upsert "$PF" "${kv%%=*}" "${kv#*=}"
+    done
+  fi
 fi
 
 # Помимо статуса пишем телеметрию: KEY_AT (время перехода) для терминальных
@@ -91,6 +110,11 @@ set_kv() {
   case "$val" in
     done|failed|waiting|approved|rejected|skipped|running)
       upsert "$PF" "${key}_AT" "$(date '+%F %T')" ;;
+    # У «ещё не было» времени перехода нет. Иначе решение, сброшенное в pending
+    # (recovery, новый круг планирования), сохраняло дату прошлого approve —
+    # и человек у ворот видел свежий на вид вердикт от позавчера.
+    pending)
+      if grep -q "^${key}_AT=" "$PF" 2>/dev/null; then upsert "$PF" "${key}_AT" ""; fi ;;
   esac
   if [[ "$val" == "failed" ]]; then
     local fails

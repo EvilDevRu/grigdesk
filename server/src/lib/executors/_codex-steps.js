@@ -32,6 +32,10 @@ function resultOf(item) {
   return textOf(item?.aggregated_output ?? item?.output ?? item?.result ?? item?.error ?? '');
 }
 
+function toolCallInputOf(item) {
+  return textOf(item?.arguments ?? item?.input ?? item?.params ?? item?.prompt ?? '');
+}
+
 function changeList(item) {
   const changes = Array.isArray(item?.changes) ? item.changes : [];
   return changes.map((change) => {
@@ -78,16 +82,18 @@ function toolOf(item) {
     return { id, name: 'WebSearch', title: cut(item.query || item.search_query || '', 200) };
   }
 
-  // Новые Codex tool-items должны fail closed в контурах, где tools запрещены.
-  // Обычные agent/reasoning messages обработаны ниже отдельно; всё похожее на
-  // image/browser/computer/tool нельзя молча потерять из audit trail.
   const type = String(item.type || '').toLowerCase();
-  if (/(?:tool|image|browser|computer|exec|command|file_change|web_search)/.test(type)) {
+  const toolCallSuffix = '_tool_call';
+  if (type.endsWith(toolCallSuffix)) {
+    const namespace = type.slice(0, -toolCallSuffix.length);
+    const name = String(item.tool || item.tool_name || item.name || type);
+    const input = toolCallInputOf(item);
     return {
       id,
-      name: 'UnknownTool',
-      title: cut(type || 'неизвестный инструмент', 200),
-      preview: cut(textOf(item?.arguments ?? item?.input ?? item?.params ?? ''), 600),
+      name,
+      title: cut(input, 200),
+      sub: namespace,
+      preview: cut(input, 600),
     };
   }
 

@@ -94,6 +94,27 @@ export const useProvidersStore = defineStore('providers', {
       } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
     },
     /**
+     * Своя настройка исполнителя (тумблер в его плашке). Значение применяем сразу,
+     * чтобы тумблер не «отставал», и откатываем, если сервер не принял: схему настроек
+     * объявляет исполнитель, фронт про смысл ключа ничего не знает.
+     */
+    async saveSetting(providerId, settingId, value) {
+      const p = this.providers.find((x) => x.id === providerId);
+      const s = (p?.settings || []).find((x) => x.id === settingId);
+      if (!s) return { ok: false, error: 'настройка не объявлена исполнителем' };
+      const before = s.value;
+      s.value = value;
+      try {
+        const r = await api.post(`/api/providers/${encodeURIComponent(providerId)}/settings`, { settingId, value });
+        if (!r?.ok) { s.value = before; return { ok: false, error: r?.message || 'сервер не принял значение' }; }
+        if (r.settings) p.settings = r.settings;
+        return { ok: true };
+      } catch (e) {
+        s.value = before;
+        return { ok: false, error: e.data?.message || e.message };
+      }
+    },
+    /**
      * Declarative account action exposed by one provider adapter. requestId is
      * generated once per click so a provider can make irreversible calls idempotent.
      */

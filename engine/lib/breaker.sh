@@ -56,13 +56,31 @@ breaker_record() {
   eval "exec ${lock_fd}>&-"
 }
 
+# Предохранитель НИКОГДА не бывает бессрочным. Адаптеры провайдеров время сброса
+# лимита не сообщают (DISPATCH_LIMIT_UNTIL никто не заполняет), поэтому пустое
+# LIMITED_UNTIL раньше означало «навсегда»: провайдер выпадал из цепочки до ручного
+# удаления файла. Так и вышло на прогоне t8165 — Claude отлежал лимит, но конвейер
+# продолжал ходить в мёртвый резерв. Без известного срока держим предохранитель
+# ограниченный cooldown от момента обнаружения.
+_breaker_default_cooldown() {
+  local value=${FACTORY_BREAKER_COOLDOWN_S:-900}
+  [[ "$value" =~ ^[0-9]+$ ]] || value=900
+  printf '%s\n' "$value"
+}
+
 _breaker_entry_active() {
-  local file=$1 now=$2 until status
+  local file=$1 now=$2 until status detected cooldown
   [[ -f "$file" ]] || return 1
   status=$(_breaker_get "$file" STATUS)
   until=$(_breaker_get "$file" LIMITED_UNTIL)
   [[ "$status" == limited ]] || return 1
-  if [[ -n "$until" && "$until" != 0 && "$now" -gt "$until" ]]; then
+  if [[ -z "$until" || "$until" == 0 ]]; then
+    detected=$(_breaker_get "$file" DETECTED_AT)
+    [[ "$detected" =~ ^[0-9]+$ ]] || return 1
+    cooldown=$(_breaker_default_cooldown)
+    until=$(( detected + cooldown ))
+  fi
+  if [[ "$now" -gt "$until" ]]; then
     return 1
   fi
 }

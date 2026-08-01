@@ -86,6 +86,56 @@ for prof in "${PROFILES[@]}"; do
     echo "✓ контракт: переменные и хуки на месте"
   fi
 
+  # 1a. Контракт route v2: заявленная в graph.json capability обязывает профиль
+  # реализовать все семь v2-хуков — иначе factory-v2 откажет на старте.
+  graph_json="$FACTORY_PROFILES_DIR/${prof}/graph.json"
+  if [[ -f "$graph_json" ]] && python3 - "$graph_json" <<'PY' 2>/dev/null
+import json
+import sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+caps = data.get("capabilities") if isinstance(data, dict) else None
+raise SystemExit(0 if isinstance(caps, list) and "route-v2" in caps else 1)
+PY
+  then
+    v2_miss=$(bash -c "
+      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' 2>/dev/null
+      for f in profile_v2_backend_source profile_v2_frontend_source \
+        profile_v2_backend_worktree profile_v2_frontend_worktree \
+        profile_v2_source_branch profile_v2_container profile_v2_sandbox_alive; do
+        declare -F \$f >/dev/null || echo \"нет v2-хука \$f\"
+      done
+    ")
+    if [[ -n "$v2_miss" ]]; then
+      echo "$v2_miss" | sed 's/^/✗ route-v2: /'
+      RC=1
+    else
+      echo "✓ route-v2: capability заявлена, все 7 v2-хуков на месте"
+    fi
+
+    # Форма списка изменчивых путей. Иначе ошибку видно только на живом прогоне:
+    # instrumentation_tx_begin отдаст 78 уже после подъёма стенда и работы предыдущих
+    # узлов, а пустой список — не отказ, а fail-closed на первом же мусоре стенда (t8165).
+    vol_bad=$(bash -c "
+      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' 2>/dev/null
+      read -r -a globs <<<\"\${PROFILE_VOLATILE_PATHS:-}\"
+      for g in \${globs[@]+\"\${globs[@]}\"}; do
+        [[ \"\$g\" == /* ]] &&
+          echo \"абсолютный путь \$g — глоб задаётся ОТ корня рабочего дерева\"
+      done
+      (( \${#globs[@]} > 0 )) ||
+        echo \"⚠ PROFILE_VOLATILE_PATHS пуст: всё, что пишет сам стенд (логи, кэши, \
+артефакты тестов), сторож примет за правку агента и остановит узел инструментации\"
+    ")
+    if [[ "$vol_bad" == *"абсолютный путь"* ]]; then
+      echo "$vol_bad" | sed 's/^/✗ изменчивые пути: /'
+      RC=1
+    elif [[ -n "$vol_bad" ]]; then
+      echo "$vol_bad"
+    else
+      echo "✓ изменчивые пути: список объявлен и относителен корню"
+    fi
+  fi
+
   runner_config="$FACTORY_PROFILES_DIR/${prof}/runners.env"
   if ! profile_config_validate "$runner_config"; then
     echo "✗ canonical runner config отсутствует или некорректен: $runner_config"

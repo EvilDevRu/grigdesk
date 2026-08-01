@@ -44,13 +44,16 @@ runtime_switch_request() {
 }
 
 runtime_signal_active() {
-  local pid=$1 pgid=$2 starttime=$3
-  [[ "$pid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ && "$starttime" =~ ^[0-9]+$ ]] || return 2
+  local pid=$1 pgid=$2 starttime=$3 session=${4:-$1}
+  [[ "$pid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ && "$starttime" =~ ^[0-9]+$ &&
+     "$session" =~ ^[0-9]+$ ]] || return 2
   local own_pgid
-  own_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+  own_pgid=$(ps -o pgid= -p "$BASHPID" 2>/dev/null | tr -d ' ')
   [[ -n "$own_pgid" && "$pgid" != "$own_pgid" ]] || return 73
   runner_process_matches "$pid" "$pgid" "$starttime" || return 73
-  kill -TERM -- "-$pgid" 2>/dev/null
+  # Сигнал идёт всей сессии раннера, а не одной группе лидера: у провайдера
+  # под GNU timeout собственная группа, и TERM в группу лидера его не достанет.
+  _runner_signal_runtime TERM "$pgid" "$session"
 }
 
 runtime_switch_consume() {
@@ -92,22 +95,36 @@ runtime_switch_consume() {
 }
 
 runtime_interrupt_and_wait() {
-  local pid=$1 pgid=$2 starttime=$3 grace_s=${4:-5}
-  [[ "$pid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ && "$starttime" =~ ^[0-9]+$ ]] || return 2
+  local pid=$1 pgid=$2 starttime=$3 grace_s=${4:-5} expected_session=${5:-$1}
+  [[ "$pid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ &&
+     "$starttime" =~ ^[0-9]+$ && "$expected_session" =~ ^[0-9]+$ &&
+     "$grace_s" =~ ^[0-9]+$ ]] || return 2
   local own_pgid
-  own_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+  own_pgid=$(ps -o pgid= -p "$BASHPID" 2>/dev/null | tr -d ' ')
   [[ -n "$own_pgid" && "$pgid" != "$own_pgid" ]] || return 73
-  runner_process_matches "$pid" "$pgid" "$starttime" || return 73
-  kill -TERM -- "-$pgid" 2>/dev/null || return 73
-  local deadline=$((SECONDS + grace_s))
-  while kill -0 "$pid" 2>/dev/null && (( SECONDS <= deadline )); do
-    sleep 0.05
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    runner_process_matches "$pid" "$pgid" "$starttime" || return 73
-    kill -KILL -- "-$pgid" 2>/dev/null || true
+  if ! runner_process_full_matches \
+    "$pid" "$pgid" "$expected_session" "$starttime"; then
+    # The leader may have completed between the trusted read and the signal.
+    # That race is safe only when the exact PGID/session is already empty.
+    runner_runtime_absent "$pgid" "$expected_session" "$starttime" && return 0
+    return 73
   fi
-  wait "$pid" 2>/dev/null || true
-  kill -0 "$pid" 2>/dev/null && return 1
-  return 0
+  _runner_quiesce_owned_runtime \
+    "$pid" "$pgid" "$expected_session" "$starttime" "$grace_s"
+}
+
+runtime_interrupt_trusted_active() {
+  local task=$1 expected_stage=${2:-} expected_run=${3:-} expected_epoch=${4:-}
+  local grace_s=${5:-5} identity rc
+  local stage run_id epoch runner pid pgid session starttime
+  identity=$(runner_trusted_identity_read \
+    "$task" "$expected_stage" "$expected_run" "$expected_epoch")
+  rc=$?
+  (( rc == 0 )) || return "$rc"
+  read -r stage run_id epoch runner pid pgid session starttime <<<"$identity"
+  runtime_interrupt_and_wait "$pid" "$pgid" "$starttime" "$grace_s" "$session" ||
+    return
+  runner_trusted_identity_clear \
+    "$task" "$stage" "$run_id" "$epoch" "$runner" \
+    "$pid" "$pgid" "$session" "$starttime"
 }

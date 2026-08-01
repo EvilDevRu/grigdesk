@@ -47,19 +47,19 @@ function activeRunArtifacts({ stateDir, task, registry = {} }) {
     if (!key.startsWith('ACTIVE_RUN_') || !runId) continue;
     const stage = key.slice('ACTIVE_RUN_'.length);
     if (!SAFE_STAGE.test(stage) || !SAFE_RUN.test(String(runId))) continue;
+    // ACTIVE_RUN живёт дольше самого прогона: это ещё и fencing-токен, его НЕ чистят
+    // (сброс эпохи воскресил бы убитый ход). Значит непустой ключ у не бегущего этапа —
+    // не активность, а расписка о прошлом. На паузе у ворот иначе показывается давняя
+    // запись из журнала BUILD отменённой попытки.
+    if (registry[stage] !== 'running') continue;
     const runDir = path.join(stateDir, 'logs', 'runs', `t${task}`, stage, String(runId));
     const eventsFile = path.join(runDir, 'events.jsonl');
     try {
       const stat = fs.statSync(eventsFile);
-      candidates.push({
-        runDir,
-        eventsFile,
-        mtimeMs: stat.mtimeMs,
-        running: registry[stage] === 'running',
-      });
+      candidates.push({ runDir, eventsFile, mtimeMs: stat.mtimeMs });
     } catch { /* run успел зарегистрироваться, но launcher ещё не создал журнал */ }
   }
-  return candidates.sort((a, b) => Number(b.running) - Number(a.running) || b.mtimeMs - a.mtimeMs)[0] || null;
+  return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0] || null;
 }
 
 /**
@@ -80,7 +80,12 @@ export function readActivity({ stateDir, task, registry }) {
   const active = activeRunArtifacts({ stateDir, task, registry });
   if (active) journalMtimeMs = active.mtimeMs;
 
-  const adir = registry.ACTIVE_DIR || (registry.JOURNAL ? path.dirname(registry.JOURNAL) : '');
+  // На protocol v2 каждый ход обязан зарегистрировать ACTIVE_RUN, поэтому его отсутствие —
+  // это «сейчас никто не пишет», а не «поищи где-нибудь ещё». Запасные пути тут только
+  // навредят: orch.log остаётся от прошлого поколения и превращает штатную паузу у ворот
+  // в тревожное «нет событий N мин».
+  const legacy = registry.RUN_PROTOCOL !== '2';
+  const adir = legacy && (registry.ACTIVE_DIR || (registry.JOURNAL ? path.dirname(registry.JOURNAL) : ''));
   if (journalMtimeMs == null && adir) {
     try {
       for (const f of fs.readdirSync(adir)) {
@@ -90,7 +95,7 @@ export function readActivity({ stateDir, task, registry }) {
       }
     } catch { /* нет каталога */ }
   }
-  if (journalMtimeMs == null) {
+  if (journalMtimeMs == null && legacy) {
     try {
       journalMtimeMs = fs.statSync(path.join(stateDir, 'logs', `t${task}.orch.log`)).mtimeMs;
     } catch { /* лога агента нет */ }
@@ -194,8 +199,11 @@ export function readAgentLive({ stateDir, task, registry = {} }) {
   const TAIL_BYTES = 192 * 1024;
   const MAX_ACTIONS = 25;
   const active = activeRunArtifacts({ stateDir, task, registry });
-  const logFile = active?.eventsFile || path.join(stateDir, 'logs', `t${task}.orch.log`);
-  const tail = readTail(logFile, TAIL_BYTES);
+  // Тот же запрет на legacy-подмену, что и в readActivity: на v2 без активного хода
+  // лента пуста, а не «взята из orch.log прошлого поколения».
+  const logFile = active?.eventsFile
+    || (registry.RUN_PROTOCOL !== '2' ? path.join(stateDir, 'logs', `t${task}.orch.log`) : null);
+  const tail = logFile ? readTail(logFile, TAIL_BYTES) : null;
   if (!tail) return { actions: [], model: readRunModel(active?.runDir) };
   const { raw, truncated } = tail;
 

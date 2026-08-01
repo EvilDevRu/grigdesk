@@ -11,17 +11,18 @@ test('server discovers only directory-based profiles with graph.json', async (t)
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-profiles-layout-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const profilesDir = path.join(root, 'profiles');
-  const routesDir = path.join(root, 'routes');
   const stateDir = path.join(root, 'state');
 
   await mkdir(path.join(profilesDir, 'factory-project'), { recursive: true });
   await mkdir(path.join(profilesDir, 'incomplete'), { recursive: true });
-  await mkdir(path.join(routesDir, 'cockpit-project'), { recursive: true });
   await mkdir(stateDir, { recursive: true });
   await writeFile(path.join(profilesDir, 'factory-project', 'graph.json'), '{}\n');
 
+  // Проект, заведённый в кокпите, живёт реестром prefs — каталога на диске у него нет.
+  const prefs = { read: () => ({ projects: { 'cockpit-project': { repos: [] } } }) };
+
   assert.deepEqual(await listFactoryProfiles(profilesDir), ['factory-project']);
-  assert.deepEqual(await listProjects({ profilesDir, routesDir }), [
+  assert.deepEqual(await listProjects({ profilesDir }, prefs), [
     'cockpit-project',
     'factory-project',
   ]);

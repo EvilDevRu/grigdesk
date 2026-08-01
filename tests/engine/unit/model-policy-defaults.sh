@@ -33,4 +33,17 @@ _multi_catalog_model claude "" latest auto claude-opus-unknown 2.1.0 >/dev/null
 assert_rc 4 "$?" "unverified exact model id fails closed without a catalog"
 _multi_catalog_cleanup
 
+# Семейство без каталога уходит в `--model` как есть, поэтому список алиасов раннера
+# обязан совпадать с тем, что понимает установленный CLI: fable там есть, mythos нет.
+MULTI_CATALOG_ROOT=$(mktemp -d "$STATE_DIR/.catalog-invoke.XXXXXX")
+_multi_catalog_model claude fable latest auto "" 2.1.0 >/dev/null
+assert_rc 0 "$?" "fable resolves through the Claude family alias"
+assert_eq fable "$MULTI_RESOLVED_MODEL" "family alias reaches the CLI verbatim"
+_multi_catalog_cleanup
+
+MULTI_CATALOG_ROOT=$(mktemp -d "$STATE_DIR/.catalog-invoke.XXXXXX")
+_multi_catalog_model claude mythos latest auto "" 2.1.0 >/dev/null
+assert_rc 4 "$?" "family unknown to the CLI fails closed"
+_multi_catalog_cleanup
+
 finish_tests

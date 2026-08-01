@@ -383,7 +383,7 @@ _runner_cli_task() {
         "$task" "$stage" "$primary" "$failover" "$source"
       ;;
     switch)
-      local stage target active run_id epoch request_id run_dir pid pgid starttime
+      local stage target active run_id epoch request_id identity
       if [[ "${1:-}" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
         stage=$1; target=${2:-}
       else
@@ -397,13 +397,16 @@ _runner_cli_task() {
       active=$(run_state_active_file "$task" "$stage")
       run_id=$(_run_state_get "$active" RUN_ID)
       epoch=$(_run_state_get "$active" EPOCH)
+      # STATE_DIR is intentionally writable by the provider. Process identity
+      # therefore comes only from the exact control-plane record published
+      # while the runner was still behind its launch barrier.
+      identity=$(runner_trusted_identity_read "$task" "$stage" "$run_id" "$epoch") || {
+        echo "trusted process identity активного runner недоступна" >&2
+        return 73
+      }
       request_id="switch-$(date +%s)-$$-$RANDOM"
       runtime_switch_request "$task" "$stage" "$run_id" "$epoch" "$target" "$request_id" || return
-      run_dir="$STATE_DIR/logs/runs/t${task}/${stage}/${run_id}"
-      pid=$(_run_state_get "$run_dir/meta.env" PID)
-      pgid=$(_run_state_get "$run_dir/meta.env" PGID)
-      starttime=$(_run_state_get "$run_dir/meta.env" STARTTIME)
-      runtime_interrupt_and_wait "$pid" "$pgid" "$starttime" \
+      runtime_interrupt_trusted_active "$task" "$stage" "$run_id" "$epoch" \
         "${FACTORY_SWITCH_GRACE_SECONDS:-5}" || return
       printf 't%s %s: переключение %s запрошено\n' "$task" "$stage" "$target"
       ;;

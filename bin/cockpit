@@ -56,7 +56,9 @@ case "$CMD" in
       exit 0
     fi
     ensure_deps; build_web
-    echo "→ Сервер поднят: http://localhost:$PORT  (с планшета — через Tailscale: http://<ip>:$PORT)"
+    # С планшета — по https: без него нет PWA (secure context), а http из сети сам уводит
+    # редиректом на защищённый порт. Сертификат — «Настройки → Доступ → Локальный HTTPS».
+    echo "→ Сервер поднят: http://localhost:$PORT  (с планшета — https://<адрес мозга>:${COCKPIT_TLS_PORT:-8143})"
     cd "$DIR/server" && exec node "${ENV_ARG[@]}" src/app.js
     ;;
   *)

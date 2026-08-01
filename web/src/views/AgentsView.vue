@@ -5,16 +5,11 @@ import { confirmDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import NumberField from '../shared/ui/NumberField.vue';
-import {
-  familyLabel,
-  familyModels,
-  resolveModelFamily,
-} from '../shared/model-family.js';
 
 // База агентов (стадий конвейера): слева список, справа редактор карточки.
-// Агент — базовая сущность; принадлежность к маршрутам здесь НЕ настраивается
-// (это свойство маршрута — им займётся конструктор схем).
-// Два уровня настроек: обычные (подпись, форма, модель, промпт) и «Профи»
+// Агент — заготовка нового узла; принадлежность и исполняемая политика здесь НЕ настраиваются
+// (это свойства конкретного маршрута и runners.env).
+// Два уровня рекомендаций: обычные (подпись, форма, класс модели, промпт) и «Профи»
 // (ключ реестра, сноска, таймаут, бюджет, флаги) — скрыты за тумблером.
 const agents = ref([]);
 const loading = ref(false);
@@ -32,21 +27,29 @@ const KINDS = [
   { v: 'code', label: '</> Код' },
 ];
 const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
-// Семейства и их текущие модели/эффорты — из реестра исполнителей, без хардкода.
+// Класс модели, а не семейство: база агентов общая для всех проектов, а проекты
+// живут на разных исполнителях. Какое семейство закрывает класс — дело runners.env.
+const TIERS = [
+  { v: 'reasoning', label: 'Рассуждающая — сложный анализ' },
+  { v: 'balanced', label: 'Сбалансированная — рутина по спецификации' },
+  { v: 'cheap', label: 'Экономная — механика и проверки' },
+];
+const TIER_LABEL = Object.fromEntries(TIERS.map((t) => [t.v, t.label.split(' — ')[0]]));
+// Эффорты — из реестра исполнителей, без хардкода.
 const providers = ref([]);
 
 // Описания настроек для тултипов — языком человека, не движка.
 const HELP = {
-  label: 'Название блока — так этап подписан на схеме конвейера.',
-  kind: 'Кто выполняет этап: агент Claude, человек (конвейер встаёт и ждёт решения в дашборде) или код (скрипт/проверка). Заодно определяет форму блока на схеме: прямоугольник, пилюля или ромб.',
-  model: 'Какое семейство модели выполняет этап. Конкретную актуальную версию движок выбирает из живого каталога перед запуском. «Сессионная» — семейство прогона; точный id можно сохранить как явный pin для исключений.',
-  effort: 'Сколько модель «думает» на этапе. «Дефолт движка» — не задавать явно. Механическим этапам хватает низкого, проверочным и планирующим — высокий и выше. Доступные ступени зависят от выбранной модели.',
+  label: 'Название блока — так новые узлы из этой заготовки будут подписаны на схеме.',
+  kind: 'Рекомендуемая форма нового узла: агент, человек или host-команда. Фактический executor задаётся конкретной схемой; изменение шаблона существующие узлы не меняет.',
+  tier: 'Какого класса модель нужна этому этапу. Неисполняемая рекомендация: провайдер, семейство и failover выбираются только через runners.env проекта. Конкретное семейство здесь не указывают — база агентов общая, а проекты живут на разных исполнителях. Валидатор маршрутов сообщит, если профиль даёт этапу класс слабее рекомендованного.',
+  effort: 'Неисполняемая рекомендация автору схемы. Фактический effort задаётся runners.env; это поле не переопределяет запуск.',
   sub: 'Мелкая приписка под блоком на схеме — подсказка, чем этап занимается (например «pint · eslint»).',
-  key: 'Имя ключа в реестре прогона, куда движок и агент пишут статус этапа: running, done, failed. По нему схема красит блок.',
-  timeout: 'Максимум времени на этап в секундах. 0 — стандартный лимит движка. Агент, убитый по таймауту, теряет всю работу этапа — браузерным и видео-этапам лимит поднимают.',
-  budget: 'Ориентир длительности этапа в минутах. Агенту говорят укладываться в него, сужая охват работы, а не работать дольше.',
-  flags: '«read-only» — агенту запрещена запись в файлы проекта (для проверочных этапов: ревью, линт). «optional» — этап можно штатно пропустить, пропуск не считается аномалией.',
-  prompt: 'Заготовка задания: при добавлении агента в схему копируется в узел и дальше живёт в самой схеме (правится кликом по узлу в «Маршрутах»). Правка шаблона уже расставленные узлы не меняет. Плейсхолдеры {{TASK}} и {{STATE_DIR}} движок заменяет на номер задачи и каталог состояния прогона.',
+  key: 'Рекомендуемый runKey нового узла. Результат сохраняет движок по run-scoped протоколу; команды status/pipeline в промпт не добавляются.',
+  timeout: 'Рекомендуемый лимит нового узла. Фактический timeout принадлежит опубликованной схеме и runtime.',
+  budget: 'Рекомендуемый ориентир длительности нового узла; 0 означает «без рекомендации».',
+  flags: 'Рекомендации для нового узла: state-only и допустимый skipped. Фактическую файловую политику и outcomes задаёт схема.',
+  prompt: 'Заготовка задания: при добавлении агента в схему копируется в узел и дальше живёт в самой схеме. Правка шаблона уже расставленные узлы не меняет. Live-данные задачи добавляет движок отдельными типизированными секциями.',
 };
 
 watch(pro, (v) => localStorage.setItem('cockpit-agents-pro', v ? '1' : '0'));
@@ -55,38 +58,11 @@ const groups = computed(() => KINDS
   .map((k) => ({ ...k, items: agents.value.filter((a) => a.kind === k.v) }))
   .filter((g) => g.items.length));
 
-// По одному актуальному кандидату каждого семейства; значение селекта = family, не exact id.
-const modelGroups = computed(() => providers.value
-  .map((p) => ({ id: p.id, name: p.name, models: familyModels(p.models || []) }))
-  .filter((g) => g.models.length));
-const selectedModel = computed(() => resolveModelFamily(providers.value, form.value?.model));
-const pinnedModel = computed(() => {
-  if (!form.value?.model || !selectedModel.value || form.value.model === selectedModel.value.family) return null;
-  const exact = selectedModel.value.matched?.id === form.value.model;
-  return {
-    value: form.value.model,
-    label: exact
-      ? `${form.value.model} (точный pin)`
-      : selectedModel.value.family
-        ? `${form.value.model} → ${familyLabel(selectedModel.value.family)}`
-        : `${form.value.model} (алиас)`,
-  };
-});
-// Эффорты доступной ступенью зависят от выбранной модели; без модели — объединение всех.
-const effortOptions = computed(() => {
-  const all = providers.value.flatMap((p) => p.models || []);
-  const m = pinnedModel.value ? selectedModel.value?.matched : selectedModel.value?.model;
-  const list = m?.efforts || [...new Set(all.flatMap((x) => x.efforts || []))];
-  return list;
-});
-
-function agentModelLabel(agent) {
-  if (!agent?.model) return 'сессия';
-  const resolved = resolveModelFamily(providers.value, agent.model);
-  if (!resolved) return agent.model;
-  if (!resolved.family) return `${agent.model} 🔒`;
-  return `${familyLabel(resolved.family)}${agent.model === resolved.family ? '' : ' 🔒'}`;
-}
+// Модель шаблоном не выбирается, поэтому и ступени эффорта берём объединением по
+// всем исполнителям реестра: какая из них применится — решит политика профиля.
+const effortOptions = computed(() => [...new Set(providers.value
+  .flatMap((p) => p.models || [])
+  .flatMap((m) => m.efforts || []))]);
 
 const original = computed(() => agents.value.find((a) => a.id === selectedId.value) || null);
 const dirty = computed(() => {
@@ -106,11 +82,6 @@ async function load() {
   try { providers.value = (await api.get('/api/providers')).providers || []; } catch { /* остаётся пусто */ }
 }
 
-// Смена модели: если выбранный эффорт этой модели недоступен — сбрасываем на дефолт.
-function onModelChange() {
-  if (form.value.effort && !effortOptions.value.includes(form.value.effort)) form.value.effort = '';
-}
-
 async function select(id) {
   const a = agents.value.find((x) => x.id === id);
   if (!a) return;
@@ -123,7 +94,7 @@ async function createNew() {
   if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
   selectedId.value = ''; isNew.value = true; notice.value = '';
   form.value = {
-    id: '', kind: 'agent', label: '', sub: '', key: '', model: '', effort: '',
+    id: '', kind: 'agent', label: '', sub: '', key: '', tier: '', effort: '',
     timeout: 0, budget: 0, readonly: false, optional: false, prompt: '',
   };
 }
@@ -175,7 +146,7 @@ onMounted(load);
         <button v-for="a in g.items" :key="a.id" class="item" :class="{ sel: a.id === selectedId && !isNew }" @click="select(a.id)">
           <span class="ic" :class="`k-${a.kind}`">{{ KIND_ICON[a.kind] }}</span>
           <span class="nm">{{ a.label || a.id }}</span>
-          <span v-if="a.model || a.effort" class="chip mono">{{ [agentModelLabel(a), a.effort].filter(Boolean).join(' · ') }}</span>
+          <span v-if="a.tier || a.effort" class="chip mono">совет: {{ [TIER_LABEL[a.tier] || a.tier, a.effort].filter(Boolean).join(' · ') }}</span>
         </button>
       </template>
     </aside>
@@ -211,24 +182,16 @@ onMounted(load);
           </select>
         </label>
         <label class="f">
-          <span class="lbl">Семейство модели <HelpTip :text="HELP.model" /></span>
-          <select v-model="form.model" class="fld" @change="onModelChange">
-            <option value="">сессионное (семейство прогона)</option>
-            <optgroup v-for="g in modelGroups" :key="g.id" :label="g.name">
-              <option v-for="m in g.models" :key="m.id" :value="m.family">
-                {{ familyLabel(m.family) }} · сейчас {{ m.name }}
-              </option>
-            </optgroup>
-            <!-- Старый exact/alias не теряем: он остаётся осознанным pin до смены выбора. -->
-            <option v-if="pinnedModel" :value="pinnedModel.value">{{ pinnedModel.label }}</option>
-            <option v-else-if="form.model && !selectedModel"
-                    :value="form.model">{{ form.model }} (нет в реестре)</option>
+          <span class="lbl">Класс модели <HelpTip :text="HELP.tier" /></span>
+          <select v-model="form.tier" class="fld">
+            <option value="">без рекомендации</option>
+            <option v-for="t in TIERS" :key="t.v" :value="t.v">{{ t.label }}</option>
           </select>
         </label>
         <label class="f">
-          <span class="lbl">Эффорт <HelpTip :text="HELP.effort" /></span>
+          <span class="lbl">Рекомендация effort <HelpTip :text="HELP.effort" /></span>
           <select v-model="form.effort" class="fld">
-            <option value="">дефолт движка</option>
+            <option value="">без рекомендации</option>
             <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
           </select>
         </label>

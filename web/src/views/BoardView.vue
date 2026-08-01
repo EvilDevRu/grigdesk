@@ -55,6 +55,13 @@ function dotTitle(t) {
   if (conveyor.value.has(k)) return conveyor.value.get(k) ? 'На конвейере — идёт' : 'На конвейере — стоит (ждёт/прерван)';
   return t.statusLabel;
 }
+function projectName(t) {
+  return String(t?.group || '').trim();
+}
+function projectInitial(t) {
+  const [initial = ''] = projectName(t).match(/[\p{L}\p{N}]/u) || [];
+  return initial.toLocaleUpperCase('ru-RU');
+}
 
 // Живой тик таймера: считается от timer_started_at из B24 — см. liveTimerSec.
 function liveElapsed(t) {
@@ -271,6 +278,9 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
               <TaskFavoriteButton :active="favorites.isFavorite(t.id)"
                                   :pending="!favorites.loaded || favorites.loading || favorites.isPending(t.id)"
                                   :task-title="t.title" @toggle="toggleFavorite(t)" />
+              <span v-if="projectName(t)" class="project-badge" role="img"
+                    :aria-label="`Проект: ${projectName(t)}`"
+                    :title="`Проект: ${projectName(t)}`">{{ projectInitial(t) }}</span>
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
               <TriageBadge :row="triageOf(t)" />
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
@@ -424,6 +434,12 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 /* Задача на конвейере: точка чуть крупнее и «дышит» — видно с первого взгляда */
 .tstat.conv { width: 9px; height: 9px; animation: convpulse 2s ease-in-out infinite; }
 @keyframes convpulse { 50% { opacity: .45; } }
+.project-badge {
+  width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+  font-size: 11px; font-weight: 700; line-height: 1; text-transform: uppercase;
+}
 .ttext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px;
   background: none; border: none; color: var(--ink); text-align: left; padding: 0; cursor: pointer; }
 .ttext:hover { color: var(--accent); }

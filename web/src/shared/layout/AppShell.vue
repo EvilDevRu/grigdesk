@@ -11,7 +11,6 @@ import { usePluginsStore } from '../../stores/plugins.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
-import { useReviewsStore } from '../../stores/reviews.js';
 import { providerUsageView } from '../provider-usage.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../ProviderUsageResources.vue';
@@ -39,7 +38,7 @@ function provTitle(p) {
   return `${p.name} (${p.vendor}) · ${p.available ? 'доступен' : 'недоступен'} · ${p.authLabel}`
     + (p.version ? ` · ${p.version}` : '');
 }
-// Клик по иконке исполнителя — сразу на вкладку «Исполнители» настроек
+// Кнопка «Настройки исполнителей» во всплывашке — на вкладку «Исполнители» настроек
 // (таб настроек запоминается в localStorage, поэтому просто задаём его).
 const router = useRouter();
 function toProviders() {
@@ -120,13 +119,6 @@ const boardChipTitle = computed(() => {
 const notifyWatch = useNotifyWatchStore();
 notifyWatch.start();
 
-// Ревью: серверная сводка считает разные PR. SSE служит только сигналом заново получить
-// снимок — повторное событие никогда не прибавляет число локально.
-const reviewStore = useReviewsStore();
-reviewStore.start();
-const reviewChip = computed(() => reviewStore.chip);
-onUnmounted(() => reviewStore.stop());
-
 const badges = computed(() => {
   const out = {};
   if (waitingChats.value || unreadChats.value) {
@@ -144,13 +136,6 @@ const badges = computed(() => {
       title: notifyWatch.attentionTitle,
     };
   }
-  if (reviewChip.value.visible) {
-    out['/reviews'] = {
-      n: reviewChip.value.label,
-      kind: reviewChip.value.kind,
-      title: reviewChip.value.title,
-    };
-  }
   return out;
 });
 
@@ -164,7 +149,6 @@ const ICONS = {
   agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z',
-  reviews: 'M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M9 8h6 M9 12h6 M9 16h3',
   code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
@@ -181,7 +165,6 @@ const nav = [
   { to: '/agents', label: 'Агенты', icon: 'agents' },
   { to: '/routes', label: 'Маршруты', icon: 'routes' },
   { to: '/projects', label: 'Проекты', icon: 'projects' },
-  { to: '/reviews', label: 'Ревью', icon: 'reviews' },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
 ];
 // Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У пользовательских
@@ -299,11 +282,15 @@ const { connected } = useSse((name) => {
         </HelpTip>
         <span v-if="sys" class="sep" aria-hidden="true">·</span>
         <AttentionAlerts />
-        <span v-if="prov.providers.length" class="provbox" @mouseenter="prov.loadUsage()">
-          <HelpTip v-for="p in prov.providers" :key="p.id" class="prov-tip">
-            <!-- Клик ведёт в настройки: обновление CLI — только вручную, кнопкой -->
+        <!-- pointerdown, а не только mouseenter: на тач-экране ховера нет, и без него
+             свежие лимиты приезжали бы уже после раскрытия всплывашки -->
+        <span v-if="prov.providers.length" class="provbox"
+              @mouseenter="prov.loadUsage()" @pointerdown="prov.loadUsage()">
+          <HelpTip v-for="p in prov.providers" :key="p.id" class="prov-tip" toggle>
+            <!-- Клик раскрывает саму всплывашку (на планшете ховера нет), а в настройки
+                 ведёт кнопка внутри неё: обновление CLI — только вручную, кнопкой -->
             <span class="prov" :class="{ off: !p.available, upd: p.updateAvailable }"
-                  :style="p.available ? { color: p.color } : null" @click="toProviders">
+                  :style="p.available ? { color: p.color } : null">
               <ProviderIcon :provider="p" :size="15" />
               <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
             </span>
@@ -330,6 +317,9 @@ const { connected } = useSse((name) => {
                       {{ usageOf(p).action.label }}
                     </button>
                   </span>
+                </span>
+                <span class="ptip-go">
+                  <button type="button" @click="toProviders">Настройки исполнителей</button>
                 </span>
               </span>
             </template>
@@ -497,6 +487,14 @@ const { connected } = useSse((name) => {
   font-size: 11px;
 }
 .pu-state button:hover { border-color: var(--accent); color: var(--accent); }
+/* Переход в настройки исполнителей — теперь кнопкой внутри всплывашки, а не кликом по иконке */
+.ptip-go { display: flex; padding-top: 8px; border-top: 1px solid var(--line); }
+.ptip-go button {
+  width: 100%; padding: 6px 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-mid);
+  font-size: 11.5px;
+}
+.ptip-go button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).
    Селекторы с тегом: иначе .pu-head b перебивает .lv-* по специфичности. */

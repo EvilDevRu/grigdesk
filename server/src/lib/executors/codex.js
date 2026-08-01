@@ -401,33 +401,20 @@ export function buildCodexExecArgs({
   model,
   effort,
   sessionId,
-  sandbox = 'workspace-write',
-  networkAccess = true,
-  ephemeral = false,
-  ignoreUserConfig = false,
-  ignoreRules = false,
-  disabledFeatures = [],
-  messageViaStdin = false,
-  configOverrides = [],
 }) {
   const args = [
     'exec',
     '--skip-git-repo-check',
-    '--sandbox', sandbox,
-    '-c', `sandbox_workspace_write.network_access=${networkAccess ? 'true' : 'false'}`,
+    '--sandbox', 'workspace-write',
+    '-c', 'sandbox_workspace_write.network_access=true',
     '-C', cwd,
   ];
-  for (const override of configOverrides) args.push('-c', String(override));
-  if (ephemeral) args.push('--ephemeral');
-  if (ignoreUserConfig) args.push('--ignore-user-config');
-  if (ignoreRules) args.push('--ignore-rules');
-  for (const feature of disabledFeatures) args.push('--disable', feature);
   for (const dir of extraDirs) args.push('--add-dir', dir);
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
   if (sessionId) args.push('resume', '--json', sessionId);
   else args.push('--json');
-  args.push(messageViaStdin ? '-' : message);
+  args.push(message);
   return args;
 }
 
@@ -438,6 +425,13 @@ export default {
   color: '#10a37f',
   order: 2,
   install: 'npm i -g @openai/codex && codex login',
+
+  // Родного компакта в неинтерактивном режиме нет: `codex exec` принимает ПРОМПТ, а не
+  // слэш-команды (`codex exec --help`: [PROMPT] либо подкоманда resume/review), и ручки
+  // порога автокомпакта в окружении он тоже не предлагает — поэтому autoCompactEnv не
+  // объявлен. Сжатие идёт универсальным путём: заказываем выжимку текстом, кокпит
+  // начинает с неё новую сессию.
+  compaction: { kind: 'summary' },
 
   bin(config) { return config.codexBin; },
 
@@ -514,13 +508,9 @@ export default {
 
   run({
     config, message, cwd, extraDirs = [], model, effort, sessionId, signal, onProgress, onStep,
-    sandbox, networkAccess, ephemeral, ignoreUserConfig, ignoreRules, disabledFeatures,
-    messageViaStdin, configOverrides, env,
   }) {
     const args = buildCodexExecArgs({
-      message, cwd, extraDirs, model, effort, sessionId, sandbox, networkAccess,
-      ephemeral, ignoreUserConfig, ignoreRules, disabledFeatures, messageViaStdin,
-      configOverrides,
+      message, cwd, extraDirs, model, effort, sessionId,
     });
 
     return new Promise((resolve, reject) => {
@@ -551,6 +541,9 @@ export default {
         // Даже оборванный первый ход успевает напечатать thread.started. Сохраняем id:
         // следующий вопрос сможет продолжить тот же разговор после кнопки «стоп».
         stopped.sessionId = threadId;
+        // Оценка входа, посчитанная до остановки: пусть кольцо показывает её, а не ноль.
+        stopped.contextTokens = contextTokens;
+        stopped.contextIsEstimate = true;
         finishError(stopped);
       }
 
@@ -606,11 +599,9 @@ export default {
       try {
         child = spawn(config.codexBin, args, {
           cwd,
-          ...(env ? { env } : {}),
           signal,
-          stdio: [messageViaStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-        if (messageViaStdin) child.stdin.end(message);
       } catch (error) {
         finishError(error);
         return;

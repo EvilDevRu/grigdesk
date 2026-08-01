@@ -4,103 +4,14 @@
 // Источник №2 — prefs кокпита (projects.<id>.repos): для проектов, заведённых в кокпите,
 // у которых bash-профиля нет. Сам список проектов — как и раньше, lib/profiles.js.
 import { promises as fs } from 'node:fs';
-import { execFile } from 'node:child_process';
-import path from 'node:path';
-import { promisify } from 'node:util';
 import { listFactoryProfiles, listProjects } from './profiles.js';
 import { loadTriageProfile } from './analysis/profile.js';
-
-const exec = promisify(execFile);
+import { RoutesV2Store } from '../modules/routes/store-v2.js';
 
 // Чтение профиля — это source bash-файла (см. analysis/profile.js), не дёшево.
 // Короткого кэша хватает: профили правятся руками и редко.
 const TTL = 15_000;
 const cache = new Map(); // имя → { at, repos }
-
-const GITHUB_SLUG_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-
-/** Привести GitHub slug к сохраняемому виду, не меняя регистр владельца и репозитория. */
-export function normalizeGitHubSlug(value) {
-  const slug = String(value || '').trim().replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
-  return GITHUB_SLUG_RE.test(slug) ? slug : '';
-}
-
-/**
- * Извлечь owner/repo только из github.com remote. Userinfo намеренно не возвращается:
- * в HTTPS remote иногда лежит токен, его нельзя засветить в API «Проектов».
- */
-export function githubSlugFromRemote(value) {
-  const remote = String(value || '').trim();
-  if (!remote) return '';
-  const scp = remote.match(/^(?:[^@/:]+@)?github\.com:([^/]+\/[^/]+)$/i);
-  if (scp) return normalizeGitHubSlug(scp[1]);
-  try {
-    const url = new URL(remote);
-    if (url.hostname.toLowerCase() !== 'github.com') return '';
-    return normalizeGitHubSlug(url.pathname);
-  } catch {
-    return '';
-  }
-}
-
-/** Публичное и безопасное представление сохранённой GitHub-привязки репозитория. */
-export function normalizeReviewBinding(value = {}) {
-  const slug = normalizeGitHubSlug(value.slug);
-  const detectedSlug = normalizeGitHubSlug(value.detectedSlug);
-  const requestedConfirmation = !!value.confirmed && !!slug;
-  const remoteChecked = value.remoteChecked === true;
-  const mismatch = !!(requestedConfirmation && remoteChecked
-    && (!detectedSlug || slug.toLowerCase() !== detectedSlug.toLowerCase()));
-  const active = requestedConfirmation && !mismatch;
-  const verifyCommands = [...new Set((Array.isArray(value.verifyCommands) ? value.verifyCommands : [])
-    .map((cmd) => String(cmd || '').trim())
-    .filter(Boolean))]
-    .slice(0, 20);
-  return {
-    slug,
-    detectedSlug,
-    confirmed: active,
-    ...(mismatch && { mismatch: true }),
-    autoSync: active && value.autoSync !== false,
-    autoAnalyze: active && value.autoAnalyze !== false,
-    verifyCommands,
-    verifyCoversCriteria: active
-      && verifyCommands.length > 0
-      && value.verifyCoversCriteria === true,
-  };
-}
-
-/**
- * Найти другую подтверждённую привязку того же GitHub repository.
- * Сравнение case-insensitive: GitHub owner/repo регистронезависимы.
- */
-export function reviewBindingConflict(projects, { projectId, repoKey, slug }) {
-  const wanted = normalizeGitHubSlug(slug).toLowerCase();
-  if (!wanted) return null;
-  for (const [pid, project] of Object.entries(projects || {})) {
-    const repositories = project?.review?.repositories || {};
-    for (const [key, raw] of Object.entries(repositories)) {
-      if (pid === projectId && key === repoKey) continue;
-      const binding = normalizeReviewBinding(raw);
-      if (binding.confirmed && binding.slug.toLowerCase() === wanted) {
-        return { projectId: pid, repoKey: key };
-      }
-    }
-  }
-  return null;
-}
-
-async function detectedGitHubSlug(dir) {
-  try {
-    const { stdout } = await exec('git', ['-C', dir, 'remote', 'get-url', 'origin'], {
-      timeout: 5000,
-      maxBuffer: 1024 * 1024,
-    });
-    return githubSlugFromRemote(stdout);
-  } catch {
-    return '';
-  }
-}
 
 async function factoryRepos(config, name) {
   const hit = cache.get(name);
@@ -134,31 +45,22 @@ export async function projectRepos({ config, prefs, id, isFactory = null }) {
  */
 export async function projectsOverview({ config, prefs }) {
   const factorySet = new Set(await listFactoryProfiles(config.profilesDir));
-  const ids = await listProjects(config);
-  const savedProjects = prefs.read().projects || {};
+  const ids = await listProjects(config, prefs);
+  const store = new RoutesV2Store({ baseDir: config.routesV2Dir });
   return Promise.all(ids.map(async (id) => {
     const repos = await projectRepos({ config, prefs, id, isFactory: factorySet.has(id) });
-    const withExists = await Promise.all(repos.map(async (r) => {
-      const exists = await fs.access(r.dir).then(() => true).catch(() => false);
-      const detectedSlug = exists ? await detectedGitHubSlug(r.dir) : '';
-      const stored = savedProjects[id]?.review?.repositories?.[r.key] || {};
-      return {
-        ...r,
-        exists,
-        github: normalizeReviewBinding({ ...stored, detectedSlug, remoteChecked: exists }),
-      };
-    }));
+    const withExists = await Promise.all(repos.map(async (r) => ({
+      ...r,
+      exists: await fs.access(r.dir).then(() => true).catch(() => false),
+    })));
+    // Маршруты проекта — это состав ОПУБЛИКОВАННОГО каталога v2, а не файлы на диске:
+    // здесь показывается ровно то, по чему пойдут новые попытки. Нет бандла (проект ещё
+    // не переехал на v2) — пустой список, а не ошибка на весь раздел.
     let routes = [];
     try {
-      routes = (await fs.readdir(path.join(config.routesDir, id)))
-        .filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
-    } catch { /* базы маршрутов ещё нет — проект только из фабрики */ }
-    return {
-      id,
-      factory: factorySet.has(id),
-      repos: withExists,
-      routes,
-      reviewReady: withExists.some((repo) => repo.github.confirmed),
-    };
+      const current = await store.readCurrent(id);
+      routes = current ? Object.keys(current.catalog.routes).sort() : [];
+    } catch { /* каталога нет или он битый — «Маршруты» покажут это подробно */ }
+    return { id, factory: factorySet.has(id), repos: withExists, routes };
   }));
 }

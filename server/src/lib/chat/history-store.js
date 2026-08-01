@@ -5,6 +5,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { mergeChat } from './merge-chat.js';
+
 export class ChatHistoryStore {
   /**
    * @param {{ chatsDir: string, legacyPath?: string, log?: object }} opts
@@ -14,6 +16,8 @@ export class ChatHistoryStore {
     this.dir = chatsDir;
     this.legacyPath = legacyPath;
     this.log = log;
+    // id чата → хвост очереди его сохранений (см. withChatLock).
+    this.locks = new Map();
   }
 
   /**
@@ -101,21 +105,56 @@ export class ChatHistoryStore {
    * одним телом; вместе с лентами шагов он дорос до лимита тела запроса, сервер начал
    * отвечать 413, и история не сохранялась вовсе. Одно тело = один чат, и объём запроса
    * больше не зависит от того, сколько всего чатов накопилось.
-   * Возвращает false, если на диске уже лежит ровно это (частый случай — лишний persist).
+   *
+   * Присланная копия НЕ ЗАМЕЩАЕТ серверную, а сливается с ней (`mergeChat`): окно может
+   * отстать и принести ленту без чужих сообщений — раньше это стирало ответы, дошедшие
+   * до другого устройства. Запись сериализована по id: два окна, сохраняющие один чат
+   * одновременно, читали бы диск до записи друг друга и всё равно теряли сообщения.
+   *
+   * @returns {{written: boolean, restored: number, dropped: number}}
+   *   written — файл изменился (false — на диске уже лежит ровно это, частый случай
+   *   лишнего persist); restored/dropped — что дало слияние, см. merge-chat.js.
    */
   async saveOne(chat, archived = false) {
-    if (!chat?.id) return false;
-    await this.ensureDir();
-    const c = { ...chat, archived: !!archived };
-    c.createdAt = c.createdAt || c.updatedAt || Date.now();
-    const target = this.fileOf(c);
-    const json = JSON.stringify(c);
-    // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
-    const prev = (await this.scan()).get(c.id);
-    if (prev && prev.path === target && prev.json === json) return false;
-    await this.writeAtomic(target, json);
-    if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
-    return true;
+    if (!chat?.id) return { written: false, restored: 0, dropped: 0 };
+    return this.withChatLock(chat.id, async () => {
+      await this.ensureDir();
+      // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
+      const prev = (await this.scan()).get(chat.id);
+      const { chat: merged, restored, dropped } = mergeChat(prev?.chat || null, chat);
+      const c = { ...merged, archived: !!archived };
+      c.createdAt = c.createdAt || c.updatedAt || Date.now();
+      const target = this.fileOf(c);
+      const json = JSON.stringify(c);
+      if (prev && prev.path === target && prev.json === json) return { written: false, restored, dropped };
+      await this.writeAtomic(target, json);
+      if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
+      return { written: true, restored, dropped };
+    });
+  }
+
+  /**
+   * Очередь записи на чат: сохранения одного чата выполняются по очереди, разных —
+   * параллельно. Ошибка одного сохранения не рвёт цепочку следующим.
+   */
+  async withChatLock(id, fn) {
+    const prev = this.locks.get(id) || Promise.resolve();
+    const next = prev.then(fn, fn);
+    // Хвост очереди чистим, только если за время работы её никто не продлил.
+    this.locks.set(id, next.then(() => {}, () => {}));
+    const done = this.locks.get(id);
+    done.then(() => { if (this.locks.get(id) === done) this.locks.delete(id); });
+    return next;
+  }
+
+  /**
+   * Один чат по id — точечная досинхронизация окон: по событию `chat-store` окно тянет
+   * ровно изменившийся чат, а не всю историю (она растёт, а меняется всегда один чат).
+   */
+  async readOne(id) {
+    if (!id) return null;
+    const found = (await this.scan()).get(String(id));
+    return found ? found.chat : null;
   }
 
   /** Удаление чата (человек стёр его в списке). Файла нет — значит уже удалён. */

@@ -12,7 +12,7 @@ import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
 import { reserveSlot, releaseSlot, slotsOverview, SlotsFullError } from '../../lib/sandbox-slots.js';
 import { recoveryDecision } from '../../lib/pipeline-recovery.js';
-import { factoryLaunchEnv } from '../../lib/factory-launch.js';
+import { factoryLaunchEnv, factoryV2UnitArgs } from '../../lib/factory-launch.js';
 import {
   FactoryRunnerControl,
   RunnerControlCommandError,
@@ -35,6 +35,18 @@ async function factoryModule(fastify, opts) {
     configRoot: config.factoryConfigRoot,
     profilesDir: config.profilesDir,
   });
+
+  // Задачами прогона v2 управляет factory-v2 (immutable журнал попытки): гейты через
+  // pipeline-set, форс этапов, runner switch и снос v1-песочницы к ним неприменимы.
+  // Отклоняем ДО каких-либо действий, чтобы кнопки v1-интерфейса не портили журнал.
+  const rejectV2Mutation = async (id, reply) => {
+    if (!(await factoryState.isV2Task(id))) return false;
+    reply.code(409).send({
+      error: 'v2_task_engine_owned',
+      message: 'Задача идёт по протоколу v2 — управление только через factory-v2 (gate/resume/abandon).',
+    });
+    return true;
+  };
 
   // Список всех задач с картой статусов этапов.
   fastify.get('/api/tasks', async () => {
@@ -60,8 +72,10 @@ async function factoryModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     const file = STAGE_DOCS[request.params.name];
     if (!id || !file) return reply.code(400).send({ error: 'bad_doc' });
-    try { return { text: await fs.readFile(path.join(config.stateDir, `t${id}.${file}`), 'utf8') }; }
-    catch { return { text: '' }; }
+    try {
+      const dir = await factoryState.taskStateDir(id);
+      return { text: await fs.readFile(path.join(dir, `t${id}.${file}`), 'utf8') };
+    } catch { return { text: '' }; }
   });
 
   // Воркдиры задачи (worktree бэка/фронта) — для кнопки «Открыть в VS Code».
@@ -136,8 +150,7 @@ async function factoryModule(fastify, opts) {
       }
     }
     // Живой незавершённый реестр = продолжение прогона: у фабрики для этого есть
-    // режим resume (start реинициализирует реестр и гонит цепочку заново со скаута —
-    // так резюм #7803 дважды пере-прогонял разведку).
+    // режим resume; start реинициализирует реестр и заново гонит цепочку со скаута.
     const mode = reg && reg.WF_STATUS === 'running' ? 'resume' : 'start';
     const args = [id, mode, '--profile', profile];
     // Тикет = название+описание с фронта ПЛЮС контекст, которого нет в описании:
@@ -165,10 +178,10 @@ async function factoryModule(fastify, opts) {
     }
     if (route) args.push('--route', route);
 
-    // СЛОТ СТЕНДА резервируем ЗДЕСЬ, до запуска. Внутри подъёма индекс выбирается за
-    // двадцать минут до того, как попадёт в реестр песочниц, и всё это окно выглядит
-    // свободным: #7789 и #7804 так взяли один и тот же k=5, и второй умер на
-    // «Address already in use», потеряв весь провижининг. Кокпит — единственная точка
+    // СЛОТ СТЕНДА резервируем ЗДЕСЬ, до запуска. Внутри подъёма индекс выбирается задолго
+    // до того, как попадёт в реестр песочниц, и всё это окно выглядит свободным: два
+    // запуска могут взять один k, а второй умереть на «Address already in use», потеряв
+    // весь провижининг. Кокпит — единственная точка
     // запуска на машине, поэтому окно закрывается здесь: под локом выбрали, записали,
     // передали конвейеру. Дальше стенд подтвердит слот в реестре, и резервация снимется.
     let slot = { k: null, source: 'none' };
@@ -196,8 +209,8 @@ async function factoryModule(fastify, opts) {
     const slotEnv = (slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {};
     const launchEnv = factoryLaunchEnv(config, slotEnv);
     // КРИТИЧНО: оркестратор живёт ЧАСЫ и обязан пережить рестарт кокпита.
-    // Прогон #7803 умер именно так: сервер работал под systemd-юнитом, фабрика
-    // родилась в его cgroup, и при рестарте systemd зачистил cgroup целиком (TERM
+    // Если фабрика родилась в cgroup systemd-юнита сервера, при рестарте systemd
+    // зачистит cgroup целиком (TERM
     // демону и claude-агенту). Поэтому фабрика уезжает в СВОЙ transient scope
     // (systemd-run --user --scope) — отдельный cgroup, жизнь кокпита её не касается.
     // Без systemd — просто полная отвязка: detached, вывод в файл, unref.
@@ -243,6 +256,7 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/launch', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    if (await rejectV2Mutation(id, reply)) return reply;
     const r = await startPipeline(id, request.body || {});
     return r.status ? reply.code(r.status).send(r.body) : r.body;
   });
@@ -283,6 +297,10 @@ async function factoryModule(fastify, opts) {
 
     for (const id of await factoryState.listTaskIds()) {
       try {
+        // Прогоны v2 управляются только factory-v2: v1-автовосстановление к ним
+        // неприменимо, иначе после рестарта сервера оно запишет NEEDS_RUN в legacy-state
+        // живого v2-прогона — реестр-призрак в чужом дереве.
+        if (await factoryState.isV2Task(id)) continue;
         const { registry } = await factoryState.readRegistry(id);
         const alive = factoryState.isDaemonAlive(registry.ORCH_PID, id);
         const available = await profileAvailable(registry.PROFILE);
@@ -383,6 +401,45 @@ async function factoryModule(fastify, opts) {
     // в цепочке; теперь оно снимается кнопкой плагина «Демо», а не ответом на воротах.
     if (!id || !key.startsWith('GATE_')) return reply.code(400).send({ error: 'bad_gate' });
     if (!['approve', 'reject'].includes(decision)) return reply.code(400).send({ error: 'bad_decision' });
+    // Ворота v2: решение применяет factory-v2 (immutable журнал попытки), а
+    // продолжение уезжает в ОТВЯЗАННЫЙ systemd-юнит — он переживает рестарты
+    // сервера, а фиксированное имя юнита не даёт двум resume бежать параллельно.
+    // --commit-only тут обязателен: без него gate сам ведёт маршрут дальше и
+    // висит столько, сколько работает следующий этап. Тогда execFile исчерпывает таймаут:
+    // решение уже записано, TERM убивает оркестратор, TESTS
+    // остался сиротой, а человек увидел «Command failed» на принятом плане.
+    if (await factoryState.isV2Task(id)) {
+      let registry;
+      try { ({ registry } = await factoryState.readRegistry(id)); }
+      catch (err) { return reply.code(404).send({ error: 'not_found', message: err.message }); }
+      const attempt = registry.ATTEMPT_ID || '';
+      const value2 = decision === 'approve' ? 'approved' : 'rejected';
+      const comment2 = ((request.body || {}).comment || '').replace(/\n/g, ' ').slice(0, 500);
+      if (!/^a_[a-f0-9]{32}$/.test(attempt)) {
+        return reply.code(409).send({ error: 'v2_attempt_unknown', message: 'в реестре нет ATTEMPT_ID активной попытки' });
+      }
+      const gateArgs = [id, 'gate', '--profile', registry.PROFILE, '--attempt', attempt,
+        '--node', key.toLowerCase(), '--decision', value2, '--commit-only'];
+      if (comment2) gateArgs.push('--comment', comment2);
+      try {
+        await new Promise((resolve, rejectGate) => {
+          execFile(config.factoryV2Bin, gateArgs, { timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) rejectGate(new Error((stderr || stdout || err.message).slice(-300)));
+            else resolve();
+          });
+        });
+      } catch (err) {
+        return reply.code(409).send({ error: 'v2_gate_rejected', message: err.message });
+      }
+      execFile('systemd-run', [
+        ...factoryV2UnitArgs(id),
+        `--setenv=PATH=${process.env.PATH}`,
+        config.factoryV2Bin, id, 'resume', '--profile', registry.PROFILE, '--attempt', attempt,
+      ], { timeout: 15000 }, (err) => {
+        if (err) fastify.log.warn({ task: id, err: err.message }, 'v2 resume после ворот не запустился — продолжить вручную');
+      });
+      return { ok: true, key, value: value2, generation: 'v2' };
+    }
     const value = decision === 'approve' ? 'approved' : 'rejected';
     const comment = ((request.body || {}).comment || '').replace(/\n/g, ' ').slice(0, 500);
     const pairs = [key, value];
@@ -398,6 +455,57 @@ async function factoryModule(fastify, opts) {
     const status = request.params.status;
     if (!id || !key) return reply.code(400).send({ error: 'bad_input' });
     if (!STAGE_STATUSES.has(status)) return reply.code(400).send({ error: 'bad_status' });
+    // v2: «перейти сюда» — не форс статуса в реестре (журнал попытки подделывать
+    // нельзя), а доверенный человеческий возврат курсора: factory-v2 goto пишет
+    // событие human-rewind с причиной и сбрасывает пройденный хвост маршрута.
+    // Прочие принудительные статусы для v2-задач по-прежнему запрещены.
+    if (await factoryState.isV2Task(id)) {
+      if (status !== 'running') {
+        return reply.code(409).send({
+          error: 'v2_task_engine_owned',
+          message: 'Для v2 доступен только возврат на пройденный узел («перейти сюда»).',
+        });
+      }
+      let registry;
+      try { ({ registry } = await factoryState.readRegistry(id)); }
+      catch (err) { return reply.code(404).send({ error: 'not_found', message: err.message }); }
+      const attempt = registry.ATTEMPT_ID || '';
+      if (!/^a_[a-f0-9]{32}$/.test(attempt)) {
+        return reply.code(409).send({ error: 'v2_attempt_unknown', message: 'в реестре нет ATTEMPT_ID активной попытки' });
+      }
+      // Узел маршрута по ключу реестра: граф уже строится из бандла попытки.
+      const graph = await factoryState.getTaskGraph(id).catch(() => null);
+      const node = graph && Object.keys(graph.keys || {}).find((nid) => graph.keys[nid] === key);
+      if (!node) {
+        return reply.code(409).send({ error: 'v2_node_unknown', message: `узел ${key} не найден в маршруте попытки` });
+      }
+      // Причина уезжает в журнал попытки, а движок валидирует её жёстко: 1–500 символов
+      // без управляющих. Раньше гасился только \n, поэтому вставленный из редактора текст
+      // с \r или табами ронял goto с 409 уже после того, как человек его написал.
+      const comment = String((request.body || {}).comment || '')
+        .replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+        || 'возврат из кокпита';
+      try {
+        await new Promise((resolve, rejectGoto) => {
+          execFile(config.factoryV2Bin, [id, 'goto', '--profile', registry.PROFILE,
+            '--attempt', attempt, '--node', node, '--reason', comment],
+          { timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) rejectGoto(new Error((stderr || stdout || err.message).slice(-300)));
+            else resolve();
+          });
+        });
+      } catch (err) {
+        return reply.code(409).send({ error: 'v2_goto_rejected', message: err.message });
+      }
+      execFile('systemd-run', [
+        ...factoryV2UnitArgs(id),
+        `--setenv=PATH=${process.env.PATH}`,
+        config.factoryV2Bin, id, 'resume', '--profile', registry.PROFILE, '--attempt', attempt,
+      ], { timeout: 15000 }, (err) => {
+        if (err) fastify.log.warn({ task: id, err: err.message }, 'v2 resume после возврата не запустился');
+      });
+      return { ok: true, key, status: 'running', node, generation: 'v2' };
+    }
     try {
       const { registry } = await factoryState.readRegistry(id);
       const { stages } = factoryState.buildStageMap(registry);
@@ -422,6 +530,19 @@ async function factoryModule(fastify, opts) {
     if (!id || !/^[A-Z][A-Z0-9_]*$/.test(stage) || !/^[a-z][a-z0-9_-]*$/.test(target)) {
       return reply.code(400).send({ error: 'bad_runner_switch' });
     }
+    // Переключение исполнителя одинаково для обоих поколений: движок гасит точную
+    // process group по TRUSTED identity и переигрывает этап на выбранном провайдере
+    // (v2 использует тот же multi-runner). Разница только в дереве состояния —
+    // v2-задача живёт в state-v2, поэтому CLI зовём с её каталогом.
+    const v2Task = await factoryState.isV2Task(id);
+    const control = v2Task
+      ? new FactoryRunnerControl({
+        factoryBin: config.factoryBin,
+        stateDir: await factoryState.taskStateDir(id),
+        configRoot: config.factoryConfigRoot,
+        profilesDir: config.profilesDir,
+      })
+      : runnerControl;
     try {
       const graph = await factoryState.getTaskGraph(id);
       const nodeId = Object.keys(graph.runnerKeys || {}).find((nid) => graph.runnerKeys[nid] === stage)
@@ -440,7 +561,7 @@ async function factoryModule(fastify, opts) {
           message: 'Исполнитель не входит в разрешённую резервную цепочку этапа.',
         });
       }
-      return await runnerControl.switch({ task: id, stage, target });
+      return await control.switch({ task: id, stage, target });
     } catch (err) {
       if (err instanceof RunnerControlInputError) {
         return reply.code(400).send({ error: 'bad_runner_switch', message: err.message });
@@ -457,6 +578,7 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/instruction', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    if (await rejectV2Mutation(id, reply)) return reply;
     try {
       writeInstruction({ ...cfg, task: id, text: (request.body || {}).text || '' });
       if ((request.body || {}).text) await setPipeline({ ...cfg, task: id, pairs: ['INSTRUCTION_AT', new Date().toISOString().slice(0, 19).replace('T', ' ')] }).catch(() => {});
@@ -469,9 +591,10 @@ async function factoryModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     try {
+      const dir = await factoryState.taskStateDir(id);
       const { registry } = await factoryState.readRegistry(id);
-      const activity = readActivity({ ...cfg, task: id, registry });
-      const live = readAgentLive({ stateDir: cfg.stateDir, task: id, registry });
+      const activity = readActivity({ ...cfg, stateDir: dir, task: id, registry });
+      const live = readAgentLive({ stateDir: dir, task: id, registry });
       return { ...activity, live };
     } catch (err) { return reply.code(404).send({ error: 'not_found', message: err.message }); }
   });
@@ -508,6 +631,7 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/sandbox/down', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    if (await rejectV2Mutation(id, reply)) return reply;
     const cmd = await sandboxDownCmd(id);
     if (!cmd) return reply.code(501).send({ error: 'not_configured', message: NOT_CONFIGURED });
     const down = await runSandboxDown(id, cmd);
@@ -515,20 +639,77 @@ async function factoryModule(fastify, opts) {
     return { ok: true, output: down.output };
   });
 
+  // Закрыть задачу: снос стенда — операция ИНФРАСТРУКТУРНАЯ, а «задача закрыта» —
+  // логическая, и down.sh их принципиально не смешивает: иначе аварийный снос
+  // архивирует живой реестр. Поэтому логическое закрытие живёт
+  // отдельной кнопкой: реестр в архив + удаление ПУСТОЙ ветки задачи. Ветку с
+  // коммитами не трогаем никогда — работу кнопкой не теряют.
+  fastify.post('/api/tasks/:id/close', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    let registry;
+    let stateDir = config.stateDir;
+    try {
+      ({ registry } = await factoryState.readRegistry(id));
+      stateDir = await factoryState.taskStateDir(id);
+    } catch (err) {
+      return reply.code(404).send({ error: 'not_found', message: err.message });
+    }
+    if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
+      return reply.code(409).send({ error: 'running', message: 'конвейер идёт — сначала останови прогон' });
+    }
+    const env = await factoryState.readEnv(id);
+    if (env.FE_PORT) {
+      return reply.code(409).send({ error: 'sandbox_alive', message: 'стенд ещё жив — сначала снеси стенд' });
+    }
+
+    // Ветки задачи ищем по worktree-путям из env прогона; репозиторий — их основной
+    // checkout. Пустая (0 коммитов от базы) удаляется, непустая остаётся с отчётом.
+    const branches = [];
+    const branch = registry.SOURCE_BRANCH || env.BE_BRANCH || env.FE_BRANCH || '';
+    const repos = (await loadTriageProfile(config, registry.PROFILE).catch(() => null))?.repos || [];
+    for (const repo of repos) {
+      if (!branch || !repo?.path) continue;
+      const kept = await new Promise((resolve) => {
+        execFile('git', ['-C', repo.path, 'rev-list', '--count', `HEAD..refs/heads/${branch}`],
+          { timeout: 15000 }, (err, stdout) => {
+            if (err) return resolve({ repo: repo.name || repo.path, state: 'нет ветки' });
+            if (String(stdout).trim() !== '0') return resolve({ repo: repo.name || repo.path, state: `оставлена: коммитов ${String(stdout).trim()}` });
+            execFile('git', ['-C', repo.path, 'branch', '-D', branch], { timeout: 15000 }, (delErr) => {
+              resolve({ repo: repo.name || repo.path, state: delErr ? `не удалена: ${delErr.message.slice(-120)}` : 'удалена (пустая)' });
+            });
+          });
+      });
+      branches.push(kept);
+    }
+
+    const moved = [];
+    await fs.mkdir(path.join(stateDir, 'archive'), { recursive: true });
+    for (const suffix of ['pipeline', 'env', 'stage', 'plan.md', 'recon.md', 'report.md', 'tests.sha256']) {
+      const from = path.join(stateDir, `t${id}.${suffix}`);
+      try {
+        await fs.rename(from, path.join(stateDir, 'archive', `t${id}.${suffix}`));
+        moved.push(suffix);
+      } catch { /* файла нет — нечего архивировать */ }
+    }
+    return { ok: true, archived: moved, branch: branch || null, branches };
+  });
+
   // Перезапуск стенда после провала подъёма.
   //
   // Кнопка «снести стенд» показывается только у ЖИВОГО стенда (её условие — известный
   // порт фронта), а когда подъём упал, порта нет — и вернуть задачу в работу из
   // интерфейса было нечем. Движок при этом ставит STALLED_HUMAN=1 и выходит, НИЧЕГО за
-  // собой не убирая (намеренно: следы падения нужны для разбора). #7789 так и встал:
-  // первая попытка умерла на занятом порту, вторая — мгновенно, на гарде «схема db_t7789
-  // уже существует», потому что остатки первой никто не снёс. Поэтому кнопка делает ДВА
+  // собой не убирая (намеренно: следы падения нужны для разбора). Первая попытка может
+  // умереть на занятом порту, а вторая — на гарде «схема db_t<TASK> уже существует»,
+  // потому что остатки первой никто не снёс. Поэтому кнопка делает ДВА
   // шага: сносит остатки (down.sh идемпотентен — дропает по точным именам, чего нет,
   // то и не трогает) и поднимает конвейер заново. Заново — это resume: разведка,
   // маршрут и пройденные этапы в реестре уцелеют, стенд соберётся фоном.
   fastify.post('/api/tasks/:id/sandbox/retry', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    if (await rejectV2Mutation(id, reply)) return reply;
 
     let reg = null;
     try { reg = (await factoryState.readRegistry(id)).registry; } catch { /* реестра нет */ }

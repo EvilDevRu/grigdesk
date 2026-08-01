@@ -7,6 +7,19 @@ import fp from 'fastify-plugin';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
+import { PROFILE_RE } from '../../lib/profiles.js';
+
+export async function profileHasCapability(profilesDir, profile, capability) {
+  if (!PROFILE_RE.test(String(profile || '')) || !/^[a-z][a-z0-9_-]*$/.test(capability)) {
+    return false;
+  }
+  try {
+    const graph = JSON.parse(await fs.readFile(path.join(profilesDir, profile, 'graph.json'), 'utf8'));
+    return Array.isArray(graph.capabilities) && graph.capabilities.includes(capability);
+  } catch {
+    return false;
+  }
+}
 
 async function demoModule(fastify, opts) {
   const { config, factoryState } = opts;
@@ -23,11 +36,13 @@ async function demoModule(fastify, opts) {
     if (gate(reply)) return reply;
     const tasks = [];
     for (const t of await factoryState.listTasks()) {
+      const profile = t.profile || t.registry?.PROFILE || '';
+      if (!(await profileHasCapability(config.profilesDir, profile, 'demo'))) continue;
       let env = {};
       try { env = await factoryState.readEnv(t.task); } catch { /* стенд не поднимался */ }
       tasks.push({
         task: t.task,
-        profile: t.profile || null,
+        profile,
         demo: t.registry?.DEMO || 'pending',
         demoAt: t.registry?.DEMO_AT || null,
         shipDone: t.registry?.SHIP === 'done',
@@ -51,12 +66,19 @@ async function demoModule(fastify, opts) {
   // (running → done|failed) — фронт поллит обзор.
   fastify.post('/api/demo/:id/run', async (request, reply) => {
     if (gate(reply)) return reply;
-    const id = String(request.params.id).replace(/[^0-9]/g, '');
-    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    const match = /^(?:t)?([1-9][0-9]*)$/.exec(String(request.params.id));
+    if (!match) return reply.code(400).send({ error: 'bad_task_id' });
+    const id = match[1];
     let reg = null;
     try { reg = (await factoryState.readRegistry(id)).registry; } catch { /* нет реестра */ }
     if (!reg) return reply.code(404).send({ error: 'no_registry', message: 'задача не проходила конвейер — демо снимать не с чего' });
     if (reg.DEMO === 'running') return { outcome: 'already_running' };
+    if (!(await profileHasCapability(config.profilesDir, reg.PROFILE, 'demo'))) {
+      return reply.code(409).send({
+        error: 'demo_unsupported',
+        message: `Профиль «${reg.PROFILE || 'неизвестный'}» не поддерживает этап DEMO.`,
+      });
+    }
 
     const launchLog = path.join(config.stateDir, `t${id}.launch.log`);
     const out = await fs.open(launchLog, 'a');

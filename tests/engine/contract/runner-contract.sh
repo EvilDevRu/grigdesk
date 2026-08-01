@@ -16,6 +16,7 @@ fi
 
 source "$FACTORY_HOME/lib/runners/index.sh"
 source "$FACTORY_HOME/lib/runner-launcher.sh"
+source "$FACTORY_HOME/lib/runtime-switch.sh"
 
 runner_registry_reset
 runner_registry_add fake "$FACTORY_TESTS_HOME/fakes/runners/fake.sh"
@@ -103,5 +104,74 @@ else
   kill -KILL "$barrier_pid" 2>/dev/null || true
   wait "$barrier_pid" 2>/dev/null || true
 fi
+
+# Widen the fork-to-barrier interval with trusted module initialization, then
+# signal the launcher inside that interval. The signal must be replayed only
+# after the exact control-root identity exists; provider run code must never
+# cross the barrier.
+slow_module="$TEST_ROOT/slow-barrier-runner.sh"
+printf '%s\n' \
+  'if [[ "${FACTORY_LAUNCH_BARRIER:-0}" == 1 ]]; then' \
+  '  : >"${TEST_ROOT:?}/slow-barrier-sourced"' \
+  '  sleep 0.2' \
+  'fi' \
+  'runner_slowbarrier_probe() { printf "ready\n"; }' \
+  'runner_slowbarrier_catalog() { printf "fake-model\tslowbarrier\tfixture\t1\tdefault\t1\t1\t0\t1\t0.0.0\t999.0.0\n"; }' \
+  'runner_slowbarrier_capabilities() { printf "status status_fd foreground structured_output\n"; }' \
+  'runner_slowbarrier_run() { : >"${TEST_ROOT:?}/slow-barrier-ran"; }' \
+  'runner_slowbarrier_classify() { printf "unknown\n"; }' \
+  'runner_slowbarrier_fanout_count() { printf "0\n"; }' \
+  'runner_slowbarrier_dialect() { printf "fixture\n"; }' \
+  'runner_slowbarrier_interrupt() { return 0; }' >"$slow_module"
+runner_registry_add slowbarrier "$slow_module"
+
+barrier_signal_handler() {
+  local trusted_rc
+  runner_trusted_identity_read 43 CHECK run-signal 1 \
+    >"$TEST_ROOT/signal-trusted-record"
+  trusted_rc=$?
+  printf '%s\n' "$trusted_rc" >"$TEST_ROOT/signal-trusted-rc"
+  (( trusted_rc == 0 )) || return "$trusted_rc"
+  runtime_interrupt_trusted_active 43 CHECK run-signal 1 0
+}
+trap barrier_signal_handler TERM
+test_shell_pid=$BASHPID
+(
+  for _poll in {1..100}; do
+    [[ -f "$TEST_ROOT/slow-barrier-sourced" ]] && break
+    sleep 0.01
+  done
+  kill -TERM "$test_shell_pid"
+) &
+signal_sender=$!
+signal_run_dir="$STATE_DIR/logs/runs/t43/CHECK/run-signal"
+runner_launch slowbarrier 43 "signal" CHECK fake-model high 5 \
+  "$signal_run_dir" run-signal 1 "$status_token" >/dev/null 2>&1
+wait "$signal_sender" 2>/dev/null || true
+trap - TERM
+assert_eq 0 "$(cat "$TEST_ROOT/signal-trusted-rc")" \
+  "deferred launch signal observes trusted identity before replay"
+assert_file_missing "$TEST_ROOT/slow-barrier-ran" \
+  "deferred signal stops the runner before provider code crosses the barrier"
+assert_file_missing "$(runner_trusted_identity_file 43)" \
+  "deferred signal retires the exact identity after PGID quiescence"
+assert_eq idle "$RUNNER_LAUNCH_STATE" \
+  "launcher leaves the signal critical section in a quiescent state"
+
+# Reproduce the restore seam directly: TERM restoration itself delivers INT
+# while INT still points at the temporary deferral trap. The helper must read
+# the deferred slot after restoring both handlers and replay that late signal.
+late_restore_handler() {
+  printf 'replayed\n' >"$TEST_ROOT/late-restore-signal"
+}
+trap late_restore_handler INT
+saved_int=$(trap -p INT)
+trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-INT}' INT
+RUNNER_LAUNCH_DEFERRED_SIGNAL=""
+_runner_launch_restore_signal_traps \
+  "trap - TERM; kill -INT $BASHPID" "$saved_int"
+assert_eq replayed "$(tr -d '\n' <"$TEST_ROOT/late-restore-signal")" \
+  "late signal in trap-restore seam is replayed instead of erased"
+trap - INT
 
 finish_tests

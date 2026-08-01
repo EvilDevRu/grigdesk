@@ -36,9 +36,20 @@ SPLIT = {'PLAN': ['plan', 'skeptic', 'validate', 'translator']}
 # месте. Демо-узлов здесь нет намеренно: демо снимается вне конвейера (кнопка плагина
 # «Демо» в кокпите), и на схеме маршрута ему делать нечего.
 ENGINE_NODES = {'sandbox', 'ship', 'retro'}
+# Хвост может рисоваться на схеме, но не должен входить в PROFILE_ROUTE_STAGES_*:
+# bin/factory запускает его сам после успешного run_pipeline.
+ENGINE_TAIL_STAGES = {'SHIP', 'RETRO'}
+# Старые demo-ворота удалены из runtime. Их возврат в граф снова покажет человеку
+# несуществующую часть конвейера.
+OBSOLETE_GRAPH_NODES = {'demo', 'gate_demo', 'gate_demo_ok'}
 # Спутники этапа: рисуются НЕ везде (в коротких маршрутах диффы мелкие — симплифаер не нужен).
 # Допустимы, если их родительский этап в маршруте есть; их отсутствие ошибкой не считается.
-SATELLITES = {'simplify': 'BUILD'}
+SATELLITES = {
+    'simplify': 'BUILD',
+    # Тест-критика выполняет тот же агент внутри TESTS и публикует отдельный статус
+    # для наглядности; отдельного запуска TCRITIC в маршруте быть не должно.
+    'tcritic': 'TESTS',
+}
 
 # Этапы маршрутов читаем у профиля — источник истины именно он.
 out = subprocess.run(
@@ -60,11 +71,16 @@ if not profile_routes:
     fails.append(f'профиль {PROFILE}: не прочитались PROFILE_ROUTE_STAGES_*')
 
 for route, stages in profile_routes.items():
+    for stage in sorted(ENGINE_TAIL_STAGES.intersection(stages)):
+        fails.append(
+            f'{route}: {stage} ошибочно включён в маршрут — это хвост движка после GATE_ACCEPT')
     g = dash.profile_graphs(PROFILE).get(route)
     if not g:
         notes.append(f'{route}: своей схемы нет — дашборд нарисует автосхему из этапов')
         continue
     drawn = set(g['pos'])
+    for n in sorted(drawn.intersection(OBSOLETE_GRAPH_NODES)):
+        fails.append(f'{route}: на схеме остался устаревший demo-узел — {n}')
     # какой узел отвечает за этап: сперва объявленное в graph.json (keys), затем lower(этап)
     by_key = {}
     for node, key in dash.profile_graph_meta(PROFILE)['keys'].items():

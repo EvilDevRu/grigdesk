@@ -18,17 +18,26 @@ export const config = {
   // Корень репозитория кокпита — от него считаются bin/restart, plugins/ и базы в корне.
   rootDir,
   stateDir: process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state'),
+  // Состояние прогонов route v2 — отдельное дерево (движок требует непересечения
+  // с legacy). Сервер его только читает; мутации v2 — через factory-v2.
+  stateV2Dir: process.env.FACTORY_STATE_V2_DIR || path.join(home, '.factory', 'state-v2'),
   // Движок входит в этот же репозиторий. Внешний checkout поддерживается только явным env.
   factoryHome,
   // Проектные профили живут отдельно от движка, в корне репозитория.
   profilesDir: process.env.FACTORY_PROFILES_DIR || path.join(rootDir, 'profiles'),
   factoryBin: process.env.COCKPIT_FACTORY_BIN || path.join(factoryHome, 'bin', 'factory'),
+  // Лаунчер протокола v2 — для моста ворот (gate/resume из UI).
+  factoryV2Bin: process.env.COCKPIT_FACTORY_V2_BIN || path.join(factoryHome, 'bin', 'factory-v2'),
   // Debug settings принадлежат engine writer-у, Cockpit передаёт этот root его CLI.
   factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(home, '.factory', 'config'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
   factoryProfile: process.env.COCKPIT_FACTORY_PROFILE || '',
   // Бинарь Claude для чата с агентом по задаче.
   claudeBin: process.env.COCKPIT_CLAUDE_BIN || 'claude',
+  // Обычно OAuth-пара читается из установленного Claude CLI. Явный override допустим
+  // только целиком: смешивать client id одного приложения с endpoint другого нельзя.
+  claudeOauthClientId: process.env.COCKPIT_CLAUDE_OAUTH_CLIENT_ID || '',
+  claudeOauthTokenUrl: process.env.COCKPIT_CLAUDE_OAUTH_TOKEN_URL || '',
   // Бинарь Codex CLI (GPT-исполнитель OpenAI). Не установлен → провайдер «недоступен».
   codexBin: process.env.COCKPIT_CODEX_BIN || 'codex',
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
@@ -53,9 +62,11 @@ export const config = {
   // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
   agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
 
-  // База маршрутов конвейера — папка в корне проекта (внутри свой .gitignore):
-  // routes/<профиль>/<id>.json + сайдкары промптов routes/<профиль>/<id>/<этап>.md.
-  routesDir: process.env.COCKPIT_ROUTES_DIR || path.join(__dirname, '..', '..', 'routes'),
+  // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов v2 — runtime-артефакт движка,
+  // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Имя без
+  // поколения намеренно: legacy маршрутов в ~/.factory никогда не было, каталог
+  // принадлежит только v2-store; движок читает его же (дефолт factory-v2).
+  routesV2Dir: process.env.COCKPIT_ROUTES_V2_DIR || path.join(home, '.factory', 'routes'),
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
@@ -83,20 +94,6 @@ export const config = {
   // Параллельных оценок триажа: 1 воркер на очереди в 70 задач — это часы ожидания.
   analysisConcurrency: Number(process.env.COCKPIT_ANALYSIS_CONCURRENCY) || 2,
 
-  // Автоматическое ревью GitHub PR. Это отдельное состояние: оно не создаёт и не
-  // переписывает t<TASK>.pipeline фабрики. В каталоге лежат снимки, рекомендации,
-  // review-runs и их изолированные worktree.
-  reviewsDir: process.env.COCKPIT_REVIEWS_DIR || path.join(__dirname, '..', '.state', 'reviews'),
-  reviewPollMs: Number(process.env.COCKPIT_REVIEW_POLL_MS) || 5 * 60 * 1000,
-  reviewDebounceMs: Number(process.env.COCKPIT_REVIEW_DEBOUNCE_MS) || 45 * 1000,
-  reviewAnalysisConcurrency: Number(process.env.COCKPIT_REVIEW_ANALYSIS_CONCURRENCY) || 1,
-  reviewAnalysisTimeoutMs: Number(process.env.COCKPIT_REVIEW_ANALYSIS_TIMEOUT_MS) || 30 * 60 * 1000,
-  // Анализатор и переводчик запускаются новыми read-only сессиями Codex. Модель
-  // меняется окружением без хардкода проектного профиля.
-  reviewProvider: process.env.COCKPIT_REVIEW_PROVIDER || 'codex',
-  reviewModel: process.env.COCKPIT_REVIEW_MODEL || 'gpt-5.6-sol',
-  reviewEffort: process.env.COCKPIT_REVIEW_EFFORT || 'high',
-
   // Команда сноса стенда (проектно-специфична) — задаётся окружением, {task} подставляется.
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.COCKPIT_SANDBOX_DOWN_CMD || '',
@@ -117,16 +114,34 @@ export const config = {
   // Пользовательские плагины: plugins/<id>/plugin.json (+server.js) в корне проекта.
   userPluginsDir: process.env.COCKPIT_PLUGINS_DIR || path.join(__dirname, '..', '..', 'plugins'),
 
-  // TLS. Пусто → http. Задать оба пути → Fastify слушает https на том же порту.
+  // TLS. Сертификат есть → поднимается ВТОРОЙ сокет (https) на своём порту, а http остаётся
+  // жить на `port` — но из сети отдаёт только корневой сертификат и редирект на https
+  // (см. lib/tls/local.js и plugins/http-scope.js).
+  //
+  // Почему не «https вместо http»: 8140 — внутренняя шина. По нему ходят MCP разрешений чата
+  // (иначе каждое действие агента автоматически отклоняется), `bin/b24` (через него SHIP-этап
+  // фабрики пишет комментарий в задачу), `bin/restart`, dev-прокси Vite и шлюз с VPS. Все они
+  // остаются на http/loopback и ничего не знают про сертификат. Бонусом `http://localhost:8140`
+  // — сам по себе secure context, поэтому на самом мозге PWA работает без установки корня.
   //
   // Прямо связано с авторизацией: по http пароль уходит открытым текстом, поэтому для доступа
   // вне localhost TLS обязателен, иначе вход декоративный. От него же зависит флаг Secure
-  // у сессионной cookie.
+  // у сессионной cookie (решается по запросу — Fastify смотрит на сокет).
   //
-  // Терминируем в самом Fastify, без прокси: на этом порту живут SSE (`/api/events`) и
+  // Терминируем сами, без прокси: на этом порту живут SSE (`/api/events`) и
   // WebSocket-терминал (`/api/terminal`) — именно эти потоки обычно и ломает лишний прокси.
+  //
+  // Пути из env — приоритетный override (шлюз, ручные случаи). Пусто → берём то, что
+  // выпущено из «Настроек» и лежит в `tlsDir` с маркером `state.json`.
   tlsKeyPath: process.env.COCKPIT_TLS_KEY || '',
   tlsCertPath: process.env.COCKPIT_TLS_CERT || '',
+  tlsPort: Number(process.env.COCKPIT_TLS_PORT) || 8143,
+  tlsDir: process.env.COCKPIT_TLS_DIR || path.join(__dirname, '..', '.state', 'tls'),
+  // Ключ корневого сертификата — ВНЕ репозитория. Причины конкретные: `server/.state` лежит
+  // внутри дерева проекта, поэтому его утащит любой `tar` папки, а плагин «Код» отдаёт по HTTP
+  // любой файл под корнем зарегистрированного репозитория — `GET /api/code/<проект>/file?path=
+  // server/.state/tls/ca.key` вернул бы приватный ключ CA прямо в JSON.
+  tlsCaDir: process.env.COCKPIT_TLS_CA_DIR || path.join(home, '.config', 'cockpit', 'ca'),
 
   // Работа за доверенным шлюзом (VPS с Caddy + обратный туннель). Пусто → выключено.
   //

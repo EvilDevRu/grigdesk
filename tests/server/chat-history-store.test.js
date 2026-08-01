@@ -46,3 +46,33 @@ test('chat history moves from active to archive before permanent removal', async
   assert.equal(state.sessions.length, 0);
   assert.equal(state.archived.length, 0);
 });
+
+// Точечное чтение — то, чем окна досинхронизируются по SSE `chat-store`: тянут ровно
+// изменившийся чат, а не всю историю.
+test('readOne отдаёт один чат и молчит про несуществующий', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-readone-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
+  const chat = {
+    id: 'chat-2',
+    title: 'Начат на планшете',
+    messages: [{ role: 'user', text: 'Привет с планшета' }],
+    createdAt: Date.UTC(2026, 6, 30),
+    updatedAt: Date.UTC(2026, 6, 30),
+  };
+
+  assert.equal(await store.readOne('chat-2'), null);
+  await store.saveOne(chat, false);
+
+  const found = await store.readOne('chat-2');
+  assert.equal(found.title, 'Начат на планшете');
+  assert.equal(found.archived, false);
+  assert.deepEqual(found.messages, chat.messages);
+
+  await store.saveOne({ ...chat, closedAt: Date.UTC(2026, 6, 30, 1) }, true);
+  assert.equal((await store.readOne('chat-2')).archived, true, 'архивность едет вместе с чатом');
+
+  assert.equal(await store.readOne('chat-404'), null);
+  assert.equal(await store.readOne(''), null);
+});

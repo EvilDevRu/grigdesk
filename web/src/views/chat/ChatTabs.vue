@@ -31,7 +31,7 @@ function commitEdit() {
       <button v-for="s in chat.sessions" :key="s.id" class="tab" :class="{ active: s.id === chat.activeId }"
               :title="chat.tabLabel(s) + ' · двойной клик — переименовать'"
               @click="chat.setActive(s.id)" @dblclick="startEdit(s)">
-        <span v-if="s.sending" class="spin"></span>
+        <span v-if="s.sending || s.compacting" class="spin"></span>
         <span v-else class="tdot" :class="{ task: s.taskId }"></span>
         <input v-if="editId === s.id" ref="editEl" v-model="editVal" class="edit"
                @keydown.enter="commitEdit" @keydown.esc="editId = null" @blur="commitEdit" @click.stop />

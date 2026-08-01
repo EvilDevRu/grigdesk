@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -84,4 +84,50 @@ test('activity follows the active run and renders Codex JSONL events', async (t)
   assert.equal(live.actions[2].name, 'Ожидание субагентов');
   assert.equal(live.actions[3].name, 'Изменение файлов');
   assert.equal(live.actions[3].desc, '/workspace/src/activity.js');
+});
+
+// ACTIVE_RUN не чистят после этапа: это ещё и fencing-токен, сброс эпохи воскресил бы
+// убитый ход. Значит непустой ключ у не бегущего этапа — расписка о прошлом, и брать
+// с него свежесть журнала нельзя. Живой прогон t8165: конвейер штатно стоял у ворот
+// плана, а модалка показывала «нет событий 676 мин» по журналу BUILD от отменённой
+// позавчерашней попытки — и это читалось как «агент завис».
+test('a stale ACTIVE_RUN of a finished stage is not mistaken for live activity', async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-activity-stale.'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const staleDir = path.join(stateDir, 'logs', 'runs', 't8165', 'BUILD', 'run-abandoned');
+  await mkdir(staleDir, { recursive: true });
+  await writeFile(path.join(staleDir, 'events.jsonl'), `${JSON.stringify({ type: 'thread.started' })}\n`);
+  const stale = new Date(Date.now() - 676 * 60 * 1000);
+  await utimes(path.join(staleDir, 'events.jsonl'), stale, stale);
+
+  // orch.log предыдущего поколения лежит рядом и переживает recovery — на v2 он тоже
+  // не источник активности, иначе цифра просто сменится на другую, столь же чужую.
+  await writeFile(path.join(stateDir, 'logs', 't8165.orch.log'), `${JSON.stringify({ type: 'assistant' })}\n`);
+
+  const registry = {
+    WF_STATUS: 'running',
+    RUN_PROTOCOL: '2',
+    SKEPTIC: 'done',
+    BUILD: 'pending',
+    ACTIVE_RUN_SKEPTIC: '',
+    ACTIVE_RUN_BUILD: 'run-abandoned',
+    GATE_PLAN: 'waiting',
+  };
+  const paused = readActivity({ stateDir, task: '8165', registry });
+  assert.equal(paused.journalAgeSec, null);
+  assert.equal(paused.journalFresh, false);
+  assert.deepEqual(readAgentLive({ stateDir, task: '8165', registry }).actions, []);
+
+  // Тот же реестр, но этап действительно бежит — свежесть берётся с его собственного хода.
+  const runDir = path.join(stateDir, 'logs', 'runs', 't8165', 'BUILD', 'run-live');
+  await mkdir(runDir, { recursive: true });
+  await writeFile(path.join(runDir, 'events.jsonl'), `${JSON.stringify({ type: 'thread.started' })}\n`);
+  const live = readActivity({
+    stateDir,
+    task: '8165',
+    registry: { ...registry, BUILD: 'running', ACTIVE_RUN_BUILD: 'run-live' },
+  });
+  assert.equal(live.journalFresh, true);
+  assert.equal(live.journalAgeSec < 2, true);
 });

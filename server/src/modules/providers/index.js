@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { getExecutors } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { isOutdated } from '../../lib/executors/_npm-latest.js';
+import { applyProviderSetting, resolveProviderSettings } from '../../lib/provider-settings.js';
 import {
   executeProviderUsageAction,
   mergeProviderUsage,
@@ -27,6 +28,14 @@ async function providersModule(fastify, opts) {
    * Реестр: для каждого исполнителя — probe бинаря, авторизация, модели
    * (из models-registry: редактируемый файл + динамическое обнаружение эффортов).
    */
+  /**
+   * Схему своих настроек объявляет исполнитель (`executor.settings`), выбор человека
+   * лежит в prefs. Собираем их вместе: UI получает готовую декларацию со значением.
+   */
+  function settingsOf(ex) {
+    return resolveProviderSettings(ex, prefs?.read().providerSettings?.[ex.id]);
+  }
+
   async function buildRegistry() {
     const executors = await getExecutors();
     const models = await getModelsRegistry(config);
@@ -59,6 +68,8 @@ async function providersModule(fastify, opts) {
         checkedAt: updates.get(ex.id)?.at || null,
         models: models[ex.id] || [],
         modes: modes || [],
+        // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
+        settings: settingsOf(ex),
       });
     }
     return providers;
@@ -174,6 +185,21 @@ async function providersModule(fastify, opts) {
     const providers = await buildRegistry();
     cache = { at: Date.now(), providers };
     return { providers, showAllModels };
+  });
+
+  /**
+   * Сохранение своей настройки исполнителя (тумблер в его плашке). Ядро не знает, что
+   * значит настройка: принимаем только объявленные самим executor-ом id и приводим
+   * значение к типу его `kind` — чужой ключ в prefs не попадёт.
+   */
+  fastify.post('/api/providers/:id/settings', async (request, reply) => {
+    const ex = (await getExecutors()).get(String(request.params.id));
+    if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
+    const applied = applyProviderSetting(ex, prefs.read().providerSettings, request.body || {});
+    if (!applied.ok) return reply.code(400).send({ error: applied.error, message: applied.message });
+    prefs.write({ providerSettings: applied.providerSettings });
+    cache = null; // следующий /api/providers отдаст новое значение
+    return { ok: true, settings: applied.settings };
   });
 
   /**

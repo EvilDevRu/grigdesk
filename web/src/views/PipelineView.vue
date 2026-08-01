@@ -125,6 +125,9 @@ function openStage(t, node) {
       || t.graph.keys?.[node.nid]
       || node.nid.toUpperCase(),
     isGate: node.nid.startsWith('gate_'), label: stripEmoji(node.label), sub: node.sub,
+    // Возврат курсора с указанием — только у v2: у v1 кнопка форсит статус в реестре,
+    // человеческого текста этому пути передать некуда.
+    isV2: t.graph.generation === 'v2',
     status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
   };
   stageComment.value = ''; stageActivity.value = null; stageInstruction.value = '';
@@ -147,6 +150,28 @@ async function pollActivity() {
   if (!stage.value) return;
   try { stageActivity.value = await api.get(`/api/tasks/${stage.value.task}/activity`); } catch { /* игнор */ }
 }
+// Модалка живёт дольше этапа: её открывают на бегущем узле и не закрывают. Статус в ней
+// обязан идти за графом, иначе она навсегда остаётся «выполняется сейчас» и продолжает
+// опрашивать активность уже закончившегося этапа (прогон t8165: Скептик закрылся в 12:51,
+// конвейер встал у ворот, а модалка показывала работу).
+const stageLive = computed(() => {
+  if (!stage.value) return null;
+  const g = tasks.value.find((x) => Number(x.task) === Number(stage.value.task))?.graph;
+  if (!g?.statuses?.[stage.value.id]) return null;
+  return { status: g.statuses[stage.value.id], meta: g.nodeMeta?.[stage.value.id] || {} };
+});
+watch(stageLive, (live) => {
+  if (!stage.value || !live) return;
+  // Мета (время, длительность, токены, попытки runner-а) обновляется всегда: этап
+  // дописывает её и после того, как перестал быть активным.
+  stage.value.meta = live.meta;
+  if (live.status === stage.value.status) return;
+  stage.value.status = live.status;
+  clearInterval(actPoll);
+  if (live.status === 'run') { pollActivity(); actPoll = setInterval(pollActivity, 3000); }
+  else { stageActivity.value = null; }
+});
+
 // Автопрокрутка ленты действий агента вниз при обновлении.
 watch(() => stageActivity.value?.live?.actions?.length, () => {
   nextTick(() => { if (liveFeed.value) liveFeed.value.scrollTop = liveFeed.value.scrollHeight; });
@@ -157,9 +182,21 @@ async function gateDecide(decision) {
   catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 async function forceStatus(status) {
-  if (!await confirmDialog(`Принудительно: этап «${stage.value.label}» → ${status}?`, { okText: 'Выполнить' })) return;
+  // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним
+  // (factory-v2 goto: chain[index:]). Прежний текст «Принудительно: этап → running?»
+  // об этом молчал, а возврат с приёмки на план сносит результаты всего, что между.
+  const question = stage.value.isV2
+    ? `Вернуть конвейер на «${stage.value.label}»? Результаты этого узла и всех следующих за ним будут сброшены.`
+    : `Принудительно: этап «${stage.value.label}» → ${status}?`;
+  if (!await confirmDialog(question, { okText: 'Вернуть' })) return;
   stageBusy.value = 'force';
-  try { await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`); await load(); closeStage(); }
+  // Указание уезжает тем же запросом, что и сам возврат: сервер кладёт его в журнал
+  // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
+  try {
+    await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
+      { comment: stageComment.value });
+    await load(); closeStage();
+  }
   catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 async function switchRunner(target) {
@@ -196,6 +233,25 @@ async function sandboxDown(task) {
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
   try { await api.post(`/api/tasks/${task}/sandbox/down`); await load(); }
   catch (e) { alertDialog(e.status === 501 ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.' : `Ошибка: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
+// Закрыть задачу — ЛОГИЧЕСКОЕ завершение, отдельно от инфраструктурного сноса стенда:
+// реестр уходит в архив (карточка пропадает с доски), пустая ветка задачи удаляется,
+// ветка с коммитами остаётся. Кнопка появляется, когда стенда уже нет.
+async function closeTask(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Закрыть задачу #${task}? Реестр уйдёт в архив, пустая ветка будет удалена (ветка с коммитами останется).`,
+    { danger: true, okText: 'Закрыть' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try {
+    const r = await api.post(`/api/tasks/${task}/close`);
+    const branches = (r.branches || []).map((b) => `${b.repo}: ${b.state}`).join('; ');
+    await alertDialog(`Задача #${task} закрыта.${branches ? ` Ветки — ${branches}.` : ''}`);
+    await load();
+  } catch (e) { alertDialog(`Ошибка: ${e.message}`); }
   finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
@@ -376,6 +432,12 @@ function cardState(g) {
           <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> сношу стенд…</span>
           <span v-else>⏏ снести стенд</span>
         </button>
+        <button v-if="!t.graph.fePort && !t.graph.sandbox" class="sbdown"
+          :class="{ busy: sandboxBusy.has(t.task) }" :disabled="sandboxBusy.has(t.task)"
+          @click="closeTask(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> закрываю…</span>
+          <span v-else>✓ закрыть задачу</span>
+        </button>
         <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
         <span v-if="t.graph.halted" class="chunk bad">⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}</span>
       </footer>
@@ -528,6 +590,10 @@ function cardState(g) {
 
           <!-- Действия -->
           <div class="sect sactions">
+            <!-- Указание уезжает тем же запросом, что и возврат: своей кнопки «отправить» нет.
+                 У ворот поле уже есть выше и принадлежит решению — второго не заводим. -->
+            <textarea v-if="stage.isV2 && !stage.isGate" v-model="stageComment" rows="2"
+              placeholder="Указание агенту при возврате на этот узел — что сделать иначе (необязательно)"></textarea>
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
             <OpenDiffButton :task-id="stage.task" />
             <button v-if="!stage.isGate" class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Вернуть конвейер на этот этап">
@@ -762,6 +828,9 @@ function cardState(g) {
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 .sactions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
   border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
+/* Поле указания занимает свою строку целиком: в одном ряду с кнопками оно съёживается
+   до пары сантиметров, и в него никто не пишет. */
+.sactions textarea { flex: 1 0 100%; }
 .sect .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; align-self: flex-start; }
 .sect .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
 .sect .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }

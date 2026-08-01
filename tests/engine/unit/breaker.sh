@@ -4,7 +4,7 @@ source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 
 if [[ ! -f "$FACTORY_HOME/lib/breaker.sh" ]]; then
   test_fail "breaker module exists" "missing lib/breaker.sh"
-  finish_tests
+
   exit $?
 fi
 source "$FACTORY_HOME/lib/breaker.sh"
@@ -49,5 +49,21 @@ done
 wait
 count=$(find "$STATE_DIR/runners/breakers/v1/codex/acct-z" -name '*.state' | wc -l)
 assert_eq 4 "$count" "parallel breaker merge loses no entries"
+
+
+
+# Предохранитель без известного срока сброса НЕ бессрочен: адаптеры провайдеров
+# время сброса не сообщают, и «навсегда» выключало живой провайдер до ручной
+# чистки файла (прогон t8165 — Claude отлежал лимит, а конвейер его не брал).
+FACTORY_BREAKER_COOLDOWN_S=900
+breaker_record claude acct111 provider "" "" 1000 "" classifier
+breaker_match claude acct111 opus opus 1200
+assert_rc 0 "$?" "breaker without expiry is active inside the cooldown"
+breaker_match claude acct111 opus opus 1901
+assert_rc 1 "$?" "breaker without expiry expires after the default cooldown"
+FACTORY_BREAKER_COOLDOWN_S=60
+breaker_match claude acct111 opus opus 1100
+assert_rc 1 "$?" "cooldown length is configurable"
+unset FACTORY_BREAKER_COOLDOWN_S
 
 finish_tests

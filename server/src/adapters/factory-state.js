@@ -9,6 +9,8 @@ import { parsePipeline } from '../lib/pipeline-parse.js';
 import { parseStagesLog } from '../lib/stages-parse.js';
 import { detectStall } from '../lib/stall.js';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factory-graph.js';
+import { buildV2RouteDef, v2StageKeys } from '../lib/route-v2-graph.js';
+import { RoutesV2Store } from '../modules/routes/store-v2.js';
 import {
   activeRunnerReason,
   loadRunnerConfig,
@@ -49,11 +51,60 @@ function stallNodeId(def, statuses, stage) {
 }
 
 export class FactoryStateAdapter {
-  /** @param {{ stateDir: string, profilesDir: string }} opts */
-  constructor({ stateDir, profilesDir }) {
+  /** @param {{ stateDir: string, profilesDir: string, stateV2Dir?: string|null, routesV2Dir?: string|null }} opts */
+  constructor({ stateDir, profilesDir, stateV2Dir = null, routesV2Dir = null }) {
     this.stateDir = stateDir;
+    this.stateV2Dir = stateV2Dir;
     this.profilesDir = profilesDir;
-    this.logsDir = path.join(stateDir, 'logs');
+    this.routesV2Dir = routesV2Dir;
+    this._routesV2Store = null;
+  }
+
+  /**
+   * Форма графа v2-задачи — из ЗАКРЕПЛЁННОГО бандла (реестр несёт profile, route
+   * и routeHash пина). Возвращает null, если это не v2-задача или бандл
+   * недоступен, — тогда рисуем v1-форму как раньше.
+   */
+  async v2RouteDef(registry) {
+    if (registry.CATALOG_PROTOCOL !== 'route-v2' || !this.routesV2Dir
+        || !registry.PROFILE || !registry.ROUTE
+        || !/^[a-f0-9]{64}$/.test(registry.ROUTE_HASH || '')) return null;
+    try {
+      this._routesV2Store ||= new RoutesV2Store({ baseDir: this.routesV2Dir });
+      const { route } = await this._routesV2Store.readRoute(
+        registry.PROFILE,
+        registry.ROUTE,
+        registry.ROUTE_HASH,
+      );
+      // Поля машины в route.json верхнеуровневые (sequence/nodes/entry).
+      return buildV2RouteDef(
+        { entry: route.entry, sequence: route.sequence, nodes: route.nodes },
+        registry.ROUTE,
+      );
+    } catch {
+      return null; // бандл потерян/испорчен — честная v1-форма лучше 500
+    }
+  }
+
+  /**
+   * Каталог, где реально живёт реестр задачи. Протокол route v2 держит состояние
+   * в отдельном stateV2Dir (движок требует непересечения с legacy), поэтому все
+   * чтения идут через это разрешение. Коллизий не бывает: v2-старт отказывает
+   * задаче, у которой есть legacy-реестр.
+   */
+  async taskStateDir(task) {
+    if (this.stateV2Dir) {
+      try {
+        await fsp.access(path.join(this.stateV2Dir, `t${task}.pipeline`));
+        return this.stateV2Dir;
+      } catch { /* не v2 — читаем legacy */ }
+    }
+    return this.stateDir;
+  }
+
+  /** Задача прогона v2? Мутации v1-CLI (runner switch, снос песочницы) к ней неприменимы. */
+  async isV2Task(task) {
+    return this.stateV2Dir !== null && (await this.taskStateDir(task)) === this.stateV2Dir;
   }
 
   /**
@@ -75,28 +126,29 @@ export class FactoryStateAdapter {
     }
   }
 
-  /** Список номеров задач из глоба `t*.pipeline`. */
+  /** Список номеров задач из глоба `t*.pipeline` — по обоим поколениям состояния. */
   async listTaskIds() {
-    let files = [];
-    try {
-      files = await fsp.readdir(this.stateDir);
-    } catch {
-      return [];
-    }
-    const ids = [];
-    for (const f of files) {
-      const m = /^t(\d+)\.pipeline$/.exec(f);
-      if (m) ids.push(m[1]);
+    const ids = new Set();
+    for (const dir of [this.stateDir, this.stateV2Dir]) {
+      if (!dir) continue;
+      let files = [];
+      try {
+        files = await fsp.readdir(dir);
+      } catch { continue; }
+      for (const f of files) {
+        const m = /^t(\d+)\.pipeline$/.exec(f);
+        if (m) ids.add(m[1]);
+      }
     }
     // Стабильный числовой порядок (как в dashboard.collect_sandboxes).
-    ids.sort((a, b) => (a.length - b.length) || a.localeCompare(b));
-    return ids;
+    return [...ids].sort((a, b) => (a.length - b.length) || a.localeCompare(b));
   }
 
   /** Параметры песочницы задачи (tNNNN.env): порты, worktree-пути. */
   async readEnv(task) {
     try {
-      return parsePipeline(await fsp.readFile(path.join(this.stateDir, `t${task}.env`), 'utf8'));
+      const dir = await this.taskStateDir(task);
+      return parsePipeline(await fsp.readFile(path.join(dir, `t${task}.env`), 'utf8'));
     } catch { return {}; }
   }
 
@@ -107,7 +159,7 @@ export class FactoryStateAdapter {
    */
   async readSandboxStage(task) {
     try {
-      const p = path.join(this.stateDir, `t${task}.stage`);
+      const p = path.join(await this.taskStateDir(task), `t${task}.stage`);
       const lines = (await fsp.readFile(p, 'utf8')).trim().split('\n').filter(Boolean);
       const m = /^([^|]*)\|(\d+)\/(\d+)\|(.*)$/.exec(lines[lines.length - 1] || '');
       if (!m) return null;
@@ -117,7 +169,7 @@ export class FactoryStateAdapter {
 
   /** Сырой реестр одной задачи + время модификации. */
   async readRegistry(task) {
-    const file = path.join(this.stateDir, `t${task}.pipeline`);
+    const file = path.join(await this.taskStateDir(task), `t${task}.pipeline`);
     const [text, stat] = await Promise.all([
       fsp.readFile(file, 'utf8'),
       fsp.stat(file),
@@ -128,7 +180,11 @@ export class FactoryStateAdapter {
   /** Карта статусов этапов маршрута: STAGE → { status, at, fails, dur, fanout }. */
   buildStageMap(registry) {
     const route = registry.ROUTE || 'feature';
-    const stages = ROUTE_STAGES[route] || ROUTE_STAGES.feature;
+    // v2-реестр несёт РОВНО узлы закреплённого бандла (в порядке машины) —
+    // никаких захардкоженных списков этапов.
+    const stages = registry.CATALOG_PROTOCOL === 'route-v2'
+      ? v2StageKeys(registry)
+      : (ROUTE_STAGES[route] || ROUTE_STAGES.feature);
     const map = {};
     for (const key of stages) {
       map[key] = {
@@ -144,8 +200,10 @@ export class FactoryStateAdapter {
 
   /** Таймлайн задачи из stages.log (пусто, если журнала нет). */
   async readTimeline(task) {
-    try { return parseStagesLog(await fsp.readFile(path.join(this.logsDir, `t${task}.stages.log`), 'utf8')); }
-    catch { return []; }
+    try {
+      const dir = await this.taskStateDir(task);
+      return parseStagesLog(await fsp.readFile(path.join(dir, 'logs', `t${task}.stages.log`), 'utf8'));
+    } catch { return []; }
   }
 
   /** Краткая карточка задачи для списка. */
@@ -154,12 +212,15 @@ export class FactoryStateAdapter {
     const { route, stages, map } = this.buildStageMap(registry);
     const daemonAlive = this.isDaemonAlive(registry.ORCH_PID, task);
     // Причина остановки идёт В СВОДКУ, а не только в деталь задачи: затык надо видеть
-    // в списке, не открывая карточку. Иначе повторяется #7800 — движок час ждал
-    // человека, а в интерфейсе это выглядело обычным «○ стоит», как у доделанной задачи.
+    // в списке, не открывая карточку. Иначе движок ждёт человека, а в интерфейсе это
+    // выглядит обычным «○ стоит», как у доделанной задачи.
     const timeline = await this.readTimeline(task);
     return {
       task,
       route,
+      // Поколение прогона: v2-задачами управляет factory-v2, мутации v1-CLI к ним
+      // неприменимы — UI и ручки сервера смотрят на этот флаг.
+      generation: (await this.isV2Task(task)) ? 'v2' : 'v1',
       profile: registry.PROFILE || null,
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
@@ -185,26 +246,31 @@ export class FactoryStateAdapter {
    * статус каждого узла + возвраты. Всё для отрисовки SVG-графа на клиенте.
    */
   async getTaskGraph(task) {
+    const stateDir = await this.taskStateDir(task);
     const { registry, mtime } = await this.readRegistry(task);
     const profile = registry.PROFILE;
     if (!profile) throw new Error(`у задачи t${task} нет PROFILE в реестре`);
-    const g = loadGraph(this.profilesDir, profile);
-    const route = registry.ROUTE || g.default_route;
-    const def = graphForRoute(g, route);
+    let def = await this.v2RouteDef(registry);
+    let route = registry.ROUTE;
+    if (!def) {
+      const g = loadGraph(this.profilesDir, profile);
+      route = registry.ROUTE || g.default_route;
+      def = graphForRoute(g, route);
+    }
     const runnerConfig = loadRunnerConfig(this.profilesDir, profile);
     const statuses = computeNodeStatuses({
       pf: registry, pos: def.pos, keys: def.keys, optional: def.optional, mtimeMs: mtime,
     });
     let loops = { loops: {}, halted: null, haltMsg: '' };
     try {
-      const log = await fsp.readFile(path.join(this.logsDir, `t${task}.stages.log`), 'utf8');
+      const log = await fsp.readFile(path.join(stateDir, 'logs', `t${task}.stages.log`), 'utf8');
       loops = parseLoops(log);
     } catch { /* журнала нет */ }
 
     // Порты стенда — в tNNNN.env (не в реестре .pipeline).
     let env = {};
     try {
-      env = parsePipeline(await fsp.readFile(path.join(this.stateDir, `t${task}.env`), 'utf8'));
+      env = parsePipeline(await fsp.readFile(path.join(stateDir, `t${task}.env`), 'utf8'));
     } catch { /* env нет */ }
 
     // Честный статус ромба песочницы: порты есть → готова; идёт сборка → running
@@ -228,7 +294,7 @@ export class FactoryStateAdapter {
       // _ars_link_state в профиле arsenkin). Тогда решает журнал: раз конвейер встал
       // на подъёме стенда, ромб обязан гореть провалом. Без этой ветки статус падал
       // на догадку computeNodeStatuses «цепочка тронута → песочница готова», и
-      // упавший стенд #7789 показывался зелёным.
+      // упавший стенд показывался зелёным.
       else if (stall?.stage === 'SANDBOX') statuses.sandbox = 'fail';
       else if (!alive && !env.FE_PORT && statuses.sandbox === 'done') statuses.sandbox = 'pending';
     }
@@ -263,7 +329,7 @@ export class FactoryStateAdapter {
       if (def.nodes[nid]?.[0] === 'agent') {
         const runner = resolveRunnerState(runnerConfig, registry, runnerKey);
         const attempts = await readRunnerAttempts(
-          this.stateDir,
+          stateDir,
           task,
           runnerKey,
         );
@@ -278,6 +344,7 @@ export class FactoryStateAdapter {
       task,
       profile,
       route,
+      generation: this.stateV2Dir && stateDir === this.stateV2Dir ? 'v2' : 'v1',
       vb: def.vb,
       nodes: def.nodes,
       pos: def.pos,

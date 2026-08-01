@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, watch, onUnmounted } from 'vue';
 
 // Иконка-подсказка «?» с тултипом для человека: что делает настройка.
 // Показывается по ховеру и по фокусу (клавиатура/тач). Если сверху не хватает
@@ -13,8 +13,16 @@ const props = defineProps({
   // Куда раскрывать тултип, если элемент у края: center (по умолчанию) | left | right
   align: { type: String, default: 'center' },
   fixed: { type: Boolean, default: false },
+  // У составного триггера (например, <select>) уже есть собственный фокус. Не добавляем
+  // ему второй Tab-stop на обёртке, но :focus-within по-прежнему покажет подсказку.
+  triggerFocusable: { type: Boolean, default: true },
+  // Клик по триггеру закрепляет всплывашку открытой (и закрывает повторным кликом).
+  // Нужно на планшете: там ховера нет, а тап по триггеру-ссылке уносил со страницы
+  // раньше, чем человек успевал прочитать содержимое.
+  toggle: { type: Boolean, default: false },
 });
 
+const rootEl = ref(null);
 const icEl = ref(null);
 const tipEl = ref(null);
 const below = ref(false);
@@ -24,9 +32,40 @@ const tipStyle = ref({});
 // триггера на зазор, и на пути к нему hover слетал — навести мышь на кнопки
 // внутри было невозможно. Закрытие с задержкой: успеваем перелететь зазор.
 const on = ref(false);
+// Закреплена кликом (режим toggle): ховер и потеря фокуса её не закрывают.
+const pinned = ref(false);
 let hideT = null;
 function show() { clearTimeout(hideT); place(); on.value = true; }
-function hide() { clearTimeout(hideT); hideT = setTimeout(() => { on.value = false; }, 180); }
+function hide() {
+  if (pinned.value) return;
+  clearTimeout(hideT);
+  hideT = setTimeout(() => { on.value = false; }, 180);
+}
+
+function onTriggerClick() {
+  if (!props.toggle) return;
+  if (pinned.value) { close(); return; }
+  pinned.value = true;
+  show();
+}
+function close() {
+  pinned.value = false;
+  clearTimeout(hideT);
+  on.value = false;
+  // Без снятия фокуса :focus-within оставил бы подсказку висеть после закрытия.
+  icEl.value?.blur?.();
+}
+// Клик по кнопке внутри подсказки — это действие (уход на страницу, команда):
+// закреплённую всплывашку после него держать незачем.
+function onTipClick(e) {
+  if (pinned.value && e.target?.closest?.('button, a')) close();
+}
+function onDocDown(e) { if (!rootEl.value?.contains(e.target)) close(); }
+watch(pinned, (v) => {
+  if (v) document.addEventListener('pointerdown', onDocDown, true);
+  else document.removeEventListener('pointerdown', onDocDown, true);
+});
+onUnmounted(() => { clearTimeout(hideT); document.removeEventListener('pointerdown', onDocDown, true); });
 
 function place() {
   const r = icEl.value?.getBoundingClientRect();
@@ -45,10 +84,14 @@ function place() {
 </script>
 
 <template>
-  <span class="ht" :class="[`al-${align}`, { below, fx: fixed, on }]" @mouseenter="show" @mouseleave="hide">
-    <span v-if="$slots.default" ref="icEl" class="ht-tr" tabindex="0" @focus="show" @blur="hide"><slot /></span>
-    <span v-else ref="icEl" class="ht-ic" tabindex="0" aria-label="Подсказка" @focus="show" @blur="hide">?</span>
-    <span ref="tipEl" class="ht-tip" role="tooltip" :style="fixed ? tipStyle : undefined"><slot name="tip">{{ text }}</slot></span>
+  <span ref="rootEl" class="ht" :class="[`al-${align}`, { below, fx: fixed, on, pinned }]"
+        @mouseenter="show" @mouseleave="hide" @keydown.esc="close">
+    <span v-if="$slots.default" ref="icEl" class="ht-tr" :tabindex="triggerFocusable ? 0 : undefined"
+          @focus="show" @blur="hide" @click="onTriggerClick"><slot /></span>
+    <span v-else ref="icEl" class="ht-ic" tabindex="0" aria-label="Подсказка"
+          @focus="show" @blur="hide" @click="onTriggerClick">?</span>
+    <span ref="tipEl" class="ht-tip" role="tooltip" :style="fixed ? tipStyle : undefined"
+          @click="onTipClick"><slot name="tip">{{ text }}</slot></span>
   </span>
 </template>
 

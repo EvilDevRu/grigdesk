@@ -9,6 +9,9 @@ import { confirmDialog } from '../../shared/ui/confirm.js';
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
 const chat = useChatStore();
+// open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
+// колонку: следить за activeId там мало — повторный тык по уже активному чату его не меняет.
+const emit = defineEmits(['open']);
 
 const prov = useProvidersStore();
 prov.load();
@@ -62,12 +65,14 @@ function commitEdit() {
 function newChat() {
   showArchived.value = false;
   chat.newSession();
+  emit('open');
 }
 
 function select(r) {
   chat.selectChat(r.id);
   // Выбор архивного чата восстанавливает его, поэтому возвращаемся к активному списку.
   if (r.archived) showArchived.value = false;
+  emit('open');
 }
 
 function restore(r) {
@@ -107,9 +112,11 @@ async function del(r) {
         <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
              Во время работы цвет меняется целиком, а вращается только внешнее кольцо. -->
         <span class="ava" :class="{ live: r.sending }"
-              :title="r.sending
-                ? `${r.modelName || 'Модель по умолчанию'} · агент работает`
-                : (r.modelName || 'Модель по умолчанию')">
+              :title="r.compacting
+                ? `${r.modelName || 'Модель по умолчанию'} · сжимаю контекст`
+                : r.sending
+                  ? `${r.modelName || 'Модель по умолчанию'} · агент работает`
+                  : (r.modelName || 'Модель по умолчанию')">
           <ProviderIcon v-if="r.provider" :provider="r.provider" :size="19" />
           <template v-else>{{ letter(r) }}</template>
           <!-- Точка «непрочитано»: бейджи на кнопке и в сайдбаре считают именно такие чаты -->
@@ -150,7 +157,11 @@ async function del(r) {
 <style scoped>
 .cl { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 
-.top { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-bottom: 1px solid var(--line); }
+/* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
+   разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
+   центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
+.top { display: flex; flex-direction: column; justify-content: center; gap: 5px;
+  height: var(--chat-head-h); padding: 0 10px; border-bottom: 1px solid var(--line); }
 .tools { display: flex; gap: 7px; }
 .top :deep(.tsw) { align-self: flex-start; }
 .q { flex: 1; min-width: 0; height: 32px; background: var(--ground); border: 1px solid var(--line); border-radius: 16px;
@@ -221,4 +232,21 @@ async function del(r) {
 .acts button:hover { color: var(--ink); background: var(--surface-2); }
 .acts button:last-child:hover { color: var(--accent); }
 .acts button.danger:hover { color: var(--bad); }
+
+/* Пальцем ховера нет — на сенсорном экране действия строки были бы недостижимы.
+   Показываем их всегда, а место под них освобождаем отступом самой строки. */
+@media (hover: none) {
+  .acts { display: inline-flex; }
+  .row { padding-right: 66px; }
+  .ago { display: none; }
+}
+
+/* Планшет-альбом: список уже, но остаётся на экране рядом с чатом */
+@media (min-width: 900px) and (max-width: 1099px) { .cl { width: 232px; } }
+
+/* Узкий экран: список занимает всю колонку (чат показывается вместо него — см. ChatsView) */
+@media (max-width: 899px) {
+  .cl { width: 100%; border-right: none; }
+  .rows { padding: 5px 5px calc(6px + env(safe-area-inset-bottom, 0px)); }
+}
 </style>

@@ -4,13 +4,32 @@
 source "${FACTORY_HOME:?}/lib/pipeline-store.sh"
 
 factory_control_root() {
+  local candidate state normalized normalized_state
   if [[ -n "${FACTORY_CONTROL_ROOT:-}" ]]; then
-    printf '%s\n' "$FACTORY_CONTROL_ROOT"
+    candidate=$FACTORY_CONTROL_ROOT
   elif [[ -n "${FACTORY_CONFIG_ROOT:-}" ]]; then
-    printf '%s/control\n' "$FACTORY_CONFIG_ROOT"
+    candidate="$FACTORY_CONFIG_ROOT/control"
   else
-    printf '%s/.factory/control\n' "${HOME:?HOME or FACTORY_CONFIG_ROOT is required}"
+    candidate="${HOME:?HOME or FACTORY_CONFIG_ROOT is required}/.factory/control"
   fi
+  [[ "$candidate" == /* && "$candidate" != *$'\n'* && "$candidate" != *$'\t'* ]] ||
+    return 78
+  normalized=$(realpath -m -- "$candidate" 2>/dev/null) || return 78
+  [[ "$normalized" == "$candidate" && "$normalized" != / ]] || return 78
+
+  # Provider получает STATE_DIR как writable add-dir. Control metadata обязана
+  # находиться в непересекающемся дереве, иначе agent сможет подменить CAS/guard.
+  state=${STATE_DIR:-${FACTORY_STATE:-}}
+  if [[ -n "$state" ]]; then
+    normalized_state=$(realpath -m -- "$state" 2>/dev/null) || return 78
+    case "$normalized" in
+      "$normalized_state"|"$normalized_state"/*) return 78 ;;
+    esac
+    case "$normalized_state" in
+      "$normalized"|"$normalized"/*) return 78 ;;
+    esac
+  fi
+  printf '%s\n' "$normalized"
 }
 
 factory_token_hash() {
@@ -19,8 +38,9 @@ factory_token_hash() {
 
 factory_control_init() {
   local token=${1:?control token} root tmp
-  root=$(factory_control_root)
+  root=$(factory_control_root) || return
   mkdir -p "$root"
+  [[ ! -L "$root" && "$(realpath -e -- "$root" 2>/dev/null)" == "$root" ]] || return 78
   chmod 700 "$root" 2>/dev/null || true
   tmp=$(mktemp "$root/.control.XXXXXX")
   factory_token_hash "$token" >"$tmp"

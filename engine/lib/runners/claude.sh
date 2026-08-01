@@ -19,11 +19,17 @@ runner_claude_default_policy() {
 }
 
 runner_claude_family_alias() {
-  case "${1:-}" in opus|sonnet|haiku) return 0 ;; *) return 4 ;; esac
+  # Каталога нет (см. runner_claude_catalog), поэтому семейство уходит прямо в `--model`:
+  # список обязан совпадать с алиасами установленного CLI. Fable добавлен по 2.1.220,
+  # где `--model fable` резолвится самим CLI наравне с opus и sonnet.
+  case "${1:-}" in opus|fable|sonnet|haiku) return 0 ;; *) return 4 ;; esac
 }
 
 runner_claude_capabilities() {
-  printf 'status status_fd sandbox tools structured_output fanout\n'
+  # status_request обязателен: текущий Claude CLI не наследует fd 7 в тул-шелл
+  # (найдено живым прогоном t8165), fd-транспорт остаётся быстрым путём там,
+  # где он ещё жив, — stage-result сам выбирает доступный.
+  printf 'status status_fd status_request sandbox tools structured_output fanout\n'
 }
 
 runner_claude_run() {
@@ -37,7 +43,11 @@ runner_claude_run() {
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
   args+=(--permission-mode acceptEdits)
-  factory_exec provider timeout "$timeout_s" "${args[@]}"
+  # -k: голый timeout шлёт только TERM и уходит. Провайдер, застрявший в необрываемом
+  # вызове, пережил бы его и остался висеть с занятым слотом; KILL через 30 с закрывает
+  # эту дыру. Код возврата остаётся 124 (GNU timeout не меняет его из-за KILL), поэтому
+  # классификация timeout в runner_claude_classify работает как прежде.
+  factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
 }
 
 _runner_fixture_meta() {

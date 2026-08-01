@@ -26,28 +26,34 @@ function safeHref(value, { image = false } = {}) {
   return '';
 }
 
-const renderer = new Renderer();
+function createRenderer({ resolveHref } = {}) {
+  const renderer = new Renderer();
+  renderer.html = ({ text }) => escapeHtml(text);
+  renderer.link = function ({ href, title, tokens }) {
+    const text = this.parser.parseInline(tokens);
+    let resolved = href;
+    if (typeof resolveHref === 'function') {
+      try { resolved = resolveHref(href) || href; } catch { resolved = href; }
+    }
+    // Результат расширения проходит тот же allowlist: resolver не может подсунуть
+    // javascript:/data: и обойти базовую защиту Markdown-рендерера.
+    const safe = safeHref(resolved);
+    if (!safe) return text;
+    const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+    return `<a href="${escapeHtml(safe)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+  };
+  renderer.image = ({ href, title, text }) => {
+    const safe = safeHref(href, { image: true });
+    if (!safe) return escapeHtml(text || '');
+    const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+    return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text || '')}"${titleAttr} loading="lazy">`;
+  };
+  return renderer;
+}
 
-renderer.html = ({ text }) => escapeHtml(text);
-
-renderer.link = function ({ href, title, tokens }) {
-  const text = this.parser.parseInline(tokens);
-  const safe = safeHref(href);
-  if (!safe) return text;
-  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-  return `<a href="${escapeHtml(safe)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
-};
-
-renderer.image = ({ href, title, text }) => {
-  const safe = safeHref(href, { image: true });
-  if (!safe) return escapeHtml(text || '');
-  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-  return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text || '')}"${titleAttr} loading="lazy">`;
-};
-
-export function mdToHtml(src) {
+export function mdToHtml(src, options = {}) {
   return marked.parse(String(src || ''), {
-    renderer,
+    renderer: createRenderer(options),
     gfm: true,
     breaks: true,
     async: false,

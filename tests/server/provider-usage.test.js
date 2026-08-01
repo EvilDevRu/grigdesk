@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -9,6 +12,7 @@ import {
 } from '../../server/src/lib/provider-usage.js';
 import {
   classifyClaudeUsageResponse,
+  fetchClaudeUsage,
   parseClaudeUsagePayload,
   parseClaudeUsageResources,
 } from '../../server/src/lib/executors/claude.js';
@@ -262,6 +266,87 @@ test('Codex reset consumption forwards a stable idempotency key and maps outcome
   });
   assert.equal(empty.ok, false);
   assert.match(empty.error, /нет/i);
+});
+
+test('Claude usage refreshes an expired CLI token instead of asking for login', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const now = 1_800_000_000_000;
+  await writeFile(credentialsPath, JSON.stringify({
+    untouched: 'keep',
+    claudeAiOauth: {
+      accessToken: 'expired-access',
+      refreshToken: 'working-refresh',
+      expiresAt: now - 1,
+      refreshTokenExpiresAt: now + 86_400_000,
+      scopes: ['user:profile', 'user:inference'],
+      subscriptionType: 'max',
+    },
+  }), { mode: 0o600 });
+
+  const calls = [];
+  const usage = await fetchClaudeUsage({
+    credentialsPath,
+    now: () => now,
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith('/v1/oauth/token')) {
+        return new Response(JSON.stringify({
+          access_token: 'fresh-access',
+          refresh_token: 'rotated-refresh',
+          expires_in: 3_600,
+          refresh_token_expires_in: 7_200,
+          scope: 'user:profile user:inference',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      assert.equal(init.headers.Authorization, 'Bearer fresh-access');
+      return new Response(JSON.stringify({
+        limits: [{ kind: 'session', percent: 12 }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  assert.equal(usage.status, 200);
+  assert.equal(calls.length, 2);
+  const refreshBody = JSON.parse(calls[0].init.body);
+  assert.equal(refreshBody.grant_type, 'refresh_token');
+  assert.equal(refreshBody.refresh_token, 'working-refresh');
+  assert.equal(refreshBody.scope, 'user:profile user:inference');
+
+  const stored = JSON.parse(await readFile(credentialsPath, 'utf8'));
+  assert.equal(stored.untouched, 'keep');
+  assert.equal(stored.claudeAiOauth.accessToken, 'fresh-access');
+  assert.equal(stored.claudeAiOauth.refreshToken, 'rotated-refresh');
+  assert.equal(stored.claudeAiOauth.expiresAt, now + 3_600_000);
+  assert.equal(stored.claudeAiOauth.subscriptionType, 'max');
+});
+
+test('temporary Claude token refresh failure is not reported as logout', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-oauth-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const now = 1_800_000_000_000;
+  await writeFile(credentialsPath, JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'expired-access',
+      refreshToken: 'working-refresh',
+      expiresAt: now - 1,
+      scopes: ['user:inference'],
+    },
+  }), { mode: 0o600 });
+
+  const raw = await fetchClaudeUsage({
+    credentialsPath,
+    now: () => now,
+    fetchImpl: async () => { throw new Error('network offline'); },
+  });
+  const status = classifyClaudeUsageResponse(raw);
+
+  assert.equal(raw.hasToken, true);
+  assert.equal(raw.status, 0);
+  assert.equal(status.state, 'unavailable');
+  assert.equal(status.action, null);
 });
 
 test('Claude usage payload is converted to subscription and scoped family bars', () => {

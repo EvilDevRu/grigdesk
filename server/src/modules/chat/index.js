@@ -23,6 +23,17 @@ import {
 
 const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
 
+// Заказ выжимки для исполнителей без родного компакта (см. compaction в lib/executors).
+// Просим ИМЕННО рабочее состояние, а не пересказ реплик: выжимка станет первым сообщением
+// новой сессии, и агент должен продолжить работу, а не заново выяснять, что происходит.
+const SUMMARY_PROMPT = `Сожми наш разговор в рабочую выжимку, чтобы продолжить его в новой сессии с чистым контекстом.
+Верни ТОЛЬКО текст выжимки, без вступлений и без вопросов. Обязательно сохрани:
+— задачу, которую решаем, и текущее состояние;
+— уже принятые решения и причины, по которым они приняты;
+— файлы и места в коде, которых касались (с путями);
+— что уже сделано и что осталось;
+— договорённости и ограничения, о которых просил человек.`;
+
 async function chatModule(fastify, opts) {
   const {
     factoryState, config, claudeAuth, internalToken, prefs,
@@ -71,7 +82,7 @@ async function chatModule(fastify, opts) {
    */
   // ── Активные запуски агента: перезагруженная страница восстанавливает «думает…»
   // и уже показанную ленту шагов текущего хода. ──
-  const activeRuns = new Map(); // chatKey → { startedAt, tokens, steps[], ac }
+  const activeRuns = new Map(); // ключ чата → { startedAt, tokens, steps[], ac, compact }
 
   // ── Очередь ходов на чат ─────────────────────────────────────────────────────
   // ДВА CLI НА ОДНУ СЕССИЮ НЕ ЖИВУТ: второй `claude --resume <тот же id>` падает
@@ -122,7 +133,7 @@ async function chatModule(fastify, opts) {
   fastify.get('/api/chat/active', async () => ({
     // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
-      chatKey, startedAt: v.startedAt, tokens: v.tokens, steps: v.steps,
+      chatKey, startedAt: v.startedAt, tokens: v.tokens, steps: v.steps, compact: !!v.compact,
     })),
   }));
 
@@ -285,7 +296,7 @@ async function chatModule(fastify, opts) {
 
   async function runChatTurn(reply, request, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
-    chatKey, queued, requestTitle,
+    chatKey, queued, requestTitle, compact,
   }) {
     const wantsTitle = requestTitle === true;
     // Сообщение ждало в очереди — его sessionId устарел: пока оно стояло, предыдущий ход
@@ -317,15 +328,23 @@ async function chatModule(fastify, opts) {
     // Один и тот же каталог может прийти из доверенного списка, worktree и вложений.
     // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
     const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
-    const fullMessage = withChatTitleHook(
-      contextPrefix(context, mode.hint) + attachBlock + (message || 'Посмотри вложения.'),
-      wantsTitle,
-    );
 
     // Исполнитель — по модели из реестра (lib/models-registry). Неизвестная модель → claude.
     const info = await modelInfo(model, config);
     const provId = info?.provider || 'claude';
     const executor = await getExecutor(provId);
+
+    // Сжатие контекста (кнопка на кольце) — служебный ход, а не сообщение человека: ни
+    // контекст страницы, ни вложения, ни хук заголовка ему не нужны. План берём у
+    // исполнителя: родная слэш-команда CLI (сессия сохраняется) либо выжимка текстом,
+    // если слэш-команд в неинтерактивном режиме он не понимает (lib/executors/index.js).
+    const plan = compact ? (executor?.compaction || { kind: 'summary' }) : null;
+    const fullMessage = plan
+      ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
+      : withChatTitleHook(
+        contextPrefix(context, mode.hint) + attachBlock + (message || 'Посмотри вложения.'),
+        wantsTitle,
+      );
     // Режим прав выбирает пользователь в чате; страница даёт лишь дефолт для своих
     // сценариев (например «Агенты» — правки без спроса). Значение сверяем со списком
     // самого CLI: неизвестное он не принимает, а падает с ошибкой валидации.
@@ -371,19 +390,31 @@ async function chatModule(fastify, opts) {
     // Ход можно оборвать кнопкой «стоп»: контроллер живёт в activeRuns, POST /api/chat/stop
     // дёргает abort, execFile убивает CLI.
     const ac = new AbortController();
-    const runRec = { startedAt: Date.now(), tokens: 0, steps: [], ac };
+    // compact — служебный ход сжатия: окна показывают его не «думает…», а вертящимся
+    // кольцом контекста. Флаг обязан быть здесь, а не только в затеявшем окне: у родного
+    // компакта нет ни шагов, ни прогресса (см. ниже), так что второму устройству
+    // догадаться о сжатии больше неоткуда.
+    const runRec = { startedAt: Date.now(), tokens: 0, steps: [], ac, compact: !!plan };
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
       // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
-      fastify.sse.broadcast('chat-turn-start', { chatKey, at: runRec.startedAt });
+      fastify.sse.broadcast('chat-turn-start', { chatKey, at: runRec.startedAt, compact: !!plan });
     }
     // Ожидание ответа человека не должно упираться в таймаут вызова MCP-инструмента.
     const baseEnv = claudeAuth ? claudeAuth.env() : process.env;
+    // Порог автокомпакта из «Настроек → Запуски» — только тем CLI, у кого такая ручка
+    // вообще есть (executor.autoCompactEnv). Читаем перед каждым ходом: правка настройки
+    // действует сразу, без рестарта сервера. 0 — не вмешиваемся, у CLI остаётся свой.
+    const currentPrefs = prefs?.read?.() || {};
+    const compactWindow = Math.max(0, Number(currentPrefs.chatAutoCompactWindow) || 0);
+    const compactEnv = compactWindow && executor.autoCompactEnv
+      ? { [executor.autoCompactEnv]: String(compactWindow) }
+      : {};
     try {
       const runArgs = {
         config,
         signal: ac.signal,
-        env: { ...baseEnv, MCP_TOOL_TIMEOUT: String(PERM_WAIT_MS) },
+        env: { ...baseEnv, MCP_TOOL_TIMEOUT: String(PERM_WAIT_MS), ...compactEnv },
         message: fullMessage,
         cwd,
         extraDirs: uniqueExtraDirs,
@@ -393,6 +424,7 @@ async function chatModule(fastify, opts) {
         permissionMode,
         mcpConfig,
         permissionPromptTool: 'mcp__cockpit-perm__approve',
+        providerSettings: currentPrefs.providerSettings?.[executor.id] || {},
         log: fastify.log,
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
         onProgress: chatKey ? (tokens) => {
@@ -415,12 +447,30 @@ async function chatModule(fastify, opts) {
       // Пустой ход (ноль шагов, ноль стоимости) = CLI умер на старте и НИЧЕГО не сделал.
       // Повторить его безопасно — и честнее, чем отдать человеку заглушку и ждать, что
       // он пришлёт сообщение заново (а он пришлёт — и получит то же самое).
-      if (out?.emptyRun) {
+      // Ход сжатия не повторяем: у родного компакта stdout пуст ВСЕГДА (вывод слэш-команды
+      // локальный, в поток он не идёт), так что «пустой ход» тут — норма, а второй прогон
+      // сжал бы уже сжатое.
+      if (out?.emptyRun && !plan) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         out = await executor.run(runArgs);
       }
       // Название — метаданные Cockpit, маркер из видимого ответа/истории уже удалён.
       out = finishChatTitleHook(out, wantsTitle);
+      // Итог сжатия. Наружу — короткая строка для ленты: сырой вывод тут либо пуст
+      // (родной компакт), либо это сама выжимка — она не ответ агента человеку, а семя
+      // новой сессии, поэтому уезжает отдельным полем. contextTokens этого хода —
+      // размер контекста ДО сжатия (выжимку писали, читая всю переписку), поэтому его
+      // не отдаём вовсе: настоящий размер измерит следующий обычный ход.
+      if (plan) {
+        const seed = plan.kind === 'summary' ? String(out.reply || '').trim() : '';
+        if (plan.kind === 'summary' && !seed) throw new Error('Исполнитель не вернул выжимку — контекст не сжат.');
+        out = {
+          ...out,
+          reply: '🗜 Контекст сжат.',
+          contextTokens: 0,
+          compact: { kind: plan.kind, seed },
+        };
+      }
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
@@ -445,7 +495,11 @@ async function chatModule(fastify, opts) {
         // следующий вопрос шёл без --resume, и агент не помнил ничего из разговора.
         const stoppedOut = finishChatTitleHook({
           reply: '⏹ Ход остановлен.', steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
-          contextTokens: 0, cost: null, model: model || null, effort: runEffort || null, stopped: true,
+          // Размер контекста берём тот, что исполнитель успел увидеть в потоке: раньше здесь
+          // стоял жёсткий 0, клиент его игнорировал (нули не пишем), и после «стопа» кольцо
+          // врало — у новой сессии оставалось пустым, хотя контекст в ней уже набрался.
+          contextTokens: err.contextTokens || 0, contextIsEstimate: !!err.contextIsEstimate,
+          cost: null, model: model || null, effort: runEffort || null, stopped: true,
         }, wantsTitle);
         // Оборванный ход всё равно завёл разговор: следующему из очереди нужен ЕГО id,
         // иначе сообщение уйдёт со старым и агент не вспомнит, на чём его прервали.
@@ -565,6 +619,28 @@ async function chatModule(fastify, opts) {
     });
   });
 
+  // ── Сжатие контекста чата (кнопка на кольце) ────────────────────────────────────
+  // Идёт ТОЙ ЖЕ очередью, что обычные сообщения: два CLI на одну сессию не живут, а
+  // сжатие — полноценный ход агента. Без sessionId сжимать нечего: разговора ещё нет.
+  function compactBody(request) {
+    const { model, effort, mode, sessionId, chatKey } = request.body || {};
+    return { model, effort, mode, sessionId, chatKey, compact: true };
+  }
+
+  fastify.post('/api/chat/compact', async (request, reply) => {
+    const body = compactBody(request);
+    if (!body.sessionId) return reply.code(400).send({ error: 'no_session' });
+    return runChat(reply, request, { id: null, ...body });
+  });
+
+  fastify.post('/api/tasks/:id/compact', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    const body = compactBody(request);
+    if (!body.sessionId) return reply.code(400).send({ error: 'no_session' });
+    return runChat(reply, request, { id, ...body });
+  });
+
   // ── Хранилище истории чатов: файлы chats/YYYY-MM/<id>.json (см. lib/chat/history-store) ──
   const history = new ChatHistoryStore({
     chatsDir: config.chatsDir,
@@ -572,7 +648,13 @@ async function chatModule(fastify, opts) {
     log: fastify.log,
   });
 
-  fastify.get('/api/chat/store', async () => history.read());
+  // Вместе с историей отдаём порог сжатия из настроек: по нему кольцо контекста решает,
+  // где желтеть и краснеть. Своего эндпоинта порогу не завели — клиент чата этот и так
+  // тянет при загрузке, а меняется порог только в «Настройках» (оттуда же обновляется стор).
+  fastify.get('/api/chat/store', async () => ({
+    ...(await history.read()),
+    compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
+  }));
 
   // Полная запись стора. Осталась для миграции со старой схемы и восстановления
   // из браузерного снимка; в обычной работе клиент ею НЕ пользуется — с ростом истории
@@ -584,20 +666,63 @@ async function chatModule(fastify, opts) {
 
   // ── Точечное сохранение: одно тело — один чат ──
   // Объём запроса больше не зависит от того, сколько чатов накопилось всего.
+  //
+  // Изменения РАЗЪЕЗЖАЮТСЯ по окнам сами (SSE `chat-store`): историю читают все устройства
+  // сразу, а узнать об изменении им было неоткуда — начатый на планшете разговор появлялся
+  // на компьютере только после F5. Пишущее окно помечает запрос своим `origin`, чтобы не
+  // принимать собственное эхо; остальные тянут ровно изменившийся чат
+  // (`GET /api/chat/store/chat/:id`), а не всю историю.
   fastify.put('/api/chat/store/chat', async (request, reply) => {
-    const { chat, archived } = request.body || {};
+    const { chat, archived, origin } = request.body || {};
     if (!chat?.id) return reply.code(400).send({ error: 'bad_chat' });
-    const written = await history.saveOne(chat, !!archived);
-    return { ok: true, written };
+    const { written, restored, dropped } = await history.saveOne(chat, !!archived);
+    // Ничего не изменилось — молчим: лишний persist не повод будить остальные окна.
+    if (written) {
+      fastify.sse.broadcast('chat-store', {
+        id: chat.id, archived: !!archived, origin: origin || '', at: Date.now(),
+      });
+    }
+    // Окно прислало отставшую копию, сервер дописал в неё недостающее (см. merge-chat.js) —
+    // значит у самого окна лента неполная и перечитать её должно и оно. Своё эхо оно
+    // пропускает по `origin`, поэтому шлём второе событие уже НИЧЬИМ. С задержкой: без неё
+    // событие обгоняет ответ на этот же PUT, окно считает свою копию неотправленной
+    // («грязной») и отказывается принимать серверную.
+    if (restored || dropped) {
+      fastify.log.warn({ chat: chat.id, restored, dropped }, 'история чата слита с серверной копией');
+      setTimeout(() => {
+        fastify.sse.broadcast('chat-store', {
+          id: chat.id, archived: !!archived, origin: '', at: Date.now(), merged: true,
+        });
+      }, 500).unref?.();
+    }
+    return { ok: true, written, restored, dropped };
+  });
+
+  fastify.get('/api/chat/store/chat/:id', async (request, reply) => {
+    const chat = await history.readOne(String(request.params.id));
+    if (!chat) return reply.code(404).send({ error: 'no_chat' });
+    return { chat };
   });
 
   fastify.delete('/api/chat/store/chat/:id', async (request) => {
-    const removed = await history.remove(String(request.params.id));
+    const id = String(request.params.id);
+    const removed = await history.remove(id);
+    // origin в query: DELETE у нас без тела (см. shared/api-client.js).
+    if (removed) {
+      fastify.sse.broadcast('chat-store', {
+        id, gone: true, origin: String(request.query?.origin || ''), at: Date.now(),
+      });
+    }
     return { ok: true, removed };
   });
 
   // Мета отдельно: переключение вкладки не тащит за собой переписку.
-  fastify.put('/api/chat/store/meta', async (request) => ({ ok: true, meta: await history.saveMeta(request.body || {}) }));
+  fastify.put('/api/chat/store/meta', async (request) => {
+    const { origin, ...body } = request.body || {};
+    const meta = await history.saveMeta(body);
+    fastify.sse.broadcast('chat-store-meta', { meta, origin: origin || '', at: Date.now() });
+    return { ok: true, meta };
+  });
 }
 
 export default fp(chatModule, { name: 'module-chat' });

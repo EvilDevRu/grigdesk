@@ -1,6 +1,9 @@
-// Проекты (профили): у каждого — свой набор маршрутов; агенты — общая библиотека.
-// Список — объединение корневых profiles/<name>/graph.json и проектов,
-// заведённых в кокпите (подпапки routes/). Хардкода имён нет.
+// Проекты (профили): у каждого — свой конвейер; агенты — общая библиотека.
+// Список — объединение корневых profiles/<name>/graph.json и проектов, заведённых
+// в самом кокпите. Вторые живут реестром в prefs (там же их пути репозиториев для
+// плагина «Код»): каталог-маркер под них держал legacy-стор маршрутов, а он выпилен
+// вместе с v1 — проект без профиля фабрики не должен зависеть от мёртвой базы.
+// Хардкода имён нет.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -22,19 +25,18 @@ export async function listFactoryProfiles(profilesDir) {
   } catch { return []; }
 }
 
-/** Подпапки-проекты внутри базы маршрутов. */
-async function listBaseDirs(dir) {
+/** Проекты, заведённые в кокпите: ключи реестра prefs.projects. */
+function listCockpitProjects(prefs) {
   try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory() && PROFILE_RE.test(e.name)).map((e) => e.name);
+    return Object.keys(prefs?.read?.()?.projects || {}).filter((name) => PROFILE_RE.test(name));
   } catch { return []; }
 }
 
 /** Все проекты: фабрика + заведённые в кокпите (объединение, отсортировано). */
-export async function listProjects({ profilesDir, routesDir }) {
+export async function listProjects({ profilesDir }, prefs = null) {
   const all = new Set([
     ...(await listFactoryProfiles(profilesDir)),
-    ...(await listBaseDirs(routesDir)),
+    ...listCockpitProjects(prefs),
   ]);
   return [...all].sort();
 }

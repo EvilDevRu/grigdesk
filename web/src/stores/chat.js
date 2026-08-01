@@ -52,12 +52,48 @@ const sentChats = new Map();
 let sentMeta = '';
 let saveWarned = false;
 
+// Когда историю последний раз сверяли с сервером целиком. Нужно, чтобы первое `hello`
+// (оно приходит сразу после загрузки) не тянуло всю историю по второму разу.
+let storeSyncedAt = 0;
+
+// Чаты, по которым прямо из ЭТОГО окна висит незакрытый запрос сжатия. Нужны, чтобы
+// сверка активных ходов (_loadActive) не сняла заморозку под своим же запросом: у сжатия
+// нет счётчика inflight, а сервер попадает в список активных не мгновенно.
+const compactInflight = new Set();
+
+// Кто именно пишет — чтобы не принимать собственное эхо. Своё изменение уже в сторе,
+// а серверная копия по нему прилетает тем же событием, что и чужая (см. `chat-store`).
+const WINDOW_ID = `w${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+
+// Рантайм-поля чата: живут только в окне и на сервер не едут (см. slimOf). При замене
+// чата серверной копией их надо сохранить — иначе принятое чужое изменение погасило бы
+// «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
+const RUNTIME_KEYS = ['sending', 'compacting', 'stopping', 'progressTokens', 'steps', 'error', 'inflight', 'offline'];
+function runtimeOf(s) {
+  const out = {};
+  for (const k of RUNTIME_KEYS) if (s?.[k] !== undefined) out[k] = s[k];
+  return out;
+}
+
+// Порядок чатов в сторе — как у сервера (по времени создания): иначе вкладки прыгали бы
+// в зависимости от того, каким путём чат попал в окно — загрузкой или досинхронизацией.
+function insertByCreated(list, chat) {
+  const at = chat.createdAt || 0;
+  const i = list.findIndex((c) => (c.createdAt || 0) > at);
+  if (i < 0) list.push(chat); else list.splice(i, 0, chat);
+}
+
 // Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
 function slimOf(s) {
   return {
     id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
     messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
     contextIsEstimate: !!s.contextIsEstimate,
+    // Выжимка после сжатия у исполнителя без родного компакта: ждёт следующего
+    // сообщения, чтобы уехать первой в новую сессию. Обязана переживать F5 — иначе
+    // сжатие превратилось бы в потерю памяти агента.
+    pendingSeed: s.pendingSeed || '',
+    compactedAt: s.compactedAt || 0,
     draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
   };
 }
@@ -115,7 +151,12 @@ export const useChatStore = defineStore('chat', {
   // saveError — история не пишется на сервер (см. _saveFailed). В чате НЕ рисуется:
   // состояние общее, а плашка в открытом чате висела бы в каждом. Наружу идёт разовым
   // оповещением, текст ошибки хранится здесь.
-  state: () => ({ ...pickStore(null), loaded: false, open: false, conveyorIds: [], pending: {}, saveError: null }),
+  // compactWindow — порог сжатия контекста из настроек сервера (0 = «не вмешиваться»).
+  // Держим в сторе, а не в компоненте: по нему кольцо контекста красится в каждом чате.
+  state: () => ({
+    ...pickStore(null), loaded: false, open: false, conveyorIds: [], pending: {}, saveError: null,
+    compactWindow: 0,
+  }),
   getters: {
     active: (s) => s.sessions.find((x) => x.id === s.activeId) || null,
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
@@ -166,7 +207,10 @@ export const useChatStore = defineStore('chat', {
           draft: !t && !!(sess.draft || '').trim(),
           // Модель чата — для иконки исполнителя и подписи в строке списка.
           model: sess.model || '',
-          taskId: sess.taskId, sending: !!sess.sending, unread: !!sess.unread,
+          // Сжатие для списка — такая же занятость чата, как обычный ход: строке нужен
+          // тот же живой аватар, отличается только подсказка.
+          taskId: sess.taskId, sending: !!sess.sending || !!sess.compacting,
+          compacting: !!sess.compacting, unread: !!sess.unread,
           // Агент в этом чате упёрся в вопрос и стоит — строке нужен чип «ждёт ответа».
           waiting: waiting.has(sess.id),
           // В архиве важнее момент архивирования: только что убранный старый разговор
@@ -194,6 +238,9 @@ export const useChatStore = defineStore('chat', {
         loadPromise = (async () => {
           let j = null;
           try { j = await api.get('/api/chat/store'); } catch { j = null; }
+          // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
+          // снимок в браузере хранит только историю, настроек в нём нет.
+          this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
           // Снимок свежее серверной копии — значит сервер не успел записать последнее
           // (например, его перезапустили сразу после ответа агента): восстанавливаем из него.
           const snap = readSnapshot();
@@ -213,6 +260,7 @@ export const useChatStore = defineStore('chat', {
           this._normalize(picked.archived);
           Object.assign(this, picked);
           this.loaded = true;
+          storeSyncedAt = Date.now();
           // Снимок оказался свежее серверной копии — немедленно возвращаем расхождение
           // на сервер. Если же стор пришёл с сервера как есть, слать нечего: запоминаем
           // слепки, чтобы дальше уезжали только реальные изменения.
@@ -223,14 +271,7 @@ export const useChatStore = defineStore('chat', {
           // Спросы агентов, висящие прямо сейчас: после F5 их некому было показать.
           await this._loadWaiting();
           // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
-          try {
-            const { active } = await api.get('/api/chat/active');
-            for (const a of active || []) {
-              const s = this._get(a.chatKey);
-              // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
-              if (s) { s.sending = true; s.progressTokens = a.tokens || 0; s.steps = a.steps || []; }
-            }
-          } catch { /* сервер старый/недоступен */ }
+          await this._loadActive();
         })();
       }
       await loadPromise;
@@ -268,6 +309,8 @@ export const useChatStore = defineStore('chat', {
           // Ответ доехал, пока мы смотрели в другое место — чат становится непрочитанным.
           if (!this._visible(p.chatKey)) s.unread = true;
           s.sending = false;
+          // Ответ оборванного хода забран — плашка «связь прервалась» своё отслужила.
+          s.offline = false;
           s.updatedAt = p.at || Date.now();
         }
         api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
@@ -298,7 +341,7 @@ export const useChatStore = defineStore('chat', {
           alive.add(c.id);
           const json = JSON.stringify(c);
           if (sentChats.get(c.id) === json) return;
-          jobs.push(api.put('/api/chat/store/chat', { chat: c, archived })
+          jobs.push(api.put('/api/chat/store/chat', { chat: c, archived, origin: WINDOW_ID })
             .then(() => { sentChats.set(c.id, json); }));
         };
         slim.forEach((c) => push(c, false));
@@ -306,12 +349,14 @@ export const useChatStore = defineStore('chat', {
         // Чат исчез из стора (удалили, вытеснили из архива) — убираем и на сервере.
         for (const id of [...sentChats.keys()]) {
           if (alive.has(id)) continue;
-          jobs.push(api.del(`/api/chat/store/chat/${id}`).then(() => { sentChats.delete(id); }));
+          jobs.push(api.del(`/api/chat/store/chat/${id}?origin=${WINDOW_ID}`)
+            .then(() => { sentChats.delete(id); }));
         }
         const meta = { activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode };
         const metaJson = JSON.stringify(meta);
         if (metaJson !== sentMeta) {
-          jobs.push(api.put('/api/chat/store/meta', meta).then(() => { sentMeta = metaJson; }));
+          jobs.push(api.put('/api/chat/store/meta', { ...meta, origin: WINDOW_ID })
+            .then(() => { sentMeta = metaJson; }));
         }
         if (!jobs.length) return;
         Promise.all(jobs)
@@ -368,6 +413,9 @@ export const useChatStore = defineStore('chat', {
         s.error ??= null;
         s.steps ||= [];
         s.draft ??= '';
+        s.pendingSeed ??= '';
+        s.compactedAt ??= 0;
+        s.compacting = false;
       }
       return list;
     },
@@ -397,7 +445,7 @@ export const useChatStore = defineStore('chat', {
         model: this.defModel, effort: this.defEffort, mode: this.defMode,
         createdAt: Date.now(), updatedAt: Date.now(),
         messages: [], sessionId: null, contextTokens: 0, contextIsEstimate: false,
-        sending: false, error: null, draft: '',
+        sending: false, error: null, draft: '', pendingSeed: '', compactedAt: 0,
       };
       this.sessions.push(s);
       this.activeId = s.id;
@@ -428,8 +476,31 @@ export const useChatStore = defineStore('chat', {
           delete this.pending[d.pid];
         } else if (name === 'hello') {
           // Связь восстановилась (в т.ч. после рестарта сервера) — пока её не было,
-          // спросы могли и появиться, и умереть: сверяем список целиком.
-          if (this.loaded) this._loadWaiting();
+          // спросы и ходы могли и появиться, и умереть: сверяем списки целиком.
+          // Точечные `chat-store` за время разрыва прошли мимо, поэтому историю тоже
+          // сверяем — но не сразу после загрузки: первое `hello` приходит следом за ней.
+          // Заодно снимаем плашки «связь прервалась»: раз событие дошло — связь есть,
+          // а что стало с самими ходами, сейчас расскажет _loadActive().
+          for (const c of this.sessions) if (c.offline) c.offline = false;
+          if (this.loaded) {
+            this._loadWaiting();
+            this._loadActive();
+            if (Date.now() - storeSyncedAt > 2000) this._resyncStore();
+          }
+        } else if (name === 'chat-store') {
+          // Историю изменило другое окно/устройство. Своё эхо пропускаем: изменение
+          // и так в сторе, а перечитывать его — гонка с ещё не уехавшими правками.
+          if (d.origin === WINDOW_ID || !this.loaded) return;
+          if (d.gone) this._dropRemoteChat(d.id);
+          else this._pullChat(d.id, !!d.archived);
+        } else if (name === 'chat-store-meta') {
+          // Дефолты новых чатов общие, а вот activeId НЕ применяем: у каждого устройства
+          // своя открытая вкладка, и подменять её на чужую — забрать разговор из-под рук.
+          if (d.origin === WINDOW_ID || !this.loaded) return;
+          const m = d.meta || {};
+          if (m.defModel !== undefined) this.defModel = m.defModel || '';
+          if (m.defEffort !== undefined) this.defEffort = m.defEffort || '';
+          if (m.defMode !== undefined) this.defMode = m.defMode || '';
         } else if (name === 'chat-step') {
           // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
           const s = this._get(d.chatKey);
@@ -440,21 +511,34 @@ export const useChatStore = defineStore('chat', {
         } else if (name === 'chat-progress') {
           // Живой прогресс «думает… · N ток.». Прогресс = агент точно работает:
           // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
+          // Кроме сжатия: там работу показывает кольцо, а «думает…» только спорило бы с ним.
           const s = this._get(d.chatKey);
-          if (s) { s.sending = true; s.progressTokens = d.tokens; }
+          if (s && !s.compacting) { s.sending = true; s.progressTokens = d.tokens; }
         } else if (name === 'chat-turn-start') {
           // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
           // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
           const s = this._get(d.chatKey);
-          const m = (s?.messages || []).find((x) => x.queued);
+          // Чат завели в другом окне и сразу отправили — его копия к нам ещё едет.
+          // Тянем сейчас, чтобы разговор появился с работающим агентом, а не после F5.
+          if (!s) { this._pullChat(d.chatKey, false); return; }
+          const m = (s.messages || []).find((x) => x.queued);
           if (m) delete m.queued;
-          if (s) { s.sending = true; s.steps = []; s.progressTokens = 0; }
+          // Сжатие — служебный ход: во ВСЕХ окнах это вертящееся кольцо и заморозка ввода,
+          // а не «думает…». Раньше признак жил только в затеявшем окне, и на втором
+          // устройстве сжатие не отображалось ничем.
+          if (d.compact) { s.compacting = true; s.sending = false; s.progressTokens = 0; }
+          else { s.sending = true; s.steps = []; s.progressTokens = 0; }
         } else if (name === 'chat-done') {
-          // Ход завершён — снять «думает…» во всех окнах (ответ доставляется
+          // Ход завершён — снять «думает…»/кольцо во всех окнах (ответ доставляется
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
           // и они ждут очереди, агент продолжит работу: индикатор оставляем.
           const s = this._get(d.chatKey);
+          // Событие дошло — связь с сервером есть, даже если рвался длинный POST хода.
+          if (s?.offline) s.offline = false;
           if (s && !s.inflight) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
+          // Своё сжатие разморозит его собственный ответ (он ещё едет и правит счётчики);
+          // чужому окну ждать нечего — снимаем кольцо здесь.
+          if (s && !compactInflight.has(s.id)) s.compacting = false;
         }
       });
     },
@@ -488,6 +572,142 @@ export const useChatStore = defineStore('chat', {
         fresh[w.pid] = this.pending[w.pid] || { ...w, kind: w.questions ? 'question' : 'perm' };
       }
       this.pending = fresh;
+    },
+    /**
+     * Ходы, идущие ПРЯМО СЕЙЧАС, — по данным сервера. Правда о работе агента живёт в
+     * процессе сервера (activeRuns), а не в окне: иначе второе устройство не знает ни
+     * что чат занят, ни чем именно. Зовём при загрузке (после F5) и на восстановление
+     * связи (SSE доставляет `chat-turn-start` один раз — кто в этот момент был в офлайне
+     * или ещё не открыт, тот его не увидит; у сжатия догнать нечем — ни шагов, ни
+     * прогресса по нему не идёт).
+     * Сверяемся ПОЛНОСТЬЮ, как со спросами: после рестарта сервера ходы умирают, и
+     * оставленное «думает…»/кольцо крутились бы вечно. Не трогаем только то, по чему
+     * из этого окна висит свой незакрытый запрос: его судьбу решит его же ответ.
+     */
+    async _loadActive() {
+      let active;
+      try { ({ active } = await api.get('/api/chat/active')); }
+      catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
+      const byKey = new Map((active || []).map((a) => [a.chatKey, a]));
+      for (const s of this.sessions) {
+        const a = byKey.get(s.id);
+        if (a?.compact) {
+          // Сжатие: «думает…» не показываем — его место занимает вертящееся кольцо.
+          s.compacting = true; s.sending = false; s.progressTokens = 0;
+        } else if (a) {
+          s.compacting = false; s.sending = true; s.progressTokens = a.tokens || 0;
+          // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
+          // Свою ленту серверной подменяем, только если та полнее: сервер хранит не больше
+          // 400 шагов, и на переподключении посреди долгого хода обрезал бы показанное.
+          if ((a.steps?.length || 0) > (s.steps?.length || 0)) s.steps = a.steps;
+        } else if (!s.inflight && !compactInflight.has(s.id)) {
+          s.sending = false; s.stopping = false; s.compacting = false; s.progressTokens = 0;
+        }
+      }
+    },
+    /**
+     * В окне есть изменения, которых сервер ещё не видел (дебаунс `_persist`, неудачная
+     * запись). Такой чат чужой копией НЕ перетираем: наша запись всё равно уедет следом
+     * и победит, а принятая сейчас серверная версия стёрла бы набранное.
+     */
+    _dirty(chat) {
+      const archived = (this.archived || []).some((c) => c.id === chat.id);
+      return sentChats.get(chat.id) !== JSON.stringify(archived ? archivedSlimOf(chat) : slimOf(chat));
+    },
+    /**
+     * Чат изменили в другом окне (в т.ч. на другом устройстве) — забираем именно его.
+     * Тянем по одному чату, а не всю историю: меняется всегда один, а история растёт.
+     */
+    async _pullChat(id, archived) {
+      if (!id) return;
+      const local = this._get(id) || (this.archived || []).find((c) => c.id === id);
+      if (local && this._dirty(local)) return;
+      let chat = null;
+      try { ({ chat } = await api.get(`/api/chat/store/chat/${id}`)); }
+      catch { return; /* чат уже успели удалить — придёт отдельным событием */ }
+      if (!chat?.id) return;
+      this._applyRemoteChat(chat, archived);
+      // Чат появился в окне впервые — в нём может уже идти ход (его завели и сразу
+      // отправили сообщение на другом устройстве). Своих SSE-событий мы не видели,
+      // поэтому живое состояние берём у сервера.
+      if (!local) await this._loadActive();
+    },
+    /**
+     * Серверная копия чата встаёт на место своей: поля переписки берём у неё, рантайм —
+     * у окна (идущий ход не должен погаснуть от чужой правки). Чат мог и переехать между
+     * открытыми и архивом — тогда переносим его между списками.
+     */
+    _applyRemoteChat(chat, archived) {
+      this.archived ||= [];
+      const target = archived ? this.archived : this.sessions;
+      const source = archived ? this.sessions : this.archived;
+      const next = { ...chat };
+      delete next.archived; // принадлежность к архиву — это список, а не поле чата
+      this._normalize([next]);
+      const si = source.findIndex((c) => c.id === chat.id);
+      const moved = si >= 0 ? source.splice(si, 1)[0] : null;
+      const i = target.findIndex((c) => c.id === chat.id);
+      // Объект чата НЕ подменяем, а обновляем на месте: ссылку на него держат и
+      // компоненты, и идущий прямо сейчас send() — подмена оставила бы ход писать
+      // ответ в отцепленный объект, то есть потеряла бы его целиком.
+      const live = i >= 0 ? target[i] : moved;
+      if (live) {
+        Object.assign(live, next, runtimeOf(live));
+        if (i < 0) insertByCreated(target, live);
+      } else {
+        insertByCreated(target, next);
+      }
+      // Копия пришла с сервера — значит она там и лежит: помечаем отправленной, иначе
+      // ближайший persist погнал бы её обратно и разбудил остальные окна вхолостую.
+      const applied = live || next;
+      sentChats.set(applied.id, JSON.stringify(archived ? archivedSlimOf(applied) : slimOf(applied)));
+    },
+    /** Чат удалили в другом окне — убираем и здесь (удаление всегда осознанное действие). */
+    _dropRemoteChat(id) {
+      if (!id) return;
+      for (const list of [this.sessions, this.archived || []]) {
+        const i = list.findIndex((c) => c.id === id);
+        if (i >= 0) list.splice(i, 1);
+      }
+      sentChats.delete(id);
+      if (this.activeId === id) this.activeId = this.sessions[0]?.id || null;
+    },
+    /**
+     * Полная сверка истории с сервером — на восстановление связи. Точечные `chat-store`
+     * закрывают обычную жизнь, но пока планшет спал (или пока сервер перезапускали),
+     * событий никто не слышал: без сверки чат, заведённый в это время, снова ждал бы F5.
+     */
+    async _resyncStore() {
+      let j = null;
+      try { j = await api.get('/api/chat/store'); }
+      catch { return; }
+      if (!j?.sessions && !j?.archived) return;
+      storeSyncedAt = Date.now();
+      const onServer = new Set();
+      for (const [list, archived] of [[j.sessions || [], false], [j.archived || [], true]]) {
+        for (const chat of list) {
+          if (!chat?.id) continue;
+          onServer.add(chat.id);
+          const local = this._get(chat.id) || (this.archived || []).find((c) => c.id === chat.id);
+          if (local && this._dirty(local)) continue; // своё несохранённое важнее чужой копии
+          const next = { ...chat };
+          delete next.archived;
+          // Ровно это у нас и лежит — не трогаем объект, иначе каждое переподключение
+          // подменяло бы массивы сообщений и перерисовывало открытый чат на ровном месте.
+          const same = sentChats.get(chat.id)
+            === JSON.stringify(archived ? archivedSlimOf(next) : slimOf(next));
+          if (local && same) continue;
+          this._applyRemoteChat(chat, archived);
+        }
+      }
+      // Чата нет на сервере, хотя мы его туда писали — значит его стёрли на другом
+      // устройстве. Тот, которого сервер и не видел (новый, ещё не уехал), — оставляем.
+      for (const list of [this.sessions, this.archived || []]) {
+        for (const c of [...list]) {
+          if (onServer.has(c.id) || !sentChats.has(c.id) || this._dirty(c)) continue;
+          this._dropRemoteChat(c.id);
+        }
+      }
     },
     async answerPerm(pid, allow, remember = false) {
       const p = this.pending[pid];
@@ -630,13 +850,79 @@ export const useChatStore = defineStore('chat', {
     },
     setEffort(id, e) { const s = this._get(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
-    resetContext(id) {
+    /**
+     * Сброс памяти агента: следующее сообщение уйдёт БЕЗ --resume, то есть в чистую
+     * сессию. Переписка на экране остаётся (история кокпита к сессии CLI не привязана),
+     * поэтому визуально «ничего не произошло» — это ловушка, из-за которой сброс легко
+     * спутать со сжатием. Ждущую выжимку тоже гасим: раз память сбрасывают осознанно,
+     * подсовывать агенту старое состояние нельзя.
+     * note: false — не оставлять плашку (зовёт `/clear`, где историю только что вычистили
+     * и единственной записью осталось бы наше же сообщение о сбросе).
+     */
+    resetContext(id, { note = true } = {}) {
       const s = this._get(id);
       if (!s) return;
       s.sessionId = null;
       s.contextTokens = 0;
       s.contextIsEstimate = false;
+      s.pendingSeed = '';
+      s.compactedAt = 0;
+      if (note) s.messages.push({ role: 'note', text: '🧹 Память агента сброшена — следующее сообщение начнёт разговор с нуля.' });
       this._persist();
+    },
+
+    /**
+     * Сжатие контекста: полноценный ход агента, поэтому идёт той же серверной очередью,
+     * что и сообщения, и так же занимает индикатор хода. Два пути (какой — решает
+     * исполнитель на сервере):
+     *   native  — CLI сжал разговор сам, сессия та же, ничего больше делать не надо;
+     *   summary — сервер вернул выжимку; сессию обнуляем, выжимка ждёт в pendingSeed и
+     *             уедет первой в новую сессию вместе со следующим сообщением.
+     * Точный размер контекста после сжатия не знает никто: ход сжатия читал ещё СТАРУЮ
+     * переписку. Поэтому обнуляем счётчик и ждём следующего обычного хода — он измерит.
+     */
+    async compact(id) {
+      const s = this._get(id);
+      if (!s || s.compacting || s.sending || !s.sessionId) return;
+      const before = s.contextTokens || 0;
+      s.compacting = true;
+      s.error = null;
+      // Пометка «сжатие затеяли здесь»: пока свой запрос не вернулся, ни `chat-done`,
+      // ни сверка активных ходов заморозку не снимают — её снимет ответ ниже.
+      compactInflight.add(id);
+      try {
+        const url = s.taskId ? `/api/tasks/${s.taskId}/compact` : '/api/chat/compact';
+        const provStore = useProvidersStore();
+        const resolvedModel = provStore.modelOf(s.model);
+        const effortLevels = resolvedModel.model?.efforts || [];
+        const r = await api.post(url, {
+          model: resolvedModel.id, effort: effortLevels.includes(s.effort) ? s.effort : '',
+          mode: s.mode || '', sessionId: s.sessionId, chatKey: id,
+        });
+        // Сжатие оборвали кнопкой «стоп»: ход вернулся обычным ответом, но контекст
+        // остался прежним. Обнулить счётчик здесь значило бы соврать кольцу и человеку.
+        if (r.stopped) {
+          s.messages.push({ role: 'note', text: '⏹ Сжатие прервано — контекст остался прежним.' });
+          return;
+        }
+        if (r.compact?.kind === 'summary') {
+          if (!r.compact.seed) throw new Error('Сервер не вернул выжимку — контекст не сжат.');
+          s.pendingSeed = r.compact.seed;
+          s.sessionId = null;
+        }
+        s.contextTokens = 0;
+        s.contextIsEstimate = false;
+        s.compactedAt = Date.now();
+        s.messages.push({ role: 'note', text: `🗜 Контекст сжат — было ${before.toLocaleString('ru')} токенов.` });
+      } catch (e) {
+        s.error = e.message;
+        s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
+      } finally {
+        compactInflight.delete(id);
+        s.compacting = false;
+        s.updatedAt = Date.now();
+        this._persist();
+      }
     },
 
     /**
@@ -646,7 +932,8 @@ export const useChatStore = defineStore('chat', {
      */
     async stop(id) {
       const s = this._get(id);
-      if (!s?.sending) return;
+      // Сжатие останавливается так же, как обычный ход: это тот же процесс CLI в activeRuns.
+      if (!s?.sending && !s?.compacting) return;
       s.stopping = true;
       try { await api.post('/api/chat/stop', { chatKey: id }); } catch { /* ход мог уже кончиться */ }
     },
@@ -669,9 +956,15 @@ export const useChatStore = defineStore('chat', {
       // Счётчик незакрытых отправок: «думает…» гасим, только когда закончилась ПОСЛЕДНЯЯ,
       // иначе ответ первого хода снимал бы индикатор у ещё работающего второго.
       s.inflight = (s.inflight || 0) + 1;
-      s.sending = true; s.error = null;
+      s.sending = true; s.error = null; s.offline = false;
       if (!queued) { s.progressTokens = 0; s.steps = []; } // лента предыдущего хода уже уехала в своё сообщение
       s.updatedAt = Date.now();
+      // После сжатия «выжимкой» сессии ещё нет: агент увидит состояние работы первым
+      // блоком этого сообщения. В переписку на экране блок не попадает — там уже есть и
+      // вся история, и плашка о сжатии. Снимаем семя ДО запроса (иначе гонка со вторым
+      // окном засеяла бы сессию дважды), при провале возвращаем на место.
+      const seed = s.pendingSeed || '';
+      if (seed) s.pendingSeed = '';
       this._persist(true); // немедленно: вопрос не должен потеряться при F5/гонке окон
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat';
@@ -692,7 +985,8 @@ export const useChatStore = defineStore('chat', {
         // явный effort не отправляем: CLI применит собственный актуальный дефолт.
         const requestEffort = effortLevels.includes(s.effort) ? s.effort : '';
         const r = await api.post(url, {
-          message: text, model: resolvedModel.id, effort: requestEffort, mode: s.mode || '',
+          message: seed ? `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}\n[/Выжимка]\n\n${text}` : text,
+          model: resolvedModel.id, effort: requestEffort, mode: s.mode || '',
           sessionId: s.sessionId, context, chatKey: id, requestTitle,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
@@ -728,11 +1022,24 @@ export const useChatStore = defineStore('chat', {
         }
       } catch (e) {
         s.error = e.message;
-        s.messages.push({ role: 'error', text: e.message });
+        // Оборвалась СВЯЗЬ — это не провал хода: ход живёт в процессе сервера, а не в этой
+        // вкладке, и его ответ доедет через chats/pending. Раньше сюда падала запись
+        // `role:'error'`, она уезжала в общую историю, и живой ход выглядел проваленным на
+        // всех устройствах разом (01.08.2026 — три чата подряд: `вопрос → ⚠ Failed to fetch
+        // → ответ`, причём ответ был на месте). Отличаем по `status`: он есть только когда
+        // ответил сам сервер; у оборванного fetch (TypeError) и таймаута его нет.
+        // Признак локальный (в историю не едет — см. slimOf): порвалось у ЭТОГО окна.
+        if (e?.status === undefined) s.offline = true;
+        else s.messages.push({ role: 'error', text: e.message });
+        // Ход не дошёл — выжимку возвращаем в ожидание, иначе повтор сообщения ушёл бы
+        // в пустую сессию и агент потерял бы всё, что помнил до сжатия.
+        if (seed && !s.pendingSeed) s.pendingSeed = seed;
       } finally {
         s.inflight = Math.max(0, (s.inflight || 1) - 1);
         // Ещё есть незакрытые отправки этого чата — ход продолжается, «думает…» не снимаем.
-        if (!s.inflight) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
+        // Оборванная связь — тоже не повод его снимать: агент работает дальше, а правду о
+        // нём вернут SSE (`chat-done`) и сверка активных ходов при восстановлении связи.
+        if (!s.inflight && !s.offline) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
         s.updatedAt = Date.now(); this._persist();
       }
     },

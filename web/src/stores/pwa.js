@@ -1,5 +1,27 @@
-// Состояние PWA: доступна ли новая версия + установка приложения на устройство.
+// Состояние PWA: обновление, установка и локальные возможности текущего устройства.
 import { defineStore } from 'pinia';
+
+const WAKE_LOCK_KEY = 'cockpit-screen-wake-lock';
+
+// WakeLockSentinel — браузерный объект, его нельзя класть в реактивный state Pinia.
+// Держим дескриптор и незавершённый запрос рядом со стором: приложение создаёт один Pinia,
+// а initWakeLock() защищён от повторной подписки.
+let wakeLockSentinel = null;
+let wakeLockRequest = null;
+
+function savedWakeLockEnabled() {
+  try { return localStorage.getItem(WAKE_LOCK_KEY) === '1'; }
+  catch { return false; }
+}
+
+function saveWakeLockEnabled(enabled) {
+  try { localStorage.setItem(WAKE_LOCK_KEY, enabled ? '1' : '0'); }
+  catch { /* приватный режим может запрещать localStorage — до закрытия настройка всё равно действует */ }
+}
+
+function wakeLockSupported() {
+  return typeof navigator !== 'undefined' && typeof navigator.wakeLock?.request === 'function';
+}
 
 export const usePwaStore = defineStore('pwa', {
   state: () => ({
@@ -12,6 +34,14 @@ export const usePwaStore = defineStore('pwa', {
     // Событие приходит ТОЛЬКО когда выполнены все критерии: https + иконки 192/512 + живой SW.
     installPrompt: null,
     installed: false,
+    // Эта настройка намеренно локальная: планшет не должен заставлять экран компьютера
+    // тоже гореть. Действует на всё SPA, потому что инициализируется в main.js, а не во view.
+    wakeLockEnabled: savedWakeLockEnabled(),
+    wakeLockSupported: wakeLockSupported(),
+    wakeLockActive: false,
+    wakeLockBusy: false,
+    wakeLockError: '',
+    wakeLockInitialized: false,
   }),
   getters: {
     // Можно ли предложить установку прямо сейчас.
@@ -48,6 +78,91 @@ export const usePwaStore = defineStore('pwa', {
         return outcome === 'accepted';
       } catch {
         return false;
+      }
+    },
+
+    // Поднимаем Screen Wake Lock один раз на всё приложение. При уходе в фон браузер
+    // освобождает его сам; visibilitychange возвращает блокировку после открытия PWA.
+    initWakeLock() {
+      if (this.wakeLockInitialized || typeof document === 'undefined') return;
+      this.wakeLockInitialized = true;
+      this.wakeLockSupported = wakeLockSupported();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && this.wakeLockEnabled) {
+          this.acquireWakeLock();
+        } else if (document.visibilityState !== 'visible') {
+          // Не ждём, когда конкретный браузер пришлёт release: так быстрый возврат
+          // не примет старый sentinel за ещё действующую блокировку.
+          this.releaseWakeLock();
+        }
+      });
+      if (this.wakeLockEnabled) this.acquireWakeLock();
+    },
+
+    async setWakeLockEnabled(enabled) {
+      this.wakeLockEnabled = !!enabled;
+      this.wakeLockError = '';
+      saveWakeLockEnabled(this.wakeLockEnabled);
+      if (this.wakeLockEnabled) return this.acquireWakeLock();
+      await this.releaseWakeLock();
+      return true;
+    },
+
+    async acquireWakeLock() {
+      if (!this.wakeLockEnabled) return false;
+      this.wakeLockSupported = wakeLockSupported();
+      if (!this.wakeLockSupported) {
+        this.wakeLockActive = false;
+        return false;
+      }
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return false;
+      if (wakeLockSentinel && !wakeLockSentinel.released) {
+        this.wakeLockActive = true;
+        return true;
+      }
+      if (wakeLockRequest) return wakeLockRequest;
+
+      this.wakeLockBusy = true;
+      this.wakeLockError = '';
+      wakeLockRequest = (async () => {
+        try {
+          const lock = await navigator.wakeLock.request('screen');
+          // Пользователь мог выключить настройку или свернуть приложение, пока системный
+          // запрос был в полёте. Не оставляем поздно выданную блокировку жить в фоне.
+          if (!this.wakeLockEnabled
+              || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) {
+            await lock.release();
+            return false;
+          }
+          wakeLockSentinel = lock;
+          this.wakeLockActive = !lock.released;
+          lock.addEventListener('release', () => {
+            if (wakeLockSentinel === lock) wakeLockSentinel = null;
+            this.wakeLockActive = false;
+          }, { once: true });
+          return this.wakeLockActive;
+        } catch (error) {
+          this.wakeLockActive = false;
+          if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return false;
+          this.wakeLockError = error?.name === 'NotAllowedError'
+            ? 'Система не разрешила удерживать экран. Проверь режим энергосбережения.'
+            : 'Не удалось удерживать экран включённым.';
+          return false;
+        } finally {
+          this.wakeLockBusy = false;
+          wakeLockRequest = null;
+        }
+      })();
+      return wakeLockRequest;
+    },
+
+    async releaseWakeLock() {
+      const lock = wakeLockSentinel;
+      wakeLockSentinel = null;
+      this.wakeLockActive = false;
+      if (lock && !lock.released) {
+        try { await lock.release(); }
+        catch { /* браузер мог освободить блокировку одновременно с нами */ }
       }
     },
 

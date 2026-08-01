@@ -222,14 +222,41 @@ fi
 # посмотреть результат, доснять демо, доперепроверить руками), а движок сносил её молча,
 # и вернуть можно было только полным подъёмом. Снос — отдельная кнопка на карточке
 # задачи в дашборде (/api/sandbox/<task>/down).
-if [[ "$(get "$TASK" SHIP)" == "done" && "$(get "$TASK" RETRO)" != "done" ]]; then
-  flog "$TASK" "ретро (стенд не трогаем — сносится кнопкой в дашборде)"
-  # Статус running ОБЯЗАТЕЛЕН: ретро идёт минутами, а на схеме всё это время висело
-  # «не начато» — со стороны конвейер выглядел замершим сразу после ship, и человек шёл
-  # выяснять, работает ли фабрика вообще (#7800). У ship выше статус ставится, у ретро забыли.
-  run_stage "$TASK" RETRO || true
+if [[ "$(get "$TASK" SHIP)" == "done" ]]; then
+  case "$(get "$TASK" RETRO)" in
+    done|skipped) ;;
+    *)
+      flog "$TASK" "ретро (стенд не трогаем — сносится кнопкой в дашборде)"
+      # Статус running ОБЯЗАТЕЛЕН: ретро идёт минутами, а на схеме всё это время висело
+      # «не начато» — со стороны конвейер выглядел замершим сразу после ship, и человек шёл
+      # выяснять, работает ли фабрика вообще (#7800). У ship выше статус ставится, у ретро забыли.
+      run_stage "$TASK" RETRO || true
+      ;;
+  esac
 fi
+
+# Архивировать можно только ПОСЛЕ хвоста. Раньше run_pipeline переносил реестр сразу
+# после основного маршрута: SHIP/RETRO затем читали пустой active path, не доходили
+# до конца, а журнал всё равно утверждал, что конвейер завершён.
+local _ship_status _retro_status
+_ship_status=$(get "$TASK" SHIP)
+_retro_status=$(get "$TASK" RETRO)
+if [[ "$_ship_status" != done || ! "$_retro_status" =~ ^(done|skipped)$ ]]; then
+  flog "$TASK" "основной маршрут завершён, но хвост не готов (SHIP=${_ship_status:-pending}, RETRO=${_retro_status:-pending})"
+  set_st "$TASK" STALLED_HUMAN 1
+  return 1
+fi
+
 flog "$TASK" "конвейер завершён"
+if [[ "${PROFILE_ARCHIVE_ON_FINISH:-0}" == 1 ]]; then
+  mkdir -p "$STATE_DIR/archive"
+  if mv -f "$STATE_DIR/t${TASK}.pipeline" "$STATE_DIR/archive/t${TASK}.pipeline" 2>/dev/null; then
+    flog "$TASK" "прогон завершён — карточка убрана с дашборда (реестр в архиве)"
+  else
+    flog "$TASK" "конвейер завершён, но архивировать карточку не удалось"
+    return 1
+  fi
+fi
 }
 
 _daemon_main

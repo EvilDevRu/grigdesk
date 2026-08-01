@@ -12,7 +12,12 @@
 4. какие команды/данные/ресурсы запрещены агенту;
 5. где обязательны человеческие ворота;
 6. какой ИИ primary и какой failover для этого проекта;
-7. какие семейства моделей нужны сильным и дешёвым этапам.
+7. какие семейства моделей нужны сильным и дешёвым этапам;
+8. **что приложение пишет в рабочее дерево само** — логи, кэши, дампы отладчика,
+   артефакты тестов. Вопрос человеку звучит так: «запусти стек, погоняй тесты и покажи
+   `git status --ignored` — что тут появилось не от разработчика?». Ответ уходит в
+   `PROFILE_VOLATILE_PATHS` (шаг 7); без него сторож приёмки остановит конвейер на
+   первом же этапе, который гоняет живой стенд.
 
 Не использовать глобальный default: один проект может быть Claude-first, другой Codex-first.
 
@@ -134,14 +139,43 @@ profile_stage_readonly() {
   esac
 }
 
-profile_dirty_files() {
-  git -C "/path/to/worktrees/t${1}" status --porcelain |
-    awk '{print "APP:" $NF}'
+profile_source_roots() {
+  local worktree="/path/to/worktrees/t${1}"
+  [[ -d "$worktree/.git" || -f "$worktree/.git" ]] &&
+    git -C "$worktree" rev-parse --show-toplevel
+}
+
+profile_sensitive_files() {
+  printf '%s\n' "/path/to/worktrees/t${1}/.env.local"
 }
 ```
 
-Deny правила убирают частые auto-fix команды, а diff guard ловит остальные записи.
-Движок не откатывает пользовательские файлы без `FACTORY_AUTOREVERT=1`.
+Deny правила убирают частые auto-fix команды, а exact guard сравнивает содержимое
+tracked/untracked, index и symlink до/после. Если root определить нельзя, readonly-этап
+не запускается. При расхождении движок останавливается и не откатывает файлы: без владения
+транзакцией это могло бы стереть параллельную работу человека.
+
+Этап, которому действительно нужны временные правки (`TRACE`/`INSTRUMENT`), не помечать
+readonly. Для него нужен заранее объявленный file scope и host-controlled
+instrumentation transaction; простого обещания в prompt недостаточно.
+
+Такой этап запускается только в отдельном linked worktree, который host эксклюзивно
+арендовал этой попытке. Primary checkout и общий worktree для transaction cleanup
+не поддерживаются.
+
+И сразу объяви, что пишет само приложение, — иначе первый же такой этап встанет:
+
+```bash
+PROFILE_VOLATILE_PATHS="storage/logs/* storage/framework/* e2e/traces/* test-results/*"
+```
+
+Сторож транзакции следит за ВСЕМИ игнорируемыми Git файлами (`.env`, `vendor`,
+`node_modules` — там правку проще всего спрятать), а стенд в это время поднят и пишет
+свои логи. Сторожу это неотличимо от правки агента: приёмка t8165 встала fail-closed на
+177 дампах debugbar и трассах Playwright, ни одного исходника. Список глобов
+относительно корня рабочего дерева; проверь его по `git status --ignored` после прогона
+тестов. Чем шире список, тем больше слепая зона — объявляй каталоги артефактов, а не
+корни репозитория.
 
 ## 8. Добавить budget/fanout
 
@@ -204,6 +238,8 @@ profile_slots() {
 - возвраты review/test → build;
 - `keys`;
 - `optional`.
+- `capabilities`, если профиль поддерживает отдельные действия вне маршрута
+  (например, `["demo"]`).
 
 После правки маршрутов:
 
@@ -230,7 +266,7 @@ tests/run-all.sh
 - сильные и дешёвые stages имеют policy обоих provider-ов;
 - stage prompts используют result/progress v2;
 - graph совпадает с routes;
-- readonly/diff guard настроены;
+- readonly exact guard и `profile_source_roots` настроены;
 - нет project-specific кода в `engine/lib`.
 
 ## 12. Host preflight
@@ -243,9 +279,9 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 
 Это metadata-only проверка CLI/catalog/capabilities. Она не отправляет prompt.
 
-## 13. Первый рабочий canary
+## 13. Первая контролируемая задача
 
-Canary выполняется отдельно, когда разрешён запуск:
+Первую небольшую обратимую задачу запускают отдельно после явного разрешения:
 
 ```bash
 engine/bin/factory 1 start --profile <name> --ticket "маленькая обратимая задача"

@@ -3,7 +3,7 @@
 ## Слои
 
 ```
-web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶  источники
+web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :8143 https)  ──▶  источники
                                      │
    Pinia stores                      ├─ adapters/factory-state ─▶ ~/.factory/state
    (chat, tasks, providers,          ├─ engine/bin/factory* ────▶ engine + CLI runners
@@ -26,21 +26,33 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140)  ──▶
 | `b24` | `/api/b24/{dashboard,task/:id,users}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart` | `/proc`, `os`, systemd/manual launcher |
 | `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
-| `settings` | `/api/settings/{prefs,factory-debug,b24}` | prefs, engine debug CLI, `CredsStore` |
+| `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls}` | prefs, engine debug CLI, `CredsStore`, `LocalTls` |
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission | выбранный executor + `chats/` ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
-| `routes` | `/api/profiles`, CRUD `/api/routes/:profile[/:id]`, `POST …/reseed` | `routes/<профиль>/` + `profiles/*/graph.json` |
+| `routes` | `GET/POST /api/profiles`, immutable `/api/routes-v2/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_V2_DIR`); проекты кокпита — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
 | `projects`, `code` | `/api/projects*`, read-only `/api/code/:project/*` | профили/prefs + git/worktree |
+| `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](documents.md)) |
 | `plugins`, `demo` | `/api/plugins*`, `/api/demo*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
 | `terminal` | `/api/terminal` (WebSocket) | PTY |
 | `health` | `/api/health` | — |
 
-Fastify-плагины: `sse` (fs.watch → broadcast), `auth` (весь `/api`, WS, `/shots` и `/demo`
-закрыты сессией; исключения — login/setup/state и gateway TLS allow; локальные CLI используют
-`X-Cockpit-Token`), `static` (web/dist, кэш index=no-cache, assets=immutable).
+Fastify-плагины: `sse` (fs.watch → broadcast), `http-scope` (область http-сокета, когда поднят
+https: с loopback — всё, из сети — только корневой сертификат и `301`), `auth` (весь `/api`, WS,
+`/shots` и `/demo` закрыты сессией; исключения — login/setup/state, gateway TLS allow и выдача
+корневого сертификата; локальные CLI используют `X-Cockpit-Token`), `static` (web/dist, кэш
+index=no-cache, assets=immutable). Порядок важен: `http-scope` идёт ПЕРЕД `auth`, иначе устройство
+из сети получало бы `401` вместо редиректа и не добиралось до экрана входа.
+
+**Два сокета в одном процессе:** Fastify создаётся без опции `https`, второй сервер
+(`lib/https-listener.js`) получает тот же роутер (`fastify.routing`) и перенесённые слушатели
+`upgrade`. Что положить в сокет, решает `lib/tls-source.js`: `COCKPIT_TLS_KEY`/`COCKPIT_TLS_CERT`,
+иначе — выпущенное из «Настроек» (`lib/tls-local.js`) и только при включённом тумблере режима
+(prefs `accessLocalHttps`, читается в `app.js` до сборки: сокет создаётся один раз при старте).
+Почему http остаётся полнофункциональным для loopback и чем это грозит,
+если переставить — [gotchas](gotchas.md#локальный-https-два-сокета-в-одном-процессе-а-не-переезд-на-8143).
 
 **Триаж (lib/analysis/analyzer.js), устойчивость:** очередь оценок при старте сервера
 ВОССТАНАВЛИВАЕТСЯ из статус-файлов (`queued` → снова в очередь; `running` → interrupted,
@@ -50,20 +62,44 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
 
 **Агенты и промпты (модель данных):** агент в `agents/` — переиспользуемый ШАБЛОН роли
 (один id = один шаблон, коллизий и суффиксов `-<профиль>` больше нет, `.remap.json` умер).
-У шаблона явные `model` и `effort`: селекты в редакторе строятся из реестра исполнителей
-(`/api/providers`, без хардкода списков); `''` = сессионная модель / дефолт движка.
-Посев обновляет метаданные, но НЕ трогает курируемые поля: `prompt` (заготовка) и `effort`.
+Шаблон советует `tier` (КЛАСС модели: `reasoning|balanced|cheap`) и `effort`, но runtime их не
+читает: исполняемая model policy остаётся в `profiles/<name>/runners.env`. Класс, а не семейство —
+потому что база агентов общая, а проекты живут на разных исполнителях (arsenkin — claude,
+rdesigner — codex): «opus» в общем шаблоне сверять с codex-профилем нечем. Соответствие
+семейство↔класс объявляет сам исполнитель (`executor.familyClass`, у codex его нет — сверка
+тогда честно пропускается), а валидатор маршрутов даёт warning `agent_tier_below_policy`, когда
+профиль выдаёт этапу класс СЛАБЕЕ рекомендованного (сильнее — нормально, это выбор проекта).
+Старое поле `model: opus|sonnet|haiku|fable` читается как класс и при первом сохранении
+переписывается в `tier`.
 Боевой промпт каждого этапа принадлежит СХЕМЕ: сайдкар `routes/<профиль>/<маршрут>/<этап>.md`.
 При добавлении узла в конструкторе заготовка копируется из шаблона в схему (инстанцирование)
 и дальше живёт своей жизнью; правка шаблона расставленные узлы НЕ меняет. В редакторе маршрутов
 клик по узлу → «Промпт этапа» (кнопки «Из шаблона» и «Применить во все схемы» — разнести общий
 текст, например уроки прогонов, по всем схемам проекта). Пустой промпт = сайдкар удаляется;
-промпты в `<id>.json` не живут (только сайдкары). Посев: метаданные шаблона — первый профиль
-по алфавиту, а ЗАГОТОВКА промпта посевом не трогается (курируется руками, обезличенные скелеты
-ролей без проектных путей); промпты узлов каждого профиля — из его bash-профиля
-(`extractProfilePrompts` в agents/seed.js).
+промпты в `<id>.json` не живут (только сайдкары). Startup-autoseed удалён. Legacy reseed
+строит только read-only preview из `graph.json` и статических agent-файлов, не source-ит
+`profile.sh`; apply отключён до атомарной миграции. Динамические prompt-ветки переносятся
+вручную; общий shell extractor удалён.
 У стадий-статусов профиля проекта (skeptic/validate/tcritic/simplify) промпт пуст ЗАКОННО — их ведут
 промпты соседних стадий (plan/tests/build).
+
+**Прогоны v2 в UI:** адаптер состояния читает ОБА дерева — legacy `state` и
+`state-v2` (`config.stateV2Dir`); формат pipeline-файла одинаковый, поэтому список,
+граф и логи v2-задач работают штатно, в сводке/графе есть `generation: v1|v2`.
+Мутации v1-CLI (гейты, форс этапа, runner switch, снос песочницы, launch) по
+v2-задаче — 409 `v2_task_engine_owned`: ею управляет только `factory-v2`.
+
+**Маршруты v2:** `/api/routes-v2` — отдельный namespace и не подменяет legacy CRUD.
+Хранилище опубликованных бандлов — `~/.factory/routes` (`config.routesV2Dir`), отдельно
+от legacy-базы `<repo>/routes`: это runtime-артефакт движка, и движок (`factory-v2`)
+читает тот же каталог по умолчанию. Без `routesV2Dir` в конфиге v2-store падает в общий
+каталог с legacy (режим тестов; защищён гардами `badRouteId`/`removePromptSidecars`).
+Route/catalog публикуются полным immutable bundle, exact bytes перечислены в manifest,
+а `current.json` меняется через compare-and-swap. Catalog pin включает bootstrap Scout и
+точные route hashes. Server валидирует schema при публикации и чтении; engine перед
+исполнением делает независимую повторную проверку. Route schema описывает executor,
+phase, policy, status owner, retry и все переходы, но запрещает `model`, `provider`,
+`effort` и произвольный shell.
 
 **UI-мелочи:** системный `confirm()` запрещён — единый `shared/ui/confirm.js`
 (`await confirmDialog(text, {danger, okText})`, тёмная модалка проекта). Тултип исполнителя
@@ -88,7 +124,7 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 
 - Реестр прогона: `~/.factory/state/tNNNN.pipeline` — `KEY=VALUE` (не JSON), парс `lib/pipeline-parse`.
 - Форма графа: `<config.profilesDir>/<profile>/graph.json` (по умолчанию локальный корневой
-  `profiles/`, целиком вне Git) (nodes/keys/optional/routes с pos+edges).
+  `profiles/`, целиком вне Git) (`capabilities`, nodes/keys/optional/routes с pos+edges).
 - Статусы узлов: `lib/factory-graph.computeNodeStatuses` — порт `pipeline_statuses` из `dashboard.py`.
 - Возвраты: `parseLoops` из `logs/tNNNN.stages.log`. Порты стенда: `tNNNN.env`.
 - Стадии — глобальный каталог `lib/stages.js` (enum), профиль оверрайдит подпись/тип.
@@ -100,15 +136,21 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 
 - `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
   Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
-  Projects, Code (read-only дерево/файл/git), Diff (Monaco), Video, Demo, Terminal,
-  Settings (Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ), Login,
+  Projects, Code (read-only дерево/файл/git), Documents (скрытый route просмотра MD/TXT),
+  Diff (Monaco), Video, Demo, Terminal,
+  Settings (Приложение / Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ), Login,
   TaskModal и ChatPanel.
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
   (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
-  (модалка задачи), `pwa` (баннер обновления), `chat` (мультисессии, история на сервере),
+  (модалка задачи), `pwa` (обновление/установка и Screen Wake Lock текущего устройства),
+  `chat` (мультисессии, история на сервере),
   `analysis`, `auth`, `diff`, `plugins`, `providers` (реестр исполнителей),
   `ui-context` (что открыто — для чата), `notify-watch` (что на конвейере встало на человеке).
+- **Screen Wake Lock** — локальная настройка `cockpit-screen-wake-lock` во вкладке
+  «Настройки → Приложение». Она не хранится в серверных prefs, чтобы планшет не менял
+  энергоповедение остальных окон. `stores/pwa.js` держит блокировку на уровне всего SPA,
+  а после системного освобождения в фоне повторяет запрос по `visibilitychange`.
 - **Чипы «требует меня» в навигации** (`AppShell.vue`, карта `badges`: пункт → `{n, kind, title}`) —
   одно правило на все разделы. Жёлтый пульсирующий (`wait`) — работа СТОИТ, пока не подойду
   (вопрос агента в чате, ворота конвейера); красный (`stall`) — конвейер упёрся или оборвался,
