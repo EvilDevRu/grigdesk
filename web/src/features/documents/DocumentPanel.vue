@@ -4,7 +4,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { api } from '../../shared/api-client.js';
 import { mdToHtml } from '../../shared/md.js';
-import { documentRefRouteHref } from './links.js';
+import { documentRefAssetHref, documentRefRouteHref } from './links.js';
 
 const props = defineProps({
   source: { type: String, default: '' },
@@ -29,8 +29,20 @@ function localLink(href) {
   }) : '';
 }
 
+function localImage(href) {
+  const current = document.value?.ref;
+  return current ? documentRefAssetHref(href, {
+    source: current.source,
+    basePath: current.path,
+  }) : '';
+}
+
 const markdown = computed(() => document.value?.format === 'markdown'
-  ? mdToHtml(document.value.content, { resolveHref: localLink })
+  ? mdToHtml(document.value.content, {
+    resolveHref: localLink,
+    resolveImageHref: localImage,
+    allowHtml: true,
+  })
   : '');
 const textLines = computed(() => String(document.value?.content || '').split('\n'));
 

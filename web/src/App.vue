@@ -6,6 +6,7 @@ import UpdateBanner from './shared/ui/UpdateBanner.vue';
 import TaskModal from './views/TaskModal.vue';
 import ChatPanel from './views/ChatPanel.vue';
 import DiffModal from './views/DiffModal.vue';
+import DocumentModal from './views/DocumentModal.vue';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
@@ -56,6 +57,7 @@ watch(() => auth.authenticated, (on, was) => {
       <TaskModal />
       <ChatPanel />
       <DiffModal />
+      <DocumentModal />
     </template>
   </template>
 </template>

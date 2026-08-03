@@ -1,6 +1,6 @@
 // Общий безопасный Markdown-рендерер для ответов чата, документов этапов и триажа.
-// Raw HTML показываем текстом, а ссылки пропускаем только через явный белый список:
-// результат вставляется через v-html, поэтому доверять модельному ответу нельзя.
+// По умолчанию raw HTML показывается текстом. Только read-only viewer документов может
+// включить allowHtml: тогда итог всё равно проходит строгий allowlist перед v-html.
 import { marked, Renderer } from 'marked';
 
 function escapeHtml(value) {
@@ -26,24 +26,44 @@ function safeHref(value, { image = false } = {}) {
   return '';
 }
 
-function createRenderer({ resolveHref } = {}) {
+function resolveUrl(href, resolver) {
+  let resolved = href;
+  if (typeof resolver === 'function') {
+    try { resolved = resolver(href) || href; } catch { resolved = href; }
+  }
+  return resolved;
+}
+
+function resolveImageUrl(href, resolver) {
+  if (typeof resolver !== 'function') return href;
+  try { return resolver(href) || ''; } catch { return ''; }
+}
+
+function isDocumentLink(href) {
+  return String(href || '').startsWith('#/documents?');
+}
+
+function linkAttributes(href) {
+  return isDocumentLink(href)
+    ? ' data-document-link="true"'
+    : ' target="_blank" rel="noopener noreferrer"';
+}
+
+function createRenderer({ resolveHref, resolveImageHref, allowHtml = false } = {}) {
   const renderer = new Renderer();
-  renderer.html = ({ text }) => escapeHtml(text);
+  renderer.html = ({ text }) => (allowHtml ? text : escapeHtml(text));
   renderer.link = function ({ href, title, tokens }) {
     const text = this.parser.parseInline(tokens);
-    let resolved = href;
-    if (typeof resolveHref === 'function') {
-      try { resolved = resolveHref(href) || href; } catch { resolved = href; }
-    }
+    const resolved = resolveUrl(href, resolveHref);
     // Результат расширения проходит тот же allowlist: resolver не может подсунуть
     // javascript:/data: и обойти базовую защиту Markdown-рендерера.
     const safe = safeHref(resolved);
     if (!safe) return text;
     const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-    return `<a href="${escapeHtml(safe)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    return `<a href="${escapeHtml(safe)}"${titleAttr}${linkAttributes(safe)}>${text}</a>`;
   };
   renderer.image = ({ href, title, text }) => {
-    const safe = safeHref(href, { image: true });
+    const safe = safeHref(resolveImageUrl(href, resolveImageHref), { image: true });
     if (!safe) return escapeHtml(text || '');
     const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
     return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text || '')}"${titleAttr} loading="lazy">`;
@@ -51,13 +71,96 @@ function createRenderer({ resolveHref } = {}) {
   return renderer;
 }
 
+const ALLOWED_HTML_TAGS = new Set([
+  'a', 'b', 'blockquote', 'br', 'code', 'del', 'details', 'div', 'em', 'h1', 'h2', 'h3',
+  'h4', 'h5', 'h6', 'hr', 'i', 'img', 'kbd', 'li', 'ol', 'p', 'pre', 's', 'span', 'strong',
+  'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
+]);
+const ALIGN_TAGS = new Set(['div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'td', 'th']);
+
+function safeInteger(value, { min = 1, max = 4096 } = {}) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number >= min && number <= max ? String(number) : '';
+}
+
+function sanitizeElement(element, { resolveHref, resolveImageHref } = {}) {
+  const tag = element.tagName.toLowerCase();
+  const attrs = Object.fromEntries([...element.attributes].map(({ name, value }) => [name.toLowerCase(), value]));
+  for (const { name } of [...element.attributes]) element.removeAttribute(name);
+
+  const id = String(attrs.id || '').trim();
+  if (id && id.length <= 160 && /^[\p{L}\p{N}_.:-]+$/u.test(id)) element.setAttribute('id', id);
+  const align = String(attrs.align || '').toLowerCase();
+  if (ALIGN_TAGS.has(tag) && ['left', 'center', 'right'].includes(align)) element.setAttribute('align', align);
+
+  if (tag === 'a') {
+    const safe = safeHref(resolveUrl(attrs.href, resolveHref));
+    if (safe) {
+      element.setAttribute('href', safe);
+      if (isDocumentLink(safe)) element.setAttribute('data-document-link', 'true');
+      else {
+        element.setAttribute('target', '_blank');
+        element.setAttribute('rel', 'noopener noreferrer');
+      }
+    }
+    if (attrs.title) element.setAttribute('title', attrs.title.slice(0, 500));
+  } else if (tag === 'img') {
+    const safe = safeHref(resolveImageUrl(attrs.src, resolveImageHref), { image: true });
+    if (!safe) {
+      element.replaceWith(element.ownerDocument.createTextNode(attrs.alt || ''));
+      return;
+    }
+    element.setAttribute('src', safe);
+    element.setAttribute('alt', String(attrs.alt || '').slice(0, 500));
+    element.setAttribute('loading', 'lazy');
+    if (attrs.title) element.setAttribute('title', attrs.title.slice(0, 500));
+    const width = safeInteger(attrs.width);
+    const height = safeInteger(attrs.height);
+    if (width) element.setAttribute('width', width);
+    if (height) element.setAttribute('height', height);
+  } else if (tag === 'code') {
+    const language = String(attrs.class || '').match(/(?:^|\s)(language-[a-z0-9_-]+)(?:\s|$)/i)?.[1];
+    if (language) element.setAttribute('class', language.toLowerCase());
+  } else if (tag === 'ol') {
+    const start = safeInteger(attrs.start, { min: 1, max: 100000 });
+    if (start) element.setAttribute('start', start);
+  } else if (tag === 'td' || tag === 'th') {
+    const colspan = safeInteger(attrs.colspan, { min: 1, max: 100 });
+    const rowspan = safeInteger(attrs.rowspan, { min: 1, max: 100 });
+    if (colspan) element.setAttribute('colspan', colspan);
+    if (rowspan) element.setAttribute('rowspan', rowspan);
+  }
+}
+
+/** Санитизация нужна после marked: так она одинаково покрывает raw HTML и Markdown. */
+export function sanitizeRenderedHtml(html, options = {}) {
+  const documentImpl = options.sanitizerDocument || globalThis.document;
+  if (!documentImpl?.createElement) return escapeHtml(html);
+  const template = documentImpl.createElement('template');
+  template.innerHTML = String(html || '');
+  for (const element of [...template.content.querySelectorAll('*')]) {
+    if (!template.content.contains(element)) continue;
+    const tag = element.tagName.toLowerCase();
+    if (!ALLOWED_HTML_TAGS.has(tag)) {
+      element.replaceWith(documentImpl.createTextNode(element.outerHTML));
+      continue;
+    }
+    sanitizeElement(element, options);
+  }
+  return template.innerHTML;
+}
+
 export function mdToHtml(src, options = {}) {
-  return marked.parse(String(src || ''), {
-    renderer: createRenderer(options),
+  const sanitizerDocument = options.sanitizerDocument || globalThis.document;
+  // Вне браузера fail closed: raw HTML не включаем, если его нечем санитизировать.
+  const allowHtml = !!options.allowHtml && !!sanitizerDocument?.createElement;
+  const html = marked.parse(String(src || ''), {
+    renderer: createRenderer({ ...options, allowHtml }),
     gfm: true,
     breaks: true,
     async: false,
   });
+  return allowHtml ? sanitizeRenderedHtml(html, options) : html;
 }
 
 // Однострочные превью не должны показывать служебный синтаксис Markdown:

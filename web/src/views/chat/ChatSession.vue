@@ -13,7 +13,8 @@ import ChatPermission from './ChatPermission.vue';
 import HelpTip from '../../shared/ui/HelpTip.vue';
 import { confirmDialog } from '../../shared/ui/confirm.js';
 import { mdToHtml } from '../../shared/md.js';
-import { documentRouteHref } from '../../features/documents/links.js';
+import { documentLinkFromClick, documentRouteHref } from '../../features/documents/links.js';
+import { useDocumentPreviewStore } from '../../stores/document-preview.js';
 import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
 
 // Одна сессия чата. Переиспользуется в плавающей панели и на странице «Агенты».
@@ -29,6 +30,40 @@ const router = useRouter();
 const chat = useChatStore();
 const tasks = useTasksStore();
 const ui = useUiStore();
+const documentPreview = useDocumentPreviewStore();
+
+function onMarkdownClick(event) {
+  if (!isPlainClick(event)) return;
+  const image = event.target?.closest?.('img');
+  if (image) {
+    event.preventDefault();
+    documentPreview.showImage({
+      src: image.currentSrc || image.getAttribute('src'),
+      name: image.getAttribute('alt') || image.getAttribute('title') || 'Изображение',
+      mime: '',
+    });
+    return;
+  }
+  const href = documentLinkFromClick(event);
+  if (!href) return;
+  event.preventDefault();
+  documentPreview.show(href);
+}
+
+function isPlainClick(event) {
+  return event?.button === 0
+    && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+function onAttachmentClick(event, attachment) {
+  if (!isImg(attachment) || !isPlainClick(event)) return;
+  event.preventDefault();
+  documentPreview.showImage({
+    src: api.url(attachment.url),
+    name: attachment.name,
+    mime: attachment.mime,
+  });
+}
 
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid) || null);
 
@@ -655,7 +690,8 @@ async function openDebug() {
         </div>
         <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
           <div v-if="m.attachments?.length" class="m-atts">
-            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener">
+            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
+               @click="onAttachmentClick($event, a)">
               <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
               <span v-else class="m-file">📄 {{ a.name }}</span>
             </a>
@@ -678,7 +714,8 @@ async function openDebug() {
           <div v-if="m.text" class="mrow">
             <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md"
-                 v-html="mdToHtml(m.text, { resolveHref: documentRouteHref })"></div>
+                 v-html="mdToHtml(m.text, { resolveHref: documentRouteHref })"
+                 @click="onMarkdownClick"></div>
             <div v-else class="text">{{ m.text }}</div>
             <button class="copy" :class="{ done: copiedIdx === i }"
                     :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
@@ -970,7 +1007,8 @@ async function openDebug() {
 .text.md :deep(th), .text.md :deep(td) { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
 .text.md :deep(th) { background: var(--surface-2); }
 .text.md :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
-.text.md :deep(img) { display: block; max-width: min(100%, 760px); height: auto; border-radius: 8px; margin: 6px 0 8px; }
+.text.md :deep(img) { display: block; max-width: min(100%, 760px); height: auto; border-radius: 8px; margin: 6px 0 8px;
+  cursor: zoom-in; }
 /* md-текст не pre-wrap (маркдаун сам управляет блоками) */
 .msg.assistant .text.md { white-space: normal; }
 /* Ошибка — компактная плашка по содержимому, а не баннер во всю ширину */
@@ -997,12 +1035,13 @@ async function openDebug() {
 .act.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .lm { font-size: 12px; }
 
-/* Вложения в сообщениях: превью-картинки, клик — оригинал */
+/* Вложения в сообщениях: картинка открывается в общем viewer-е, файл — как оригинал. */
 .m-queued { font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
 .msg.user .m-queued { text-align: right; }
 .m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg.user .m-atts { justify-content: flex-end; }
-.m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block;
+  cursor: zoom-in; }
 .m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .m-atts a { text-decoration: none; }
 
