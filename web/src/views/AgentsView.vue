@@ -22,6 +22,8 @@ const form = ref(null);        // редактируемая копия
 const isNew = ref(false);      // режим создания нового агента
 const saving = ref(false);
 const notice = ref('');
+const installing = ref(false);   // идёт установка стандартного набора
+const installNotice = ref('');   // итог установки в шапке списка
 const pro = ref(localStorage.getItem('cockpit-agents-pro') === '1');
 
 const KINDS = [
@@ -147,6 +149,21 @@ async function del() {
   } catch (e) { notice.value = `Ошибка: ${e.message}`; }
 }
 
+// Доустановка отсутствующих агентов из стандартного набора (server/seed/agents).
+// Create-only: свои правки и одноимённые агенты не перезаписываются, жать можно смело.
+async function install() {
+  installing.value = true; installNotice.value = '';
+  try {
+    const r = await api.post('/api/agents/install');
+    await load();
+    installNotice.value = r.created?.length
+      ? `Установлено агентов: ${r.created.length}`
+      : 'Все агенты набора уже есть';
+    setTimeout(() => { installNotice.value = ''; }, 4000);
+  } catch (e) { installNotice.value = `Ошибка: ${e.message}`; }
+  finally { installing.value = false; }
+}
+
 onMounted(load);
 </script>
 
@@ -166,11 +183,23 @@ onMounted(load);
           </template>
         </HelpTip>
         <span class="grow"></span>
+        <button class="btn" :disabled="installing"
+                title="Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются"
+                @click="install">
+          <span v-if="installing" class="spin"></span>⇩ Набор
+        </button>
         <button class="btn accent" @click="createNew">+ Новый</button>
       </div>
       <p class="list-sub">Заготовки ролей для схем конвейера. На запуск не влияют: боевой промпт и модель живут в маршруте проекта.</p>
+      <p v-if="installNotice" class="list-sub" :class="{ bad: installNotice.startsWith('Ошибка') }">{{ installNotice }}</p>
       <div v-if="loading && !agents.length" class="pad muted"><span class="spin"></span> Загружаю…</div>
       <div v-else-if="error && !agents.length" class="pad bad">{{ error }}</div>
+      <div v-else-if="!agents.length" class="pad empty-list">
+        <p class="muted">Библиотека пуста. На свежей установке это нормально: наполнение агентов — данные машины и не едет с репозиторием.</p>
+        <button class="btn accent" :disabled="installing" @click="install">
+          <span v-if="installing" class="spin"></span> Установить стандартный набор
+        </button>
+      </div>
       <template v-for="g in groups" :key="g.v">
         <div class="grp-ttl">{{ g.label }}</div>
         <button v-for="a in g.items" :key="a.id" class="item" :class="{ sel: a.id === selectedId && !isNew }" @click="select(a.id)">
@@ -308,6 +337,8 @@ onMounted(load);
 .tier-chip { flex: 0 1 auto; }
 .effort-chip { flex: none; color: var(--accent); }
 .pad { padding: 12px 8px; }
+.empty-list { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.45; }
+.empty-list p { margin: 0; }
 
 /* ── Редактор ── */
 .editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 18px 18px; gap: 12px; }

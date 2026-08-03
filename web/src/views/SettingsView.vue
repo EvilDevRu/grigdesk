@@ -580,6 +580,42 @@ async function restartServer() {
   srvMsg.value = { type: 'err', text: 'Сервер не вернулся за 40 секунд — смотри journalctl --user -u cockpit-server или server/.state/cockpit-server.log.' };
 }
 
+// ── Пересборка web-бандла из рабочего дерева (без checkout и рестарта) ──
+const rebuilding = ref(false);
+async function rebuildWeb() {
+  if (!(await confirmDialog(
+    'Пересобрать web-бандл из текущего рабочего дерева? В сборку попадут и незакоммиченные правки. '
+    + 'Checkout и процесс сервера не трогаем; на время сборки (~минута) рестарт и обновления заблокированы.',
+    { okText: 'Пересобрать' },
+  ))) return;
+  srvMsg.value = null;
+  try { await api.post('/api/system/web-rebuild'); }
+  catch (e) { srvMsg.value = { type: 'err', text: e.message }; return; }
+  rebuilding.value = true;
+  const t0 = Date.now();
+  // Сборка фоном на сервере — опрашиваем. «idle» после старта = сервер перезапустили
+  // в обход блокировки (руками), статус сборки уже неизвестен.
+  while (Date.now() - t0 < 12 * 60_000) {
+    await new Promise((r) => { setTimeout(r, 2000); });
+    let state = null;
+    try { state = (await api.get('/api/system/web-rebuild')).rebuild; } catch { continue; }
+    if (state?.status === 'running') continue;
+    if (state?.status === 'done') {
+      srvMsg.value = { type: 'ok', text: 'Web-бандл пересобран. Страница обновится и подтянет новую сборку.' };
+      pwa.checkForUpdate();
+      setTimeout(() => location.reload(), 1500);
+    } else if (state?.status === 'failed') {
+      srvMsg.value = { type: 'err', text: state.error?.message || 'Пересборка завершилась ошибкой.' };
+    } else {
+      srvMsg.value = { type: 'err', text: 'Сервер перезапустился во время сборки — статус неизвестен, проверь web/dist вручную.' };
+    }
+    rebuilding.value = false;
+    return;
+  }
+  rebuilding.value = false;
+  srvMsg.value = { type: 'err', text: 'Пересборка не завершилась за 12 минут — смотри лог сервера.' };
+}
+
 onMounted(() => {
   revealTab(tab.value, false);
   loadCurrent();
@@ -1148,9 +1184,15 @@ onMounted(() => {
             <code>deploy/install.sh</code>. Режимы не смешивать: ручной экземпляр держит порт,
             и юнит будет падать в цикле.
           </p>
-          <button class="btn" :disabled="restarting" @click="restartServer">
-            {{ restarting ? 'Перезапускаю… жду возвращения' : 'Перезапустить сервер' }}
-          </button>
+          <div class="row">
+            <button class="btn" :disabled="restarting || rebuilding" @click="restartServer">
+              {{ restarting ? 'Перезапускаю… жду возвращения' : 'Перезапустить сервер' }}
+            </button>
+            <button class="btn" :disabled="rebuilding || restarting" @click="rebuildWeb">
+              {{ rebuilding ? 'Собираю web-бандл…' : 'Пересобрать web-бандл' }}
+            </button>
+          </div>
+          <p class="muted small">Пересборка трогает только web: npm install + vite build из рабочего дерева, включая незакоммиченные правки. Без смены checkout и перезапуска сервера.</p>
           <p v-if="srvMsg" class="msg" :class="srvMsg.type">{{ srvMsg.text }}</p>
         </template>
       </div>
@@ -1636,7 +1678,7 @@ button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); color: #07101d; border-color: var(--accent); font-weight: 650; }
 button.danger-ghost { border-color: color-mix(in srgb, var(--bad) 42%, var(--line)); color: color-mix(in srgb, var(--bad) 82%, #fff); }
 button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 10%, var(--surface-2)); border-color: var(--bad); }
-.msg { font-size: 13px; margin: 0; }
+.msg { font-size: 13px; margin: 0; white-space: pre-line; }
 .small { font-size: 12px; line-height: 1.5; }
 .msg.ok { color: var(--good); }
 .msg.err { color: var(--bad); }

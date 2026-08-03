@@ -162,6 +162,48 @@ export function routeMessage(code, output) {
   return [tail, hint ? `(код ${code}: ${hint})` : `(код ${code})`].filter(Boolean).join(' ');
 }
 
+const sleep = (ms) => new Promise((res) => { setTimeout(res, ms); });
+
+/** Вызов внешней команды без исключений — для остановки юнита. */
+function runCmd(cmd, args, { timeout = 70000 } = {}) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout }, (err, stdout, stderr) => {
+      resolve({ ok: !err, message: String(stderr || err?.message || '').trim().slice(-400) });
+    });
+  });
+}
+
+/**
+ * Остановить работающий оркестратор прогона по кнопке человека.
+ *
+ * Юнит собран под graceful-остановку (KillMode=mixed в factoryUnitArgs): TERM
+ * приходит главному процессу, обработчик движка гасит активный runner и снимает
+ * инструментацию. Без systemd — прямой TERM по pid из реестра; isAlive сверяет
+ * cmdline, поэтому сигнал не уйдёт чужому процессу. Попытка остаётся открытой:
+ * дальше работает обычный resume.
+ *
+ * @returns {Promise<{ ok: boolean, outcome: 'not_running'|'stopped'|'stop_sent',
+ *                     message?: string }>}
+ */
+export async function stopRouteOrchestrator({
+  task, orchPid, isAlive, waitMs = 10000, stepMs = 300,
+  run = runCmd, kill = (pid) => process.kill(pid, 'SIGTERM'),
+}) {
+  if (!isAlive()) return { ok: true, outcome: 'not_running' };
+  const viaUnit = await run('systemctl', ['--user', 'stop', routeUnitName(task)]);
+  if (!viaUnit.ok && isAlive()) {
+    // Нет systemd (или юнита): detached-запуск останавливается прямым сигналом.
+    try { kill(Number(orchPid)); } catch { /* умер между проверками */ }
+  }
+  const deadline = Date.now() + waitMs;
+  while (isAlive() && Date.now() < deadline) await sleep(stepMs);
+  if (isAlive()) {
+    if (!viaUnit.ok) return { ok: false, outcome: 'stop_sent', message: viaUnit.message || 'не удалось остановить прогон' };
+    return { ok: true, outcome: 'stop_sent' };
+  }
+  return { ok: true, outcome: 'stopped' };
+}
+
 /** Жив ли юнит прогона. `--collect` убирает мёртвый юнит, поэтому «не активен» = вышел. */
 export function routeUnitActive(task) {
   return new Promise((resolve) => {

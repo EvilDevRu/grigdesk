@@ -3,10 +3,13 @@
 // каждого этапа принадлежит схеме (модуль routes, сайдкары в папке маршрута) —
 // при добавлении узла заготовка копируется туда и живёт своей жизнью.
 // Хранение: agents/<id>.md (frontmatter + промпт), папка самогитигнорится.
-// Посев из профилей фабрики доступен как read-only preview; legacy apply отключён
-// до атомарного хранилища. Startup никогда не переписывает библиотеку.
+// Стандартный набор доустанавливается из версионируемого server/seed/agents
+// (POST /api/agents/install, create-only). Посев из профилей фабрики доступен как
+// read-only preview; legacy apply отключён до атомарного хранилища.
+// Startup никогда не переписывает библиотеку.
 import fp from 'fastify-plugin';
 import { AgentsStore, ID_RE, defaults } from './store.js';
+import { installAgents } from './install.js';
 import { seedAgents } from './seed.js';
 
 async function agentsModule(fastify, opts) {
@@ -89,6 +92,22 @@ async function agentsModule(fastify, opts) {
       if (!ID_RE.test(req.params.id)) return reply.code(400).send({ error: 'bad_id' });
       try { await store.remove(req.params.id); return { ok: true }; }
       catch (error) { return storeFailure(reply, error, { missing: true }); }
+    });
+  });
+
+  // Установка стандартного набора из версионируемого посева (server/seed/agents).
+  // Create-only и идемпотентно: существующие агенты не перезаписываются.
+  fastify.post('/api/agents/install', async (_req, reply) => {
+    return mutate(async () => {
+      try {
+        const { created, skipped } = await installAgents(store, config.agentsSeedDir);
+        return { ok: true, created, skipped };
+      } catch (error) {
+        if (error?.code === 'agents_seed_missing') {
+          return reply.code(500).send({ error: error.code, message: error.message });
+        }
+        return storeFailure(reply, error);
+      }
     });
   });
 

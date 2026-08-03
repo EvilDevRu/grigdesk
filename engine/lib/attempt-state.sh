@@ -42,13 +42,36 @@ _attempt_state_attempt_id() {
   printf '%s\n' "$attempt"
 }
 
+# Причина ручного вмешательства (abandon/recover/goto/pause) ложится в доверенный
+# журнал и едет в промпт следующего агента, поэтому она — ОДНА строка 1..500 символов.
+# Отказ обязан называть нарушенное правило: молчащий код 2 стоит захода. Так уже
+# было с вердиктом этапа (lib/run-state.sh) — человек за CLI и агент видели «код 2»
+# и не понимали, что упёрлись в лимит длины, а не в состояние ledger.
 _attempt_state_reason() {
   python3 - "${1-}" <<'PY'
 import sys
 
+REASON_LIMIT = 500
 value = sys.argv[1]
-if not 1 <= len(value) <= 500 or any(ord(char) < 32 or ord(char) == 127 for char in value):
+
+
+def fail(reason):
+    print(f"reason: {reason}", file=sys.stderr)
     raise SystemExit(2)
+
+
+if not value:
+    fail("причина обязательна и не может быть пустой")
+if len(value) > REASON_LIMIT:
+    fail(
+        f"причина {len(value)} символов, допустимо 1..{REASON_LIMIT}; "
+        "развёрнутый разбор кладётся в файл этапа, в причину идёт ссылка на него"
+    )
+for position, char in enumerate(value, start=1):
+    code = ord(char)
+    if code < 32 or code == 127:
+        name = "перевод строки" if char == "\n" else f"управляющий символ U+{code:04X}"
+        fail(f"причина содержит {name} в позиции {position}; нужна ОДНА строка")
 PY
 }
 

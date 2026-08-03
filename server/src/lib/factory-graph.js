@@ -27,7 +27,21 @@ export function loadGraph(profilesDir, profile) {
 
 /** Определение графа для маршрута: узлы, ключи, optional, vb, pos, edges. */
 export function graphForRoute(g, route) {
-  const r = g.routes[route] || g.routes[g.default_route];
+  // Разметки может не быть вовсе. Профиль, перешедший на route-v2, держит nodes/routes/pos
+  // только ради read-only показа старых реестров, а после чистки graph.json их не остаётся:
+  // картинку рисует закреплённый бандл (route-graph.js). Сюда такой профиль попадает лишь
+  // историческим реестром без CATALOG_PROTOCOL=route-v2 — и падал на `r.pos`, отдавая
+  // человеку «Cannot read properties of undefined» вместо ответа, чего именно смотреть нечем.
+  const r = g.routes?.[route] || g.routes?.[g.default_route];
+  if (!r?.pos) {
+    const known = Object.keys(g.routes || {});
+    throw new Error(
+      `в graph.json профиля нет разметки маршрута «${route || g.default_route || '—'}»`
+      + (known.length
+        ? `; в файле есть только ${known.join(', ')}`
+        : ': профиль перешёл на route-v2, у исторического реестра схемы больше нет'),
+    );
+  }
   const optional = new Set([...(g.optional?.['*'] || []), ...(g.optional?.[route] || [])]);
   // Узлы: оверрайд профиля поверх глобального каталога стадий (stages.js).
   const nodes = {};

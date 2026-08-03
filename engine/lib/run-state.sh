@@ -80,34 +80,54 @@ import sys
 operation, result, encoded, *findings_raw = sys.argv[1:]
 owners = {"build", "tests", "environment", "plan", "human"}
 finding_re = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+SUMMARY_LIMIT = 500
+FINDINGS_LIMIT = 32
 
 
-def fail():
+# Отказ обязан называть нарушенное правило. Молчащий код 2 стоил вердикта этапа: на t7802
+# скептик 17 минут не мог отчитаться (summary длиннее лимита), угадывал причину пробными
+# вызовами — и терминальный исход узла закрыл диагностический плейсхолдер, потому что
+# повторная фиксация того же run уже отклоняется. Печатаем правило и id, но не текст
+# замечания: то же сообщение уходит в журнал маршрута при trusted-проверке.
+def fail(reason="вердикт отклонён"):
+    print(f"stage-result: {reason}", file=sys.stderr)
     raise SystemExit(2)
 
 
 def validate(value):
     if not isinstance(value, dict) or set(value) != {"owner", "findings"}:
-        fail()
+        fail("вердикт должен состоять ровно из owner и findings")
     owner = value.get("owner")
     findings = value.get("findings")
-    if owner not in owners or not isinstance(findings, list) or not 1 <= len(findings) <= 32:
-        fail()
+    if owner not in owners:
+        fail(f"неизвестный failure-owner; допустимы: {', '.join(sorted(owners))}")
+    if not isinstance(findings, list) or not 1 <= len(findings) <= FINDINGS_LIMIT:
+        count = len(findings) if isinstance(findings, list) else "нет списка"
+        fail(f"замечаний {count}, допустимо 1..{FINDINGS_LIMIT}")
     seen = set()
-    for finding in findings:
+    for index, finding in enumerate(findings, start=1):
         if not isinstance(finding, dict) or set(finding) != {"id", "summary"}:
-            fail()
+            fail(f"замечание {index}: допустимы ровно поля id и summary")
         finding_id = finding.get("id")
         summary = finding.get("summary")
-        if (
-            not isinstance(finding_id, str)
-            or not finding_re.fullmatch(finding_id)
-            or finding_id in seen
-            or not isinstance(summary, str)
-            or not 1 <= len(summary) <= 500
-            or any(ord(char) < 32 or ord(char) == 127 for char in summary)
-        ):
-            fail()
+        if not isinstance(finding_id, str) or not finding_re.fullmatch(finding_id):
+            fail(
+                f"замечание {index}: id должен быть kebab-case до 64 символов "
+                "(^[a-z0-9][a-z0-9-]{0,63}$)"
+            )
+        if finding_id in seen:
+            fail(f"замечание {index} (id={finding_id}): такой id уже был в этом вердикте")
+        if not isinstance(summary, str) or not 1 <= len(summary) <= SUMMARY_LIMIT:
+            length = len(summary) if isinstance(summary, str) else "нет строки"
+            fail(
+                f"замечание {index} (id={finding_id}): summary {length} символов, "
+                f"допустимо 1..{SUMMARY_LIMIT}; развёрнутый разбор кладётся в файл этапа"
+            )
+        if any(ord(char) < 32 or ord(char) == 127 for char in summary):
+            fail(
+                f"замечание {index} (id={finding_id}): summary — одна строка, "
+                "переводы строки и управляющие символы запрещены"
+            )
         seen.add(finding_id)
     return value
 
@@ -116,7 +136,9 @@ if operation == "encode":
     owner = encoded
     if result != "failed":
         if owner or findings_raw:
-            fail()
+            fail(
+                f"результат {result}: --failure-owner и --finding допустимы только у failed"
+            )
         print("")
         raise SystemExit(0)
     if not owner and not findings_raw:
@@ -124,9 +146,9 @@ if operation == "encode":
         print("")
         raise SystemExit(0)
     parsed = []
-    for raw in findings_raw:
+    for index, raw in enumerate(findings_raw, start=1):
         if "=" not in raw:
-            fail()
+            fail(f"--finding {index}: ожидается вид id=краткое замечание")
         finding_id, summary = raw.split("=", 1)
         parsed.append({"id": finding_id, "summary": summary})
     value = validate({"owner": owner, "findings": parsed})
@@ -143,14 +165,17 @@ elif operation in {"validate", "owner"}:
             print("")
         raise SystemExit(0)
     if result != "failed" or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded):
-        fail()
+        fail(f"результат {result}: typed verdict возможен только у failed")
     try:
         payload = base64.b64decode(encoded, validate=True)
         if len(payload) > 32 * 1024:
-            fail()
-        value = json.loads(payload.decode("utf-8"), parse_constant=lambda _: fail())
+            fail("payload вердикта больше 32 КиБ")
+        value = json.loads(
+            payload.decode("utf-8"),
+            parse_constant=lambda _: fail("вердикт содержит NaN/Infinity"),
+        )
     except (ValueError, UnicodeError, json.JSONDecodeError):
-        fail()
+        fail("вердикт не является валидным base64 с JSON внутри")
     value = validate(value)
     canonical = json.dumps(
         value,
@@ -159,11 +184,11 @@ elif operation in {"validate", "owner"}:
         separators=(",", ":"),
     ).encode("utf-8")
     if canonical != payload:
-        fail()
+        fail("вердикт записан не в канонической форме")
     if operation == "owner":
         print(value["owner"])
 else:
-    fail()
+    fail(f"неизвестная операция {operation}")
 PY
 }
 

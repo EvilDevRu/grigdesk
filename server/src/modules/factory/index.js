@@ -24,7 +24,7 @@ import {
 } from '../../lib/factory-launch-contract.js';
 import {
   runRouteEngine, spawnRouteEngine, readLaunchLog, routeUnitActive,
-  startRegistryIdentity,
+  startRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
 } from '../../lib/factory-route-cli.js';
 import {
@@ -921,6 +921,14 @@ async function factoryModule(fastify, opts) {
   // кнопка, и первый шаг перезапуска стенда, а реагируют они на отказ по-разному.
   //
   // STATE_DIR передаём явно: lifecycle script и server читают один runtime root.
+  //
+  // FACTORY_DOWN_WORKTREE=force — сносить worktree задачи вместе с незакоммиченным.
+  // Оба вызывающих сначала закрывают попытку (abandon), то есть работа этапа уже
+  // ничья, а бережно «оставленный» грязный worktree ровно ничего не спасал: сам он
+  // из интерфейса не виден, зато следующий подъём упирается в гард частично
+  // созданной песочницы (env реестра снесён, каталоги на месте) и задача встаёт
+  // с кодом 75 ещё до первого агента. Работа при этом не пропадает — профиль перед
+  // удалением кладёт патч в archive/ (t<id>.<репозиторий>-<worktree>.patch).
   function runSandboxDown(id, cmd, stateDir) {
     return new Promise((resolve) => {
       execFile('sh', ['-c', cmd], {
@@ -929,6 +937,7 @@ async function factoryModule(fastify, opts) {
           ...process.env,
           STATE_DIR: stateDir,
           FACTORY_STATE: stateDir,
+          FACTORY_DOWN_WORKTREE: 'force',
         },
       }, (err, stdout, stderr) => {
         if (err) resolve({ ok: false, message: (stderr || err.message).slice(-500) });
@@ -964,7 +973,8 @@ async function factoryModule(fastify, opts) {
 
   // Снос стенда — терминальное действие для ТЕКУЩЕГО прогона: инфраструктуру удаляем,
   // проекцию реестра переносим в архив, и задача сразу снова доступна для отправки на
-  // конвейер. Ветки и незакоммиченные изменения здесь не трогаем. Одной архивации
+  // конвейер. Worktree задачи уходит вместе со стендом (незакоммиченное сохраняется
+  // патчем в archive/), ветки не трогаем — коммиты в безопасности. Одной архивации
   // файлов недостаточно: открытую попытку сначала обязан терминализировать сам движок,
   // иначе следующий start получит 73 («попытка уже активна»).
   fastify.post('/api/tasks/:id/sandbox/down', async (request, reply) => {
@@ -1159,8 +1169,8 @@ async function factoryModule(fastify, opts) {
       reuseTicket: true,
     });
     // Снос уже прошёл, поэтому его вывод отдаём в ЛЮБОМ случае: там видны отказы,
-    // из-за которых новый подъём упадёт снова (например «worktree ОСТАВЛЕН» —
-    // в нём незакоммиченные изменения, и гард подъёма упрётся именно в это).
+    // из-за которых новый подъём упадёт снова (например «worktree ОСТАВЛЕН как есть» —
+    // не удалось снять патч, и гард частично созданной песочницы упрётся именно в это).
     if (r.status) return reply.code(r.status).send({ ...r.body, downOutput: down.output });
     return { ...r.body, retried: true, downOutput: down.output };
   });
@@ -1186,6 +1196,24 @@ async function factoryModule(fastify, opts) {
     const launch = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'по кнопке' });
     if (!launch.ok) return reply.code(500).send({ error: 'resume_failed', message: launch.message });
     return { ok: true, outcome: 'launched', attempt };
+  });
+
+  // «Стоп» — ручная остановка работающего конвейера. Движок получает TERM,
+  // сам гасит runner и снимает инструментацию; попытка остаётся открытой,
+  // поэтому после остановки карточка показывает обычное «продолжить прогон».
+  fastify.post('/api/tasks/:id/stop', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    const managed = await managedRegistry(id, reply);
+    if (!managed) return reply;
+    const { registry } = managed;
+    const stop = await stopRouteOrchestrator({
+      task: id,
+      orchPid: registry.ORCH_PID,
+      isAlive: () => factoryState.isDaemonAlive(registry.ORCH_PID, id),
+    });
+    if (!stop.ok) return reply.code(500).send({ error: 'stop_failed', message: stop.message });
+    return stop;
   });
 
   // Полный граф конвейера задачи (для SVG-отрисовки): схема + статусы узлов + возвраты.

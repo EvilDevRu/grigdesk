@@ -79,6 +79,9 @@ export const config = {
   // База агентов (стадий конвейера) — папка в корне проекта (внутри свой .gitignore,
   // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
   agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
+  // Версионируемый стандартный набор агентов: отсюда кнопка «Установить набор»
+  // доустанавливает отсутствующих (create-only, существующие файлы не трогает).
+  agentsSeedDir: process.env.COCKPIT_AGENTS_SEED_DIR || path.join(__dirname, '..', 'seed', 'agents'),
 
   // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов — runtime-артефакт движка,
   // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Каталог

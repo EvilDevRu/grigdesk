@@ -368,7 +368,12 @@ const { connected } = useSse((name) => {
                :tip-style="{ maxWidth: 'min(340px, calc(100vw - 20px))' }">
         <span class="cockpit-version" :class="cockpitUpdate.tone"
               role="status" :aria-label="cockpitToneTitle" :title="cockpitToneTitle">
-          <span aria-hidden="true">◧</span>
+          <!-- «◧» рисуем SVG: текстовый глиф сидел на базовой линии шрифта
+               ниже геометрического центра em-бокса и выглядел смещённым вниз -->
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 5h7v14H5z" fill="currentColor" />
+            <rect x="5" y="5" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" />
+          </svg>
           <span v-if="cockpitUpdate.tone" class="cockpit-dot" aria-hidden="true"></span>
         </span>
         <template #tip>
@@ -520,12 +525,12 @@ const { connected } = useSse((name) => {
 }
 .cockpit-tip { display: inline-flex; align-items: center; height: 32px; }
 .cockpit-tip :deep(.ht-tr) { display: inline-flex; align-items: center; height: 32px; }
-.cockpit-version > span:first-child { display: block; line-height: 1; }
+.cockpit-version > .ic { display: block; width: 16px; height: 16px; }
 .settings-link { line-height: 0; }
 .settings-link .ic { display: block; }
 .cockpit-version {
   width: 32px; height: 32px; flex: none; display: grid; place-items: center; position: relative;
-  border-radius: 8px; color: var(--ink-mid); font-size: 16px; cursor: pointer;
+  border-radius: 8px; color: var(--ink-mid); cursor: pointer;
   transition: background .12s, color .12s;
 }
 .cockpit-version:hover { background: var(--surface); color: var(--ink); }

@@ -1,7 +1,7 @@
 // Модуль system — нагрузка домашнего ПК (CPU/RAM) + жизненный цикл самого сервера
 // (режим запуска и перезапуск кнопкой из «Настройки → Сервер»).
 import fp from 'fastify-plugin';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 import { CockpitReleaseService } from '../../lib/cockpit-release.js';
 import { CockpitUpdateManager } from '../../lib/cockpit-update.js';
@@ -17,6 +17,14 @@ async function systemModule(fastify, opts) {
     releases,
     rootDir: config.rootDir,
     statePath: config.cockpitUpdateStatePath,
+  });
+  // Статус пересборки web-бандла (см. эндпоинты ниже). В памяти процесса: перезапуск
+  // сервера обнуляет его, а сиротевший npm при этом дособирает сам — dist не портится.
+  let webRebuild = null;
+  const rebuildBusy = () => webRebuild?.status === 'running';
+  const rebuildConflict = (reply) => reply.code(409).send({
+    error: 'rebuild_in_progress',
+    message: 'Идёт пересборка web-бандла — дождитесь её конца.',
   });
   fastify.get('/api/system', async () => system.read());
 
@@ -43,6 +51,9 @@ async function systemModule(fastify, opts) {
       },
     },
   }, async (request, reply) => {
+    // Гонка с пересборкой web: worker обновления публикует dist атомарным rename,
+    // а бегущий vite build писал бы в него поверх старых исходников — мешанина.
+    if (rebuildBusy()) return rebuildConflict(reply);
     try {
       const job = await updates.startApply(request.body);
       return reply.code(202).send({ ok: true, job });
@@ -62,6 +73,7 @@ async function systemModule(fastify, opts) {
       },
     },
   }, async (request, reply) => {
+    if (rebuildBusy()) return rebuildConflict(reply);
     try {
       const job = await updates.startUpdate(request.body);
       return reply.code(202).send({ ok: true, job });
@@ -86,6 +98,9 @@ async function systemModule(fastify, opts) {
   // бы второй экземпляр против юнита — ровно так юнит намотал 7553 падения 27.07.2026
   // (см. комментарий в deploy/cockpit-server.service).
   fastify.post('/api/system/restart', async (_request, reply) => {
+    // Рестарт гасит процесс → статус пересборки (в памяти) потеряется, а клиент
+    // останется ждать. Проще запретить, чем восстанавливать неизвестное состояние.
+    if (rebuildBusy()) return rebuildConflict(reply);
     try { await updates.assertIdle(); }
     catch (error) { return sendReleaseError(reply, error); }
     const systemd = underSystemd();
@@ -97,6 +112,70 @@ async function systemModule(fastify, opts) {
       child.unref();
     }, 400);
     return { ok: true, mode: systemd ? 'systemd' : 'script' };
+  });
+
+  // ── Пересборка web-бандла из текущего рабочего дерева ──
+  // Лёгкий путь рядом с полным «применить checkout» (updates): без git-preflight,
+  // временного снимка, smoke-тестов и перезапуска — npm install + vite build прямо
+  // в web/. В сборку попадают и незакоммиченные правки (типовой случай: подправил
+  // фронт и хочешь увидеть живьём). dist — статика, серверу перезапуск не нужен.
+  function runNpm(args) {
+    return new Promise((resolve) => {
+      execFile('npm', args, {
+        cwd: path.join(config.rootDir, 'web'),
+        timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8',
+      }, (error, stdout = '', stderr = '') => resolve({
+        code: error ? (Number.isInteger(error.code) ? error.code : 1) : 0,
+        timedOut: !!error?.killed,
+        output: `${stdout}\n${stderr}`,
+      }));
+    });
+  }
+
+  // Хвост вывода npm для сообщения об ошибке: полный лог мегабайты, а причина — внизу.
+  function outputTail(text) {
+    return String(text || '').split('\n').map((line) => line.trimEnd()).filter(Boolean)
+      .slice(-8).join('\n').slice(-600);
+  }
+
+  async function rebuildWebBundle() {
+    const install = await runNpm(['install', '--no-audit', '--no-fund']);
+    if (install.code !== 0) {
+      return { code: 'web_dependencies_failed', message: `npm install завершился ошибкой${install.timedOut ? ' (таймаут)' : ''}.\n${outputTail(install.output)}` };
+    }
+    const build = await runNpm(['run', 'build']);
+    if (build.code !== 0) {
+      return { code: 'web_build_failed', message: `vite build завершился ошибкой${build.timedOut ? ' (таймаут)' : ''}.\n${outputTail(build.output)}` };
+    }
+    return null;
+  }
+
+  // Инъекция для тестов: реальный билд в них не гоняем.
+  const webRebuilder = opts.webRebuilder || rebuildWebBundle;
+
+  fastify.get('/api/system/web-rebuild', async () => ({ rebuild: webRebuild || { status: 'idle' } }));
+
+  fastify.post('/api/system/web-rebuild', async (_request, reply) => {
+    try { await updates.assertIdle(); }
+    catch (error) { return sendReleaseError(reply, error); }
+    if (rebuildBusy()) return rebuildConflict(reply);
+    webRebuild = { status: 'running', startedAt: new Date().toISOString(), finishedAt: null, error: null };
+    // Сборка ~минута — дольше таймаутов гейтвея, поэтому фоном, а клиент опрашивает GET.
+    Promise.resolve()
+      .then(() => webRebuilder())
+      .then((failure) => {
+        webRebuild = {
+          ...webRebuild, status: failure ? 'failed' : 'done',
+          finishedAt: new Date().toISOString(), error: failure || null,
+        };
+      })
+      .catch((error) => {
+        webRebuild = {
+          ...webRebuild, status: 'failed', finishedAt: new Date().toISOString(),
+          error: { code: 'rebuild_failed', message: error?.message || 'Пересборка неожиданно завершилась.' },
+        };
+      });
+    return reply.code(202).send({ ok: true });
   });
 
   await updates.recover?.();

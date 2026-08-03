@@ -45,20 +45,97 @@ runner_kimi_capabilities() {
   printf 'status status_request tools structured_output\n'
 }
 
+# Effort у CLI нет ни argv-флагом, ни env (spike, KIMI.md), но `[thinking].effort`
+# читается из config.toml при `-p`, а KIMI_CODE_HOME CLI уважает (fixture kimi-no-login).
+# Поэтому effort применяется через per-run home: копия config.toml с переписанной
+# секцией [thinking], credentials/oauth — symlink на дефолтный home (OAuth refresh
+# обязан попадать в общее хранилище). CLI невалидный effort молча нормализует в high
+# (spike 2026-08-03, migrations-effort.json), поэтому набор low|high|max пиннутого
+# CLI проверяется здесь fail-closed, до вызова модели.
+_runner_kimi_prepare_home() {
+  local run_home=$1 effort=$2
+  local default_home=${KIMI_CODE_HOME:-"${HOME:?HOME or KIMI_CODE_HOME is required}/.kimi-code"}
+  [[ -f "$default_home/config.toml" ]] || return 4
+  mkdir -p "$run_home" || return 4
+  chmod 700 "$run_home" 2>/dev/null || true
+  local link
+  for link in credentials oauth; do
+    if [[ -e "$default_home/$link" ]]; then
+      ln -sfn "$default_home/$link" "$run_home/$link" || return 4
+    fi
+  done
+  if [[ -z "$effort" ]]; then
+    cp -- "$default_home/config.toml" "$run_home/config.toml"
+    return
+  fi
+  command -v python3 >/dev/null 2>&1 || return 4
+  python3 - "$default_home/config.toml" "$run_home/config.toml" "$effort" <<'PYTHON'
+import re
+import sys
+
+src, dst, effort = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(src, encoding="utf-8") as fh:
+    lines = fh.read().splitlines()
+
+out = []
+section = None
+thinking_seen = False
+effort_written = False
+for line in lines:
+    stripped = line.strip()
+    header = re.fullmatch(r"\[\s*([A-Za-z0-9_.\"-]+)\s*\]", stripped)
+    if header:
+        if section == "thinking" and not effort_written:
+            out.append(f'effort = "{effort}"')
+            effort_written = True
+        section = header.group(1).split(".")[0].strip('"')
+        thinking_seen = thinking_seen or section == "thinking"
+    if section == "thinking" and re.match(r"effort\s*=", stripped):
+        if not effort_written:
+            out.append(f'effort = "{effort}"')
+            effort_written = True
+        continue
+    out.append(line)
+
+if section == "thinking" and not effort_written:
+    out.append(f'effort = "{effort}"')
+if not thinking_seen:
+    out += ["", "[thinking]", "enabled = true", f'effort = "{effort}"']
+
+with open(dst, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(out) + "\n")
+PYTHON
+}
+
 runner_kimi_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   # Промпт — только аргументом: stdin-форму `-p -` CLI не читает (доказано spike,
   # KIMI.md). Потолок ARG_MAX (~2 МБ на argv+env) на порядки выше конвейерных
-  # промптов, отдельной защиты не делаем. effort в argv не передаём — флага нет.
+  # промптов, отдельной защиты не делаем.
   local -a args=(kimi -p "$prompt" --output-format stream-json)
   [[ -z "$model" ]] || args+=(-m "$model")
+  if [[ -n "$effort" ]]; then
+    case "$effort" in
+      low|high|max) ;;
+      *)
+        echo "kimi effort не поддерживается: $effort (допустимы low|high|max)" >&2
+        return 4
+        ;;
+    esac
+  fi
+  local run_home="$run_dir/kimi-home"
+  _runner_kimi_prepare_home "$run_home" "$effort" || {
+    echo "kimi per-run home не собран: $run_home" >&2
+    return 4
+  }
   local add_dir
   for add_dir in ${RUNNER_KIMI_ADD_DIRS:-}; do
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
-  factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
+  KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
 }
 
 _runner_kimi_meta() {

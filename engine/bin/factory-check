@@ -2,7 +2,8 @@
 # Все проверки профиля в одном месте: factory-check [профиль ...] [--quick] [--host-preflight]
 #   --quick — изолированный временный state, без запуска Cockpit и без запросов к моделям.
 #   --host-preflight — metadata-only проверка CLI/каталогов; требует RUN_HOST_PREFLIGHT=1.
-# Ноль на выходе = профиль готов вести задачи.
+# Ноль на выходе = профиль готов вести задачи — либо честно заявил, что не ведёт их
+# вовсе (`"launchable": false` в graph.json: проверки запуска для него пропускаются).
 set -uo pipefail
 FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 export FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
@@ -65,6 +66,44 @@ for prof in "${PROFILES[@]}"; do
   # Единственный исполняемый контракт — immutable route. Профиль без capability
   # остаётся читаемой конфигурацией, но не считается готовым к запуску.
   graph_json="$FACTORY_PROFILES_DIR/${prof}/graph.json"
+
+  # Профиль, который задач не ведёт вообще (только triage-конфигурация и allow-list для
+  # чата кокпита), заявляет это полем "launchable": false. Без него проверка требовала
+  # route-контракт от КАЖДОГО каталога в profiles/ и держала общий код возврата на
+  # единице вечно: «ЕСТЬ ПРОБЛЕМЫ» перестало что-либо значить, потому что не отличало
+  # сломанный конвейер от профиля, у которого конвейера нет по замыслу, — а проверку,
+  # которая всегда красная, перестают читать.
+  launch_state=$(python3 - "$graph_json" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        data = json.load(source)
+except Exception:                                            # noqa: BLE001
+    raise SystemExit(0)                                      # форму разберёт проверка ниже
+if not isinstance(data, dict) or data.get("launchable") is not False:
+    raise SystemExit(0)
+caps = data.get("capabilities")
+print("both" if isinstance(caps, list) and "route-v2" in caps else "off")
+PY
+  )
+  if [[ "$launch_state" == both ]]; then
+    # Движок поле не читает: с заявленной capability прогон пойдёт, а проверка будет
+    # молчать про route и стенд. Такое расхождение опаснее любого из двух состояний.
+    echo "✗ запуск: launchable: false вместе с capability route-v2 — оставь что-то одно:"
+    echo "  движок поле не читает, прогон пойдёт, а route/стенд останутся непроверенными"
+    RC=1
+    echo
+    continue
+  fi
+  if [[ "$launch_state" == off ]]; then
+    echo "○ запуск: профиль задач не ведёт (launchable: false) — route, стенд и"
+    echo "  исполнители не проверяются; factory start откажет fail-closed"
+    echo
+    continue
+  fi
+
   if [[ -f "$graph_json" ]] && python3 - "$graph_json" <<'PY' 2>/dev/null
 import json
 import sys

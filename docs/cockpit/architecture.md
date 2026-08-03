@@ -24,7 +24,7 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :814
 |--------|-----------|----------|
 | `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд | `~/.factory/state` + `<factoryHome>/bin/factory` |
 | `b24` | `/api/b24/{dashboard,task/:id,users}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
-| `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart` | `/proc`, `os`, systemd/manual launcher |
+| `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
 | `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
 | `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls}` | prefs, engine debug CLI, `CredsStore`, `LocalTls` |
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission | выбранный executor + `chats/` ([детали](chat-agents.md)) |

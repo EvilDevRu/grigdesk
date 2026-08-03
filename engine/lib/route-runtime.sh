@@ -1404,17 +1404,30 @@ route_v2_cleanup_active_instrumentation() {
   [[ -d "$dir" && ! -L "$dir" && -f "$dir/state.env" &&
      ! -L "$dir/state.env" ]] || return 78
   state=$(_instrumentation_tx_get "$dir/state.env" STATE)
+  # Причину stalled журналу отдаёт и этот путь. Раньше её писал только
+  # _route_v2_transaction_after, поэтому остановка на снятии инструментации упавшего узла
+  # оставляла в журнале одну строку «код 75»: на t7802 REASON приходилось доставать из
+  # state.env руками, не зная даже, что дело в транзакции, а не в раннере.
   case "$state" in
     active)
-      instrumentation_tx_checkpoint "$task" "$txid" || return
+      instrumentation_tx_checkpoint "$task" "$txid" || {
+        rc=$?
+        _route_v2_log_transaction_stall "$task" "$txid"
+        return "$rc"
+      }
       ;;
     cleaning|completed)
       ;;
     *)
+      _route_v2_log_transaction_stall "$task" "$txid"
       return 75
       ;;
   esac
-  instrumentation_tx_cleanup "$task" "$txid" || return
+  instrumentation_tx_cleanup "$task" "$txid" || {
+    rc=$?
+    _route_v2_log_transaction_stall "$task" "$txid"
+    return "$rc"
+  }
   if declare -F route_v2_instrumentation_restored >/dev/null; then
     route_v2_instrumentation_restored "$task" "$dir/scope.list" || return
   fi

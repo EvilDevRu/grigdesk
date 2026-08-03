@@ -388,6 +388,27 @@ assert_rc 0 "$gate_rc" "commit-only gate verifies and preserves the exact shared
 assert_eq "$attempt" "$(awk -F= '$1=="ATTEMPT"{print $2}' "$lease_dir"/*.owner | sort -u)" \
   "human decision does not release shared resources before resumed work"
 
+# Слишком длинная причина — самая частая ошибка человека за CLI и в модалке кокпита.
+# Отказ обязан прийти ДО локов и проекции, с названной границей: кокпит показывает
+# человеку именно этот текст движка (routeMessage в server/src/lib/factory-route-cli.js).
+plan_before=$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")
+long_reason=$(python3 -c 'print("щ" * 501, end="")')
+long_goto=$(FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" goto --profile "$profile_id" \
+    --attempt "$attempt" \
+    --node plan \
+    --reason "$long_reason" \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 2 "$?" "goto refuses a reason over the limit"
+assert_contains "$long_goto" 'допустимо 1..500' \
+  "the refusal names the violated rule instead of a bare exit code"
+assert_eq "$plan_before" \
+  "$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "a refused reason leaves the projection untouched"
+
 goto_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" goto --profile "$profile_id" \

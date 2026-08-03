@@ -176,11 +176,17 @@ def decode_verdict(encoded, outcome):
     return value
 
 
-def verdict_fingerprint(value):
+def verdict_snapshot(value):
+    # Снимок вердикта для сторожа топтания: владелец + стабильные finding id.
+    # Кортеж, а не строка-отпечаток: по строке видно только полное совпадение
+    # наборов, а неснятую причину показывает их ПЕРЕСЕЧЕНИЕ. Со строкой смена
+    # одного finding из четырёх читается прогрессом, и цикл законно ходит вокруг
+    # одного и того же замечания, пока сопутствующие тасуются.
     if value is None:
         return None
-    return value["owner"] + ":" + ",".join(
-        sorted(finding["id"] for finding in value["findings"])
+    return (
+        value["owner"],
+        tuple(sorted(finding["id"] for finding in value["findings"])),
     )
 
 
@@ -371,9 +377,9 @@ def human_rewind_note(directory, node):
 
 def automatic_rewind_history(directory, node, target):
     # Возвращаем историю ЗАФИКСИРОВАННЫХ возвратов той же автономной дуги после
-    # последнего решения человека. Для typed verdict сохраняем fingerprint owner +
-    # стабильных finding id: изменение набора замечаний считается прогрессом, а
-    # повтор и A↔B-осцилляция — нет.
+    # последнего решения человека. Для typed verdict сохраняем снимок owner +
+    # стабильных finding id: прогрессом считается закрытие замечаний, а повтор
+    # набора, A↔B-осцилляция и неснимаемое общее ядро — нет.
     identifier(node)
     identifier(target)
     try:
@@ -386,7 +392,7 @@ def automatic_rewind_history(directory, node, target):
         if match:
             events.append((int(match.group(1)), name))
     events.sort()
-    fingerprints = []
+    snapshots = []
     for _, name in events:
         event = regular_json(os.path.join(directory, name))
         action = event.get("action")
@@ -407,7 +413,7 @@ def automatic_rewind_history(directory, node, target):
             # И явный goto, и rejected на human gate начинают новую автономную
             # серию: прежние findings не должны остановить исправление по новой
             # человеческой обратной связи.
-            fingerprints = []
+            snapshots = []
             continue
         if (
             event.get("kind") == "commit"
@@ -417,20 +423,48 @@ def automatic_rewind_history(directory, node, target):
         ):
             verdict = event.get("verdict")
             validate_verdict(verdict, event.get("outcome"))
-            fingerprints.append(verdict_fingerprint(verdict))
-    return fingerprints
+            snapshots.append(verdict_snapshot(verdict))
+    return snapshots
+
+
+def stable_core_reason(window, owner):
+    # Замечание, пережившее каждый ремонт окна. Наборы при этом не совпадают,
+    # поэтому проверки повтора и осцилляции молчат, — а цикл уже доказал, что
+    # эту причину он снять не умеет: ровно так расследование крутится вокруг
+    # неотделённой первопричины, пока сопутствующие findings меняются.
+    if any(item[0] != owner for item in window):
+        return None
+    core = set(window[0][1])
+    for item in window[1:]:
+        core &= set(item[1])
+    if not core:
+        return None
+    # Закрытие замечаний по одному — прогресс, даже пока последнее ещё открыто:
+    # строгое сужение набора хотя бы на одном переходе снимает подозрение.
+    if any(
+        set(after[1]) < set(before[1]) for before, after in zip(window, window[1:])
+    ):
+        return None
+    # reason() ограничен 500 символами, а findings бывает до 32: перечисляем
+    # первые три и говорим, сколько осталось, — иначе длинное ядро уронило бы
+    # запись события, то есть сторож ломал бы то, что охраняет.
+    names = sorted(core)
+    shown = ", ".join(names[:3])
+    if len(names) > 3:
+        shown += f" и ещё {len(names) - 3}"
+    return f"ремонт не снимает замечания: {shown}"
 
 
 def no_progress_reason(history, candidate, limit):
     if candidate is None or not limit:
         return None
-    fingerprints = history + [candidate]
+    snapshots = history + [candidate]
 
     # Тот же набор finding id повторился limit+1 раз подряд: ремонт не меняет
     # наблюдаемое состояние проверяющего.
     repeated = 0
-    for fingerprint in reversed(fingerprints):
-        if fingerprint != candidate:
+    for snapshot in reversed(snapshots):
+        if snapshot != candidate:
             break
         repeated += 1
     if repeated >= limit + 1:
@@ -440,12 +474,15 @@ def no_progress_reason(history, candidate, limit):
     # Пять точек достаточно, чтобы отличить цикл A→B→A→B→A от одного полезного
     # пересмотра. Общий hard limit остаётся последним предохранителем иных циклов.
     if (
-        len(fingerprints) >= 5
-        and fingerprints[-1] == fingerprints[-3] == fingerprints[-5]
-        and fingerprints[-2] == fingerprints[-4]
-        and fingerprints[-1] != fingerprints[-2]
+        len(snapshots) >= 5
+        and snapshots[-1] == snapshots[-3] == snapshots[-5]
+        and snapshots[-2] == snapshots[-4]
+        and snapshots[-1] != snapshots[-2]
     ):
         return "обнаружена осцилляция двух наборов замечаний"
+
+    if len(snapshots) >= limit + 1:
+        return stable_core_reason(snapshots[-(limit + 1):], candidate[0])
     return None
 
 
@@ -838,7 +875,7 @@ elif OP == "prepare-commit":
         )
         progress_reason = no_progress_reason(
             rewind_history,
-            verdict_fingerprint(verdict),
+            verdict_snapshot(verdict),
             no_progress_limit,
         )
         if progress_reason is not None:

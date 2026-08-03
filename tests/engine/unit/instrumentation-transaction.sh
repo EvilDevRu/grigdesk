@@ -183,9 +183,32 @@ printf '%s\n' "$repo/tracked.txt" >"$TEST_ROOT/marker.scope"
 instrumentation_tx_begin 45 trace-x "$TEST_ROOT/marker.scope" 'FACTORY-TRACE:t45' "$repo"
 assert_rc 78 "$?" "a pre-existing task marker blocks a new transaction"
 
+# Маркер в игнорируемом файле задачу не запирает: так выглядит вывод самой трассировки.
+# Агент вписывает Log::info в исходник, стенд отрабатывает сценарий и пишет строку с
+# маркером в лог приложения ВНУТРИ дерева. Раньше begin отказывал 78, а cleanup вставал
+# baseline_not_restored — узел нельзя было ни закрыть, ни переиграть (t7802).
 printf '%s\n' 'ignored FACTORY-TRACE:t46 маркер' >"$repo/ignored-marker"
-instrumentation_tx_begin 46 trace-x "$TEST_ROOT/marker.scope" 'FACTORY-TRACE:t46' "$repo"
-assert_rc 78 "$?" "a marker in an ignored source file also blocks a transaction"
+instrumentation_tx_begin 46 trace-marker-ignored "$TEST_ROOT/marker.scope" \
+  'FACTORY-TRACE:t46' "$repo"
+assert_rc 0 "$?" "a marker in an ignored file no longer blocks a new transaction"
+printf 'trace third\n// FACTORY-TRACE:t46\n' >"$repo/tracked.txt"
+instrumentation_tx_checkpoint 46 trace-marker-ignored
+assert_rc 0 "$?" "checkpoint accepts declared instrumentation over an ignored marker"
+printf '%s\n' 'стенд дописал FACTORY-TRACE:t46 в свой лог' >>"$repo/ignored-marker"
+instrumentation_tx_cleanup 46 trace-marker-ignored
+assert_rc 0 "$?" "cleanup completes while trace output stays in an ignored log"
+assert_eq "trace third" "$(cat "$repo/tracked.txt")" \
+  "cleanup still restores the instrumented source byte for byte"
+assert_contains "$(cat "$repo/ignored-marker")" "FACTORY-TRACE:t46" \
+  "cleanup never touches what the application logged"
+
+# Половина, ради которой проверка существует, работает: маркер в tracked-исходнике
+# по-прежнему запирает begin, потому что именно оттуда он уезжает в диф.
+printf 'trace third\n// FACTORY-TRACE:t46\n' >"$repo/tracked.txt"
+instrumentation_tx_begin 46 trace-marker-tracked "$TEST_ROOT/marker.scope" \
+  'FACTORY-TRACE:t46' "$repo"
+assert_rc 78 "$?" "a marker left in a tracked source file still blocks a transaction"
+printf 'trace third\n' >"$repo/tracked.txt"
 
 # Scope нельзя превратить в symlink после begin: такая запись уже могла уйти
 # за пределы worktree, поэтому checkpoint обязан остановиться и не объявлять cleanup успешным.

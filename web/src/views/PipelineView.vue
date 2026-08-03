@@ -344,6 +344,23 @@ async function resumeRun(task) {
   finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
+// Работающий конвейер останавливает человек кнопкой: движок получает TERM и
+// убирает за собой сам, попытка остаётся открытой для «продолжить прогон».
+function canStop(t) {
+  return !t.readOnly && t.daemonAlive;
+}
+async function stopRun(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Остановить конвейер задачи #${task}? Текущий этап будет прерван, прогон встанет — продолжить его можно будет кнопкой «продолжить прогон».`,
+    { danger: true, okText: 'Остановить' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try { await api.post(`/api/tasks/${task}/stop`); await load(); }
+  catch (e) { alertDialog(`Не удалось остановить: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
 const ROUTE_ICON = {
   feature: '✨', debug: '🔍', trivial: '⚡', hunt: '🕵', perf: '⏱', dev: '🛠', quick: '⚡',
 };
@@ -501,6 +518,11 @@ function cardState(g) {
         </span>
         <!-- Развёрнутая карточка: продолжение прогона рядом с остальными действиями —
              плашка затыка видна только у свёрнутой. -->
+        <button v-if="canStop(t)" class="sbstop" :class="{ busy: sandboxBusy.has(t.task) }"
+          :disabled="sandboxBusy.has(t.task)" @click="stopRun(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> останавливаю…</span>
+          <span v-else>■ остановить</span>
+        </button>
         <button v-if="canResume(t)" class="sbresume" :class="{ busy: sandboxBusy.has(t.task) }"
           :disabled="sandboxBusy.has(t.task)" @click="resumeRun(t.task)">
           <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> продолжаю…</span>
@@ -756,6 +778,11 @@ function cardState(g) {
   border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .sbdown:hover { color: var(--bad); border-color: var(--bad); }
 .sbdown.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
+/* Остановка живого прогона — разрушительное действие, красным, как снос стенда. */
+.sbstop { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.sbstop:hover { color: var(--bad); border-color: var(--bad); }
+.sbstop.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
 .sbspin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--bad);
   border-top-color: transparent; border-radius: 50%; vertical-align: -1px;
   animation: sbspin .8s linear infinite; }

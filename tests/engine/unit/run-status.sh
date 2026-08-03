@@ -232,6 +232,25 @@ rc=$?
 exec 9<&-
 assert_rc 2 "$rc" "typed failed requires at least one finding"
 
+# Отказ обязан называть нарушенное правило. Молчащий код 2 стоил вердикта этапа: на t7802
+# скептик не смог отчитаться из-за длинного summary, угадывал причину пробными вызовами, и
+# терминальный исход узла закрыл диагностический плейсхолдер — повторная фиксация того же
+# run уже отклоняется.
+long_summary=$(printf 'x%.0s' $(seq 1 501))
+verdict_stderr="$TEST_ROOT/verdict-stderr.txt"
+exec 9<<<"status-secret-d"
+FACTORY_STATUS_FD=9 bash "$FACTORY_HOME/lib/stage-result.sh" \
+  --task "$task" --stage "$stage" --run-id run-d --epoch 4 \
+  --failure-owner build --finding "too-long=$long_summary" \
+  failed 'слишком длинное замечание' >/dev/null 2>"$verdict_stderr"
+rc=$?
+exec 9<&-
+assert_rc 2 "$rc" "typed failed rejects a summary over the limit"
+assert_contains "$(cat "$verdict_stderr")" "summary 501 символов, допустимо 1..500" \
+  "rejection names the violated rule instead of a bare exit code"
+assert_eq running "$(pipeline_store_get "$task" "$stage")" \
+  "rejected verdict leaves the run open for a valid retry"
+
 exec 9<<<"status-secret-d"
 FACTORY_STATUS_FD=9 bash "$FACTORY_HOME/lib/stage-result.sh" \
   --task "$task" --stage "$stage" --run-id run-d --epoch 4 \

@@ -7,7 +7,11 @@
 
 - `loadGraph(profilesDir, profile)` — читает и кеширует `profiles/<profile>/graph.json`.
 - `graphForRoute(g, route)` — узлы (оверрайд профиля поверх каталога `stages.js`), status
-  `keys`, route-specific `runnerKeys`, optional, vb, pos, edges.
+  `keys`, route-specific `runnerKeys`, optional, vb, pos, edges. Это **только legacy-ветка**:
+  реестр с `CATALOG_PROTOCOL=route-v2` рисуется из закреплённого бандла (`route-graph.js`),
+  fallback запрещён. Профиль, перешедший на v2, разметку `routes/pos` в `graph.json` может не
+  держать вовсе, поэтому её отсутствие — названная ошибка («нет разметки маршрута …»), которая
+  доезжает до человека ответом `404`, а не падение на `undefined` внутри.
 - `computeNodeStatuses({ pf, pos, keys, optional, mtimeMs })` — **порт `pipeline_statuses`**:
   - `_ST_MAP`: done/approved→done, running→run, waiting→wait, failed/rejected→stall, blocked→skipbad.
   - `skipped` у optional-узла → `skip`, иначе `skipbad` (аномалия).

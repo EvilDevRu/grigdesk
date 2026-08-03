@@ -71,6 +71,29 @@ assert_rc 1 "$?" "profile without route capability fails closed"
 assert_contains "$(<"$TEST_ROOT/check-contract.out")" "запуск fail-closed" \
   "missing capability has explicit diagnostic"
 
+# Профиль, который задач не ведёт (triage-конфигурация кокпита), заявляет это вслух.
+# Без этого проверка требовала route-контракт от каждого каталога в profiles/ и общий
+# код возврата не мог стать нулём никогда — красную проверку перестают читать.
+printf '%s\n' '{"capabilities":[],"launchable":false}' >"$profiles/fixture/graph.json"
+run_check
+assert_rc 0 "$?" "profile declaring launchable:false passes without route contract"
+output=$(<"$TEST_ROOT/check-contract.out")
+assert_contains "$output" "задач не ведёт" "non-launchable profile is named, not diagnosed"
+if [[ "$output" == *"capability заявлена"* || "$output" == *"хост стенда"* ||
+      "$output" == *"canonical config"* ]]; then
+  test_fail "launch checks are skipped for non-launchable profile" "$output"
+else
+  test_ok "launch checks are skipped for non-launchable profile"
+fi
+
+# Заявить и то и другое — расхождение опаснее любого из двух состояний: движок поле
+# не читает, прогон пойдёт, а route и стенд останутся непроверенными.
+printf '%s\n' '{"capabilities":["route-v2"],"launchable":false}' >"$profiles/fixture/graph.json"
+run_check
+assert_rc 1 "$?" "launchable:false together with route-v2 capability fails closed"
+assert_contains "$(<"$TEST_ROOT/check-contract.out")" "оставь что-то одно" \
+  "contradiction between capability and launchable is named"
+
 printf '%s\n' '{"capabilities":["route-v2"]}' >"$profiles/fixture/graph.json"
 sed -i '/profile_instrumentation_restored/d' "$profiles/fixture/profile.sh"
 run_check

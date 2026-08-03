@@ -463,6 +463,82 @@ assert_eq ready "$(json_field "$after_gate_feedback" state)" \
 assert_eq instrument "$(json_field "$after_gate_feedback" currentNode)" \
   "после человеческой обратной связи исправление снова разрешено"
 
+# Набор замечаний меняется от захода к заходу, но одно и то же переживает каждый
+# ремонт. Полное совпадение отпечатка такое не ловит: смена одного finding из двух
+# читается прогрессом, и цикл ходит вокруг неснятой причины, пока сопутствующие
+# замечания тасуются. Останавливает именно ПЕРЕСЕЧЕНИЕ наборов.
+core_attempt=$(begin_selected 63 a_dddddddddddddddddddddddddddddddd)
+assert_rc 0 "$?" "попытка для устойчивого ядра подготовлена"
+core_dir="$(attempt_state_v2_task_root 63)/attempts/$core_attempt"
+attempt_stage_state_init_v2 63 "$core_attempt" debug >/dev/null
+core_first=$(run_state_verdict_encode failed build \
+  'shared-cause=причина не отделена от места проявления' \
+  'first-side=побочное замечание первого захода')
+core_second=$(run_state_verdict_encode failed build \
+  'shared-cause=причина не отделена от места проявления' \
+  'second-side=побочное замечание второго захода')
+core_third=$(run_state_verdict_encode failed build \
+  'shared-cause=причина не отделена от места проявления' \
+  'third-side=побочное замечание третьего захода')
+for verdict in "$core_first" "$core_second"; do
+  attempt_stage_state_commit_v2 63 "$core_attempt" instrument done >/dev/null
+  moving=$(attempt_stage_state_commit_v2 \
+    63 "$core_attempt" check failed 6 "$verdict" 2)
+  assert_eq ready "$(json_field "$moving" state)" \
+    "смена сопутствующих замечаний ещё допускает исправление"
+done
+attempt_stage_state_commit_v2 63 "$core_attempt" instrument done >/dev/null
+core_stop=$(attempt_stage_state_commit_v2 \
+  63 "$core_attempt" check failed 6 "$core_third" 2)
+assert_rc 0 "$?" "третий заход с тем же ядром фиксируется атомарно"
+assert_eq stopped "$(json_field "$core_stop" state)" \
+  "неснимаемое замечание останавливает автоматический цикл"
+assert_eq no-progress "$(json_field "$core_stop" stop)" \
+  "устойчивое ядро — отсутствие прогресса, а не hard ceiling"
+core_event=$(find "$core_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_file_exists "$core_event" \
+  "устойчивое ядро записано отдельным неизменяемым событием"
+assert_contains "$(json_field "$(cat "$core_event")" reason)" 'shared-cause' \
+  "журнал называет замечание, которое ремонт не снимает"
+
+# Обратная сторона того же сторожа: замечания закрываются по одному, набор строго
+# сужается — пересечение непусто, но это прогресс, и обрывать цикл нельзя.
+shrink_attempt=$(begin_selected 64 a_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee)
+assert_rc 0 "$?" "попытка для сужающегося набора подготовлена"
+attempt_stage_state_init_v2 64 "$shrink_attempt" debug >/dev/null
+shrink_first=$(run_state_verdict_encode failed build \
+  'kept-finding=замечание, которое чинят последним' \
+  'closed-second=замечание, закрытое вторым' \
+  'closed-first=замечание, закрытое первым')
+shrink_second=$(run_state_verdict_encode failed build \
+  'kept-finding=замечание, которое чинят последним' \
+  'closed-second=замечание, закрытое вторым')
+shrink_third=$(run_state_verdict_encode failed build \
+  'kept-finding=замечание, которое чинят последним')
+for verdict in "$shrink_first" "$shrink_second" "$shrink_third"; do
+  attempt_stage_state_commit_v2 64 "$shrink_attempt" instrument done >/dev/null
+  shrinking=$(attempt_stage_state_commit_v2 \
+    64 "$shrink_attempt" check failed 6 "$verdict" 2)
+  assert_eq ready "$(json_field "$shrinking" state)" \
+    "последовательное закрытие замечаний остаётся прогрессом"
+done
+
+# Наборы вообще не пересекаются: каждый заход находит новое. Ядра нет, значит и
+# повода останавливать цикл раньше hard ceiling тоже нет.
+fresh_attempt=$(begin_selected 65 a_ffffffffffffffffffffffffffffffff)
+assert_rc 0 "$?" "попытка для непересекающихся наборов подготовлена"
+attempt_stage_state_init_v2 65 "$fresh_attempt" debug >/dev/null
+for finding in first second third; do
+  fresh_verdict=$(run_state_verdict_encode failed build \
+    "only-$finding=замечание, найденное только в этом заходе")
+  attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+  fresh=$(attempt_stage_state_commit_v2 \
+    65 "$fresh_attempt" check failed 6 "$fresh_verdict" 2)
+  assert_eq ready "$(json_field "$fresh" state)" \
+    "полностью новый набор замечаний прогрессом и остаётся"
+done
+
 legacy_after=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \
   "all stage-ledger operations leave legacy STATE_DIR byte-for-byte untouched"

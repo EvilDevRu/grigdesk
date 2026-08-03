@@ -91,7 +91,10 @@ integration-тестами с fake-раннером, не живым CLI.
 `[providers."managed:kimi-code"]` oauth, 4 модели), `credentials`, `oauth/`, `sessions/`,
 `session_index.jsonl`, `logs/`, `telemetry/`, `workspaces.json`, `bin/` (CLI + `kimi.bak`
 после self-update). При пустом `KIMI_CODE_HOME` CLI создаёт `config.toml`, `logs/`,
-`updates/`, `device_id`, `migrations-effort.json`. Skills без `--skills-dir`
+`updates/`, `device_id`, `migrations-effort.json`. Раннер запускает CLI с per-run
+`KIMI_CODE_HOME` (`$run_dir/kimi-home`, см. «Effort через per-run home»): symlink
+`credentials`/`oauth` + копия `config.toml`, остальное CLI пересоздаёт на запуск.
+Skills без `--skills-dir`
 подхватываются auto-discovery из user и project каталогов (по `--help`) — раннер
 наследует это поведение, как запуск из терминала (принятый риск).
 
@@ -103,8 +106,32 @@ Pinned CLI: **0.31.1** (probe fail-closed: другая версия → нед�
 default `kimi-code/k3`): `kimi-code/k3`, `kimi-code/k3-256k`, `kimi-code/kimi-for-coding`,
 `kimi-code/kimi-for-coding-highspeed`. Каталог раннера — pinned models.tsv с этими id.
 
-Effort: флага у `-p` нет (по `--help`) — в policy не заявляем; effort-поле контракта
-игнорируется раннером.
+Effort: argv-флага и env-переменной у `-p` нет (по `--help`), но `[thinking].effort`
+из config.toml применяется — см. «Effort через per-run home» ниже.
+
+## Effort через per-run home (доказано 2026-08-03)
+
+Spike (тот же протокол, что основной; каталог `/tmp/kimi-effort-spike`, удалён после):
+
+- `KIMI_CODE_HOME=<per-run>` с symlink `credentials`/`oauth` на дефолтный home и копией
+  config.toml: `kimi -p … --output-format stream-json` → rc=0, события `assistant` +
+  terminal `session.resume_hint`, stderr пуст. Per-run home рабочий, credentials
+  symlink-ами достаточно.
+- Валидные значения `[thinking].effort` (`low`, `max`) переживают запуск — config.toml
+  не переписывается.
+- **Невалидное значение CLI не отвергает**: `effort = "bogus"` → rc=0, модель отвечает,
+  а config.toml молча переписывается в `effort = "high"` (след — `migrations-effort.json`).
+  Поэтому набор `low|high|max` пиннутого CLI валидирует сам раннер, fail-closed rc 4 до
+  вызова модели (иначе мусорный пин незаметно деградирует в high).
+- Effort в событиях stream-json не наблюдается: доказательство применения — принятие
+  валидных значений и сохранность конфига, а не поле в потоке.
+
+Реализация: `runner_kimi_run` собирает `$run_dir/kimi-home` (копия config.toml с
+переписанной секцией `[thinking]` — блоки моделей с их `default_effort` не трогаются;
+`credentials`/`oauth` symlink) и запускает CLI с `KIMI_CODE_HOME` на него. Пустой
+effort → конфиг копируется без правки (наследуется дефолтный home). Пины —
+`MODEL_<СТАДИЯ>_KIMI_EFFORT` / `MODEL_DEFAULT_KIMI_EFFORT` в runners.env, как у
+других провайдеров.
 
 ## Принятые риски (наследуют риски редакции 2 плана)
 
