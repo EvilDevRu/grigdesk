@@ -244,13 +244,112 @@ export function parseCodexModelList(result) {
 }
 
 /**
- * В `codex exec --json` cached_input_tokens — часть input_tokens, а не ещё один
- * кусок входа. Поток не отдаёт фактическую заполненность context window, поэтому
- * это только оценка по входу завершённого хода, а не точный размер контекста.
+ * `codex exec --json` кладёт в `turn.completed.usage` НАКОПЛЕННЫЙ расход thread:
+ * каждый вызов модели после tool-call ещё раз добавляет весь вход. Это полезная
+ * метрика работы/лимита, но не заполненность context window — в долгом ходе она
+ * закономерно вырастает до миллионов при окне в сотни тысяч.
+ *
+ * cached_input_tokens уже входит в input_tokens, повторно его не складываем.
  */
-export function codexContextEstimateTokens(usage) {
+export function codexTotalInputTokens(usage) {
   const tokens = Number(usage?.input_tokens);
   return Number.isFinite(tokens) && tokens > 0 ? tokens : 0;
+}
+
+const CODEX_CONTEXT_METRIC = 'active-input-v1';
+const ROLLOUT_READ_CHUNK = 256 * 1024;
+
+function tokenNumber(value, { positive = false } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || (positive && number <= 0)) return null;
+  return number;
+}
+
+/**
+ * Rollout пишет точную пару, которую показывает родной `/status`:
+ * last_token_usage.input_tokens — вход ПОСЛЕДНЕГО model request (активный контекст),
+ * model_context_window — эффективное окно уже с поправкой модели. total_token_usage
+ * оставляем отдельной метрикой, чтобы не смешивать расход и заполненность.
+ */
+export function parseCodexTokenInfoLine(line) {
+  let event;
+  try { event = JSON.parse(String(line || '')); } catch { return null; }
+  if (event?.payload?.type !== 'token_count') return null;
+  const info = event.payload.info;
+  const contextTokens = tokenNumber(info?.last_token_usage?.input_tokens);
+  const contextWindow = tokenNumber(info?.model_context_window, { positive: true });
+  if (contextTokens === null || contextWindow === null) return null;
+  return {
+    contextTokens,
+    contextWindow,
+    contextMetric: CODEX_CONTEXT_METRIC,
+    contextIsEstimate: false,
+    totalInputTokens: tokenNumber(info?.total_token_usage?.input_tokens) || 0,
+    cachedInputTokens: tokenNumber(info?.total_token_usage?.cached_input_tokens) || 0,
+  };
+}
+
+/** Читает rollout с конца: многомиллионный ход не грузим целиком в память. */
+export async function readLatestCodexTokenInfo(file) {
+  const handle = await fs.open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    let position = size;
+    let carry = '';
+    while (position > 0) {
+      const length = Math.min(ROLLOUT_READ_CHUNK, position);
+      position -= length;
+      const chunk = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(chunk, 0, length, position);
+      const lines = `${chunk.subarray(0, bytesRead).toString('utf8')}${carry}`.split('\n');
+      carry = position > 0 ? (lines.shift() || '') : '';
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        const info = parseCodexTokenInfoLine(lines[i]);
+        if (info) return info;
+      }
+    }
+    return parseCodexTokenInfoLine(carry);
+  } finally {
+    await handle.close();
+  }
+}
+
+function codexThreadDays(threadId) {
+  const compact = String(threadId || '').replaceAll('-', '');
+  if (!/^[0-9a-f]{32}$/i.test(compact)) return null;
+  const timestamp = Number.parseInt(compact.slice(0, 12), 16);
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  // Rollout-каталог использует календарный день хоста, UUIDv7 — UTC timestamp.
+  // Вокруг полуночи они могут отличаться на сутки, поэтому проверяем соседние даты.
+  return [-86_400_000, 0, 86_400_000]
+    .map((shift) => new Date(timestamp + shift).toISOString().slice(0, 10).split('-'));
+}
+
+async function matchingRollout(dir, threadId) {
+  try {
+    const suffix = `-${threadId}.jsonl`;
+    const names = await fs.readdir(dir);
+    const name = names.find((candidate) => candidate.endsWith(suffix));
+    return name ? path.join(dir, name) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Находит только собственный UUID-файл thread; произвольный путь сюда не принимается. */
+export async function readCodexThreadTokenInfo(threadId, { env = process.env } = {}) {
+  const days = codexThreadDays(threadId);
+  if (!days) return null;
+  const home = String(env?.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'));
+  let active = null;
+  for (const day of days) {
+    active = await matchingRollout(path.join(home, 'sessions', ...day), threadId);
+    if (active) break;
+  }
+  const archived = active || await matchingRollout(path.join(home, 'archived_sessions'), threadId);
+  if (!archived) return null;
+  try { return await readLatestCodexTokenInfo(archived); } catch { return null; }
 }
 
 /**
@@ -401,6 +500,7 @@ export function buildCodexExecArgs({
   model,
   effort,
   sessionId,
+  compactWindow = 0,
 }) {
   const args = [
     'exec',
@@ -412,6 +512,8 @@ export function buildCodexExecArgs({
   for (const dir of extraDirs) args.push('--add-dir', dir);
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
+  const compactAt = Math.max(0, Math.round(Number(compactWindow) || 0));
+  if (compactAt) args.push('-c', `model_auto_compact_token_limit=${compactAt}`);
   if (sessionId) args.push('resume', '--json', sessionId);
   else args.push('--json');
   args.push(message);
@@ -426,11 +528,9 @@ export default {
   order: 2,
   install: 'npm i -g @openai/codex && codex login',
 
-  // Родного компакта в неинтерактивном режиме нет: `codex exec` принимает ПРОМПТ, а не
-  // слэш-команды (`codex exec --help`: [PROMPT] либо подкоманда resume/review), и ручки
-  // порога автокомпакта в окружении он тоже не предлагает — поэтому autoCompactEnv не
-  // объявлен. Сжатие идёт универсальным путём: заказываем выжимку текстом, кокпит
-  // начинает с неё новую сессию.
+  // Ручной компакт пока идёт универсальным путём: `codex exec` принимает prompt, а
+  // app-server `thread/compact/start` потребовал бы другого transport. Автокомпакт при
+  // этом родной: buildCodexExecArgs передаёт официальный model_auto_compact_token_limit.
   compaction: { kind: 'summary' },
 
   bin(config) { return config.codexBin; },
@@ -507,10 +607,11 @@ export default {
   },
 
   run({
-    config, message, cwd, extraDirs = [], model, effort, sessionId, signal, onProgress, onStep,
+    config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
+    signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   }) {
     const args = buildCodexExecArgs({
-      message, cwd, extraDirs, model, effort, sessionId,
+      message, cwd, extraDirs, model, effort, sessionId, compactWindow,
     });
 
     return new Promise((resolve, reject) => {
@@ -521,7 +622,8 @@ export default {
       const normalizeStep = createCodexStepNormalizer({ model, cwd });
       let threadId = sessionId || null;
       let reply = '';
-      let contextTokens = 0;
+      let totalInputTokens = 0;
+      let cachedInputTokens = 0;
       let actualModel = '';
       let stderrTail = '';
       let buffer = '';
@@ -541,9 +643,6 @@ export default {
         // Даже оборванный первый ход успевает напечатать thread.started. Сохраняем id:
         // следующий вопрос сможет продолжить тот же разговор после кнопки «стоп».
         stopped.sessionId = threadId;
-        // Оценка входа, посчитанная до остановки: пусть кольцо показывает её, а не ноль.
-        stopped.contextTokens = contextTokens;
-        stopped.contextIsEstimate = true;
         finishError(stopped);
       }
 
@@ -569,7 +668,8 @@ export default {
             reply = event.last_agent_message;
           }
           if (event.usage) {
-            contextTokens = codexContextEstimateTokens(event.usage);
+            totalInputTokens = codexTotalInputTokens(event.usage);
+            cachedInputTokens = tokenNumber(event.usage.cached_input_tokens) || 0;
             const spent = Number(event.usage.output_tokens || 0) + Number(event.usage.reasoning_output_tokens || 0);
             if (Number.isFinite(spent) && spent > 0) {
               try { onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
@@ -599,6 +699,7 @@ export default {
       try {
         child = spawn(config.codexBin, args, {
           cwd,
+          env,
           signal,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -621,7 +722,7 @@ export default {
         }
         return finishError(new Error((stderrTail || error?.message || 'codex не запустился').slice(-600)));
       });
-      child.once('close', (code) => {
+      child.once('close', async (code) => {
         if (buffer.trim()) consumeLine(buffer);
         buffer = '';
         if (settled) return;
@@ -631,8 +732,16 @@ export default {
           return finishError(new Error(`codex не вернул ответ${detail ? `: ${detail}` : ` (код ${code ?? '?'})`}`));
         }
         settled = true;
+        let context = null;
+        try { context = await tokenInfoReader(threadId, { env }); } catch { /* без точной метрики лучше пусто, чем миллионы */ }
         resolve({
-          reply, sessionId: threadId, cost: null, contextTokens, contextIsEstimate: true,
+          reply, sessionId: threadId, cost: null,
+          contextTokens: context?.contextTokens ?? 0,
+          contextWindow: context?.contextWindow ?? 0,
+          contextMetric: context?.contextMetric || 'unavailable',
+          contextIsEstimate: !context,
+          totalInputTokens: context?.totalInputTokens ?? totalInputTokens,
+          cachedInputTokens: context?.cachedInputTokens ?? cachedInputTokens,
           actualModel, steps: stepSink.steps,
         });
       });

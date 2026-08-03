@@ -9,6 +9,23 @@ import path from 'node:path';
 
 export const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 
+/**
+ * Готовность профиля к чему-либо он заявляет САМ — списком `capabilities` в graph.json
+ * (тот же ключ читает движок: `profile_has_capability` в bin/factory). Кокпит не
+ * догадывается по косвенным признакам: поддержку route protocol решает профиль.
+ */
+export async function profileHasCapability(profilesDir, profile, capability) {
+  if (!PROFILE_RE.test(String(profile || '')) || !/^[a-z][a-z0-9_-]*$/.test(capability)) {
+    return false;
+  }
+  try {
+    const graph = JSON.parse(await fs.readFile(path.join(profilesDir, profile, 'graph.json'), 'utf8'));
+    return Array.isArray(graph.capabilities) && graph.capabilities.includes(capability);
+  } catch {
+    return false;
+  }
+}
+
 /** Профили фабрики (по наличию схемы) — используются для автопосева. */
 export async function listFactoryProfiles(profilesDir) {
   try {

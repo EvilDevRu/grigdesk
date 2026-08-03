@@ -12,14 +12,30 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ingestRecording } from '../../lib/media/ingest.js';
 import { getExecutor } from '../../lib/executors/index.js';
-import { modelInfo } from '../../lib/models-registry.js';
+import { getModelsRegistry } from '../../lib/models-registry.js';
 import { resolveRequestedEffort } from '../../lib/model-effort.js';
 import { ChatHistoryStore } from '../../lib/chat/history-store.js';
+import { ChatSessionBindingStore } from '../../lib/chat/session-binding-store.js';
+import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
+import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
+import { kimiAutoDecision } from '../../lib/chat/auto-approve.js';
+import { MAX_CHAT_STEPS } from '../../lib/chat/stream-steps.js';
+import {
+  KIMI_AUTH_PROFILE_ID,
+  KIMI_SECURITY_PROFILE,
+} from '../../lib/kimi/profile.js';
+import {
+  normalizeModelRef,
+  resolveLegacyModel,
+  resolveModelRef,
+  sameModelRef,
+} from '../../lib/chat/model-ref.js';
 import {
   finishChatTitleHook,
   visibleChatTitleStep,
   withChatTitleHook,
 } from '../../lib/chat/title-hook.js';
+import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
 
 const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
 
@@ -38,6 +54,22 @@ async function chatModule(fastify, opts) {
   const {
     factoryState, config, claudeAuth, internalToken, prefs,
   } = opts;
+  const modelsRegistry = opts.modelsRegistry || ((cfg) => getModelsRegistry(cfg));
+  const executorResolver = opts.executorResolver || getExecutor;
+
+  // История является server-owned источником surface/modelRef. Binding лежит отдельно:
+  // никакой PUT чата не может назначить Kimi resume id или его generation.
+  const history = new ChatHistoryStore({
+    chatsDir: config.chatsDir,
+    legacyPath: config.chatStoreLegacyPath,
+    log: fastify.log,
+    registryProvider: () => modelsRegistry(config),
+    defaultSurface: 'chats',
+  });
+  const bindingStore = new ChatSessionBindingStore({
+    dir: config.chatBindingsDir || path.join(config.chatsDir, '.bindings'),
+  });
+  const turnLocks = new ChatTurnLocks();
 
   /**
    * Режим страницы по UI-контексту: подсказка агенту о том, что открыто, и —
@@ -93,20 +125,28 @@ async function chatModule(fastify, opts) {
   // Поэтому сообщение, пришедшее во время чужого хода, НЕ отклоняем и ввод не блокируем
   // (человек имеет право готовить следующее сообщение) — ставим в очередь: запрос висит,
   // пока не дойдёт черёд, и уходит сразу после текущего хода.
-  const chatQueues = new Map();   // chatKey → промис последнего поставленного в очередь хода
   const lastSession = new Map();  // chatKey → sessionId последнего завершённого хода
 
-  /** Поставить ход в очередь чата (FIFO). Без chatKey очередь не построить — гоним сразу. */
-  function enqueueTurn(chatKey, job) {
-    if (!chatKey) return job();
-    const prev = chatQueues.get(chatKey) || Promise.resolve();
-    // .catch до then: упавший ход не должен вешать очередь — следующий обязан пойти.
-    const next = prev.catch(() => {}).then(job);
-    chatQueues.set(chatKey, next);
-    next.catch(() => {}).finally(() => {
-      // Чистим ТОЛЬКО собственный хвост: иначе снесли бы ссылку на чужой, уже вставший в очередь ход.
-      if (chatQueues.get(chatKey) === next) chatQueues.delete(chatKey);
-    });
+  /**
+   * Сделать текущую Kimi session непригодной для resume, не удаляя сам vendor transcript.
+   * Пустой binding остаётся server-owned маркером: старое окно ещё может прислать прежний
+   * sessionId, но сервер его проигнорирует и заведёт новую сессию вместо forged resume.
+   */
+  async function invalidateKimiSession(chatKey, {
+    expectedSessionId = '',
+    reason = 'reset',
+  } = {}) {
+    const current = await bindingStore.read(chatKey);
+    if (!current) return null;
+    if (current.provider !== 'kimi') throw new Error('binding provider не совпал с Kimi');
+    if (expectedSessionId && current.sessionId && current.sessionId !== expectedSessionId) {
+      throw new Error('Kimi binding изменился до сброса session');
+    }
+    const next = current.sessionId
+      ? await bindingStore.rotate(current, current.generation)
+      : current;
+    lastSession.delete(chatKey);
+    fastify.log.info({ chatKey, reason }, 'Kimi session binding сброшен');
     return next;
   }
 
@@ -138,6 +178,39 @@ async function chatModule(fastify, opts) {
   }));
 
   /**
+   * Явный «сброс памяти» из UI. Для Kimi одного client-side `sessionId = null`
+   * недостаточно: resume id принадлежит sidecar-у сервера и намеренно не доверяет
+   * браузеру. Поэтому пользовательское действие подтверждается отдельным API-вызовом,
+   * который только инвалидирует binding этого же сохранённого чата.
+   */
+  fastify.post('/api/chat/session/reset', async (request, reply) => {
+    const chatKey = String(request.body?.chatKey || '');
+    if (!chatKey) return reply.code(400).send({ error: 'bad_chat_key' });
+    const record = await history.readOne(chatKey);
+    if (!record) return reply.code(404).send({ error: 'unknown_chat' });
+    const requestedRef = normalizeModelRef(request.body?.modelRef);
+    if (requestedRef && !sameModelRef(record.modelRef, requestedRef)) {
+      return reply.code(409).send({
+        error: 'stale_chat_model',
+        message: 'модель чата уже изменена в другом окне; перечитай чат перед сбросом памяти',
+      });
+    }
+    if (record.modelRef?.provider !== 'kimi') return { ok: true, reset: false };
+    if (activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey })) {
+      return reply.code(409).send({
+        error: 'chat_busy',
+        message: 'сначала останови текущий ход, затем сбрось память агента',
+      });
+    }
+    // Проверка busy и постановка собственного chat lock идут без await между ними:
+    // новый ход либо успевает первым (тогда 409 выше), либо ждёт уже пустой binding.
+    const binding = await turnLocks.run({ chatKey }, () => (
+      invalidateKimiSession(chatKey, { reason: 'user_reset' })
+    ));
+    return { ok: true, reset: !!binding, generation: binding?.generation ?? null };
+  });
+
+  /**
    * Стоп: агент ушёл не туда или завис. Executor, который поддерживает AbortSignal,
    * убивает процесс CLI — ход завершится
    * ошибкой `stopped`, и чат покажет «Ход остановлен» вместо бесконечного «думает…».
@@ -165,9 +238,43 @@ async function chatModule(fastify, opts) {
     for (const [pid, p] of pendingPerms) {
       if (p.chatKey !== chatKey) continue;
       pendingPerms.delete(pid);
-      p.resolve({ behavior: 'deny', message });
+      p.resolve(p.provider === 'kimi'
+        ? { outcome: { outcome: 'cancelled' }, message }
+        : { behavior: 'deny', message });
       fastify.sse.broadcast('chat-permission-done', { pid });
     }
+  }
+
+  /** ACP reverse-RPC Kimi использует ту же всплывашку, но ответ возвращается
+   * напрямую transport-у, без локального HTTP MCP-процесса Claude. */
+  function requestKimiInteraction(presentation, chatKey) {
+    const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+    const at = Date.now();
+    const isQuestion = !!presentation?.isQuestion;
+    const input = isQuestion
+      ? { questions: presentation.questions || [] }
+      : (presentation?.input || {});
+    return new Promise((resolve) => {
+      pendingPerms.set(pid, {
+        resolve,
+        provider: 'kimi',
+        isQuestion,
+        tool: presentation?.tool || 'Действие Kimi',
+        input,
+        chatKey: chatKey || '',
+        at,
+      });
+      if (isQuestion) {
+        fastify.sse.broadcast('chat-question', {
+          pid, chatKey: chatKey || '', questions: input.questions, at,
+        });
+      } else {
+        fastify.sse.broadcast('chat-permission', {
+          pid, tool: presentation?.tool || 'Действие Kimi', input,
+          chatKey: chatKey || '', at,
+        });
+      }
+    });
   }
 
   // Что сейчас ждёт человека — чтобы окно после F5 (и второе окно) подняло всплывашки:
@@ -204,7 +311,7 @@ async function chatModule(fastify, opts) {
     const at = Date.now();
     return new Promise((resolve) => {
       // chatKey запоминаем, чтобы «стоп» и конец хода сняли именно запросы этого чата.
-      pendingPerms.set(pid, { resolve, isQuestion, tool: tool_name || '?', input: input || {}, chatKey: chatKey || '', at });
+      pendingPerms.set(pid, { resolve, provider: 'claude', isQuestion, tool: tool_name || '?', input: input || {}, chatKey: chatKey || '', at });
       // Агент умер, пока мы ждали человека (упал, убит извне) — снимаем спрос сами,
       // иначе он остался бы висеть на экране навсегда: отвечать в мёртвый процесс некому.
       //
@@ -238,7 +345,15 @@ async function chatModule(fastify, opts) {
     pendingPerms.delete(pid);
     fastify.sse.broadcast('chat-permission-done', { pid });
     const body = request.body || {};
-    if (p.isQuestion) {
+    if (p.provider === 'kimi' && p.isQuestion) {
+      const answers = Array.isArray(body.answers) ? body.answers : [];
+      p.resolve({
+        selected: answers.flatMap((answer) => answer?.selected || []).filter(Boolean),
+        text: answers.map((answer) => answer?.text || '').find(Boolean) || '',
+      });
+    } else if (p.provider === 'kimi') {
+      p.resolve({ allow: body.allow === true });
+    } else if (p.isQuestion) {
       p.resolve({ behavior: 'deny', message: answerText(body.answers) });
     } else {
       p.resolve(body.allow
@@ -283,20 +398,94 @@ async function chatModule(fastify, opts) {
    * Ответ на HTTP-запрос приходит по завершении СВОЕГО хода — клиенту ждать дольше,
    * зато сообщение не теряется и агент видит его в правильном порядке.
    */
+  async function resolveRunTarget(opts) {
+    const registry = await modelsRegistry(config);
+    const chatKey = String(opts.chatKey || '');
+    const record = chatKey ? await history.readOne(chatKey) : null;
+    if (chatKey && !record) {
+      return { ok: false, error: 'unknown_chat', message: 'чат ещё не сохранён на сервере' };
+    }
+
+    const requestedRef = normalizeModelRef(opts.modelRef);
+    if (record?.modelRef && requestedRef && !sameModelRef(record.modelRef, requestedRef)) {
+      return {
+        ok: false,
+        error: 'stale_chat_model',
+        message: 'модель чата уже изменена в другом окне; перечитай чат перед запуском',
+      };
+    }
+    // При наличии chatKey источником является только сохранённая запись. Legacy-поля
+    // запроса допускаются лишь для старых вызовов без chat record.
+    const resolution = record
+      ? resolveModelRef(record.modelRef, registry)
+      : (requestedRef
+        ? resolveModelRef(requestedRef, registry)
+        : resolveLegacyModel(opts.model, registry));
+    if (!resolution.ok) {
+      const messages = {
+        invalid_model_ref: 'ссылка на модель повреждена',
+        missing_model: 'модель чата не выбрана',
+        ambiguous_model: 'legacy model неоднозначна — выбери provider и модель заново',
+        unknown_provider: 'исполнитель модели неизвестен',
+        unknown_model: 'модель отсутствует в актуальном реестре',
+      };
+      return {
+        ok: false,
+        error: resolution.error,
+        message: messages[resolution.error] || 'модель чата нельзя разрешить',
+      };
+    }
+    const provider = resolution.modelRef.provider;
+    let binding = null;
+    let sessionId = opts.sessionId || null;
+    if (provider === 'kimi') {
+      if (record?.surface !== 'chats') {
+        return { ok: false, error: 'provider_surface_denied', message: 'Kimi доступен только пользовательским чатам' };
+      }
+      binding = await bindingStore.read(chatKey);
+      // Клиентский sessionId никогда не участвует в Kimi resume. При живом binding
+      // несовпадающее значение считаем forged/stale. Пустой binding — намеренная
+      // инвалидация после stop/reset: старый id из отставшего окна безопасно игнорируем,
+      // потому что executor всё равно получит null и создаст новую provider session.
+      if (opts.sessionId && (!binding || (binding.sessionId && opts.sessionId !== binding.sessionId))) {
+        return { ok: false, error: 'forged_session', message: 'sessionId не принадлежит этому чату' };
+      }
+      sessionId = binding?.sessionId || null;
+    }
+    return {
+      ok: true,
+      record,
+      binding,
+      provider,
+      model: resolution.modelRef.model,
+      modelInfo: resolution.model,
+      sessionId,
+    };
+  }
+
   async function runChat(reply, request, opts) {
     const chatKey = opts.chatKey || '';
-    const queued = !!chatKey && (activeRuns.has(chatKey) || chatQueues.has(chatKey));
+    const target = await resolveRunTarget(opts);
+    if (!target.ok) return reply.code(400).send({ error: target.error, message: target.message });
+    const scope = { chatKey, provider: target.provider, sessionId: target.sessionId };
+    const queued = turnLocks.isBusy(scope);
     if (queued) {
       fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
       // Второму окну (и своему же, если оно захочет показать «в очереди») — сигнал.
       fastify.sse.broadcast('chat-queued', { chatKey, at: Date.now() });
     }
-    return enqueueTurn(chatKey, () => runChatTurn(reply, request, { ...opts, queued }));
+    return turnLocks.run(scope, () => runChatTurn(reply, request, {
+      ...opts,
+      model: target.model,
+      sessionId: target.sessionId,
+      target,
+      queued,
+    }));
   }
 
   async function runChatTurn(reply, request, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
-    chatKey, queued, requestTitle, compact,
+    chatKey, queued, requestTitle, compact, target,
   }) {
     const wantsTitle = requestTitle === true;
     // Сообщение ждало в очереди — его sessionId устарел: пока оно стояло, предыдущий ход
@@ -309,11 +498,52 @@ async function chatModule(fastify, opts) {
     const extraDirs = [...(prefs?.read().trustedDirectories || [])];
     if (id) {
       const env = await factoryState.readEnv(id);
-      if (env.BE_WT) cwd = env.BE_WT;
-      if (env.FE_WT) extraDirs.push(env.FE_WT);
+      const parsed = parseSandboxRepositories(env);
+      if (parsed.kind === 'invalid') {
+        return reply.code(409).send({
+          error: 'invalid_sandbox_env',
+          message: 'Реестр worktree задачи повреждён — task-chat не запущен.',
+        });
+      }
+      const { repos } = parsed;
+      if (repos.length) {
+        cwd = repos[0].path;
+        extraDirs.push(...repos.slice(1).map((repo) => repo.path));
+      }
     }
     const mode = pageMode(context, !!id);
     if (mode.cwd) cwd = mode.cwd;
+
+    // Kimi session принадлежит не браузеру, а sidecar-у Cockpit. Под фактическим
+    // chat lock перечитываем binding, вращаем его при смене cwd/model/profile и
+    // резервируем generation ещё до session/new.
+    let kimiBinding = null;
+    let kimiIdentity = null;
+    if (target.provider === 'kimi') {
+      const cwdRealpath = await fs.realpath(cwd);
+      kimiIdentity = {
+        chatKey,
+        provider: 'kimi',
+        cwdRealpath,
+        model,
+        authProfileId: KIMI_AUTH_PROFILE_ID,
+        securityProfile: KIMI_SECURITY_PROFILE,
+      };
+      const current = await bindingStore.read(chatKey);
+      const identityMatches = current
+        && ['provider', 'cwdRealpath', 'model', 'authProfileId', 'securityProfile']
+          .every((field) => current[field] === kimiIdentity[field]);
+      if (!current || !identityMatches) {
+        kimiBinding = await bindingStore.rotate(kimiIdentity, current?.generation ?? null);
+      } else {
+        kimiBinding = current;
+      }
+      sessionId = kimiBinding.sessionId || null;
+      if (sessionId) {
+        await bindingStore.assertResumeOwner({ chatKey, provider: 'kimi', sessionId });
+      }
+      cwd = cwdRealpath;
+    }
 
     // Вложения: клиент присылает имена файлов, ранее загруженных через /api/chat/upload.
     // Пути строим сами (только внутри attachDir) и открываем агенту доступ через --add-dir.
@@ -322,17 +552,19 @@ async function chatModule(fastify, opts) {
       .map((a) => attachFile(a?.file))
       .filter(Boolean);
     if (attachPaths.length) {
-      extraDirs.push(attachDir);
+      // Kimi получает private staging только из перечисленных файлов. Весь каталог
+      // вложений в его mount namespace не попадает.
+      if (target.provider !== 'kimi') extraDirs.push(attachDir);
       attachBlock = `[Вложения]\nПользователь приложил файлы (открой их инструментом Read):\n${attachPaths.map((p) => `- ${p}`).join('\n')}\n[/Вложения]\n\n`;
     }
     // Один и тот же каталог может прийти из доверенного списка, worktree и вложений.
     // Повторные --add-dir не опасны, но засоряют командную строку и диагностику.
     const uniqueExtraDirs = [...new Set(extraDirs.map((dir) => path.resolve(dir)))];
 
-    // Исполнитель — по модели из реестра (lib/models-registry). Неизвестная модель → claude.
-    const info = await modelInfo(model, config);
-    const provId = info?.provider || 'claude';
-    const executor = await getExecutor(provId);
+    // Target уже разрешён строго по сохранённому modelRef до взятия locks. Никакого
+    // fallback к Claude здесь больше нет.
+    const info = { provider: target.provider, model: target.modelInfo };
+    const executor = await executorResolver(target.provider);
 
     // Сжатие контекста (кнопка на кольце) — служебный ход, а не сообщение человека: ни
     // контекст страницы, ни вложения, ни хук заголовка ему не нужны. План берём у
@@ -413,6 +645,7 @@ async function chatModule(fastify, opts) {
     try {
       const runArgs = {
         config,
+        chatKey,
         signal: ac.signal,
         env: { ...baseEnv, MCP_TOOL_TIMEOUT: String(PERM_WAIT_MS), ...compactEnv },
         message: fullMessage,
@@ -421,11 +654,39 @@ async function chatModule(fastify, opts) {
         model,
         effort: runEffort,
         sessionId,
+        attachmentPaths: attachPaths,
         permissionMode,
         mcpConfig,
         permissionPromptTool: 'mcp__cockpit-perm__approve',
         providerSettings: currentPrefs.providerSettings?.[executor.id] || {},
+        // Claude получает порог через env выше, Codex — как официальный config override
+        // в своих exec-args. Одно значение настроек, transport выбирает сам executor.
+        compactWindow,
         log: fastify.log,
+        // ACP возвращает id новой сессии до prompt. Фиксируем его CAS-записью ДО
+        // передачи пользовательского текста, чтобы другой чат не мог присвоить id.
+        onSessionCreated: target.provider === 'kimi' ? async (newSessionId) => {
+          const saved = await bindingStore.compareAndSwap({
+            ...kimiIdentity,
+            sessionId: newSessionId,
+          }, kimiBinding.generation);
+          kimiBinding = saved;
+          sessionId = saved.sessionId;
+          lastSession.set(chatKey, saved.sessionId);
+        } : undefined,
+        onPermission: target.provider === 'kimi'
+          ? (presentation) => {
+            // Кокпит-режим «auto»: ACP остаётся в default (Kimi спрашивает), а на
+            // безопасные запросы отвечает классификатор. Деструктивные и неизвестные
+            // формы по-прежнему уходят человеку во всплывашку.
+            if (permissionMode === 'auto') {
+              const decision = kimiAutoDecision(presentation);
+              if (decision.verdict === 'allow') return { allow: true };
+              fastify.log.info({ chatKey, tool: presentation?.tool, reason: decision.reason }, 'Kimi auto: действие — на подтверждение человеку');
+            }
+            return requestKimiInteraction(presentation, chatKey);
+          }
+          : undefined,
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
         onProgress: chatKey ? (tokens) => {
           const a = activeRuns.get(chatKey);
@@ -439,7 +700,13 @@ async function chatModule(fastify, opts) {
           const visibleStep = visibleChatTitleStep(step, wantsTitle);
           if (!visibleStep) return;
           const a = activeRuns.get(chatKey);
-          if (a && a.steps.length < 400) a.steps.push(visibleStep);
+          // Тем же скользящим окном, что и sink: копия нужна окну, открытому ПОСРЕДИ
+          // хода, а ему важно свежее. Раньше здесь копились первые 400 шагов, и после
+          // F5 длинный ход показывал начало часовой давности вместо того, что идёт.
+          if (a) {
+            a.steps.push(visibleStep);
+            if (a.steps.length > MAX_CHAT_STEPS) a.steps.splice(0, a.steps.length - MAX_CHAT_STEPS);
+          }
           fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
         } : undefined,
       };
@@ -450,9 +717,32 @@ async function chatModule(fastify, opts) {
       // Ход сжатия не повторяем: у родного компакта stdout пуст ВСЕГДА (вывод слэш-команды
       // локальный, в поток он не идёт), так что «пустой ход» тут — норма, а второй прогон
       // сжал бы уже сжатое.
-      if (out?.emptyRun && !plan) {
+      if (mayRetryEmptyRun(executor, out, { compact: !!plan })) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         out = await executor.run(runArgs);
+      }
+      // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt
+      // повторять нельзя: модель могла выполнить действие, а ответ потеряться. Но и
+      // выдавать `(пусто)` как успешный ответ нельзя. Для pinned Kimi 0.31.1 это также
+      // наблюдалось после resume отменённого хода; инвалидируем только binding, чтобы
+      // следующий ЯВНЫЙ запрос пользователя начал чистую session без автоповтора.
+      if (!plan && target.provider === 'kimi' && out?.emptyRun) {
+        try {
+          await invalidateKimiSession(chatKey, {
+            expectedSessionId: out.sessionId || sessionId || '',
+            reason: 'empty_post_prompt',
+          });
+        } catch (resetError) {
+          fastify.log.error({ chatKey, err: resetError.message }, 'Kimi binding после пустого хода не сброшен');
+          const error = new Error('Kimi завершил ход без ответа, но сессию сбросить не удалось. Выполни явный сброс памяти перед повтором.');
+          error.code = 'kimi_session_reset_failed';
+          error.sessionResetFailed = true;
+          throw error;
+        }
+        const error = new Error('Kimi завершил ход без ответа. Сессия сброшена; повтори сообщение явно.');
+        error.code = 'kimi_empty_response';
+        error.sessionReset = true;
+        throw error;
       }
       // Название — метаданные Cockpit, маркер из видимого ответа/истории уже удалён.
       out = finishChatTitleHook(out, wantsTitle);
@@ -490,19 +780,51 @@ async function chatModule(fastify, opts) {
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
       if (err.stopped) {
-        // sessionId — тот, что CLI успел завести в этом ходе (executor ловит его из потока).
-        // Раньше сюда уходил ВХОДНОЙ id, а у первого хода в чате он пустой: после «стопа»
-        // следующий вопрос шёл без --resume, и агент не помнил ничего из разговора.
+        let sessionReset = false;
+        if (target.provider === 'kimi') {
+          try {
+            await invalidateKimiSession(chatKey, {
+              expectedSessionId: err.sessionId || sessionId || '',
+              reason: 'stopped',
+            });
+            sessionReset = true;
+          } catch (resetError) {
+            fastify.log.error({ chatKey, err: resetError.message }, 'Kimi binding после stop не сброшен');
+            const resetMessage = 'Kimi остановлен, но сессию сбросить не удалось. Выполни явный сброс памяти перед следующим сообщением.';
+            if (request.socket.destroyed && chatKey) {
+              await writeOrphan({
+                id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+                chatKey,
+                role: 'error',
+                reply: resetMessage,
+                userText: message || '',
+                sessionResetFailed: true,
+                at: Date.now(),
+              });
+              fastify.sse.broadcast('chat-orphan', { chatKey });
+              return reply;
+            }
+            return reply.code(500).send({
+              error: 'kimi_session_reset_failed',
+              message: resetMessage,
+              sessionResetFailed: true,
+            });
+          }
+        }
+        // Для Kimi оборванную session намеренно не возобновляем: pinned 0.31.1 после
+        // cancel способен принять следующий prompt без нового llm.request. Остальные
+        // исполнители сохраняют прежний контракт и возвращают заведённый ими id.
         const stoppedOut = finishChatTitleHook({
-          reply: '⏹ Ход остановлен.', steps: err.steps || [], sessionId: err.sessionId || sessionId || null,
+          reply: '⏹ Ход остановлен.', steps: err.steps || [],
+          sessionId: sessionReset ? null : (err.sessionId || sessionId || null),
           // Размер контекста берём тот, что исполнитель успел увидеть в потоке: раньше здесь
           // стоял жёсткий 0, клиент его игнорировал (нули не пишем), и после «стопа» кольцо
           // врало — у новой сессии оставалось пустым, хотя контекст в ней уже набрался.
           contextTokens: err.contextTokens || 0, contextIsEstimate: !!err.contextIsEstimate,
-          cost: null, model: model || null, effort: runEffort || null, stopped: true,
+          cost: null, model: model || null, effort: runEffort || null, stopped: true, sessionReset,
         }, wantsTitle);
-        // Оборванный ход всё равно завёл разговор: следующему из очереди нужен ЕГО id,
-        // иначе сообщение уйдёт со старым и агент не вспомнит, на чём его прервали.
+        // У исполнителей без принудительного reset следующему ходу из очереди нужен
+        // фактический id оборванного разговора. Для Kimi здесь null и чистая session.
         if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
         if (request.socket.destroyed && chatKey) {
           await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
@@ -514,11 +836,18 @@ async function chatModule(fastify, opts) {
       }
       if (request.socket.destroyed && chatKey) {
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'error', reply: err.message, userText: message || '', at: Date.now() });
+          chatKey, role: 'error', reply: err.message, userText: message || '',
+          sessionReset: !!err.sessionReset, sessionResetFailed: !!err.sessionResetFailed,
+          at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
-      return reply.code(500).send({ error: 'chat_failed', message: err.message });
+      return reply.code(500).send({
+        error: err.code || 'chat_failed',
+        message: err.message,
+        ...(err.sessionReset ? { sessionReset: true } : {}),
+        ...(err.sessionResetFailed ? { sessionResetFailed: true } : {}),
+      });
     } finally {
       if (chatKey) {
         activeRuns.delete(chatKey);
@@ -600,22 +929,22 @@ async function chatModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     const {
-      message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id, message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
     });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
     const {
-      message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id: null, message, model, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
     });
   });
 
@@ -623,8 +952,8 @@ async function chatModule(fastify, opts) {
   // Идёт ТОЙ ЖЕ очередью, что обычные сообщения: два CLI на одну сессию не живут, а
   // сжатие — полноценный ход агента. Без sessionId сжимать нечего: разговора ещё нет.
   function compactBody(request) {
-    const { model, effort, mode, sessionId, chatKey } = request.body || {};
-    return { model, effort, mode, sessionId, chatKey, compact: true };
+    const { model, modelRef, effort, mode, sessionId, chatKey } = request.body || {};
+    return { model, modelRef, effort, mode, sessionId, chatKey, compact: true };
   }
 
   fastify.post('/api/chat/compact', async (request, reply) => {
@@ -639,13 +968,6 @@ async function chatModule(fastify, opts) {
     const body = compactBody(request);
     if (!body.sessionId) return reply.code(400).send({ error: 'no_session' });
     return runChat(reply, request, { id, ...body });
-  });
-
-  // ── Хранилище истории чатов: файлы chats/YYYY-MM/<id>.json (см. lib/chat/history-store) ──
-  const history = new ChatHistoryStore({
-    chatsDir: config.chatsDir,
-    legacyPath: config.chatStoreLegacyPath,
-    log: fastify.log,
   });
 
   // Вместе с историей отдаём порог сжатия из настроек: по нему кольцо контекста решает,
@@ -675,7 +997,7 @@ async function chatModule(fastify, opts) {
   fastify.put('/api/chat/store/chat', async (request, reply) => {
     const { chat, archived, origin } = request.body || {};
     if (!chat?.id) return reply.code(400).send({ error: 'bad_chat' });
-    const { written, restored, dropped } = await history.saveOne(chat, !!archived);
+    const { written, restored, dropped, stale, chat: saved } = await history.saveOne(chat, !!archived);
     // Ничего не изменилось — молчим: лишний persist не повод будить остальные окна.
     if (written) {
       fastify.sse.broadcast('chat-store', {
@@ -695,7 +1017,18 @@ async function chatModule(fastify, opts) {
         });
       }, 500).unref?.();
     }
-    return { ok: true, written, restored, dropped };
+    return {
+      ok: true,
+      written,
+      restored,
+      dropped,
+      stale,
+      revision: saved?.revision ?? null,
+      schema: saved?.schema ?? null,
+      surface: saved?.surface ?? null,
+      modelRef: saved?.modelRef ?? null,
+      modelRefState: saved?.modelRefState ?? null,
+    };
   });
 
   fastify.get('/api/chat/store/chat/:id', async (request, reply) => {
@@ -711,6 +1044,15 @@ async function chatModule(fastify, opts) {
     if (removed) {
       fastify.sse.broadcast('chat-store', {
         id, gone: true, origin: String(request.query?.origin || ''), at: Date.now(),
+      });
+    }
+    // Sidecar сохраняется до retention deadline: удаление истории не должно неожиданно
+    // удалять vendor session, а случайно удалённый чат остаётся recoverable.
+    if (removed) {
+      const state = await history.read();
+      const activeChatKeys = [...state.sessions, ...state.archived].map((chat) => chat.id);
+      await bindingStore.cleanup({ activeChatKeys }).catch((error) => {
+        fastify.log.warn({ err: error.message }, 'cleanup session bindings не выполнен');
       });
     }
     return { ok: true, removed };

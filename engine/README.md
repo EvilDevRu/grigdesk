@@ -37,10 +37,13 @@
 
 1. Открыл задачу в трекере → «Запустить фабрику».
 2. Поднимается стенд, разведка выбирает маршрут (feature / debug / trivial).
-3. Агенты планируют (разведка → конкурирующие планы → скептик ломает → переводчик пишет по-человечески).
+3. Разведка выбирает маршрут; feature-план строится одним read-only fanout: анализ кода,
+   независимая критика и тест-дизайн сводятся координатором в один документ.
 4. **🚦 Ворота плана** — читаешь план в Cockpit, «Утвердить» или «Отклонить с замечаниями».
-5. Тесты пишутся *до* кода (и обязаны падать), код строится до зелёных тестов, ревьюер ищет дефекты,
-   trace-verify доказывает работу логами, линтеры и браузер проверяют.
+5. Тесты пишутся *до* кода (и обязаны падать), код строится до зелёных тестов. Trusted VERIFY
+   без модели сверяет frozen-хеши тестов, запускает Pest/Playwright, PHP syntax, Pint и ESLint;
+   затем семантический ревьюер и при необходимости браузер проверяют результат. Трассировка
+   остаётся в debug-маршруте, где она действительно нужна.
 6. **🚦 Ворота приёмки** — смотришь результат и скриншоты, «Принять» или «Отклонить».
 7. Принял → коммит, PR, комментарий в трекер, закрытие задачи, ретро (уроки — с твоего согласия).
    Стенд движок не сносит: это кнопка «⏻ Снести стенд» на карточке — после отгрузки песочница
@@ -60,7 +63,7 @@
 |---|---|---|
 | Linux | — | GNU-утилиты `timeout`, `flock`, `nohup`. Обкатано на Linux Mint 21.3 (база Ubuntu 22.04), ядро 6.8 |
 | bash | ≥ 4.0 | `mapfile` при разборе профилей; в работе — 5.1 |
-| python3 | ≥ 3.8 | проверки профиля, `factory-graph-new` и резервный диагностический dashboard; в работе — 3.10 |
+| python3 | ≥ 3.8 | проверки профиля и резервный диагностический dashboard; в работе — 3.10 |
 | git | — | worktree, diff и состояние веток |
 | `claude` / `codex` | совместимая с runner fixture версия | исполнители этапов; нужен CLI выбранной цепочки и его локальная авторизация |
 
@@ -104,7 +107,7 @@ bin/dashboard arsenkin 8070                          # резервная диа
 ### Выбор ИИ без Cockpit
 
 Каждый профиль обязан иметь `profiles/<name>/runners.env`. Без него запуск останавливается
-до model call. Конфиг создаётся `factory-new` или явно через CLI и включает coverage gate:
+до model call. Конфиг задаётся явно через CLI или вручную по контракту и включает coverage gate:
 
 ```bash
 bin/factory profile arsenkin runner set claude --failover codex
@@ -169,53 +172,61 @@ bin/
 lib/
   core.sh              ЯДРО: provider-neutral orchestration и вход в dispatcher
   multi-runner.sh      routing, model resolution, failover, telemetry и coverage gate
-  runners/             независимые модули CLI (Claude, Codex, будущие providers)
+  runners/             независимые модули CLI (Claude, Codex, Kimi, будущие providers —
+                       добавление по ../docs/engine/ADDING-RUNNER.md)
   dispatcher.sh        белый список причин переключения + circuit breaker
   run-state.sh         run-id/epoch/capability CAS terminal status
   runner-cli.sh        project/stage/task routing и runtime switch
   debug-settings.sh    global/profile/task debug settings, precedence и expiry
   debug-log.sh         typed trace, runtime on/off, redaction, size limit и TTL
-  pipeline-set.sh      машина статусов (upsert + телеметрия; --init / --replan / --reject-accept)
+  pipeline-set.sh      ограниченный writer вторичной проекции; topology/lifecycle ему недоступны
   dashboard.py         реализация резервного интерфейса и эталон части логики графа
 profiles/                   локальный каталог, целиком вне Git
   <name>/
-    profile.sh         стек-контекст, этапы маршрутов, хуки стенда, промпты этапов
+    profile.sh         project context, workspace/stand hooks и command policy
     runners.env        обязательная runner/model policy проекта
     dashboard.env      проектные пути/контейнеры/трекер для дашборда
-    graph.json         схема маршрутов: узлы, петли возврата, optional (нужна кокпиту)
-    up.sh, down.sh…    проектное хозяйство: провижн, озвучка, склейка демо
+    graph.json         capability/config marker профиля
+    routes/            source definitions, immutable prompts и publisher каталога
+    stand scripts…     project-specific health/lifecycle, если их допускает workspace mode
 ../docs/engine/         документация и план развития движка
 ../tests/engine/        unit, contract, integration, race и проверки профилей
 ```
 
-**Данные (вне репозитория):** `~/.factory/state/` —
-`tNNNN.pipeline` (реестр статусов задачи — единственный источник истины), `logs/`, `archive/`,
-`shots/` (скриншоты браузера), `demo/` (видео).
+**Данные (вне репозитория):** immutable attempt ledger в
+`~/.factory/control/protocol-v2/tasks/` — источник истины маршрута и lifecycle;
+`~/.factory/state/tNNNN.pipeline` — только вторичная проекция для Cockpit. Рядом лежат
+`logs/`, `archive/` и `shots/` (скриншоты браузера).
 
 ---
 
 ## Добавить новый проект
 
-Движок не знает ни одного проекта: этапы, промпты, стенд и схема живут в профиле.
+Движок не знает ни одного проекта: route source, prompts и контракт стенда живут в профиле.
 
-```bash
-bin/factory-new <имя> [корень проекта]   # скелет профиля + runner policy + env + схема
-# заполнить TODO в profiles/<имя>/profile.sh (см. ../docs/engine/NEW-PROJECT.md)
-# довести схему: подписи узлов, петли возврата, optional (штатные пропуски)
-bin/factory-check <имя> --quick          # offline: контракт, промпты, доступ и схема
-RUN_HOST_PREFLIGHT=1 bin/factory-check <имя> --host-preflight  # без model prompt
-bin/factory <TASK> start --profile <имя> --ticket "…"
-```
+Профиль создаётся вручную по [NEW-PROJECT.md](../docs/engine/NEW-PROJECT.md). Старые
+генераторы удалены: они создавали shell-массивы этапов и profile prompts, которые единый
+route runtime не исполняет.
 
 Профиль состоит из:
 
-- **`profiles/<имя>/profile.sh`** — контекст стека, маршруты (`PROFILE_ROUTE_STAGES_<маршрут>`), промпты
-  этапов, хуки стенда и доступ агента (`PROFILE_AGENT_DIRS` / `PROFILE_AGENT_ALLOW`);
+- **`profiles/<имя>/profile.sh`** — project context, workspace/stand hooks и доступ агента
+  (`PROFILE_AGENT_DIRS` / `PROFILE_AGENT_ALLOW`);
 - **`profiles/<имя>/runners.env`** — обязательные primary/failover и family policy моделей;
 - **`profiles/<имя>/dashboard.env`** — пути, контейнер стенда, трекер и базовый URL задач;
-- **`profiles/<имя>/graph.json`** — схема конвейера: узлы, петли возврата и `optional` (этапы,
-  чей пропуск не аномалия). Нужна обязательно — кокпит без неё профиль не показывает.
-  Заготовку из маршрутов делает `bin/factory-graph-new <имя>`, дальше подписи и петли — руками.
+- **`profiles/<имя>/graph.json`** — явный capability/config marker;
+- **`profiles/<имя>/routes/`** — source definitions, prompts, тест и publisher immutable
+  route catalog.
+
+Порядок проверки и активации:
+
+```bash
+# сначала локальный source-тест профиля и публикация во временный store
+bin/factory-check <имя> --quick
+RUN_HOST_PREFLIGHT=1 bin/factory-check <имя> --host-preflight
+# live catalog публикуется CAS; capability включается отдельным последним действием
+bin/factory <TASK> start --profile <имя> --ticket "…"
+```
 
 Подробно, с вопросами, которые надо задать до написания профиля:
 **[NEW-PROJECT.md](../docs/engine/NEW-PROJECT.md)**.
@@ -227,8 +238,9 @@ bin/factory <TASK> start --profile <имя> --ticket "…"
 - **Наблюдатель** отличает «завис» (журналы агента молчат >15 мин) от «ждёт человека на воротах».
 - **Санити графа**: один активный узел (инвариант линейности); пропущенный обязательный этап — красная
   аномалия, а не тихий пропуск; приёмка при недоделанном хвосте — «преждевременно», а не «готово».
-- **Обе петли возврата**: отклонил план → в планирование (`--replan`); отклонил приёмку → в сборку
-  (`--reject-accept`, тесты остаются заморожены).
+- **Возврат задаёт маршрут**: gate commit хранит exact reset-set в immutable журнале,
+  а движок проецирует его в Cockpit по `runKey` закреплённой machine. Фиксированных
+  `--replan`/`--reject-accept` и скрытого списка этапов больше нет.
 
 ---
 

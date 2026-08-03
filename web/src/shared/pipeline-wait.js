@@ -6,6 +6,8 @@
 // Человеческая расшифровка ворот: подпись узла на схеме короткая («Приёмка»),
 // а в оповещении и подсказке чипа нужно ДЕЙСТВИЕ, которое от меня ждут.
 export const GATE_REASON = {
+  'hunt/gate_accept': 'принять находки и покрытие',
+  'perf/gate_plan': 'утвердить замер, цель и guardrails',
   gate_accept: 'принять работу — проверить в браузере',
   gate_plan: 'утвердить план работ',
   gate_cause: 'подтвердить причину',
@@ -27,7 +29,10 @@ export function waitingReason(g) {
     const s = statuses[nid];
     if ((s === 'wait' || s === 'premature') && nid.startsWith('gate_')) {
       return {
-        text: GATE_REASON[nid] || stripEmoji(g.nodes?.[nid]?.[1]) || nid,
+        text: GATE_REASON[`${g?.route}/${nid}`]
+          || GATE_REASON[nid]
+          || stripEmoji(g.nodes?.[nid]?.[1])
+          || nid,
         premature: s === 'premature',
       };
     }

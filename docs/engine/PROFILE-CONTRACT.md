@@ -50,6 +50,21 @@ engine/bin/factory <TASK> runner set REVIEW claude --failover codex
 engine/bin/factory <TASK> runner clear REVIEW
 ```
 
+Task-level override можно закрепить уже на старте прогона:
+
+```bash
+engine/bin/factory <TASK> start --profile <name> --route <route> --ticket-json <abs> \
+  --runner-primary codex
+```
+
+Id валидируется по установленным адаптерам (та же выборка, что `factory runners`). Движок
+пишет `RUNNER_OVERRIDE_PRIMARY=<id>` и `RUNNER_OVERRIDE_FAILOVER` — профильный failover без
+выбранного id (task override целиком замещает пару primary/failover, профильный failover сам
+не подмешивается). Флаг допустим только при `start`; override хранится в реестре задачи и
+переживает resume. В Cockpit тот же override выставляет селект исполнителя в форме запуска,
+а stage override — модалка узла (`POST /api/tasks/:id/runner/override` → `runner set/clear
+<STAGE>`; работающий этап — только `runner switch`).
+
 Routing precedence:
 
 ```text
@@ -72,52 +87,29 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 Он не отправляет prompt. Пока coverage отсутствует, просрочено или несовместимо, запуск
 блокируется до model call.
 
-## Обязательные переменные `.sh`
+## Переменные `profile.sh`
 
 | Переменная | Смысл |
 |---|---|
 | `PROFILE_NAME` | имя профиля |
-| `PROFILE_CTX` | стек, правила, проектные запреты для каждого prompt |
-| `PROFILE_AGENT_CWD` | базовый рабочий каталог агента |
-| `PROFILE_ROUTE_STAGES_<route>` | bash-массив этапов маршрута |
+| `PROFILE_CTX` | общий стек, правила и проектные запреты для agent context |
+| `PROFILE_AGENT_CWD` | базовый рабочий каталог агента; route launcher закрепляет его по первому repository |
+| `PROFILE_AGENT_DIRS` | дополнительные разрешённые каталоги |
+| `PROFILE_AGENT_ALLOW` / `PROFILE_AGENT_DENY` | project-specific command policy |
+| `PROFILE_SERVICE_HOST` | hostname без схемы и порта |
 
-Пример:
+Topology и prompt-файлы не задаются shell-массивами или функциями профиля. Они читаются только
+из опубликованного immutable route bundle. Обязательные workspace/stand hooks перечислены ниже
+в разделе «Route protocol».
 
-```bash
-PROFILE_ROUTE_STAGES_feature=(SCOUT PLAN GATE_PLAN TESTS BUILD REVIEW GATE_ACCEPT)
-PROFILE_ROUTE_STAGES_trivial=(SCOUT BUILD REVIEW GATE_ACCEPT)
-```
-
-Этапы `GATE_*` обрабатывает движок: они не требуют prompt и ждут решения человека.
-
-## Обязательные хуки
-
-- `profile_sandbox_up <TASK>` — идемпотентно подготовить стенд;
-- `profile_sandbox_down <TASK>` — снести стенд по явному действию оператора;
-- `profile_sandbox_exists <TASK>` — вывести непустое значение, если стенд готов;
-- `profile_stage_prompt <TASK> <STAGE>` — вернуть project-specific задание этапа.
-
-Профиль подгружается заново перед каждым этапом. Исправленный prompt/budget подхватится без
-рестарта демона; синтаксически битая новая версия не должна заменять уже загруженную.
-
-## Опциональные хуки
+## Опциональные route hooks
 
 | Хук | Назначение |
 |---|---|
-| `profile_route <TASK>` | детерминированно выбрать route без SCOUT |
-| `profile_slots` | вернуть `RANGE`/`USED` для распределения стендов |
-| `profile_agent_cwd <TASK>` | выбрать worktree конкретной задачи |
-| `profile_stage_budget <STAGE>` | ориентир глубины в минутах |
-| `profile_stage_timeout <STAGE>` | жёсткий timeout в секундах; действует только там, где узел не объявил `policy.timeoutClass` |
 | `profile_timeout_class <CLASS>` | переопределить секунды класса времени из бандла маршрута |
-| `profile_stage_fanout <STAGE>` | `AUTO min-max` или фиксированные зоны |
-| `profile_stage_readonly <STAGE>` | объявить проверочный этап read-only |
-| `profile_source_roots <TASK>` | вывести по одному абсолютному git root для точного guard |
-| `profile_sensitive_files <TASK>` | перечислить ignored-файлы, чьё содержимое тоже контролируется по hash |
-
-`PROFILE_ARCHIVE_ON_FINISH=1` архивирует карточку только после успешного основного маршрута
-и терминальных `SHIP → RETRO`. Незавершённый хвост остаётся активным и получает
-`STALLED_HUMAN=1`.
+| `profile_stage_agent_allow <RUN_KEY>` | добавить узкому route-узлу project command |
+| `profile_route_node_evidence_check ...` | trusted-проверка evidence exact run и снимок его артефактов |
+| `profile_agent_control_start <TASK> <RUN_KEY>` / `profile_agent_control_stop <TASK> <RUN_KEY> <RC>` | краткоживущий project control channel для exact stage |
 
 Хуки выбора runner/model в `.sh` не являются частью контракта и runtime их не читает.
 
@@ -130,6 +122,13 @@ PROFILE_ROUTE_STAGES_trivial=(SCOUT BUILD REVIEW GATE_ACCEPT)
 - `PROFILE_AGENT_ALLOW` — project-specific разрешённые команды;
 - `PROFILE_AGENT_DENY` — project-specific запрещённые команды.
 
+Общие безопасные команды остаются в `PROFILE_AGENT_ALLOW`. Разрешение, нужное только роли
+узла, профиль возвращает построчно из необязательного
+`profile_stage_agent_allow <RUN_KEY>`. В частности, delivery CLI (`gh`, tracker) выдаются
+только `SHIP`, а не всему профилю: маршрут без `ship` не должен получить их ни на одном узле.
+Это сужение команд, но не изоляция секретов — общий `HOME` и сетевой стек остаются отдельной
+границей hardening.
+
 Движок сам разрешает только scoped status API:
 
 ```text
@@ -137,9 +136,31 @@ engine/lib/stage-result.sh
 engine/lib/stage-progress.sh
 ```
 
-Общий `pipeline-set.sh` агенту не выдаётся. Он остаётся control writer-ом движка.
+Общий `pipeline-set.sh` агенту не выдаётся. Это ограниченный writer неслужебных полей
+вторичной проекции; topology, lifecycle, provenance и route statuses принадлежат только
+host/control writer и run-scoped capability API.
 Для Codex дополнительные каталоги переводятся в `--add-dir`; sandbox остаётся
 `workspace-write`.
+
+Control hooks объявляются только парой. `start` обязан создать отдельный canonical
+owner-only каталог mode `0700`, запустить trusted broker и экспортировать его как
+`PROFILE_AGENT_CONTROL_DIR`; `stop` вызывается после любого результата runner-а и проверяет
+безопасное завершение/cleanup. Это не writable workspace: restricted Codex проверяет exact
+path/owner/mode/non-symlink, отклоняет пересечение с любым `--add-dir` и монтирует каталог
+только как `read`. Project protocol внутри может использовать FIFO/regular lock: FIFO I/O и
+`flock` работают через read-only bind, поэтому network proxy, localhost/TCP и AF_UNIX для
+host-channel не нужны. Сам broker остаётся host-процессом с закрытым whitelist; каталог не
+может выдавать агенту произвольный lifecycle API.
+
+Claude route runner доступен только для аудированной native CLI `2.1.220`. Engine передаёт
+ему один файл `--settings` из приватного `CONTROL_DIR` (regular, owner-only, mode `0400`) и
+запускает с `--setting-sources ''`, `--safe-mode`, `--strict-mcp-config` без `--mcp-config`
+и `--disable-slash-commands`. Так user/project/local settings, hooks, skills и произвольные
+MCP не расширяют route policy; credential store при этом не отключается (`--bare` запрещён).
+Файл требует native Bash sandbox `enabled=true`, `failIfUnavailable=true`, запрещает
+unsandboxed escape hatch и не содержит `excludedCommands`. `CONTROL_DIR` закрыт одновременно
+через `sandbox.filesystem.denyRead/denyWrite` и deny правил инструментов
+`Read/Edit/Write/NotebookEdit`. Другая версия CLI считается unavailable до повторного аудита.
 
 Разрешение сверяется по префиксу строки, поэтому на проверочных этапах движок запрещает
 запускатели чужих команд (`timeout`, `env`, `xargs`, `nohup`, `setsid`, `stdbuf`, `nice`,
@@ -151,20 +172,18 @@ engine/lib/stage-progress.sh
 проверяющий этап не найдёт разрешённой формы запуска e2e и примет падение спек на веру,
 хотя на живом стенде они зелёные.
 
-Read-only этап v1 защищается двумя слоями:
+Route-узел с `policy.filesystem=state-only` защищается двумя слоями:
 
 1. deny правил для очевидных writer/auto-fix команд;
-2. точным сравнением `HEAD`, worktree diff, index diff, содержимого tracked/untracked,
-   symlink targets и объявленных sensitive ignored-файлов до и после этапа.
+2. точным host-снимком workspace до и после exact run.
 
 При нарушении этап останавливается с `STALLED_HUMAN=1`. Движок ничего не откатывает:
 обычный readonly guard не владеет изменением и не может безопасно отличить запись агента
-от параллельной правки человека. `profile_dirty_files`, `profile_revert_files` и
-`FACTORY_AUTOREVERT` больше не являются механизмом защиты.
+от параллельной правки человека.
 
-Это compatibility-backstop, а не host-level sandbox. Политика route v2 `state-only` может
-считаться обеспеченной только runner-ом, который физически не монтирует source roots на
-запись; до этого v2-cutover для такого узла запрещён.
+Это backstop, а не самостоятельная host-level sandbox. Основную границу `state-only` обязан
+обеспечивать runner, который физически не выдаёт source roots на запись; у Claude Bash-процессы
+дополнительно исполняются только внутри обязательной native OS sandbox.
 
 ## Временная инструментация
 
@@ -177,10 +196,10 @@ instrumentation_tx_checkpoint TASK TXID
 instrumentation_tx_cleanup TASK TXID
 ```
 
-До вызова host обязан выдать отдельный linked worktree только одной попытке и установить
-`FACTORY_INSTRUMENTATION_ISOLATION=exclusive-worktree-v1`. Библиотека механически
-отклоняет primary checkout; реестр аренды остаётся в trusted control plane и не передаётся
-provider-процессу.
+В isolated-режиме host выдаёт linked worktree только одной попытке и устанавливает
+`FACTORY_INSTRUMENTATION_ISOLATION=exclusive-worktree-v1`. В explicit shared-режиме допустим
+primary checkout с `exclusive-shared-checkout-v1`, но только после trusted-проверки exact durable
+lease на workspace и стенд. Реестр аренды не передаётся provider-процессу.
 
 До `begin` scope содержит точные абсолютные имена файлов. Пути с `..`, каталогами,
 `.git` и symlink-родителями наружу отклоняются. `checkpoint` разрешает изменения только
@@ -197,43 +216,47 @@ cleanup принимает только покомпонентную смесь 
 Состояние транзакции, baseline и backups находятся под `FACTORY_CONTROL_ROOT`, а не
 в provider-writable `STATE_DIR`. Эти каталоги не добавляются runner-у как writable roots.
 
-### `PROFILE_VOLATILE_PATHS` — что пишет само приложение
+### Самодостаточное рабочее дерево — без общих inode
 
-В чувствительное множество снимка попадают ВСЕ ignored-файлы обоих корней: именно там
-правку проще всего спрятать (`.env`, `vendor`, `node_modules`). Но рядом крутится стенд,
-и узел вроде `TRACE` ради живого прогона и существует — приложение пишет логи, кэши и
-трассы само, без участия агента. Сторожу это неотличимо от записи агента: файл был
-другой — значит кто-то менял. Поэтому приёмка может встать fail-closed на файлах
-`storage/debugbar`, `storage/logs` и артефактах Playwright, даже если исходников среди
-них нет.
+Сторож транзакции следит за трекаемыми файлами и объявленным scope. Игнорируемые git
+файлы — логи, кэши, `vendor`, `node_modules`, `.env` — под наблюдение не попадают вовсе,
+поэтому мусор работающего стенда его не касается и объявлять исключения не нужно.
 
-Какие пути изменчивы, знает только проект, поэтому список объявляет профиль — строка
-глобов через пробел, относительно КАЖДОГО корня:
+Взамен профиль обязан отдавать рабочее дерево, правки в котором **не выходят за пределы
+песочницы**. Практически это одно требование: не клонировать зависимости хардлинками.
+
+`cp -al` делает `vendor` песочницы и `vendor` основного репозитория одними и теми же
+файлами. Любая запись — прогон тестов, кэш инструмента, сборка — меняет их разом везде.
+В t7802 pest писал `vendor/pestphp/pest/.temp/test-results` при `nlink=7`: в основной
+репозиторий и шесть соседних рабочих деревьев одновременно, то есть мог уронить чужую
+транзакцию, к которой не имел никакого отношения.
+
+Правильно — полная копия:
 
 ```sh
-PROFILE_VOLATILE_PATHS="storage/debugbar/* storage/logs/* storage/framework/* \
-  bootstrap/cache/* e2e/traces/* e2e/.auth/* test-results/* playwright-report/*"
+cp -a "$REPO/vendor" "$WORKTREE/vendor"     # не cp -al
 ```
 
-Глоб сверяется целиком с путём относительно корня (`*` перекрывает и `/`, поэтому
-`storage/logs/*` закрывает вложенные каталоги). Разделитель — пробел, поэтому путей с
-пробелами в списке быть не может. Абсолютные пути отклоняются (код 78). Совпавшее
-не попадает в чувствительное множество вовсе — ни в baseline, ни в checkpoint.
-Объявленный scope этапа сильнее: файл из scope остаётся под наблюдением, даже если
-подходит под глоб.
+Цена замерена на 261 МБ и 15 тысяч файлов: 0.93 с против 0.35 с у хардлинков. На фоне
+подъёма песочницы в 20–25 минут это ничто, а `node_modules` в 676 МБ и так копируется
+целиком — хардлинки для него невозможны, часть файлов принадлежит uid контейнера.
 
-Список замораживается в транзакции (`volatile.list` рядом с `roots.list`) при `begin`.
-Снимки одной транзакции обязаны сравниваться байт в байт, а профиль между заходами
-могли и поправить — иначе перезапуск демона посреди транзакции дал бы ложное нарушение.
-Транзакции, начатые до появления файла, читаются как «изменчивых путей нет».
+Проверить это статически движок не может: рабочее дерево существует только под живую
+задачу. Требование держится на профиле.
 
-Чем шире список, тем больше слепая зона: объявляй каталоги артефактов, а не корни.
+Чего сторож не делает и никогда не делал: он сравнивает две точки — `begin` и
+`checkpoint`. Всё, что изменили и вернули между ними, для него не существует. Защитой
+от намеренного подлога он не является, и строить её на нём не нужно.
+
+> `PROFILE_VOLATILE_PATHS` отменён. Если переменная осталась в профиле — она мёртвая,
+> движок её не читает. Почему список исключений оказался тупиком, расписано над
+> `_instrumentation_tx_snapshot` в `engine/lib/instrumentation-transaction.sh`.
 
 ### `PROFILE_SERVICE_HOST` — под каким именем открывать стенд
 
 Адрес стенда движок собирает сам: `http://<host>:<порт>` уезжает агенту в
-`services.frontendUrl` и `services.apiUrl`. Порт свой у каждой песочницы и известен
-движку, а вот имя хоста — слово проекта:
+`services.frontendUrl` и `services.apiUrl`. Порты приходят из закреплённого workspace contract,
+а имя хоста — слово проекта:
 
 ```sh
 PROFILE_SERVICE_HOST="localhost"   # умолчание: 127.0.0.1
@@ -251,46 +274,74 @@ PROFILE_SERVICE_HOST="localhost"   # умолчание: 127.0.0.1
 Значение — голое имя хоста или адрес: без схемы, порта и слэшей (их добавляет движок).
 Форму проверяет `factory-check`, чтобы ошибка не всплыла на живом прогоне.
 
-## Route v2: capability и хуки
+## Route protocol: capability и workspace
 
-Профиль, готовый к immutable-протоколу route v2 (`factory-v2`), обязан:
+Исполняемый движок один: `factory`. Профиль обязан заявить семантическую capability
+`"route-v2"` в `graph.json`; профиль без неё не получает старый launcher или fallback,
+а завершается fail-closed до lifecycle-действий.
 
-1. заявить `"route-v2"` в `capabilities` своего `graph.json` — без этого launcher
-   отказывает профилю до каких-либо действий;
-2. реализовать в `profile.sh` семь v2-хуков (движок валидирует форму значений
-   fail-closed и не содержит ни одного проектного пути):
+Обязательные хуки `profile.sh`:
 
 | Хук | Возвращает |
 |---|---|
-| `profile_v2_backend_source` | абсолютный путь основного backend-репозитория |
-| `profile_v2_frontend_source` | абсолютный путь основного frontend-репозитория |
-| `profile_v2_backend_worktree TASK` | путь backend-worktree поколения v2 (может ещё не существовать — его создаст `up.sh`) |
-| `profile_v2_frontend_worktree TASK` | путь frontend-worktree поколения v2 |
-| `profile_v2_source_branch TASK` | имя ветки задачи, одна на оба репозитория |
-| `profile_v2_container TASK` | имя контейнера/сервиса приложения (уходит в typed context) |
-| `profile_v2_sandbox_alive TASK` | код 0, если стек песочницы жив (чем проверять — знание профиля: docker, systemd, …) |
+| `profile_workspace_mode` | ровно `isolated` или `shared` |
+| `profile_repositories TASK` | 1–16 строк `имя<TAB>source<TAB>workspace`; первый repo — основной cwd |
+| `profile_project_context` | JSON ровно с `stack: string[]` и `guardrails: string[]` |
+| `profile_source_branch TASK` | закрепляемую ветку workspace |
+| `profile_container TASK` | имя стенда/контейнера для typed context и resource lease |
+| `profile_stand_alive TASK` | только health существующего стенда, без create/start/delete |
 
-Песочницу поколения v2 поднимает `profiles/<имя>/up.sh <TASK>` — тот же контрактный
-скрипт, что у v1; launcher зовёт его с `FACTORY_SANDBOX_GENERATION=v2`,
-`FACTORY_REQUIRE_NEW_SANDBOX=1` и base-ref переменными. `up.sh` обязан записать
-`STATE_DIR/t<TASK>.env` с ключами `TASK`, `GENERATION=v2`, `BE_WT`, `FE_WT`,
-`BE_BRANCH`, `FE_BRANCH` (обе равны `profile_v2_source_branch`), `SB_K`,
-`API_PORT`, `FE_PORT` — движок сверяет каждый с ожиданиями из хуков и отказывает
-при расхождении. Worktree v2 не имеют права совпадать с legacy worktree-tN и
-никогда не откатываются на старую песочницу.
+Для запуска publish-маршрутов из Cockpit профиль обязан объявить
+`profile_delivery_targets TASK`: по одной строке `имя-repo<TAB>целевая-ветка` для каждого
+репозитория из `profile_repositories`. Это trusted-конфигурация Cockpit, а не
+редактируемый ввод браузера: сервер передаёт её движку явными `--delivery-target`.
+Сам движок ветки по profile hook не угадывает; прямой CLI-запуск по-прежнему обязан
+передать targets явно.
 
-Остальные `STATE_DIR/t<TASK>.*` — файлы движка, профиль их не создаёт и не чистит:
-`.pipeline`, `.stage`, журналы этапов и черновики хода `t<TASK>.<этап>.checkpoint.md`
-(их время жизни движок ведёт сам — см. [ENGINE.md](ENGINE.md)). Снос песочницы в `down.sh`
-должен убирать только то, что создал сам, а не подметать маску `t<TASK>.*`.
+`source` всегда существует и каноничен. В `isolated` workspace — нормализованный
+планируемый путь, строго не пересекающийся ни с одним source; его создаёт профильный
+`up.sh`. В `shared` workspace обязан **точно совпадать** с source, быть существующим
+primary Git checkout (`git-dir == git-common-dir`) и находиться на ветке из
+`profile_source_branch`. Равенство путей никогда не выводится эвристикой и не разрешает
+ослабить isolated-режим.
 
-Typed context принимает ПРОИЗВОЛЬНЫЙ список репозиториев профиля:
-`factory-context-v2 --repo имя:worktree:source` (повторяемый). В контексте они
-лежат под своими именами — `workspace.<имя>.path`/`.sourcePath`, а `workspace.repos`
-перечисляет их в порядке объявления. Однорепозиторному профилю достаточно одного
-`--repo`; двухрепозиторные флаги `--backend-*`/`--frontend-*` остаются
-совместимым сахаром и дают привычные `workspace.backend`/`workspace.frontend`.
-Промпты бандла обращаются к репозиториям по именам своего профиля.
+Shared-профиль дополнительно реализует:
+
+| Хук | Возвращает |
+|---|---|
+| `profile_service_ports TASK` | одна строка `FE_PORT<TAB>API_PORT` |
+| `profile_exclusive_resources TASK` | стабильные строки ресурсов, включая exact `workspace:<path>` и `stand:<name>`; общий GPU объявляется одинаковым ключом |
+| `profile_instrumentation_restored TASK SCOPE_FILE` | exact sync восстановленного scope во внешний стенд и health; без создания/удаления ресурсов |
+
+Движок захватывает каждый exclusive resource CAS-арендой в trusted control root.
+Аренда закреплена за exact task/attempt, переживает завершение foreground-команды и
+human gates и снимается только после `completed` либо успешного `abandon`. Поэтому
+обычный процессный `flock` не считается защитой shared checkout/GPU. `resume`, `gate`
+и `goto` exact-проверяют владельца; `recover` получает новую аренду. При незавершённой
+instrumentation или ошибке post-restore hook аренда остаётся занята.
+
+Shared launcher не вызывает `up.sh`/`down.sh`, не создаёт task-env, worktree, контейнер
+или volume силами профиля и не стартует остановленный стенд. Он только проверяет health
+и атомарно пишет engine-owned projection `STATE_DIR/t<TASK>.env` с
+`WORKSPACE_MODE=shared`, `STAND_OWNERSHIP=external`, service metadata и точными
+`REPO_<N>_{NAME,SOURCE,WT,BRANCH}`. Этот файл не передаёт движку ownership внешнего
+checkout/стенда; destructive sandbox endpoints обязаны его сохранять.
+
+Для isolated `up.sh` пишет тот же generic repo-набор плюс `SB_K`,
+`API_PORT`, `FE_PORT` и `SOURCE_BRANCH`; launcher exact-сверяет все значения. Старых
+backend/frontend hooks и `BE_WT/FE_WT` fallback в исполняемом контракте нет.
+
+Repo/project/mode/branch/stand/ports/resources закрепляются immutable artifact-ом
+попытки. `resume` останавливается при любом дрейфе. Для маршрута с `ship` каждый
+delivery target задаётся как `имя-repo=ветка` для имени из `profile_repositories`;
+маршрут без `ship` не получает delivery actions. Typed context принимает список через
+`factory-context --repo имя:workspace:source` и публикует его под именами профиля.
+
+Транзакционная instrumentation в isolated по-прежнему требует linked worktree. Primary
+checkout разрешён только в explicit shared mode после проверки exact durable lease.
+Cleanup использует прежний CAS и восстанавливает исходно dirty baseline побайтово; затем
+обязателен `profile_instrumentation_restored`. Любая параллельная неизвестная правка или
+ошибка sync останавливает попытку и ничего не перезаписывает молча.
 
 Файловая политика узла дополнена явным разрешением браузера:
 `policy.browser: forbid|allow` (умолчание `forbid`). Разрешение независимо от
@@ -298,6 +349,52 @@ Typed context принимает ПРОИЗВОЛЬНЫЙ список репо�
 разведке и планированию он не положен даже при доступной записи. При `forbid`
 движок кладёт `mcp__playwright*` в deny-правила запуска: браузер физически
 недоступен агенту, а не «не рекомендован промптом».
+
+Исполняемый узел route v2 обязан иметь `node.id == node.runKey.toLowerCase()`: Cockpit и
+trusted runtime выводят ключ ворот/статуса из этой связи и отклоняют неоднозначный bundle.
+`timeoutClass` выбирается только из классов, известных движку. У маршрута с узлом `ship`
+этот узел канонический (`SHIP`, tail, `workspace-write`, класс `delivery`, required context
+`delivery`). Маршрут без `ship` не получает delivery-файл, actions или targets, а typed context
+содержит `delivery.mode=disabled`.
+
+Профиль может объявить `profile_route_node_evidence_check TASK ROUTE NODE RUN_KEY OUTCOME
+RUN_ID CONTEXT_FILE`. Диспетчер вызывает его после runner и `state-only` guard для точного
+`runId`; последний аргумент — owner-only typed context именно этого запуска. Ненулевой
+результат превращает заявленный runner-ом `done/skipped` в продуктовый `failed`, чтобы переход
+машины остановил недоказанный результат у человека, а не ретраил его как no-result.
+Доверенные снимки такого hook должны лежать внутри `ROUTE_V2_ATTEMPT_DIR`/`FACTORY_CONTROL_ROOT`;
+копия в provider-writable `STATE_DIR` может использоваться для отчёта и UI, но не как источник
+истины следующей проверки. Проверка обязана связывать снимок с точным `runId` и не засчитывать
+команду декларации evidence как чтение проверяемого исходника.
+
+Для `executor=command` профиль объявляет доверенный hook:
+
+```text
+profile_route_command TASK ROUTE NODE RUN_KEY COMMAND_ID CONTEXT_FILE
+```
+
+`COMMAND_ID` — только идентификатор из закреплённого bundle, не shell-строка. Профиль обязан
+сопоставить его с заранее известной реализацией и отклонить всё остальное; движок никогда не
+исполняет содержимое bundle через shell. Command-узел объявляет `fanout: single/1/forbid`,
+нулевые `noResult`/`productFailure`/`providerFailure.attempts` и стратегию `none`. Допустимы
+`state-only` и `workspace-write`; для проверок предпочтителен `state-only` со сторожем.
+
+Hook пишет в stdout ровно один JSON-объект:
+
+```json
+{
+  "schema": 1,
+  "outcome": "failed",
+  "comment": "краткий итог",
+  "failureOwner": "build",
+  "findings": [{"id": "stable-contract-id", "summary": "проверяемое замечание"}]
+}
+```
+
+Для `done`/`skipped` нужны `failureOwner: null` и пустой `findings`; `failed` требует владельца
+и 1–32 findings. Ненулевой exit, лишние поля или невалидный JSON считаются отказом trusted
+host-команды и не превращаются в продуктовый исход. Так детерминированные SHA/check/test
+проверки выполняются до семантического LLM-review и не расходуют model call.
 
 ## Status protocol v2
 
@@ -309,10 +406,31 @@ Terminal результат:
 stage-result --task N --stage BUILD --run-id ... --epoch ... done
 stage-result ... skipped "причина"
 stage-result ... failed "причина"
+stage-result ... --failure-owner build \
+  --finding "stable-contract-id=краткое проверяемое замечание" failed "причина"
 ```
 
 Точную команду движок добавляет к prompt перед запуском. Профиль должен формулировать условия
 `done`, `skipped` и `failed`, но не собирать run-id/token самостоятельно.
+
+Typed `failed` допускает ровно одного владельца пачки:
+
+- `build` — дефект реализации продукта;
+- `tests` — неверный, нестабильный или неполный тест;
+- `environment` — стенд, зависимости или локальная конфигурация;
+- `plan` — неверное требование либо утверждённый план;
+- `human` — корректный вариант требует решения человека.
+
+Finding id имеет kebab-case формат и остаётся тем же при повторной проверке той же проблемы.
+Менять id ради обхода лимита нельзя; исчезнувший finding не включается в новый вердикт.
+Canonical verdict хранится в run capability record и immutable event, а не в свободных полях
+pipeline. Старый `failed` без metadata остаётся совместимым для уже опубликованных prompts.
+
+Agent/command node может объявить полный объект `onFailure` со всеми пятью владельцами.
+При typed `failed` runtime выбирает этот переход; без `onFailure` либо для legacy failed
+используется `on.failed`. В typed context производная проверенного hash-chain доступна как
+`evidence.findings.open` и `evidence.findings.closed`: успешный повтор source-узла закрывает
+его прежние findings, история при этом не переписывается.
 
 Для нетерминальных данных есть `stage-progress`. Допустимы только:
 
@@ -334,9 +452,16 @@ stage-result ... failed "причина"
 Terminal result принимается compare-and-set только для активных `run_id + epoch + token`.
 Поздний ответ предыдущей попытки отклоняется.
 
+`retry.productFailure` — повтор текущего узла до применения перехода `on.failed`/`onFailure`.
+Поэтому комбинация `productFailure > 0` и rewind проверочного failed запрещена для новых
+typed-переходов: исправить вход
+проверяющего может только узел-цель возврата, а повтор до rewind снова увидит прежний план,
+тесты или diff. Для автора/BUILD допустим `productFailure > 0`, если его `failed` не ведёт
+на другой узел и повтор действительно способен исправить собственный результат.
+
 ## Prompt этапа
 
-Хороший `profile_stage_prompt` отвечает на четыре вопроса:
+Хороший prompt-файл исполняемого узла immutable bundle отвечает на четыре вопроса:
 
 1. что сделать;
 2. откуда взять вход и куда записать артефакт;
@@ -363,41 +488,30 @@ Terminal result принимается compare-and-set только для ак�
 Следующий этап должен читать подготовленный артефакт, а не повторно сканировать весь проект.
 Background workflow запускать нельзя: этап синхронный, а фоновой процесс осиротеет.
 
-## Fanout и budget
+## Fanout
 
-`profile_stage_fanout`:
+Fanout задаётся только в `node.fanout` immutable bundle. Runtime поддерживает
+`single/1/forbid` и `parallel/N/{forbid|allow-single}` только для `state-only` agent-узлов.
+`forbid` требует native capability `fanout` у выбранного runner. `allow-single` явно
+деградирует к последовательному разбору независимых зон внутри того же run; это остаётся
+одним terminal result и одним переходом route. Command-узел всегда single.
 
-```bash
-profile_stage_fanout() {
-  case "$1" in
-    SCOUT)
-      printf '%s\n' 'AUTO 3-8' 'Делить по реально затронутым подсистемам.'
-      ;;
-    *) printf '\n' ;;
-  esac
-}
-```
-
-Fanout подходит для независимого чтения/ревью. Он не подходит для параллельной записи в один
-worktree или замеров на одном стенде.
-
-`profile_stage_budget` ограничивает глубину, класс времени — длительность процесса.
-Фактическая длительность и fanout пишутся движком в telemetry.
+Параллельная запись в один workspace и параллельные замеры на одном shared-стенде запрещены:
+server и engine отклоняют parallel при любой файловой политике кроме `state-only`. Максимум
+исполнителей приходит из bundle, фактический fanout пишется движком в telemetry.
 
 ### Лимит времени этапа
 
 Источник правды — **класс узла** (`policy.timeoutClass` в бандле маршрута), а не имя этапа:
 длительность диктует роль узла, и одна схема должна вести себя одинаково у всех проектов.
-Порядок разрешения в `_stage_timeout`:
+Порядок разрешения:
 
 1. класс узла → таблица дефолтов движка (`planning`/`standard`/`review`/`delivery`/`check` —
    1800 с, `test`/`build` — 3600 с, `diagnostic`/`browser` — 5400 с);
-2. `profile_timeout_class <CLASS>` — если проекту нужны другие секунды для того же класса;
-3. `profile_stage_timeout <STAGE>` — только для узлов без класса и маршрутов v1;
-4. `NODE_TIMEOUT` (1800 с, переопределяется `FACTORY_STAGE_TIMEOUT`).
+2. `profile_timeout_class <CLASS>` — если проекту нужны другие секунды для того же класса.
 
-Класс, которого движок не знает, не роняет этап: берётся `NODE_TIMEOUT`, а несовпадение
-пишется в журнал этапов строкой `ЛИМИТ: неизвестный timeoutClass=…`.
+Bundle с неизвестным классом отклоняется server- и engine-валидаторами до запуска.
+Shell-override по имени stage и fallback на старые маршруты отсутствуют.
 
 Движок сам приписывает в конец промпта регламент: сколько минут у этапа всего и к какому
 сроку зафиксировать результат через `stage-result`. Числа берутся из того же вызова, что и
@@ -406,26 +520,18 @@ worktree или замеров на одном стенде.
 
 ## Схема Cockpit
 
-`profiles/<name>/graph.json` обязательна: Cockpit не строит fallback-схему.
+`profiles/<name>/graph.json` обязательна как явный capability/config marker. Cockpit не строит
+fallback-схему, а topology, подписи, переходы и optional outcomes читает из опубликованного
+immutable route catalog.
 
-Схема содержит:
+До публикации профиль оставляет `capabilities: []`. Правильный порядок активации:
 
-- узлы и координаты;
-- `capabilities` — явные внепоточные возможности профиля, например `["demo"]`;
-- route edges и петли возврата;
-- `keys`, если id узла не совпадает с pipeline key;
-- `runner_keys`, если визуальный узел является внутренней фазой другого runner-stage;
-  поддерживаются общий раздел `*` и route-specific оверрайд;
-- `optional` — этапы, для которых `skipped` является нормальным.
+1. проверить source definition, prompts, переходы и no-ship topology локальным тестом профиля;
+2. опубликовать bundle во временный store и перечитать каждый immutable hash;
+3. выполнить CAS-публикацию в live catalog;
+4. отдельным последним действием включить `"route-v2"` в `graph.json`.
 
-`optional` читает UI, а не движок. Причина `skipped` обязательна в любом случае.
-
-После изменения маршрутов:
-
-```bash
-engine/bin/factory-graph-new <name> --force
-python3 tests/engine/routes-sync.py <name>
-```
+Генератора shell-маршрутов и синхронизации route arrays с UI-графом нет.
 
 ## Debug
 
@@ -455,10 +561,11 @@ RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
 
 Проверки должны подтвердить:
 
-- обязательные файлы и hooks;
+- capability и обязательные workspace/stand hooks;
 - canonical runner config;
-- route/graph sync;
-- доступы к путям;
-- prompt каждого stage;
+- форму хоста стенда (`PROFILE_SERVICE_HOST`);
 - model policy и coverage;
-- безопасность status protocol.
+- metadata-only readiness рабочего хоста.
+
+Schema, prompts, переходы и no-ship topology проверяет source-тест маршрутов профиля до
+live-публикации.

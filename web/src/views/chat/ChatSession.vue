@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { api } from '../../shared/api-client.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useTasksStore } from '../../stores/tasks.js';
+import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
@@ -27,6 +28,7 @@ const emit = defineEmits(['back']);
 const router = useRouter();
 const chat = useChatStore();
 const tasks = useTasksStore();
+const ui = useUiStore();
 
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid) || null);
 
@@ -54,7 +56,7 @@ prov.load();
 // Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
-const current = computed(() => prov.modelOf(sess.value?.model));
+const current = computed(() => prov.modelOf(sess.value?.modelRef || sess.value?.model));
 const modelId = computed(() => current.value.id);
 const currentModel = computed(() => current.value.model);
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь кокпит).
@@ -65,7 +67,7 @@ const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока рее
 const effortLevels = computed(() => currentModel.value?.efforts || []);
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
-const modes = computed(() => prov.modesOf(sess.value?.model));
+const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));
 const currentMode = computed(() => {
   const want = sess.value?.mode;
   const list = modes.value;
@@ -73,7 +75,9 @@ const currentMode = computed(() => {
   return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
 });
 const modeHint = computed(() => modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента');
-const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
+// Codex сообщает эффективное окно только в token_count конкретной сессии (например,
+// catalog 272k × 95% = 258.4k). Оно точнее каталожного fallback и потому приоритетно.
+const ctxWindow = computed(() => sess.value?.contextWindow || currentModel.value?.context || CONTEXT_WINDOW);
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
 const modelUnknown = computed(() => !!currentModel.value?.unknown);
@@ -86,15 +90,28 @@ const lastRequestedName = computed(() => {
   const id = lastRun.value?.model;
   return id ? (prov.modelOf(id).model?.name || id) : '';
 });
-function onModelChange(e) {
+async function onModelChange(e) {
+  // Reset Kimi асинхронный и на время запроса перерисовывает select со старой моделью.
+  // Поэтому выбранный id надо снять с DOM до await, иначе после подтверждения здесь
+  // снова окажется K3 и визуально успешный reset отменит саму смену модели.
+  const select = e.target;
+  const nextModelId = select.value;
   const oldProv = current.value.provider?.id;
-  const newProv = prov.modelOf(e.target.value).provider?.id;
-  chat.setModel(props.sid, e.target.value);
+  const newProv = prov.modelOf(nextModelId).provider?.id;
   // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
   // резюмить им нельзя: сбрасываем контекст, история чата остаётся.
-  if (oldProv && newProv && oldProv !== newProv && sess.value?.sessionId) {
-    chat.resetContext(props.sid);
+  // У старого фронта Kimi reset был только локальным: в истории id уже мог быть null,
+  // а server-owned binding — всё ещё жив. Поэтому для Kimi сбрасываем sidecar даже без
+  // видимого sessionId; revision позволяет стору отличить сохранённый чат от нового.
+  if (oldProv && newProv && oldProv !== newProv && (sess.value?.sessionId || oldProv === 'kimi')) {
+    // Для Kimi reset меняет server-owned binding. Модель переключаем только после
+    // подтверждения, иначе при сетевой ошибке старую сессию было бы уже не сбросить.
+    if (!await chat.resetContext(props.sid)) {
+      select.value = modelId.value;
+      return;
+    }
   }
+  chat.setModel(props.sid, nextModelId);
   // У новой модели может не быть текущего уровня эффорта — снимаем явный выбор.
   // Выбирать другую ступень за пользователя нельзя.
   const lv = effortLevels.value;
@@ -162,27 +179,37 @@ const ctxLimit = computed(() => {
   const want = chat.compactWindow || 0; // 0 — автосжатие в настройках выключено
   return want > 0 ? Math.min(want, ceil) : ceil;
 });
+const CODEX_CONTEXT_METRIC = 'active-input-v1';
+const ctxUnavailable = computed(() => current.value?.provider?.id === 'codex'
+  && !!sess.value?.sessionId
+  && sess.value?.contextMetric !== CODEX_CONTEXT_METRIC);
 const ctxClass = computed(() => {
+  if (ctxUnavailable.value) return '';
   const tokens = sess.value?.contextTokens || 0;
   if (tokens >= ctxLimit.value) return 'hi';
   if (tokens >= ctxLimit.value * CTX_WARN_RATIO) return 'mid';
   return '';
 });
-// Codex в exec --json не сообщает фактическую заполненность окна. Даже старые
-// сохранённые GPT-чаты без флага показываем честно, узнавая executor по модели.
-const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate || current.value?.provider?.id === 'codex');
+const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate);
+const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+const spentHint = computed(() => {
+  const total = sess.value?.totalInputTokens || 0;
+  if (!total) return '';
+  const cached = sess.value?.cachedInputTokens || 0;
+  return ` · за сессию обработано ${fmtTokens(total)} входных токенов${cached ? `, из них ${fmtTokens(cached)} из кэша` : ''}`;
+});
 const ctxTitle = computed(() => {
   const s = sess.value;
-  const tokens = (s?.contextTokens || 0).toLocaleString('ru');
+  const tokens = fmtTokens(s?.contextTokens);
   if (s?.compacting) return 'Сжимаю контекст…';
   if (!s?.sessionId) return s?.pendingSeed ? 'Контекст сжат — выжимка уедет со следующим сообщением' : 'Контекст: пусто';
   if (s?.compactedAt && !s.contextTokens) return 'Контекст сжат — размер покажется после следующего хода';
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
-  if (ctxIsEstimate.value) {
-    return `Ввод последнего хода: ${tokens} токенов (≈${ctxPct.value}% окна) · Codex не отдаёт точную заполненность контекста · ${hint}`;
-  }
+  if (ctxUnavailable.value) return `Точная заполненность Codex появится после следующего завершённого хода${spentHint.value} · ${hint}`;
   const warn = (s?.contextTokens || 0) >= ctxLimit.value * CTX_WARN_RATIO ? ' · разговор уже дорогой, пора сжать' : '';
-  return `Контекст: ${tokens} токенов (${ctxPct.value}%)${warn} · ${hint}`;
+  const window = fmtTokens(ctxWindow.value);
+  const estimate = ctxIsEstimate.value ? 'примерно ' : '';
+  return `Контекст: ${estimate}${tokens} из ${window} токенов (${ctxPct.value}%)${warn}${spentHint.value} · ${hint}`;
 });
 // Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;
@@ -205,21 +232,26 @@ async function onCtxClick(e) {
       'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. Переписка на экране останется, но вернуть агенту контекст будет уже нельзя.',
       { title: 'Сбросить память агента?', okText: 'Сбросить', danger: true },
     );
-    if (ok) chat.resetContext(props.sid);
+    if (ok) await chat.resetContext(props.sid);
     return;
   }
-  const tokens = (s.contextTokens || 0).toLocaleString('ru');
+  const contextNow = ctxUnavailable.value
+    ? 'Точный размер текущего контекста пока недоступен.'
+    : `Сейчас в контексте ${fmtTokens(s.contextTokens)} токенов.`;
   const ok = await confirmDialog(
-    `Сейчас в контексте ${tokens} токенов. Агент соберёт из разговора рабочую выжимку и продолжит с неё — что решили, чего касались, что осталось. Это полноценный ход: он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.`,
+    `${contextNow} Агент соберёт из разговора рабочую выжимку и продолжит с неё — что решили, чего касались, что осталось. Это полноценный ход: он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.`,
     { title: 'Сжать контекст чата?', okText: 'Сжать' },
   );
   if (ok) chat.compact(props.sid);
 }
 
-// Идёт сжатие — управление чата заморожено: ход уже в полёте, менять ему модель, задачу
-// или права поздно, а второй ход на ту же сессию её убьёт. Поле ввода, вложения и диктовка
-// намеренно живые: следующее сообщение можно готовить, пока агент пересказывает разговор.
-const frozen = computed(() => !!sess.value?.compacting);
+// Сжатие или server-owned reset замораживают управление: менять модель/задачу/права
+// посреди перехода нельзя. Поле ввода, вложения и диктовка остаются живыми; сама кнопка
+// отправки ждёт завершения перехода.
+const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting);
+const frozenHint = computed(() => (sess.value?.sessionResetting
+  ? 'Сбрасывается память агента — отправка будет доступна после подтверждения сервера'
+  : 'Идёт сжатие контекста — отправка будет доступна сразу после него'));
 
 // ── «Прочитано» ──
 // Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
@@ -289,7 +321,12 @@ async function submit() {
   clearTimeout(draftTimer);
   chat.setDraft(props.sid, '');
   pending.value = [];
-  await chat.send(props.sid, t, atts);
+  const accepted = await chat.send(props.sid, t, atts);
+  if (accepted === false) {
+    input.value = t;
+    pending.value = atts;
+    chat.setDraft(props.sid, t);
+  }
 }
 function onKey(e) {
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
@@ -460,12 +497,45 @@ const launchMsg = ref(null);
 async function toConveyor() {
   const s = sess.value; if (!s?.taskId) return;
   if (onConveyor.value) { router.push('/pipeline'); chat.close(); return; }
-  launchMsg.value = 'запуск…';
+  ui.openTaskLaunch(s.taskId);
+  launchMsg.value = 'выбери маршрут и проверь параметры запуска в карточке задачи';
+}
+
+// Debug открывается отдельным разговором, но остаётся в worktree этой же задачи.
+// Здесь только готовим черновик: ни отправки агенту, ни запуска конвейера по клику нет.
+const DEBUG_HINT = 'Откроется отдельный Debug-чат в той же песочнице задачи. Новый конвейер не создаётся, черновик останется неотправленным.';
+const debugOpening = ref(false);
+const debugMsg = ref('');
+const debugTaskTitle = computed(() => {
+  const task = String(sess.value?.taskId || '');
+  return taskOpts.value.find((o) => o.task === task)?.title || sess.value?.title || '';
+});
+function recentDebugContext(messages = []) {
+  return messages
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && String(m.text || '').trim())
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? 'Пользователь' : 'Агент'}: ${String(m.text).trim()}`)
+    .join('\n\n')
+    .slice(-3000);
+}
+async function openDebug() {
+  const s = sess.value;
+  if (!s?.taskId || s.purpose === 'debug' || debugOpening.value) return;
+  debugOpening.value = true;
+  debugMsg.value = '';
   try {
-    const r = await tasks.launch(s.taskId, s.messages.map((m) => m.text).join('\n').slice(-3000));
-    launchMsg.value = r.outcome === 'already_running' ? 'уже идёт' : r.outcome === 'launched' ? `запущено (${r.profile})` : (r.note || 'отправлено');
-    chat.loadConveyor();
-  } catch (e) { launchMsg.value = `ошибка: ${e.message}`; }
+    await chat.openDebugFor({
+      taskId: s.taskId,
+      taskTitle: debugTaskTitle.value,
+      sourceChatId: s.id,
+      context: recentDebugContext(s.messages),
+    });
+    await router.push('/chats');
+  } catch (e) {
+    debugMsg.value = `ошибка: ${e.message}`;
+  } finally {
+    debugOpening.value = false;
+  }
 }
 </script>
 
@@ -497,7 +567,8 @@ async function toConveyor() {
                     @click="startTitleEdit">✎</button>
           </template>
         </div>
-        <HelpTip class="task-tip" :text="activeTaskLabel" align="left" fixed :trigger-focusable="false">
+        <HelpTip class="task-tip" :text="activeTaskLabel" align="left" :trigger-focusable="false"
+                 :tip-style="{ maxWidth: 'min(520px, calc(100vw - 16px))' }">
           <span class="sel task">
             <span class="lbl">задача</span>
             <select :value="sess.taskId || ''" :disabled="frozen" @change="onTaskChange">
@@ -552,7 +623,7 @@ async function toConveyor() {
         </div>
         <EffortSlider v-if="effortLevels.length" :model-value="sess.effort" :levels="effortLevels"
                       @update:model-value="chat.setEffort(sid, $event)" />
-        <!-- Контекст: кольцо показывает точное значение либо явно помеченную оценку Codex.
+        <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
              Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента. -->
         <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
                 :disabled="!sess.sessionId || sess.compacting || sess.sending"
@@ -638,13 +709,20 @@ async function toConveyor() {
       </div>
     </div>
 
-    <!-- Действие на конвейер (только для задачи) -->
-    <div v-if="sess.taskId && sess.messages?.length" class="cs-act">
+    <!-- Действия задачи: конвейер или отдельный Debug-чат в той же песочнице. -->
+    <div v-if="sess.taskId && (sess.messages?.length || sess.purpose !== 'debug')" class="cs-act">
       <div class="col act-row">
-        <button class="act" :class="{ onconv: onConveyor }" :disabled="frozen" @click="toConveyor">
+        <button v-if="sess.messages?.length" class="act" :class="{ onconv: onConveyor }" :disabled="frozen" @click="toConveyor">
           🏭 {{ onConveyor ? 'Уже на конвейере →' : 'На конвейер' }}
         </button>
+        <HelpTip v-if="sess.purpose !== 'debug'" class="debug-tip" :text="DEBUG_HINT"
+                 align="left" :trigger-focusable="false">
+          <button class="act debug-act" :disabled="frozen || debugOpening" @click="openDebug">
+            🐞 {{ debugOpening ? 'Открываю…' : 'Исправлять' }}
+          </button>
+        </HelpTip>
         <span v-if="launchMsg" class="lm muted">{{ launchMsg }}</span>
+        <span v-if="debugMsg" class="lm muted">{{ debugMsg }}</span>
       </div>
     </div>
 
@@ -713,7 +791,7 @@ async function toConveyor() {
             <span class="sq"></span>
           </button>
           <button class="send" :disabled="frozen || (!input.trim() && !pending.length)"
-                  :title="frozen ? 'Идёт сжатие контекста — отправка будет доступна сразу после него'
+                  :title="frozen ? frozenHint
                     : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
                   @click="submit">↑</button>
         </div>
@@ -767,7 +845,6 @@ async function toConveyor() {
    в общем HelpTip — внешний overflow страницы его не обрежет. */
 .task-tip { flex: 0 1 420px; max-width: 520px; min-width: 150px; }
 .task-tip :deep(.ht-tr) { width: 100%; min-width: 0; cursor: default; }
-.task-tip :deep(.ht-tip) { max-width: min(520px, calc(100vw - 16px)); }
 .sel.task { width: 100%; min-width: 0; }
 /* Селект модели сжимаемый: в узкой плавающей панели ряд «модель + эффорт + кольцо»
    должен оставаться одним рядом, а не разъезжаться на три */

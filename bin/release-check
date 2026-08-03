@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Read-only preflight стабильного релиза. Ничего не коммитит, не тегирует и не push-ит.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(tr -d '\r\n' < "$ROOT/VERSION")"
+TAG="v$VERSION"
+
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "VERSION должен иметь строгий формат MAJOR.MINOR.PATCH" >&2
+  exit 1
+fi
+if [ "$(git -C "$ROOT" branch --show-current)" != "main" ]; then
+  echo "релиз разрешён только из ветки main" >&2
+  exit 1
+fi
+if [ -n "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ]; then
+  echo "рабочее дерево должно быть чистым" >&2
+  exit 1
+fi
+if git -C "$ROOT" show-ref --verify --quiet "refs/tags/$TAG"; then
+  echo "тег $TAG уже существует и не должен перемещаться" >&2
+  exit 1
+fi
+read -r REMOTE_MAIN _ < <(git -C "$ROOT" ls-remote --heads origin refs/heads/main)
+if [ -z "${REMOTE_MAIN:-}" ] || [ "$(git -C "$ROOT" rev-parse HEAD)" != "$REMOTE_MAIN" ]; then
+  echo "main должна в точности совпадать с origin/main" >&2
+  exit 1
+fi
+if [ -n "$(git -C "$ROOT" ls-remote --tags origin "refs/tags/$TAG")" ]; then
+  echo "тег $TAG уже опубликован и не должен переиспользоваться" >&2
+  exit 1
+fi
+
+( cd "$ROOT/server" && npm test )
+( cd "$ROOT/web" && npm test && npm run build )
+echo "Готово к публикации $TAG: создай аннотированный тег и GitHub Release явными командами."

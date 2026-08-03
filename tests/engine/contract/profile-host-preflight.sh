@@ -34,4 +34,10 @@ assert_rc 1 "$?" "unavailable failover makes host preflight fail closed"
 assert_eq 1 "$(coverage_artifact_get "$host" UNAVAILABLE)" \
   "unavailable configured provider is counted"
 
+mktemp() { return 1; }
+profile_runner_host_preflight fixture 300 60 >/dev/null 2>&1
+storage_rc=$?
+unset -f mktemp
+assert_rc 78 "$storage_rc" "coverage storage failure cannot report preflight success"
+
 finish_tests

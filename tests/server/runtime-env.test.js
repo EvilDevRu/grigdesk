@@ -15,6 +15,16 @@ cockpit_load_runtime_env "$2"
 printf '%s\t%s\n' "$COCKPIT_EFFECTIVE_PORT" "$COCKPIT_EFFECTIVE_TLS_PORT"
 `;
 
+const pathProbe = String.raw`
+set -euo pipefail
+source "$1"
+HOME="$2"
+PATH="/usr/bin:/bin"
+cockpit_add_cli_paths
+cockpit_add_cli_paths
+printf '%s\n' "$PATH"
+`;
+
 function ports(dir, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
   if (extraEnv.COCKPIT_PORT === null) delete env.COCKPIT_PORT;
@@ -48,4 +58,14 @@ test('экспортированные порты имеют приоритет 
     COCKPIT_PORT: '28140',
     COCKPIT_TLS_PORT: '28143',
   }), '28140\t28143');
+});
+
+test('штатные launcher-ы добавляют официальный каталог Kimi в PATH один раз', (t) => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'cockpit-kimi-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const value = execFileSync('bash', ['-c', pathProbe, 'runtime-env-test', helper, home], {
+    encoding: 'utf8',
+  }).trim();
+
+  assert.equal(value, `${home}/.kimi-code/bin:/usr/bin:/bin`);
 });

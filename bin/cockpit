@@ -21,6 +21,7 @@ fi
 # Корневой .env читаем штатным парсером Node, не исполняя его как shell-код.
 # Экспортированное окружение имеет приоритет. Те же аргументы передаём серверу.
 source "$DIR/bin/lib/runtime-env.sh"
+cockpit_add_cli_paths
 cockpit_load_runtime_env "$DIR"
 PORT="$COCKPIT_EFFECTIVE_PORT"
 TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"

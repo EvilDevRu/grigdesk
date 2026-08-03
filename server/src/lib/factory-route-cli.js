@@ -1,0 +1,233 @@
+// Вызовы route-движка из кокпита: аргументы, запуск в отвязанном юните и разбор отказов.
+//
+// ТРИ ВЕЩИ, КОТОРЫЕ ЗДЕСЬ НЕЛЬЗЯ ДЕЛАТЬ ИНАЧЕ.
+//
+// 1. Каталоги — только явными аргументами. Cockpit и движок используют один каталог
+//    runtime-состояния и один опубликованный каталог маршрутов; скрытых legacy roots нет.
+//
+// 2. Окружение transient-**сервиса** не наследуется вовсе (в отличие от `--scope`).
+//    Всё нужное перечисляется `--setenv` поимённо. Забыть здесь `FACTORY_SB_K` —
+//    значит вернуть гонку слотов: подъём выберет индекс сам, и два прогона возьмут один.
+//
+// 3. `systemd-run` без `--scope` возвращает 0 сразу после регистрации юнита, поэтому
+//    код возврата движка до кокпита НЕ доходит. Исход читаем из состояния: жив ли юнит
+//    и появился ли ORCH_PID; текст отказа — из журнала запуска.
+import { execFile, spawn } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
+import { factoryUnitArgs } from './factory-launch.js';
+
+/** Коды выхода route-движка человеческим текстом. */
+export const ROUTE_EXIT_HINTS = {
+  73: 'занято: идёт другой прогон этой задачи, попытка ещё активна или стенд не отвечает',
+  75: 'песочница создана частично — автоудаление запрещено, нужен человек (снеси стенд и запусти заново)',
+  78: 'контракт не выполнен: аргументы, профиль, маршрут или занятый лок оркестратора',
+};
+
+/** Имя юнита прогона: фиксированное — два оркестратора одной задачи параллельно не поднимутся. */
+export const routeUnitName = (task) => `factory-t${task}`;
+
+/** Общие пути для любой команды. Порядок аргументов стабилен — на него смотрят тесты. */
+export function routePathArgs(config) {
+  return [
+    '--routes-dir', config.routesDir,
+    '--state-dir', config.stateDir,
+    '--control-dir', config.factoryControlDir,
+  ];
+}
+
+/** `check` — единственная команда без побочных эффектов: профиль, capability, маршрут в каталоге. */
+export function routeCheckArgs(config, { profile, route }) {
+  const args = ['check', '--profile', profile];
+  if (route) args.push('--route', route);
+  return [...args, '--routes-dir', config.routesDir];
+}
+
+export function routeStartArgs(config, {
+  task, profile, route, ticketFile,
+  runnerPrimary = '',
+  instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
+  deliveryTargets = [],
+}) {
+  const args = [String(task), 'start', '--profile', profile, '--route', route,
+    '--ticket-json', ticketFile];
+  // Выбор исполнителя — сразу за постановкой: порядок аргументов стабилен,
+  // на него смотрят тесты.
+  if (runnerPrimary) args.push('--runner-primary', runnerPrimary);
+  args.push(...routePathArgs(config));
+  for (const file of instrumentationFiles) args.push('--instrumentation-file', file);
+  if (diagnosisKind) args.push('--diagnosis-kind', diagnosisKind);
+  if (diagnosisSignal) args.push('--diagnosis-signal', diagnosisSignal);
+  for (const target of deliveryTargets) args.push('--delivery-target', target);
+  return args;
+}
+
+export function routeResumeArgs(config, { task, profile, attempt }) {
+  return [String(task), 'resume', '--profile', profile, '--attempt', attempt, ...routePathArgs(config)];
+}
+
+/**
+ * `gate` — фиксация решения человека. `--commit-only` обязателен: без него gate сам
+ * ведёт маршрут дальше и держит команду столько, сколько работает следующий узел,
+ * а вызывающий по HTTP упирается в свой таймаут. Продолжение — отдельным resume.
+ */
+export function routeGateArgs(config, {
+  task, profile, attempt, node, decision, comment,
+}) {
+  const args = [String(task), 'gate', '--profile', profile, '--attempt', attempt,
+    '--node', node, '--decision', decision, '--commit-only'];
+  if (comment) args.push('--comment', comment);
+  return [...args, ...routePathArgs(config)];
+}
+
+/** `goto` — доверенный возврат курсора человеком на пройденный узел. */
+export function routeGotoArgs(config, {
+  task, profile, attempt, node, reason,
+}) {
+  return [String(task), 'goto', '--profile', profile, '--attempt', attempt,
+    '--node', node, '--reason', reason, ...routePathArgs(config)];
+}
+
+export function routeAbandonArgs(config, { task, profile, attempt, reason }) {
+  return [String(task), 'abandon', '--profile', profile, '--attempt', attempt,
+    '--reason', reason, ...routePathArgs(config)];
+}
+
+/**
+ * Identity of a fully pinned fresh start as projected by the route engine.
+ *
+ * ORCH_PID appears in the registry before the attempt and route bundle are pinned.
+ * Treating that short-lived bootstrap projection as a successful launch lets a
+ * fast rc=75/78 look green in the UI. Only the complete, non-stalled identity is
+ * eligible for launch confirmation.
+ */
+export function startRegistryIdentity(registry, { profile, route }) {
+  if (!registry || typeof registry !== 'object') return null;
+  const attempt = String(registry.ATTEMPT_ID || '');
+  const routeHash = String(registry.ROUTE_HASH || '');
+  const pid = String(registry.ORCH_PID || '');
+  if (!/^a_[a-f0-9]{32}$/.test(attempt)
+    || !/^[a-f0-9]{64}$/.test(routeHash)
+    || !/^[1-9][0-9]*$/.test(pid)
+    || registry.PROFILE !== profile
+    || registry.ROUTE !== route
+    || registry.RUN_PROTOCOL !== '2'
+    || registry.CATALOG_PROTOCOL !== 'route-v2'
+    || !['publish', 'disabled'].includes(registry.DELIVERY_MODE)
+    || registry.STALLED_HUMAN === '1') return null;
+  return `${attempt}:${pid}:${routeHash}`;
+}
+
+/**
+ * Окружение прогона. Runtime roots передаются аргументами, здесь остаются только
+ * process-level настройки профилей и runner control.
+ */
+export function routeLaunchEnv(config, extra = {}) {
+  return {
+    ...extra,
+    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+    HOME: process.env.HOME || '',
+    FACTORY_HOME: config.factoryHome,
+    FACTORY_PROFILES_DIR: config.profilesDir,
+    FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
+  };
+}
+
+/** Синхронный вызов route-движка (check, gate --commit-only, abandon, goto). */
+export function runRouteEngine(config, args, { timeout = 30000 } = {}) {
+  return new Promise((resolve) => {
+    execFile(config.factoryBin, args, {
+      timeout,
+      env: { ...process.env, ...routeLaunchEnv(config) },
+      maxBuffer: 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
+      resolve({
+        code,
+        ok: code === 0,
+        stdout: String(stdout || ''),
+        stderr: String(stderr || ''),
+        message: routeMessage(code, stderr || stdout || err?.message || ''),
+      });
+    });
+  });
+}
+
+/** Отказ движка — человеку: его собственный текст плюс расшифровка кода. */
+export function routeMessage(code, output) {
+  const tail = String(output || '').trim().split('\n').filter(Boolean).slice(-3).join('; ').slice(-400);
+  const hint = ROUTE_EXIT_HINTS[code];
+  if (!code) return tail;
+  return [tail, hint ? `(код ${code}: ${hint})` : `(код ${code})`].filter(Boolean).join(' ');
+}
+
+/** Жив ли юнит прогона. `--collect` убирает мёртвый юнит, поэтому «не активен» = вышел. */
+export function routeUnitActive(task) {
+  return new Promise((resolve) => {
+    execFile('systemctl', ['--user', 'is-active', routeUnitName(task)], { timeout: 5000 }, (err, stdout) => {
+      resolve(String(stdout || '').trim() === 'active');
+    });
+  });
+}
+
+/** Хвост журнала запуска — единственное, что остаётся от умершего юнита. */
+export async function readLaunchLog(file, bytes = 2000) {
+  try {
+    const text = await fs.readFile(file, 'utf8');
+    return text.slice(-bytes).trim();
+  } catch { return ''; }
+}
+
+/**
+ * Запустить route-движок в отвязанном юните.
+ *
+ * Юнит именно transient-**сервис**, а не scope: оркестратор живёт часами и обязан
+ * пережить рестарт кокпита, а его собственный обработчик TERM должен успеть снять
+ * инструментацию (KillMode=mixed в factoryUnitArgs).
+ *
+ * @returns {Promise<{ ok: boolean, unit: string|null, logFile: string, message?: string,
+ *                     exited?: number|null }>}
+ */
+export async function spawnRouteEngine(config, { task, args, extraEnv = {} }) {
+  const logFile = path.join(config.stateDir, `t${task}.launch.log`);
+  await fs.mkdir(config.stateDir, { recursive: true });
+  const env = routeLaunchEnv(config, extraEnv);
+  const haveSystemd = await new Promise((res) => execFile('systemd-run', ['--version'], (err) => res(!err)));
+
+  if (!haveSystemd) {
+    // Без systemd — полная отвязка: код возврата виден сразу, вывод в тот же журнал.
+    const out = await fs.open(logFile, 'a');
+    const child = spawn(config.factoryBin, args, {
+      detached: true, stdio: ['ignore', out.fd, out.fd], env: { ...process.env, ...env },
+    });
+    child.unref();
+    const exited = await new Promise((res) => {
+      let done = false;
+      child.on('exit', (code) => { done = true; res(code ?? 1); });
+      setTimeout(() => { if (!done) res(null); }, 3000);
+    });
+    await out.close();
+    if (exited) {
+      return { ok: false, unit: null, logFile, exited, message: routeMessage(exited, await readLaunchLog(logFile)) };
+    }
+    return { ok: true, unit: null, logFile, exited: null };
+  }
+
+  const unit = routeUnitName(task);
+  const argv = [
+    ...factoryUnitArgs(task),
+    // Без этого отказ движка не оставит следа: у сервиса stdout уходит в журнал
+    // systemd, а кокпит его не читает и читать не должен.
+    `--property=StandardOutput=append:${logFile}`,
+    ...Object.entries(env).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => `--setenv=${k}=${v}`),
+    config.factoryBin, ...args,
+  ];
+  const started = await new Promise((resolve) => {
+    execFile('systemd-run', argv, { timeout: 15000 }, (err, stdout, stderr) => {
+      resolve(err ? { ok: false, message: String(stderr || err.message).trim().slice(-400) } : { ok: true });
+    });
+  });
+  if (!started.ok) return { ok: false, unit, logFile, message: `юнит не зарегистрирован: ${started.message}` };
+  return { ok: true, unit, logFile, exited: null };
+}

@@ -29,7 +29,15 @@ async function compileHelpTip() {
   )).default;
 }
 
+// Окно на весь файл, а не на тест: Vue захватывает `document` один раз при импорте
+// runtime-dom, поэтому Teleport второго окна складывал бы подсказку в body первого.
+let shared = null;
+
 async function browserHarness(t) {
+  if (shared) {
+    shared.document.body.innerHTML = '<div id="mount"></div><button id="outside">мимо</button>';
+    return shared;
+  }
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://cockpit.test/#/chats' });
   for (const [key, value] of Object.entries({
@@ -49,7 +57,7 @@ async function browserHarness(t) {
     Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   }
   browser.document.body.innerHTML = '<div id="mount"></div><button id="outside">мимо</button>';
-  t.after(() => browser.close());
+  shared = browser;
   return browser;
 }
 
@@ -68,20 +76,25 @@ async function mountTip(t, browser, slots) {
   return { wrapper, h };
 }
 
+// Сама подсказка живёт в <body> (Teleport), а не в поддереве компонента: её нельзя
+// искать через wrapper.find — только по документу.
+const tipOf = (browser) => browser.document.querySelector('.ht-tip');
+
 test('HelpTip с toggle: клик закрепляет подсказку, уход мыши её не гасит, повторный клик закрывает', async (t) => {
   const browser = await browserHarness(t);
   const { wrapper } = await mountTip(t, browser);
 
+  assert.equal(tipOf(browser).parentElement, browser.document.body);
   await wrapper.find('.ht-tr').trigger('click');
-  assert.equal(wrapper.find('.ht').classes().includes('on'), true);
+  assert.equal(tipOf(browser).classList.contains('on'), true);
 
   // Ховер ушёл — закреплённая всплывашка остаётся: на планшете «увести мышь» нечем,
   // но синтетический mouseleave прилетает при скролле, и он не должен её закрывать.
   await wrapper.find('.ht').trigger('mouseleave');
-  assert.equal(wrapper.find('.ht').classes().includes('on'), true);
+  assert.equal(tipOf(browser).classList.contains('on'), true);
 
   await wrapper.find('.ht-tr').trigger('click');
-  assert.equal(wrapper.find('.ht').classes().includes('on'), false);
+  assert.equal(tipOf(browser).classList.contains('on'), false);
 });
 
 test('HelpTip с toggle: клик мимо и Esc закрывают закреплённую подсказку', async (t) => {
@@ -92,12 +105,24 @@ test('HelpTip с toggle: клик мимо и Esc закрывают закре�
   browser.document.querySelector('#outside')
     .dispatchEvent(new browser.Event('pointerdown', { bubbles: true }));
   await wrapper.vm.$nextTick();
-  assert.equal(wrapper.find('.ht').classes().includes('on'), false);
+  assert.equal(tipOf(browser).classList.contains('on'), false);
 
   await wrapper.find('.ht-tr').trigger('click');
-  assert.equal(wrapper.find('.ht').classes().includes('on'), true);
+  assert.equal(tipOf(browser).classList.contains('on'), true);
   await wrapper.find('.ht').trigger('keydown', { key: 'Escape' });
-  assert.equal(wrapper.find('.ht').classes().includes('on'), false);
+  assert.equal(tipOf(browser).classList.contains('on'), false);
+});
+
+test('HelpTip с toggle: клик ВНУТРИ подсказки её не закрывает', async (t) => {
+  const browser = await browserHarness(t);
+  const { wrapper } = await mountTip(t, browser);
+
+  await wrapper.find('.ht-tr').trigger('click');
+  // Подсказка вне корня компонента, поэтому «клик мимо» обязан учитывать и её саму:
+  // иначе закреплённая всплывашка гасла бы от тычка в собственный текст.
+  tipOf(browser).dispatchEvent(new browser.Event('pointerdown', { bubbles: true }));
+  await wrapper.vm.$nextTick();
+  assert.equal(tipOf(browser).classList.contains('on'), true);
 });
 
 test('HelpTip с toggle: кнопка внутри подсказки закрывает её (действие уводит со страницы)', async (t) => {
@@ -109,7 +134,9 @@ test('HelpTip с toggle: кнопка внутри подсказки закры
   });
 
   await wrapper.find('.ht-tr').trigger('click');
-  assert.equal(wrapper.find('.ht').classes().includes('on'), true);
-  await wrapper.find('.ht-tip .go').trigger('click');
-  assert.equal(wrapper.find('.ht').classes().includes('on'), false);
+  assert.equal(tipOf(browser).classList.contains('on'), true);
+  browser.document.querySelector('.ht-tip .go')
+    .dispatchEvent(new browser.Event('click', { bubbles: true }));
+  await wrapper.vm.$nextTick();
+  assert.equal(tipOf(browser).classList.contains('on'), false);
 });

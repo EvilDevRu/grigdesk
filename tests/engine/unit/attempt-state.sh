@@ -4,7 +4,7 @@ source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 source "$FACTORY_HOME/lib/attempt-state.sh"
 control_dir=$(factory_control_root)
 
-publisher="$FACTORY_TESTS_HOME/fixtures/routes-v2-publish.mjs"
+publisher="$FACTORY_TESTS_HOME/fixtures/routes-publish.mjs"
 routes_dir="$TEST_ROOT/routes"
 
 json_field() {
@@ -28,6 +28,13 @@ assert_rc 0 "$?" "immutable route fixture is published"
 catalog_v1=$(json_field "$first" catalogHash)
 route_v1=$(json_field "$first" routeHash)
 
+# protocol root мог появиться раньше ledger через orchestrator/shared locks под umask 0002.
+# Prepare обязан безопасно сузить уже существующие owned canonical directories.
+mkdir -p "$control_dir/protocol-v2/tasks"
+chmod 775 "$control_dir/protocol-v2" "$control_dir/protocol-v2/tasks"
+assert_eq 775 "$(stat -c '%a' "$control_dir/protocol-v2")" \
+  "fixture starts with a group-writable protocol root"
+
 ATTEMPT_STATE_ID_OVERRIDE=a_11111111111111111111111111111111
 attempt_v1=$(attempt_state_begin_v2 42 demo-profile "$routes_dir")
 begin_rc=$?
@@ -38,6 +45,14 @@ assert_eq a_11111111111111111111111111111111 "$attempt_v1" \
 
 task_root=$(attempt_state_v2_task_root 42)
 attempt_dir="$task_root/attempts/$attempt_v1"
+assert_eq 700 "$(stat -c '%a' "$control_dir/protocol-v2")" \
+  "attempt prepare narrows an existing protocol root to owner-only"
+assert_eq 700 "$(stat -c '%a' "$control_dir/protocol-v2/tasks")" \
+  "attempt prepare narrows an existing tasks root to owner-only"
+assert_eq 700 "$(stat -c '%a' "$task_root")" \
+  "task ledger root is owner-only"
+assert_eq 700 "$(stat -c '%a' "$task_root/attempts")" \
+  "attempts directory is owner-only"
 assert_file_exists "$attempt_dir/attempt.json" \
   "attempt metadata is published in the isolated v2 namespace"
 assert_file_exists "$attempt_dir/pins.json" \

@@ -1,6 +1,6 @@
-// Статика: собранный фронт (web/dist) + артефакты приёмки из STATE_DIR (/shots, /demo).
+// Статика: собранный фронт (web/dist) + артефакты приёмки из STATE_DIR (/shots).
 // @fastify/static регистрируется несколько раз с разными префиксами; повторные — с
-// decorateReply:false. shots/demo создаём сами: иначе первый же ролик, снятый после
+// decorateReply:false. shots создаём сами: иначе первый же скриншот, снятый после
 // старта сервера, не раздавался бы до рестарта (роут регистрируется только на старте).
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
@@ -11,12 +11,9 @@ async function staticPlugin(fastify, opts) {
   const { webDist, stateDir } = opts;
 
   const shotsDir = path.join(stateDir, 'shots');
-  const demoDir = path.join(stateDir, 'demo');
   fs.mkdirSync(shotsDir, { recursive: true });
-  fs.mkdirSync(demoDir, { recursive: true });
 
   await fastify.register(fastifyStatic, { root: shotsDir, prefix: '/shots/', decorateReply: false });
-  await fastify.register(fastifyStatic, { root: demoDir, prefix: '/demo/', decorateReply: false });
 
   // Фронт — последним, на корне. SPA-fallback: неизвестные не-API пути → index.html.
   // Кеш: index.html — no-cache (иначе старый html держит ссылки на старые ассеты);

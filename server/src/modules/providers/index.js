@@ -6,11 +6,12 @@
 // Не путать с /api/agents — там база агентов-стадий конвейера (промпты).
 import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
-import { getExecutors } from '../../lib/executors/index.js';
+import { getProviderAdapters } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { isOutdated } from '../../lib/executors/_npm-latest.js';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/provider-settings.js';
 import {
+  createUsageReadCache,
   executeProviderUsageAction,
   mergeProviderUsage,
   normalizeProviderUsage,
@@ -37,7 +38,7 @@ async function providersModule(fastify, opts) {
   }
 
   async function buildRegistry() {
-    const executors = await getExecutors();
+    const executors = await getProviderAdapters();
     const models = await getModelsRegistry(config);
     const providers = [];
     for (const ex of executors.values()) {
@@ -58,8 +59,13 @@ async function providersModule(fastify, opts) {
         auth: auth.mode,
         authLabel: auth.label,
         available: ok && auth.available,
+        // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
+        chatEnabled: typeof ex.run === 'function',
         installed: ok,
         install: ex.install || null,
+        // Установка и login могут быть разными сценариями. Старые адаптеры пока
+        // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
+        setupCommand: ok ? (ex.login || ex.install || null) : (ex.install || null),
         canUpdate: !!ex.updateCmd,
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
@@ -76,7 +82,33 @@ async function providersModule(fastify, opts) {
   }
 
   let cache = null; // { at, providers }
-  let usageCache = null; // { at, usage }
+  const usageCache = createUsageReadCache(async (previousUsage) => {
+    const executors = await getProviderAdapters();
+    const checkedAt = Date.now();
+    // Аккаунты независимы: медленная проверка одного исполнителя не должна
+    // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
+    const entries = await Promise.all([...executors.values()].map(async (ex) => {
+      let current;
+      if (typeof ex.usage !== 'function') {
+        current = unsupportedProviderUsage(ex.name, checkedAt);
+      } else {
+        try {
+          current = normalizeProviderUsage(await ex.usage(config, deps), {
+            providerName: ex.name,
+            checkedAt,
+          });
+        } catch (e) {
+          fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
+          current = normalizeProviderUsage({
+            state: 'unavailable',
+            message: `Не удалось получить лимиты ${ex.name}. Повторим проверку автоматически.`,
+          }, { providerName: ex.name, checkedAt });
+        }
+      }
+      return [ex.id, mergeProviderUsage(previousUsage?.[ex.id], current)];
+    }));
+    return Object.fromEntries(entries);
+  }, { maxAgeMs: CACHE_MS });
 
   // ── Проверка новых версий CLI: периодически и по кнопке, НИКОГДА не обновляет сама ──
   const updates = new Map(); // providerId → { latest, outdated, at }
@@ -84,7 +116,7 @@ async function providersModule(fastify, opts) {
   const FIRST_CHECK_MS = 30_000;             // после старта — не мешая подъёму сервера
 
   async function checkUpdates() {
-    const executors = await getExecutors();
+    const executors = await getProviderAdapters();
     let changed = false;
     for (const ex of executors.values()) {
       if (typeof ex.latestVersion !== 'function') continue;
@@ -118,35 +150,7 @@ async function providersModule(fastify, opts) {
   fastify.post('/api/providers/check-updates', async () => ({ updates: await checkUpdates() }));
 
   // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
-  fastify.get('/api/providers/usage', async () => {
-    if (usageCache && Date.now() - usageCache.at < CACHE_MS) return { usage: usageCache.usage };
-    const executors = await getExecutors();
-    const usage = {};
-    const checkedAt = Date.now();
-    for (const ex of executors.values()) {
-      let current;
-      if (typeof ex.usage !== 'function') {
-        current = unsupportedProviderUsage(ex.name, checkedAt);
-      } else {
-        try {
-          current = normalizeProviderUsage(await ex.usage(config, deps), {
-            providerName: ex.name,
-            checkedAt,
-          });
-        } catch (e) {
-          fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
-          current = normalizeProviderUsage({
-            state: 'unavailable',
-            message: `Не удалось получить лимиты ${ex.name}. Повторим проверку автоматически.`,
-          }, { providerName: ex.name, checkedAt });
-        }
-      }
-      usage[ex.id] = mergeProviderUsage(usageCache?.usage?.[ex.id], current);
-    }
-    // Сетевой сбой не затирает прошлые бары/ресурсы, но остаётся видимым состоянием.
-    usageCache = { at: checkedAt, usage };
-    return { usage: usageCache.usage };
-  });
+  fastify.get('/api/providers/usage', async () => ({ usage: await usageCache.read() }));
 
   /**
    * Generic provider-account action. The route knows neither billing semantics
@@ -154,7 +158,7 @@ async function providersModule(fastify, opts) {
    * requestId crosses the boundary for idempotent irreversible actions.
    */
   fastify.post('/api/providers/:id/usage-actions/:actionId', async (request, reply) => {
-    const ex = (await getExecutors()).get(String(request.params.id));
+    const ex = (await getProviderAdapters()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     const body = request.body || {};
     const r = await executeProviderUsageAction(ex, {
@@ -170,7 +174,7 @@ async function providersModule(fastify, opts) {
         message: `исполнитель ${ex.name} не поддерживает это действие`,
       });
     }
-    if (r?.ok) usageCache = null;
+    if (r?.ok) usageCache.clear();
     else fastify.log.warn({ provider: ex.id, action: request.params.actionId, err: r?.error }, 'действие usage не выполнено');
     return r;
   });
@@ -193,7 +197,7 @@ async function providersModule(fastify, opts) {
    * значение к типу его `kind` — чужой ключ в prefs не попадёт.
    */
   fastify.post('/api/providers/:id/settings', async (request, reply) => {
-    const ex = (await getExecutors()).get(String(request.params.id));
+    const ex = (await getProviderAdapters()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     const applied = applyProviderSetting(ex, prefs.read().providerSettings, request.body || {});
     if (!applied.ok) return reply.code(400).send({ error: applied.error, message: applied.message });
@@ -209,7 +213,7 @@ async function providersModule(fastify, opts) {
    * до кокпита без правок кода.
    */
   fastify.post('/api/providers/:id/update', async (request, reply) => {
-    const ex = (await getExecutors()).get(String(request.params.id));
+    const ex = (await getProviderAdapters()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     if (!ex.updateCmd) return reply.code(400).send({ error: 'no_update', message: `у исполнителя ${ex.name} нет команды обновления` });
     const before = (await ex.probe(config))?.version || '';

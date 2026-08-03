@@ -45,7 +45,7 @@ async function worktrees(dir) {
 async function codeModule(fastify, opts) {
   const { config, prefs } = opts;
 
-  // Живой гейт (как у video/demo): тумблер в настройках действует без рестарта.
+  // Живой гейт (как у video): тумблер в настройках действует без рестарта.
   const gate = (reply) => (fastify.pluginEnabled('code') ? null
     : reply.code(403).send({ error: 'plugin_disabled', message: 'Плагин «Код» выключен — «Настройки → Плагины»' }));
 

@@ -16,10 +16,10 @@ runner_sandboxed_run() {
   [[ "$?" == 2 ]] || return 71
   FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-progress.sh" \
     --task "$FACTORY_RUN_TASK" --stage "$FACTORY_RUN_STAGE" \
-    --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" ROUTE feature || return
+    --run-id "$FACTORY_RUN_ID" --epoch "$FACTORY_RUN_EPOCH" PLANS done || return
   local visible=0
   for _poll in {1..20}; do
-    if grep -q '^ROUTE=feature$' "$STATE_DIR/t${FACTORY_RUN_TASK}.pipeline" 2>/dev/null; then
+    if grep -q '^PLANS=done$' "$STATE_DIR/t${FACTORY_RUN_TASK}.pipeline" 2>/dev/null; then
       visible=1
       break
     fi

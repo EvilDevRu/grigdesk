@@ -40,8 +40,8 @@ export function lineCount(value) {
 }
 
 /**
- * Принимает уже нормализованные шаги, ставит timestamp, ограничивает поток и
- * безопасно передаёт его в SSE. Локальная копия нужна executor-у для истории и
+ * Принимает уже нормализованные шаги, ставит timestamp, ограничивает хранение и
+ * безопасно передаёт поток в SSE. Локальная копия нужна executor-у для истории и
  * для корректного ответа после остановки хода.
  */
 export function createStepSink(onStep, {
@@ -51,12 +51,20 @@ export function createStepSink(onStep, {
   const steps = [];
 
   function emit(step) {
-    if (!step || typeof step !== 'object' || !step.k || steps.length >= limit) return null;
+    if (!step || typeof step !== 'object' || !step.k) return null;
     const next = {
       ...step,
       at: Number.isFinite(step.at) ? step.at : now(),
     };
+    // Лимит ограничивает ХРАНЕНИЕ, а не трансляцию. Раньше он глушил и `onStep`:
+    // ход на 400-м шаге переставал слать SSE, и лента в окне замирала навсегда —
+    // человек видел вечное «думает…» и считал агента повисшим, хотя тот работал
+    // ещё час (у Codex это заметнее: его счётчик токенов тикает только в конце хода,
+    // так что других признаков жизни у окна не остаётся вовсе).
+    // Окно скользящее: у длинного хода ценен свежий хвост, а не архив начала —
+    // именно он восстанавливается в ленте после F5.
     steps.push(next);
+    if (steps.length > limit) steps.splice(0, steps.length - limit);
     try { onStep?.(next); } catch { /* лента не должна ронять ход агента */ }
     return next;
   }

@@ -15,7 +15,6 @@ const routes = [
   { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Проекты' } },
   { path: '/code', name: 'code', component: () => import('./views/CodeView.vue'), meta: { title: 'Код' } },
   { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { title: 'Видео' } },
-  { path: '/demo', name: 'demo', component: () => import('./views/DemoView.vue'), meta: { title: 'Демо' } },
   { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue'), meta: { title: 'Настройки' } },
 ];
 

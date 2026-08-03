@@ -4,6 +4,7 @@
 source "${FACTORY_HOME:?}/lib/profile-config.sh"
 source "$FACTORY_HOME/lib/pipeline-store.sh"
 source "$FACTORY_HOME/lib/routing.sh"
+source "$FACTORY_HOME/lib/runners-catalog.sh"
 source "$FACTORY_HOME/lib/runtime-switch.sh"
 source "$FACTORY_HOME/lib/debug-settings.sh"
 
@@ -417,12 +418,7 @@ _runner_cli_task() {
 factory_runner_cli() {
   case "${1:-}" in
     runners)
-      local module
-      for module in "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}"/*.sh; do
-        [[ -f "$module" ]] || continue
-        case "$(basename "$module" .sh)" in index|policy|catalog) continue ;; esac
-        basename "$module" .sh
-      done | sort
+      runners_catalog_list
       ;;
     profile)
       shift

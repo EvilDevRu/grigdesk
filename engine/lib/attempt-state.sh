@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Изолированное состояние попыток route protocol v2.
-#
-# Этот слой намеренно не подключён к core/factory: до cutover старые tNN.pipeline остаются
-# единственным состоянием v1. V2 живёт в отдельном namespace и никогда не открывает v1-файлы.
+# Trusted immutable состояние попыток route protocol. После cutover это единственный
+# исполняемый state layer; исторические tNN.pipeline читаются только как UI-проекция.
+# Суффикс `_v2` у внутренних shell API сохранён как версия формата ledger, не как второй launcher.
 #
 # Публичный API:
 #   attempt_state_begin_v2 TASK PROFILE ABS_ROUTES_DIR
@@ -59,8 +58,8 @@ _attempt_state_state_dir() {
   mkdir -p "$control" || return 1
   [[ -d "$control" && ! -L "$control" ]] || return 78
   canonical=$(realpath -e -- "$control") || return 78
-  [[ "$canonical" == "$control" ]] || return 78
-  chmod 700 "$control" 2>/dev/null || true
+  [[ "$canonical" == "$control" && -O "$control" ]] || return 78
+  chmod 700 -- "$control" 2>/dev/null || return 78
   printf '%s\n' "$control"
 }
 
@@ -82,7 +81,7 @@ _attempt_state_routes_dir() {
 }
 
 _attempt_state_route_tool() {
-  local tool="${FACTORY_HOME:?}/bin/factory-route-v2" canonical
+  local tool="${FACTORY_HOME:?}/bin/factory-route" canonical
   [[ "$tool" == /* && -f "$tool" && -x "$tool" && ! -L "$tool" ]] || return 2
   canonical=$(realpath -e -- "$tool") || return 2
   [[ "$canonical" == "$tool" ]] || return 2
@@ -90,7 +89,7 @@ _attempt_state_route_tool() {
 }
 
 _attempt_state_prepare_root() {
-  local root=$1 state base tasks dir
+  local root=$1 state base tasks dir canonical
   state=$(_attempt_state_state_dir) || return
   base="$state/protocol-v2"
   tasks="$base/tasks"
@@ -102,6 +101,12 @@ _attempt_state_prepare_root() {
         [[ -d "$dir" && ! -L "$dir" ]] || return 1
       }
     fi
+    canonical=$(realpath -e -- "$dir" 2>/dev/null) || return 78
+    [[ "$canonical" == "$dir" && -O "$dir" ]] || return 78
+    # protocol-v2 мог впервые появиться через orchestrator/shared lock под umask
+    # 0002 и остаться 0775. Trusted ledger fail-closed требует приватную lineage;
+    # существующий канонический каталог текущего uid безопасно сужаем до 0700.
+    chmod 700 -- "$dir" 2>/dev/null || return 78
   done
 }
 

@@ -115,7 +115,17 @@ export function mergeMessages(base = [], incoming = []) {
 // Поля, которые описывают состояние агента, а не окно: отставшая копия ломает ими живой
 // разговор (старый sessionId уводит агента в забытую сессию, старый счётчик контекста
 // врёт про кольцо, потерянный pendingSeed — это потерянная память после сжатия).
-const AGENT_KEYS = ['sessionId', 'contextTokens', 'contextIsEstimate', 'pendingSeed', 'compactedAt'];
+const AGENT_KEYS = [
+  'sessionId',
+  'contextTokens',
+  'contextWindow',
+  'contextMetric',
+  'contextIsEstimate',
+  'totalInputTokens',
+  'cachedInputTokens',
+  'pendingSeed',
+  'compactedAt',
+];
 
 /**
  * Слияние чата целиком.

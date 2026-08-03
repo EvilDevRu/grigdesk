@@ -1,6 +1,6 @@
 // Модуль routes — проекты и их маршруты.
 // Маршрут живёт ТОЛЬКО опубликованным immutable-бандлом (`~/.factory/routes/<профиль>/`):
-// ревизии по content-addressed хешу + указатель current.json. HTTP-поверхность — api-v2.js.
+// ревизии по content-addressed хешу + указатель current.json. HTTP-поверхность — api.js.
 //
 // Редактируемого legacy-стора `routes/<проект>/<id>.json` больше нет. Он ничего не
 // исполнял: движок читал profile.sh и graph.json, а apply у reseed был отключён ещё
@@ -9,12 +9,12 @@
 // prefs.projects, где и так лежат их пути репозиториев для плагина «Код».
 import fp from 'fastify-plugin';
 import { listProjects, PROFILE_RE } from '../../lib/profiles.js';
-import { registerRoutesV2Api } from './api-v2.js';
+import { registerRoutesApi } from './api.js';
 
 async function routesModule(fastify, opts) {
   const { config, prefs } = opts;
-  await registerRoutesV2Api(fastify, {
-    baseDir: config.routesV2Dir,
+  await registerRoutesApi(fastify, {
+    baseDir: config.routesDir,
     profilesDir: config.profilesDir,
   });
 
@@ -29,8 +29,9 @@ async function routesModule(fastify, opts) {
   fastify.get('/api/profiles', async () => ({ profiles: await listProjects(config, prefs) }));
 
   // Новый проект кокпита — запись в реестре prefs; дальше ему задают пути репозиториев
-  // («Проекты»), и его видит плагин «Код». Профиль фабрики так НЕ заводится: скелет
-  // профиля создаёт engine/bin/factory-new, и подделывать его каталогом кокпит не станет.
+  // («Проекты»), и его видит плагин «Код». Профиль фабрики так НЕ заводится: его
+  // route-контракт создают вручную по PROFILE-CONTRACT/NEW-PROJECT, а кокпит не подделывает
+  // локальный каталог profiles/.
   fastify.post('/api/profiles', async (req, reply) => {
     return mutate(async () => {
       const id = String(req.body?.id || '').trim();

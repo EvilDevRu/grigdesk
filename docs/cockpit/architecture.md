@@ -22,26 +22,26 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :814
 
 | Модуль | Эндпоинты | Источник |
 |--------|-----------|----------|
-| `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots}`, запуск/ворота/этапы/runner switch/стенд | `~/.factory/state` + `<factoryHome>/bin/factory` |
+| `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд | `~/.factory/state` + `<factoryHome>/bin/factory` |
 | `b24` | `/api/b24/{dashboard,task/:id,users}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart` | `/proc`, `os`, systemd/manual launcher |
 | `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
 | `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls}` | prefs, engine debug CLI, `CredsStore`, `LocalTls` |
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission | выбранный executor + `chats/` ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
-| `routes` | `GET/POST /api/profiles`, immutable `/api/routes-v2/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_V2_DIR`); проекты кокпита — prefs |
+| `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_DIR`); проекты кокпита — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
 | `projects`, `code` | `/api/projects*`, read-only `/api/code/:project/*` | профили/prefs + git/worktree |
 | `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](documents.md)) |
-| `plugins`, `demo` | `/api/plugins*`, `/api/demo*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
+| `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
 | `terminal` | `/api/terminal` (WebSocket) | PTY |
 | `health` | `/api/health` | — |
 
 Fastify-плагины: `sse` (fs.watch → broadcast), `http-scope` (область http-сокета, когда поднят
 https: с loopback — всё, из сети — только корневой сертификат и `301`), `auth` (весь `/api`, WS,
-`/shots` и `/demo` закрыты сессией; исключения — login/setup/state, gateway TLS allow и выдача
+`/shots` закрыт сессией; исключения — login/setup/state, gateway TLS allow и выдача
 корневого сертификата; локальные CLI используют `X-Cockpit-Token`), `static` (web/dist, кэш
 index=no-cache, assets=immutable). Порядок важен: `http-scope` идёт ПЕРЕД `auth`, иначе устройство
 из сети получало бы `401` вместо редиректа и не добиралось до экрана входа.
@@ -83,23 +83,49 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
 У стадий-статусов профиля проекта (skeptic/validate/tcritic/simplify) промпт пуст ЗАКОННО — их ведут
 промпты соседних стадий (plan/tests/build).
 
-**Прогоны v2 в UI:** адаптер состояния читает ОБА дерева — legacy `state` и
-`state-v2` (`config.stateV2Dir`); формат pipeline-файла одинаковый, поэтому список,
-граф и логи v2-задач работают штатно, в сводке/графе есть `generation: v1|v2`.
-Мутации v1-CLI (гейты, форс этапа, runner switch, снос песочницы, launch) по
-v2-задаче — 409 `v2_task_engine_owned`: ею управляет только `factory-v2`.
+**Прогоны в UI:** адаптер читает единственный runtime root `config.stateDir`.
+Полностью закреплённая route-attempt identity делает реестр исполняемым; исторические
+реестры без неё остаются видимыми только для чтения. Поля `generation`, веток запуска
+v1/v2 и compatibility resume нет. Слепой форс этапа получает 409
+`engine_owned_state`, повторный launch — `run_exists`: immutable-журнал подделывать нельзя.
 
-**Маршруты v2:** `/api/routes-v2` — отдельный namespace и не подменяет legacy CRUD.
-Хранилище опубликованных бандлов — `~/.factory/routes` (`config.routesV2Dir`), отдельно
-от legacy-базы `<repo>/routes`: это runtime-артефакт движка, и движок (`factory-v2`)
-читает тот же каталог по умолчанию. Без `routesV2Dir` в конфиге v2-store падает в общий
-каталог с legacy (режим тестов; защищён гардами `badRouteId`/`removePromptSidecars`).
+| Действие | Кто делает | Как |
+|---|---|---|
+| Ворота (approve/reject) | движок | мост в `factory gate --attempt … --commit-only` |
+| «Перейти сюда» | движок | `factory goto` пишет событие human-rewind с причиной |
+| Runner switch | движок | тот же multi-runner и exact active run |
+| Lifecycle isolated-стенда | **кокпит** | только для `WORKSPACE_MODE=isolated` |
+| Lifecycle shared-стенда | внешний владелец | Cockpit и engine не создают, не сносят и не перезапускают его |
+| Продолжить упавший прогон | человек кнопкой | `POST /api/tasks/:id/resume` (resume ТОЙ ЖЕ попытки) |
+
+Терминальность прогона несёт trusted attempt-ledger и его `RESULT`
+(`completed|abandoned|recovered|human-rewind`), а не `WF_STATUS`: последний —
+только вторичная проекция активности и не является terminal marker. На этом же
+trusted поле стоит кнопка «Продолжить»: без него закрытая
+попытка выглядела бы упавшей. Автовосстановление отключено: resume всегда является
+явным действием человека и требует exact attempt.
+
+**Маршруты:** `/api/routes` — единственный namespace immutable route bundles.
+Хранилище опубликованных бандлов — `~/.factory/routes` (`config.routesDir`); движок
+`factory` читает тот же каталог по умолчанию. Legacy CRUD, reseed и API alias удалены.
 Route/catalog публикуются полным immutable bundle, exact bytes перечислены в manifest,
 а `current.json` меняется через compare-and-swap. Catalog pin включает bootstrap Scout и
 точные route hashes. Server валидирует schema при публикации и чтении; engine перед
 исполнением делает независимую повторную проверку. Route schema описывает executor,
 phase, policy, status owner, retry и все переходы, но запрещает `model`, `provider`,
 `effort` и произвольный shell.
+
+Граф в UI строится из **закреплённой машины попытки**, а не из live `graph.json`:
+main/tail задают узлы, rewind — красные рёбра, штатный `skipped` без `stop` — optional.
+Маршрут без канонического `ship` законен и отображается без публикационного хвоста; engine
+передаёт ему `delivery.mode=disabled` и не создаёт actions/targets. Тексты одинаково
+названных ворот ключуются парой `route/node`, поэтому `hunt/gate_accept` не называется
+браузерной приёмкой изменения.
+
+Pin защищает только bundle (machine + prompts). `engine` и `profile.sh` читаются живыми,
+`runners.env` — при routing decision, а `server`/`web` меняются после человеческого
+рестарта/развёртывания. Поэтому rollout сначала ставит обратно совместимые live-компоненты,
+затем CAS-публикует новый catalog; уже начатые попытки не перепривязываются.
 
 **UI-мелочи:** системный `confirm()` запрещён — единый `shared/ui/confirm.js`
 (`await confirmDialog(text, {danger, okText})`, тёмная модалка проекта). Тултип исполнителя
@@ -137,7 +163,7 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 - `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
   Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
   Projects, Code (read-only дерево/файл/git), Documents (скрытый route просмотра MD/TXT),
-  Diff (Monaco), Video, Demo, Terminal,
+  Diff (Monaco), Video, Terminal,
   Settings (Приложение / Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ), Login,
   TaskModal и ChatPanel.
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
@@ -186,28 +212,36 @@ cookie jar, чтобы два процесса не перезаписывали
 
 Плагин = отключаемый блок: пункт в сайдбаре (под разделителем после основного nav), плашка
 в «Настройки → Плагины», свои API/настройки. Реестр: `lib/plugins-registry.js` (SYSTEM =
-video, demo, code) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+video, code) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
 в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
-системные модули (media, demo, code) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
+системные модули (media, code) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
 plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ входит в плагин video — не гейтится.
-Фронт: `stores/plugins.js`, DemoView/VideoView/CodeView показывают заглушку при выключенном плагине.
+Фронт: `stores/plugins.js`, VideoView/CodeView показывают заглушку при выключенном плагине.
 Вкладка «Настройки → Плагины»: карточки горизонтальной сеткой (auto-fill 340px), селекты
 настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
 действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.
 
-## Демо вне конвейера
+## Демо: удалено целиком
 
-Демо УБРАНО из цепочки фабрики (хвост bin/factory: ship → сразу ретро). Съёмка — плагин «Демо»
-(`/demo`): `POST /api/demo/:id/run` → `factory <task> demo` (одиночный прогон DEMO-агента в
-transient scope `factory-demo-tNNNN`), статус — ключ DEMO реестра (running→done|failed), фронт
-поллит `/api/demo/overview` (задачи+стенды+ролики из `~/.factory/state/demo`). В реестре остался
-ОДИН ключ — `DEMO`, и пишет его только режим demo. Ворота `DEMO_ASK`/`GATE_DEMO` выпилены
-целиком (2026-07-27): из `--init` реестра, из `ROUTE_STAGES.feature`, из каталога стадий
-`lib/stages.js`, из `GATE_REASON` и из эндпоинта ворот — он снова принимает только `GATE_*`.
-Пока они числились этапами маршрута, прогресс feature не доходил до 100%, а дашборд фабрики
-ждал ответа на вопрос, которого движок больше не задаёт.
+Съёмки демо в кокпите БОЛЬШЕ НЕТ (2026-08-01, решение человека: видео вынесено в отдельный
+сервис). Удалены плагин «Демо» с `/api/demo*` и `DemoView`, отдача `/demo/*` из статики и
+`PROTECTED_STATIC`, режим `factory <TASK> demo` в движке, промпт DEMO с лимитами и скриптами
+озвучки в профиле, шаблон агента и сами ролики (`~/.factory/state/demo`).
+
+Что осталось от истории и почему это не надо «возвращать обратно»:
+
+- До этого демо убрали из ЦЕПОЧКИ (2026-07-27, хвост bin/factory: ship → сразу ретро) вместе
+  с воротами `DEMO_ASK`/`GATE_DEMO` — из `--init` реестра, из `ROUTE_STAGES.feature`, из
+  каталога стадий `lib/stages.js`, из `GATE_REASON` и из эндпоинта ворот (он принимает только
+  `GATE_*`). Пока они числились этапами маршрута, прогресс feature не доходил до 100%,
+  а дашборд ждал ответа на вопрос, которого движок больше не задаёт.
+- Ключ `DEMO` в старых реестрах мёртв: его никто не пишет и не ждёт. Исторический
+  реестр доступен только для чтения; единый route runtime не строит по нему маршрут
+  и не возобновляет такую попытку.
+- Распознавание видео в задачи (плагин «Видео», `/api/media*`) к демо отношения не имеет
+  и осталось на месте.
 
 ## Авторизация и CLI-токен
 

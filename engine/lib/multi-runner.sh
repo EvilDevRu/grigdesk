@@ -106,12 +106,23 @@ _multi_execution_plan() {
   # Этапу нужен терминальный status transport, а его реализация provider-specific:
   # Claude сохраняет capability FD, Codex использует deferred request из sandbox.
   local provider=$1 caps required=status degradable="" requirements plan
+  local fanout_mode=${FACTORY_ROUTE_FANOUT_MODE:-single}
+  local fanout_max=${FACTORY_ROUTE_FANOUT_MAX:-1}
+  local fanout_degrade=${FACTORY_ROUTE_FANOUT_DEGRADE:-forbid}
+  case "$fanout_mode:$fanout_max:$fanout_degrade" in
+    single:1:forbid) ;;
+    parallel:*:forbid)
+      [[ "$fanout_max" =~ ^([2-9]|1[0-6])$ ]] || return 78
+      required=$(_execution_csv_append_unique "$required" fanout)
+      ;;
+    parallel:*:allow-single)
+      [[ "$fanout_max" =~ ^([2-9]|1[0-6])$ ]] || return 78
+      required=$(_execution_csv_append_unique "$required" fanout)
+      degradable=$(_execution_csv_append_unique "$degradable" fanout)
+      ;;
+    *) return 78 ;;
+  esac
   caps=$(runner_call "$provider" capabilities 2>/dev/null | tr ' \n' ',' | sed 's/,,*/,/g; s/,$//')
-  if declare -F profile_stage_fanout >/dev/null &&
-     [[ -n "$(profile_stage_fanout "$MULTI_STAGE" 2>/dev/null)" ]]; then
-    required+=,fanout
-    degradable=fanout
-  fi
   requirements=$(mktemp "$MULTI_CATALOG_ROOT/.requirements.XXXXXX")
   {
     printf 'REQUIREMENTS_SCHEMA=1\n'
@@ -269,8 +280,14 @@ _multi_invoke() {
   status_command="bash $FACTORY_HOME/lib/stage-result.sh --task $MULTI_TASK --stage $MULTI_STAGE --run-id $run_id --epoch $epoch"
   progress_command="bash $FACTORY_HOME/lib/stage-progress.sh --task $MULTI_TASK --stage $MULTI_STAGE --run-id $run_id --epoch $epoch"
   local plan_note=""
-  if [[ "${MULTI_PLAN_LEVEL[$provider]}" == degraded &&
-        "${MULTI_PLAN_DEGRADED[$provider]}" == *fanout* ]]; then
+  if [[ "${FACTORY_ROUTE_FANOUT_MODE:-single}" == parallel &&
+        "${MULTI_PLAN_LEVEL[$provider]}" != degraded ]]; then
+    plan_note="
+ПАРАЛЛЕЛЬНЫЙ READ-ONLY ВЕЕР: выдели до ${FACTORY_ROUTE_FANOUT_MAX} независимых исполнителей
+для явно разделённых зон задания, затем сам сведи их доказательства в один терминальный
+результат. Исполнители не меняют workspace и не публикуют статус этапа по отдельности."
+  elif [[ "${MULTI_PLAN_LEVEL[$provider]}" == degraded &&
+          "${MULTI_PLAN_DEGRADED[$provider]}" == *fanout* ]]; then
     plan_note="
 РЕЖИМ СОВМЕСТИМОСТИ: этот runner не предоставляет нативный fanout. Не блокируй этап:
 разбери перечисленные зоны последовательно, сохраняя независимые заметки, затем сведи их
@@ -282,8 +299,16 @@ ${plan_note}
 ЗАВЕРШЕНИЕ ЭТАПА (единственный допустимый канал статуса этого запуска):
   ${status_command} done
   ${status_command} failed \"причина\"
+  ${status_command} --failure-owner build --finding \"stable-id=краткое проверяемое замечание\" failed \"причина\"
   ${status_command} skipped \"причина\"
-Команда принимает результат только текущего run; старый или повторный результат будет отклонён."
+Команда принимает результат только текущего run; старый или повторный результат будет отклонён.
+Для проверочного failed типизированные замечания обязательны; bare failed оставлен только
+для legacy авторских этапов. Назначь корневого владельца: build — дефект продукта;
+tests — дефект/неполнота теста; environment —
+стенд, зависимости или конфигурация; plan — неверное требование/план; human — нужно решение
+человека. У каждого замечания стабильный id в kebab-case: при повторной проверке сохраняй тот
+же id, пока проблема та же, и не включай уже исчезнувшее замечание. Нельзя передавать owner без
+хотя бы одного --finding или metadata у done/skipped."
   prompt+="
 
 ПРОГРЕСС И МЕТАДАННЫЕ (не завершает этап):

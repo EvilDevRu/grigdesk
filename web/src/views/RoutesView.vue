@@ -7,12 +7,12 @@ import FactoryGraph from './pipeline/FactoryGraph.vue';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ProjectSwitcher from '../shared/ui/ProjectSwitcher.vue';
 
-// Маршруты проекта — ОПУБЛИКОВАННЫЙ каталог v2, а не редактируемая копия.
-// Правится маршрут в самом профиле (routes-v2/), кокпит даёт две кнопки —
+// Маршруты проекта — ОПУБЛИКОВАННЫЙ каталог, а не редактируемая копия.
+// Правится маршрут в самом профиле (routes/), кокпит даёт две кнопки —
 // «Проверить» и «Опубликовать» — и список ревизий с откатом указателя.
 // Редактора здесь нет намеренно: схема попытки закреплена хешем, и правка
 // «на лету» означала бы, что бегущая задача идёт по одному, а показывается
-// другое. Ровно из-за этого расхождения v2 и появился.
+// другое.
 const profiles = ref([]);
 const profile = ref(localStorage.getItem('cockpit-project') || '');
 const loading = ref(true);
@@ -28,7 +28,7 @@ const busy = ref('');            // 'validate' | 'publish' | 'rollback'
 const notice = ref('');
 const report = ref(null);        // сырой ответ публикатора — в «подробностях»
 
-const HELP_PANEL = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes-v2/), здесь только проверка, публикация и откат.';
+const HELP_PANEL = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes/), здесь только проверка, публикация и откат.';
 const HELP_REVISIONS = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие останутся на своей.';
 
 const ui = useUiContextStore();
@@ -66,7 +66,7 @@ async function load() {
       }
     }
     if (!profile.value) return;
-    const data = await api.get(`/api/routes-v2/${profile.value}/revisions`);
+    const data = await api.get(`/api/routes/${profile.value}/revisions`);
     publishSupported.value = !!data.publishSupported;
     currentHash.value = data.currentCatalogHash;
     revisions.value = data.revisions || [];
@@ -84,7 +84,9 @@ async function loadGraph() {
   graphLoading.value = true;
   try {
     const { id, hash } = selected.value;
-    graph.value = (await api.get(`/api/routes-v2/${profile.value}/routes/${id}/${hash}/graph`)).graph;
+    // ?c=<catalogHash> в URL обязателен: когда-то схема отдавалась с immutable, и браузер
+    // до сих пор может держать тот старый ответ по голому пути — иной query = промах кеша.
+    graph.value = (await api.get(`/api/routes/${profile.value}/routes/${id}/${hash}/graph?c=${currentHash.value}`)).graph;
   } catch (e) { graphError.value = e.message; }
   finally { graphLoading.value = false; }
 }
@@ -108,7 +110,7 @@ function onProjectCreated({ id, profiles: fresh }) {
   switchProfile(id);
 }
 
-// Проверка и публикация делает сам профиль (routes-v2/publish.mjs) — состав
+// Проверка и публикация делает сам профиль (routes/publish.mjs) — состав
 // маршрутов, промпты и bootstrap знает только он. Кокпит передаёт ровно два
 // своих аргумента: куда публиковать и поверх какой ревизии.
 async function run(mode) {
@@ -122,7 +124,7 @@ async function run(mode) {
     const body = mode === 'publish'
       ? { mode, expectedCatalogHash: currentHash.value }
       : { mode };
-    const res = await api.post(`/api/routes-v2/${profile.value}/publish`, body);
+    const res = await api.post(`/api/routes/${profile.value}/publish`, body);
     report.value = res.result;
     if (mode === 'publish') {
       await load();
@@ -147,7 +149,7 @@ async function rollback(rev) {
   ))) return;
   busy.value = 'rollback'; notice.value = '';
   try {
-    await api.put(`/api/routes-v2/${profile.value}/current`, {
+    await api.put(`/api/routes/${profile.value}/current`, {
       desiredCatalogHash: rev.catalogHash,
       expectedCatalogHash: currentHash.value,
     });
@@ -184,7 +186,7 @@ onMounted(load);
       <header class="phead">
         <span class="ttl">{{ profile || '—' }}</span>
         <span v-if="published" class="hash mono" :title="currentHash">current {{ shortHash(currentHash) }}</span>
-        <span v-else class="muted">маршрутов v2 ещё нет</span>
+        <span v-else class="muted">маршрутов ещё нет</span>
         <span class="grow"></span>
         <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
         <template v-if="publishSupported">
@@ -195,16 +197,15 @@ onMounted(load);
             <span v-if="busy === 'publish'" class="spin"></span> Опубликовать
           </button>
         </template>
-        <span v-else class="muted nopub" title="Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes-v2/publish.mjs">
+        <span v-else class="muted nopub" title="Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs">
           нет скрипта публикации
         </span>
       </header>
 
-      <!-- Проект ещё не переехал на v2: честно говорим, чего не хватает -->
+      <!-- Каталог ещё не опубликован: честно говорим, чего не хватает -->
       <div v-if="!published && !loading" class="hint">
-        <p>Проект идёт по схеме движка v1 (<span class="mono">profiles/{{ profile }}/graph.json</span>) —
-          опубликованного каталога маршрутов у него нет.</p>
-        <p class="muted">Маршрут v2 собирает сам профиль: <span class="mono">routes-v2/publish.mjs</span>.
+        <p>У проекта нет опубликованного каталога маршрутов.</p>
+        <p class="muted">Каталог собирает сам профиль: <span class="mono">routes/publish.mjs</span>.
           Как только он появится, здесь заработают проверка, публикация и откат.</p>
       </div>
 

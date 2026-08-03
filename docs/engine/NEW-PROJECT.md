@@ -1,313 +1,174 @@
-# Новый проект в Factory
+# Подключение нового проекта
 
-Новый проект добавляется профилем, а не условием в движке.
+Профиль проекта — локальная конфигурация окружения в profiles/<name>/. Движок не знает
+названий проектов и не создаёт профиль по догадкам. Старые генераторы профиля удалены: они
+создавали массивы этапов и shell-prompts, которые единый route-движок не исполняет.
 
-## 1. Собрать требования
+## Что выяснить до настройки
 
-До генерации профиля выяснить:
+С человеком нужно зафиксировать:
 
-1. что является задачей и откуда берётся ticket;
-2. чем доказать результат: тестом, метрикой, браузером, ручной приёмкой;
-3. как изолируется стенд и можно ли запускать задачи параллельно;
-4. какие команды/данные/ресурсы запрещены агенту;
-5. где обязательны человеческие ворота;
-6. какой ИИ primary и какой failover для этого проекта;
-7. какие семейства моделей нужны сильным и дешёвым этапам;
-8. **что приложение пишет в рабочее дерево само** — логи, кэши, дампы отладчика,
-   артефакты тестов. Вопрос человеку звучит так: «запусти стек, погоняй тесты и покажи
-   `git status --ignored` — что тут появилось не от разработчика?». Ответ уходит в
-   `PROFILE_VOLATILE_PATHS` (шаг 7); без него сторож приёмки остановит конвейер на
-   первом же этапе, который гоняет живой стенд;
-9. **под каким именем человек открывает стенд** — `localhost`, петлевой адрес, доменное
-   имя. Спрашивать так: «а если открыть тот же стенд по 127.0.0.1 вместо localhost —
-   всё работает так же?». Приложение может различать локальный запуск по имени хоста;
-   ответ уходит в `PROFILE_SERVICE_HOST` (шаг 9).
+1. Какие Git-репозитории входят в работу и какой из них является основным cwd.
+2. Режим workspace:
+   - isolated — отдельные workspace создаёт project-specific lifecycle;
+   - shared — source и workspace совпадают с primary checkout, стенд уже существует.
+3. Как проверить health стенда и какие frontend/API порты публиковать.
+4. Какие пути пишет само приложение: логи, кэши и тестовые артефакты.
+5. Какие команды нужны агентам и какие команды должны быть запрещены.
+6. Какие маршруты нужны. Обычно достаточно feature и debug; различие должно выражаться
+   в гарантиях и topology, а не только в тексте prompt.
+7. Есть ли delivery. Маршрут без узла ship не получает commit/push/PR actions.
+8. Для shared-режима — какие checkout, стенд и GPU должны блокироваться одной durable lease.
 
-Не использовать глобальный default: один проект может быть Claude-first, другой Codex-first.
+## Структура
 
-## 2. Сгенерировать каркас
+Создай вручную:
 
-```bash
-engine/bin/factory-new <name> /absolute/project/root
-```
-
-Команда создаёт:
-
-```text
+~~~text
 profiles/<name>/
   profile.sh
   runners.env
-  dashboard.env
   graph.json
-```
+  dashboard.env
+  routes/
+    definition.mjs
+    publish.mjs
+    prompts/...
+~~~
 
-Сначала исправить все `TODO`, затем запускать проверки.
+profiles/ игнорируется Git. Не добавляй проектные пути и секреты в tracked engine-файлы.
 
-## 3. Выбрать runner policy
+До публикации оставь capability выключенной:
 
-Скелет создаётся Claude → Codex. Если проект Codex-first:
-
-```bash
-engine/bin/factory profile <name> runner set codex --failover claude
-```
-
-Настроить семейства:
-
-```bash
-engine/bin/factory profile <name> model set DEFAULT codex \
-  family=sol version=latest effort=xhigh
-engine/bin/factory profile <name> model set DEFAULT claude \
-  family=opus version=latest effort=max
-engine/bin/factory profile <name> model set SCOUT codex \
-  family=terra version=latest effort=high
-engine/bin/factory profile <name> model set SCOUT claude \
-  family=sonnet version=latest effort=high
-```
-
-Хранить номер конкретного релиза нужно только при осознанном pin. Для автоматического
-обновления внутри линии использовать `family + version=latest`.
-
-## 4. Описать маршруты
-
-Маршрут — последовательность project stages:
-
-```bash
-PROFILE_ROUTE_STAGES_dev=(SCOUT PLAN GATE_PLAN TESTS BUILD REVIEW GATE_ACCEPT)
-PROFILE_ROUTE_STAGES_quick=(SCOUT BUILD REVIEW GATE_ACCEPT)
-```
-
-Правила:
-
-- `GATE_*` — ожидание человека;
-- SCOUT публикует `ROUTE` через `stage-progress`;
-- route должен существовать в профиле;
-- SHIP/RETRO выполняет хвост движка, если проект использует эти этапы;
-- DEMO запускается отдельной командой и не входит в обычный route.
-
-Не создавать два маршрута, если они не отличаются существенной гарантией.
-
-## 5. Написать prompts
-
-`profile_stage_prompt <TASK> <STAGE>` должен содержать:
-
-- цель одного этапа;
-- входные артефакты;
-- выходной артефакт;
-- команды проверки;
-- условия `done`, `skipped`, `failed`.
-
-Terminal команда добавляется движком:
-
-```text
-stage-result ... done
-stage-result ... skipped "причина"
-stage-result ... failed "причина"
-```
-
-Для route/internal nodes использовать добавленную `stage-progress`:
-
-```text
-ROUTE dev ROUTE_BY scout
-PLANS done SKEPTIC done VALIDATE done TRANSLATOR done
-```
-
-Не писать fixed status files и не давать агенту общий pipeline writer.
-
-## 6. Настроить доступы
-
-```bash
-PROFILE_AGENT_CWD="/path/to/project"
-PROFILE_AGENT_DIRS="/path/to/project-worktrees /path/to/second-repo"
-PROFILE_AGENT_ALLOW=("Bash(docker exec project-app:*)")
-PROFILE_AGENT_DENY=("Bash(project-destructive-command:*)")
-```
-
-Пути и команды — разные permission channels. Разрешение Write не разрешает Bash и наоборот.
-
-Для worktree задачи:
-
-```bash
-profile_agent_cwd() {
-  local worktree="/path/to/worktrees/t${1}"
-  [[ -d "$worktree" ]] && printf '%s\n' "$worktree"
+~~~json
+{
+  "capabilities": []
 }
-```
+~~~
 
-## 7. Защитить проверочные этапы
+Профиль без "route-v2" не запускается — это ожидаемый fail-closed этап настройки.
 
-```bash
-profile_stage_readonly() {
-  case "$1" in
-    REVIEW|LINT|BROWSER) printf '1\n' ;;
-    *) printf '\n' ;;
-  esac
+## runners.env
+
+Минимальный canonical config:
+
+~~~text
+RUNNERS_SCHEMA=1
+CONFIG_REVISION=1
+RUNNERS_COVERAGE=required
+PROJECT_RUNNER_PRIMARY=codex
+PROJECT_RUNNER_FAILOVER=claude
+~~~
+
+Модели и stage overrides добавляются теми же ключами MODEL_*/STAGE_*, что описаны в
+[PROFILE-CONTRACT.md](PROFILE-CONTRACT.md). После изменения нужен metadata-only host preflight.
+
+## profile.sh
+
+Обязательные route hooks:
+
+~~~bash
+profile_workspace_mode         # isolated | shared
+profile_repositories TASK      # name<TAB>source<TAB>workspace
+profile_project_context        # JSON: stack[] + guardrails[]
+profile_source_branch TASK
+profile_container TASK
+profile_stand_alive TASK       # только health, без lifecycle
+~~~
+
+Shared-профиль дополнительно реализует:
+
+~~~bash
+profile_service_ports TASK                 # FE_PORT<TAB>API_PORT
+profile_exclusive_resources TASK           # exact workspace:/... и stand:...
+profile_instrumentation_restored TASK SCOPE_FILE
+~~~
+
+Пример минимального shared-контракта:
+
+~~~bash
+PROFILE_NAME="example"
+PROJECT_ROOT="/absolute/path/example"
+PROFILE_SERVICE_HOST="127.0.0.1"
+
+profile_workspace_mode() { printf 'shared\n'; }
+profile_repositories() {
+  printf 'example\t%s\t%s\n' "$PROJECT_ROOT" "$PROJECT_ROOT"
 }
-
-profile_source_roots() {
-  local worktree="/path/to/worktrees/t${1}"
-  [[ -d "$worktree/.git" || -f "$worktree/.git" ]] &&
-    git -C "$worktree" rev-parse --show-toplevel
+profile_project_context() {
+  printf '%s\n' '{"stack":["TODO"],"guardrails":["TODO"]}'
 }
-
-profile_sensitive_files() {
-  printf '%s\n' "/path/to/worktrees/t${1}/.env.local"
+profile_source_branch() { git -C "$PROJECT_ROOT" symbolic-ref --quiet --short HEAD; }
+profile_container() { printf 'example\n'; }
+profile_service_ports() { printf '8080\t8080\n'; }
+profile_stand_alive() { curl -sf --max-time 3 http://127.0.0.1:8080/health >/dev/null; }
+profile_exclusive_resources() {
+  printf '%s\n' \
+    "workspace:$PROJECT_ROOT" \
+    'stand:example' \
+    'gpu:primary'
 }
-```
+# Если стенд читает checkout напрямую, отдельный sync не нужен, но health после
+# восстановления exact scope всё равно обязателен.
+profile_instrumentation_restored() { profile_stand_alive "$1"; }
+~~~
 
-Deny правила убирают частые auto-fix команды, а exact guard сравнивает содержимое
-tracked/untracked, index и symlink до/после. Если root определить нельзя, readonly-этап
-не запускается. При расхождении движок останавливается и не откатывает файлы: без владения
-транзакцией это могло бы стереть параллельную работу человека.
+Shared launcher не вызывает up.sh/down.sh, не создаёт worktree, контейнеры или volumes и
+не запускает остановленный стенд. Lease должна жить до terminal результата или abandon, включая
+все человеческие ворота. Cleanup инструментации обязан синхронизировать восстановленный scope во
+внешний стенд через profile_instrumentation_restored; ошибка оставляет попытку остановленной и
+lease занятой.
 
-Этап, которому действительно нужны временные правки (`TRACE`/`INSTRUMENT`), не помечать
-readonly. Для него нужен заранее объявленный file scope и host-controlled
-instrumentation transaction; простого обещания в prompt недостаточно.
+В isolated-режиме lifecycle допустим только для объектов exact attempt. Source и workspace
+обязаны быть непересекающимися; общие checkout/стенды нельзя выдавать за isolated.
 
-Такой этап запускается только в отдельном linked worktree, который host эксклюзивно
-арендовал этой попытке. Primary checkout и общий worktree для transaction cleanup
-не поддерживаются.
+## Маршруты и prompts
 
-И сразу объяви, что пишет само приложение, — иначе первый же такой этап встанет:
+Topology, политики, retry, fanout и prompt-файлы принадлежат immutable route bundle. В
+profile.sh их дубликатов нет. Каждый исполняемый узел задаёт:
 
-```bash
-PROFILE_VOLATILE_PATHS="storage/logs/* storage/framework/* e2e/traces/* test-results/*"
-```
+- id, runKey и executor;
+- policy.filesystem, policy.browser, policy.timeoutClass;
+- single/parallel policy в fanout: parallel допустим только для `state-only` agent-узла;
+  `degrade=forbid` требует native fanout, `allow-single` разрешает явное последовательное
+  выполнение независимых ролей одним runner-ом;
+- допустимые outcomes и переходы;
+- required context и project-specific prompt-файл.
 
-Сторож транзакции следит за ВСЕМИ игнорируемыми Git файлами (`.env`, `vendor`,
-`node_modules` — там правку проще всего спрятать), а стенд в это время поднят и пишет
-свои логи. Сторожу это неотличимо от правки агента: он может встать fail-closed на
-дампах debugbar и трассах Playwright, даже если среди них нет исходников. Список глобов
-относительно корня рабочего дерева; проверь его по `git status --ignored` после прогона
-тестов. Чем шире список, тем больше слепая зона — объявляй каталоги артефактов, а не
-корни репозитория.
+Для debug заранее объявляется instrumentation scope. Чисто машинные проверки syntax/hash/lint
+лучше оформлять `executor=command` через allowlisted profile hook, а не тратить на них LLM-узел.
+Узлы metrics и browser должны останавливать маршрут у человека, если обязательное доказательство
+невозможно получить.
 
-## 8. Добавить budget/fanout
+Не ставь `retry.productFailure > 0` узлу, у которого `on.failed` делает `rewind`. Сначала
+исполняется retry того же узла на прежнем входе и только потом rewind, поэтому проверяющий
+повторит то же замечание вместо возврата к автору. Общий валидатор отклоняет такую схему.
 
-```bash
-profile_stage_budget() {
-  case "$1" in
-    SCOUT) printf '8\n' ;;
-    BUILD) printf '20\n' ;;
-    *) printf '\n' ;;
-  esac
-}
+Проверяй source-каталог без live-публикации, затем публикуй в временный store и перечитывай
+каждый immutable hash. Только после зелёных offline-проверок выполняются CAS-публикация live
+catalog и отдельное включение capability. Эти два действия нельзя менять местами.
 
-profile_stage_timeout() {
-  case "$1" in
-    BUILD) printf '3600\n' ;;
-    *) printf '\n' ;;
-  esac
-}
+## Проверки
 
-profile_stage_fanout() {
-  case "$1" in
-    SCOUT)
-      printf '%s\n' 'AUTO 3-8' 'Делить по реально затронутым подсистемам.'
-      ;;
-    *) printf '\n' ;;
-  esac
-}
-```
+Структурная проверка без Cockpit и model call:
 
-Fanout применять для независимого чтения/анализа. Не применять для параллельной записи в один
-worktree и замеров на общем стенде.
-
-## 9. Реализовать стенд
-
-```bash
-profile_sandbox_up()     { ...; }
-profile_sandbox_down()   { ...; }
-profile_sandbox_exists() { ...; }
-```
-
-Скрипты хранить рядом в `profiles/<name>/`, а `profile.sh` оставлять тонким adapter-ом.
-
-Сразу объяви, под каким именем стенд открывают:
-
-```bash
-PROFILE_SERVICE_HOST="localhost"   # умолчание: 127.0.0.1
-```
-
-Из него движок собирает `services.frontendUrl`/`apiUrl` для браузерного этапа. Проверь
-ответ руками: открой стенд по петлевому адресу и по имени. Приложение, которое отличает
-локальный запуск по `window.location.hostname`, по IP уйдёт в продовый режим авторизации —
-а браузерный агент увидит не приложение, а цикл редиректов (инцидент t8165, шаг 1 пункт 9).
-
-Если Cockpit распределяет несколько стендов:
-
-```bash
-profile_slots() {
-  printf '%s\n' 'RANGE 0 5'
-  printf '%s\n' 'USED 2 t<TASK> task'
-}
-```
-
-Источник занятости должен совпадать с источником, который использует sandbox up/down.
-
-## 10. Довести UI graph
-
-`factory-new` создаёт graph из routes. Вручную проверить:
-
-- подписи и координаты;
-- route edges;
-- возвраты review/test → build;
-- `keys`;
-- `optional`.
-- `capabilities`, если профиль поддерживает отдельные действия вне маршрута
-  (например, `["demo"]`).
-
-После правки маршрутов:
-
-```bash
-engine/bin/factory-graph-new <name> --force
-python3 tests/engine/routes-sync.py <name>
-```
-
-Без graph Cockpit профиль не показывает.
-
-## 11. Offline приёмка
-
-```bash
+~~~bash
 engine/bin/factory-check <name> --quick
-tests/run-all.sh
-```
+~~~
 
-На этом этапе Cockpit и модели не запускаются.
+Она проверяет capability и hooks, canonical runner config и форму хоста стенда.
+Определения маршрутов, prompts, переходы и no-ship topology проверяет локальный тест source-каталога
+профиля до публикации.
 
-Проверить вручную, что:
+~~~bash
+node profiles/<name>/routes/publish.mjs --validate
+~~~
 
-- `profiles/<name>/runners.env` валиден;
-- primary/failover соответствуют проекту;
-- сильные и дешёвые stages имеют policy обоих provider-ов;
-- stage prompts используют result/progress v2;
-- graph совпадает с routes;
-- readonly exact guard и `profile_source_roots` настроены;
-- нет project-specific кода в `engine/lib`.
+На рабочем хосте после настройки CLI/auth:
 
-## 12. Host preflight
-
-После offline suite:
-
-```bash
+~~~bash
 RUN_HOST_PREFLIGHT=1 engine/bin/factory-check <name> --host-preflight
-```
+~~~
 
-Это metadata-only проверка CLI/catalog/capabilities. Она не отправляет prompt.
-
-## 13. Первая контролируемая задача
-
-Первую небольшую обратимую задачу запускают отдельно после явного разрешения:
-
-```bash
-engine/bin/factory 1 start --profile <name> --ticket "маленькая обратимая задача"
-```
-
-Проверить в состоянии/UI:
-
-- отображение project chain;
-- фактический provider/model attempt;
-- переход stage status;
-- ручной task override;
-- контролируемый failover на искусственно классифицированной provider error;
-- блокировку failover на task/test/policy error;
-- очистку task override и debug после проверки.
+Preflight не отправляет model prompt. Live-пилот требует отдельного разрешения человека и не
+должен автоматически создавать delivery, запускать shared-стенд или очищать чужой checkout.

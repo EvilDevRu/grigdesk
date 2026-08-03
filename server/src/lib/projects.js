@@ -4,14 +4,34 @@
 // Источник №2 — prefs кокпита (projects.<id>.repos): для проектов, заведённых в кокпите,
 // у которых bash-профиля нет. Сам список проектов — как и раньше, lib/profiles.js.
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { listFactoryProfiles, listProjects } from './profiles.js';
 import { loadTriageProfile } from './analysis/profile.js';
-import { RoutesV2Store } from '../modules/routes/store-v2.js';
+import { RoutesStore } from '../modules/routes/store.js';
 
 // Чтение профиля — это source bash-файла (см. analysis/profile.js), не дёшево.
 // Короткого кэша хватает: профили правятся руками и редко.
 const TTL = 15_000;
 const cache = new Map(); // имя → { at, repos }
+
+// Один монорепозиторий иногда объявляют несколькими техническими алиасами (например,
+// BE/FE для совместимости профиля фабрики). Для раздела «Проекты» и плагина «Код» это
+// всё равно одна физическая рабочая копия: схлопываем одинаковые корни и, если корень
+// единственный, даём ему понятный ключ проекта.
+function normalizeProjectRepos(repos, id, from) {
+  const valid = (Array.isArray(repos) ? repos : [])
+    .filter((repo) => repo && repo.key && repo.dir)
+    .map((repo) => ({ key: String(repo.key), dir: String(repo.dir), from }));
+  const seen = new Set();
+  const unique = valid.filter((repo) => {
+    const canonicalDir = path.resolve(repo.dir);
+    if (seen.has(canonicalDir)) return false;
+    seen.add(canonicalDir);
+    return true;
+  });
+  if (unique.length === 1 && valid.length > 1) unique[0].key = String(id);
+  return unique;
+}
 
 async function factoryRepos(config, name) {
   const hit = cache.get(name);
@@ -31,12 +51,10 @@ export async function projectRepos({ config, prefs, id, isFactory = null }) {
   const factory = isFactory ?? (await listFactoryProfiles(config.profilesDir)).includes(id);
   if (factory) {
     const repos = await factoryRepos(config, id);
-    if (repos.length) return repos.map((r) => ({ ...r, from: 'factory' }));
+    if (repos.length) return normalizeProjectRepos(repos, id, 'factory');
   }
   const saved = (prefs.read().projects || {})[id]?.repos || [];
-  return saved
-    .filter((r) => r && r.key && r.dir)
-    .map((r) => ({ key: String(r.key), dir: String(r.dir), from: 'cockpit' }));
+  return normalizeProjectRepos(saved, id, 'cockpit');
 }
 
 /**
@@ -46,16 +64,16 @@ export async function projectRepos({ config, prefs, id, isFactory = null }) {
 export async function projectsOverview({ config, prefs }) {
   const factorySet = new Set(await listFactoryProfiles(config.profilesDir));
   const ids = await listProjects(config, prefs);
-  const store = new RoutesV2Store({ baseDir: config.routesV2Dir });
+  const store = new RoutesStore({ baseDir: config.routesDir });
   return Promise.all(ids.map(async (id) => {
     const repos = await projectRepos({ config, prefs, id, isFactory: factorySet.has(id) });
     const withExists = await Promise.all(repos.map(async (r) => ({
       ...r,
       exists: await fs.access(r.dir).then(() => true).catch(() => false),
     })));
-    // Маршруты проекта — это состав ОПУБЛИКОВАННОГО каталога v2, а не файлы на диске:
-    // здесь показывается ровно то, по чему пойдут новые попытки. Нет бандла (проект ещё
-    // не переехал на v2) — пустой список, а не ошибка на весь раздел.
+    // Маршруты проекта — это состав ОПУБЛИКОВАННОГО каталога, а не файлы на диске:
+    // здесь показывается ровно то, по чему пойдут новые попытки. Нет бандла — пустой
+    // список, а не ошибка на весь раздел.
     let routes = [];
     try {
       const current = await store.readCurrent(id);

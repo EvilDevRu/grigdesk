@@ -20,10 +20,10 @@
   `adapters/` (factory-state, b24, system, media), `lib/` (pipeline/stages/factory-graph парсеры, git,
   `b24/` — перенесённый `B24Client`, `media/` — перенесённый медиа-конвейер, claude-auth-store), `modules/`
   (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers,
-  analysis, auth, gateway, plugins, demo, projects — реестр проектов с путями репозиториев,
+  analysis, auth, gateway, plugins, projects — реестр проектов с путями репозиториев,
   code — плагин «Код»).
 - **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Projects, Code, Diff,
-  Video, Demo, Terminal, Settings, Login, TaskModal, ChatPanel),
+  Video, Terminal, Settings, Login, TaskModal, ChatPanel),
   `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
   ChatSession, ChatTabs, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
   `stores/` (Pinia: analysis, auth, board, chat, diff, notify-watch, plugins, providers, pwa,
@@ -42,7 +42,7 @@
   (`YYYY-MM/<id>.json`), `agents/` — ШАБЛОНЫ агентов (`<id>.md`, frontmatter+заготовка промпта; один id =
   один шаблон, без коллизий по профилям). **Маршрутов среди этих баз больше нет:** маршрут —
   опубликованный immutable-бандл в `~/.factory/routes/<профиль>/`, собирает его сам профиль
-  (`profiles/<проект>/routes-v2/publish.mjs`), кокпит только проверяет, публикует и откатывает.
+  (`profiles/<проект>/routes/publish.mjs`), кокпит только проверяет, публикует и откатывает.
   Промпт — свойство места в схеме, а не агента: шаблон агента даёт лишь заготовку, дальше текст
   живёт в бандле маршрута и правится в профиле.
 
@@ -53,6 +53,16 @@
   `POST /api/tasks/:id/runner/switch` (CAS-защищённое переключение активного runner-а),
   `POST /api/tasks/:id/sandbox/down`, `POST /api/tasks/:id/sandbox/retry` (снос остатков
   упавшей песочницы + resume — кнопка в плашке «стенд не поднялся»).
+  Запуск: `GET /api/tasks/:id/launch-options` (чем заполнять модалку: профиль,
+  маршруты ОПУБЛИКОВАННОГО каталога) → `POST /api/tasks/:id/launch`, `POST /api/tasks/:id/resume`
+  (продолжить упавший прогон — только по кнопке человека и exact attempt).
+  Единственный route-движок запускает только профиль с capability `route-v2` и опубликованным
+  каталогом; иначе запрос fail-closed. Исторический реестр виден только для чтения и никогда
+  не передаётся launcher-у. Постановка едет
+  файлом-тикетом (ровно шесть полей, `lib/factory-ticket.js`) и валидируется В КОКПИТЕ:
+  движок читает тикет только после подъёма песочницы, то есть через 20–25 минут.
+  Ручная постановка задачи из чата без Битрикса — runbook `profiles/parser/README.md`
+  (проект parser, shared-режим без песочниц, ID 90001+).
 - B24: `GET /api/b24/dashboard` (полный «Рабочий стол»), `/api/b24/task/:id`, `/api/b24/users`;
   мутации `POST /api/b24/tasks` (создать; тело — `title,description,groupId,responsibleId,createdById,
   priority` 0/1/2, `images`), `/task/:id/{comment,timer/:action,complete,renew}`.
@@ -112,16 +122,18 @@
   перезапустить.
 - Базы: `GET/POST/PUT/DELETE /api/agents[/:id]` (+`/reseed`);
   проекты — `GET/POST /api/profiles`; маршруты — только опубликованные бандлы v2:
-  `GET /api/routes-v2/:profile/{current,revisions}`, `GET .../routes/:id/:hash[/graph]`,
+  `GET /api/routes/:profile/{current,revisions}`, `GET .../routes/:id/:hash[/graph]`,
   `PUT .../current` (откат, CAS), `POST .../publish` (`validate|publish` — собирает
-  скрипт профиля `routes-v2/publish.mjs`).
+  скрипт профиля `routes/publish.mjs`).
   `GET /api/providers` (реестр LLM-исполнителей; его же рисует топбар).
 - Проекты: `GET /api/projects` (реестр: пути репозиториев — фабричным проектам их даёт профиль
   через `lib/analysis/profile.js`, кокпитным — prefs), `PUT /api/projects/:id` (пути кокпитного
   проекта; фабричному с путями в профиле — 409, источник правды один). Плагин «Код»:
   `GET /api/code/:project/{repos,ls,file,git}` — read-only просмотр любого дерева репозитория
   (основное + worktree из `git worktree list`), диф — тем же `lib/git.js`, что приёмка;
-  гейт `pluginEnabled('code')` живой, как у видео/демо.
+  UI показывает два уровня — проект и единую «Рабочую копию» (`repo + root` остаются внутренней
+  парой API), а несохранённые изменения переключаются между деревом и плоским списком; гейт
+  `pluginEnabled('code')` живой, как у видео.
 - Вход: `GET /api/auth/state` (публичный), `POST /api/auth/{setup,login,logout,logout-all,password}`.
   Гард (`plugins/auth.js`) закрывает **весь** `/api` включая GET и WS-upgrade; публичны только
   `auth/{state,login,setup}` и служебный `/api/gateway/tls-allow`; даже `health` требует сессию.
@@ -135,8 +147,8 @@
   `POST /api/settings/b24/test`; доверенные каталоги всех чат-исполнителей —
   `POST /api/settings/trusted-directories` (хранятся в prefs, применяются к новым ходам
   через `--add-dir`, глобальные конфиги CLI не меняются); порог автокомпакта чатов —
-  prefs `chatAutoCompactWindow` (дефолт 200 000 токенов, `0` — не вмешиваться; уезжает в
-  переменную окружения того CLI, который её объявил через `executor.autoCompactEnv`);
+  prefs `chatAutoCompactWindow` (дефолт 200 000 токенов, `0` — не вмешиваться; Claude получает
+  его через `executor.autoCompactEnv`, Codex — через `model_auto_compact_token_limit`);
   порог молчания хода конвейера — prefs `runSilenceWindow` (дефолт 900 секунд, `0` — не
   звать; едет в `/api/tasks` полем `silenceWindow`, замер молчания — полем `silence`
   сводки задачи). **Кокпит только оповещает, зависший ход не глушит** —
@@ -162,7 +174,8 @@
   **Все вызовы клиента сериализуются очередью `_run`** в адаптере (B24Client не потокобезопасен —
   конкурентные запросы рвут сессию, давали «Client Error»). Кокпит — единственный владелец сессии
   (свой cookie-файл в `.state`).
-- **Мутации фабрики** — через `factory bin` (берёт flock) или прямой upsert `pipeline-set.sh`;
+- **Мутации фабрики** — только через единый `factory`; `pipeline-set.sh` — внутренний
+  ограниченный writer вторичной проекции, не внешний control-plane API.
   **flock на `orch.lock` НЕ использовать** (демон держит его весь прогон — дедлок). Контракт запуска —
   машинный (чтение `ORCH_PID`+`/proc`), не парсинг stdout.
 - **Медиа-конвейер** (whisper/ffmpeg) живёт в Cockpit; runtime-venv хранится в

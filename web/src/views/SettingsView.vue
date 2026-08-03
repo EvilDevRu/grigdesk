@@ -11,6 +11,11 @@ import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
 import { usePwaStore } from '../stores/pwa.js';
+import {
+  blockReasonLabel,
+  UPDATE_STAGE_LABELS,
+  useCockpitUpdateStore,
+} from '../stores/cockpit-update.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
 
@@ -128,11 +133,11 @@ async function refreshProv() {
   await prov.load(true);
   refreshing.value = false;
 }
-// Команда установки недоступного исполнителя — клик открывает терминал
+// Команда установки или авторизации недоступного исполнителя — клик открывает терминал
 // с уже введённой командой (выполнение — Enter'ом пользователя).
 const router = useRouter();
 function installInTerminal(p) {
-  sessionStorage.setItem('cockpit-term-insert', p.install);
+  sessionStorage.setItem('cockpit-term-insert', p.setupCommand || p.install);
   router.push('/terminal');
 }
 
@@ -495,6 +500,53 @@ async function savePlugin(p) {
 const srv = ref(null);          // { systemd, pid, uptimeSec }
 const restarting = ref(false);
 const srvMsg = ref(null);
+const cockpitUpdate = useCockpitUpdateStore();
+const cockpitStatus = computed(() => cockpitUpdate.status);
+const cockpitJob = computed(() => cockpitStatus.value?.job || null);
+const clientBuildVersion = __COCKPIT_VERSION__;
+const clientBuildSha = __COCKPIT_SHA__;
+let confirmedUpdateJob = null;
+const shortSha = (sha) => sha?.slice(0, 7) || '—';
+const fmtChecked = (value) => {
+  if (!value) return 'ещё не проверялось';
+  try { return new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)); }
+  catch { return value; }
+};
+
+async function activeChatTurns() {
+  try { return ((await api.get('/api/chat/active')).active || []).length; }
+  catch { return 0; }
+}
+
+async function startCockpitAction(kind) {
+  const status = cockpitStatus.value;
+  if (!status) return;
+  const active = await activeChatTurns();
+  const warning = active
+    ? ` Сейчас идут ходы агентов: ${active} — при рестарте они ОБОРВУТСЯ.`
+    : '';
+  const isRelease = kind === 'update';
+  const action = isRelease
+    ? `Установить ${status.latest?.tag} fast-forward-ом на чистую main? Будет применён только commit ${shortSha(status.latest?.sha)}.`
+    : `Собрать и применить текущий checkout ${status.checkout.branch || 'detached HEAD'} · ${shortSha(status.checkout.sha)}? Git-ветка и файлы не изменятся.`;
+  const details = ' Cockpit ненадолго станет недоступен после успешной сборки.';
+  if (!(await confirmDialog(action + details + warning, {
+    danger: !!active,
+    okText: isRelease ? `Обновить до ${status.latest?.tag}` : 'Применить checkout',
+  }))) return;
+  const job = isRelease
+    ? await cockpitUpdate.installRelease()
+    : await cockpitUpdate.applyCheckout();
+  if (!job && cockpitUpdate.error) srvMsg.value = { type: 'err', text: cockpitUpdate.error };
+}
+
+watchEffect(() => {
+  const job = cockpitJob.value;
+  if (job?.status !== 'done' || job.id === confirmedUpdateJob) return;
+  confirmedUpdateJob = job.id;
+  loadServer();
+  pwa.checkForUpdate();
+});
 
 async function loadServer() { try { srv.value = await api.get('/api/system/server'); } catch { srv.value = null; } }
 
@@ -508,8 +560,7 @@ function fmtUptime(s) {
 async function restartServer() {
   // Рестарт обрывает идущие ходы агентов в чатах (они — дочерние процессы сервера):
   // честно предупреждаем числом, а не общими словами.
-  let active = 0;
-  try { active = ((await api.get('/api/chat/active')).active || []).length; } catch { /* счётчик не критичен */ }
+  const active = await activeChatTurns();
   const mode = srv.value?.systemd
     ? 'Сервер выйдет, юнит systemd поднимет его сам.'
     : 'Сервер запущен вручную — перезапустится через bin/restart.';
@@ -537,6 +588,7 @@ onMounted(() => {
   loadFactoryDebug();
   pluginsStore.load();
   loadServer();
+  cockpitUpdate.load();
   loadTls();
   acc.value.login = auth.login || '';
 });
@@ -699,8 +751,8 @@ onMounted(() => {
     <section v-else-if="tab === 'providers'">
       <p class="section-note">
         Реестр агентов-исполнителей. Его же читают топбар (иконки) и в перспективе схемы —
-        исполнителем шага сможет быть не только Claude. Авторизация — на хосте
-        (<code>claude login</code>), кокпит только показывает статус.
+        исполнителем шага сможет быть не только Claude. Авторизация — на хосте через
+        login-команду выбранного CLI, кокпит только показывает статус.
       </p>
       <!-- Плашка на исполнителя, плашки — горизонтальной линией: у каждого ИИ свои
            ручки, и мешать их в один список нельзя. -->
@@ -721,6 +773,9 @@ onMounted(() => {
           </div>
           <div class="pvfacts">
             <div class="pvsub muted">{{ p.authLabel }}<template v-if="p.version"> · {{ p.version }}</template></div>
+            <div v-if="p.chatEnabled === false" class="pvsub pvsoon">
+              Установка доступна; подключение к чатам пока не включено.
+            </div>
             <div v-if="p.models?.length" class="pvsub muted">
               моделей в каталоге: {{ p.models.length }}<template v-if="hiddenCount(p)"> (в выборе {{ p.models.length - hiddenCount(p) }} — остальные скрыты)</template><template v-if="p.models.some((m) => m.unknown)"> · есть неизвестные CLI (помечены «?»)</template>
             </div>
@@ -730,10 +785,10 @@ onMounted(() => {
             </div>
             <div v-else-if="p.latest" class="pvsub muted">последняя версия ({{ p.latest }})</div>
           </div>
-          <div v-if="!p.available && p.install" class="pvinstall">
+          <div v-if="!p.available && (p.setupCommand || p.install)" class="pvinstall">
             {{ p.installed ? 'Авторизация' : 'Установка' }}:
             <code class="click" title="Кликни — откроется терминал с введённой командой"
-                  @click="installInTerminal(p)">{{ p.install }}</code>
+                  @click="installInTerminal(p)">{{ p.setupCommand || p.install }}</code>
           </div>
           <p v-if="updMsg[p.id]" class="msg" :class="updMsg[p.id].type">{{ updMsg[p.id].text }}</p>
           <!-- Свои настройки исполнителя. Список объявляет сам executor (поле settings),
@@ -869,8 +924,8 @@ onMounted(() => {
             на окне 1M — около 950 000 токенов. А дорожает чат гораздо раньше — примерно
             с 250 000: кокпит поднимает процесс агента на каждое сообщение, и выше этого
             порога переписка перестаёт читаться из кэша и пишется в него заново по двойному
-            тарифу. <b>0</b> — не вмешиваться. Настройка применяется
-            к тем CLI, у которых есть эта ручка (сейчас — Claude); Codex её не предлагает.
+            тарифу. <b>0</b> — не вмешиваться. Claude получает порог через свою
+            переменную окружения, Codex — через <code>model_auto_compact_token_limit</code>.
             По этому же порогу краснеет кольцо контекста в чате — у моделей с маленьким
             окном оно не ждёт порога, а срабатывает на 80% окна, что бы здесь ни стояло.
           </p>
@@ -972,10 +1027,106 @@ onMounted(() => {
     <section v-else-if="tab === 'server'">
       <p class="section-note">
         Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
-        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки) —
-        ручные запуски не нужны. Кнопка ниже применяет новый код: свежие плагины и правки
-        сервера подхватываются перезапуском.
+        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки).
+        Локальный checkout и опубликованный релиз применяются разными явными действиями:
+        ни одно из них не выполняет неявный <code>git pull</code> и не затирает WIP.
       </p>
+      <div class="card cockpit-release-card">
+        <div class="card-head">
+          <div>
+            <h3>Версия Cockpit</h3>
+            <p class="muted small">Запущенный процесс, текущий checkout и стабильный канал релизов.</p>
+          </div>
+          <span v-if="cockpitStatus" class="status-pill"
+                :class="cockpitJob?.status === 'failed' ? 'danger' : cockpitStatus.updateAvailable ? 'warn' : 'ok'">
+            <span class="dot"></span>
+            {{ cockpitJob?.status === 'failed' ? 'Ошибка применения' : cockpitStatus.updateAvailable ? 'Есть релиз' : 'Актуально' }}
+          </span>
+        </div>
+        <div v-if="cockpitUpdate.loading && !cockpitStatus" class="muted">Читаю локальную версию…</div>
+        <template v-else-if="cockpitStatus">
+          <dl class="version-facts">
+            <div>
+              <dt>Запущено</dt>
+              <dd><b>{{ cockpitStatus.running.version }}</b> · <code>{{ shortSha(cockpitStatus.running.sha) }}</code></dd>
+            </div>
+            <div>
+              <dt>Checkout</dt>
+              <dd>
+                <b>{{ cockpitStatus.checkout.version }}</b> · <code>{{ shortSha(cockpitStatus.checkout.sha) }}</code>
+                · {{ cockpitStatus.checkout.branch || 'detached HEAD' }}
+                <span v-if="cockpitStatus.checkout.dirty" class="dirty-mark">dirty</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Стабильный канал</dt>
+              <dd v-if="cockpitStatus.latest">
+                <b>{{ cockpitStatus.latest.tag }}</b> · <code>{{ shortSha(cockpitStatus.latest.sha) }}</code>
+                <a v-if="cockpitStatus.latest.url" :href="cockpitStatus.latest.url" target="_blank" rel="noopener noreferrer">Что изменилось ↗</a>
+              </dd>
+              <dd v-else>релизы пока не найдены</dd>
+            </div>
+            <div>
+              <dt>Последняя проверка</dt>
+              <dd>{{ fmtChecked(cockpitStatus.checkedAt) }}</dd>
+            </div>
+            <div>
+              <dt>Web-бандл</dt>
+              <dd>
+                {{ clientBuildVersion }} · <code>{{ shortSha(clientBuildSha) }}</code>
+                <span v-if="clientBuildSha !== 'dev' && clientBuildSha !== cockpitStatus.running.sha" class="dirty-mark">
+                  ожидает обновления PWA
+                </span>
+              </dd>
+            </div>
+          </dl>
+
+          <p v-if="cockpitStatus.checkoutChanged" class="msg info">
+            Checkout изменился после запуска сервера. Чтобы запущенный процесс и web-бандл
+            соответствовали ему, примените локальные изменения.
+          </p>
+          <p v-if="cockpitStatus.checkError" class="msg warn">
+            {{ cockpitStatus.checkError.message }} Последний успешный результат сохранён.
+          </p>
+
+          <div v-if="cockpitJob" class="update-job" :class="cockpitJob.status">
+            <b>{{ UPDATE_STAGE_LABELS[cockpitJob.stage] || cockpitJob.stage }}</b>
+            <span class="muted small">
+              {{ cockpitJob.kind === 'update' ? `Релиз ${cockpitJob.targetTag}` : 'Локальный checkout' }}
+              · {{ shortSha(cockpitJob.targetSha) }}
+            </span>
+            <p v-if="cockpitJob.error" class="msg err">{{ cockpitJob.error.message }}</p>
+          </div>
+
+          <div class="row update-actions">
+            <button :disabled="cockpitUpdate.checking || cockpitUpdate.active" @click="cockpitUpdate.check">
+              {{ cockpitUpdate.checking ? 'Проверяю…' : 'Проверить обновления' }}
+            </button>
+            <button :disabled="!cockpitStatus.canApplyCheckout || cockpitUpdate.actionBusy"
+                    @click="startCockpitAction('apply')">
+              Применить локальные изменения
+            </button>
+            <button v-if="cockpitStatus.latest" class="primary"
+                    :disabled="!cockpitStatus.canInstallRelease || cockpitUpdate.actionBusy"
+                    @click="startCockpitAction('update')">
+              Обновить до {{ cockpitStatus.latest.tag }}
+            </button>
+          </div>
+
+          <ul v-if="cockpitStatus.applyBlockReasons?.length" class="block-reasons">
+            <li v-for="reason in cockpitStatus.applyBlockReasons" :key="`apply-${reason}`">
+              Локальное применение: {{ blockReasonLabel(reason) }}
+            </li>
+          </ul>
+          <ul v-if="cockpitStatus.installBlockReasons?.length" class="block-reasons">
+            <li v-for="reason in cockpitStatus.installBlockReasons" :key="`install-${reason}`">
+              Установка релиза: {{ blockReasonLabel(reason) }}
+            </li>
+          </ul>
+          <p v-if="cockpitUpdate.error" class="msg err">{{ cockpitUpdate.error }}</p>
+        </template>
+        <p v-else class="msg err">Не удалось прочитать состояние версии Cockpit.</p>
+      </div>
       <div class="card">
         <div class="card-head">
           <div>
@@ -1417,6 +1568,8 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .status-pill.ok .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 55%, transparent); }
 .status-pill.warn { border-color: color-mix(in srgb, var(--warn) 38%, var(--line)); color: var(--warn); }
 .status-pill.warn .dot { background: var(--warn); }
+.status-pill.danger { border-color: color-mix(in srgb, var(--bad) 38%, var(--line)); color: var(--bad); }
+.status-pill.danger .dot { background: var(--bad); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .form-grid .full { grid-column: 1 / -1; }
 /* Карточки плагинов — горизонтальной линией, с переносом на узких экранах. */
@@ -1532,6 +1685,20 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 /* Сервер: строка режима + кнопка перезапуска */
 .srvline { margin: 0; font-size: 13.5px; }
 .srvline b { font-weight: 640; }
+.version-facts { display: grid; gap: 10px; margin: 0; }
+.version-facts > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.version-facts dt { color: var(--ink-mid); font-size: 12px; }
+.version-facts dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.version-facts dd b { font-weight: 650; }
+.version-facts dd code { background: var(--ground); border-radius: 5px; padding: 1px 5px; }
+.version-facts dd a { margin-left: 8px; color: var(--accent); }
+.dirty-mark { margin-left: 6px; color: var(--warn); font-size: 11px; }
+.msg.info { color: var(--accent); }
+.update-job { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); }
+.update-job.failed { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.update-job.done { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.update-actions { align-items: center; }
+.block-reasons { margin: 0; padding-left: 18px; display: grid; gap: 5px; color: var(--ink-mid); font-size: 12px; line-height: 1.45; }
 
 /* Локальный HTTPS */
 .sechead { margin: 12px 0 0; font-size: 14px; font-weight: 640; }
@@ -1638,6 +1805,7 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .mode > p { margin-left: 0; padding-left: 39px; }
   .notification-line { align-items: stretch; flex-direction: column; }
   .notification-line button { width: 100%; }
+  .version-facts > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   .tlsaddr { flex-wrap: wrap; }
   .tlsqr { display: grid; justify-items: center; }
   .tlsqr img { width: min(180px, 100%); height: auto; }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
+import { detectStall } from '../../server/src/lib/stall.js';
 
 test('graph exposes a human stall on the affected node instead of showing it as running', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-stall-'));
@@ -53,4 +54,38 @@ test('graph exposes a human stall on the affected node instead of showing it as 
   assert.equal(graph.statuses.review, 'stall');
   assert.equal(graph.progress.current, 'review');
   assert.deepEqual(graph.nodeMeta.review.stall, graph.stall);
+});
+
+test('route environment rc=75 is classified without prescribing shared cleanup', () => {
+  const stall = detectStall({
+    registry: { STALLED_HUMAN: '1' },
+    daemonAlive: false,
+    logText: [
+      '2026-08-02 13:51:34 [t8162] v2: обнаружена частично созданная песочница; автоматическое удаление запрещено',
+      '2026-08-02 13:51:34 [t8162] v2: среда профиля не готова (код 75)',
+      '',
+    ].join('\n'),
+  });
+  assert.equal(stall.stage, 'SANDBOX');
+  assert.match(stall.title, /среда профиля не готова/);
+  assert.match(stall.hint, /shared-ресурсы не удаляй/);
+});
+
+test('typed no-progress stop identifies the exact reviewer node', () => {
+  const stall = detectStall({
+    registry: {
+      STALLED_HUMAN: '1',
+      REVIEW_COMMENT: 'валидный regex всё ещё возвращает 422',
+    },
+    daemonAlive: false,
+    logText: [
+      '2026-08-03 11:15:00 [t7788] REVIEW: маршрут остановлен: no-progress',
+      '',
+    ].join('\n'),
+  });
+
+  assert.equal(stall.stage, 'REVIEW');
+  assert.match(stall.title, /не меняют набор замечаний/);
+  assert.match(stall.hint, /findings/);
+  assert.equal(stall.comment, 'валидный regex всё ещё возвращает 422');
 });

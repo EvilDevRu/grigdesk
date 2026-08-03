@@ -1,0 +1,21 @@
+{
+  "sessions": [
+    {
+      "id": "legacy-claude",
+      "title": "Старый разговор",
+      "model": "opus",
+      "sessionId": "legacy-display-session",
+      "messages": [
+        { "role": "user", "text": "Продолжай" },
+        { "role": "assistant", "text": "Продолжаю" }
+      ],
+      "createdAt": 1785542400000,
+      "updatedAt": 1785542460000
+    }
+  ],
+  "archived": [],
+  "activeId": "legacy-claude",
+  "defModel": "opus",
+  "defEffort": "high",
+  "defMode": "default"
+}

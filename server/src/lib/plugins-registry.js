@@ -28,14 +28,6 @@ export const SYSTEM = [
     ],
   },
   {
-    id: 'demo',
-    name: 'Демо фичи',
-    version: '1.0.0',
-    description: 'Съёмка демо-видео готовой фичи с живого стенда задачи (playwright + озвучка) — по кнопке, вне конвейера. Галерея готовых роликов.',
-    nav: { path: '/demo', label: 'Демо', icon: 'demo' },
-    settings: [],
-  },
-  {
     id: 'code',
     name: 'Код',
     version: '1.0.0',

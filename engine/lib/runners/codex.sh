@@ -63,20 +63,97 @@ runner_codex_capabilities() {
 runner_codex_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   local sandbox=${RUNNER_CODEX_SANDBOX:-workspace-write}
-  local -a args=(codex exec --json --skip-git-repo-check --sandbox "$sandbox")
-  if [[ "$sandbox" == workspace-write ]]; then
-    args+=(-c 'sandbox_workspace_write.network_access=true')
+  local -a args=(codex exec --json --skip-git-repo-check)
+  if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
+    # Shared checkout не должен наследовать доступ пользователя к Docker socket.
+    # Permission profile — реальная process boundary; PreToolUse ниже лишь даёт
+    # понятный ранний отказ для очевидных docker/worktree/ship-команд. Узкий
+    # stand broker доступен через exact read-only control dir с FIFO/lock и сам
+    # разрешает только фиксированные операции существующего стенда.
+    local control_dir=${PROFILE_AGENT_CONTROL_DIR:-}
+    local policy_hook="$FACTORY_HOME/lib/runners/codex-command-policy.py"
+    [[ "$control_dir" == /* && "$control_dir" =~ ^[A-Za-z0-9_./-]+$ &&
+       -d "$control_dir" && ! -L "$control_dir" && -O "$control_dir" &&
+       "$(realpath -e -- "$control_dir" 2>/dev/null)" == "$control_dir" &&
+       "$(stat -c '%a' "$control_dir" 2>/dev/null)" == 700 &&
+       -f "$policy_hook" && ! -L "$policy_hook" &&
+       "$(realpath -e -- "$policy_hook" 2>/dev/null)" == "$policy_hook" ]] || return 4
+    local permission_profile='factory-shared-stand'
+    local permission_policy hook_policy filesystem_policy read_dir codex_entry codex_runtime
+    local codex_native codex_alias_dir
+    local -a codex_native_candidates
+    # Не наследуем :workspace: у него широкое host-read, а same-UID
+    # bearer Cockpit превращает localhost в косвенный Docker/worktree lifecycle.
+    # Custom profile видит только runtime minimum, workspace roots и
+    # точные trusted tools; .git/.codex остаются read-only. Deny для
+    # существующего каталога на Linux bwrap непереносим; read даёт ту же
+    # механическую защиту от commit/worktree и подмены policy.
+    filesystem_policy='{ ":minimal" = "read", ":tmpdir" = "write", ":slash_tmp" = "write", ":workspace_roots" = { "." = "write", ".git" = "read", ".codex" = "read" }'
+    codex_entry=$(realpath -e -- "$(command -v codex 2>/dev/null)" 2>/dev/null) || return 4
+    codex_runtime=$(realpath -e -- "$(dirname "$codex_entry")/.." 2>/dev/null) || return 4
+    codex_native_candidates=(
+      "$codex_runtime"/node_modules/@openai/codex-linux-*/vendor/*/bin/codex
+    )
+    (( ${#codex_native_candidates[@]} == 1 )) || return 4
+    codex_native=$(realpath -e -- "${codex_native_candidates[0]}" 2>/dev/null) || return 4
+    [[ "$codex_native" == "$codex_runtime/"* && -f "$codex_native" &&
+       ! -L "$codex_native" && -x "$codex_native" ]] || return 4
+    codex_alias_dir="$FACTORY_HOME/lib/runners/codex-path"
+    [[ -x "$codex_alias_dir/codex-linux-sandbox" &&
+       ! -L "$codex_alias_dir/codex-linux-sandbox" ]] || return 4
+    for read_dir in "$FACTORY_HOME" "$codex_runtime" ${RUNNER_CODEX_READ_DIRS:-}; do
+      [[ "$read_dir" == /* && "$read_dir" =~ ^[A-Za-z0-9_@+.,/=-]+$ &&
+         -d "$read_dir" && ! -L "$read_dir" &&
+         "$(realpath -e -- "$read_dir" 2>/dev/null)" == "$read_dir" ]] || return 4
+      filesystem_policy+=', "'"$read_dir"'" = "read"'
+    done
+    filesystem_policy+=', "'"$control_dir"'" = "read"'
+    filesystem_policy+=' }'
+    # Командному sandbox не нужен network transport: ни localhost/TCP, ни AF_UNIX.
+    # FIFO I/O и flock работают через read-only bind exact control directory.
+    permission_policy='{ filesystem = '"$filesystem_policy"', network = { enabled = false } }'
+    hook_policy='[{ matcher = "^Bash$", hooks = [{ type = "command", command = "/usr/bin/python3 '"$policy_hook"' shared-stand", timeout = 5 }] }]'
+    args+=(
+      --ignore-user-config
+      --strict-config
+      --dangerously-bypass-hook-trust
+      -c 'approval_policy="never"'
+      -c "default_permissions=\"$permission_profile\""
+      -c "permissions.$permission_profile=$permission_policy"
+      -c "hooks.PreToolUse=$hook_policy"
+    )
+  else
+    args+=(--sandbox "$sandbox")
+    if [[ "$sandbox" == workspace-write ]]; then
+      args+=(-c 'sandbox_workspace_write.network_access=true')
+    fi
   fi
   [[ -z "$model" ]] || args+=(-m "$model")
   [[ -z "$effort" ]] || args+=(-c "model_reasoning_effort=\"$effort\"")
   local add_dir
   for add_dir in ${RUNNER_CODEX_ADD_DIRS:-}; do
-    [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
+    if [[ -d "$add_dir" ]]; then
+      if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
+        add_dir=$(realpath -e -- "$add_dir" 2>/dev/null) || return 4
+        case "$add_dir" in
+          "$control_dir"|"$control_dir"/*) return 4 ;;
+        esac
+        case "$control_dir" in
+          "$add_dir"/*) return 4 ;;
+        esac
+      fi
+      args+=(--add-dir "$add_dir")
+    fi
   done
   args+=(-o "$run_dir/last.md" -)
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
-  factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+  if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
+    PATH="$codex_alias_dir:$PATH" CODEX_NATIVE_BIN="$codex_native" \
+      factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+  else
+    factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+  fi
 }
 
 _runner_codex_meta() {

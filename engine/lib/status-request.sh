@@ -48,13 +48,16 @@ _status_request_write() {
 }
 
 status_request_result() {
-  local task=${1#[tT]} stage=$2 run_id=$3 epoch=$4 result=$5 comment=${6:-} dir
+  local task=${1#[tT]} stage=$2 run_id=$3 epoch=$4 result=$5 comment=${6:-}
+  local verdict_b64=${7:-} dir
   case "$result" in done|skipped|failed) ;; *) return 2 ;; esac
+  run_state_verdict_validate "$result" "$verdict_b64" || return
   status_request_context_valid "$task" "$stage" "$run_id" "$epoch" || return 74
   dir=$(status_request_expected_dir "$task" "$stage" "$run_id") || return
   _status_request_write "$dir" \
     "SCHEMA=1" "TYPE=result" "TASK=$task" "STAGE=$stage" "RUN_ID=$run_id" \
-    "EPOCH=$epoch" "RESULT=$result" "COMMENT_B64=$(_status_request_b64 "$comment")"
+    "EPOCH=$epoch" "RESULT=$result" "COMMENT_B64=$(_status_request_b64 "$comment")" \
+    "VERDICT_B64=$verdict_b64"
 }
 
 status_request_progress() {
@@ -78,7 +81,7 @@ status_request_progress() {
 status_request_consume_all() {
   local task=${1#[tT]} stage=$2 run_id=$3 epoch=$4 token=$5 dir=$6
   local request schema type req_task req_stage req_run req_epoch count index key encoded value
-  local result comment rc
+  local result comment verdict_b64 rc
   local -a requests=() pairs=()
   [[ -d "$dir" ]] || return 0
   mapfile -t requests < <(find "$dir" -maxdepth 1 -type f -name '*.request' -print | LC_ALL=C sort)
@@ -109,7 +112,10 @@ status_request_consume_all() {
         result=$(_run_state_get "$request" RESULT)
         encoded=$(_run_state_get "$request" COMMENT_B64)
         comment=$(_status_request_unb64 "$encoded") || return 74
-        run_state_apply_result "$task" "$stage" "$run_id" "$epoch" "$token" "$result" "$comment"
+        verdict_b64=$(_run_state_get "$request" VERDICT_B64)
+        run_state_verdict_validate "$result" "$verdict_b64" || return 74
+        run_state_apply_result \
+          "$task" "$stage" "$run_id" "$epoch" "$token" "$result" "$comment" "$verdict_b64"
         rc=$?
         ;;
       *) return 74 ;;

@@ -49,7 +49,7 @@ assert_eq 1800 "$(budget_for review)" "класс review остаётся пол
 assert_eq 1800 "$(budget_for delivery)" "класс delivery остаётся получасовым"
 assert_eq 1800 "$(budget_for standard)" "класс standard остаётся получасовым"
 
-# --- узел без класса (старая ревизия бандла, v1-маршрут) ---
+# --- узел без класса получает единый консервативный default ---
 assert_eq "$NODE_TIMEOUT" "$(budget_for '')" "без класса действует дефолт движка"
 
 # --- неизвестный класс: fail-open, но след в журнале ---
@@ -63,12 +63,6 @@ profile_timeout_class() { [[ "$1" == build ]] && printf '7200\n'; }
 assert_eq 7200 "$(budget_for build)" "профиль переопределяет класс"
 assert_eq 5400 "$(budget_for browser)" "непереопределённый класс сохраняет дефолт"
 unset -f profile_timeout_class
-
-# --- legacy-хук по имени этапа: только там, где класса нет ---
-profile_stage_timeout() { [[ "$1" == BUILD ]] && printf '900\n'; }
-assert_eq 900 "$(budget_for '' BUILD)" "без класса работает legacy-хук профиля"
-assert_eq 3600 "$(budget_for build BUILD)" "класс узла главнее legacy-хука"
-unset -f profile_stage_timeout
 
 # --- регламент доезжает до агента и совпадает с фактическим лимитом ---
 FACTORY_ROUTE_TIMEOUT_CLASS=build run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
@@ -169,12 +163,9 @@ rm -f "$ckpt" "$(_stage_checkpoint_path 41 TESTS)"
 # «закрывает» его: маршрут останавливается и передаёт человеку, узел будут переигрывать,
 # и черновик — единственная запись остатка работы. Если TESTS отчитается «детали и остаток —
 # t<TASK>.tests.checkpoint.md», движок не должен стирать файл следующей же строкой.
-runtime_src=$(cat "$FACTORY_HOME/lib/route-runtime-v2.sh")
+runtime_src=$(cat "$FACTORY_HOME/lib/route-runtime.sh")
 assert_contains "$runtime_src" '[[ "$outcome" != failed && "$outcome" != exhausted ]]' \
-  "route v2 не снимает черновик на провале и исчерпании попыток"
-core_src=$(cat "$FACTORY_HOME/lib/core.sh")
-assert_contains "$core_src" 'failed) flog "$t" "$key → failed"; return 1 ;;' \
-  "легаси-путь тоже оставляет черновик провалившегося этапа"
+  "route runtime не снимает черновик на провале и исчерпании попыток"
 
 # --- указание человека при возврате курсора ---
 # Свободный текст от человека доезжал до агента только через решения ворот; у обычного

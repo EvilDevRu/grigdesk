@@ -148,6 +148,48 @@ export function unsupportedProviderUsage(providerName, checkedAt = Date.now()) {
 }
 
 /**
+ * Кэш долгого read-only сбора usage. Одновременные вкладки получают один и тот
+ * же in-flight результат, а TTL отсчитывается от ЗАВЕРШЕНИЯ загрузки: медленный
+ * исполнитель не должен сделать кэш устаревшим ещё до прихода ответа.
+ */
+export function createUsageReadCache(load, {
+  maxAgeMs = 60_000,
+  now = Date.now,
+} = {}) {
+  let cache = null; // { at, value }
+  let inFlight = null;
+  let generation = 0;
+
+  return {
+    async read() {
+      if (cache && now() - cache.at < maxAgeMs) return cache.value;
+      if (inFlight) return inFlight;
+
+      const startedGeneration = generation;
+      const pending = Promise.resolve()
+        .then(() => load(cache?.value ?? null))
+        .then((value) => {
+          if (generation === startedGeneration) cache = { at: now(), value };
+          return value;
+        })
+        .finally(() => {
+          if (inFlight === pending) inFlight = null;
+        });
+      inFlight = pending;
+      return pending;
+    },
+
+    clear() {
+      generation += 1;
+      cache = null;
+      // Уже начатую read-only операцию не убиваем, но после явного сброса новый
+      // читатель не должен получить её потенциально устаревший результат.
+      inFlight = null;
+    },
+  };
+}
+
+/**
  * Provider-owned action dispatcher. Core validates only the stable action id and
  * delegates semantics to the executor adapter. Adding Kimi or another provider
  * therefore does not add a vendor branch to the providers module.

@@ -39,15 +39,24 @@ profile_runner_host_preflight() {
   runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 78
 
   local coverage_dir="$STATE_DIR/coverage/$profile"
-  mkdir -p "$coverage_dir"
+  mkdir -p "$coverage_dir" || return 78
   local providers plans results provider structural_level host_status provider_key
   local family version variant exact defaults
   local probe_output runner_version
   declare -A preflight_probe_ready=()
-  providers=$(mktemp "$coverage_dir/.providers.XXXXXX")
-  plans=$(mktemp "$coverage_dir/.plans.XXXXXX")
-  results=$(mktemp "$coverage_dir/.host-results.XXXXXX")
-  _profile_preflight_providers "$config" | LC_ALL=C sort -u >"$providers"
+  providers=$(mktemp "$coverage_dir/.providers.XXXXXX") || return 78
+  plans=$(mktemp "$coverage_dir/.plans.XXXXXX") || {
+    rm -f -- "$providers"
+    return 78
+  }
+  results=$(mktemp "$coverage_dir/.host-results.XXXXXX") || {
+    rm -f -- "$providers" "$plans"
+    return 78
+  }
+  _profile_preflight_providers "$config" | LC_ALL=C sort -u >"$providers" || {
+    rm -f -- "$providers" "$plans" "$results"
+    return 78
+  }
 
   while IFS= read -r provider; do
     [[ -n "$provider" ]] || continue
@@ -73,7 +82,10 @@ profile_runner_host_preflight() {
     fi
     runner_version=$(grep -oE '[0-9]+([.][0-9]+)+' <<<"$probe_output" | head -1)
     [[ -n "$runner_version" ]] || runner_version=1.0.0
-    MULTI_CATALOG_ROOT=$(mktemp -d "${STATE_DIR:?}/.catalog-invoke.XXXXXX")
+    MULTI_CATALOG_ROOT=$(mktemp -d "${STATE_DIR:?}/.catalog-invoke.XXXXXX") || {
+      rm -f -- "$providers" "$plans" "$results"
+      return 78
+    }
     if runner_registry_has "$provider" && runner_contract_check "$provider" &&
        _multi_catalog_model "$provider" "$family" "$version" "$variant" "$exact" "$runner_version"; then
       structural_level=native
@@ -87,7 +99,10 @@ profile_runner_host_preflight() {
   local revision structural_hash structural="$coverage_dir/structural.env"
   revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
   structural_hash=$(coverage_structural_hash "$config" "$plans")
-  coverage_structural_write "$structural" "$structural_hash" "$revision" "$plans"
+  coverage_structural_write "$structural" "$structural_hash" "$revision" "$plans" || {
+    rm -f -- "$providers" "$plans" "$results"
+    return 78
+  }
 
   local unavailable=0 total=0
   while IFS= read -r provider; do
@@ -109,15 +124,27 @@ profile_runner_host_preflight() {
       printf 'structural:%s\ncatalog:%s\n' "$structural_hash" "$revision"
       LC_ALL=C sort "$results"
     } | sha256sum | awk '{print $1}'
-  )
-  tmp=$(mktemp "$coverage_dir/.host.XXXXXX")
+  ) || {
+    rm -f -- "$providers" "$plans" "$results"
+    return 78
+  }
+  tmp=$(mktemp "$coverage_dir/.host.XXXXXX") || {
+    rm -f -- "$providers" "$plans" "$results"
+    return 78
+  }
   {
     printf 'SCHEMA=1\nKIND=host\nHASH=%s\nSTRUCTURAL_HASH=%s\n' \
       "$host_hash" "$structural_hash"
     printf 'CATALOG_REVISION=%s\nTOTAL=%s\nUNAVAILABLE=%s\nFETCHED_AT=%s\nEXPIRES_AT=%s\n' \
       "$revision" "$total" "$unavailable" "$now" "$((now + ttl))"
-  } >"$tmp"
-  mv -f -- "$tmp" "$host"
+  } >"$tmp" || {
+    rm -f -- "$tmp" "$providers" "$plans" "$results"
+    return 78
+  }
+  mv -f -- "$tmp" "$host" || {
+    rm -f -- "$tmp" "$providers" "$plans" "$results"
+    return 78
+  }
   rm -f -- "$providers" "$plans" "$results"
 
   [[ "$(coverage_artifact_get "$structural" UNAVAILABLE)" == 0 && "$unavailable" == 0 ]]

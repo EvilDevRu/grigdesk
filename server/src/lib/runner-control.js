@@ -39,15 +39,10 @@ export class FactoryRunnerControl {
     this.run = run;
   }
 
-  async switch({ task, stage, target }) {
-    if (!TASK_RE.test(String(task || ''))
-        || !STAGE_RE.test(String(stage || ''))
-        || !PROVIDER_RE.test(String(target || ''))) {
-      throw new RunnerControlInputError('Некорректные параметры переключения исполнителя.');
-    }
+  async exec(args) {
     const { stdout } = await this.run(
       this.factoryBin,
-      [String(task), 'runner', 'switch', String(stage), String(target)],
+      args,
       {
         shell: false,
         timeout: 15_000,
@@ -65,5 +60,33 @@ export class FactoryRunnerControl {
       },
     );
     return { ok: true, output: stdout.trim() };
+  }
+
+  async switch({ task, stage, target }) {
+    if (!TASK_RE.test(String(task || ''))
+        || !STAGE_RE.test(String(stage || ''))
+        || !PROVIDER_RE.test(String(target || ''))) {
+      throw new RunnerControlInputError('Некорректные параметры переключения исполнителя.');
+    }
+    return this.exec([String(task), 'runner', 'switch', String(stage), String(target)]);
+  }
+
+  /** Stage-level override: primary этапа пишется в реестр задачи через CLI движка. */
+  async setStage({ task, stage, primary }) {
+    if (!TASK_RE.test(String(task || ''))
+        || !STAGE_RE.test(String(stage || ''))
+        || !PROVIDER_RE.test(String(primary || ''))) {
+      throw new RunnerControlInputError('Некорректные параметры назначения исполнителя этапа.');
+    }
+    return this.exec([String(task), 'runner', 'set', String(stage), String(primary)]);
+  }
+
+  /** Снять stage-level override. Идемпотентно: движок просто убирает ключ реестра. */
+  async clearStage({ task, stage }) {
+    if (!TASK_RE.test(String(task || ''))
+        || !STAGE_RE.test(String(stage || ''))) {
+      throw new RunnerControlInputError('Некорректные параметры снятия исполнителя этапа.');
+    }
+    return this.exec([String(task), 'runner', 'clear', String(stage)]);
   }
 }

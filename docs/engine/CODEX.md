@@ -210,7 +210,8 @@ Runtime не читает model/runner hooks из `.sh`. Отсутствующ�
 - использует `CONFIG_REVISION` как CAS;
 - сериализуется через `flock`;
 - сохраняется во временный файл и атомарно переименовывается;
-- не создаёт implicit primary: его всегда задаёт человек или `factory-new`.
+- не создаёт implicit primary: его всегда явно задаёт человек через canonical
+  `runners.env` или CLI.
 
 ## Coverage и preflight
 
@@ -334,26 +335,11 @@ Task debug имеет TTL по умолчанию. Логи типизирова
 capability token или полный ответ модели. Глобальная настройка уже доступна в
 «Настройки → Запуски»; индикация profile/task scope на схеме относится к целевому UI выше.
 
-## Миграция состояния
+## Историческое состояние
 
-Разовый переход:
-
-```bash
-engine/bin/factory-migrate-v2 --dry-run
-engine/bin/factory-migrate-v2
-```
-
-Мигратор до любой записи:
-
-- проверяет canonical config профиля каждой задачи;
-- отказывается работать при живом оркестраторе;
-- находит активные и архивные canonical pipeline;
-- создаёт backup с manifest;
-- атомарно добавляет `RUN_PROTOCOL=2`;
-- переносит старые fixed markers и ошибочные pipeline-файлы в backup, не удаляя их.
-
-Повторный запуск идемпотентен. Восстановление выполняется вручную из пути, указанного в
-`manifest.tsv`.
+После cutover старые registry остаются только данными для чтения/ручного архива.
+Единый `engine/bin/factory` не имеет legacy orchestration, migration launcher или resume
+по одному `RUN_PROTOCOL`; продолжение требует exact immutable route attempt.
 
 ## TDD и порядок поставки
 
@@ -389,7 +375,7 @@ tests/engine/contract/
   profile-config.sh
 
 tests/engine/integration/
-  protocol-v2-migration.sh
+  route-dispatch.sh
   core-multi-runner.sh
   runtime-switch.sh
   coverage-gate.sh

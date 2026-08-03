@@ -1,14 +1,11 @@
 // Плагин SSE — push-обновления окну вместо polling'а.
-// `fs.watch` на КАЖДОМ каталоге состояния (с общим дебаунсом) → рассылка события
+// `fs.watch` на единственном каталоге состояния → рассылка события
 // `state-change` всем клиентам. Эндпоинт: GET /api/events (text/event-stream).
 import fp from 'fastify-plugin';
 import fs from 'node:fs';
 
 async function ssePlugin(fastify, opts) {
-  // Каталогов больше одного: legacy-состояние и state-v2 живут раздельно (движок
-  // требует непересечения). Смотреть надо за всеми, иначе задачи одного поколения
-  // молча остаются без push-обновлений.
-  const stateDirs = [...new Set((opts.stateDirs || [opts.stateDir]).filter(Boolean))];
+  const stateDir = opts.stateDir;
   /** @type {Set<import('node:http').ServerResponse>} */
   const clients = new Set();
 
@@ -20,22 +17,19 @@ async function ssePlugin(fastify, opts) {
   }
   fastify.decorate('sse', { broadcast });
 
-  // Дебаунс общий на все каталоги: файловые изменения приходят пачками, шлём не чаще
+  // Файловые изменения приходят пачками, шлём не чаще
   // раза в 300 мс. Событие безадресное («что-то изменилось»), поэтому склейка законна.
   let timer = null;
-  const watchers = [];
+  let watcher = null;
   const onChange = () => {
     if (timer) return;
     timer = setTimeout(() => { timer = null; broadcast('state-change', { at: Date.now() }); }, 300);
   };
-  for (const dir of stateDirs) {
-    // Каталога может не быть (поколение ещё не заводили) — это не повод падать,
-    // но и не повод молчать: без watcher'а окно живёт до ручной перезагрузки.
-    try {
-      watchers.push(fs.watch(dir, onChange));
-    } catch (err) {
-      fastify.log.warn(`fs.watch на ${dir} не запущен: ${err.message}`);
-    }
+  // Каталога может ещё не быть — сервер остаётся доступен, но пишет явное предупреждение.
+  try {
+    watcher = fs.watch(stateDir, onChange);
+  } catch (err) {
+    fastify.log.warn(`fs.watch на ${stateDir} не запущен: ${err.message}`);
   }
 
   fastify.get('/api/events', (request, reply) => {
@@ -58,7 +52,7 @@ async function ssePlugin(fastify, opts) {
 
   fastify.addHook('onClose', async () => {
     if (timer) clearTimeout(timer);
-    for (const watcher of watchers) watcher.close();
+    watcher?.close();
     for (const res of clients) { try { res.end(); } catch { /* уже закрыт */ } }
     clients.clear();
   });

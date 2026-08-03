@@ -45,7 +45,6 @@ import analysisModule from './modules/analysis/index.js';
 import authModule from './modules/auth/index.js';
 import gatewayModule from './modules/gateway/index.js';
 import pluginsModule from './modules/plugins/index.js';
-import demoModule from './modules/demo/index.js';
 import projectsModule from './modules/projects/index.js';
 import codeModule from './modules/code/index.js';
 import documentsModule from './modules/documents/index.js';
@@ -103,9 +102,9 @@ async function build() {
   // Адаптеры (изоляция источников).
   const factoryState = new FactoryStateAdapter({
     stateDir: config.stateDir,
-    stateV2Dir: config.stateV2Dir,
-    routesV2Dir: config.routesV2Dir,
+    routesDir: config.routesDir,
     profilesDir: config.profilesDir,
+    controlDir: config.factoryControlDir,
   });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
@@ -160,10 +159,9 @@ async function build() {
     internalToken,
     cliToken,
   });
-  // Оба поколения состояния: маршруты v2 пишут реестр в отдельный каталог, и без него
-  // страница конвейера не обновляется вовсе — Скептик уже закончен, ворота ждут,
-  // а на схеме он продолжает «гореть» до ручного F5.
-  await fastify.register(ssePlugin, { stateDirs: [config.stateDir, config.stateV2Dir] });
+  // Единственный движок пишет одну runtime-проекцию; legacy-реестры в этом каталоге
+  // доступны только для чтения и не требуют второго watcher-а.
+  await fastify.register(ssePlugin, { stateDir: config.stateDir });
 
   // Модули.
   await fastify.register(authModule, { authStore, config });
@@ -176,7 +174,6 @@ async function build() {
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, { config, prefs });
   await fastify.register(mediaModule, { media });
-  await fastify.register(demoModule, { config, factoryState });
   await fastify.register(codeModule, { config, prefs });
   await fastify.register(documentsModule, { reader: documentReader });
   await fastify.register(projectsModule, { config, prefs });

@@ -73,6 +73,10 @@ async function compileTaskModal() {
       'const mdToHtml = (value) => String(value || "");',
     )
     .replace(
+      "import { providerLabel } from '../shared/runner-display.js';",
+      'const { providerLabel } = globalThis.__taskModalFavoriteRunnerDisplay;',
+    )
+    .replace(
       "import OpenDiffButton from './OpenDiffButton.vue';",
       'const OpenDiffButton = { template: "<span></span>" };',
     )
@@ -172,6 +176,7 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
   });
 
   const pinia = createPinia();
+  globalThis.__taskModalFavoriteRunnerDisplay = await import('../../web/src/shared/runner-display.js');
   const TaskModal = await compileTaskModal();
   const wrapper = mount(TaskModal, {
     attachTo: browser.document.querySelector('#mount'),
@@ -182,6 +187,7 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
     browser.close();
     for (const key of [
       '__taskModalFavoriteApi',
+      '__taskModalFavoriteRunnerDisplay',
       '__taskModalFavoriteUiStore',
       '__taskModalFavoriteTasksStore',
       '__taskModalFavoriteBoardStore',

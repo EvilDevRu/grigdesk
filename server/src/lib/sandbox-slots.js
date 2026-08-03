@@ -66,14 +66,9 @@ async function withLock(dir, fn) {
   try { return await fn(); } finally { try { fs.rmdirSync(lock); } catch { /* уже снят */ } }
 }
 
-/**
- * Занятость слотов ГЛАЗАМИ ФАБРИКИ (`factory slots --profile <name>`).
- * Считает её профиль тем же кодом, которым подъём стенда выбирает индекс, — иначе
- * распределитель выдал бы резервацию на слот, который up.sh считает занятым.
- * @returns {Promise<{range:[number,number], used:Array<{k:number,by:string,why:string}>, free:number[]}>}
- */
-export function listSlots({
-  factoryBin, stateDir, profilesDir = '', profile,
+/** Один опрос профиля: занятость глазами конкретного каталога состояния. */
+function slotsSnapshot({
+  factoryBin, stateDir, profilesDir, profile,
 }) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -97,6 +92,19 @@ export function listSlots({
       },
     );
   });
+}
+
+/**
+ * Занятость слотов ГЛАЗАМИ ФАБРИКИ (`factory slots --profile <name>`).
+ * Считает её профиль тем же кодом, которым подъём стенда выбирает индекс, — иначе
+ * распределитель выдал бы резервацию на слот, который up.sh считает занятым.
+ *
+ * @returns {Promise<{range:[number,number], used:Array<{k:number,by:string,why:string}>, free:number[]}>}
+ */
+export async function listSlots({
+  factoryBin, stateDir, profilesDir = '', profile,
+}) {
+  return slotsSnapshot({ factoryBin, stateDir, profilesDir, profile });
 }
 
 /** Живые резервации: {task → {task, k, at}}. Протухшие подчищаются на месте. */
@@ -134,16 +142,13 @@ function readReservations(dir, ttlMs = RESERVATION_TTL_MS) {
 export async function reserveSlot({
   factoryBin, stateDir, profilesDir = '', profile, task, ttlMs = RESERVATION_TTL_MS,
 }) {
+  // Резервации и runtime-проекция принадлежат одному state root.
   const dir = slotsDir(stateDir);
-  let slots;
-  try {
-    slots = await listSlots({
-      factoryBin, stateDir, profilesDir, profile,
-    });
-  } catch (e) {
-    // Профиль без слотов (или опрос сломался) — не повод не пустить конвейер:
-    // он сам выберет индекс, как делал раньше. Гонка возвращается, но отказ хуже.
-    return { k: null, source: 'none', reason: e.message };
+  const slots = await listSlots({ factoryBin, stateDir, profilesDir, profile });
+  // Отсутствие slot contract должно быть явным успешным ответом движка. Ошибку/битый
+  // JSON больше не превращаем в запуск без резервации: это возвращало гонку портов.
+  if (slots?.supported === false) {
+    return { k: null, source: 'none', reason: slots.reason || 'профиль не использует слоты' };
   }
 
   return withLock(dir, async () => {

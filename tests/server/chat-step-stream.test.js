@@ -11,7 +11,7 @@ import { toClaudeSteps } from '../../server/src/lib/executors/_claude-steps.js';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codex-steps.js';
 import codex from '../../server/src/lib/executors/codex.js';
 
-test('нейтральный sink ставит время и не выпускает шаги сверх лимита', () => {
+test('нейтральный sink ставит время, хранит хвост и транслирует ВСЕ шаги', () => {
   const sent = [];
   let tick = 100;
   const sink = createStepSink((step) => sent.push(step), {
@@ -21,11 +21,14 @@ test('нейтральный sink ставит время и не выпуска
 
   sink.emit({ k: 'start', model: 'test' });
   sink.emit({ k: 'think', text: 'проверяю' });
-  sink.emit({ k: 'note', text: 'этот шаг не должен уйти' });
+  sink.emit({ k: 'note', text: 'шаг сверх лимита хранения' });
 
+  // Лимит режет только хранение: длинный ход упирался в него и переставал слать
+  // шаги в SSE — лента в окне замирала, и живой агент выглядел повисшим.
+  assert.deepEqual(sent.map((step) => step.k), ['start', 'think', 'note']);
   assert.equal(sink.steps.length, 2);
-  assert.deepEqual(sent, sink.steps);
-  assert.deepEqual(sink.steps.map((step) => step.at), [101, 102]);
+  assert.deepEqual(sink.steps.map((step) => step.k), ['think', 'note']);
+  assert.deepEqual(sink.steps.map((step) => step.at), [102, 103]);
 });
 
 test('Claude normalizer сохраняет прежние шаги в общем контракте', () => {
@@ -181,6 +184,14 @@ test('Codex executor передаёт JSONL-шаги живьём и сохра�
     sessionId: null, signal: undefined,
     onStep: (step) => live.push(step),
     onProgress: (tokens) => progress.push(tokens),
+    tokenInfoReader: async () => ({
+      contextTokens: 11,
+      contextWindow: 258_400,
+      contextMetric: 'active-input-v1',
+      contextIsEstimate: false,
+      totalInputTokens: 17,
+      cachedInputTokens: 10,
+    }),
   });
 
   await new Promise((resolve) => setTimeout(resolve, 60));
@@ -190,8 +201,12 @@ test('Codex executor передаёт JSONL-шаги живьём и сохра�
   assert.equal(out.reply, 'Готово.');
   assert.equal(out.sessionId, 'thread-from-stream');
   assert.equal(out.actualModel, 'gpt-actual');
-  assert.equal(out.contextTokens, 17);
-  assert.equal(out.contextIsEstimate, true);
+  assert.equal(out.contextTokens, 11);
+  assert.equal(out.contextWindow, 258_400);
+  assert.equal(out.contextMetric, 'active-input-v1');
+  assert.equal(out.contextIsEstimate, false);
+  assert.equal(out.totalInputTokens, 17);
+  assert.equal(out.cachedInputTokens, 10);
   assert.deepEqual(out.steps.map((step) => step.k), ['start', 'think', 'tool', 'res', 'tool', 'res']);
   assert.deepEqual(live, out.steps);
   assert.equal(out.steps[1].text, 'Сверяю состояние проекта.');

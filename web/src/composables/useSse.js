@@ -9,7 +9,7 @@ import { api } from '../shared/api-client.js';
 
 // Все именованные события сервера — новые добавлять сюда (иначе подписчик их не увидит).
 const EVENT_NAMES = [
-  'hello', 'state-change', 'providers-update',
+  'hello', 'state-change', 'providers-update', 'cockpit-update',
   'chat-permission', 'chat-question', 'chat-permission-done',
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan',
   'chat-store', 'chat-store-meta',

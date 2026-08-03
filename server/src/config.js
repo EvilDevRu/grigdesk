@@ -8,6 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const home = os.homedir();
 const rootDir = path.join(__dirname, '..', '..');
 const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
+const chatsDir = process.env.COCKPIT_CHATS_DIR || path.join(rootDir, 'chats');
+const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
 
 export const config = {
   // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось через Tailscale.
@@ -17,17 +19,16 @@ export const config = {
   // Пути «мозга».
   // Корень репозитория кокпита — от него считаются bin/restart, plugins/ и базы в корне.
   rootDir,
-  stateDir: process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state'),
-  // Состояние прогонов route v2 — отдельное дерево (движок требует непересечения
-  // с legacy). Сервер его только читает; мутации v2 — через factory-v2.
-  stateV2Dir: process.env.FACTORY_STATE_V2_DIR || path.join(home, '.factory', 'state-v2'),
+  stateDir: factoryStateDir,
+  // Доверенный control-каталог протокола маршрутов (движок пишет туда то, что провайдеру
+  // менять нельзя). Задаём явно, а не полагаемся на дефолт по $HOME: прогон уезжает
+  // в transient-юнит systemd, окружение вызывающего он не наследует.
+  factoryControlDir: process.env.FACTORY_CONTROL_ROOT || path.join(home, '.factory', 'control'),
   // Движок входит в этот же репозиторий. Внешний checkout поддерживается только явным env.
   factoryHome,
   // Проектные профили живут отдельно от движка, в корне репозитория.
   profilesDir: process.env.FACTORY_PROFILES_DIR || path.join(rootDir, 'profiles'),
   factoryBin: process.env.COCKPIT_FACTORY_BIN || path.join(factoryHome, 'bin', 'factory'),
-  // Лаунчер протокола v2 — для моста ворот (gate/resume из UI).
-  factoryV2Bin: process.env.COCKPIT_FACTORY_V2_BIN || path.join(factoryHome, 'bin', 'factory-v2'),
   // Debug settings принадлежат engine writer-у, Cockpit передаёт этот root его CLI.
   factoryConfigRoot: process.env.FACTORY_CONFIG_ROOT || path.join(home, '.factory', 'config'),
   // Профиль для запуска на конвейер (пусто → определяется по данным/обнаружению).
@@ -40,6 +41,19 @@ export const config = {
   claudeOauthTokenUrl: process.env.COCKPIT_CLAUDE_OAUTH_TOKEN_URL || '',
   // Бинарь Codex CLI (GPT-исполнитель OpenAI). Не установлен → провайдер «недоступен».
   codexBin: process.env.COCKPIT_CODEX_BIN || 'codex',
+  // Kimi ставится обычным внешним CLI, как Claude/Codex. В чатах он запускается не
+  // напрямую, а через server-owned contained ACP profile (bwrap + user systemd cgroup
+  // + versioned HTTPS allowlist); host config/hooks/plugins/MCP runtime не наследует.
+  kimiBin: process.env.COCKPIT_KIMI_BIN || 'kimi',
+  kimiHome: process.env.COCKPIT_KIMI_HOME
+    || process.env.KIMI_CODE_HOME
+    || path.join(home, '.kimi-code'),
+  kimiRuntimeHome: process.env.COCKPIT_KIMI_RUNTIME_HOME
+    || path.join(factoryStateDir, 'cockpit-kimi-contained'),
+  kimiBwrapBin: process.env.COCKPIT_KIMI_BWRAP_BIN || '/usr/bin/bwrap',
+  kimiSystemdRunBin: process.env.COCKPIT_KIMI_SYSTEMD_RUN_BIN || '/usr/bin/systemd-run',
+  kimiSystemctlBin: process.env.COCKPIT_KIMI_SYSTEMCTL_BIN || '/usr/bin/systemctl',
+  kimiCaBundle: process.env.COCKPIT_KIMI_CA_BUNDLE || '/etc/ssl/certs/ca-certificates.crt',
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
   modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
   // Автообнаружение новых моделей Anthropic ХОСТОВЫМ OAuth-токеном CLI (~/.claude/.credentials.json).
@@ -54,7 +68,11 @@ export const config = {
   // История чатов с агентами — папка в корне проекта (внутри свой .gitignore):
   // каждый чат — отдельный файл chats/YYYY-MM/<id>.json, мета — meta.json.
   // Общая для всех окон/устройств, битый файл одного чата не трогает остальные.
-  chatsDir: process.env.COCKPIT_CHATS_DIR || path.join(__dirname, '..', '..', 'chats'),
+  chatsDir,
+  // Server-owned sidecar provider-сессий. Отдельно от chat JSON: браузер не может
+  // назначить resume id stale PUT-ом или поддельным полем sessionId.
+  chatBindingsDir: process.env.COCKPIT_CHAT_BINDINGS_DIR
+    || path.join(chatsDir, '.bindings'),
   // Старое хранилище одним файлом — только для одноразовой миграции.
   chatStoreLegacyPath: process.env.COCKPIT_CHAT_STORE || path.join(__dirname, '..', '.state', 'chats.json'),
 
@@ -62,11 +80,10 @@ export const config = {
   // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
   agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
 
-  // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов v2 — runtime-артефакт движка,
-  // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Имя без
-  // поколения намеренно: legacy маршрутов в ~/.factory никогда не было, каталог
-  // принадлежит только v2-store; движок читает его же (дефолт factory-v2).
-  routesV2Dir: process.env.COCKPIT_ROUTES_V2_DIR || path.join(home, '.factory', 'routes'),
+  // Immutable-хранилище ОПУБЛИКОВАННЫХ маршрутов — runtime-артефакт движка,
+  // как state/control, поэтому живёт в ~/.factory, а не в репозитории. Каталог
+  // принадлежит единственному route-store; движок читает тот же путь.
+  routesDir: process.env.COCKPIT_ROUTES_DIR || path.join(home, '.factory', 'routes'),
 
   // Собранный фронт (по умолчанию отдаём тем же сервером — один origin).
   webDist: process.env.COCKPIT_WEB_DIST || path.join(__dirname, '..', '..', 'web', 'dist'),
@@ -78,6 +95,11 @@ export const config = {
   b24BaseUrl: process.env.COCKPIT_B24_BASE_URL || '',
   b24CookiePath: process.env.B24_COOKIE_PATH || path.join(__dirname, '..', '.state', 'b24-cookies.json'),
   b24CredsPath: process.env.B24_CREDS_PATH || path.join(__dirname, '..', '.state', 'b24-creds.json'),
+
+  // Постановки задач для immutable route-прогонов. Хранилище кокпита, а НЕ
+  // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент
+  // может переписать. Движок делает себе доверенную копию сам.
+  ticketsDir: process.env.COCKPIT_TICKETS_DIR || path.join(__dirname, '..', '.state', 'tickets'),
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),
@@ -111,6 +133,9 @@ export const config = {
   // Токен для ЛОКАЛЬНЫХ CLI-потребителей API (bin/b24, ship-этап фабрики, скиллы):
   // файл 0600 на этой же машине. Кто может его прочитать — уже владеет всеми кредами .state.
   cliTokenPath: process.env.COCKPIT_CLI_TOKEN_PATH || path.join(__dirname, '..', '.state', 'cli-token'),
+  // Проверка и применение релизов Cockpit. Это runtime-state машины, не часть релиза.
+  cockpitUpdateStatePath: process.env.COCKPIT_UPDATE_STATE_PATH
+    || path.join(__dirname, '..', '.state', 'cockpit-update.json'),
   // Пользовательские плагины: plugins/<id>/plugin.json (+server.js) в корне проекта.
   userPluginsDir: process.env.COCKPIT_PLUGINS_DIR || path.join(__dirname, '..', '..', 'plugins'),
 

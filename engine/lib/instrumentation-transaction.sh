@@ -9,8 +9,8 @@
 # 5) при несовпадении останавливается и ничего не перезаписывает.
 #
 # Scope-файлы нельзя отличить от параллельной человеческой правки постфактум. Поэтому
-# begin разрешён только в выделенном linked worktree, который trusted host зарезервировал
-# исключительно для этой попытки. Аттестация не передаётся provider-процессу.
+# begin разрешён либо в выделенном linked worktree, либо в primary checkout с точной
+# trusted-аттестацией durable shared lease. Аттестация не передаётся provider-процессу.
 
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/workspace-guard.sh"
@@ -44,11 +44,20 @@ _instrumentation_tx_get() {
 
 _instrumentation_tx_write_state() {
   local dir=$1 state=$2 checkpoint=${3:-0} reason=${4:-}
-  local tmp
+  local tmp isolation
+  if [[ -f "$dir/isolation" && ! -L "$dir/isolation" ]]; then
+    isolation=$(<"$dir/isolation") || return 78
+  elif [[ -f "$dir/state.env" && ! -L "$dir/state.env" ]]; then
+    isolation=$(_instrumentation_tx_get "$dir/state.env" ISOLATION)
+  else
+    isolation=${FACTORY_INSTRUMENTATION_ISOLATION:-}
+  fi
+  [[ "$isolation" == exclusive-worktree-v1 ||
+     "$isolation" == exclusive-shared-checkout-v1 ]] || return 78
   tmp=$(mktemp "$dir/.state.XXXXXX") || return 1
   {
-    printf 'SCHEMA=1\nISOLATION=exclusive-worktree-v1\nSTATE=%s\nCHECKPOINT=%s\n' \
-      "$state" "$checkpoint"
+    printf 'SCHEMA=1\nISOLATION=%s\nSTATE=%s\nCHECKPOINT=%s\n' \
+      "$isolation" "$state" "$checkpoint"
     [[ -z "$reason" ]] || printf 'REASON=%s\n' "${reason//$'\n'/ }"
   } >"$tmp"
   chmod 600 "$tmp"
@@ -160,8 +169,16 @@ _instrumentation_tx_marker_absent_in_roots() {
 }
 
 _instrumentation_tx_verify_isolation() {
-  local roots_file=$1 root git_dir common_dir
-  [[ "${FACTORY_INSTRUMENTATION_ISOLATION:-}" == exclusive-worktree-v1 ]] || return 78
+  local roots_file=$1 root git_dir common_dir isolation
+  isolation=${FACTORY_INSTRUMENTATION_ISOLATION:-}
+  case "$isolation" in
+    exclusive-worktree-v1) ;;
+    exclusive-shared-checkout-v1)
+      declare -F instrumentation_tx_shared_lease_invariant >/dev/null || return 78
+      instrumentation_tx_shared_lease_invariant "$roots_file" || return 75
+      ;;
+    *) return 78 ;;
+  esac
   while IFS= read -r root || [[ -n "$root" ]]; do
     [[ -n "$root" ]] || continue
     git_dir=$(git -C "$root" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
@@ -170,10 +187,13 @@ _instrumentation_tx_verify_isolation() {
       return 78
     git_dir=$(realpath -e -- "$git_dir" 2>/dev/null) || return 78
     common_dir=$(realpath -e -- "$common_dir" 2>/dev/null) || return 78
-    # Primary checkout имеет git-dir == common-dir. Для транзакции нужен отдельный
-    # linked worktree; эксклюзивную аренду этого пути гарантирует trusted host.
-    [[ "$git_dir" != "$common_dir" && "$git_dir" == "$common_dir/worktrees/"* ]] ||
-      return 78
+    if [[ "$isolation" == exclusive-worktree-v1 ]]; then
+      [[ "$git_dir" != "$common_dir" && "$git_dir" == "$common_dir/worktrees/"* ]] ||
+        return 78
+    else
+      # Primary checkout допустим только после exact lease invariant выше.
+      [[ "$git_dir" == "$common_dir" ]] || return 78
+    fi
   done <"$roots_file"
 }
 
@@ -242,64 +262,40 @@ _instrumentation_tx_backup_indexes() {
   done <"$dir/roots.list"
 }
 
-# Глобы изменчивых путей замораживаются в транзакции рядом с roots.list и scope.list.
-# Читать их на каждом снимке прямо из профиля нельзя: снимки ОДНОЙ транзакции обязаны
-# сравниваться байт в байт, а профиль между заходами могли и поправить — тогда baseline
-# и checkpoint разошлись бы на пустом месте и дали ложное readonly-нарушение.
-_instrumentation_tx_write_volatile() {
-  local output=$1 glob
-  local -a globs=()
-  # read -a расщепляет по IFS и НЕ раскрывает глобы (в отличие от `for g in $VAR`,
-  # который развернул бы `storage/logs/*` по текущему каталогу).
-  read -r -a globs <<<"${PROFILE_VOLATILE_PATHS:-}"
-  : >"$output" || return 1
-  for glob in ${globs[@]+"${globs[@]}"}; do
-    [[ -n "$glob" ]] || continue
-    [[ "$glob" != /* ]] || return 78
-    printf '%s\n' "$glob" >>"$output"
-  done
-  return 0
-}
-
+# Чувствительное множество снимка — это ТОЛЬКО scope: записи по нему нужны cleanup-у,
+# чтобы доказать, что инструментация восстановлена побайтово. Правки исходников ловятся
+# не отсюда: записи TRACKED_WORKTREE, TRACKED_INDEX и UNTRACKED workspace_guard строит
+# прямо из состояния git, независимо от этого списка.
+#
+# Раньше сюда добавлялись ВСЕ игнорируемые git файлы каждого корня — чтобы агент не прятал
+# правки в .env, vendor и node_modules. От намеренного подлога это не защищало никогда:
+# сторож сравнивает две точки (begin и checkpoint), и всё, что изменили и вернули между
+# ними, для него не существует — достаточно откатить .env перед завершением этапа. Зато
+# ложные срабатывания шли потоком: стенд поднят всю транзакцию (узел вроде TRACE ради
+# живого прогона и существует), и его мусор сторожу неотличим от правки. Список исключений
+# PROFILE_VOLATILE_PATHS оказался списком шрамов — в него попадало ровно то, на чём уже
+# умер прогон (t8165 — 177 дампов storage/debugbar и трассы Playwright; t7802 — кэш pest
+# внутри vendor), а следующая мина всегда лежала взведённой: node_modules/.vite, 128 файлов,
+# плюс .vite-temp и .vue-global-types, и внести их было нельзя — node_modules в списке
+# запрещён намеренно. Догнать инструменты перечислением невозможно.
+#
+# Замер на t7802 показал, чего этот надзор стоил и что защищал: .env, storage, node_modules
+# и кэш Vite имели nlink=1 — это копии песочницы, они исчезают вместе с ней и в диф не
+# попадают никогда. Единственным исключением был vendor бэкенда с nlink=7: профиль клонировал
+# его через `cp -al`, и запись в песочнице меняла файлы основного репозитория и всех соседних
+# деревьев разом. Но это дефект провижна, а не предмет надзора, и чинится он в профиле полной
+# копией (замер: 0.93 с против 0.35 с на 261 МБ). Отсюда требование к профилю: рабочее дерево
+# обязано быть самодостаточным, без общих inode с чем-либо вне песочницы — см. PROFILE-CONTRACT.
 _instrumentation_tx_snapshot() {
-  local dir=$1 output=$2 root rel absolute sensitive rc glob skip
-  local -a roots=() volatile=()
+  local dir=$1 output=$2 sensitive rc
+  local -a roots=()
   mapfile -t roots <"$dir/roots.list"
   (( ${#roots[@]} > 0 )) || return 2
-  # Транзакции, начатые до появления списка, читаются как «изменчивых путей нет».
-  [[ -f "$dir/volatile.list" ]] && mapfile -t volatile <"$dir/volatile.list"
   sensitive=$(mktemp "$dir/.snapshot-sensitive.XXXXXX") || return 1
   cp -- "$dir/scope.list" "$sensitive" || {
     rm -f -- "$sensitive"
     return 1
   }
-  for root in "${roots[@]}"; do
-    while IFS= read -r -d '' rel; do
-      [[ "$rel" != *$'\n'* ]] || {
-        rm -f -- "$sensitive"
-        return 78
-      }
-      # Мусор работающего стенда (логи, debugbar, трассы Playwright) сторожу неотличим
-      # от правки агента: файл был другой — значит кто-то менял. А стенд поднят всю
-      # транзакцию, потому что узел вроде TRACE ради живого прогона и существует.
-      # Сторож может встать на сотнях файлов storage/debugbar без единого исходника.
-      # Что мусор, знает только проект — движок берёт список из профиля и молча
-      # выбрасывает совпавшее ДО того, как путь попадёт в чувствительное множество.
-      skip=0
-      for glob in ${volatile[@]+"${volatile[@]}"}; do
-        [[ -n "$glob" ]] || continue
-        # shellcheck disable=SC2053  # справа именно шаблон, кавычки убили бы смысл
-        if [[ "$rel" == $glob ]]; then
-          skip=1
-          break
-        fi
-      done
-      (( skip == 0 )) || continue
-      absolute="$root/$rel"
-      [[ -e "$absolute" || -L "$absolute" ]] &&
-        printf '%s\n' "$absolute" >>"$sensitive"
-    done < <(git -C "$root" ls-files --others --ignored --exclude-standard -z)
-  done
   sort -u -o "$sensitive" "$sensitive"
   WORKSPACE_GUARD_SENSITIVE_LIST_FILE="$sensitive" \
     workspace_guard_snapshot "$output" "${roots[@]}"
@@ -404,9 +400,18 @@ instrumentation_tx_begin() {
     return 1
   }
   chmod 700 "$tmp"
+  printf '%s\n' "${FACTORY_INSTRUMENTATION_ISOLATION:-}" >"$tmp/isolation" || {
+    rm -rf -- "$tmp"
+    _instrumentation_tx_unlock "$lock_fd"
+    return 1
+  }
+  chmod 400 "$tmp/isolation" || {
+    rm -rf -- "$tmp"
+    _instrumentation_tx_unlock "$lock_fd"
+    return 1
+  }
   _instrumentation_tx_normalize_roots "$tmp/roots.list" "$@" &&
     _instrumentation_tx_normalize_scope "$scope_input" "$tmp/scope.list" "$tmp/roots.list" &&
-    _instrumentation_tx_write_volatile "$tmp/volatile.list" &&
     _instrumentation_tx_verify_isolation "$tmp/roots.list" &&
     printf '%s' "$marker" | workspace_guard_b64 >"$tmp/marker.b64" &&
     _instrumentation_tx_marker_absent_in_roots "$tmp" &&

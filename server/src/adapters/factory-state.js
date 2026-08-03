@@ -10,8 +10,13 @@ import { parseStagesLog } from '../lib/stages-parse.js';
 import { detectStall } from '../lib/stall.js';
 import { readRunSilence } from '../lib/factory-cli.js';
 import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../lib/factory-graph.js';
-import { buildV2RouteDef, v2StageKeys } from '../lib/route-v2-graph.js';
-import { RoutesV2Store } from '../modules/routes/store-v2.js';
+import { buildRouteDef, routeStageKeys } from '../lib/route-graph.js';
+import { RoutesStore } from '../modules/routes/store.js';
+import { parseSandboxRepositories } from '../lib/sandbox-env.js';
+import {
+  readFactoryAttemptLedger,
+  verifyFactoryAttemptEnvironment,
+} from '../lib/factory-attempt-ledger.js';
 import {
   activeRunnerReason,
   loadRunnerConfig,
@@ -22,9 +27,10 @@ import {
 // Этапы конвейера по маршрутам (порядок ключей реестра). Держим здесь, чтобы
 // собирать статус-карту предсказуемо; форма графа (координаты) придёт из
 // profiles/<profile>/graph.json на этапе модуля «Конвейер».
-// DEMO-ключей здесь нет намеренно: демо убрано из цепочки фабрики (2026-07-27) и снимается
-// по кнопке плагина «Демо» (factory <task> demo). Пока они числились этапами маршрута,
-// прогресс feature не доходил до 100%, а дошедшая до ретро задача выглядела недоделанной.
+// DEMO-ключей здесь нет: демо убрано из цепочки фабрики (2026-07-27), а сама съёмка
+// удалена вместе с плагином (2026-08-01) — видео живёт в отдельном сервисе. Пока DEMO
+// числился этапом маршрута, прогресс feature не доходил до 100%, а дошедшая до ретро
+// задача выглядела недоделанной.
 const ROUTE_STAGES = {
   feature: ['SCOUT', 'PLAN', 'SKEPTIC', 'VALIDATE', 'TRANSLATOR', 'GATE_PLAN', 'TESTS',
     'TCRITIC', 'BUILD', 'SIMPLIFY', 'REVIEW', 'TRACE', 'PHPCHECK', 'LINT', 'BROWSER',
@@ -52,60 +58,118 @@ function stallNodeId(def, statuses, stage) {
 }
 
 export class FactoryStateAdapter {
-  /** @param {{ stateDir: string, profilesDir: string, stateV2Dir?: string|null, routesV2Dir?: string|null }} opts */
-  constructor({ stateDir, profilesDir, stateV2Dir = null, routesV2Dir = null }) {
+  /** @param {{ stateDir: string, profilesDir: string, routesDir?: string|null, controlDir?: string|null }} opts */
+  constructor({ stateDir, profilesDir, routesDir = null, controlDir = null }) {
     this.stateDir = stateDir;
-    this.stateV2Dir = stateV2Dir;
     this.profilesDir = profilesDir;
-    this.routesV2Dir = routesV2Dir;
-    this._routesV2Store = null;
+    this.routesDir = routesDir;
+    this.controlDir = controlDir;
+    this._routesStore = null;
+  }
+
+  /** Только синтаксис UI-проекции; разрешением на исполнение эта проверка не является. */
+  hasRouteProjectionIdentity(registry) {
+    return Boolean(registry
+      && registry.CATALOG_PROTOCOL === 'route-v2'
+      && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(registry.PROFILE || '')
+      && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(registry.ROUTE || '')
+      && /^a_[a-f0-9]{32}$/.test(registry.ATTEMPT_ID || '')
+      && /^[a-f0-9]{64}$/.test(registry.ROUTE_HASH || ''));
   }
 
   /**
-   * Форма графа v2-задачи — из ЗАКРЕПЛЁННОГО бандла (реестр несёт profile, route
-   * и routeHash пина). Возвращает null, если это не v2-задача или бандл
-   * недоступен, — тогда рисуем v1-форму как раньше.
+   * Единственный источник executable identity — trusted engine control ledger.
+   * `.pipeline` здесь лишь сверяемая provider-writable проекция.
    */
-  async v2RouteDef(registry) {
-    if (registry.CATALOG_PROTOCOL !== 'route-v2' || !this.routesV2Dir
-        || !registry.PROFILE || !registry.ROUTE
-        || !/^[a-f0-9]{64}$/.test(registry.ROUTE_HASH || '')) return null;
+  async readTrustedAttempt(task, registry = null) {
+    const projection = registry || (await this.readRegistry(task)).registry;
+    return readFactoryAttemptLedger({
+      controlDir: this.controlDir,
+      stateDir: this.stateDir,
+      task: String(task),
+      registry: projection,
+    });
+  }
+
+  /** Перед destructive lifecycle mutable `.env` обязан точно совпасть с pin профиля. */
+  verifyTrustedEnvironment(trusted, env) {
+    return verifyFactoryAttemptEnvironment(trusted, env);
+  }
+
+  /**
+   * Форма графа текущей задачи — только из ЗАКРЕПЛЁННОГО бандла. Потерянный или
+   * подменённый pin является ошибкой целостности, а не поводом открыть legacy graph.
+   */
+  async routeDef(registry, opts = {}) {
+    if (!this.hasRouteProjectionIdentity(registry) || !this.routesDir) {
+      throw new Error('реестр не содержит полностью закреплённую route-attempt identity');
+    }
     try {
-      this._routesV2Store ||= new RoutesV2Store({ baseDir: this.routesV2Dir });
-      const { route } = await this._routesV2Store.readRoute(
+      this._routesStore ||= new RoutesStore({ baseDir: this.routesDir });
+      const { route } = await this._routesStore.readRoute(
         registry.PROFILE,
         registry.ROUTE,
         registry.ROUTE_HASH,
       );
       // Поля машины в route.json верхнеуровневые (sequence/nodes/entry).
-      return buildV2RouteDef(
+      return buildRouteDef(
         { entry: route.entry, sequence: route.sequence, nodes: route.nodes },
         registry.ROUTE,
+        opts,
       );
-    } catch {
-      return null; // бандл потерян/испорчен — честная v1-форма лучше 500
+    } catch (err) {
+      throw new Error(`закреплённый маршрут недоступен или повреждён: ${err.message}`);
     }
   }
 
   /**
-   * Каталог, где реально живёт реестр задачи. Протокол route v2 держит состояние
-   * в отдельном stateV2Dir (движок требует непересечения с legacy), поэтому все
-   * чтения идут через это разрешение. Коллизий не бывает: v2-старт отказывает
-   * задаче, у которой есть legacy-реестр.
+   * Маршруты ОПУБЛИКОВАННОГО каталога профиля — то, из чего человек выбирает при
+   * запуске. Список берём из бандла, а не из `graph.json` профиля: стартовать можно
+   * только по опубликованному маршруту, и предложить неопубликованный значит
+   * пообещать то, чего движок не примет.
+   * @returns {Promise<{catalogHash:string, routes:string[],routeOptions:object}|null>}
+   * null — каталог не опубликован
    */
-  async taskStateDir(task) {
-    if (this.stateV2Dir) {
-      try {
-        await fsp.access(path.join(this.stateV2Dir, `t${task}.pipeline`));
-        return this.stateV2Dir;
-      } catch { /* не v2 — читаем legacy */ }
+  async catalog(profile) {
+    if (!this.routesDir || !profile) return null;
+    try {
+      this._routesStore ||= new RoutesStore({ baseDir: this.routesDir });
+      const current = await this._routesStore.readCurrent(profile);
+      if (!current) return null;
+      const routes = Object.keys(current.catalog.routes || {}).sort();
+      const entries = await Promise.all(routes.map(async (routeId) => {
+        const { route } = await this._routesStore.readRoute(
+          profile,
+          routeId,
+          current.catalog.routes[routeId],
+        );
+        return [routeId, {
+          deliveryMode: route.nodes.some((node) => node.id === 'ship') ? 'publish' : 'disabled',
+          instrumentationRequired: routeId === 'debug',
+        }];
+      }));
+      return {
+        catalogHash: current.catalogHash,
+        routes,
+        routeOptions: Object.fromEntries(entries),
+      };
+    } catch {
+      return null; // каталога нет или он испорчен — запуск обязан fail closed
     }
+  }
+
+  /**
+   * Единственный runtime root. Legacy-файлы могут оставаться в нём для истории,
+   * но без совпавшего trusted ledger ни одна мутация их не принимает.
+   */
+  async taskStateDir(_task) {
     return this.stateDir;
   }
 
-  /** Задача прогона v2? Мутации v1-CLI (runner switch, снос песочницы) к ней неприменимы. */
-  async isV2Task(task) {
-    return this.stateV2Dir !== null && (await this.taskStateDir(task)) === this.stateV2Dir;
+  /** Только такие задачи разрешено передавать единственному движку для mutation/resume. */
+  async isExecutableTask(task) {
+    try { await this.readTrustedAttempt(task); return true; }
+    catch { return false; }
   }
 
   /**
@@ -119,7 +183,7 @@ export class FactoryStateAdapter {
     try {
       const raw = fs.readFileSync(`/proc/${pid}/cmdline`);
       const argv = raw.toString('utf8').split('\0').filter(Boolean);
-      const hasBin = argv.some((a) => a.endsWith('/bin/factory') || a === 'bin/factory' || a.includes('bin/factory'));
+      const hasBin = argv.some((a) => a.endsWith('/bin/factory') || a === 'bin/factory');
       const hasTask = argv.includes(String(task));
       return hasBin && hasTask;
     } catch {
@@ -127,19 +191,14 @@ export class FactoryStateAdapter {
     }
   }
 
-  /** Список номеров задач из глоба `t*.pipeline` — по обоим поколениям состояния. */
+  /** Список номеров задач из единственного runtime root. */
   async listTaskIds() {
     const ids = new Set();
-    for (const dir of [this.stateDir, this.stateV2Dir]) {
-      if (!dir) continue;
-      let files = [];
-      try {
-        files = await fsp.readdir(dir);
-      } catch { continue; }
-      for (const f of files) {
-        const m = /^t(\d+)\.pipeline$/.exec(f);
-        if (m) ids.add(m[1]);
-      }
+    let files = [];
+    try { files = await fsp.readdir(this.stateDir); } catch { return []; }
+    for (const f of files) {
+      const m = /^t(\d+)\.pipeline$/.exec(f);
+      if (m) ids.add(m[1]);
     }
     // Стабильный числовой порядок (как в dashboard.collect_sandboxes).
     return [...ids].sort((a, b) => (a.length - b.length) || a.localeCompare(b));
@@ -184,7 +243,7 @@ export class FactoryStateAdapter {
     // v2-реестр несёт РОВНО узлы закреплённого бандла (в порядке машины) —
     // никаких захардкоженных списков этапов.
     const stages = registry.CATALOG_PROTOCOL === 'route-v2'
-      ? v2StageKeys(registry)
+      ? routeStageKeys(registry)
       : (ROUTE_STAGES[route] || ROUTE_STAGES.feature);
     const map = {};
     for (const key of stages) {
@@ -212,6 +271,11 @@ export class FactoryStateAdapter {
     const { registry, mtime } = await this.readRegistry(task);
     const { route, stages, map } = this.buildStageMap(registry);
     const daemonAlive = this.isDaemonAlive(registry.ORCH_PID, task);
+    const env = await this.readEnv(task);
+    const sandbox = parseSandboxRepositories(env, { allowLegacy: true });
+    let trusted = null;
+    try { trusted = await this.readTrustedAttempt(task, registry); } catch { /* read-only */ }
+    const readOnly = !trusted;
     // Причина остановки идёт В СВОДКУ, а не только в деталь задачи: затык надо видеть
     // в списке, не открывая карточку. Иначе движок ждёт человека, а в интерфейсе это
     // выглядит обычным «○ стоит», как у доделанной задачи.
@@ -219,10 +283,17 @@ export class FactoryStateAdapter {
     return {
       task,
       route,
-      // Поколение прогона: v2-задачами управляет factory-v2, мутации v1-CLI к ним
-      // неприменимы — UI и ручки сервера смотрят на этот флаг.
-      generation: (await this.isV2Task(task)) ? 'v2' : 'v1',
-      profile: registry.PROFILE || null,
+      // Старый реестр остаётся видимым как архивная проекция, но никакая server-side
+      // мутация не имеет права передать его единственному движку.
+      readOnly,
+      workspaceMode: trusted?.workspaceMode || sandbox.workspaceMode,
+      // Попытка и её исход. Без них кнопка «Продолжить» не отличила бы упавший
+      // прогон от закрытой попытки. `WF_STATUS` тут не судья: это вторичная
+      // проекция активности. Терминальность несёт trusted attempt-ledger и его
+      // RESULT (completed/abandoned/recovered/human-rewind).
+      attempt: trusted?.attempt || registry.ATTEMPT_ID || null,
+      result: trusted?.terminal || registry.RESULT || null,
+      profile: trusted?.profile || registry.PROFILE || null,
       wfStatus: registry.WF_STATUS || null,
       orchPid: registry.ORCH_PID || null,
       daemonAlive,
@@ -256,9 +327,23 @@ export class FactoryStateAdapter {
     const { registry, mtime } = await this.readRegistry(task);
     const profile = registry.PROFILE;
     if (!profile) throw new Error(`у задачи t${task} нет PROFILE в реестре`);
-    let def = await this.v2RouteDef(registry);
+    let trusted = null;
+    try { trusted = await this.readTrustedAttempt(task, registry); } catch { /* read-only */ }
+    const executable = Boolean(trusted);
+    // Порты стенда и режим workspace — в tNNNN.env (не в реестре .pipeline).
+    let env = {};
+    try {
+      env = parsePipeline(await fsp.readFile(path.join(stateDir, `t${task}.env`), 'utf8'));
+    } catch { /* env нет */ }
+    let def = null;
     let route = registry.ROUTE;
-    if (!def) {
+    if (registry.CATALOG_PROTOCOL === 'route-v2') {
+      // Маркер текущего протокола запрещает fallback: pin должен пройти полностью.
+      // Режим закреплён в env попытки: shared-профиль рисуется без ромба песочницы.
+      def = await this.routeDef(registry, { workspaceMode: env.WORKSPACE_MODE });
+    } else {
+      // Исторический legacy graph доступен только для просмотра. Mutation endpoints
+      // проверяют executable identity до любых команд и записей.
       const g = loadGraph(this.profilesDir, profile);
       route = registry.ROUTE || g.default_route;
       def = graphForRoute(g, route);
@@ -273,11 +358,7 @@ export class FactoryStateAdapter {
       loops = parseLoops(log);
     } catch { /* журнала нет */ }
 
-    // Порты стенда — в tNNNN.env (не в реестре .pipeline).
-    let env = {};
-    try {
-      env = parsePipeline(await fsp.readFile(path.join(stateDir, `t${task}.env`), 'utf8'));
-    } catch { /* env нет */ }
+    const parsedSandbox = parseSandboxRepositories(env, { allowLegacy: true });
 
     // Честный статус ромба песочницы: порты есть → готова; идёт сборка → running
     // (при живом демоне), демон умер посреди сборки → fail. Иначе — как посчитала цепочка.
@@ -350,7 +431,8 @@ export class FactoryStateAdapter {
       task,
       profile,
       route,
-      generation: this.stateV2Dir && stateDir === this.stateV2Dir ? 'v2' : 'v1',
+      readOnly: !executable,
+      workspaceMode: trusted?.workspaceMode || parsedSandbox.workspaceMode,
       vb: def.vb,
       nodes: def.nodes,
       pos: def.pos,
@@ -392,22 +474,14 @@ export class FactoryStateAdapter {
   async primaryProfile() {
     const ids = await this.listTaskIds();
     for (const id of ids) {
-      try { const { registry } = await this.readRegistry(id); if (registry.PROFILE) return registry.PROFILE; }
+      try {
+        const { registry } = await this.readRegistry(id);
+        const trusted = await this.readTrustedAttempt(id, registry);
+        if (trusted.profile) return trusted.profile;
+      }
       catch { /* пропускаем */ }
     }
     return this.discoverProfiles()[0] || null;
-  }
-
-  /** Эталонные схемы всех маршрутов профиля (для раздела «Маршруты»). */
-  getRoutes(profile) {
-    if (!profile) throw new Error('профиль не указан');
-    const g = loadGraph(this.profilesDir, profile);
-    const routes = {};
-    for (const route of Object.keys(g.routes)) {
-      const def = graphForRoute(g, route);
-      routes[route] = { nodes: def.nodes, pos: def.pos, edges: def.edges };
-    }
-    return { profile, default: g.default_route, routes };
   }
 
   /** Все задачи с краткими карточками. */

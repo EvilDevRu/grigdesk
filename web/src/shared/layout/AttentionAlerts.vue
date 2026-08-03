@@ -41,7 +41,9 @@ async function dismissAll() {
 </script>
 
 <template>
-  <HelpTip v-if="items.length" align="right" fixed class="alerts-tip">
+  <!-- Тултип со списком шире стандартного (270px мало — строки липнут к краям) -->
+  <HelpTip v-if="items.length" align="right" class="alerts-tip"
+           :tip-style="{ maxWidth: '400px', padding: '14px 16px' }">
     <span class="warnchip mono">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
@@ -79,8 +81,6 @@ async function dismissAll() {
   font-variant-numeric: tabular-nums;
 }
 .warnchip svg { width: 13px; height: 13px; }
-/* Тултип со списком шире стандартного (270px мало — строки липнут к краям) */
-.alerts-tip :deep(.ht-tip) { max-width: 400px; padding: 14px 16px; }
 .alerts { display: flex; flex-direction: column; gap: 9px; min-width: 320px; text-align: left; }
 /* Длинный список — скроллом, чтобы тултип не вылезал за экран */
 .alist { display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow-y: auto; padding-right: 4px; margin-right: -6px; }

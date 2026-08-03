@@ -1,10 +1,23 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { defineConfig, loadEnv } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const envDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+function buildMetadata() {
+  let version = process.env.VITE_COCKPIT_VERSION || 'dev';
+  let sha = process.env.VITE_COCKPIT_SHA || 'dev';
+  try { if (version === 'dev') version = readFileSync(path.join(envDir, 'VERSION'), 'utf8').trim(); }
+  catch { /* dev checkout без VERSION */ }
+  try {
+    if (sha === 'dev') sha = execFileSync('git', ['-C', envDir, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 5000 }).trim();
+  } catch { /* source archive может собираться без .git; worker передаёт SHA через env */ }
+  return { version, sha };
+}
 
 // base './' — чтобы собранная статика работала и на корне сервера, и в поддиректории.
 // В dev проксируем API/статику фабрики на настроенный порт сервера, чтобы фронт ходил
@@ -15,6 +28,7 @@ export default defineConfig(({ mode }) => {
   // уже экспортированная переменная выше значения из корневого .env.
   const cockpitPort = Number(process.env.COCKPIT_PORT ?? fileEnv.COCKPIT_PORT) || 8140;
   const proxyTarget = `http://localhost:${cockpitPort}`;
+  const metadata = buildMetadata();
 
   return {
     plugins: [
@@ -51,11 +65,15 @@ export default defineConfig(({ mode }) => {
           // Monaco (диф-редактор) — крупный чанк; поднимаем лимит прекеша (по умолчанию 2 МБ).
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
           // SPA-fallback не должен перехватывать API/статику.
-          navigateFallbackDenylist: [/^\/api/, /^\/shots/, /^\/demo/],
+          navigateFallbackDenylist: [/^\/api/, /^\/shots/],
         },
       }),
     ],
     base: './',
+    define: {
+      __COCKPIT_VERSION__: JSON.stringify(metadata.version),
+      __COCKPIT_SHA__: JSON.stringify(metadata.sha),
+    },
     // .env лежит в корне репо (общий для сервера и фронта) — читаем оттуда.
     envDir,
     server: {
@@ -64,7 +82,6 @@ export default defineConfig(({ mode }) => {
         '/api': { target: proxyTarget, changeOrigin: true, ws: false },
         '/vscode': { target: proxyTarget, changeOrigin: true, ws: true },
         '/shots': proxyTarget,
-        '/demo': proxyTarget,
       },
     },
     build: { outDir: 'dist', emptyOutDir: true },

@@ -109,12 +109,24 @@ test('одновременные сохранения двух окон не т�
 });
 
 test('состояние агента не откатывается копией из отставшего окна', () => {
-  const disk = baseChat({ sessionId: 'новая-сессия', contextTokens: 90_000, updatedAt: Date.UTC(2026, 7, 1, 6) });
-  const stale = baseChat({ sessionId: 'старая-сессия', contextTokens: 12_000, updatedAt: Date.UTC(2026, 7, 1, 2) });
+  const disk = baseChat({
+    sessionId: 'новая-сессия', contextTokens: 90_000, contextWindow: 258_400,
+    contextMetric: 'active-input-v1', totalInputTokens: 2_000_000, cachedInputTokens: 1_800_000,
+    updatedAt: Date.UTC(2026, 7, 1, 6),
+  });
+  const stale = baseChat({
+    sessionId: 'старая-сессия', contextTokens: 12_000, contextWindow: 400_000,
+    contextMetric: 'legacy-unavailable', totalInputTokens: 12_000, cachedInputTokens: 0,
+    updatedAt: Date.UTC(2026, 7, 1, 2),
+  });
 
   const { chat } = mergeChat(disk, stale);
   assert.equal(chat.sessionId, 'новая-сессия');
   assert.equal(chat.contextTokens, 90_000);
+  assert.equal(chat.contextWindow, 258_400);
+  assert.equal(chat.contextMetric, 'active-input-v1');
+  assert.equal(chat.totalInputTokens, 2_000_000);
+  assert.equal(chat.cachedInputTokens, 1_800_000);
   assert.equal(chat.updatedAt, Date.UTC(2026, 7, 1, 6));
 });
 

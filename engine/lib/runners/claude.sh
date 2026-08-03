@@ -4,8 +4,14 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 runner_claude_probe() {
+  local version
   command -v claude >/dev/null 2>&1 || return 4
-  factory_exec provider claude --version
+  version=$(factory_exec provider claude --version) || return
+  # Empty --setting-sources is an audited fail-closed contract of this exact
+  # native CLI. A future release stays unavailable until its parsing and sandbox
+  # schema have been reviewed instead of silently re-enabling disk settings.
+  [[ "$version" =~ ^2\.1\.220([[:space:]]|$) ]] || return 4
+  printf '%s\n' "$version"
 }
 
 runner_claude_catalog() {
@@ -29,15 +35,112 @@ runner_claude_capabilities() {
   # status_request обязателен: текущий Claude CLI не наследует fd 7 в тул-шелл;
   # fd-транспорт остаётся быстрым путём там,
   # где он ещё жив, — stage-result сам выбирает доступный.
-  printf 'status status_fd status_request sandbox tools structured_output fanout\n'
+  # `sandbox` в списке нет намеренно: native OS sandbox временно снят (см. lib/core.sh),
+  # и заявлять границу, которой нет, опаснее, чем её отсутствие.
+  printf 'status status_fd status_request tools structured_output fanout\n'
+}
+
+_runner_claude_trusted_settings() {
+  local control=${RUNNER_CLAUDE_CONTROL_DIR:-} settings=${RUNNER_CLAUDE_SETTINGS:-}
+  command -v python3 >/dev/null 2>&1 || return 78
+  python3 - "$control" "$settings" <<'PYTHON'
+import json
+import os
+import stat
+import sys
+
+control, settings = sys.argv[1:]
+
+
+def fail():
+    raise SystemExit(78)
+
+
+if not os.path.isabs(control) or not os.path.isabs(settings):
+    fail()
+control = os.path.normpath(control)
+settings = os.path.normpath(settings)
+if control == os.sep or os.path.realpath(control) != control:
+    fail()
+try:
+    control_stat = os.lstat(control)
+except OSError:
+    fail()
+if (not stat.S_ISDIR(control_stat.st_mode) or stat.S_ISLNK(control_stat.st_mode)
+        or control_stat.st_uid != os.getuid()
+        or stat.S_IMODE(control_stat.st_mode) != 0o700):
+    fail()
+try:
+    if os.path.commonpath((control, settings)) != control or settings == control:
+        fail()
+except ValueError:
+    fail()
+try:
+    settings_stat = os.lstat(settings)
+except OSError:
+    fail()
+if (not stat.S_ISREG(settings_stat.st_mode) or stat.S_ISLNK(settings_stat.st_mode)
+        or settings_stat.st_uid != os.getuid() or settings_stat.st_nlink != 1
+        or stat.S_IMODE(settings_stat.st_mode) != 0o400
+        or settings_stat.st_size > 2 * 1024 * 1024
+        or os.path.realpath(settings) != settings):
+    fail()
+try:
+    with open(settings, encoding="utf-8") as source:
+        value = json.load(source)
+except (OSError, UnicodeError, json.JSONDecodeError):
+    fail()
+
+permissions = value.get("permissions") if isinstance(value, dict) else None
+if not isinstance(permissions, dict):
+    fail()
+
+# Native OS sandbox снят с обязательных требований: на Linux это bwrap-namespace, который
+# отбирает у агента группу docker и хостовый localhost, то есть весь канал до стенда
+# (см. lib/core.sh и ../docs/engine/ENGINE.md). Но если блок всё же объявлен — он обязан быть
+# ровно той аудированной формой, что была: полумеры вроде excludedCommands или allowRead
+# опаснее честного отсутствия границы, потому что выглядят как граница.
+sandbox = value.get("sandbox")
+if sandbox is not None:
+    filesystem = sandbox.get("filesystem") if isinstance(sandbox, dict) else None
+    if (not isinstance(sandbox, dict) or sandbox.get("enabled") is not True
+            or sandbox.get("failIfUnavailable") is not True
+            or sandbox.get("allowUnsandboxedCommands") is not False
+            or "excludedCommands" in sandbox or not isinstance(filesystem, dict)
+            or "allowRead" in filesystem):
+        fail()
+    for key in ("denyRead", "denyWrite"):
+        rules = filesystem.get(key)
+        if not isinstance(rules, list) or control not in rules or f"{control}/**" not in rules:
+            fail()
+
+deny = permissions.get("deny")
+if not isinstance(deny, list) or not all(isinstance(rule, str) for rule in deny):
+    fail()
+tool_control = f"//{control.lstrip('/')}"
+required = {
+    f"{tool}({path})"
+    for tool in ("Read", "Edit", "Write", "NotebookEdit")
+    for path in (tool_control, f"{tool_control}/**")
+}
+if not required.issubset(deny):
+    fail()
+PYTHON
 }
 
 runner_claude_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
-  local -a args=(claude -p "$prompt" --output-format stream-json --verbose)
+  _runner_claude_trusted_settings || return
+  local -a args=(
+    claude -p "$prompt" --output-format stream-json --verbose
+    --settings "$RUNNER_CLAUDE_SETTINGS"
+    --setting-sources ""
+    --strict-mcp-config
+    --disable-slash-commands
+    --safe-mode
+  )
   [[ -z "$model" ]] || args+=(--model "$model")
   [[ -z "$effort" ]] || args+=(--effort "$effort")
-  [[ -z "${RUNNER_CLAUDE_SETTINGS:-}" ]] || args+=(--settings "$RUNNER_CLAUDE_SETTINGS")
   local add_dir
   for add_dir in ${RUNNER_CLAUDE_ADD_DIRS:-}; do
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")

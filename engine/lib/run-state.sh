@@ -67,8 +67,123 @@ _run_state_get() {
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file" 2>/dev/null
 }
 
+# Типизированный verdict остаётся частью run-scoped status protocol, а не свободным
+# полем реестра. Агент передаёт только allowlisted owner и стабильные finding id;
+# здесь payload канонизируется до того, как попадёт в trusted control record.
+_run_state_verdict() {
+  python3 - "$@" <<'PY'
+import base64
+import json
+import re
+import sys
+
+operation, result, encoded, *findings_raw = sys.argv[1:]
+owners = {"build", "tests", "environment", "plan", "human"}
+finding_re = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def fail():
+    raise SystemExit(2)
+
+
+def validate(value):
+    if not isinstance(value, dict) or set(value) != {"owner", "findings"}:
+        fail()
+    owner = value.get("owner")
+    findings = value.get("findings")
+    if owner not in owners or not isinstance(findings, list) or not 1 <= len(findings) <= 32:
+        fail()
+    seen = set()
+    for finding in findings:
+        if not isinstance(finding, dict) or set(finding) != {"id", "summary"}:
+            fail()
+        finding_id = finding.get("id")
+        summary = finding.get("summary")
+        if (
+            not isinstance(finding_id, str)
+            or not finding_re.fullmatch(finding_id)
+            or finding_id in seen
+            or not isinstance(summary, str)
+            or not 1 <= len(summary) <= 500
+            or any(ord(char) < 32 or ord(char) == 127 for char in summary)
+        ):
+            fail()
+        seen.add(finding_id)
+    return value
+
+
+if operation == "encode":
+    owner = encoded
+    if result != "failed":
+        if owner or findings_raw:
+            fail()
+        print("")
+        raise SystemExit(0)
+    if not owner and not findings_raw:
+        # Старые prompts продолжают законно посылать обычный failed без metadata.
+        print("")
+        raise SystemExit(0)
+    parsed = []
+    for raw in findings_raw:
+        if "=" not in raw:
+            fail()
+        finding_id, summary = raw.split("=", 1)
+        parsed.append({"id": finding_id, "summary": summary})
+    value = validate({"owner": owner, "findings": parsed})
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    print(base64.b64encode(payload).decode("ascii"))
+elif operation in {"validate", "owner"}:
+    if not encoded:
+        if operation == "owner":
+            print("")
+        raise SystemExit(0)
+    if result != "failed" or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded):
+        fail()
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+        if len(payload) > 32 * 1024:
+            fail()
+        value = json.loads(payload.decode("utf-8"), parse_constant=lambda _: fail())
+    except (ValueError, UnicodeError, json.JSONDecodeError):
+        fail()
+    value = validate(value)
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if canonical != payload:
+        fail()
+    if operation == "owner":
+        print(value["owner"])
+else:
+    fail()
+PY
+}
+
+run_state_verdict_encode() {
+  local result=$1 owner=${2:-}
+  shift 2
+  _run_state_verdict encode "$result" "$owner" "$@"
+}
+
+run_state_verdict_validate() {
+  _run_state_verdict validate "$1" "${2:-}"
+}
+
+run_state_verdict_owner() {
+  _run_state_verdict owner "$1" "${2:-}"
+}
+
 _run_state_write() {
   local file=$1 run_id=$2 epoch=$3 token_hash=$4 state=$5 result=${6:-} comment=${7:-}
+  local verdict_b64=${8:-}
   local tmp
   mkdir -p "$(dirname "$file")"
   tmp=$(mktemp "$(dirname "$file")/.active.XXXXXX")
@@ -77,6 +192,7 @@ _run_state_write() {
       "$run_id" "$epoch" "$token_hash" "$state"
     [[ -z "$result" ]] || printf 'RESULT=%s\n' "$result"
     [[ -z "$comment" ]] || printf 'COMMENT=%s\n' "${comment//$'\n'/ }"
+    [[ -z "$verdict_b64" ]] || printf 'VERDICT_B64=%s\n' "$verdict_b64"
   } >"$tmp"
   chmod 600 "$tmp"
   mv -f -- "$tmp" "$file"
@@ -109,8 +225,11 @@ run_state_begin() {
 
 run_state_apply_result() {
   local task=$1 stage=$2 run_id=$3 epoch=$4 token=$5 result=$6 comment=${7:-}
+  local verdict_b64=${8:-}
   case "$result" in done|skipped|failed) ;; *) return 2 ;; esac
+  run_state_verdict_validate "$result" "$verdict_b64" || return
   local lock_fd file active_run active_epoch expected_hash state stored_result stored_comment rc
+  local stored_verdict
   pipeline_lock_acquire "$task" lock_fd || return
   file=$(run_state_active_file "$task" "$stage") || {
     pipeline_lock_release "$lock_fd"
@@ -135,6 +254,11 @@ run_state_apply_result() {
   if [[ "$state" == committed ]]; then
     stored_result=$(_run_state_get "$file" RESULT)
     stored_comment=$(_run_state_get "$file" COMMENT)
+    stored_verdict=$(_run_state_get "$file" VERDICT_B64)
+    run_state_verdict_validate "$stored_result" "$stored_verdict" || {
+      pipeline_lock_release "$lock_fd"
+      return 78
+    }
     pipeline_store_update_unlocked "$task" "$stage" "$stored_result" \
       "${stage}_COMMENT" "$stored_comment" "ACTIVE_RUN_${stage}" ""
     pipeline_lock_release "$lock_fd"
@@ -144,7 +268,8 @@ run_state_apply_result() {
     pipeline_lock_release "$lock_fd"
     return 75
   }
-  _run_state_write "$file" "$run_id" "$epoch" "$expected_hash" committed "$result" "$comment"
+  _run_state_write "$file" "$run_id" "$epoch" "$expected_hash" committed \
+    "$result" "$comment" "$verdict_b64"
   pipeline_store_update_unlocked "$task" "$stage" "$result" "${stage}_COMMENT" "$comment" \
     "ACTIVE_RUN_${stage}" ""
   rc=$?
@@ -160,14 +285,8 @@ run_state_validate_progress() {
     key=$1; value=$2; shift 2
     [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ && "$key" != "$stage" ]] || return 2
     case "$key" in
-      ROUTE)
-        [[ "$value" =~ ^[a-z][a-z0-9_-]*$ ]] || return 2 ;;
-      ROUTE_BY)
-        [[ "$value" =~ ^(scout|escalation)$ ]] || return 2 ;;
       SIZE)
         [[ "$value" =~ ^(S|M|L)$ ]] || return 2 ;;
-      TRIVIAL_ESCALATED)
-        [[ "$value" == 1 ]] || return 2 ;;
       PLANS|SKEPTIC|VALIDATE|TRANSLATOR)
         [[ "$value" =~ ^(running|done|skipped)$ ]] || return 2 ;;
       *)

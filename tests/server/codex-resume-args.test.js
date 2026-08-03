@@ -32,6 +32,7 @@ test('Codex second message puts exec-only sandbox and cwd before resume', () => 
     model: 'gpt-test',
     effort: 'high',
     sessionId: 'thread-1',
+    compactWindow: 200_000,
   });
 
   assert.deepEqual(args, [
@@ -44,6 +45,7 @@ test('Codex second message puts exec-only sandbox and cwd before resume', () => 
     '--add-dir', '/repos/frontend',
     '-m', 'gpt-test',
     '-c', 'model_reasoning_effort="high"',
+    '-c', 'model_auto_compact_token_limit=200000',
     'resume',
     '--json',
     'thread-1',

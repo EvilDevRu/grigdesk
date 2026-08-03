@@ -253,5 +253,15 @@ export const usePwaStore = defineStore('pwa', {
         window.location.reload();
       }
     },
+
+    // Серверный update-worker уже положил новый web/dist. Просим регистрацию проверить
+    // новый service worker сейчас, не дожидаясь страховочного 30-секундного интервала.
+    async checkForUpdate() {
+      try {
+        const registration = await navigator.serviceWorker?.getRegistration();
+        await registration?.update?.();
+        return !!registration;
+      } catch { return false; }
+    },
   },
 });

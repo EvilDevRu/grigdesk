@@ -20,7 +20,8 @@ source "$FACTORY_HOME/lib/runtime-switch.sh"
 
 task=88
 stage=BUILD
-bash "$FACTORY_HOME/lib/pipeline-set.sh" "$task" --init "$stage" pending >/dev/null
+pipeline_store_route_init "$task" "$stage"
+assert_rc 0 "$?" "active switch fixture initializes an exact route registry"
 run_state_begin "$task" "$stage" run-a 1 token-a
 
 runtime_switch_request "$task" "$stage" run-old 0 codex request-old
@@ -37,7 +38,8 @@ runtime_switch_consume "$task" "$stage" run-a 1 request-a >/dev/null
 assert_rc 75 "$?" "consumed request cannot replay"
 
 task_done=89
-bash "$FACTORY_HOME/lib/pipeline-set.sh" "$task_done" --init "$stage" pending >/dev/null
+pipeline_store_route_init "$task_done" "$stage"
+assert_rc 0 "$?" "completed switch fixture initializes an exact route registry"
 run_state_begin "$task_done" "$stage" run-done 1 token-done
 runtime_switch_request "$task_done" "$stage" run-done 1 codex request-done
 run_state_apply_result "$task_done" "$stage" run-done 1 token-done done

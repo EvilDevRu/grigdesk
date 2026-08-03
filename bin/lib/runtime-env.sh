@@ -4,6 +4,15 @@
 # читает их через `node --env-file`. Сам `.env` не source-ится и не попадает в eval:
 # строки вроде `VALUE=$(command)` остаются обычным текстом. Уже экспортированное
 # окружение имеет приоритет над значениями файла — это также поведение Node.
+cockpit_add_cli_paths() {
+  local kimi_bin_dir="${HOME:?домашний каталог обязателен}/.kimi-code/bin"
+  case ":${PATH:-}:" in
+    *":${kimi_bin_dir}:"*) ;;
+    *) PATH="${kimi_bin_dir}${PATH:+:${PATH}}" ;;
+  esac
+  export PATH
+}
+
 cockpit_load_runtime_env() {
   local cockpit_root=${1:?корень cockpit обязателен}
   local env_file="$cockpit_root/.env"

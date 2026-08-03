@@ -32,6 +32,7 @@ function pickStore(j) {
     activeId: j?.activeId || null,
     // Пусто = «ещё не выбирали»: модель нового чата возьмётся из реестра (см. defaultModelId).
     defModel: j?.defModel || '',
+    defModelRef: j?.defModelRef || null,
     defEffort: j?.defEffort || '',
     // Режим прав по умолчанию для новых чатов (пусто = как решит сервер по странице).
     defMode: j?.defMode || '',
@@ -51,6 +52,24 @@ let loadPromise = null;
 const sentChats = new Map();
 let sentMeta = '';
 let saveWarned = false;
+
+// Перед model POST чат сохраняется с CAS-revision. Другое окно может успеть записать
+// черновик/ответ между нашим чтением и PUT — сервер сольёт историю, вернёт свежую
+// revision и stale=true. Повторяем только безопасный PUT, сам ход агента здесь ещё
+// не начинался. Бесконечно спорить с постоянно пишущим окном нельзя.
+const CHAT_SAVE_ATTEMPTS = 3;
+
+function chatRevisionConflict() {
+  const error = new Error('Чат одновременно меняется в другом окне. Закрой лишние окна или повтори отправку.');
+  error.code = 'chat_revision_conflict';
+  return error;
+}
+
+function isConnectionError(error) {
+  return error instanceof TypeError
+    || error?.name === 'TimeoutError'
+    || error?.name === 'AbortError';
+}
 
 // Ответ может приехать тремя путями: прямо в send(), из chats/pending после обрыва
 // вкладки или синхронизацией истории с другого устройства. Ключи не дают одному ответу
@@ -77,14 +96,27 @@ let storeSyncedAt = 0;
 // нет счётчика inflight, а сервер попадает в список активных не мгновенно.
 const compactInflight = new Set();
 
+// Явный reset Kimi меняет server-owned binding и потому является асинхронным.
+// Карта не даёт отправить сообщение в коротком окне между нажатием «сбросить» и
+// подтверждением сервера, а повторный reset того же чата присоединяется к первому.
+const sessionResetJobs = new Map();
+
 // Кто именно пишет — чтобы не принимать собственное эхо. Своё изменение уже в сторе,
 // а серверная копия по нему прилетает тем же событием, что и чужая (см. `chat-store`).
 const WINDOW_ID = `w${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 
+// Лента живёт скользящим окном, как и её копия на сервере: длинный ход даёт тысячи
+// шагов, и без вытеснения окно (а с ним и DOM списка) растёт весь ход. Держим хвост —
+// начало давно уехало за экран, а свежее и есть признак, что агент жив.
+const MAX_STEPS = 400;
+
 // Рантайм-поля чата: живут только в окне и на сервер не едут (см. slimOf). При замене
 // чата серверной копией их надо сохранить — иначе принятое чужое изменение погасило бы
 // «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
-const RUNTIME_KEYS = ['sending', 'compacting', 'stopping', 'progressTokens', 'steps', 'error', 'inflight', 'offline'];
+const RUNTIME_KEYS = [
+  'sending', 'compacting', 'stopping', 'progressTokens', 'steps', 'error', 'inflight', 'offline',
+  'sessionResetting', 'sessionResetFailed',
+];
 function runtimeOf(s) {
   const out = {};
   for (const k of RUNTIME_KEYS) if (s?.[k] !== undefined) out[k] = s[k];
@@ -102,9 +134,17 @@ function insertByCreated(list, chat) {
 // Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
 function slimOf(s) {
   return {
-    id: s.id, taskId: s.taskId, title: s.title, model: s.model, effort: s.effort, mode: s.mode || '',
+    id: s.id, taskId: s.taskId, title: s.title, model: s.model, modelRef: s.modelRef || null,
+    // Служебные рабочие чаты (например Debug) остаются обычными пользовательскими
+    // чатами, но эта устойчивая метка позволяет повторной кнопке открыть тот же
+    // разговор вместо размножения сессий. По заголовку связывать нельзя — он редактируемый.
+    purpose: s.purpose || '', sourceChatId: s.sourceChatId || null,
+    schema: s.schema, surface: s.surface, revision: s.revision,
+    effort: s.effort, mode: s.mode || '',
     messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
+    contextWindow: s.contextWindow || 0, contextMetric: s.contextMetric || '',
     contextIsEstimate: !!s.contextIsEstimate,
+    totalInputTokens: s.totalInputTokens || 0, cachedInputTokens: s.cachedInputTokens || 0,
     // Выжимка после сжатия у исполнителя без родного компакта: ждёт следующего
     // сообщения, чтобы уехать первой в новую сессию. Обязана переживать F5 — иначе
     // сжатие превратилось бы в потерю памяти агента.
@@ -112,6 +152,68 @@ function slimOf(s) {
     compactedAt: s.compactedAt || 0,
     draft: s.draft || '', unread: !!s.unread, createdAt: s.createdAt, updatedAt: s.updatedAt,
   };
+}
+
+function applySaveAck(session, response) {
+  if (!session || !response) return;
+  if (Number.isSafeInteger(response.revision)) session.revision = response.revision;
+  if (Number.isSafeInteger(response.schema)) session.schema = response.schema;
+  if (response.surface) session.surface = response.surface;
+  if (response.modelRef) session.modelRef = response.modelRef;
+  if (response.modelRefState) session.modelRefState = response.modelRefState;
+}
+
+function selectedModel(session) {
+  return session?.modelRef || session?.model || '';
+}
+
+const CODEX_CONTEXT_METRIC = 'active-input-v1';
+
+function metricNumber(value, { positive = false } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || (positive && number <= 0)) return null;
+  return number;
+}
+
+function isCodexChat(session) {
+  return session?.modelRef?.provider === 'codex'
+    || /^(?:gpt-|codex-)/i.test(String(session?.model || ''));
+}
+
+/** Одна точка применения метрик: обычный ответ и orphan после обрыва не расходятся. */
+function applyContextUsage(session, payload) {
+  if (!session || !payload) return;
+  const metric = typeof payload.contextMetric === 'string' ? payload.contextMetric : '';
+  const context = metricNumber(payload.contextTokens);
+  // Ноль осмыслен только с новым контрактом: это честное «после компакта/нет запроса».
+  if (context !== null && (context > 0 || metric)) session.contextTokens = context;
+  const window = metricNumber(payload.contextWindow, { positive: true });
+  if (window !== null) session.contextWindow = window;
+  if (metric) session.contextMetric = metric;
+  if (Object.hasOwn(payload, 'contextIsEstimate')) {
+    session.contextIsEstimate = !!payload.contextIsEstimate;
+  }
+  const total = metricNumber(payload.totalInputTokens);
+  if (total !== null) session.totalInputTokens = total;
+  const cached = metricNumber(payload.cachedInputTokens);
+  if (cached !== null) session.cachedInputTokens = cached;
+}
+
+/** Обнулить provider session и её метрики. Выжимку выбрасываем только при явном reset:
+ * после аварийного сброса/stop она всё ещё нужна следующей чистой сессии. */
+function clearSessionContext(session, { discardSeed = false } = {}) {
+  if (!session) return;
+  session.sessionId = null;
+  session.contextTokens = 0;
+  session.contextWindow = 0;
+  session.contextMetric = '';
+  session.contextIsEstimate = false;
+  session.totalInputTokens = 0;
+  session.cachedInputTokens = 0;
+  if (discardSeed) {
+    session.pendingSeed = '';
+    session.compactedAt = 0;
+  }
 }
 
 // Архив сохраняем тем же узким снимком, что и активный чат, плюс момент закрытия.
@@ -222,7 +324,8 @@ export const useChatStore = defineStore('chat', {
           id: sess.id, title, snippet: mdToText(snippet), archived,
           draft: !t && !!(sess.draft || '').trim(),
           // Модель чата — для иконки исполнителя и подписи в строке списка.
-          model: sess.model || '',
+          model: sess.model || sess.modelRef?.model || '',
+          modelRef: sess.modelRef || null,
           // Сжатие для списка — такая же занятость чата, как обычный ход: строке нужен
           // тот же живой аватар, отличается только подсказка.
           taskId: sess.taskId, sending: !!sess.sending || !!sess.compacting,
@@ -315,10 +418,13 @@ export const useChatStore = defineStore('chat', {
             role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id,
             steps: p.steps || [], model: p.model || '', actualModel: p.actualModel || '', effort: p.effort || '',
           });
-          if (p.sessionId) s.sessionId = p.sessionId;
-          if (typeof p.contextTokens === 'number' && p.contextTokens > 0) {
-            s.contextTokens = p.contextTokens;
-            s.contextIsEstimate = !!p.contextIsEstimate;
+          if (p.sessionReset) {
+            clearSessionContext(s);
+            s.sessionResetFailed = false;
+          } else {
+            if (p.sessionId) s.sessionId = p.sessionId;
+            applyContextUsage(s, p);
+            if (p.sessionResetFailed) s.sessionResetFailed = true;
           }
           // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
           if (p.effort && p.effort !== s.effort) s.effort = p.effort;
@@ -343,7 +449,8 @@ export const useChatStore = defineStore('chat', {
         const archivedSlim = (this.archived || []).map(archivedSlimOf);
         const payload = {
           sessions: slim, archived: archivedSlim, activeId: this.activeId,
-          defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
+          defModel: this.defModel, defModelRef: this.defModelRef,
+          defEffort: this.defEffort, defMode: this.defMode,
         };
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
@@ -358,7 +465,13 @@ export const useChatStore = defineStore('chat', {
           const json = JSON.stringify(c);
           if (sentChats.get(c.id) === json) return;
           jobs.push(api.put('/api/chat/store/chat', { chat: c, archived, origin: WINDOW_ID })
-            .then(() => { sentChats.set(c.id, json); }));
+            .then((response) => {
+              const live = this._get(c.id) || (this.archived || []).find((item) => item.id === c.id);
+              applySaveAck(live, response);
+              const acknowledged = { ...c };
+              applySaveAck(acknowledged, response);
+              sentChats.set(c.id, JSON.stringify(acknowledged));
+            }));
         };
         slim.forEach((c) => push(c, false));
         archivedSlim.forEach((c) => push(c, true));
@@ -368,7 +481,13 @@ export const useChatStore = defineStore('chat', {
           jobs.push(api.del(`/api/chat/store/chat/${id}?origin=${WINDOW_ID}`)
             .then(() => { sentChats.delete(id); }));
         }
-        const meta = { activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode };
+        const meta = {
+          activeId: this.activeId,
+          defModel: this.defModel,
+          defModelRef: this.defModelRef,
+          defEffort: this.defEffort,
+          defMode: this.defMode,
+        };
         const metaJson = JSON.stringify(meta);
         if (metaJson !== sentMeta) {
           jobs.push(api.put('/api/chat/store/meta', { ...meta, origin: WINDOW_ID })
@@ -390,6 +509,42 @@ export const useChatStore = defineStore('chat', {
       else persistTimer = setTimeout(write, 300);
     },
     /**
+     * Барьер перед запуском executor-а: server-owned record с modelRef должен быть
+     * durable раньше POST /api/chat. Иначе быстрый запрос мог обогнать debounce истории.
+     */
+    async _saveChatNow(session) {
+      if (!session?.id) throw new Error('чат не выбран');
+      clearTimeout(persistTimer);
+      const archived = (this.archived || []).some((item) => item.id === session.id);
+      // Именно эту модель человек видел в отправляющем окне. stale-ack сообщает
+      // server-owned модель чужой ревизии; принять её и продолжить означало бы
+      // незаметно запустить не того исполнителя. На повторном CAS сохраняем свой выбор.
+      const intendedModel = session.model;
+      const intendedModelRef = session.modelRef ? { ...session.modelRef } : session.modelRef;
+      for (let attempt = 0; attempt < CHAT_SAVE_ATTEMPTS; attempt += 1) {
+        const snapshot = archived ? archivedSlimOf(session) : slimOf(session);
+        const response = await api.put('/api/chat/store/chat', {
+          chat: snapshot,
+          archived,
+          origin: WINDOW_ID,
+        });
+        applySaveAck(session, response);
+        if (response?.stale) {
+          // revision из ack — новая CAS-база. Сервер уже слил сообщения, поэтому
+          // повтор того же снимка их не удалит (mergeChat восстановит серверный хвост).
+          session.model = intendedModel;
+          session.modelRef = intendedModelRef ? { ...intendedModelRef } : intendedModelRef;
+          if (attempt + 1 < CHAT_SAVE_ATTEMPTS) continue;
+          throw chatRevisionConflict();
+        }
+        const acknowledged = { ...snapshot };
+        applySaveAck(acknowledged, response);
+        sentChats.set(session.id, JSON.stringify(acknowledged));
+        return response;
+      }
+      throw chatRevisionConflict();
+    },
+    /**
      * Стор совпал с серверным — запоминаем слепки, чтобы первое же сохранение
      * не гнало всю историю заново.
      */
@@ -398,7 +553,8 @@ export const useChatStore = defineStore('chat', {
       this.sessions.forEach((s) => sentChats.set(s.id, JSON.stringify(slimOf(s))));
       (this.archived || []).forEach((c) => sentChats.set(c.id, JSON.stringify(archivedSlimOf(c))));
       sentMeta = JSON.stringify({
-        activeId: this.activeId, defModel: this.defModel, defEffort: this.defEffort, defMode: this.defMode,
+        activeId: this.activeId, defModel: this.defModel, defModelRef: this.defModelRef,
+        defEffort: this.defEffort, defMode: this.defMode,
       });
     },
     /**
@@ -423,8 +579,23 @@ export const useChatStore = defineStore('chat', {
     _normalize(list) {
       for (const s of list || []) {
         s.messages ||= [];
+        s.modelRef ||= null;
+        s.revision ??= 0;
         s.contextTokens ??= 0;
+        s.contextWindow ??= 0;
+        s.contextMetric ??= '';
         s.contextIsEstimate ??= false;
+        s.totalInputTokens ??= 0;
+        s.cachedInputTokens ??= 0;
+        // До active-input-v1 Cockpit сохранял cumulative input как «контекст».
+        // Старые миллионы переносим в расход и гасим кольцо до следующего точного хода.
+        if (s.sessionId && isCodexChat(s) && s.contextMetric !== CODEX_CONTEXT_METRIC) {
+          s.totalInputTokens = Math.max(s.totalInputTokens, s.contextTokens);
+          s.contextTokens = 0;
+          s.contextWindow = 0;
+          s.contextMetric = 'legacy-unavailable';
+          s.contextIsEstimate = true;
+        }
         s.sending = false;
         s.error ??= null;
         s.steps ||= [];
@@ -432,6 +603,8 @@ export const useChatStore = defineStore('chat', {
         s.pendingSeed ??= '';
         s.compactedAt ??= 0;
         s.compacting = false;
+        s.sessionResetting = false;
+        s.sessionResetFailed ??= false;
       }
       return list;
     },
@@ -471,12 +644,15 @@ export const useChatStore = defineStore('chat', {
     newSession(opts = {}) {
       const s = {
         id: uid(), taskId: opts.taskId ? String(opts.taskId) : null, title: opts.title || '',
+        purpose: opts.purpose || '', sourceChatId: opts.sourceChatId || null,
         // Пустая модель = «по умолчанию»: конкретный id подставится из реестра при показе
         // и отправке. Фиксировать здесь нельзя — реестр к этому моменту может не загрузиться.
-        model: this.defModel, effort: this.defEffort, mode: this.defMode,
+        model: this.defModel, modelRef: this.defModelRef, effort: this.defEffort, mode: this.defMode,
+        schema: 2, revision: 0,
         createdAt: Date.now(), updatedAt: Date.now(),
-        messages: [], sessionId: null, contextTokens: 0, contextIsEstimate: false,
-        sending: false, error: null, draft: '', pendingSeed: '', compactedAt: 0,
+        messages: [], sessionId: null, contextTokens: 0, contextWindow: 0,
+        contextMetric: '', contextIsEstimate: false, totalInputTokens: 0, cachedInputTokens: 0,
+        sending: false, error: null, draft: opts.draft || '', pendingSeed: '', compactedAt: 0,
       };
       this.sessions.push(s);
       this.activeId = s.id;
@@ -530,12 +706,17 @@ export const useChatStore = defineStore('chat', {
           if (d.origin === WINDOW_ID || !this.loaded) return;
           const m = d.meta || {};
           if (m.defModel !== undefined) this.defModel = m.defModel || '';
+          if (m.defModelRef !== undefined) this.defModelRef = m.defModelRef || null;
           if (m.defEffort !== undefined) this.defEffort = m.defEffort || '';
           if (m.defMode !== undefined) this.defMode = m.defMode || '';
         } else if (name === 'chat-step') {
           // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
           const s = this._get(d.chatKey);
-          if (s && d.step) (s.steps ||= []).push(d.step);
+          if (s && d.step) {
+            const steps = (s.steps ||= []);
+            steps.push(d.step);
+            if (steps.length > MAX_STEPS) steps.splice(0, steps.length - MAX_STEPS);
+          }
         } else if (name === 'chat-orphan') {
           // Ответ остался без адресата (то окно умерло) — подбираем в этом окне.
           this._collectPending();
@@ -628,9 +809,14 @@ export const useChatStore = defineStore('chat', {
         } else if (a) {
           s.compacting = false; s.sending = true; s.progressTokens = a.tokens || 0;
           // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
-          // Свою ленту серверной подменяем, только если та полнее: сервер хранит не больше
-          // 400 шагов, и на переподключении посреди долгого хода обрезал бы показанное.
-          if ((a.steps?.length || 0) > (s.steps?.length || 0)) s.steps = a.steps;
+          // Серверную копию берём, если она полнее ИЛИ свежее нашей: обе стороны держат
+          // скользящее окно одного размера, поэтому у отставшего окна (связь рвалась,
+          // шаги прошли мимо) длина такая же, а хвост — вчерашний.
+          const mine = s.steps?.length || 0;
+          const theirs = a.steps?.length || 0;
+          const myLast = s.steps?.[mine - 1]?.at || 0;
+          const theirLast = a.steps?.[theirs - 1]?.at || 0;
+          if (theirs > mine || theirLast > myLast) s.steps = a.steps;
         } else if (!s.inflight && !compactInflight.has(s.id)) {
           s.sending = false; s.stopping = false; s.compacting = false; s.progressTokens = 0;
         }
@@ -866,6 +1052,52 @@ export const useChatStore = defineStore('chat', {
       this._persist();
     },
 
+    /**
+     * Открыть один устойчивый Debug-разговор для песочницы задачи.
+     *
+     * Кнопка намеренно только ГОТОВИТ черновик: отдельный chatKey не означает
+     * отдельный worktree, и автозапуск мог бы начать писать файлы одновременно с
+     * Hunt. Человек видит постановку и отправляет её, когда читающий конвейер закончил.
+     */
+    async openDebugFor({ taskId, taskTitle = '', sourceChatId = '', context = '' } = {}) {
+      await this.ensure();
+      const task = String(taskId || '');
+      if (!task) throw new Error('Debug-чат требует задачу с песочницей');
+
+      const matches = (s) => s?.purpose === 'debug' && String(s.taskId || '') === task;
+      let target = this.sessions.find(matches);
+      let created = false;
+      if (!target) {
+        const archived = (this.archived || []).find(matches);
+        if (archived) {
+          this.restoreArchived(archived.id);
+          target = this._get(archived.id);
+        }
+      }
+      if (!target) {
+        const excerpt = String(context || '').trim().slice(-3000);
+        const draft = [
+          `Работай в песочнице задачи #${task} в режиме Debug: воспроизведи описанную ошибку, докажи первопричину, внеси минимальное исправление и выполни релевантные проверки.`,
+          'Не начинай менять worktree, пока Hunt или другой читающий конвейер этой задачи ещё выполняется.',
+          excerpt ? `\nКонтекст исходного разговора:\n${excerpt}` : '',
+        ].filter(Boolean).join('\n');
+        const id = this.newSession({
+          taskId: task,
+          title: `Debug · #${task}${taskTitle ? ` · ${taskTitle}` : ''}`,
+          purpose: 'debug',
+          sourceChatId: sourceChatId || null,
+          draft,
+        });
+        target = this._get(id);
+        created = true;
+      }
+
+      this.activeId = target.id;
+      this.open = true;
+      this._persist(true);
+      return { id: target.id, created };
+    },
+
     setTask(id, taskId, title) {
       const s = this._get(id); if (!s) return;
       s.taskId = taskId ? String(taskId) : null;
@@ -877,7 +1109,17 @@ export const useChatStore = defineStore('chat', {
      * выбор режима обычно про привычку работы, а не про конкретный разговор.
      */
     setMode(id, m) { const s = this._get(id); if (!s) return; s.mode = m; this.defMode = m; this._persist(); },
-    setModel(id, m) { const s = this._get(id); if (!s) return; s.model = m; this.defModel = m; this._persist(); },
+    setModel(id, m) {
+      const s = this._get(id); if (!s) return;
+      const resolved = useProvidersStore().modelOf(m);
+      s.model = resolved.id || m;
+      s.modelRef = resolved.provider && resolved.model
+        ? { provider: resolved.provider.id, model: resolved.model.id }
+        : null;
+      this.defModel = s.model;
+      this.defModelRef = s.modelRef;
+      this._persist();
+    },
     /**
      * Черновик неотправленного сообщения. Живёт в чате (и на сервере), поэтому
      * переключение чатов и перезагрузка страницы его не теряют — как в телеграме.
@@ -902,14 +1144,51 @@ export const useChatStore = defineStore('chat', {
      */
     resetContext(id, { note = true } = {}) {
       const s = this._get(id);
-      if (!s) return;
-      s.sessionId = null;
-      s.contextTokens = 0;
-      s.contextIsEstimate = false;
-      s.pendingSeed = '';
-      s.compactedAt = 0;
-      if (note) s.messages.push({ role: 'note', text: '🧹 Память агента сброшена — следующее сообщение начнёт разговор с нуля.' });
-      this._persist();
+      if (!s) return Promise.resolve(false);
+      const inflight = sessionResetJobs.get(id);
+      if (inflight) return inflight;
+
+      // Важен ref ДО возможной смены provider в селекте. При переходе Kimi → другой
+      // исполнитель сначала инвалидируем старый Kimi binding, затем меняем модель.
+      const modelRef = s.modelRef ? { ...s.modelRef } : null;
+      const resetOnServer = modelRef?.provider === 'kimi' && (s.sessionId || s.revision > 0);
+      s.sessionResetting = true;
+      s.sessionResetFailed = false;
+      s.error = null;
+
+      const job = (async () => {
+        // Даём положить Promise в карту до любого синхронного локального reset.
+        await Promise.resolve();
+        try {
+          if (resetOnServer) {
+            await api.post('/api/chat/session/reset', { chatKey: id, modelRef });
+          }
+          const live = this._get(id) || s;
+          clearSessionContext(live, { discardSeed: true });
+          live.sessionResetFailed = false;
+          if (note) {
+            live.messages.push({ role: 'note', text: '🧹 Память агента сброшена — следующее сообщение начнёт разговор с нуля.' });
+          }
+          return true;
+        } catch (error) {
+          const live = this._get(id) || s;
+          live.sessionResetFailed = true;
+          live.error = error.message;
+          live.messages.push({
+            role: 'error',
+            text: `Сбросить память агента не удалось: ${error.message}. Повтори сброс перед следующим сообщением.`,
+          });
+          return false;
+        } finally {
+          const live = this._get(id) || s;
+          live.sessionResetting = false;
+          live.updatedAt = Date.now();
+          sessionResetJobs.delete(id);
+          this._persist();
+        }
+      })();
+      sessionResetJobs.set(id, job);
+      return job;
     },
 
     /**
@@ -934,16 +1213,27 @@ export const useChatStore = defineStore('chat', {
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/compact` : '/api/chat/compact';
         const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(s.model);
+        const resolvedModel = provStore.modelOf(selectedModel(s));
         const effortLevels = resolvedModel.model?.efforts || [];
+        if (!resolvedModel.provider || !resolvedModel.model) throw new Error('Выбранная модель недоступна в реестре.');
+        s.model = resolvedModel.id;
+        s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+        await this._saveChatNow(s);
         const r = await api.post(url, {
-          model: resolvedModel.id, effort: effortLevels.includes(s.effort) ? s.effort : '',
+          model: resolvedModel.id, modelRef: s.modelRef,
+          effort: effortLevels.includes(s.effort) ? s.effort : '',
           mode: s.mode || '', sessionId: s.sessionId, chatKey: id,
         });
         // Сжатие оборвали кнопкой «стоп»: ход вернулся обычным ответом, но контекст
         // остался прежним. Обнулить счётчик здесь значило бы соврать кольцу и человеку.
         if (r.stopped) {
-          s.messages.push({ role: 'note', text: '⏹ Сжатие прервано — контекст остался прежним.' });
+          if (r.sessionReset) {
+            clearSessionContext(s);
+            s.sessionResetFailed = false;
+            s.messages.push({ role: 'note', text: '⏹ Сжатие прервано — сессия Kimi сброшена, следующий ход начнётся с нуля.' });
+          } else {
+            s.messages.push({ role: 'note', text: '⏹ Сжатие прервано — контекст остался прежним.' });
+          }
           return;
         }
         if (r.compact?.kind === 'summary') {
@@ -952,10 +1242,19 @@ export const useChatStore = defineStore('chat', {
           s.sessionId = null;
         }
         s.contextTokens = 0;
+        s.contextWindow = 0;
+        s.contextMetric = '';
         s.contextIsEstimate = false;
+        s.totalInputTokens = 0;
+        s.cachedInputTokens = 0;
         s.compactedAt = Date.now();
         s.messages.push({ role: 'note', text: `🗜 Контекст сжат — было ${before.toLocaleString('ru')} токенов.` });
       } catch (e) {
+        if (e.data?.sessionReset) {
+          clearSessionContext(s);
+          s.sessionResetFailed = false;
+        }
+        if (e.data?.sessionResetFailed) s.sessionResetFailed = true;
         s.error = e.message;
         s.messages.push({ role: 'error', text: `Сжать контекст не удалось: ${e.message}` });
       } finally {
@@ -982,6 +1281,11 @@ export const useChatStore = defineStore('chat', {
     async send(id, text, attachments = []) {
       const s = this._get(id); if (!s) return;
       if (!text.trim() && !attachments.length) return;
+      const resetJob = sessionResetJobs.get(id);
+      if (resetJob && !await resetJob) return false;
+      // После отклонённого reset нельзя молча продолжить старую Kimi session: UI уже
+      // обещал чистый разговор. Текст остаётся в поле ввода (см. ChatSession.submit).
+      if (s.sessionResetFailed) return false;
       // Cockpit просит семантическое имя только в первом ходе безымянного чата.
       // Пока агент работает, мгновенно показываем локальный запасной вариант.
       const requestTitle = shouldRequestChatTitle(s);
@@ -1006,7 +1310,11 @@ export const useChatStore = defineStore('chat', {
       // окном засеяла бы сессию дважды), при провале возвращаем на место.
       const seed = s.pendingSeed || '';
       if (seed) s.pendingSeed = '';
-      this._persist(true); // немедленно: вопрос не должен потеряться при F5/гонке окон
+      // До этой границы любой сбой означает «агент точно НЕ стартовал». После начала
+      // POST сетевой исход неоднозначен: сервер мог принять запрос и продолжить ход уже
+      // без окна — только тогда уместна плашка offline и ожидание chats/pending.
+      let modelRequestStarted = false;
+      // Durable save выполняется ниже после разрешения modelRef и до запуска executor-а.
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat';
         // Снимок UI-контекста: страница + детали от неё (агент понимает «поправь здесь»).
@@ -1020,14 +1328,20 @@ export const useChatStore = defineStore('chat', {
         // Модель: сохранённый алиас резолвим в конкретную (что показано в селекте, то и считает),
         // пустое значение — модель по умолчанию из реестра.
         const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(s.model);
+        const resolvedModel = provStore.modelOf(selectedModel(s));
         const effortLevels = resolvedModel.model?.efforts || [];
+        if (!resolvedModel.provider || !resolvedModel.model) throw new Error('Выбранная модель недоступна в реестре.');
+        s.model = resolvedModel.id;
+        s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+        await this._saveChatNow(s);
         // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
         // явный effort не отправляем: CLI применит собственный актуальный дефолт.
         const requestEffort = effortLevels.includes(s.effort) ? s.effort : '';
+        modelRequestStarted = true;
         const r = await api.post(url, {
           message: seed ? `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}\n[/Выжимка]\n\n${text}` : text,
-          model: resolvedModel.id, effort: requestEffort, mode: s.mode || '',
+          model: resolvedModel.id, modelRef: s.modelRef,
+          effort: requestEffort, mode: s.mode || '',
           sessionId: s.sessionId, context, chatKey: id, requestTitle,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
@@ -1037,10 +1351,13 @@ export const useChatStore = defineStore('chat', {
         // Пустой id не затираем: у оборванного хода («стоп», лимит) его может не быть,
         // а прежняя сессия жива — иначе следующий вопрос уйдёт без --resume и агент
         // не вспомнит ничего из разговора.
-        if (r.sessionId) s.sessionId = r.sessionId;
-        if (typeof r.contextTokens === 'number' && r.contextTokens > 0) {
-          s.contextTokens = r.contextTokens;
-          s.contextIsEstimate = !!r.contextIsEstimate;
+        if (r.sessionReset) {
+          if (seed && !s.pendingSeed) s.pendingSeed = seed;
+          clearSessionContext(s);
+          s.sessionResetFailed = false;
+        } else {
+          if (r.sessionId) s.sessionId = r.sessionId;
+          applyContextUsage(s, r);
         }
         // Лента хода переезжает в сообщение (серверная копия полнее: SSE мог что-то не донести),
         // actualModel/effort — чем CLI отработал на самом деле (алиасы он резолвит сам).
@@ -1059,16 +1376,22 @@ export const useChatStore = defineStore('chat', {
         // панелью или другой активный чат) — метка «непрочитано» и оповещение.
         this._notifyReply(s, r.reply || '(пусто)');
       } catch (e) {
+        if (e.data?.sessionReset) {
+          if (seed && !s.pendingSeed) s.pendingSeed = seed;
+          clearSessionContext(s);
+          s.sessionResetFailed = false;
+        }
+        if (e.data?.sessionResetFailed) s.sessionResetFailed = true;
         s.error = e.message;
-        // Оборвалась СВЯЗЬ — это не провал хода: ход живёт в процессе сервера, а не в этой
-        // вкладке, и его ответ доедет через chats/pending. Раньше сюда падала запись
-        // `role:'error'`, она уезжала в общую историю, и живой ход выглядел проваленным на
-        // всех устройствах разом (`вопрос → ⚠ Failed to fetch → ответ`). Отличаем по `status`:
-        // он есть только когда
-        // ответил сам сервер; у оборванного fetch (TypeError) и таймаута его нет.
-        // Признак локальный (в историю не едет — см. slimOf): порвалось у ЭТОГО окна.
-        if (e?.status === undefined) s.offline = true;
-        else s.messages.push({ role: 'error', text: e.message });
+        // Сетевой обрыв ПОСЛЕ начала model POST — не провал хода: сервер мог принять
+        // запрос, агент живёт в его процессе, а ответ доедет через chats/pending.
+        // Ошибка до POST (включая stale/CAS и сеть на durable save) однозначна: агент
+        // не стартовал. Её показываем как обычную ошибку и не оставляем вечное «думает…».
+        if (modelRequestStarted && isConnectionError(e)) s.offline = true;
+        else {
+          s.offline = false;
+          s.messages.push({ role: 'error', text: e.message });
+        }
         // Ход не дошёл — выжимку возвращаем в ожидание, иначе повтор сообщения ушёл бы
         // в пустую сессию и агент потерял бы всё, что помнил до сжатия.
         if (seed && !s.pendingSeed) s.pendingSeed = seed;
@@ -1080,6 +1403,7 @@ export const useChatStore = defineStore('chat', {
         if (!s.inflight && !s.offline) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
         s.updatedAt = Date.now(); this._persist();
       }
+      return true;
     },
 
     // Список номеров задач, уже находящихся на конвейере (для защиты «На конвейер»).

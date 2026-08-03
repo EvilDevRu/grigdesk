@@ -16,6 +16,7 @@ fi
 # venv распознавания был прописан прямо здесь, и работа диктовки зависела от способа запуска:
 # поднятый этим скриптом кокпит распознавал, поднятый systemd падал со spawn ... ENOENT.
 source "$ROOT/bin/lib/runtime-env.sh"
+cockpit_add_cli_paths
 cockpit_load_runtime_env "$ROOT"
 PORT="$COCKPIT_EFFECTIVE_PORT"
 # Второй сокет (локальный HTTPS). Ждать его тоже обязательно: сокеты закрываются не

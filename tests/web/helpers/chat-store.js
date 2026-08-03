@@ -28,10 +28,13 @@ function patch(source) {
       "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
       + ' const document = { hidden: false };',
     )
-    .replace("import { useUiContextStore } from './ui-context.js';", 'const useUiContextStore = () => ({});')
+    .replace("import { useUiContextStore } from './ui-context.js';", 'const useUiContextStore = () => ({ extra: {} });')
     .replace(
       "import { useProvidersStore } from './providers.js';",
-      'const useProvidersStore = () => ({ modelOf: (id) => ({ id, model: {} }) });',
+      'const useProvidersStore = () => ({ modelOf: (value) => {'
+      + ' const id = typeof value === "object" ? value.model : (value || "test-model");'
+      + ' const provider = typeof value === "object" && value.provider ? value.provider : "test-provider";'
+      + ' return { id, model: { id }, provider: { id: provider } }; } });',
     )
     .replace(
       "import { notify } from '../shared/notify.js';",

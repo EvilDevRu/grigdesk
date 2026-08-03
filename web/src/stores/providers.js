@@ -24,6 +24,12 @@ export const useProvidersStore = defineStore('providers', {
       }
       return 'opus';
     },
+    defaultModelRef() {
+      const current = this.modelOf(this.defaultModelId);
+      return current.provider && current.model
+        ? { provider: current.provider.id, model: current.model.id }
+        : null;
+    },
     /**
      * Модели исполнителя, которые видно в выборе. Правило одно на весь кокпит: краткий
      * список = только свежие версии, `extra` (старые версии) — под настройкой; выбранную
@@ -65,6 +71,13 @@ export const useProvidersStore = defineStore('providers', {
      */
     modelOf() {
       return (sessionModel) => {
+        if (sessionModel && typeof sessionModel === 'object') {
+          const providerId = String(sessionModel.provider || '');
+          const modelId = String(sessionModel.model || '');
+          const provider = this.providers.find((item) => item.id === providerId) || null;
+          const model = (provider?.models || []).find((item) => item.id === modelId) || null;
+          return { id: modelId, model, provider };
+        }
         const id = this.resolveModelId(sessionModel) || this.defaultModelId;
         for (const p of this.providers) {
           const model = (p.models || []).find((m) => m.id === id);

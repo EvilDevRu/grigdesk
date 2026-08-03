@@ -9,6 +9,7 @@ import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
+import { blockReasonLabel, useCockpitUpdateStore } from '../../stores/cockpit-update.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
 import { providerUsageView } from '../provider-usage.js';
@@ -21,9 +22,31 @@ const route = useRoute();
 const health = ref(null);
 const { data: sys } = storeToRefs(useSystemStore());
 const pwa = usePwaStore();
+const cockpitUpdate = useCockpitUpdateStore();
+const { status: cockpitVersion } = storeToRefs(cockpitUpdate);
+cockpitUpdate.start();
+
+const shortSha = (sha) => sha?.slice(0, 7) || '—';
+const cockpitToneTitle = computed(() => ({
+  error: 'Последнее обновление Cockpit завершилось ошибкой',
+  checkout: 'Checkout Cockpit изменился после запуска сервера',
+  release: 'Доступен новый стабильный релиз Cockpit',
+}[cockpitUpdate.tone] || 'Версия Cockpit актуальна'));
+function checkedLabel(value) {
+  if (!value) return 'ещё не проверялось';
+  try { return new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)); }
+  catch { return value; }
+}
+function toCockpitSettings() {
+  localStorage.setItem('cockpit-settings-tab', 'server');
+  router.push('/settings');
+}
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
+// Setup-only карточки (сейчас Kimi) живут в настройках, но не изображают работающего
+// чат-исполнителя в шапке до появления transport-а и каталога моделей.
+const runtimeProviders = computed(() => prov.providers.filter((p) => p.chatEnabled !== false));
 const plugins = usePluginsStore();
 plugins.load();
 prov.load();
@@ -154,7 +177,6 @@ const ICONS = {
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
   settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
-  demo: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M10 9l5 3-5 3V9z',
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
 const nav = [
@@ -182,6 +204,7 @@ const { connected } = useSse((name) => {
   if (name === 'state-change') { loadHealth(); notifyWatch.check(); }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
   if (name === 'providers-update') prov.load();
+  if (name === 'cockpit-update') cockpitUpdate.load({ quiet: true });
 });
 </script>
 
@@ -249,7 +272,7 @@ const { connected } = useSse((name) => {
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <HelpTip v-if="sys" align="right" class="sys-tip">
+        <HelpTip v-if="sys" align="right" class="sys-tip" :tip-style="{ maxWidth: '320px' }">
           <span class="metric mono">
             CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
             · RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}</b>
@@ -284,13 +307,14 @@ const { connected } = useSse((name) => {
         <AttentionAlerts />
         <!-- pointerdown, а не только mouseenter: на тач-экране ховера нет, и без него
              свежие лимиты приезжали бы уже после раскрытия всплывашки -->
-        <span v-if="prov.providers.length" class="provbox"
+        <span v-if="runtimeProviders.length" class="provbox"
               @mouseenter="prov.loadUsage()" @pointerdown="prov.loadUsage()">
-          <HelpTip v-for="p in prov.providers" :key="p.id" class="prov-tip" toggle>
+          <HelpTip v-for="p in runtimeProviders" :key="p.id" class="prov-tip" toggle
+                   :tip-style="{ maxWidth: '320px' }">
             <!-- Клик раскрывает саму всплывашку (на планшете ховера нет), а в настройки
                  ведёт кнопка внутри неё: обновление CLI — только вручную, кнопкой -->
-            <span class="prov" :class="{ off: !p.available, upd: p.updateAvailable }"
-                  :style="p.available ? { color: p.color } : null">
+            <span class="prov" :class="[p.id, { off: !p.available, upd: p.updateAvailable }]"
+                  :style="p.available && !['codex', 'kimi'].includes(p.id) ? { color: p.color } : null">
               <ProviderIcon :provider="p" :size="15" />
               <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
             </span>
@@ -325,7 +349,7 @@ const { connected } = useSse((name) => {
             </template>
           </HelpTip>
         </span>
-        <span v-if="prov.providers.length && sys?.net" class="sep" aria-hidden="true">·</span>
+        <span v-if="runtimeProviders.length && sys?.net" class="sep" aria-hidden="true">·</span>
         <HelpTip v-if="sys?.net" :text="`Публичный IP мозга: ${sys.net.ip}` + (sys.net.country ? ` · ${sys.net.country}` : '')">
           <span class="netbox mono">
             <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
@@ -340,6 +364,39 @@ const { connected } = useSse((name) => {
           </span>
         </HelpTip>
       </div>
+      <HelpTip v-if="cockpitVersion" align="right" class="cockpit-tip" toggle
+               :tip-style="{ maxWidth: 'min(340px, calc(100vw - 20px))' }">
+        <span class="cockpit-version" :class="cockpitUpdate.tone"
+              role="status" :aria-label="cockpitToneTitle" :title="cockpitToneTitle">
+          <span aria-hidden="true">◧</span>
+          <span v-if="cockpitUpdate.tone" class="cockpit-dot" aria-hidden="true"></span>
+        </span>
+        <template #tip>
+          <span class="ptip cockpit-version-tip">
+            <b>{{ cockpitToneTitle }}</b>
+            <span>
+              Запущено: {{ cockpitVersion.running.version }} ·
+              <span class="mono">{{ shortSha(cockpitVersion.running.sha) }}</span>
+            </span>
+            <span v-if="cockpitVersion.checkoutChanged || cockpitVersion.checkout.dirty">
+              Checkout: {{ cockpitVersion.checkout.version }} ·
+              <span class="mono">{{ shortSha(cockpitVersion.checkout.sha) }}</span> ·
+              {{ cockpitVersion.checkout.branch || 'detached HEAD' }}<template v-if="cockpitVersion.checkout.dirty"> · dirty</template>
+            </span>
+            <span v-if="cockpitVersion.latest">Доступно: {{ cockpitVersion.latest.tag }}</span>
+            <span class="pu-reset">Проверено: {{ checkedLabel(cockpitVersion.checkedAt) }}</span>
+            <span v-if="cockpitVersion.checkError" class="pu-state is-warn">
+              {{ cockpitVersion.checkError.message }}
+            </span>
+            <span v-if="cockpitVersion.installBlockReasons?.length" class="pu-reset">
+              {{ blockReasonLabel(cockpitVersion.installBlockReasons[0]) }}
+            </span>
+            <span class="ptip-go">
+              <button type="button" @click="toCockpitSettings">Настройки обновления</button>
+            </span>
+          </span>
+        </template>
+      </HelpTip>
       <router-link to="/settings" class="settings-link" active-class="active"
                    title="Настройки" aria-label="Настройки">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
@@ -461,6 +518,25 @@ const { connected } = useSse((name) => {
   width: 32px; height: 32px; flex: none; display: grid; place-items: center;
   border-radius: 8px; color: var(--ink-mid); transition: background .12s, color .12s;
 }
+.cockpit-tip { display: inline-flex; align-items: center; height: 32px; }
+.cockpit-tip :deep(.ht-tr) { display: inline-flex; align-items: center; height: 32px; }
+.cockpit-version > span:first-child { display: block; line-height: 1; }
+.settings-link { line-height: 0; }
+.settings-link .ic { display: block; }
+.cockpit-version {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center; position: relative;
+  border-radius: 8px; color: var(--ink-mid); font-size: 16px; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.cockpit-version:hover { background: var(--surface); color: var(--ink); }
+.cockpit-version.checkout { color: var(--accent); }
+.cockpit-version.release { color: var(--warn, #e0a33a); }
+.cockpit-version.error { color: var(--bad); }
+.cockpit-dot {
+  position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%;
+  background: currentColor; border: 2px solid var(--topbar);
+}
+.cockpit-version-tip { min-width: 260px; }
 .settings-link .ic { width: 16px; height: 16px; }
 .settings-link:hover { background: var(--surface); color: var(--ink); }
 .settings-link.active { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
@@ -468,7 +544,13 @@ const { connected } = useSse((name) => {
 .metric b { font-weight: 600; }
 .sep { color: var(--ink-mid); margin: 0 -4px; }
 .provbox { display: inline-flex; align-items: center; gap: 9px; }
+/* В топбаре это обычные знаки, без кнопочных контейнеров. Нулевая высота строки
+   убирает baseline-зазор SVG и ставит все три логотипа на одну оптическую ось. */
+.prov-tip { display: inline-flex; align-items: center; vertical-align: middle; }
+.prov-tip :deep(.ht-tr) { line-height: 0; }
 .prov { display: inline-grid; place-items: center; position: relative; cursor: pointer; }
+/* OpenAI и Kimi в шапке нейтральные: цвет здесь означает состояние, а не бренд. */
+.prov.codex, .prov.kimi { color: var(--ink); }
 .prov.off { color: var(--ink-mid); opacity: .45; }
 /* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
 .updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
@@ -477,8 +559,7 @@ const { connected } = useSse((name) => {
 .pupd { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
   color: var(--warn, #e0a33a); line-height: 1.5; }
 .pupd b { font-weight: 600; }
-/* Тултип исполнителя: статус + прогрессбары потребления лимитов */
-.prov-tip :deep(.ht-tip) { max-width: 320px; }
+/* Тултип исполнителя: статус + прогрессбары потребления лимитов (ширина — :tip-style) */
 .ptip { display: flex; flex-direction: column; gap: 10px; min-width: 240px; text-align: left; }
 .pu { display: flex; flex-direction: column; gap: 9px; }
 .pu-row { display: flex; flex-direction: column; gap: 4px; }
@@ -517,17 +598,16 @@ const { connected } = useSse((name) => {
 .pu-fill.lv-bad { background: var(--bad); }
 .pu-head b.lv-warn { color: var(--warn); }
 .pu-head b.lv-bad { color: var(--bad); }
-.sys-tip :deep(.ht-tip) { max-width: 320px; }
 .sysnote { font-size: 10.5px; color: var(--ink-mid); padding-top: 8px; border-top: 1px solid var(--line); }
 .netbox { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-mid); }
 .netbox .flag { font-size: 14px; line-height: 1; }
 .netbox .ip { letter-spacing: .01em; }
 .lv-ok { color: var(--ink); } .lv-warn { color: var(--warn); } .lv-bad { color: var(--bad); }
-.conn { display: flex; align-items: center; gap: 7px; color: var(--ink-mid); }
+.conn { display: flex; align-items: center; height: 32px; gap: 7px; color: var(--ink-mid); }
 .conn .dot { width: 8px; height: 8px; border-radius: 50%; }
 .conn.on .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
 .conn.off .dot { background: var(--bad); }
-.host { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.host { display: inline-flex; align-items: center; height: 32px; line-height: 1; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 
 .content { grid-row: 2; grid-column: 2; overflow-y: auto; padding: 22px; }
 

@@ -205,89 +205,92 @@ assert_rc 73 "$?" "stalled symlink transaction cannot report successful cleanup"
 rm -f "$repo/tracked.txt"
 printf 'чужая параллельная правка\n' >"$repo/tracked.txt"
 
-# Ignored не означает разрешённый: незаявленная правка такого файла тоже меняет
-# baseline source tree и должна блокировать checkpoint.
+# Игнорируемые Git файлы сняты с наблюдения. Стенд поднят всю транзакцию (узел вроде
+# TRACE ради живого прогона и существует) и пишет сам: логи, кэши, трассы. В диф это
+# не попадает и умирает вместе с песочницей, а от намеренного подлога надзор не защищал
+# никогда — сторож сравнивает две точки, и правку, возвращённую до checkpoint, он не
+# видит. Разбор целиком — над _instrumentation_tx_snapshot в движке.
 printf 'ignored baseline\n' >"$repo/ignored-runtime"
 instrumentation_tx_begin 50 trace-ignored "$TEST_ROOT/marker.scope" \
   'FACTORY-TRACE:t50' "$repo"
-assert_rc 0 "$?" "ignored-inventory transaction starts"
+assert_rc 0 "$?" "ignored-file transaction starts"
+mkdir -p "$repo/ignored-logs/nested"
+printf 'стенд пишет лог сам\n' >"$repo/ignored-logs/app.log"
+printf 'и во вложенный каталог тоже\n' >"$repo/ignored-logs/nested/trace.json"
 printf 'ignored changed without marker\n' >"$repo/ignored-runtime"
 instrumentation_tx_checkpoint 50 trace-ignored
-assert_rc 75 "$?" "checkpoint rejects an ignored out-of-scope change"
-
-# --- изменчивые пути, объявленные профилем (PROFILE_VOLATILE_PATHS) ---
-# Стенд поднят всю транзакцию и пишет логи сам: сторож может встать на сотнях файлов
-# storage/debugbar без единого исходника. Объявленное профилем не попадает в
-# чувствительное множество вовсе; всё остальное ignored остаётся под наблюдением.
-mkdir -p "$repo/ignored-logs"
-printf 'ignored baseline\n' >"$repo/ignored-runtime"
-export PROFILE_VOLATILE_PATHS="ignored-logs/*"
-instrumentation_tx_begin 51 trace-volatile "$TEST_ROOT/marker.scope" \
-  'FACTORY-TRACE:t51' "$repo"
-assert_rc 0 "$?" "volatile-paths transaction starts"
-assert_file_exists "$control_dir/transactions/t51/trace-volatile/volatile.list" \
-  "begin freezes the profile globs next to roots.list"
-printf 'стенд пишет лог сам\n' >"$repo/ignored-logs/app.log"
-mkdir -p "$repo/ignored-logs/nested"
-printf 'и во вложенный каталог тоже\n' >"$repo/ignored-logs/nested/trace.json"
-instrumentation_tx_checkpoint 51 trace-volatile
-assert_rc 0 "$?" "checkpoint ignores runtime junk declared volatile by the profile"
-instrumentation_tx_cleanup 51 trace-volatile
-assert_rc 0 "$?" "cleanup completes with volatile junk present"
+assert_rc 0 "$?" "checkpoint no longer stalls on ignored runtime junk"
+instrumentation_tx_cleanup 50 trace-ignored
+assert_rc 0 "$?" "cleanup completes with ignored junk present"
 assert_file_exists "$repo/ignored-logs/app.log" \
   "cleanup never deletes what the application wrote"
 
-# Глоб покрывает ровно объявленное: соседний ignored-файл по-прежнему валит приёмку.
-instrumentation_tx_begin 52 trace-volatile-narrow "$TEST_ROOT/marker.scope" \
-  'FACTORY-TRACE:t52' "$repo"
-assert_rc 0 "$?" "narrow-glob transaction starts"
-printf 'правка мимо глоба\n' >"$repo/ignored-runtime"
-instrumentation_tx_checkpoint 52 trace-volatile-narrow
-assert_rc 75 "$?" "a volatile glob does not blind the guard to other ignored files"
-
-# Scope сильнее глоба: заявленный файл остаётся под наблюдением и восстанавливается,
-# даже если подходит под изменчивый путь.
-printf 'ignored baseline\n' >"$repo/ignored-runtime"
+# Игнорируемость не отменяет scope: заявленный файл остаётся под наблюдением и
+# восстанавливается побайтово, даже если Git его игнорирует. Инструментация имеет
+# право лечь именно в такой файл (например, в конфиг стенда).
 printf 'scope baseline\n' >"$repo/ignored-logs/scoped.txt"
-printf '%s\n' "$repo/ignored-logs/scoped.txt" >"$TEST_ROOT/volatile-scope.list"
-instrumentation_tx_begin 53 trace-volatile-scope "$TEST_ROOT/volatile-scope.list" \
-  'FACTORY-TRACE:t53' "$repo"
-assert_rc 0 "$?" "scope-over-glob transaction starts"
+printf '%s\n' "$repo/ignored-logs/scoped.txt" >"$TEST_ROOT/ignored-scope.list"
+instrumentation_tx_begin 51 trace-ignored-scope "$TEST_ROOT/ignored-scope.list" \
+  'FACTORY-TRACE:t51' "$repo"
+assert_rc 0 "$?" "scope-over-ignored transaction starts"
 printf 'правка этапа\n' >"$repo/ignored-logs/scoped.txt"
-instrumentation_tx_checkpoint 53 trace-volatile-scope
-assert_rc 0 "$?" "checkpoint accepts a scoped change under a volatile glob"
-instrumentation_tx_cleanup 53 trace-volatile-scope
-assert_rc 0 "$?" "cleanup completes for a scoped file under a volatile glob"
+instrumentation_tx_checkpoint 51 trace-ignored-scope
+assert_rc 0 "$?" "checkpoint accepts a declared change to an ignored file"
+instrumentation_tx_cleanup 51 trace-ignored-scope
+assert_rc 0 "$?" "cleanup completes for a scoped ignored file"
 assert_eq "scope baseline" "$(cat "$repo/ignored-logs/scoped.txt")" \
-  "scope beats the glob: the declared file is still restored"
+  "a declared ignored file is still restored byte for byte"
 
-# Абсолютный путь в списке — ошибка профиля, а не «глоб пошире»: он не относится
-# ни к одному корню и молча не совпал бы ни с чем.
-PROFILE_VOLATILE_PATHS="/etc/*"
-instrumentation_tx_begin 54 trace-volatile-abs "$TEST_ROOT/marker.scope" \
-  'FACTORY-TRACE:t54' "$repo"
-assert_rc 78 "$?" "an absolute volatile path is refused at begin"
+# Правка исходника ловится не списком исключений, а записями TRACKED_WORKTREE, которые
+# workspace_guard строит прямо из состояния git. Снятие надзора за ignored не должно
+# задеть эту половину — ради неё сторож и существует.
+printf '%s\n' "$repo/existing.tmp" >"$TEST_ROOT/tracked-guard.scope"
+instrumentation_tx_begin 52 trace-tracked-guard "$TEST_ROOT/tracked-guard.scope" \
+  'FACTORY-TRACE:t52' "$repo"
+assert_rc 0 "$?" "tracked-guard transaction starts"
+printf 'правка исходника мимо scope\n' >>"$repo/tracked.txt"
+instrumentation_tx_checkpoint 52 trace-tracked-guard
+assert_rc 75 "$?" "checkpoint still rejects an out-of-scope change to a tracked file"
 
-# Список заморожен: правка профиля между заходами не должна разводить снимки
-# ОДНОЙ транзакции — иначе перезапуск демона выдал бы ложное нарушение readonly.
-PROFILE_VOLATILE_PATHS="ignored-logs/*"
-instrumentation_tx_begin 55 trace-volatile-frozen "$TEST_ROOT/marker.scope" \
-  'FACTORY-TRACE:t55' "$repo"
-assert_rc 0 "$?" "frozen-list transaction starts"
-PROFILE_VOLATILE_PATHS="ignored-nothing/*"
-printf 'лог после правки профиля\n' >"$repo/ignored-logs/app.log"
-instrumentation_tx_checkpoint 55 trace-volatile-frozen
-assert_rc 0 "$?" "checkpoint reads the frozen list, not the edited profile"
+# Primary checkout разрешён только через отдельную host-trusted аттестацию exact
+# shared lease. Одной строки isolation недостаточно: provider не должен уметь
+# сам объявить основной checkout эксклюзивным.
+shared_scope="$TEST_ROOT/shared-primary.scope"
+printf '%s\n' "$main_repo/tracked.txt" >"$shared_scope"
+export FACTORY_INSTRUMENTATION_ISOLATION=exclusive-shared-checkout-v1
+unset -f instrumentation_tx_shared_lease_invariant 2>/dev/null || true
+instrumentation_tx_begin 60 trace-shared-no-attestation "$shared_scope" \
+  'FACTORY-TRACE:t60' "$main_repo"
+assert_rc 78 "$?" "primary checkout refuses shared isolation without trusted lease attestation"
 
-# Транзакция, начатая до появления механизма, читается как «изменчивых путей нет».
-PROFILE_VOLATILE_PATHS="ignored-logs/*"
-instrumentation_tx_begin 56 trace-volatile-legacy "$TEST_ROOT/marker.scope" \
-  'FACTORY-TRACE:t56' "$repo"
-assert_rc 0 "$?" "legacy-shape transaction starts"
-rm -f "$control_dir/transactions/t56/trace-volatile-legacy/volatile.list"
-printf 'лог без замороженного списка\n' >"$repo/ignored-logs/app.log"
-instrumentation_tx_checkpoint 56 trace-volatile-legacy
-assert_rc 75 "$?" "a transaction without volatile.list keeps the old strict behaviour"
-unset PROFILE_VOLATILE_PATHS
+instrumentation_tx_shared_lease_invariant() { return 1; }
+instrumentation_tx_begin 61 trace-shared-stale-lease "$shared_scope" \
+  'FACTORY-TRACE:t61' "$main_repo"
+assert_rc 75 "$?" "primary checkout refuses a missing or stale exact lease"
+
+attested_roots="$TEST_ROOT/attested-shared-roots"
+instrumentation_tx_shared_lease_invariant() {
+  cp -- "$1" "$attested_roots"
+  [[ "$(cat "$1")" == "$main_repo" ]]
+}
+instrumentation_tx_begin 62 trace-shared-attested "$shared_scope" \
+  'FACTORY-TRACE:t62' "$main_repo"
+assert_rc 0 "$?" "exact shared lease attestation admits the primary checkout"
+assert_eq "$main_repo" "$(cat "$attested_roots")" \
+  "lease invariant receives the canonical roots frozen by the transaction"
+printf 'shared trace\n// FACTORY-TRACE:t62\n' >"$main_repo/tracked.txt"
+instrumentation_tx_checkpoint 62 trace-shared-attested
+assert_rc 0 "$?" "attested primary transaction checkpoints only declared scope"
+instrumentation_tx_cleanup 62 trace-shared-attested
+assert_rc 0 "$?" "attested primary transaction restores its exact baseline"
+assert_eq 'чистое' "$(cat "$main_repo/tracked.txt")" \
+  "primary cleanup preserves the original checkout content"
+
+instrumentation_tx_shared_lease_invariant() { return 0; }
+printf '%s\n' "$repo/tracked.txt" >"$TEST_ROOT/shared-linked.scope"
+instrumentation_tx_begin 63 trace-shared-linked "$TEST_ROOT/shared-linked.scope" \
+  'FACTORY-TRACE:t63' "$repo"
+assert_rc 78 "$?" "shared attestation cannot relabel a linked worktree as primary"
+unset -f instrumentation_tx_shared_lease_invariant
 
 finish_tests

@@ -12,7 +12,8 @@ run_id=run-sandboxed
 token=sandboxed-secret
 run_dir="$STATE_DIR/logs/runs/t${task}/${stage}/${run_id}"
 
-bash "$FACTORY_HOME/lib/pipeline-set.sh" "$task" --init "$stage" pending >/dev/null
+pipeline_store_route_init "$task" "$stage"
+assert_rc 0 "$?" "sandboxed status fixture initializes an exact route registry"
 factory_control_init control-secret
 run_state_begin "$task" "$stage" "$run_id" 1 "$token"
 
@@ -26,7 +27,7 @@ assert_rc 0 "$rc" "sandboxed runner completes without inherited status FD"
 assert_eq 0 "$(find "$run_dir/control-requests" -type f 2>/dev/null | wc -l)" \
   "invalid deferred progress never enters the request queue"
 assert_file_exists "$run_dir/progress-visible" "deferred progress is applied while the runner is alive"
-assert_eq feature "$(pipeline_store_get "$task" ROUTE)" "deferred progress reaches the registry"
+assert_eq done "$(pipeline_store_get "$task" PLANS)" "deferred progress reaches the registry"
 assert_eq done "$(pipeline_store_get "$task" "$stage")" "deferred terminal result reaches the registry"
 assert_eq "sandbox completed" "$(pipeline_store_get "$task" "${stage}_COMMENT")" \
   "deferred terminal comment is preserved"

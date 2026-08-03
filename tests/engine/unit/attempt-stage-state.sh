@@ -3,7 +3,7 @@ set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 source "$FACTORY_HOME/lib/attempt-stage-state.sh"
 
-publisher="$FACTORY_TESTS_HOME/fixtures/routes-v2-publish.mjs"
+publisher="$FACTORY_TESTS_HOME/fixtures/routes-publish.mjs"
 routes_dir="$TEST_ROOT/routes"
 
 json_field() {
@@ -113,7 +113,7 @@ assert_rc 0 "$?" "commit is allowed from the matching paused node"
 assert_eq ready "$(json_field "$after_instrument" state)" \
   "next transition resumes a ready cursor"
 assert_eq check "$(json_field "$after_instrument" currentNode)" \
-  "next node is derived by factory-route-v2"
+  "next node is derived by factory-route"
 assert_eq 2 "$(json_field "$after_instrument" lastCommit sequence)" \
   "lastCommit identifies the exact ledger sequence"
 
@@ -144,6 +144,13 @@ assert_eq instrument "$(json_field "$(cat "$rewind_event")" action rewind)" \
 assert_eq instrument,check,gate_plan \
   "$("$NODE_BIN" -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.action.reset.join(","));' "$(cat "$rewind_event")")" \
   "rewind ledger event preserves the exact reset interval"
+latest_rewind=$(attempt_stage_state_latest_event_v2 51 "$attempt")
+assert_rc 0 "$?" "latest-event API verifies the immutable ledger before projection"
+assert_eq 4 "$(json_field "$latest_rewind" sequence)" \
+  "latest-event API returns the exact committed rewind event"
+assert_eq instrument,check,gate_plan \
+  "$("$NODE_BIN" -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.action.reset.join(","));' "$latest_rewind")" \
+  "latest-event API exposes the route-declared reset interval"
 
 after_replay=$(attempt_stage_state_commit_v2 51 "$attempt" instrument done)
 assert_rc 0 "$?" "a node can commit again after an explicit rewind"
@@ -312,6 +319,149 @@ assert_eq "$note_after" "$note_again" "идемпотентный повтор �
 assert_eq "$note_events" \
   "$(event_count "$(attempt_state_v2_task_root 58)/attempts/$note_attempt")" \
   "идемпотентный повтор не кладёт второго события"
+
+# Автономный rewind имеет движковый бюджет поверх immutable route: два одинаковых
+# возврата исполняются, третий атомарно останавливает попытку. Это не route-policy:
+# старые закреплённые бандлы тоже не должны молотить BUILD↔REVIEW всю ночь.
+loop_attempt=$(begin_selected 59 a_99999999999999999999999999999999)
+assert_rc 0 "$?" "попытка для лимита возвратов подготовлена"
+loop_dir="$(attempt_state_v2_task_root 59)/attempts/$loop_attempt"
+attempt_stage_state_init_v2 59 "$loop_attempt" debug >/dev/null
+
+for round in 1 2; do
+  attempt_stage_state_commit_v2 59 "$loop_attempt" instrument done 2 >/dev/null
+  attempt_stage_state_commit_v2 59 "$loop_attempt" check done 2 >/dev/null
+  # Без пятого аргумента — как события, которые успел записать прежний runtime до
+  # обновления движка. Новый guard обязан посчитать и их, а не начать с нуля.
+  loop_cursor=$(attempt_stage_state_commit_v2 59 "$loop_attempt" gate_plan rejected)
+  assert_rc 0 "$?" "автоматический возврат $round укладывается в бюджет"
+  assert_eq ready "$(json_field "$loop_cursor" state)" \
+    "возврат $round оставляет маршрут исполняемым"
+  assert_eq instrument "$(json_field "$loop_cursor" currentNode)" \
+    "возврат $round ведёт на объявленную цель"
+done
+
+attempt_stage_state_commit_v2 59 "$loop_attempt" instrument done 2 >/dev/null
+attempt_stage_state_commit_v2 59 "$loop_attempt" check done 2 >/dev/null
+limited=$(attempt_stage_state_commit_v2 59 "$loop_attempt" gate_plan rejected 2)
+assert_rc 0 "$?" "третий одинаковый возврат фиксирует безопасную остановку"
+assert_eq stopped "$(json_field "$limited" state)" \
+  "исчерпанный rewind-бюджет останавливает курсор"
+assert_eq rewind-limit "$(json_field "$limited" stop)" \
+  "причина остановки отличима от исхода опубликованного маршрута"
+assert_eq null "$(json_field "$limited" currentNode)" \
+  "после rewind-limit нет автоматически исполняемого узла"
+limit_event=$(find "$loop_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "rewind-limit"')
+assert_file_exists "$limit_event" "rewind-limit записан отдельным неизменяемым событием"
+assert_eq instrument "$(json_field "$(cat "$limit_event")" action rewind)" \
+  "событие сохраняет дугу, которую остановил движок"
+assert_contains "$(json_field "$(cat "$limit_event")" reason)" 'уже выполнено 2' \
+  "журнал объясняет исчерпанный бюджет"
+assert_eq "$limited" "$(attempt_stage_state_read_v2 59 "$loop_attempt")" \
+  "ledger с rewind-limit проходит полную проверку цепочки"
+
+# Явное решение человека начинает новый бюджет: оператор видел стоп и осознанно
+# вернул курсор, поэтому один следующий rewind не должен немедленно застопориться.
+attempt_stage_state_human_rewind_v2 59 "$loop_attempt" instrument \
+  instrument,check,gate_plan,retro 'после разбора повторить с новым решением' >/dev/null
+attempt_stage_state_commit_v2 59 "$loop_attempt" instrument done 2 >/dev/null
+attempt_stage_state_commit_v2 59 "$loop_attempt" check done 2 >/dev/null
+after_human=$(attempt_stage_state_commit_v2 59 "$loop_attempt" gate_plan rejected 2)
+assert_rc 0 "$?" "человеческий возврат сбрасывает автоматический бюджет"
+assert_eq ready "$(json_field "$after_human" state)" \
+  "после решения человека первый rewind снова разрешён"
+assert_eq instrument "$(json_field "$after_human" currentNode)" \
+  "после сброса бюджета сохраняется объявленная цель"
+
+# Typed failed выбирает owner-ветку вместо legacy on.failed. Finding живёт в
+# производной проекции immutable ledger и закрывается только успешной повторной
+# проверкой того же source-узла.
+typed_attempt=$(begin_selected 60 a_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
+assert_rc 0 "$?" "попытка для typed findings подготовлена"
+typed_dir="$(attempt_state_v2_task_root 60)/attempts/$typed_attempt"
+attempt_stage_state_init_v2 60 "$typed_attempt" debug >/dev/null
+attempt_stage_state_commit_v2 60 "$typed_attempt" instrument done >/dev/null
+typed_verdict=$(run_state_verdict_encode failed build \
+  'check-contract=проверяемый контракт не выполнен')
+typed_rewind=$(attempt_stage_state_commit_v2 \
+  60 "$typed_attempt" check failed 6 "$typed_verdict" 2)
+assert_rc 0 "$?" "typed failed коммитится через доверенный verdict"
+assert_eq instrument "$(json_field "$typed_rewind" currentNode)" \
+  "owner build выбирает rewind вместо legacy stop"
+typed_event=$(find "$typed_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.00000000000000000002.*.json')
+assert_eq build "$(json_field "$(cat "$typed_event")" verdict owner)" \
+  "ledger сохраняет владельца замечания"
+assert_eq check-contract \
+  "$(json_field "$(cat "$typed_event")" verdict findings 0 id)" \
+  "ledger сохраняет стабильный finding id"
+
+findings_open=$(attempt_stage_state_findings_v2 60 "$typed_attempt")
+assert_rc 0 "$?" "проекция findings проверяет hash-chain перед чтением"
+assert_eq 1 "$(json_field "$findings_open" open length)" \
+  "неисправленное замечание остаётся открытым"
+assert_eq check-contract "$(json_field "$findings_open" open 0 id)" \
+  "open-проекция возвращает точный finding"
+
+attempt_stage_state_commit_v2 60 "$typed_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 60 "$typed_attempt" check done >/dev/null
+findings_closed=$(attempt_stage_state_findings_v2 60 "$typed_attempt")
+assert_eq 0 "$(json_field "$findings_closed" open length)" \
+  "успешная повторная проверка закрывает прежнее замечание"
+assert_eq 1 "$(json_field "$findings_closed" closed length)" \
+  "закрытый finding остаётся в проверяемой истории"
+assert_eq closed "$(json_field "$findings_closed" closed 0 status)" \
+  "проекция явно маркирует закрытый finding"
+
+# Typed-цикл останавливается по наблюдаемому отсутствию прогресса раньше общего
+# hard ceiling: третий одинаковый fingerprint уже доказал, что BUILD↔CHECK застрял.
+no_progress_attempt=$(begin_selected 61 a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
+assert_rc 0 "$?" "попытка для no-progress guard подготовлена"
+no_progress_dir="$(attempt_state_v2_task_root 61)/attempts/$no_progress_attempt"
+attempt_stage_state_init_v2 61 "$no_progress_attempt" debug >/dev/null
+for round in 1 2; do
+  attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
+  repeated=$(attempt_stage_state_commit_v2 \
+    61 "$no_progress_attempt" check failed 6 "$typed_verdict" 2)
+  assert_eq ready "$(json_field "$repeated" state)" \
+    "одинаковый typed rewind $round ещё допускает исправление"
+done
+attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
+no_progress=$(attempt_stage_state_commit_v2 \
+  61 "$no_progress_attempt" check failed 6 "$typed_verdict" 2)
+assert_rc 0 "$?" "третий одинаковый typed rewind фиксируется атомарно"
+assert_eq stopped "$(json_field "$no_progress" state)" \
+  "повторяющиеся findings останавливают автоматический цикл"
+assert_eq no-progress "$(json_field "$no_progress" stop)" \
+  "причина остановки — отсутствие прогресса, не hard ceiling"
+no_progress_event=$(find "$no_progress_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_file_exists "$no_progress_event" \
+  "no-progress записан отдельным неизменяемым событием"
+assert_contains "$(json_field "$(cat "$no_progress_event")" reason)" \
+  'тот же набор открытых замечаний' \
+  "журнал объясняет наблюдаемое отсутствие прогресса"
+
+# Rejected на воротах — такое же осознанное вмешательство человека, как goto.
+# Новая обратная связь не должна наследовать fingerprint старого цикла.
+gate_reset_attempt=$(begin_selected 62 a_cccccccccccccccccccccccccccccccc)
+assert_rc 0 "$?" "попытка для сброса истории воротами подготовлена"
+attempt_stage_state_init_v2 62 "$gate_reset_attempt" debug >/dev/null
+attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  62 "$gate_reset_attempt" check failed 6 "$typed_verdict" 1 >/dev/null
+attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 62 "$gate_reset_attempt" check done >/dev/null
+attempt_stage_state_commit_v2 62 "$gate_reset_attempt" gate_plan rejected >/dev/null
+attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/null
+after_gate_feedback=$(attempt_stage_state_commit_v2 \
+  62 "$gate_reset_attempt" check failed 6 "$typed_verdict" 1)
+assert_rc 0 "$?" "typed failed после rejected ворот коммитится"
+assert_eq ready "$(json_field "$after_gate_feedback" state)" \
+  "rejected ворот начинает новую автономную серию findings"
+assert_eq instrument "$(json_field "$after_gate_feedback" currentNode)" \
+  "после человеческой обратной связи исправление снова разрешено"
 
 legacy_after=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \

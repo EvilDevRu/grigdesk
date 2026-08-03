@@ -12,6 +12,7 @@
 | [../docs/engine/ENGINE.md](../docs/engine/ENGINE.md) | **как менять этот репозиторий**: инварианты, карта файлов, когда правка вступает в силу, чем проверяться, ловушки |
 | [../docs/engine/PROFILE-CONTRACT.md](../docs/engine/PROFILE-CONTRACT.md) | что движок ждёт от профиля проекта (переменные, хуки, протокол статусов) |
 | [../docs/engine/NEW-PROJECT.md](../docs/engine/NEW-PROJECT.md) | как завести конвейер под новый проект — с вопросами, которые надо задать человеку |
+| [../docs/engine/ADDING-RUNNER.md](../docs/engine/ADDING-RUNNER.md) | как добавить нового ИИ-исполнителя (раннера): контракт, TDD-порядок, тесты, live-допуск |
 | [README.md](README.md) | что это вообще такое и как выглядит для человека |
 
 ## Три правила, нарушение которых ломает всё
@@ -28,9 +29,9 @@
 ## Проверки перед тем, как сказать «готово»
 
 ```bash
-bash -n bin/factory bin/factory-check bin/factory-new lib/*.sh ../profiles/*/profile.sh
-python3 -m py_compile lib/dashboard.py bin/factory-graph-new
-bin/factory-check --quick        # все профили разом: контракт, промпты, доступы, схема, скорость
+bash -n bin/factory bin/factory-check lib/*.sh ../profiles/*/profile.sh
+python3 -m py_compile lib/dashboard.py
+bin/factory-check --quick        # все профили: capability/hooks, runner config, paths/host
 ../tests/run-all.sh              # полный offline suite, без Cockpit и model call
 ```
 
@@ -39,16 +40,15 @@ bin/factory-check --quick        # все профили разом: контр�
 ## Что где лежит
 
 ```
-bin/      factory (CLI+демон), dashboard, factory-new (скелет профиля),
-          factory-graph-new (заготовка схемы конвейера), factory-check (проверки)
+bin/      factory (CLI+демон), factory-route/context, dashboard, factory-check
 lib/      core.sh (ядро), multi-runner.sh (dispatcher), run-state.sh (protocol v2), dashboard.py
 ../profiles/<имя>/ локальные profile.sh + обязательные runners.env/graph.json/dashboard.env +
-                    проектные скрипты; каталог целиком вне Git
+                    routes/ и проектные stand-скрипты; каталог целиком вне Git
 ../tests/engine/ проверки движка, профилей и дашборда
 ```
 
 Состояние задач — вне репозитория: `~/.factory/state/` (`tNNNN.pipeline`, `logs/`, `archive/`,
-`shots/`, `demo/`, `quarantine/`). Путь берётся из `FACTORY_STATE`/`STATE_DIR`, хардкодить нельзя.
+`shots/`, `quarantine/`). Путь берётся из `FACTORY_STATE`/`STATE_DIR`, хардкодить нельзя.
 
 Движок запускает и читает **кокпит** (`~/Workspace/cockpit`) — меняя формат реестра, вывод
 `factory slots` или переменные профиля, проверь и его.

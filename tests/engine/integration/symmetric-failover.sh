@@ -38,6 +38,11 @@ fixture_resolve() {
       DISPATCH_RESOLVED_MODEL="codex-${DISPATCH_RESOLVED_FAMILY}-actual"
       DISPATCH_FAMILY_FAILOVER=""
       DISPATCH_CREDENTIAL_FINGERPRINT=acct-codex ;;
+    kimi)
+      DISPATCH_RESOLVED_FAMILY=${requested_family:-k3}
+      DISPATCH_RESOLVED_MODEL="kimi-${DISPATCH_RESOLVED_FAMILY}-actual"
+      DISPATCH_FAMILY_FAILOVER=""
+      DISPATCH_CREDENTIAL_FINGERPRINT=acct-kimi ;;
     *)
       return 4 ;;
   esac
@@ -60,6 +65,7 @@ reset_fixture() {
   breaker_clear claude acct-claude provider "" "" 2>/dev/null || true
   breaker_clear claude acct-claude family opus "" 2>/dev/null || true
   breaker_clear codex acct-codex provider "" "" 2>/dev/null || true
+  breaker_clear kimi acct-kimi provider "" "" 2>/dev/null || true
 }
 
 reset_fixture
@@ -148,5 +154,52 @@ assert_rc 0 "$?" "fresh family limit retries explicit family fallback immediatel
 assert_eq claude "$DISPATCH_RESULT_RUNNER" "fresh family limit stays on Claude"
 assert_eq fable "$DISPATCH_RESULT_FAMILY" "fresh family fallback resolves Fable"
 assert_eq fallback_limit "$DISPATCH_REASON" "family fallback reason is visible"
+
+reset_fixture
+FIXTURE_RESULT[claude]=limited
+FIXTURE_RESULT[kimi]=ok
+dispatcher_run_chain 41 PLAN claude kimi 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "chain survives Claude limit with Kimi failover"
+assert_eq kimi "$DISPATCH_RESULT_RUNNER" "Claude limit falls back to Kimi"
+assert_eq fallback_limit "$DISPATCH_REASON" "limit reason is visible on failover to Kimi"
+assert_eq 0 "$DISPATCH_TRIES_DELTA" "failover to Kimi spends no stage try"
+
+# Кейсы 42-43 — generic-покрытие dispatcher'а, а не kimi-специфика: classify v1
+# для kimi не эмитит limited/transient (сигнатуры не доказаны, см.
+# docs/engine/KIMI.md); здесь зафиксирована только симметрия политики.
+reset_fixture
+FIXTURE_RESULT[kimi]=limited
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 42 PLAN kimi codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "chain survives Kimi limit with Codex failover"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "Kimi limit fails over to Codex"
+assert_eq fallback_limit "$DISPATCH_REASON" "limit reason is visible on failover from Kimi"
+
+reset_fixture
+FIXTURE_RESULT[kimi]=transient
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 43 PLAN kimi codex 200 fixture_resolve fixture_invoke
+assert_rc 1 "$?" "transient Kimi error stops automatic chain"
+assert_eq kimi "$DISPATCH_RESULT_RUNNER" "transient stays with failing Kimi"
+assert_eq transient "$DISPATCH_REASON" "transient reason remains visible"
+
+reset_fixture
+FIXTURE_RESULT[kimi]=unknown
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 44 PLAN kimi codex 200 fixture_resolve fixture_invoke
+assert_rc 1 "$?" "unknown Kimi error stops automatic chain"
+assert_eq kimi "$DISPATCH_RESULT_RUNNER" "unknown stays with failing Kimi"
+assert_eq unknown "$DISPATCH_REASON" "non-switching Kimi error reason remains visible"
+
+# provider_unavailable — единственный переключающий класс, который classify v1
+# реально эмитит для kimi (доказанный отказ аккаунта, см. docs/engine/KIMI.md).
+reset_fixture
+FIXTURE_RESULT[kimi]=provider_unavailable
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 45 PLAN kimi codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "chain survives a proven Kimi account refusal"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "proven Kimi refusal selects Codex"
+assert_eq fallback_provider_unavailable "$DISPATCH_REASON" \
+  "provider refusal is visible as the failover reason from Kimi"
 
 finish_tests

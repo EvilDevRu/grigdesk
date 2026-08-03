@@ -4,8 +4,10 @@
 # Публичный API:
 #   attempt_stage_state_init_v2 TASK ATTEMPT_ID ROUTE_ID
 #   attempt_stage_state_read_v2 TASK ATTEMPT_ID
+#   attempt_stage_state_latest_event_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
-#   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME
+#   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME \
+#     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT]
 #
 # Изменяемый курсор и его только дополняемый журнал событий с цепочкой хешей хранятся только в
 # <control-root>/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT>/stage-results.
@@ -45,6 +47,7 @@ _attempt_stage_state_json() {
   local operation=${1:?operation}
   shift
   python3 - "$operation" "$@" <<'PY'
+import base64
 import datetime
 import hashlib
 import json
@@ -57,11 +60,17 @@ OP, *ARGS = sys.argv[1:]
 ATTEMPT_RE = re.compile(r"^a_[a-f0-9]{32}$")
 HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+FINDING_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 TASK_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 EVENT_RE = re.compile(r"^event\.([0-9]{20})\.([a-f0-9]{64})\.json$")
-STOP_TARGETS = {"human", "failed", "done"}
+DECLARED_STOP_TARGETS = {"human", "failed", "done"}
+FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
+# rewind-limit — не исход опубликованного маршрута, а доверенная остановка движка:
+# схема просила ещё один автоматический rewind, но этот же переход уже дважды не помог.
+CURSOR_STOP_TARGETS = DECLARED_STOP_TARGETS | {"rewind-limit", "no-progress"}
+HUMAN_RESUMABLE_STOP_TARGETS = {"human", "rewind-limit", "no-progress"}
 
 
 def fail(code=78):
@@ -85,6 +94,15 @@ def integer(value, minimum=0):
     return value
 
 
+def decimal(value, maximum):
+    if not isinstance(value, str) or not re.fullmatch(r"0|[1-9][0-9]*", value):
+        fail(2)
+    parsed = int(value)
+    if parsed > maximum:
+        fail(2)
+    return parsed
+
+
 def timestamp(value):
     if not isinstance(value, str) or not TIME_RE.fullmatch(value):
         fail()
@@ -103,6 +121,67 @@ def reason(value):
     ):
         fail()
     return value
+
+
+def validate_verdict(value, outcome):
+    if value is None:
+        return None
+    if outcome != "failed":
+        fail()
+    exact(value, {"owner", "findings"})
+    if value["owner"] not in FAILURE_OWNERS:
+        fail()
+    findings = value["findings"]
+    if not isinstance(findings, list) or not 1 <= len(findings) <= 32:
+        fail()
+    seen = set()
+    for finding in findings:
+        exact(finding, {"id", "summary"})
+        finding_id = finding["id"]
+        summary = finding["summary"]
+        if (
+            not isinstance(finding_id, str)
+            or not FINDING_RE.fullmatch(finding_id)
+            or finding_id in seen
+            or not isinstance(summary, str)
+            or not 1 <= len(summary) <= 500
+            or any(ord(char) < 32 or ord(char) == 127 for char in summary)
+        ):
+            fail()
+        seen.add(finding_id)
+    return value
+
+
+def decode_verdict(encoded, outcome):
+    if not encoded:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded):
+        fail(2)
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+        if len(payload) > 32 * 1024:
+            fail(2)
+        value = json.loads(payload.decode("utf-8"), parse_constant=lambda _: fail(2))
+    except (ValueError, UnicodeError, json.JSONDecodeError):
+        fail(2)
+    validate_verdict(value, outcome)
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if canonical != payload:
+        fail(2)
+    return value
+
+
+def verdict_fingerprint(value):
+    if value is None:
+        return None
+    return value["owner"] + ":" + ",".join(
+        sorted(finding["id"] for finding in value["findings"])
+    )
 
 
 def canonical_bytes(value):
@@ -189,7 +268,7 @@ def validate_cursor(value, maximum):
     else:
         if value["currentNode"] is not None or value["pauseReason"] is not None:
             fail()
-        if value["stop"] not in STOP_TARGETS:
+        if value["stop"] not in CURSOR_STOP_TARGETS:
             fail()
     return value
 
@@ -220,7 +299,7 @@ def validate_action(value):
             fail()
     elif mode == "stop":
         exact(value, {"stop"})
-        if value["stop"] not in STOP_TARGETS:
+        if value["stop"] not in DECLARED_STOP_TARGETS:
             fail()
     else:
         # Выбранный маршрут неизменяем на всём протяжении попытки. Для перехода
@@ -285,9 +364,89 @@ def human_rewind_note(directory, node):
             continue
         if event.get("kind") == "human-rewind":
             note = reason(event.get("reason"))
-        elif event.get("kind") == "commit":
+        elif event.get("kind") in {"commit", "rewind-limit", "no-progress"}:
             note = ""
     return note
+
+
+def automatic_rewind_history(directory, node, target):
+    # Возвращаем историю ЗАФИКСИРОВАННЫХ возвратов той же автономной дуги после
+    # последнего решения человека. Для typed verdict сохраняем fingerprint owner +
+    # стабильных finding id: изменение набора замечаний считается прогрессом, а
+    # повтор и A↔B-осцилляция — нет.
+    identifier(node)
+    identifier(target)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        fail()
+    events = []
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match:
+            events.append((int(match.group(1)), name))
+    events.sort()
+    fingerprints = []
+    for _, name in events:
+        event = regular_json(os.path.join(directory, name))
+        action = event.get("action")
+        rejected_feedback = (
+            event.get("kind") == "commit"
+            and event.get("outcome") == "rejected"
+            and isinstance(action, dict)
+            and "rewind" in action
+            # Для самой считаемой legacy-дуги rejected — обычный автоматический
+            # rewind, а не граница истории. Граница возникает, когда человек на
+            # другом gate возвращает маршрут к новой серии исправлений.
+            and (
+                event.get("node") != node
+                or action.get("rewind") != target
+            )
+        )
+        if event.get("kind") == "human-rewind" or rejected_feedback:
+            # И явный goto, и rejected на human gate начинают новую автономную
+            # серию: прежние findings не должны остановить исправление по новой
+            # человеческой обратной связи.
+            fingerprints = []
+            continue
+        if (
+            event.get("kind") == "commit"
+            and event.get("node") == node
+            and isinstance(action, dict)
+            and action.get("rewind") == target
+        ):
+            verdict = event.get("verdict")
+            validate_verdict(verdict, event.get("outcome"))
+            fingerprints.append(verdict_fingerprint(verdict))
+    return fingerprints
+
+
+def no_progress_reason(history, candidate, limit):
+    if candidate is None or not limit:
+        return None
+    fingerprints = history + [candidate]
+
+    # Тот же набор finding id повторился limit+1 раз подряд: ремонт не меняет
+    # наблюдаемое состояние проверяющего.
+    repeated = 0
+    for fingerprint in reversed(fingerprints):
+        if fingerprint != candidate:
+            break
+        repeated += 1
+    if repeated >= limit + 1:
+        return "повторяется тот же набор открытых замечаний"
+
+    # Частая в ревью осцилляция: A исправили ценой B, затем вернули A и так далее.
+    # Пять точек достаточно, чтобы отличить цикл A→B→A→B→A от одного полезного
+    # пересмотра. Общий hard limit остаётся последним предохранителем иных циклов.
+    if (
+        len(fingerprints) >= 5
+        and fingerprints[-1] == fingerprints[-3] == fingerprints[-5]
+        and fingerprints[-2] == fingerprints[-4]
+        and fingerprints[-1] != fingerprints[-2]
+    ):
+        return "обнаружена осцилляция двух наборов замечаний"
+    return None
 
 
 def validate_event_static(
@@ -299,9 +458,7 @@ def validate_event_static(
     route,
     route_hash,
 ):
-    exact(
-        event,
-        {
+    required = {
             "schema",
             "protocolVersion",
             "taskId",
@@ -320,8 +477,14 @@ def validate_event_static(
             "previousEventHash",
             "before",
             "after",
-        },
-    )
+        }
+    # `verdict` добавлен совместимо: старые immutable events остаются валидны,
+    # новые commit-events могут нести проверенную типизацию failed.
+    if not isinstance(event, dict) or frozenset(event) not in {
+        frozenset(required),
+        frozenset(required | {"verdict"}),
+    }:
+        fail()
     validate_static(
         event,
         task,
@@ -334,7 +497,10 @@ def validate_event_static(
     integer(event["sequence"])
     timestamp(event["at"])
     identifier(event["node"])
-    if event["kind"] not in {"init", "pause", "commit", "human-rewind"}:
+    validate_verdict(event.get("verdict"), event.get("outcome"))
+    if event["kind"] not in {
+        "init", "pause", "commit", "human-rewind", "rewind-limit", "no-progress"
+    }:
         fail()
 
 
@@ -400,10 +566,8 @@ def event_base(runtime, sequence, at, kind, node):
     }
 
 
-def validate_transition(value, runtime, node, outcome):
-    exact(
-        value,
-        {
+def validate_transition(value, runtime, node, outcome, failure_owner):
+    required = {
             "schema",
             "catalogHash",
             "route",
@@ -413,8 +577,12 @@ def validate_transition(value, runtime, node, outcome):
             "action",
             "retry",
             "escalationPolicy",
-        },
-    )
+        }
+    if not isinstance(value, dict) or frozenset(value) not in {
+        frozenset(required),
+        frozenset(required | {"failureOwner"}),
+    }:
+        fail()
     if (
         value["schema"] != 2
         or value["catalogHash"] != runtime["catalogHash"]
@@ -423,6 +591,7 @@ def validate_transition(value, runtime, node, outcome):
         or value["node"] != node
         or value["outcome"] != outcome
         or value["escalationPolicy"] is not None
+        or value.get("failureOwner") != failure_owner
     ):
         fail()
     validate_action(value["action"])
@@ -579,10 +748,14 @@ elif OP == "prepare-human-rewind":
         fail()
     for item in reset:
         identifier(item)
-    # Остановка `stop: human` буквально означает «маршрут ждёт решения человека»,
-    # и возврат курсора — законное решение (провайдер лежал, узел исчерпал бюджет).
+    # Остановка `stop: human|rewind-limit|no-progress` означает «маршрут ждёт решения
+    # человека», и возврат курсора — законное решение (провайдер лежал или одинаковый
+    # автоматический возврат уже дважды не помог).
     # Терминальные done/failed закрывают попытку: их разбирают abandon/recover.
-    if cursor.get("state") == "stopped" and cursor.get("stop") != "human":
+    if (
+        cursor.get("state") == "stopped"
+        and cursor.get("stop") not in HUMAN_RESUMABLE_STOP_TARGETS
+    ):
         fail(75)
     if cursor.get("currentNode") == node and cursor.get("state") == "ready":
         fail(10)
@@ -606,7 +779,17 @@ elif OP == "prepare-human-rewind":
     dump(event)
 
 elif OP == "prepare-commit":
-    runtime_path, transition_path, results_dir, node, outcome, at = ARGS
+    (
+        runtime_path,
+        transition_path,
+        results_dir,
+        node,
+        outcome,
+        at,
+        rewind_limit_raw,
+        verdict_b64,
+        no_progress_limit_raw,
+    ) = ARGS
     runtime = regular_json(runtime_path)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
@@ -631,25 +814,79 @@ elif OP == "prepare-commit":
         fail(10)
     if cursor.get("state") not in {"ready", "paused"} or cursor.get("currentNode") != node:
         fail(75)
+    verdict = decode_verdict(verdict_b64, outcome)
+    failure_owner = verdict["owner"] if verdict is not None else None
     transition = regular_json(transition_path, immutable=False)
-    action = validate_transition(transition, runtime, node, outcome)
+    action = validate_transition(
+        transition,
+        runtime,
+        node,
+        outcome,
+        failure_owner,
+    )
+    rewind_limit = decimal(rewind_limit_raw, 10)
+    no_progress_limit = decimal(no_progress_limit_raw, 10)
     sequence = integer(runtime.get("sequence")) + 1
-    event = event_base(runtime, sequence, at, "commit", node)
+    event_kind = "commit"
+    event_reason = None
+    after = derive_commit_cursor(cursor, action, node, outcome, sequence)
+    if validate_action(action) == "rewind":
+        rewind_history = automatic_rewind_history(
+            results_dir,
+            node,
+            action["rewind"],
+        )
+        progress_reason = no_progress_reason(
+            rewind_history,
+            verdict_fingerprint(verdict),
+            no_progress_limit,
+        )
+        if progress_reason is not None:
+            event_kind = "no-progress"
+            event_reason = (
+                f"автоматический возврат остановлен без прогресса: {node} → "
+                f"{action['rewind']}; {progress_reason}"
+            )
+            after = {
+                "state": "stopped",
+                "currentNode": None,
+                "stop": "no-progress",
+                "pauseReason": None,
+                "lastCommit": {
+                    "node": node,
+                    "outcome": outcome,
+                    "sequence": sequence,
+                },
+            }
+        elif rewind_limit and len(rewind_history) >= rewind_limit:
+            event_kind = "rewind-limit"
+            event_reason = (
+                f"автоматический лимит возвратов исчерпан: {node} → "
+                f"{action['rewind']}; уже выполнено {rewind_limit}"
+            )
+            after = {
+                "state": "stopped",
+                "currentNode": None,
+                "stop": "rewind-limit",
+                "pauseReason": None,
+                "lastCommit": {
+                    "node": node,
+                    "outcome": outcome,
+                    "sequence": sequence,
+                },
+            }
+    event = event_base(runtime, sequence, at, event_kind, node)
     event.update(
         {
             "outcome": outcome,
-            "reason": None,
+            "reason": event_reason,
             "action": action,
             "before": cursor,
-            "after": derive_commit_cursor(
-                cursor,
-                action,
-                node,
-                outcome,
-                sequence,
-            ),
+            "after": after,
         }
     )
+    if verdict is not None:
+        event["verdict"] = verdict
     dump(event)
 
 elif OP == "event-sequence":
@@ -692,6 +929,75 @@ elif OP == "human-note":
     note = human_rewind_note(directory, node)
     if note:
         sys.stdout.write(note + "\n")
+
+elif OP == "findings-ledger":
+    (directory,) = ARGS
+    try:
+        names = sorted(
+            name for name in os.listdir(directory) if EVENT_RE.fullmatch(name)
+        )
+    except OSError:
+        fail()
+    findings = {}
+    for name in names:
+        event = regular_json(os.path.join(directory, name))
+        if event.get("kind") not in {"commit", "rewind-limit", "no-progress"}:
+            continue
+        node = identifier(event.get("node"))
+        outcome = event.get("outcome")
+        identifier(outcome)
+        sequence = integer(event.get("sequence"), 1)
+        verdict = validate_verdict(event.get("verdict"), outcome)
+        open_for_node = {
+            key
+            for key, finding in findings.items()
+            if finding["sourceNode"] == node and finding["status"] == "open"
+        }
+        if outcome == "done":
+            for key in open_for_node:
+                findings[key]["status"] = "closed"
+                findings[key]["closedSequence"] = sequence
+            continue
+        if outcome != "failed" or verdict is None:
+            # Legacy failed не несёт полного набора замечаний: по нему нельзя
+            # доказать ни открытие, ни закрытие finding.
+            continue
+        current_keys = {
+            (node, finding["id"])
+            for finding in verdict["findings"]
+        }
+        for key in open_for_node - current_keys:
+            findings[key]["status"] = "closed"
+            findings[key]["closedSequence"] = sequence
+        for finding in verdict["findings"]:
+            key = (node, finding["id"])
+            previous = findings.get(key)
+            if previous is None or previous["status"] == "closed":
+                findings[key] = {
+                    "id": finding["id"],
+                    "sourceNode": node,
+                    "owner": verdict["owner"],
+                    "summary": finding["summary"],
+                    "openedSequence": sequence,
+                    "lastSeenSequence": sequence,
+                    "status": "open",
+                    "closedSequence": None,
+                }
+            else:
+                previous["owner"] = verdict["owner"]
+                previous["summary"] = finding["summary"]
+                previous["lastSeenSequence"] = sequence
+    ordered = sorted(
+        findings.values(),
+        key=lambda item: (item["sourceNode"], item["id"]),
+    )
+    dump(
+        {
+            "schema": 1,
+            "open": [item for item in ordered if item["status"] == "open"],
+            "closed": [item for item in ordered if item["status"] == "closed"],
+        }
+    )
 
 elif OP == "validate-ledger":
     directory, task, attempt, profile, catalog, route, route_hash, entry = ARGS
@@ -793,7 +1099,10 @@ elif OP == "validate-ledger":
                 # Возврат допустим из живого курсора и из остановки «ждёт человека»:
                 # именно её человек и разрешает своим решением.
                 if (
-                    (cursor["state"] == "stopped" and cursor.get("stop") != "human")
+                    (
+                        cursor["state"] == "stopped"
+                        and cursor.get("stop") not in HUMAN_RESUMABLE_STOP_TARGETS
+                    )
                     or event["outcome"] is not None
                     or not isinstance(event["action"], dict)
                     or set(event["action"]) != {"rewind", "reset"}
@@ -841,6 +1150,26 @@ elif OP == "validate-ledger":
                     event["outcome"],
                     sequence,
                 )
+                if event["after"] != expected_cursor:
+                    fail()
+            elif event["kind"] in {"rewind-limit", "no-progress"}:
+                if cursor["state"] not in {"ready", "paused"}:
+                    fail()
+                identifier(event["outcome"])
+                reason(event["reason"])
+                if validate_action(event["action"]) != "rewind":
+                    fail()
+                expected_cursor = {
+                    "state": "stopped",
+                    "currentNode": None,
+                    "stop": event["kind"],
+                    "pauseReason": None,
+                    "lastCommit": {
+                        "node": event["node"],
+                        "outcome": event["outcome"],
+                        "sequence": sequence,
+                    },
+                }
                 if event["after"] != expected_cursor:
                     fail()
             else:
@@ -1076,6 +1405,44 @@ attempt_stage_state_read_v2() {
   return "$rc"
 }
 
+# Возвращает последний event только после полной проверки immutable hash-chain и
+# runtime pointer. Проекции интерфейса используют его как канонический источник
+# reset-списка; брать действие повторно из mutable `.pipeline` запрещено.
+attempt_stage_state_latest_event_v2() {
+  local task attempt root lock_fd runtime_tmp sequence hash event rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  root=$(attempt_state_v2_task_root "$task") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-event.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    sequence=$(_attempt_state_json get "$runtime_tmp" sequence) || rc=$?
+    hash=$(_attempt_state_json get "$runtime_tmp" headEventHash) || rc=$?
+  fi
+  if (( rc == 0 )); then
+    [[ "$sequence" =~ ^(0|[1-9][0-9]*)$ && "$hash" =~ ^[a-f0-9]{64}$ ]] || rc=78
+  fi
+  if (( rc == 0 )); then
+    printf -v event '%s/event.%020d.%s.json' "$ASTAGE_RESULTS_DIR" "$sequence" "$hash"
+    [[ -f "$event" && ! -L "$event" ]] || rc=78
+  fi
+  if (( rc == 0 )); then
+    cat -- "$event"
+    rc=$?
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
 # Человеческий возврат курсора на пройденный узел маршрута. Это НЕ подделка
 # исхода агента: в журнал ложится отдельное событие kind=human-rewind с
 # обязательной причиной, а пройденные узлы сбрасываются, как при обычном rewind.
@@ -1152,6 +1519,32 @@ attempt_stage_state_human_note_v2() {
   return "$rc"
 }
 
+# Производная проекция immutable events: какие typed findings ещё открыты и какие
+# уже закрыты повторной проверкой того же узла. Ничего отдельно не мутируется — при
+# повреждении hash-chain чтение падает до построения проекции.
+attempt_stage_state_findings_v2() {
+  local task attempt lock_fd runtime_tmp rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-findings.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_json findings-ledger "$ASTAGE_RESULTS_DIR"
+    rc=$?
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
 attempt_stage_state_pause_v2() {
   local task attempt node reason root lock_fd runtime_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
@@ -1203,11 +1596,20 @@ attempt_stage_state_pause_v2() {
 }
 
 attempt_stage_state_commit_v2() {
-  local task attempt node outcome root lock_fd runtime_tmp transition_tmp event_tmp now rc
+  local task attempt node outcome rewind_limit verdict_b64 no_progress_limit
+  local failure_owner root lock_fd
+  local runtime_tmp transition_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   node=$(_attempt_stage_state_node_id "${3:-}") || return
   outcome=$(_attempt_stage_state_outcome "${4:-}") || return
+  rewind_limit=${5:-0}
+  verdict_b64=${6:-}
+  no_progress_limit=${7:-0}
+  [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
+  [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
+  run_state_verdict_validate "$outcome" "$verdict_b64" || return
+  failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
   _attempt_stage_state_load_locked "$task" "$attempt" ""
@@ -1224,14 +1626,18 @@ attempt_stage_state_commit_v2() {
     transition_tmp=$(mktemp "$ASTAGE_RESULTS_DIR/.transition.XXXXXX") || rc=1
   fi
   if (( rc == 0 )); then
-    "$(_attempt_state_route_tool)" \
-      --routes-dir "$ASTAGE_ROUTES_DIR" \
-      --profile "$ASTAGE_PROFILE" \
-      transition \
-      --catalog-hash "$ASTAGE_CATALOG_HASH" \
-      --route "$ASTAGE_ROUTE" \
-      --node "$node" \
-      --outcome "$outcome" >"$transition_tmp"
+    local -a transition_args=(
+      "$(_attempt_state_route_tool)"
+      --routes-dir "$ASTAGE_ROUTES_DIR"
+      --profile "$ASTAGE_PROFILE"
+      transition
+      --catalog-hash "$ASTAGE_CATALOG_HASH"
+      --route "$ASTAGE_ROUTE"
+      --node "$node"
+      --outcome "$outcome"
+    )
+    [[ -z "$failure_owner" ]] || transition_args+=(--failure-owner "$failure_owner")
+    "${transition_args[@]}" >"$transition_tmp"
     rc=$?
   fi
   if (( rc == 0 )); then
@@ -1240,7 +1646,8 @@ attempt_stage_state_commit_v2() {
   fi
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-commit \
-      "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" "$now" >"$event_tmp"
+      "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" \
+      "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$transition_tmp" "$runtime_tmp"

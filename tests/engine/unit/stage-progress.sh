@@ -13,6 +13,8 @@ fi
 task=58
 stage=PLAN
 token=progress-secret
+pipeline_store_route_init "$task" "PLAN PLANS" PROFILE fixture ROUTE feature
+assert_rc 0 "$?" "progress fixture initializes an exact pinned route registry"
 factory_control_init control-secret
 run_state_begin "$task" "$stage" run-a 1 "$token"
 token_file="$TEST_ROOT/token"
@@ -20,10 +22,15 @@ printf '%s\n' "$token" >"$token_file"
 exec 7<"$token_file"
 
 FACTORY_STATUS_FD=7 "$progress" --task "$task" --stage "$stage" \
-  --run-id run-a --epoch 1 PLANS done ROUTE feature
+  --run-id run-a --epoch 1 PLANS done
 assert_rc 0 "$?" "current run can publish non-terminal progress"
 assert_eq done "$(pipeline_store_get "$task" PLANS)" "progress node reaches pipeline"
-assert_eq feature "$(pipeline_store_get "$task" ROUTE)" "route metadata reaches pipeline"
+
+FACTORY_STATUS_FD=7 "$progress" --task "$task" --stage "$stage" \
+  --run-id run-a --epoch 1 ROUTE debug >/dev/null 2>&1
+assert_rc 2 "$?" "run-scoped progress cannot rewrite the pinned route"
+assert_eq feature "$(pipeline_store_get "$task" ROUTE)" \
+  "rejected progress leaves pinned route metadata intact"
 
 FACTORY_STATUS_FD=7 "$progress" --task "$task" --stage "$stage" \
   --run-id run-a --epoch 1 PLAN done >/dev/null 2>&1

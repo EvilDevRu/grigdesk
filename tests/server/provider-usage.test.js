@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  createUsageReadCache,
   executeProviderUsageAction,
   mergeProviderUsage,
   normalizeProviderUsage,
@@ -83,6 +84,37 @@ test('provider without a usage API is explicit instead of blank', () => {
   assert.match(status.message, /не отдаёт/i);
   assert.deepEqual(status.bars, []);
   assert.deepEqual(status.resources, []);
+});
+
+test('usage read cache объединяет одновременные загрузки и считает TTL после ответа', async () => {
+  let currentTime = 100;
+  let calls = 0;
+  let finishFirst;
+  const cache = createUsageReadCache(async () => {
+    calls += 1;
+    if (calls === 1) return new Promise((resolve) => { finishFirst = resolve; });
+    return { generation: calls };
+  }, { maxAgeMs: 60, now: () => currentTime });
+
+  const first = cache.read();
+  const concurrent = cache.read();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+
+  currentTime = 130;
+  finishFirst({ generation: 1 });
+  assert.deepEqual(await Promise.all([first, concurrent]), [
+    { generation: 1 },
+    { generation: 1 },
+  ]);
+
+  currentTime = 189;
+  assert.deepEqual(await cache.read(), { generation: 1 });
+  assert.equal(calls, 1);
+
+  currentTime = 190;
+  assert.deepEqual(await cache.read(), { generation: 2 });
+  assert.equal(calls, 2);
 });
 
 test('usage resources and their controls are provider-neutral and normalized', () => {

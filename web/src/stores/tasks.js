@@ -28,9 +28,25 @@ export const useTasksStore = defineStore('tasks', {
     async comment(id, text) {
       await api.post(`/api/b24/task/${id}/comment`, { text });
     },
-    // Направить задачу на конвейер (запуск фабрики).
-    async launch(id, ticket) {
-      return api.post(`/api/tasks/${id}/launch`, { ticket });
+    // Чем заполнять модалку запуска: профиль и маршруты опубликованного каталога.
+    // Решает сервер — веб не пытается выводить доступность маршрута из профиля.
+    async launchOptions(id, profile = '') {
+      const query = profile ? `?profile=${encodeURIComponent(profile)}` : '';
+      return api.get(`/api/tasks/${id}/launch-options${query}`);
+    },
+    /** Направить задачу на маршрут с отдельными полями постановки. */
+    async launch(id, payload) {
+      return api.post(`/api/tasks/${id}/launch`, payload);
+    },
+    // Исполнитель этапа: override на небегущий этап; '' — снять override этапа
+    // (вернётся переопределение задачи, заданное при запуске, или политика профиля).
+    async setStageRunner(id, stage, primary) {
+      return api.post(`/api/tasks/${id}/runner/override`, { stage, primary });
+    },
+    // Продолжить ту же попытку. Только по кнопке: оборвавшийся прогон сначала
+    // осматривает человек, автоматического resume у интерфейса нет.
+    async resume(id) {
+      return api.post(`/api/tasks/${id}/resume`);
     },
   },
 });

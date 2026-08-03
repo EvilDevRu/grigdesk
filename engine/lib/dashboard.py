@@ -129,6 +129,81 @@ def parse_env_file(path):
     return out
 
 
+_SANDBOX_REPO_NAME = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
+_SANDBOX_BRANCH = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$')
+_SANDBOX_REPO_KEY = re.compile(r'^REPO_(?:COUNT|[0-9]+_(?:NAME|WT|BRANCH))$')
+
+
+def _sandbox_worktree_valid(value, generic=False):
+    """Путь из env не должен расширять доступ из-за относительной/битой формы."""
+    if not isinstance(value, str) or not value or not os.path.isabs(value) or value == '/':
+        return False
+    if value.startswith('//') or os.path.normpath(value) != value:
+        return False
+    if any(ch in value for ch in ('\0', '\r', '\n', '\t')):
+        return False
+    return not generic or ':' not in value
+
+
+def _sandbox_branch_valid(value):
+    return (isinstance(value, str) and _SANDBOX_BRANCH.fullmatch(value) is not None
+            and '..' not in value)
+
+
+def parse_sandbox_repositories(state):
+    """Читает generic REPO_* exact/fail-closed либо старый BE_WT/FE_WT.
+
+    Любой REPO_* переключает весь файл в generic-режим. Повреждённый набор не
+    откатывается к legacy-полям: иначе дашборд показал бы посторонний checkout.
+    """
+    state = state if isinstance(state, dict) else {}
+    repo_keys = {key for key in state if key.startswith('REPO_')}
+    if repo_keys:
+        raw_count = state.get('REPO_COUNT', '')
+        if re.fullmatch(r'(?:[1-9]|1[0-6])', raw_count) is None:
+            return {'kind': 'invalid', 'repos': []}
+        count = int(raw_count)
+        expected = {'REPO_COUNT'}
+        repos, names, worktrees = [], set(), set()
+        for index in range(count):
+            prefix = f'REPO_{index}_'
+            expected.update(prefix + field for field in ('NAME', 'WT', 'BRANCH'))
+            name = state.get(prefix + 'NAME', '')
+            worktree = state.get(prefix + 'WT', '')
+            branch = state.get(prefix + 'BRANCH', '')
+            if (not _SANDBOX_REPO_NAME.fullmatch(name)
+                    or not _sandbox_worktree_valid(worktree, generic=True)
+                    or not _sandbox_branch_valid(branch)
+                    or name in names or worktree in worktrees):
+                return {'kind': 'invalid', 'repos': []}
+            names.add(name)
+            worktrees.add(worktree)
+            repos.append({'name': name, 'path': worktree, 'branch': branch})
+        if (repo_keys != expected
+                or any(_SANDBOX_REPO_KEY.fullmatch(key) is None for key in repo_keys)):
+            return {'kind': 'invalid', 'repos': []}
+        return {'kind': 'generic', 'repos': repos}
+
+    repos, seen = [], set()
+    for name, worktree_key, branch_key in (
+            ('be', 'BE_WT', 'BE_BRANCH'), ('fe', 'FE_WT', 'FE_BRANCH')):
+        worktree = state.get(worktree_key, '')
+        if not worktree:
+            continue
+        if not _sandbox_worktree_valid(worktree):
+            return {'kind': 'invalid', 'repos': []}
+        if worktree in seen:
+            continue
+        seen.add(worktree)
+        branch = state.get(branch_key, '')
+        repos.append({
+            'name': name,
+            'path': worktree,
+            'branch': branch if _sandbox_branch_valid(branch) else '',
+        })
+    return {'kind': 'legacy' if repos else 'none', 'repos': repos}
+
+
 def collect_sandboxes():
     tasks = set()
     for f in os.listdir(STATE_DIR) if os.path.isdir(STATE_DIR) else []:
@@ -173,9 +248,10 @@ def collect_sandboxes():
             'branch': '', 'dirty': 0, 'queues': [], 'horizon': False,
         }
         pe = prof_env(profile)
-        wt = state.get('BE_WT') or (
-            os.path.join(pe['BE'], f'worktree-t{task}') if pe['BE'] else ''
-        )
+        sandbox_repos = parse_sandbox_repositories(state)
+        wt = sandbox_repos['repos'][0]['path'] if sandbox_repos['repos'] else ''
+        if not wt and sandbox_repos['kind'] != 'invalid':
+            wt = os.path.join(pe['BE'], f'worktree-t{task}') if pe['BE'] else ''
         if os.path.isdir(wt):
             info['branch'], info['dirty'] = git_info(wt)
         if status == 'run' and state.get('REDIS_N'):
@@ -478,22 +554,8 @@ _PROFILE_STAGES = {}    # профиль → {маршрут: [этапы]}
 
 
 def profile_stages(profile):
-    """Этапы маршрутов профиля (читаем сам профиль — он источник истины)."""
-    if profile in _PROFILE_STAGES:
-        return _PROFILE_STAGES[profile]
-    out = {}
-    path = os.path.join(PROFILES_DIR, profile, 'profile.sh')
-    if profile and os.path.exists(path):
-        txt = run(['bash', '-c',
-                   f'source "{path}" 2>/dev/null\n'
-                   'for v in $(compgen -A variable | grep "^PROFILE_ROUTE_STAGES_"); do\n'
-                   '  n="$v[@]"; echo "${v#PROFILE_ROUTE_STAGES_} ${!n}"\ndone'], timeout=10)
-        for line in txt.splitlines():
-            parts = line.split()
-            if len(parts) > 1:
-                out[parts[0]] = parts[1:]
-    _PROFILE_STAGES[profile] = out
-    return out
+    """Legacy profile arrays удалены; route shape читает Cockpit из pinned bundle."""
+    return {}
 
 
 def profile_graphs(profile):
@@ -1421,15 +1483,6 @@ def render():
         if links:
             out.append('<span>' + ' · '.join(links) + '</span>')
 
-        # 2а) Снос стенда — только руками и только пока он жив. Движок песочницу больше
-        # не сносит (раньше это молча делало ретро): после отгрузки стенд часто ещё нужен —
-        # посмотреть результат, переснять демо, проверить руками.
-        if alive:
-            out.append(f'<button class="sbdown" onclick="sandboxDown(\'{b["task"]}\')" '
-                       'title="Снести песочницу задачи: контейнеры, схемы БД и ClickHouse, '
-                       'рабочая копия. Поднять обратно — только полным подъёмом">'
-                       '&#9211; Снести стенд</button>')
-
         # 3) Ветка и объём правок — только там, где ветка на задачу вообще есть
         if b['branch']:
             n = b['dirty']
@@ -1522,7 +1575,8 @@ def render():
                          f'<span class="pnum">{done_n}/{total_n}</span>{where}</div>')
             p.append('</div>')
 
-            # ── Действия: таймер и кнопка запуска — отдельным блоком справа
+            # ── Действия: решение на воротах и таймер. Запуск/возобновление доступны
+            # только через единый route control plane Cockpit, не через старый dashboard.
             p.append('<span class="tctl">')
             orch = pf_card.get('ORCH_PID', '')
             alive = orch and os.path.isdir(f'/proc/{orch}')
@@ -1536,9 +1590,6 @@ def render():
                 p.append(f'<button class="runbtn gate" onclick="openFrame(\'{where_doc[0]}{b["task"]}\')" '
                          f'title="конвейер ждёт твоего решения — открыть {where_doc[1]}">'
                          f'&#9998; Решить: {where_doc[1]}</button>')
-            elif not alive and pf_card.get('RETRO') != 'done':
-                p.append(f'<button class="runbtn" onclick="runTask(\'{b["task"]}\')" '
-                         f'title="запустить/продолжить конвейер (нужен открытый VS Code)">&#9654; Продолжить</button>')
             tmr = get_timer(b['task'])
             if tmr:
                 on = ' on' if tmr['running'] else ''
@@ -1555,11 +1606,10 @@ def render():
             # и задача «выполняется» бесконечно. Молчать нельзя — иначе человек узнаёт об этом
             # только когда сам спросит.
             #
-            # Но живого ORCH_PID недостаточно как признак работы: конвейер часто ведут РУКАМИ
-            # из чата, там демона нет вовсе, а реестр обновляется через pipeline-set.sh.
-            # Поэтому смерть = мёртвый PID И застывший реестр; иначе алерт врёт,
-            # пока задача активно двигается вручную. Порог 30 минут: дольше без единой
-            # отметки в реестре не идёт ни один этап конвейера.
+            # Но живого ORCH_PID недостаточно как признак работы: detached unit мог успеть
+            # записать свежую проекцию до смены PID. Поэтому смерть = мёртвый PID И застывший
+            # реестр; иначе алерт врёт. Порог 30 минут: дольше без единой отметки в реестре
+            # не идёт ни один штатный route-узел.
             try:
                 idle_sec = time.time() - os.path.getmtime(f'{STATE_DIR}/t{b["task"]}.pipeline')
             except OSError:
@@ -1763,24 +1813,6 @@ def render():
              'localStorage.setItem("factory-notified",cur.join(","));}'
              'notifyWaits();setInterval(notifyWaits,5100);'
              'function timerAct(t,a){fetch("/api/timer/t"+t+"/"+a,{method:"POST"}).then(function(){poll();});}'
-             # Снос стенда: подтверждение с ПОЛНЫМ перечнем последствий. Отменить снос
-             # нельзя, а поднять заново — это минуты полного up, поэтому спрашиваем прямо.
-             'function sandboxDown(t){if(!confirm("Снести стенд задачи #"+t+"?\\n\\n'
-             'Будут удалены: контейнеры песочницы, её схемы MySQL и ClickHouse, рабочая копия задачи.\\n'
-             'Поднять обратно можно только полным подъёмом стенда (несколько минут).\\n'
-             'Ветка задачи и коммиты не пострадают; незакоммиченные правки worktree снос остановят."))return;'
-             'var b=event.target;b.textContent="сношу…";b.disabled=true;'
-             'fetch("/api/sandbox/t"+t+"/down",{method:"POST"}).then(function(r){return r.json();})'
-             '.then(function(d){b.textContent=d.ok?"● снос идёт":("ошибка: "+(d.msg||""));'
-             'if(!d.ok)b.disabled=false;setTimeout(poll,5000);})'
-             '.catch(function(){b.textContent="ошибка";b.disabled=false;});}'
-             # Ответ сервера тут ВАЖЕН: при живом демоне запуска не будет (второй процесс),
-             # и рисовать «● запущен» — врать. Показываем, что ответили.
-             'function runTask(t){var b=event.target;b.textContent="запускаю…";b.disabled=true;'
-             'fetch("/api/run/t"+t,{method:"POST"}).then(function(r){return r.json();}).then(function(d){'
-             'if(d.ok){b.textContent="● запущен";setTimeout(poll,3000);}'
-             'else{b.textContent="уже работает";b.title=d.msg||"";setTimeout(poll,1500);}})'
-             '.catch(function(){b.textContent="ошибка";b.disabled=false;});}'
              'setInterval(function(){document.querySelectorAll(".tmr[data-run=\'1\']").forEach(function(el){'
              'var s=parseInt(el.dataset.el)+1;el.dataset.el=s;'
              'var p=[Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(function(x){return String(x).padStart(2,"0")});'
@@ -1978,9 +2010,7 @@ def render_activity(task):
 
 # ---------- Окно этапа (клик по любой фигуре схемы) ----------
 
-# Значения реестра, которые понимает движок (core.sh: run_stage и gate_wait), — они же
-# доступны для ручного перевода. Список намеренно закрытый: произвольная строка для движка
-# означает «этап без статуса», и он гоняет этап заново (по три попытки на круг).
+# Значения исторической UI-проекции, которые read-only viewer переводит человеку.
 STAGE_VALUES = [
     ('pending', 'не начинался'), ('running', 'выполняется'), ('done', 'завершён'),
     ('waiting', 'ждёт человека'), ('approved', 'утверждён (ворота)'),
@@ -1995,279 +2025,8 @@ _STAGE_SUFFIX_RU = {'AT': 'переход в текущий статус', 'VIA'
 _STAGE_PREFIX_RU = {'DUR': 'агент работал, мин', 'FANOUT': 'субагентов запущено',
                     'TOKENS': 'токенов потрачено'}
 
-# Хвост движка: этих этапов нет в PROFILE_ROUTE_STAGES_*, но bin/factory гоняет их сам
-# сразу после конвейера (ship при approved-приёмке → ретро). В маршрут профиля их не кладут
-# намеренно: run_pipeline прогнал бы их второй раз. Без этого списка окно этапа врало
-# «этап вне маршрута движка» на Merge/Ship и Ретро.
-# DEMO здесь нет и быть не должно: демо убрано из цепочки (решение человека 2026-07-27) и
-# снимается отдельно — кнопкой плагина «Демо» в кокпите (`factory <TASK> demo`). Ключ DEMO
-# в реестре остаётся, но этапом конвейера он не является: дашборд его не ведёт и не ждёт.
-ENGINE_TAIL_KEYS = ('SHIP', 'RETRO')
-
-def pipeline_set(task, key, value):
-    """Privileged control-запись через общий writer — lib/pipeline-set.sh.
-
-    Свой upsert в дашборде пришлось бы держать в согласии с правилами движка (метка KEY_AT,
-    счётчик KEY_FAILS, подмена живого реестра архивным у отгруженной задачи) — две копии
-    правил разъезжаются на первой же правке.
-    """
-    script = os.path.join(FACTORY_HOME, 'lib', 'pipeline-set.sh')
-    try:
-        r = subprocess.run(['bash', script, str(task), key, value], capture_output=True,
-                           text=True, timeout=15, env=dict(os.environ, STATE_DIR=STATE_DIR))
-        return r.returncode == 0, (r.stderr or '').strip()
-    except Exception as e:                                   # noqa: BLE001
-        return False, str(e)
-
-
-def factory_resume(task):
-    """Продолжить конвейер задачи — единственная точка запуска движка из дашборда.
-
-    Тот же вызов, что у кнопки «▶ Продолжить» на карточке: движок умеет только
-    start|resume. Держим в одном месте, чтобы кнопки этапов и кнопка карточки не разъехались.
-    """
-    fac = os.path.join(FACTORY_HOME, 'bin', 'factory')
-    return run([fac, str(task), 'resume'], timeout=30)
-
-
-def resume_first_stage(pf, profile, route):
-    """Какой этап РЕАЛЬНО возьмёт `factory <TASK> resume` при текущем реестре.
-
-    Кнопка «начать этап» обязана говорить правду: движок идёт по маршруту и берёт первый
-    незакрытый этап, а не тот, чьё окно открыл человек. Повторяем его порядок: сначала
-    этапы маршрута (run_pipeline), затем хвост bin/factory (ship → ретро).
-    Возврат: (ключ реестра или None, пояснение).
-    """
-    for k in profile_stages(profile).get(route or '', []):
-        v = pf.get(k, '')
-        if v in ('done', 'skipped'):
-            continue
-        if k.startswith('GATE_'):
-            if v == 'approved':
-                continue
-            return k, 'ворота: ждут решения человека'
-        return k, ''
-    if pf.get('GATE_ACCEPT') == 'approved' and pf.get('SHIP') != 'done':
-        return 'SHIP', ''
-    if pf.get('SHIP') == 'done' and pf.get('RETRO') != 'done':
-        return 'RETRO', ''
-    return None, ''
-
-
-def daemon_state(task, pf):
-    """Жив ли демон конвейера этой задачи. Возврат: (pid, жив ли, сколько минут работает).
-
-    Это главный предохранитель от второго запуска: пока демон жив, любой «запусти этап»
-    из дашборда породил бы второго агента на том же этапе — ровно тот инцидент, из-за
-    которого в bin/factory уже стоит двойной гард (один процесс пишет «готово», другой
-    «не начато», и на схеме этап мигает).
-
-    Проверяем не только /proc/<pid>, но и КОМАНДНУЮ строку: PID переиспользуются, и «жив»
-    по одному каталогу — это запрет работы из-за случайного чужого процесса.
-    """
-    pid = (pf.get('ORCH_PID') or '').strip()
-    if not pid.isdigit() or not os.path.isdir(f'/proc/{pid}'):
-        return pid, False, 0
-    try:
-        with open(f'/proc/{pid}/cmdline', 'rb') as f:
-            cmd = f.read().replace(b'\0', b' ').decode('utf-8', 'replace')
-    except OSError:
-        return pid, False, 0
-    if 'bin/factory' not in cmd or str(task) not in cmd.split():
-        return pid, False, 0
-    try:
-        mins = max(0, int((time.time() - os.path.getmtime(f'/proc/{pid}')) / 60))
-    except OSError:
-        mins = 0
-    return pid, True, mins
-
-
-STALE_RUN_SEC = 1800     # столько же, сколько у алерта «демон умер — этап висит»
-
-
-def registry_idle_sec(task):
-    """Сколько секунд в реестре задачи не менялось НИЧЕГО (последняя запись статуса).
-
-    Признак «этап действительно завис»: конвейер иногда ведут руками из чата, там демона
-    нет вовсе, но статусы идут. Живым считаем то, что пишет в реестр, а не то, у чего есть PID.
-    """
-    try:
-        return time.time() - os.path.getmtime(f'{STATE_DIR}/t{task}.pipeline')
-    except OSError:
-        return 0
-
-
-def work_in_progress(task, pf, profile, route):
-    """Идёт ли ПРЯМО СЕЙЧАС работа по задаче. Возврат: (да/нет, чем именно занято).
-
-    Два независимых признака, и оба нужны:
-      - жив демон конвейера (ORCH_PID) — обычный автоматический прогон;
-      - какой-то этап в статусе running при свежем реестре — так выглядит прогон, который
-        ведут РУКАМИ из чата: демона нет вовсе, а статусы идут (см. алерт «демон умер»).
-    Застывший running без демона работой не считаем: это зависший этап, его надо давать
-    перезапускать, иначе человек заперт без единой кнопки.
-    """
-    pid, alive, mins = daemon_state(task, pf)
-    if alive:
-        return True, f'демон конвейера жив (pid {pid}, {mins} мин)'
-    idle = registry_idle_sec(task)
-    if idle < STALE_RUN_SEC:
-        running = next((k for k in engine_order(profile, route) if pf.get(k) == 'running'), None)
-        if running:
-            return True, (f'этап {running} выполняется, последняя запись в реестре '
-                          f'{int(idle / 60)} мин назад (конвейер ведут вручную, без демона)')
-    return False, ''
-
-
-def engine_order(profile, route):
-    """Порядок этапов глазами движка: маршрут профиля + хвост bin/factory."""
-    route_keys = list(profile_stages(profile).get(route or '', []))
-    return route_keys + [k for k in ENGINE_TAIL_KEYS if k not in route_keys]
-
-
-def engine_stage_key(nid, key, profile, route):
-    """Каким ключом ЭТОТ узел зовётся у движка (а не на схеме).
-
-    Схема и движок иногда зовут этап по-разному: узел «План» показывает PLANS (его пишет
-    агент по ходу планирования), а run_pipeline гоняет этап PLAN. Кнопка «начать этап»
-    обязана писать тот ключ, который движок реально читает, иначе она нажимается вхолостую.
-    """
-    order = engine_order(profile, route)
-    if key in order:
-        return key
-    return nid.upper() if nid.upper() in order else key
-
-
-def stage_action(task, nid, action):
-    """Кнопка-действие из окна этапа: перевести этап в pending и запустить движок.
-
-    Смысл: человеку показывают язык задачи («начать этап»), а не внутреннюю механику
-    реестра. Но врать нельзя — движок берёт ПЕРВЫЙ незакрытый этап маршрута. Поэтому
-    перед записью пересчитываем, что реально пойдёт первым, и resume дёргаем ТОЛЬКО
-    если это ровно то, что обещала кнопка. Иначе честно объясняем, где конвейер сейчас.
-
-    Возврат: (ok, сообщение человеку, запущен ли движок).
-    """
-    pf_path = f'{STATE_DIR}/t{task}.pipeline'
-    if not os.path.exists(pf_path):
-        # Без этой проверки pipeline-set.sh СОЗДАСТ реестр-призрак и дашборд «воскресит» задачу
-        return False, 'реестра задачи нет — действовать не над чем', False
-    pf = parse_env_file(pf_path)
-    profile, route = pf.get('PROFILE', ''), pf.get('ROUTE', '')
-    meta = profile_graph_meta(profile, route)
-    key = engine_stage_key(nid, meta['keys'].get(nid, nid.upper()), profile, route)
-
-    if action != 'run':
-        return False, f'неизвестное действие: {action}', False
-    if key not in engine_order(profile, route):
-        return False, f'этап {key} не входит в маршрут {route or "—"} — движок его не запустит', False
-
-    # ── ПРЕДОХРАНИТЕЛИ. Все — ДО любой записи в реестр и до запуска движка.
-    # Сервер обязан отказывать сам: кнопку можно нажать дважды, страницу — открыть в двух
-    # вкладках, ссылку — дёрнуть curl'ом. Полагаться на то, что UI спрятал кнопку, нельзя.
-    pid, alive, mins = daemon_state(task, pf)
-    idle = registry_idle_sec(task)
-    busy, why_busy = work_in_progress(task, pf, profile, route)
-    if pf.get(key) == 'running' and busy:
-        # Второй агент на том же этапе = два процесса пишут статусы наперегонки.
-        # Отказ снимается сам собой, когда этап явно завис (ниже) — или вручную,
-        # кнопкой в блоке «Реестр вручную»: она ничего не запускает и остаётся открытой.
-        return False, (f'этап {key} уже выполняется — второй раз запускать нельзя '
-                       f'({why_busy}). Если он всё-таки завис, сними статус в блоке '
-                       '«Реестр вручную» и запусти снова'), False
-    if busy:
-        return False, (f'по этой задаче уже идёт работа ({why_busy}). Второй запуск породил бы '
-                       'второго агента: два процесса пишут статусы наперегонки. Дождись '
-                       'окончания (или останови демон), потом запускай'), False
-    if alive:
-        return False, (f'конвейер этой задачи уже работает: демон жив (pid {pid}, {mins} мин). '
-                       'Второй запуск породил бы второго агента — дождись окончания или '
-                       'останови демон, потом запускай'), False
-
-    # Сначала СИМУЛИРУЕМ запись и смотрим, что взял бы движок. Реально писать «этап в pending»
-    # ради отказа нельзя: сброс готового этапа без запуска — это порча реестра за спиной человека.
-    first, why = resume_first_stage(dict(pf, **{key: 'pending'}), profile, route)
-    if first != key:
-        if first is None:
-            return False, 'запускать нечего: конвейер уже прошёл маршрут до конца', False
-        return False, (f'движок возьмёт не этот этап, а {first}'
-                       + (f' ({why})' if why else '')
-                       + ' — он идёт раньше по маршруту. Реестр не тронут: сначала закрой '
-                         'тот этап (или переведи его в skipped), потом запускай этот'), False
-
-    ok, msg = pipeline_set(task, key, 'pending')
-    if not ok:
-        return False, f'не записалось ({key}=pending): {msg}', False
-    factory_resume(task)
-    stale = (' Этап числился выполняющимся, но движения не было '
-             f'{int(idle / 60)} мин и демона нет — перезапускаю как зависший.'
-             if pf.get(key) == 'running' else '')
-    return True, 'запускаю этап — движок запущен, статус обновится через несколько секунд.' + stale, True
-
-
-def sandbox_down(task):
-    """Снос песочницы задачи — ТЕМ ЖЕ путём, что у движка: profile_sandbox_down профиля.
-
-    Движок больше не сносит стенд сам (ретро его не трогает): песочница — ресурс человека,
-    после отгрузки её открывают посмотреть результат и переснять демо. Решение «снести» —
-    только руками, отсюда.
-
-    Процесс запускаем отдельно и НЕ ждём: снос идёт минутами (docker rm, DROP схем, удаление
-    worktree), а ответ кнопке нужен сразу — иначе она «висит», человек жмёт второй раз и
-    получает два сноса. Ход виден в журнале задачи, итог — по индикатору стенда: контейнеров
-    не стало, точка гаснет сама на ближайшем обновлении страницы.
-    """
-    pf = parse_env_file(f'{STATE_DIR}/t{task}.pipeline')
-    profile = pf.get('PROFILE', '')
-    path = os.path.join(PROFILES_DIR, profile, 'profile.sh')
-    if not profile or not os.path.exists(path):
-        return False, f'профиль задачи неизвестен ({profile or "—"}) — сносить нечем'
-    core = os.path.join(FACTORY_HOME, 'lib', 'core.sh')
-    script = (f'source "{core}"; source "{path}"; '
-              'declare -F profile_sandbox_down >/dev/null || exit 3; '
-              f'profile_sandbox_down {int(task)}')
-    try:
-        subprocess.Popen(
-            ['bash', '-c', script],
-            env=dict(os.environ, STATE_DIR=STATE_DIR, FACTORY_PROFILES_DIR=PROFILES_DIR),
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
-        return True, 'снос запущен'
-    except Exception as e:                                   # noqa: BLE001
-        return False, str(e)
-
-
-def stage_launch(task, nid, key, route, profile):
-    """(команда, честное пояснение) для ручного запуска этапа.
-
-    Движок (bin/factory) знает только start|resume — он проходит ВЕСЬ маршрут, пропуская
-    done/skipped. Команды «выполни вот этот один этап» у него нет, и выдумывать её здесь
-    нельзя: кнопка, дёргающая несуществующий API, врёт человеку. Поэтому — готовая команда
-    в буфер и прямой текст о том, что именно она сделает.
-    """
-    stages = profile_stages(profile).get(route or '', [])
-    fac = os.path.join(FACTORY_HOME, 'bin', 'factory')
-    if key in stages or key in ENGINE_TAIL_KEYS:
-        cmd = f'{fac} {task} resume'
-        note = ('Движок умеет запускать только конвейер целиком (<code>start</code>/'
-                '<code>resume</code>) — отдельного «выполни этот этап» у него нет. '
-                '<code>resume</code> идёт по маршруту и берёт первый этап, который не '
-                '<i>done</i> и не <i>skipped</i>. Чтобы переиграли ИМЕННО этот этап — сначала '
-                'переведи его кнопкой выше в <b>pending</b> (и всё, что после него, тоже), '
-                'потом запускай. Та же кнопка «▶ Продолжить» есть на карточке задачи.')
-        return cmd, note
-    note = (f'Этап не входит в маршрут <b>{html.escape(route or "—")}</b> — движок его не '
-            'запустит ни при каком resume. Либо смени маршрут задачи, либо выставь статус вручную.')
-    return '', note
-
-
 def render_stage(task, nid):
-    """Окно этапа: что это, в каком состоянии, когда перешло, документ, журнал, ручной перевод.
-
-    До этого окна по схеме можно было только «провалиться» в чужой документ: клик вешался
-    выборочно, и любая фигура открывала приёмку. Теперь у каждой фигуры своё окно, а действия
-    над этапом (в т.ч. ручной перевод статуса) живут в нём.
-    """
+    """Read-only окно этапа: состояние проекции, история, документ и журнал."""
     pf = parse_env_file(f'{STATE_DIR}/t{task}.pipeline')
     profile, route = pf.get('PROFILE', ''), pf.get('ROUTE', '')
     kind, label, sub = node_def(nid, profile)
@@ -2292,20 +2051,8 @@ def render_stage(task, nid):
                 f'{html.escape(NODE_STATE_HINT.get(node_st, node_st))}</span></div>')
     body.append(f'<div class="srow"><span class="sk">Ключ реестра</span>'
                 f'<span class="sv mono">{html.escape(key)}={html.escape(raw or "—")}</span></div>')
-    # Схема и движок иногда зовут этап по-разному (узел «План» → PLANS, этап движка → PLAN).
-    # Показываем оба, иначе человек видит пустой ключ у явно пройденного этапа.
-    run_key = engine_stage_key(nid, key, profile, route)
-    if run_key != key:
-        body.append(f'<div class="srow"><span class="sk">Ключ движка</span>'
-                    f'<span class="sv mono">{html.escape(run_key)}='
-                    f'{html.escape(pf.get(run_key, "") or "—")}'
-                    ' <span class="dim">· этим ключом этап гоняет конвейер</span></span></div>')
-    # «Вне маршрута» считаем по ключу ДВИЖКА: у «Плана» схема зовёт этап PLANS, а движок — PLAN,
-    # и прямое сравнение с маршрутом объявляло пройденный этап чужим.
     body.append(f'<div class="srow"><span class="sk">Маршрут</span>'
-                f'<span class="sv">{route_badge(route) or "—"}'
-                + ('' if run_key in engine_order(profile, route)
-                   else ' <span class="warn">· этап вне маршрута движка</span>') + '</span></div>')
+                f'<span class="sv">{route_badge(route) or "—"}</span></div>')
 
     # ── История: метки времени и телеметрия этого этапа (KEY_AT, KEY_VIA, DUR_KEY, ...)
     hist = []
@@ -2359,197 +2106,31 @@ def render_stage(task, nid):
         body.append(f'<a class="sbtn doc" href="{doc_url}">&#128203; Открыть документ: {doc_what}</a>')
     body.append('</div>')
 
-    # ── ДЕЙСТВИЕ: то, ради чего окно открывают. Языком задачи, а не реестра, и одной кнопкой:
-    # человеку не должно приходиться угадывать, что «переиграть этап» — это выставить ключ
-    # в pending, а потом отдельно нажать «Продолжить» на карточке (замечание владельца).
-    body.append('<h3 class="sh">&#9654; Действие</h3>')
-    first_key, first_why = resume_first_stage(pf, profile, route)
-    key2nid = {v: k for k, v in meta['keys'].items()}
-    # Предохранители видны и здесь: кнопку прячем ровно там, где сервер откажет (см. stage_action).
-    pid, dmn_alive, dmn_mins = daemon_state(task, pf)
-    idle_min = int(registry_idle_sec(task) / 60)
-    # Признак работы — тот же, что у сервера (work_in_progress): кнопку прячем ровно там,
-    # где stage_action откажет. Иначе UI обещает то, что сервер не сделает.
-    busy, why_busy = work_in_progress(task, pf, profile, route)
-    stage_running = pf.get(run_key, raw) == 'running' and busy
-    stage_stale = pf.get(run_key, raw) == 'running' and not busy
-    busy_note = (f'{html.escape(why_busy)}. '
-                 f'<a href="/activity/t{task}">Смотреть журнал агентов</a>.')
-
-    def _stage_ref(k):
-        """Ссылка на окно этапа по ключу реестра — чтобы «иди закрой вон тот» был кликабельным."""
-        n = key2nid.get(k, k.lower())
-        return f'<a href="/stage/t{task}/{n}">{html.escape(node_def(n, profile)[1])}</a>'
-
-    if kind == 'human':
-        # Прочие ворота: решение принимается на странице документа, где человек видит,
-        # ЧТО он утверждает. Дублировать «принять/отклонить» здесь — плодить вторую правду.
-        doc_url, doc_what = stage_doc_url(nid, task)
-        if doc_url:
-            body.append(f'<div class="sub">Это ворота: решение принимается там, где виден его '
-                        f'предмет — на странице «{html.escape(doc_what)}». Кнопки «принять» и '
-                        f'«отклонить» живут там.</div>'
-                        f'<div class="sbtns"><a class="sbtn doc go" href="{doc_url}">'
-                        f'&#128203; Открыть {html.escape(doc_what)} и решить</a></div>')
-        else:
-            body.append('<div class="sub">Это ворота — здесь ждут решения человека. '
-                        'Отдельной страницы решения у них нет: ответ ставится вручную ниже.</div>')
-    else:
-        # Этапы агента и кода: «Начать этап». Движок умеет только resume, а resume берёт ПЕРВЫЙ
-        # незакрытый этап маршрута — поэтому кнопка активна лишь тогда, когда это и есть наш этап.
-        order = engine_order(profile, route)
-        in_route = run_key in order
-        # Наш этап пойдёт первым, если он не позже того, что движок возьмёт сейчас: сброс
-        # в pending делает первым именно его. Позже — соврать нельзя, кнопку не даём.
-        if not in_route or first_key is None:
-            will_run = in_route
-        elif first_key in order:
-            will_run = order.index(run_key) <= order.index(first_key)
-        else:
-            will_run = False
-        if not in_route:
-            body.append(f'<div class="sub warn">Этап не входит в маршрут '
-                        f'<b>{html.escape(route or "—")}</b> — движок не запустит его ни при каком '
-                        'resume. Либо смени маршрут задачи, либо выставь статус вручную ниже.</div>')
-        elif stage_running:
-            # Кнопки нет вовсе: второй агент на том же этапе — это два процесса, пишущих
-            # статусы наперегонки (из-за этого в bin/factory уже стоит гард на двойной демон).
-            body.append('<div class="sub warn">&#9210; Этап выполняется прямо сейчас — запускать '
-                        'второй раз нечего и опасно: получится два агента на одном этапе. '
-                        + busy_note + ('' if dmn_alive else
-                           ' Если движение прекратилось, сними статус в блоке «Реестр вручную» '
-                           'ниже — тогда появится кнопка запуска.') + '</div>')
-        elif busy:
-            body.append('<div class="sub warn">&#9210; Запускать нельзя: ' + busy_note
-                        + ' Второй запуск породил бы второго агента. Дождись, пока движок дойдёт '
-                          'до этого этапа сам.</div>')
-        elif will_run:
-            # «Переиграть» или «начать» — по значению ключа ДВИЖКА: у «Плана» ключ схемы пуст,
-            # и кнопка звала «начать» уже пройденный этап.
-            again = pf.get(run_key, raw) in ('done', 'skipped', 'failed')
-            if stage_stale:
-                body.append(f'<div class="sub warn">&#9888; Этап числится выполняющимся, но демона '
-                            f'нет и реестр не менялся {idle_min} мин — похоже, он завис (агент убит '
-                            'или демон умер). Кнопка ниже перезапустит его с начала.</div>')
-            body.append('<div class="sub">Кнопка переведёт этап в <i>pending</i> и продолжит '
-                        'конвейер — движок возьмёт именно его' + (', переиграв прошлый результат.'
-                                                                  if again else '.') + '</div>')
-            body.append('<div class="sbtns">'
-                        f'<button class="sbtn go" onclick="act(\'run\',\'{"Переиграть" if again else "Начать"} '
-                        f'этап {html.escape(label)}? Запустится агент движка.\')">&#9654; '
-                        + ('Переиграть этап' if again else 'Начать этап') + '</button></div>')
-        else:
-            body.append('<div class="sub warn">Запустить именно этот этап сейчас нельзя: '
-                        'движок идёт по маршруту и возьмёт первый незакрытый этап — сейчас это '
-                        + _stage_ref(first_key) + (f' ({html.escape(first_why)})' if first_why else '')
-                        + '. Закрой его (или переведи в <i>skipped</i>), тогда очередь дойдёт '
-                          'и сюда. Реестр кнопкой не портим.</div>')
-    body.append('<div class="sub actmsg" id="actmsg"></div>')
-
-    # ── Ручной перевод статуса
-    body.append('<h3 class="sh">Реестр вручную (нештатный случай)</h3>')
-    body.append('<div class="sub">Это «сырой» доступ к реестру задачи, а не основной способ '
-                'работы: кнопки просто пишут значение ключа <code>' + html.escape(key) + '</code> '
-                'через <code>pipeline-set.sh</code>, ничего не запуская. Нужны, когда штатное '
-                'действие выше не подходит: снять зависший <i>running</i>, пропустить этап, '
-                'починить реестр после сбоя. Движок увидит новое значение на следующем круге.'
-                '</div>')
-    if busy:      # застывший running сюда не попадает: там работы нет, реестр править безопасно
-        # Частое заблуждение: «переведу в done — этап остановится». Не остановится: агент живёт
-        # своей жизнью, допишет свой статус позже и перетрёт ручной. Пишем это прямо здесь.
-        body.append('<div class="sub warn">&#9888; Сейчас идёт работа: '
-                    + html.escape(why_busy)
-                    + '. Перевод в <i>done</i> или <i>skipped</i> НЕ останавливает агента: он '
-                      'доработает и запишет свой статус поверх твоего, а этап на схеме прыгнет '
-                      'обратно. Чтобы действительно прервать — останови демон конвейера '
-                      f'(<code>kill {html.escape(pid) if dmn_alive else "&lt;pid&gt;"}</code>), '
-                      'и только потом правь реестр.</div>')
-    body.append('<div class="sbtns">')
-    for val, ru in STAGE_VALUES:
-        cur = ' cur' if val == raw else ''
-        body.append(f'<button class="sbtn{cur}" onclick="setStage(\'{val}\')" '
-                    f'title="{key}={val}">{html.escape(ru)}<span class="vraw">{val}</span></button>')
-    body.append('</div>')
-
-    # ── Запуск этапа: у всего, что выполняет агент. Ромбы (линт, php-чек) — тоже этапы
-    # маршрута и гоняются тем же run_stage через claude, поэтому раздел им положен так же,
-    # как прямоугольникам; у ворот (human) запускать нечего — там решение человека.
-    if kind in ('agent', 'code'):
-        cmd, note = stage_launch(task, nid, key, route, profile)
-        body.append('<h3 class="sh">Та же команда в терминале (запасной путь)</h3>')
-        body.append(f'<div class="sub">Нужна, когда дашборд недоступен или хочется видеть вывод '
-                    f'движка своими глазами. Обычный путь — кнопка «Действие» выше. {note}</div>')
-        if cmd:
-            body.append(f'<pre class="cmd" id="cmd">{html.escape(cmd)}</pre>'
-                        '<div class="sbtns"><button class="sbtn" id="cpb" onclick="copyCmd()">'
-                        '&#10697; Скопировать команду</button></div>')
-    css = (
+    # Исполняемая control plane после cutover живёт только в Cockpit. Старый Python
+    # dashboard намеренно заканчивает страницу здесь: он показывает проекцию и журнал,
+    # но не рисует кнопок, способных обещать запись в trusted route ledger.
+    body.append('<h3 class="sh">Только чтение</h3><div class="sub">Запуск, resume, gate, '
+                'goto и lifecycle доступны только в Cockpit для exact route-attempt.</div>')
+    readonly_css = (
         '.shead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
-        '.slabel{font-size:19px}'
-        '.skind{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink2);'
-        'border:1px solid var(--cardline);border-radius:var(--r-pill);padding:2px 10px}'
-        '.ssub{font-size:12px;color:var(--ink2)}'
-        '.srow{display:flex;gap:14px;padding:6px 0;border-top:1px solid var(--cardline);font-size:13px}'
-        '.sk{flex:0 0 190px;color:var(--ink2)}.sv{color:var(--ink)}'
-        '.sv.ns-run b,.sv.ns-wait b{color:var(--serious)}.sv.ns-done b{color:var(--good)}'
-        '.sv.ns-stall b,.sv.ns-skipbad b,.sv.ns-premature b{color:var(--critical)}'
-        '.dim{color:var(--ink2)}.warn{color:var(--serious)}'
-        '.mono{font:12px ui-monospace,monospace}'
-        '.sh{font-size:13px;margin:22px 0 8px;color:var(--good);text-transform:uppercase;'
-        'letter-spacing:.08em}'
-        '.sbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}'
-        '.sbtn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--cardline);'
-        'border-radius:var(--r-md);background:none;color:var(--ink);cursor:pointer;'
-        'padding:6px 14px;font:13px ui-monospace,monospace;text-decoration:none}'
-        '.sbtn:hover{border-color:var(--good);color:var(--good)}'
-        '.sbtn.cur{border-color:var(--good);color:var(--good);background:#39d3531a}'
-        '.sbtn.doc{border-color:var(--serious);color:var(--serious)}'
-        # Главное действие окна видно сразу: остальные кнопки здесь — служебные
-        '.sbtn.go{border-color:var(--good);color:var(--good);background:#39d3531a;font-size:14px;'
-        'padding:8px 18px}'
-        '.sbtn.go:hover{box-shadow:0 0 11px #39d35344}'
-        '.sbtn:disabled{opacity:.5;cursor:default;border-color:var(--cardline);color:var(--ink2)}'
-        '.actmsg:empty{display:none}'
-        '.actmsg{margin-top:10px;padding:9px 12px;border:1px solid var(--cardline);'
-        'border-radius:var(--r-md);background:var(--card2)}'
-        '.vraw{font-size:11px;color:var(--ink2)}'
+        '.slabel{font-size:19px}.skind{font-size:11px;text-transform:uppercase;letter-spacing:.08em;'
+        'color:var(--ink2);border:1px solid var(--cardline);border-radius:var(--r-pill);padding:2px 10px}'
+        '.ssub{font-size:12px;color:var(--ink2)}.srow{display:flex;gap:14px;padding:6px 0;'
+        'border-top:1px solid var(--cardline);font-size:13px}.sk{flex:0 0 190px;color:var(--ink2)}'
+        '.sv{color:var(--ink)}.mono{font:12px ui-monospace,monospace}.dim{color:var(--ink2)}'
+        '.sh{font-size:13px;margin:22px 0 8px;color:var(--good);text-transform:uppercase;letter-spacing:.08em}'
+        '.sbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.sbtn{display:inline-flex;'
+        'align-items:center;gap:7px;border:1px solid var(--cardline);border-radius:var(--r-md);'
+        'color:var(--ink);padding:6px 14px;font:13px ui-monospace,monospace;text-decoration:none}'
         '.slog{display:flex;flex-direction:column;gap:4px;margin-top:6px}'
-        '.cmd{margin:10px 0 0;padding:12px 14px;border:1px solid var(--cardline);'
-        'border-radius:var(--r-md);background:var(--card2);font:12px ui-monospace,monospace;'
-        'color:var(--ink);white-space:pre-wrap;word-break:break-all}'
     )
-    js = ('<script>'
-          f'var T="{task}",N="{nid}";'
-          'function setStage(v){if(!confirm("Перевести этап в «"+v+"»? Меняется реестр задачи."))return;'
-          'fetch("/api/stage/"+T+"/"+N+"/"+v,{method:"POST"}).then(function(r){return r.json();})'
-          '.then(function(d){if(d.ok)location.reload();else alert("Не записалось: "+(d.msg||""));})'
-          '.catch(function(e){alert("Не записалось: "+e);});}'
-          # Действие = решение + запуск одним кликом. Движок стартует не мгновенно (демон,
-          # флок, чтение профиля), поэтому сначала честное «запускаю…», потом перезагрузка окна.
-          'function act(a,q){if(q&&!confirm(q))return;var b=event.target,old=b.textContent;'
-          'b.disabled=true;b.textContent="\\u2026 запускаю";'
-          'fetch("/api/act/"+T+"/"+N+"/"+a,{method:"POST"}).then(function(r){return r.json();})'
-          '.then(function(d){var m=document.getElementById("actmsg");if(m)m.textContent=d.msg||"";'
-          'b.textContent=d.started?"\\u25cf запущено":(d.ok?"\\u2713 записано":old);'
-          'if(!d.ok)b.disabled=false;'
-          'setTimeout(function(){location.reload();},d.started?4000:2500);})'
-          '.catch(function(e){b.textContent=old;b.disabled=false;alert("Не получилось: "+e);});}'
-          'function copyCmd(){var el=document.getElementById("cmd"),b=document.getElementById("cpb");'
-          'function ok(){b.textContent="\\u2713 скопировано";setTimeout(function(){'
-          'b.textContent="\\u29c9 Скопировать команду";},2000);}'
-          'if(navigator.clipboard)navigator.clipboard.writeText(el.textContent).then(ok,sel);else sel();'
-          'function sel(){var r=document.createRange();r.selectNode(el);'
-          'getSelection().removeAllRanges();getSelection().addRange(r);'
-          'b.textContent="выдели и скопируй вручную";}}'
-          'if (window.self !== window.top) document.documentElement.classList.add("in-frame");'
-          '</script>')
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8">'
             f'<title>Этап {html.escape(label)} · t{task}</title>'
-            f'<style>{CSS}{DOC_CSS}{css}</style>{js}</head>'
-            f'<body><div id="app"><div class="top"><h1>&#9881; Этап задачи #{html.escape(task)}</h1>'
+            f'<style>{CSS}{DOC_CSS}{readonly_css}</style>'
+            '<script>if(window.self!==window.top)document.documentElement.classList.add("in-frame");</script>'
+            f'</head><body><div id="app"><div class="top"><h1>&#9881; Этап задачи #{html.escape(task)}</h1>'
             f'<a class="back" href="/" target="_top" style="margin-left:auto">&larr; на дашборд</a></div>'
             f'<div class="card wide" style="margin-top:12px">{"".join(body)}</div></div></body></html>')
-
 
 def desc_to_html(text):
     """Описание задачи B24 -> безопасный HTML. Портал отдаёт вперемешку:
@@ -2727,12 +2308,15 @@ def render_tasks():
         if not cur:
             cur = 'готово' if pf.get('RETRO') == 'done' else '—'
         pe = prof_env(pf.get('PROFILE', ''))   # у каждого проекта свои корни репозиториев
-        be_wt = pf.get('BE_WT') or (
-            os.path.join(pe['BE'], f'worktree-t{task}') if pe['BE'] else ''
-        )
-        fe_wt = os.path.join(pe['FE'], f'worktree-t{task}') if pe['FE'] else ''
+        sandbox_state = parse_env_file(f'{STATE_DIR}/t{task}.env')
+        sandbox_repos = parse_sandbox_repositories(sandbox_state)
+        worktrees = [(repo['name'].upper(), repo['path']) for repo in sandbox_repos['repos']]
+        if not worktrees and sandbox_repos['kind'] != 'invalid':
+            be_wt = os.path.join(pe['BE'], f'worktree-t{task}') if pe['BE'] else ''
+            fe_wt = os.path.join(pe['FE'], f'worktree-t{task}') if pe['FE'] else ''
+            worktrees = [('BE', be_wt), ('FE', fe_wt)]
         diffs = []
-        for lbl, wt in (('BE', be_wt), ('FE', fe_wt)):
+        for lbl, wt in worktrees:
             if os.path.isdir(wt):
                 stat = run(['git', '-C', wt, 'diff', '--stat', 'HEAD'], timeout=6).splitlines()
                 summ = stat[-1].strip() if stat else 'нет изменений'
@@ -2753,7 +2337,7 @@ def render_tasks():
             warn = '<span class="badge st-critical">⚠ застряла</span>'
         elif any(st.get(n) == 'wait' for n in st):
             warn = '<span class="badge st-serious">⏳ ждёт тебя</span>'
-        fe_port = pf.get('FE_PORT', '')
+        fe_port = sandbox_state.get('FE_PORT') or pf.get('FE_PORT', '')
         links = []
         if os.path.exists(f'{STATE_DIR}/t{task}.plan.md'):
             links.append(f'<a href="/plan/t{task}" target="_blank">план</a>')
@@ -2914,24 +2498,13 @@ def render_plan(task, doc='plan'):
     gkey = {'plan': 'GATE_PLAN', 'diag': 'GATE_CAUSE'}.get(doc, 'GATE_ACCEPT')
     what = {'plan': 'план', 'diag': 'причина и план фикса'}.get(doc, 'результат')
     gate = pf.get(gkey, 'pending')
-    if gate == 'waiting':
-        ok_lbl = {'plan': 'Утвердить', 'diag': 'Причина верна — чиним'}.get(doc, 'Принять')
-        buttons = (f'<div class="gatebar"><b>Ворота: {what} ждёт твоего решения</b>'
-                   f'<button class="gbtn ok" onclick="gate(\'{task}\',\'approve\')">&#10003; {ok_lbl}</button>'
-                   f'<button class="gbtn no" onclick="gate(\'{task}\',\'reject\')">&#10007; Отклонить</button></div>')
-    else:
-        label = {'approved': '&#10003; принят', 'rejected': '&#10007; отклонён'}.get(gate, gate)
-        cls = {'approved': 'done', 'rejected': 'rej'}.get(gate, '')
-        via = ' (из браузера)' if pf.get(gkey + '_VIA') == 'browser' else ''
-        buttons = f'<div class="gatebar sub gate-{cls}">Статус: {label}{via}</div>'
-    gate_js = ('<script>function gate(t,d){var c="";'
-               # Отклонение без замечаний бесполезно: конвейер вернёт работу в сборку, а агент
-               # не узнает, что чинить, и переделает то же самое.
-               'if(d==="reject"){c=prompt("Что не так? Агент переделает по этим замечаниям:");'
-               'if(c===null)return;c=c.trim();'
-               'if(c.length<5){alert("Без замечаний отклонять нельзя: агент не поймёт, что исправлять.");return;}}'
-               f'fetch("/api/gate/t"+t+"/{gname}/"+d,{{method:"POST",body:c}}).then(function(){{return fetch("/api/run/t"+t,{{method:"POST"}});}}).then(function(){{location.reload();}});}}'
-               '</script>')
+    label = {'approved': '&#10003; принят', 'rejected': '&#10007; отклонён',
+             'waiting': 'ждёт решения'}.get(gate, gate)
+    cls = {'approved': 'done', 'rejected': 'rej'}.get(gate, '')
+    buttons = (f'<div class="gatebar sub gate-{cls}">Статус: {label}. '
+               'Этот dashboard работает только на чтение; решение принимается в Cockpit '
+               'через exact route-attempt.</div>')
+    gate_js = ''
     title = {'plan': 'План задачи', 'diag': 'Диагностика'}.get(doc, 'Приёмка задачи')
     return (f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>{title} t{task}</title>'
             f'<style>{CSS}{DOC_CSS}'
@@ -2991,90 +2564,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass          # штатные строки доступа journald только засоряют
 
     def do_POST(self):
-        g = re.match(r'^/api/gate/t(\d+)/(plan|accept|cause)/(approve|reject)$', self.path)
-        if g:
-            task, gate, decision = g.group(1), g.group(2), g.group(3)
-            pf_path = f'{STATE_DIR}/t{task}.pipeline'
-            key = {'plan': 'GATE_PLAN', 'accept': 'GATE_ACCEPT', 'cause': 'GATE_CAUSE'}[gate]
-            if os.path.exists(pf_path):
-                with open(pf_path, encoding='utf-8') as f:
-                    lines = [l for l in f.read().splitlines()
-                             if not l.startswith((key + '=', key + '_VIA=', key + '_AT='))]
-                val = 'approved' if decision == 'approve' else 'rejected'
-                lines.append(f'{key}={val}')
-                lines.append(f'{key}_VIA=browser')
-                lines.append(f'{key}_AT={time.strftime("%Y-%m-%d %H:%M:%S")}')
-                ln = int(self.headers.get('Content-Length') or 0)
-                comment = self.rfile.read(ln).decode('utf-8', 'replace').strip() if ln else ''
-                if comment:
-                    lines.append(f'{key}_COMMENT={comment[:500]}')
-                with open(pf_path, 'w', encoding='utf-8') as f:
-                    f.write('\n'.join(lines) + '\n')
-                body = b'{"ok": true}'
-            else:
-                body = b'{"ok": false}'
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        # Ручной перевод статуса этапа из окна этапа. Значение проверяем по закрытому списку:
-        # неизвестная строка в реестре для движка = «этап без статуса», и он погонит его заново.
-        s = re.match(r'^/api/stage/(\d+)/([a-z0-9_]+)/([a-z]+)$', self.path)
-        if s:
-            task, nid, val = s.group(1), s.group(2), s.group(3)
-            pf = parse_env_file(f'{STATE_DIR}/t{task}.pipeline')
-            meta = profile_graph_meta(pf.get('PROFILE', ''), pf.get('ROUTE', ''))
-            key = meta['keys'].get(nid, nid.upper())
-            if val not in dict(STAGE_VALUES):
-                ok, msg = False, f'недопустимое значение: {val}'
-            else:
-                ok, msg = pipeline_set(task, key, val)
-            body = json.dumps({'ok': ok, 'key': key, 'value': val, 'msg': msg},
-                              ensure_ascii=False).encode('utf-8')
-            self.send_response(200 if ok else 400)
+        # После atomic cutover Python dashboard — только исторический viewer. Ни gate,
+        # ни status writer, ни lifecycle, ни resume здесь не имеют доверенной identity
+        # попытки; все factory mutation endpoints поэтому fail-closed одним ответом.
+        if re.match(r'^/api/(?:gate|stage|act|sandbox|run)/', self.path):
+            body = json.dumps({
+                'ok': False,
+                'msg': 'read-only: действие доступно только через Cockpit с exact route-attempt',
+            }, ensure_ascii=False).encode('utf-8')
+            self.send_response(409)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', str(len(body))); self.end_headers()
-            self.wfile.write(body); return
-        ac = re.match(r'^/api/act/(\d+)/([a-z0-9_]+)/([a-z_]+)$', self.path)
-        if ac:
-            # Кнопка-действие из окна этапа: «снять демо», «пропустить демо», «начать этап».
-            # Вся честность (что реально запустится) — в stage_action, здесь только транспорт.
-            ok, msg, started = stage_action(ac.group(1), ac.group(2), ac.group(3))
-            body = json.dumps({'ok': ok, 'msg': msg, 'started': started},
-                              ensure_ascii=False).encode('utf-8')
-            self.send_response(200 if ok else 400)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', str(len(body))); self.end_headers()
-            self.wfile.write(body); return
-        sd = re.match(r'^/api/sandbox/t(\d+)/down$', self.path)
-        if sd:
-            # Снос песочницы по кнопке человека. Ответ отдаём сразу: процесс сноса живёт
-            # своей жизнью (см. sandbox_down), UI на нём не висит.
-            ok, msg = sandbox_down(sd.group(1))
-            body = json.dumps({'ok': ok, 'msg': msg}, ensure_ascii=False).encode('utf-8')
-            self.send_response(200 if ok else 400)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', str(len(body))); self.end_headers()
-            self.wfile.write(body); return
-        rn = re.match(r'^/api/run/t(\d+)$', self.path)
-        if rn:
-            # Ручной запуск/продолжение конвейера (по решению пользователя — не авто).
-            # Требует открытого окружения (VS Code/терминал) — тут просто дёргаем скрипт.
-            # Тот же предохранитель, что у кнопок этапа: пока демон жив, «Продолжить» —
-            # это заявка на второй процесс. Сам bin/factory её отобьёт, но человеку в ответ
-            # прилетало бодрое «● запущен», и он считал, что что-то произошло.
-            _t = rn.group(1)
-            _pid, _alive, _mins = daemon_state(_t, parse_env_file(f'{STATE_DIR}/t{_t}.pipeline'))
-            if _alive:
-                body = json.dumps({'ok': False, 'msg': f'конвейер уже работает: демон жив '
-                                                       f'(pid {_pid}, {_mins} мин)'},
-                                  ensure_ascii=False).encode('utf-8')
-            else:
-                body = json.dumps({'ok': True, 'msg': factory_resume(_t)},
-                                  ensure_ascii=False).encode('utf-8')
-            self.send_response(200); self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body); return
         m = re.match(r'^/api/timer/t(\d+)/(start|pause)$', self.path)
         if not m:
@@ -3090,21 +2589,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        demo = re.match(r'^/demo/(t\d+)/([\w.-]+\.(?:mp4|webm))$', self.path)
-        if demo:
-            fp = os.path.join(STATE_DIR, 'demo', demo.group(1), demo.group(2))
-            if os.path.isfile(fp):
-                with open(fp, 'rb') as fh:
-                    data = fh.read()
-                self.send_response(200)
-                self.send_header('Content-Type', 'video/mp4' if fp.endswith('.mp4') else 'video/webm')
-                self.send_header('Content-Length', str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-            else:
-                self.send_response(404)
-                self.end_headers()
-            return
         shot = re.match(r'^/shots/(t\d+)/([\w.-]+\.png)$', self.path)
         if shot:
             fp = os.path.join(STATE_DIR, 'shots', shot.group(1), shot.group(2))

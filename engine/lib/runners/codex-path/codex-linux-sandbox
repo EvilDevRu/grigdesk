@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Stable argv[0] adapter for the native Codex Linux sandbox helper. The npm
+# wrapper normally creates this alias below ~/.codex, which is intentionally
+# unreadable in the shared-stand permission profile.
+set -euo pipefail
+
+native=${CODEX_NATIVE_BIN:-}
+[[ "$native" == /* && -f "$native" && ! -L "$native" && -x "$native" &&
+   "$(realpath -e -- "$native" 2>/dev/null)" == "$native" ]] || exit 78
+exec -a codex-linux-sandbox "$native" "$@"

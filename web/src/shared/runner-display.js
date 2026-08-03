@@ -1,6 +1,7 @@
-const PROVIDER_LABELS = {
+export const PROVIDER_LABELS = {
   claude: 'Claude',
   codex: 'Codex',
+  kimi: 'Kimi',
 };
 
 export function providerLabel(id) {
@@ -58,6 +59,7 @@ export function attemptResultLabel(result) {
     ok: 'успешно',
     limited: 'лимит',
     unavailable_preflight: 'недоступен',
+    provider_unavailable: 'провайдер недоступен',
     route_unavailable: 'несовместим',
     manual_switch: 'переключён вручную',
     denied: 'запрещено',

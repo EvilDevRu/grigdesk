@@ -12,6 +12,7 @@ import { useAnalysisStore } from '../stores/analysis.js';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
 import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
+import { providerLabel } from '../shared/runner-display.js';
 import OpenDiffButton from './OpenDiffButton.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 
@@ -179,28 +180,35 @@ async function loadConveyor() {
   } catch { /* нет данных фабрики — не блокируем */ }
   if (!conveyor.value) return;
   // Порты стенда лежат не в списке задач, а в графе — тянем только для задач конвейера.
+  // Общий стенд и исторический реестр принадлежат не этой карточке: их lifecycle
+  // интерфейс не трогает.
   try {
     const g = await api.get(`/api/tasks/${taskId.value}/graph`);
-    if (g?.fePort) sandbox.value = { fePort: g.fePort, apiPort: g.apiPort || null };
+    if (g?.fePort && !g.readOnly && g.workspaceMode !== 'shared') {
+      sandbox.value = { fePort: g.fePort, apiPort: g.apiPort || null };
+    }
   } catch { /* графа нет — кнопку сноса просто не покажем */ }
 }
 function openConveyor() { ui.close(); router.push('/pipeline'); }
 
-// Снести стенд, не уходя в конвейер: задачу закрывают из карточки, и возвращаться
+// Снести стенд, не уходя в конвейер: стенд убирают из карточки, и возвращаться
 // на страницу конвейера ради одной кнопки незачем. Снос идёт до пары минут
 // (docker + схемы БД) — кнопка на это время становится индикатором.
-// После сноса перечитываем состояние: down.sh уносит реестр задачи в архив, то есть
+// После сноса перечитываем состояние: сервер уносит реестр задачи в архив, то есть
 // задача уходит и с конвейера — иначе в карточке осталась бы кнопка «Уже на конвейере».
 const sandboxBusy = ref(false);
 const sandboxMsg = ref(null);
 async function sandboxDown() {
   if (sandboxBusy.value) return;
-  if (!(await confirmDialog(`Снести стенд задачи #${taskId.value}? Действие необратимо.`, { danger: true, okText: 'Снести' }))) return;
+  if (!(await confirmDialog(
+    `Снести стенд задачи #${taskId.value}? Текущий прогон уйдёт в архив, после чего задачу можно будет отправить на конвейер заново. Ветка и незакоммиченные изменения сохранятся.`,
+    { danger: true, okText: 'Снести' },
+  ))) return;
   sandboxBusy.value = true; err.value = null; sandboxMsg.value = null;
   try {
     await api.post(`/api/tasks/${taskId.value}/sandbox/down`);
     await loadConveyor();
-    sandboxMsg.value = 'Стенд снесён';
+    sandboxMsg.value = 'Стенд снесён, прогон перенесён в архив';
   } catch (e) {
     err.value = e.status === 501
       ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.'
@@ -217,16 +225,178 @@ async function act(name, fn) {
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.value ? 'pause' : 'start'));
 const complete = async () => { if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
 const launchMsg = ref(null);
-const launch = async () => {
-  // Защита: задача уже на конвейере — не запускаем повторно.
+
+// ── Запуск на конвейер ──
+// Маршрут и критерии задаёт человек. Технические immutable-входы route engine форма
+// тоже показывает явно: целевые ветки для ship и exact instrumentation scope для debug.
+// Критерии пустыми допустимы: тогда их формулирует этап-переводчик. Выдумывать их за человека нельзя —
+// отказ на приёмке откатывает маршрут на сборку со сбросом всего хвоста.
+const launchForm = ref(null);   // форма открыта
+const launchOpts = ref(null);   // ответ /launch-options
+const launchOptionsBusy = ref(false);
+const DIAGNOSIS_LABELS = {
+  functional: 'поведение',
+  performance: 'производительность',
+  data: 'данные',
+  integration: 'интеграция',
+};
+let launchOptionsRequest = 0;
+function preferredLaunchRoute(opts) {
+  const guess = triage.value?.analysis?.route_guess;
+  return opts.routes?.includes(guess) ? guess : opts.defaultRoute;
+}
+function makeLaunchForm(opts, criteria = '') {
+  const route = preferredLaunchRoute(opts);
+  const needsInstrumentation = opts.routeOptions?.[route]?.instrumentationRequired;
+  return {
+    profile: opts.profile,
+    route,
+    criteria,
+    instrumentationFiles: needsInstrumentation
+      ? (opts.instrumentationSuggestions || []).slice(0, 1).join('\n')
+      : '',
+    diagnosisKind: opts.diagnosisSuggestion?.kind || 'functional',
+    diagnosisSignal: opts.diagnosisSuggestion?.signal || '',
+    // '' = исполнителя решает профиль; явный выбор уезжает в launch как runnerPrimary.
+    // Форма пересоздаётся на каждый ответ launch-options, поэтому смена профиля
+    // сама сбрасывает выбор — чужой набор исполнителей не наследуется.
+    runner: '',
+  };
+}
+async function openLaunch() {
   if (conveyor.value) { launchMsg.value = 'Уже на конвейере'; return; }
-  if (!(await confirmDialog(`Направить задачу #${taskId.value} на конвейер? Запустит фабрику (песочница + агенты).`, { okText: 'На конвейер' }))) return;
-  act('launch', async () => {
-    const ticket = `${detail.value?.title || ''}\n${cleanDesc.value || ''}`.trim();
-    const r = await tasks.launch(taskId.value, ticket);
+  if (launchOptionsBusy.value) return;
+  err.value = null; launchMsg.value = null;
+  const requestId = ++launchOptionsRequest;
+  let opts = null;
+  launchOptionsBusy.value = true;
+  try { opts = await tasks.launchOptions(taskId.value); }
+  catch (e) {
+    if (requestId === launchOptionsRequest) err.value = `Не удалось узнать параметры запуска: ${e.message}`;
+    return;
+  } finally {
+    if (requestId === launchOptionsRequest) launchOptionsBusy.value = false;
+  }
+  if (requestId !== launchOptionsRequest) return;
+  launchOpts.value = opts;
+
+  // Если каталог выбранного по умолчанию профиля недоступен, при нескольких профилях
+  // оставляем форму открытой: человек может выбрать другой опубликованный каталог.
+  const profiles = opts.profiles?.length ? opts.profiles : [opts.profile];
+  if (opts.error && profiles.length === 1) {
+    err.value = opts.message || 'маршрут сейчас нельзя запустить';
+    return;
+  }
+  // Триаж уже прикинул маршрут — показываем это подсказкой рядом, но выбирает человек.
+  launchForm.value = makeLaunchForm(opts);
+  if (opts.error) err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+  return undefined;
+}
+async function changeLaunchProfile() {
+  const profile = launchForm.value?.profile;
+  if (!profile || launchOptionsBusy.value) return;
+  const previousProfile = launchOpts.value?.profile;
+  const requestId = ++launchOptionsRequest;
+  const criteria = launchForm.value.criteria;
+  launchOptionsBusy.value = true;
+  err.value = null;
+  try {
+    const opts = await tasks.launchOptions(taskId.value, profile);
+    if (requestId !== launchOptionsRequest || !launchForm.value) return;
+    launchOpts.value = opts;
+    launchForm.value = makeLaunchForm(opts, criteria);
+    if (opts.error) err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+  } catch (e) {
+    if (requestId === launchOptionsRequest) {
+      if (launchForm.value && previousProfile) launchForm.value.profile = previousProfile;
+      err.value = `Не удалось выбрать профиль: ${e.message}`;
+    }
+  } finally {
+    if (requestId === launchOptionsRequest) launchOptionsBusy.value = false;
+  }
+}
+const routeGuess = computed(() => {
+  const guess = triage.value?.analysis?.route_guess;
+  return guess && guess !== launchForm.value?.route && launchOpts.value?.routes?.includes(guess) ? guess : null;
+});
+const launchRouteOption = computed(() => (
+  launchOpts.value?.routeOptions?.[launchForm.value?.route] || null
+));
+const launchNeedsDelivery = computed(() => launchRouteOption.value?.deliveryMode === 'publish');
+const launchNeedsInstrumentation = computed(() => Boolean(
+  launchRouteOption.value?.instrumentationRequired
+));
+const launchRouteIsSuggested = computed(() => (
+  triage.value?.analysis?.route_guess === launchForm.value?.route
+));
+const launchDeliverySummary = computed(() => (launchOpts.value?.repositories || [])
+  .map((repo) => `${repo.name}/${repo.targetBranch || '—'}`)
+  .join(' · '));
+const launchInstrumentationItems = computed(() => String(
+  launchForm.value?.instrumentationFiles || '',
+).split('\n').map((item) => item.trim()).filter(Boolean));
+const launchInstrumentationSummary = computed(() => {
+  const [first, ...rest] = launchInstrumentationItems.value;
+  if (!first) return 'scope не определён';
+  const short = first.split('/').pop();
+  return rest.length ? `${short} + ещё ${rest.length}` : short;
+});
+const launchDiagnosisSummary = computed(() => (
+  DIAGNOSIS_LABELS[launchForm.value?.diagnosisKind] || launchForm.value?.diagnosisKind || 'поведение'
+));
+const launchValidationError = computed(() => {
+  if (loading.value || !detail.value) return 'Постановка задачи ещё загружается.';
+  if (!launchForm.value?.route) return 'Выбери маршрут.';
+  if (!launchRouteOption.value?.deliveryMode) return 'Каталог не отдал delivery contract маршрута.';
+  if (launchOpts.value?.profileContractError) return launchOpts.value.profileContractError;
+  if (launchNeedsDelivery.value) {
+    if (!launchOpts.value?.repositories?.length) return 'Профиль не объявил репозитории для SHIP.';
+    const missing = launchOpts.value.repositories
+      .filter((repo) => !repo.targetBranch?.trim())
+      .map((repo) => repo.name);
+    if (missing.length) return `Профиль не настроил целевые ветки: ${missing.join(', ')}.`;
+  }
+  if (launchNeedsInstrumentation.value && !launchForm.value.instrumentationFiles.trim()) {
+    return 'Debug требует хотя бы один файл инструментации.';
+  }
+  return null;
+});
+function changeLaunchRoute() {
+  if (!launchForm.value || !launchNeedsInstrumentation.value
+      || launchForm.value.instrumentationFiles.trim()) return;
+  launchForm.value.instrumentationFiles = (launchOpts.value?.instrumentationSuggestions || [])
+    .slice(0, 1).join('\n');
+}
+function doLaunch(payload) {
+  return act('launch', async () => {
+    const r = await tasks.launch(taskId.value, payload);
+    launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
-      : r.outcome === 'launched' ? `Запущено (профиль ${r.profile})`
+      : r.outcome === 'launched' ? `Запущено (профиль ${r.profile}${r.route ? `, маршрут ${r.route}` : ''}${r.attempt ? `, попытка ${r.attempt.slice(0, 10)}…` : ''})`
       : r.note || 'Отправлено';
+    await loadConveyor();
+  });
+}
+const launchSelected = () => {
+  if (launchValidationError.value) return;
+  const instrumentationFiles = launchNeedsInstrumentation.value
+    ? launchForm.value.instrumentationFiles.split('\n').map((s) => s.trim()).filter(Boolean)
+    : [];
+  return doLaunch({
+    profile: launchForm.value.profile,
+    route: launchForm.value.route,
+    title: detail.value?.title || '',
+    description: cleanDesc.value || '',
+    // По строке на критерий: пустые строки отбрасывает сборка тикета.
+    acceptanceCriteria: launchForm.value.criteria.split('\n').map((s) => s.trim()).filter(Boolean),
+    instrumentationFiles,
+    diagnosisKind: launchNeedsInstrumentation.value ? launchForm.value.diagnosisKind : '',
+    diagnosisSignal: launchNeedsInstrumentation.value
+      ? launchForm.value.diagnosisSignal.trim()
+      : '',
+    // Исполнитель — только при явном выборе: пустое значение значит «по профилю»,
+    // и сервер не должен получать лишний ключ.
+    ...(launchForm.value.runner ? { runnerPrimary: launchForm.value.runner } : {}),
   });
 };
 const sendComment = () => act('comment', async () => {
@@ -241,6 +411,8 @@ const toggleFavorite = () => favorites.toggle(taskId.value);
 watch(taskId, (id) => {
   if (id) {
     detail.value = null; launchMsg.value = null; sandboxMsg.value = null;
+    launchForm.value = null; launchOpts.value = null;
+    launchOptionsRequest += 1; launchOptionsBusy.value = false;
     triage.value = null; showNote.value = false;
     mtab.value = 'triage'; comments.value = null; clarifyAtts.value = []; clarifySaved.value = '';
     loadClarifications();
@@ -254,6 +426,11 @@ watch(taskId, (id) => {
     if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
   }
 }, { immediate: true });
+watch(() => ui.launchRequested, (requested) => {
+  if (!requested || !taskId.value) return;
+  ui.consumeTaskLaunch();
+  openLaunch();
+}, { flush: 'post', immediate: true });
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
   if (triageTimer) clearInterval(triageTimer);
@@ -428,8 +605,8 @@ watch(taskId, (id) => {
               {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
                  : conveyor.daemonAlive ? '🏭 Идёт на конвейере' : '🏭 Уже на конвейере' }} →
             </button>
-            <button v-else class="btn launch" :disabled="busy === 'launch'" @click="launch" title="Запустить фабрику по задаче">
-              {{ busy === 'launch' ? '…' : '🏭 На конвейер' }}
+            <button v-else class="btn launch" :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm" @click="openLaunch" title="Запустить фабрику по задаче">
+              {{ busy === 'launch' || launchOptionsBusy ? '…' : '🏭 На конвейер' }}
             </button>
             <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
                  задачу, и ради одной кнопки идти в конвейер незачем. -->
@@ -440,6 +617,106 @@ watch(taskId, (id) => {
               <span v-else>⏏ Снести стенд</span>
             </button>
             <OpenDiffButton :task-id="taskId" />
+          </div>
+          <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
+               видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
+          <div v-if="launchForm" class="lform">
+            <div v-if="launchOpts.profiles?.length > 1" class="lrow">
+              <label class="llbl" for="launch-profile">Профиль</label>
+              <select id="launch-profile" v-model="launchForm.profile" class="lsel"
+                      :disabled="launchOptionsBusy || busy === 'launch'" @change="changeLaunchProfile">
+                <option v-for="p in launchOpts.profiles" :key="p" :value="p">{{ p }}</option>
+              </select>
+              <span v-if="launchOptionsBusy" class="lhint"><span class="spin"></span> читаю каталог…</span>
+            </div>
+            <div class="lrow">
+              <label class="llbl" for="launch-route">Маршрут</label>
+              <select id="launch-route" v-model="launchForm.route" class="lsel"
+                      @change="changeLaunchRoute">
+                <option v-for="r in launchOpts.routes" :key="r" :value="r">{{ r }}</option>
+              </select>
+              <span v-if="launchRouteIsSuggested" class="lhint good">рекомендован триажем</span>
+              <span v-else-if="routeGuess" class="lhint">триаж предлагает: {{ routeGuess }}</span>
+            </div>
+            <div v-if="launchOpts.runners?.length" class="lrow">
+              <label class="llbl" for="launch-runner">Исполнитель</label>
+              <select id="launch-runner" v-model="launchForm.runner" class="lsel"
+                      :disabled="launchOptionsBusy || busy === 'launch'">
+                <option value="">Из профиля<template v-if="launchOpts.defaultRunner"> ({{ providerLabel(launchOpts.defaultRunner) }})</template></option>
+                <option v-for="r in launchOpts.runners" :key="r" :value="r">{{ providerLabel(r) }}</option>
+              </select>
+            </div>
+
+            <div class="lsummary" aria-label="Параметры запуска">
+              <div class="lsummary-row">
+                <span>Профиль</span>
+                <b class="mono">{{ launchForm.profile }}</b>
+              </div>
+              <div v-if="launchNeedsDelivery" class="lsummary-row">
+                <span>SHIP</span>
+                <b class="mono">{{ launchDeliverySummary }}</b>
+              </div>
+              <div v-if="launchNeedsInstrumentation" class="lsummary-row">
+                <span>Диагностика</span>
+                <b>{{ launchDiagnosisSummary }} · {{ launchInstrumentationSummary }}</b>
+              </div>
+              <p v-if="launchNeedsDelivery" class="lshipwarn">
+                После финальных одобренных ворот маршрут сделает commit, push и PR.
+              </p>
+            </div>
+
+            <label class="llbl">Критерии приёмки <span class="lopt">— необязательно</span></label>
+            <textarea v-model="launchForm.criteria" rows="2"
+                      placeholder="Например: экспорт не падает на выборке 10 000 строк&#10;в отчёте появилась колонка «Менеджер»"></textarea>
+            <p class="lnote">
+              Если оставить пустым, критерии сформулирует этап-переводчик по постановке.
+            </p>
+
+            <details v-if="launchNeedsDelivery || launchNeedsInstrumentation" class="ladvanced">
+              <summary>Дополнительные параметры</summary>
+              <div class="ladvanced-body">
+                <template v-if="launchNeedsDelivery">
+                  <label class="llbl">Целевые ветки из конфигурации профиля</label>
+                  <div v-for="repo in launchOpts.repositories" :key="repo.name" class="lrepo">
+                    <span class="mono">{{ repo.name }}</span>
+                    <code class="mono">{{ repo.targetBranch }}</code>
+                  </div>
+                </template>
+                <template v-if="launchNeedsInstrumentation">
+                  <label class="llbl" for="launch-instrumentation">
+                    Точный scope <span class="lopt">— по одному repo:relative/path на строку</span>
+                  </label>
+                  <textarea id="launch-instrumentation" v-model="launchForm.instrumentationFiles" rows="3"
+                            spellcheck="false" class="mono"
+                            placeholder="backend:app/Path/To/File.php"></textarea>
+                  <div class="lrow">
+                    <label class="llbl" for="launch-diagnosis-kind">Тип диагноза</label>
+                    <select id="launch-diagnosis-kind" v-model="launchForm.diagnosisKind" class="lsel">
+                      <option value="functional">functional</option>
+                      <option value="performance">performance</option>
+                      <option value="data">data</option>
+                      <option value="integration">integration</option>
+                    </select>
+                  </div>
+                  <label class="llbl" for="launch-diagnosis-signal">Наблюдаемый сигнал</label>
+                  <input id="launch-diagnosis-signal" v-model="launchForm.diagnosisSignal"
+                         class="linp" maxlength="200" autocomplete="off"
+                         placeholder="Коротко: что именно воспроизводится" />
+                  <p class="lnote">
+                    Scope закрепляется на всю попытку; временные probes разрешены только в этих файлах.
+                  </p>
+                </template>
+              </div>
+            </details>
+            <p v-if="launchValidationError" class="lerror">{{ launchValidationError }}</p>
+            <div class="lbtns">
+              <button class="btn" @click="launchForm = null">Отмена</button>
+              <button class="btn primary"
+                      :disabled="busy === 'launch' || launchOptionsBusy || !!launchOpts.error || !!launchValidationError"
+                      @click="launchSelected">
+                {{ busy === 'launch' ? 'Запускаю…' : '🏭 Запустить' }}
+              </button>
+            </div>
           </div>
           <div v-if="conveyor?.stall" class="convstall">
             <b>{{ conveyor.stall.title }}</b>
@@ -577,6 +854,39 @@ watch(taskId, (id) => {
   animation: sbspin .8s linear infinite; }
 @keyframes sbspin { to { transform: rotate(360deg); } }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
+/* Форма запуска: решение человека сверху, технический immutable-контракт — свёрнут. */
+.lform { flex-basis: 100%; display: flex; flex-direction: column; gap: 7px; margin-top: 8px;
+  padding: 11px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
+.lrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.llbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); }
+.lopt { text-transform: none; letter-spacing: 0; }
+.lsel { height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--ground); color: var(--ink); font-size: 13px; }
+.lrepo { display: grid; grid-template-columns: minmax(90px, auto) 1fr; align-items: center; gap: 10px; }
+.lrepo code { color: var(--ink); overflow-wrap: anywhere; }
+.linp { min-width: 0; height: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--ground); color: var(--ink); font-family: inherit; font-size: 13px; }
+.linp:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.lhint { font-size: 12px; color: var(--ink-mid); }
+.lhint.good { color: var(--good); }
+.lsummary { display: grid; gap: 5px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--ground); }
+.lsummary-row { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 10px;
+  align-items: baseline; font-size: 12.5px; }
+.lsummary-row > span { color: var(--ink-mid); }
+.lsummary-row > b { min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
+.lshipwarn { margin: 2px 0 0; padding-top: 6px; border-top: 1px solid var(--line);
+  color: var(--warn); font-size: 11.5px; line-height: 1.4; }
+.lform textarea { resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--ground); color: var(--ink); font-family: inherit; font-size: 13px; }
+.lform textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.lnote { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.45; }
+.ladvanced { margin-top: 2px; border: 1px dashed var(--line); border-radius: 9px; padding: 7px 10px; }
+.ladvanced summary { color: var(--ink-mid); font-size: 12px; cursor: pointer; user-select: none; }
+.ladvanced[open] summary { margin-bottom: 9px; }
+.ladvanced-body { display: flex; flex-direction: column; gap: 7px; }
+.lerror { margin: 0; color: var(--bad); font-size: 12px; }
+.lbtns { display: flex; gap: 8px; justify-content: flex-end; }
 .comment { display: flex; gap: 8px; align-items: flex-end; }
 .comment textarea { flex: 1; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--ground); color: var(--ink); font-family: inherit; font-size: 14px; }

@@ -1,31 +1,8 @@
-// Мутации состояния фабрики через её же инструменты (единый источник истины).
-// Записи в реестр — pipeline-set.sh (upsert одной строки). Указания агенту — side-файл.
-import { execFile } from 'node:child_process';
+// Read-only адаптер журналов и активности. После cutover mutation helpers удалены:
+// Cockpit меняет попытку только через exact route commands единственного движка.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseStagesLog } from './stages-parse.js';
-
-/**
- * Пишет пары KEY VALUE в реестр задачи через pipeline-set.sh.
- * @param {{ factoryHome: string, stateDir: string, task: string, pairs: string[] }} o
- */
-export function setPipeline({ factoryHome, stateDir, task, pairs }) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'bash',
-      [path.join(factoryHome, 'lib', 'pipeline-set.sh'), task, ...pairs],
-      { env: { ...process.env, STATE_DIR: stateDir }, timeout: 15000 },
-      (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).slice(-400)) ) : resolve(stdout)),
-    );
-  });
-}
-
-/** Указание агенту — side-файл tNNNN.instruction.md (реестр многострочное не держит). */
-export function writeInstruction({ stateDir, task, text }) {
-  const file = path.join(stateDir, `t${task}.instruction.md`);
-  if (!text || !text.trim()) { try { fs.unlinkSync(file); } catch { /* нет файла */ } return; }
-  fs.writeFileSync(file, text, 'utf8');
-}
 
 export function readInstruction({ stateDir, task }) {
   try { return fs.readFileSync(path.join(stateDir, `t${task}.instruction.md`), 'utf8'); }

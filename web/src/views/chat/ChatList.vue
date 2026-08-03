@@ -26,7 +26,7 @@ const emptyLabel = computed(() => {
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
 // Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
 const rows = computed(() => chat.list(q.value, showArchived.value).map((r) => {
-  const { model, provider } = prov.modelOf(r.model);
+  const { model, provider } = prov.modelOf(r.modelRef || r.model);
   return { ...r, provider, modelName: model?.name || '' };
 }));
 

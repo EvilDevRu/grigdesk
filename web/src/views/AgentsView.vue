@@ -6,9 +6,12 @@ import HelpTip from '../shared/ui/HelpTip.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import NumberField from '../shared/ui/NumberField.vue';
 
-// База агентов (стадий конвейера): слева список, справа редактор карточки.
-// Агент — заготовка нового узла; принадлежность и исполняемая политика здесь НЕ настраиваются
-// (это свойства конкретного маршрута и runners.env).
+// База агентов (ролей конвейера): слева список, справа редактор карточки.
+// Агент — заготовка роли: метаданные + начало задания. Ни одно поле не исполняется:
+// боевой промпт этапа живёт в маршруте профиля (routes/<маршрут>/prompts/), модель и
+// лимиты — в runners.env. Отсюда текст переносят в маршрут, а не наоборот.
+// Тексты подсказок пишем в этой логике: сначала что это для человека, потом где лежит
+// боевое значение — иначе раздел читается как настройки запуска, которыми он не является.
 // Два уровня рекомендаций: обычные (подпись, форма, класс модели, промпт) и «Профи»
 // (ключ реестра, сноска, таймаут, бюджет, флаги) — скрыты за тумблером.
 const agents = ref([]);
@@ -35,22 +38,38 @@ const TIERS = [
   { v: 'cheap', label: 'Экономная — механика и проверки' },
 ];
 const TIER_LABEL = Object.fromEntries(TIERS.map((t) => [t.v, t.label.split(' — ')[0]]));
+// Чипы в списке — это рекомендации, а не то, чем этап реально пойдёт: пишем это прямо
+// в подсказке, иначе они читаются как «вот на чём он запустится».
+function adviceTitle(a) {
+  const parts = [];
+  if (a.tier) parts.push(`модель класса «${TIER_LABEL[a.tier] || a.tier}»`);
+  if (a.effort) parts.push(`effort ${a.effort}`);
+  return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет — модель и effort берутся из runners.env проекта.`;
+}
 // Эффорты — из реестра исполнителей, без хардкода.
 const providers = ref([]);
 
 // Описания настроек для тултипов — языком человека, не движка.
 const HELP = {
-  label: 'Название блока — так новые узлы из этой заготовки будут подписаны на схеме.',
-  kind: 'Рекомендуемая форма нового узла: агент, человек или host-команда. Фактический executor задаётся конкретной схемой; изменение шаблона существующие узлы не меняет.',
-  tier: 'Какого класса модель нужна этому этапу. Неисполняемая рекомендация: провайдер, семейство и failover выбираются только через runners.env проекта. Конкретное семейство здесь не указывают — база агентов общая, а проекты живут на разных исполнителях. Валидатор маршрутов сообщит, если профиль даёт этапу класс слабее рекомендованного.',
-  effort: 'Неисполняемая рекомендация автору схемы. Фактический effort задаётся runners.env; это поле не переопределяет запуск.',
-  sub: 'Мелкая приписка под блоком на схеме — подсказка, чем этап занимается (например «pint · eslint»).',
-  key: 'Рекомендуемый runKey нового узла. Результат сохраняет движок по run-scoped протоколу; команды status/pipeline в промпт не добавляются.',
-  timeout: 'Рекомендуемый лимит нового узла. Фактический timeout принадлежит опубликованной схеме и runtime.',
-  budget: 'Рекомендуемый ориентир длительности нового узла; 0 означает «без рекомендации».',
-  flags: 'Рекомендации для нового узла: state-only и допустимый skipped. Фактическую файловую политику и outcomes задаёт схема.',
-  prompt: 'Заготовка задания: при добавлении агента в схему копируется в узел и дальше живёт в самой схеме. Правка шаблона уже расставленные узлы не меняет. Live-данные задачи добавляет движок отдельными типизированными секциями.',
+  label: 'Как этап будет подписан на схеме конвейера — текст внутри блока. Например «Разведка» или «Приёмка кода».',
+  kind: 'Кто делает этап: 🤖 агент — работает ИИ; 👤 человек — конвейер останавливается и ждёт решения человека; </> код — выполняется команда на хосте. Здесь это заготовка для нового блока: у этапов уже собранной схемы форма задана самой схемой.',
+  tier: 'Насколько сильная модель нужна этапу: рассуждающая — для сложного анализа, сбалансированная — для рутины по готовой спецификации, экономная — для механики и проверок. Конкретную модель (opus, sonnet…) здесь не выбирают: база агентов общая для всех проектов, а какой моделью закрыть класс — решает runners.env проекта. Это пометка человеку, который собирает маршрут; запуск её не читает.',
+  effort: 'Сколько усилий модели тратить на обдумывание хода — пометка тому, кто собирает маршрут. На запуск не влияет: фактический effort этапа берётся из runners.env проекта.',
+  sub: 'Мелкая приписка под названием блока на схеме — уточнение, чем этап занят (например «pint · eslint»).',
+  key: 'Короткое имя этапа в реестре задачи (runKey): под ним движок хранит результат этапа и показывает его в дашборде и логах. Здесь — предложение для нового узла; у собранной схемы ключ берётся из неё.',
+  timeout: 'За сколько секунд этап должен уложиться — ориентир тому, кто собирает маршрут; 0 — без рекомендации. Боевой лимит принадлежит опубликованному маршруту, и агент узнаёт его из служебного «регламента времени» в конце промпта.',
+  budget: 'Ориентир объёма работы этапа для автора маршрута; 0 — без рекомендации. В маршрутах бюджет задан именованным классом (standard, large), так что число отсюда никуда не едет.',
+  flags: 'Две пометки для нового узла: read-only — этапу нельзя писать в репозиторий (только смотрит и отчитывается), optional — этап разрешено штатно пропустить. Настоящую файловую политику и допустимые исходы задаёт маршрут.',
+  prompt: 'С чего начинается задание этапа. Это заготовка: боевой текст живёт в маршруте профиля (routes/<маршрут>/prompts/), туда его переносят отсюда — правка заготовки собранные маршруты не меняет. Данные задачи (номер, ветку, отчёты предыдущих этапов) движок подставляет сам отдельными блоками.',
 };
+
+// Что это за раздел вообще — главный вопрос к нему. Держим ответ в трёх абзацах:
+// что здесь лежит, чего оно НЕ делает и зачем тогда нужно.
+const HELP_PAGE = [
+  'Агент здесь — описание роли конвейера: как этап подписан на схеме, какого класса модель ему нужна и с чего начинается его задание.',
+  'Это библиотека, а не настройки запуска. Прогон задачи отсюда не читает ничего: боевой промпт этапа лежит в маршруте проекта (profiles/<проект>/routes/<маршрут>/prompts/), а модель, effort и лимиты — в runners.env профиля. Правка карточки не трогает ни собранные маршруты, ни бегущие задачи.',
+  'Смысл — держать формулировку роли в одном месте: описать её один раз и переносить в маршруты проектов, а не выдумывать заново под каждый. Все поля карточки — рекомендации автору маршрута.',
+];
 
 watch(pro, (v) => localStorage.setItem('cockpit-agents-pro', v ? '1' : '0'));
 
@@ -137,16 +156,32 @@ onMounted(load);
     <aside class="list">
       <div class="list-head">
         <span class="ttl">База агентов</span>
+        <!-- toggle: на планшете ховера нет, а объяснение раздела длинное — его читают, а не задевают мышью -->
+        <HelpTip class="page-tip" toggle align="left" :tip-style="{ maxWidth: '330px' }">
+          <template #tip>
+            <span class="doc">
+              <b class="doc-ttl">Библиотека ролей конвейера</b>
+              <span v-for="(p, i) in HELP_PAGE" :key="i" class="doc-p">{{ p }}</span>
+            </span>
+          </template>
+        </HelpTip>
+        <span class="grow"></span>
         <button class="btn accent" @click="createNew">+ Новый</button>
       </div>
+      <p class="list-sub">Заготовки ролей для схем конвейера. На запуск не влияют: боевой промпт и модель живут в маршруте проекта.</p>
       <div v-if="loading && !agents.length" class="pad muted"><span class="spin"></span> Загружаю…</div>
       <div v-else-if="error && !agents.length" class="pad bad">{{ error }}</div>
       <template v-for="g in groups" :key="g.v">
         <div class="grp-ttl">{{ g.label }}</div>
         <button v-for="a in g.items" :key="a.id" class="item" :class="{ sel: a.id === selectedId && !isNew }" @click="select(a.id)">
           <span class="ic" :class="`k-${a.kind}`">{{ KIND_ICON[a.kind] }}</span>
-          <span class="nm">{{ a.label || a.id }}</span>
-          <span v-if="a.tier || a.effort" class="chip mono">совет: {{ [TIER_LABEL[a.tier] || a.tier, a.effort].filter(Boolean).join(' · ') }}</span>
+          <span class="item-main">
+            <span class="nm" :title="a.label || a.id">{{ a.label || a.id }}</span>
+            <span v-if="a.tier || a.effort" class="advice" :title="adviceTitle(a)">
+              <span v-if="a.tier" class="chip tier-chip">{{ TIER_LABEL[a.tier] || a.tier }}</span>
+              <span v-if="a.effort" class="chip effort-chip mono">{{ a.effort }}</span>
+            </span>
+          </span>
         </button>
       </template>
     </aside>
@@ -162,7 +197,8 @@ onMounted(load);
         </template>
         <span class="grow"></span>
         <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
-        <ToggleSwitch v-model="pro" label="профи" title="Показать профи-настройки" />
+        <ToggleSwitch v-model="pro" label="профи"
+                      title="Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги" />
         <button v-if="!isNew" class="btn danger" @click="del">Удалить</button>
         <button class="btn accent" :disabled="saving || !dirty || (isNew && !form.id)" @click="save">
           <span v-if="saving" class="spin"></span> Сохранить
@@ -218,21 +254,25 @@ onMounted(load);
         <div class="f">
           <span class="lbl">Флаги <HelpTip :text="HELP.flags" /></span>
           <div class="row">
-            <button class="tag" :class="{ on: form.readonly }" title="Запрет записи в каталоги проекта" @click="form.readonly = !form.readonly">read-only</button>
-            <button class="tag" :class="{ on: form.optional }" title="Этап можно штатно пропускать" @click="form.optional = !form.optional">optional</button>
+            <button class="tag" :class="{ on: form.readonly }"
+                    title="Советовать запрет записи в репозиторий: этап только смотрит и отчитывается"
+                    @click="form.readonly = !form.readonly">read-only</button>
+            <button class="tag" :class="{ on: form.optional }"
+                    title="Советовать разрешить пропуск: конвейер идёт дальше, если этап нечего делать"
+                    @click="form.optional = !form.optional">optional</button>
           </div>
         </div>
       </div>
 
       <div class="prompt-wrap">
-        <div class="lbl prompt-lbl">Заготовка промпта <HelpTip :text="HELP.prompt" align="left" /> <span class="muted sm">— копируется в узел при добавлении в схему; боевой текст правится в самой схеме</span></div>
+        <div class="lbl prompt-lbl">Заготовка задания <HelpTip :text="HELP.prompt" align="left" /> <span class="muted sm">— основа для промпта этапа; боевой текст живёт в маршруте проекта</span></div>
         <textarea v-model="form.prompt" class="prompt mono" spellcheck="false"
-                  :placeholder="form.kind === 'human' ? 'У человеческих ворот промпта нет — движок ждёт решения в дашборде' : 'Заготовка задания для новых узлов…'"></textarea>
+                  :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'"></textarea>
       </div>
     </section>
 
     <section v-else class="editor empty">
-      <p class="muted">Выбери агента слева или создай нового</p>
+      <p class="muted">Выбери роль слева или заведи новую</p>
     </section>
   </div>
 </template>
@@ -242,19 +282,31 @@ onMounted(load);
 
 /* ── Список ── */
 .list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
-.list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 10px; }
+.list-head { display: flex; align-items: center; gap: 7px; padding: 2px 4px 6px; }
 .ttl { font-weight: 700; font-size: 13.5px; }
+.page-tip { flex: none; }
+/* Ответ на «что это вообще за раздел» виден без ховера: на планшете его иначе не прочитать */
+.list-sub { margin: 0 4px 8px; font-size: 11px; line-height: 1.45; color: var(--ink-mid); }
+/* Развёрнутое объяснение раздела внутри тултипа (он в body, но слот — из этого scope) */
+.doc { display: flex; flex-direction: column; gap: 7px; }
+.doc-ttl { font-size: 12.5px; }
+.doc-p { display: block; }
 .grp-ttl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-mid); padding: 10px 6px 4px; }
-.item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none;
+.item { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; width: 100%; text-align: left; background: none;
   border: none; color: var(--ink); padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .item:hover { background: var(--surface); }
 .item.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.item .ic { flex: none; width: 20px; font-size: 12px; text-align: center; }
+.item .ic { width: 20px; margin-top: 2px; font-size: 12px; text-align: center; }
 .ic.k-code { color: var(--node-code); font-weight: 700; font-size: 10px; }
-.item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip { flex: none; font-size: 10px; color: var(--ink-mid); background: var(--surface-2);
-  border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+.item-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; width: 100%; }
+.item .nm { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
+.advice { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; margin-top: 2px; overflow: hidden; }
+.chip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px;
+  line-height: 14px; color: var(--ink-mid); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 5px; padding: 0 5px; }
+.tier-chip { flex: 0 1 auto; }
+.effort-chip { flex: none; color: var(--accent); }
 .pad { padding: 12px 8px; }
 
 /* ── Редактор ── */
