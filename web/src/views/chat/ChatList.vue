@@ -3,20 +3,30 @@ import { ref, computed, nextTick } from 'vue';
 import { useChatStore } from '../../stores/chat.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
+import ToggleSwitch from '../../shared/ui/ToggleSwitch.vue';
 import { confirmDialog } from '../../shared/ui/confirm.js';
 
-// Телеграм-сайдбар чатов: поиск сверху, ниже — все чаты (открытые + архив) свежие сверху.
+// Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
 const chat = useChatStore();
+// open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
+// колонку: следить за activeId там мало — повторный тык по уже активному чату его не меняет.
+const emit = defineEmits(['open']);
 
 const prov = useProvidersStore();
 prov.load();
 
 const q = ref('');
+const showArchived = ref(false);
+const archiveLabel = computed(() => `Показывать архив${chat.archived.length ? ` · ${chat.archived.length}` : ''}`);
+const emptyLabel = computed(() => {
+  if (q.value.trim()) return 'Ничего не найдено';
+  return showArchived.value ? 'Архив пуст' : 'Нет активных чатов';
+});
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
 // Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
-const rows = computed(() => chat.list(q.value).map((r) => {
-  const { model, provider } = prov.modelOf(r.model);
+const rows = computed(() => chat.list(q.value, showArchived.value).map((r) => {
+  const { model, provider } = prov.modelOf(r.modelRef || r.model);
   return { ...r, provider, modelName: model?.name || '' };
 }));
 
@@ -51,24 +61,62 @@ function commitEdit() {
   if (editId.value) chat.renameChat(editId.value, editVal.value.trim());
   editId.value = null;
 }
+
+function newChat() {
+  showArchived.value = false;
+  chat.newSession();
+  emit('open');
+}
+
+function select(r) {
+  chat.selectChat(r.id);
+  // Выбор архивного чата восстанавливает его, поэтому возвращаемся к активному списку.
+  if (r.archived) showArchived.value = false;
+  emit('open');
+}
+
+function restore(r) {
+  chat.restoreArchived(r.id);
+  showArchived.value = false;
+}
+
 async function del(r) {
-  if (await confirmDialog(`Удалить чат «${r.title}» безвозвратно?`, { danger: true, okText: 'Удалить' })) chat.deleteChat(r.id);
+  const permanent = r.archived;
+  const ok = await confirmDialog(
+    permanent
+      ? `Удалить чат «${r.title}» безвозвратно? Восстановить его после этого не получится.`
+      : `Переместить чат «${r.title}» в архив?`,
+    {
+      title: permanent ? 'Удалить чат навсегда' : 'Переместить в архив',
+      okText: permanent ? 'Удалить' : 'В архив',
+      danger: permanent,
+    },
+  );
+  if (ok) chat.deleteChat(r.id);
 }
 </script>
 
 <template>
   <aside class="cl">
     <div class="top">
-      <input v-model="q" class="q" placeholder="Поиск" />
-      <button class="new" title="Новый чат" @click="chat.newSession()">＋</button>
+      <div class="tools">
+        <input v-model="q" class="q" :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'" />
+        <button class="new" title="Новый чат" @click="newChat">＋</button>
+      </div>
+      <ToggleSwitch v-model="showArchived" :label="archiveLabel" />
     </div>
     <div class="rows">
-      <div v-if="!rows.length" class="none muted">Ничего не найдено</div>
-      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived }"
-           @click="chat.selectChat(r.id)" @dblclick="startEdit(r)">
+      <div v-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
+      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived, wait: r.waiting }"
+           @click="select(r)" @dblclick="startEdit(r)">
         <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
-             Агент работает — белое кольцо вокруг (внутренний спиннер сливался с цветом) -->
-        <span class="ava" :class="{ live: r.sending }" :title="r.modelName || 'Модель по умолчанию'">
+             Во время работы цвет меняется целиком, а вращается только внешнее кольцо. -->
+        <span class="ava" :class="{ live: r.sending }"
+              :title="r.compacting
+                ? `${r.modelName || 'Модель по умолчанию'} · сжимаю контекст`
+                : r.sending
+                  ? `${r.modelName || 'Модель по умолчанию'} · агент работает`
+                  : (r.modelName || 'Модель по умолчанию')">
           <ProviderIcon v-if="r.provider" :provider="r.provider" :size="19" />
           <template v-else>{{ letter(r) }}</template>
           <!-- Точка «непрочитано»: бейджи на кнопке и в сайдбаре считают именно такие чаты -->
@@ -80,7 +128,9 @@ async function del(r) {
           <template v-else>
             <div class="t1">
               <span class="name">{{ r.title }}</span>
-              <span v-if="r.modelName" class="mdl">{{ r.modelName }}</span>
+              <!-- Агент упёрся в вопрос и стоит: чип важнее подписи модели, поэтому вместо неё -->
+              <span v-if="r.waiting" class="wchip" title="агент ждёт твоего ответа — работа стоит">ждёт ответа</span>
+              <span v-else-if="r.modelName" class="mdl">{{ r.modelName }}</span>
               <span class="ago muted">{{ ago(r.ts) }}</span>
             </div>
             <div class="t2 muted">
@@ -89,8 +139,15 @@ async function del(r) {
           </template>
         </div>
         <span v-if="editId !== r.id" class="acts">
+          <button v-if="r.archived" class="restore"
+                  title="Восстановить из архива"
+                  aria-label="Восстановить чат из архива"
+                  @click.stop="restore(r)">↩</button>
           <button title="Переименовать" @click.stop="startEdit(r)">✎</button>
-          <button title="Удалить безвозвратно" @click.stop="del(r)">✕</button>
+          <button :class="{ danger: r.archived }"
+                  :title="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
+                  :aria-label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
+                  @click.stop="del(r)">✕</button>
         </span>
       </div>
     </div>
@@ -100,7 +157,13 @@ async function del(r) {
 <style scoped>
 .cl { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 
-.top { display: flex; gap: 7px; padding: 10px; border-bottom: 1px solid var(--line); }
+/* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
+   разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
+   центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
+.top { display: flex; flex-direction: column; justify-content: center; gap: 5px;
+  height: var(--chat-head-h); padding: 0 10px; border-bottom: 1px solid var(--line); }
+.tools { display: flex; gap: 7px; }
+.top :deep(.tsw) { align-self: flex-start; }
 .q { flex: 1; min-width: 0; height: 32px; background: var(--ground); border: 1px solid var(--line); border-radius: 16px;
   color: var(--ink); padding: 0 13px; font-size: 12.5px; outline: none; font-family: inherit; }
 .q::placeholder { color: var(--ink-mid); }
@@ -115,14 +178,30 @@ async function del(r) {
 .row { position: relative; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 10px; cursor: pointer; }
 .row:hover { background: var(--surface-2); }
 .row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* Чат, где агент ждёт ответа: тёплая полоска слева — видно, что строка требует действия,
+   даже когда список длинный (сам чип может уехать под многоточие названия). */
+.row.wait { background: color-mix(in srgb, var(--warn, #e0a33a) 10%, transparent); }
+.row.wait::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--warn, #e0a33a); }
+.row.wait.cur { background: color-mix(in srgb, var(--warn, #e0a33a) 18%, transparent); }
 
 .ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   font-size: 15px; font-weight: 600; position: relative; }
-/* Кольцо «агент работает» — контрастно на аватаре любого цвета */
+/* «Агент работает»: цвет читается и без движения, кольцо добавляет ощущение процесса. */
+.ava.live { color: color-mix(in srgb, var(--accent) 82%, #fff);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 24%, transparent); }
 .ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
-  border: 2.5px solid color-mix(in srgb, #fff 25%, transparent); border-top-color: #fff;
-  animation: spin .8s linear infinite; }
+  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  border-right-color: color-mix(in srgb, var(--accent) 68%, transparent);
+  animation: chat-live-spin .85s linear infinite; }
+@keyframes chat-live-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ava.live::after { animation: none; border-color: color-mix(in srgb, var(--accent) 72%, transparent); }
+}
 /* «Непрочитано» — точка на аватаре: не двигает разметку строки и не спорит с кольцом работы */
 .udot { position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 0 2px var(--surface); }
@@ -134,6 +213,10 @@ async function del(r) {
 /* Модель чата — мелкой подписью рядом с названием; при нехватке места жертвуем ею, а не названием */
 .mdl { flex: none; font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px;
   padding: 0 5px; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* «Ждёт ответа» — чип на месте подписи модели: тёплый, заметный, но не кричащий */
+.wchip { flex: none; font-size: 10.5px; font-weight: 600; color: var(--warn, #e0a33a); line-height: 1.6;
+  border: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 55%, transparent); border-radius: 5px; padding: 0 5px;
+  background: color-mix(in srgb, var(--warn, #e0a33a) 14%, transparent); white-space: nowrap; }
 /* Неотправленный текст — как в телеграме: пометка цветом, дальше сам текст */
 .dr { color: var(--warn, #e0a33a); margin-right: 4px; }
 .t2 { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
@@ -147,5 +230,23 @@ async function del(r) {
 .acts button { width: 24px; height: 24px; border-radius: 6px; border: none; background: var(--ground);
   color: var(--ink-mid); font-size: 12px; cursor: pointer; display: grid; place-items: center; }
 .acts button:hover { color: var(--ink); background: var(--surface-2); }
-.acts button:last-child:hover { color: var(--bad); }
+.acts button:last-child:hover { color: var(--accent); }
+.acts button.danger:hover { color: var(--bad); }
+
+/* Пальцем ховера нет — на сенсорном экране действия строки были бы недостижимы.
+   Показываем их всегда, а место под них освобождаем отступом самой строки. */
+@media (hover: none) {
+  .acts { display: inline-flex; }
+  .row { padding-right: 66px; }
+  .ago { display: none; }
+}
+
+/* Планшет-альбом: список уже, но остаётся на экране рядом с чатом */
+@media (min-width: 900px) and (max-width: 1099px) { .cl { width: 232px; } }
+
+/* Узкий экран: список занимает всю колонку (чат показывается вместо него — см. ChatsView) */
+@media (max-width: 899px) {
+  .cl { width: 100%; border-right: none; }
+  .rows { padding: 5px 5px calc(6px + env(safe-area-inset-bottom, 0px)); }
+}
 </style>

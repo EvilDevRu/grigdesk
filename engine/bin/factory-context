@@ -1,0 +1,667 @@
+#!/usr/bin/env python3
+"""Формирует независимый от провайдера типизированный контекст для неизменяемой попытки route-v2."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+from typing import Any
+
+
+ATTEMPT_RE = re.compile(r"^a_[a-f0-9]{32}$")
+HASH_RE = re.compile(r"^[a-f0-9]{64}$")
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+NODE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+RUN_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+TASK_RE = re.compile(r"^[1-9][0-9]{0,18}$")
+PORT_RE = re.compile(r"^[1-9][0-9]{0,4}$")
+STAGE_RESULT_RE = re.compile(r"^([a-z0-9][a-z0-9_-]{0,40}):([a-z][a-z-]{0,20}):([0-9]{1,6})$")
+FINDING_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
+# Имя хоста стенда: буквы, цифры, точка и дефис. Схема, порт и слэши запрещены —
+# их добавляет сам движок, а «http://…» в значении дало бы http://http://host:5192.
+SERVICE_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?$")
+URL_RE = re.compile(r"^https?://[A-Za-z0-9.:[\]-]+(?:/.*)?$")
+BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
+MAX_JSON_BYTES = 256 * 1024
+DELIVERY_ACTIONS = {"commit", "push", "pull-request", "task-comment"}
+WORKSPACE_RESERVED_KEYS = {"mode", "generation", "repos", "stateDir", "containerName"}
+
+
+class ContextError(Exception):
+    pass
+
+
+def fail(message: str) -> None:
+    raise ContextError(message)
+
+
+def read_regular_json(path: Path, label: str) -> Any:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        fail(f"{label}: файл недоступен: {error}")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_JSON_BYTES:
+            fail(f"{label}: нужен небольшой обычный файл")
+        with os.fdopen(fd, encoding="utf-8", closefd=True) as source:
+            fd = -1
+            try:
+                return json.load(
+                    source,
+                    parse_constant=lambda value: fail(
+                        f"{label}: запрещено не-JSON число {value}"
+                    ),
+                )
+            except (UnicodeError, json.JSONDecodeError) as error:
+                fail(f"{label}: повреждённый JSON: {error}")
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def exact_object(value: Any, keys: set[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        fail(f"{label}: ожидались ровно поля {sorted(keys)}")
+    return value
+
+
+def string(
+    value: Any,
+    label: str,
+    *,
+    minimum: int = 1,
+    maximum: int = 100_000,
+) -> str:
+    if (
+        not isinstance(value, str)
+        or not minimum <= len(value) <= maximum
+        or "\0" in value
+    ):
+        fail(f"{label}: недопустимая строка")
+    return value
+
+
+def identifier(value: Any, regexp: re.Pattern[str], label: str) -> str:
+    result = string(value, label, maximum=512)
+    if not regexp.fullmatch(result):
+        fail(f"{label}: недопустимый идентификатор")
+    return result
+
+
+def branch_name(value: Any, label: str) -> str:
+    result = identifier(value, BRANCH_RE, label)
+    if (
+        ".." in result
+        or "//" in result
+        or "@{" in result
+        or result.startswith(("/", "."))
+        or result.endswith(("/", ".", ".lock"))
+    ):
+        fail(f"{label}: небезопасное имя ветки")
+    return result
+
+
+def absolute_directory(value: str, label: str) -> str:
+    path = Path(value)
+    if not path.is_absolute() or "\n" in value or "\t" in value:
+        fail(f"{label}: нужен абсолютный путь")
+    if os.path.abspath(value) != value or not path.is_dir() or path.is_symlink():
+        fail(f"{label}: каталог отсутствует или небезопасен")
+    try:
+        canonical = str(path.resolve(strict=True))
+    except OSError as error:
+        fail(f"{label}: путь не разрешается: {error}")
+    if canonical != value:
+        fail(f"{label}: symlink-компоненты запрещены")
+    return value
+
+
+def absolute_file_candidate(value: str, roots: list[str], label: str) -> str:
+    path = Path(value)
+    if not path.is_absolute() or "\n" in value or "\t" in value:
+        fail(f"{label}: нужен абсолютный путь")
+    if os.path.abspath(value) != value:
+        fail(f"{label}: путь должен быть нормализован")
+    parent = path.parent
+    if not parent.is_dir() or parent.is_symlink():
+        fail(f"{label}: родительский каталог отсутствует или является symlink")
+    try:
+        canonical_parent = str(parent.resolve(strict=True))
+    except OSError as error:
+        fail(f"{label}: родитель не разрешается: {error}")
+    if str(Path(canonical_parent) / path.name) != value or path.is_symlink():
+        fail(f"{label}: небезопасный объект")
+    if not any(value.startswith(f"{root}/") for root in roots):
+        fail(f"{label}: файл находится вне разрешённых корней")
+    return value
+
+
+def read_ticket(path: Path, expected_task: str) -> dict[str, Any]:
+    value = exact_object(
+        read_regular_json(path, "ticket"),
+        {
+            "schema",
+            "taskId",
+            "title",
+            "description",
+            "acceptanceCriteria",
+            "sourceUrl",
+        },
+        "ticket",
+    )
+    if value["schema"] != 1:
+        fail("ticket.schema: поддерживается только 1")
+    if identifier(str(value["taskId"]), TASK_RE, "ticket.taskId") != expected_task:
+        fail("ticket.taskId: не совпадает с запуском")
+    criteria = value["acceptanceCriteria"]
+    if not isinstance(criteria, list) or len(criteria) > 100:
+        fail("ticket.acceptanceCriteria: ожидался массив до 100 строк")
+    source_url = string(value["sourceUrl"], "ticket.sourceUrl", maximum=2_000)
+    if not URL_RE.fullmatch(source_url):
+        fail("ticket.sourceUrl: нужен http(s) URL")
+    return {
+        "id": int(expected_task),
+        "title": string(value["title"], "ticket.title", maximum=500),
+        "description": string(
+            value["description"],
+            "ticket.description",
+            maximum=100_000,
+        ),
+        "acceptanceCriteria": [
+            string(item, f"ticket.acceptanceCriteria[{index}]", maximum=2_000)
+            for index, item in enumerate(criteria)
+        ],
+        "sourceUrl": source_url,
+    }
+
+
+def optional_port(value: str, label: str) -> int | None:
+    if value == "":
+        return None
+    if not PORT_RE.fullmatch(value):
+        fail(f"{label}: недопустимый порт")
+    port = int(value)
+    if port > 65535:
+        fail(f"{label}: порт вне диапазона")
+    return port
+
+
+def service_host(value: str, label: str) -> str:
+    # Под каким именем агент открывает стенд. Не косметика: фронт вправе решать
+    # «локалка или прод» по window.location.hostname, и тогда 127.0.0.1 вместо
+    # localhost уводит приложение в продовую ветку авторизации. Инцидент t8165:
+    # приёмка открыла стенд по IP, фронт посчитал себя продом, ушёл на несуществующий
+    # /tools/login и зациклил редиректы — узел browser 90 минут висел на мёртвой
+    # странице, не проверив ни одного сценария.
+    if not SERVICE_HOST_RE.fullmatch(value):
+        fail(f"{label}: нужно имя хоста или адрес без схемы, порта и слэшей")
+    return value
+
+
+def parse_targets(values: list[str], mode: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for index, value in enumerate(values):
+        if value.count("=") != 1:
+            fail(f"delivery-target[{index}]: ожидалось repo=branch")
+        repo, branch = value.split("=", 1)
+        repo = identifier(repo, ID_RE, f"delivery-target[{index}].repo")
+        branch = branch_name(
+            branch,
+            f"delivery-target[{index}].branch",
+        )
+        if repo in result:
+            fail(f"delivery-target[{index}]: повтор репозитория {repo}")
+        result[repo] = branch
+    if mode == "publish" and not result:
+        fail("delivery-target: режим publish требует целевые ветки")
+    return result
+
+
+def project_context(raw: str) -> dict[str, list[str]]:
+    """Проверяет проектную часть контекста, которую объявляет профиль."""
+    try:
+        value = json.loads(
+            string(raw, "project-context-json", maximum=32_768),
+            parse_constant=lambda item: fail(
+                f"project-context-json: запрещено не-JSON число {item}"
+            ),
+        )
+    except json.JSONDecodeError as error:
+        fail(f"project-context-json: повреждённый JSON: {error}")
+    value = exact_object(value, {"stack", "guardrails"}, "project-context-json")
+    result: dict[str, list[str]] = {}
+    for key, limit, item_limit in (
+        ("stack", 64, 500),
+        ("guardrails", 100, 2_000),
+    ):
+        items = value[key]
+        if not isinstance(items, list) or len(items) > limit:
+            fail(f"project-context-json.{key}: ожидался массив до {limit} строк")
+        result[key] = [
+            string(
+                item,
+                f"project-context-json.{key}[{index}]",
+                maximum=item_limit,
+            )
+            for index, item in enumerate(items)
+        ]
+    if not result["stack"]:
+        fail("project-context-json.stack: нужен хотя бы один элемент")
+    return result
+
+
+def findings_ledger(raw: str) -> dict[str, Any]:
+    """Проверяет производную проекцию typed findings из immutable ledger."""
+    try:
+        value = json.loads(
+            string(raw, "findings-ledger-json", maximum=MAX_JSON_BYTES),
+            parse_constant=lambda item: fail(
+                f"findings-ledger-json: запрещено не-JSON число {item}"
+            ),
+        )
+    except json.JSONDecodeError as error:
+        fail(f"findings-ledger-json: повреждённый JSON: {error}")
+    value = exact_object(value, {"schema", "open", "closed"}, "findings-ledger-json")
+    if value["schema"] != 1:
+        fail("findings-ledger-json.schema: поддерживается только 1")
+
+    seen: set[tuple[str, str]] = set()
+    projected: dict[str, list[dict[str, Any]]] = {"open": [], "closed": []}
+    for status in ("open", "closed"):
+        records = value[status]
+        if not isinstance(records, list) or len(records) > 2_000:
+            fail(f"findings-ledger-json.{status}: ожидался массив до 2000 записей")
+        for index, raw_record in enumerate(records):
+            label = f"findings-ledger-json.{status}[{index}]"
+            record = exact_object(
+                raw_record,
+                {
+                    "id",
+                    "sourceNode",
+                    "owner",
+                    "summary",
+                    "openedSequence",
+                    "lastSeenSequence",
+                    "status",
+                    "closedSequence",
+                },
+                label,
+            )
+            finding_id = identifier(record["id"], FINDING_RE, f"{label}.id")
+            source_node = identifier(record["sourceNode"], NODE_RE, f"{label}.sourceNode")
+            owner = identifier(record["owner"], ID_RE, f"{label}.owner")
+            if owner not in FAILURE_OWNERS:
+                fail(f"{label}.owner: неизвестный владелец")
+            summary = string(record["summary"], f"{label}.summary", maximum=500)
+            if any(ord(char) < 32 or ord(char) == 127 for char in summary):
+                fail(f"{label}.summary: управляющие символы запрещены")
+            opened = record["openedSequence"]
+            last_seen = record["lastSeenSequence"]
+            if (
+                isinstance(opened, bool)
+                or not isinstance(opened, int)
+                or not 1 <= opened <= 999_999
+                or isinstance(last_seen, bool)
+                or not isinstance(last_seen, int)
+                or not opened <= last_seen <= 999_999
+            ):
+                fail(f"{label}: недопустимые sequence")
+            if record["status"] != status:
+                fail(f"{label}.status: не совпадает с секцией")
+            closed = record["closedSequence"]
+            if status == "open":
+                if closed is not None:
+                    fail(f"{label}.closedSequence: у открытого finding нужен null")
+            elif (
+                isinstance(closed, bool)
+                or not isinstance(closed, int)
+                or not last_seen <= closed <= 999_999
+            ):
+                fail(f"{label}.closedSequence: недопустимый sequence")
+            key = (source_node, finding_id)
+            if key in seen:
+                fail(f"{label}: повтор finding {source_node}/{finding_id}")
+            seen.add(key)
+            projected[status].append(
+                {
+                    "id": finding_id,
+                    "sourceNode": source_node,
+                    "owner": owner,
+                    "summary": summary,
+                    "openedSequence": opened,
+                    "lastSeenSequence": last_seen,
+                    "status": status,
+                    "closedSequence": closed,
+                }
+            )
+    return {"schema": 1, **projected}
+
+
+def decision(status: str, comment: str) -> dict[str, str]:
+    return {
+        "status": status,
+        "comment": string(comment, "decision comment", minimum=0, maximum=10_000),
+    }
+
+
+def build_context(args: argparse.Namespace) -> dict[str, Any]:
+    task_id = identifier(args.task, TASK_RE, "task")
+    profile = identifier(args.profile, ID_RE, "profile")
+    attempt_id = identifier(args.attempt, ATTEMPT_RE, "attempt")
+    catalog_hash = identifier(args.catalog_hash, HASH_RE, "catalog-hash")
+    route_id = identifier(args.route, NODE_RE, "route")
+    route_hash = identifier(args.route_hash, HASH_RE, "route-hash")
+    node = identifier(args.node, NODE_RE, "node")
+    run_key = identifier(args.run_key, RUN_KEY_RE, "run-key")
+    workspace_mode = identifier(args.workspace_mode, ID_RE, "workspace-mode")
+    if workspace_mode not in {"isolated", "shared"}:
+        fail("workspace-mode: допускается только isolated или shared")
+    project = project_context(args.project_context_json)
+    findings = findings_ledger(args.findings_ledger_json)
+
+    # Репозитории профиля: произвольный список `--repo имя:worktree:source`.
+    # Двухрепозиторные флаги остаются как совместимый сахар для профилей вида
+    # backend+frontend; однорепозиторному профилю достаточно одного --repo.
+    repos: dict[str, dict[str, str]] = {}
+    repo_order: list[str] = []
+    for index, item in enumerate(args.repo):
+        label = f"repo[{index}]"
+        parts = string(item, label, maximum=8_192).split(":")
+        if len(parts) != 3:
+            fail(f"{label}: ожидался формат имя:worktree:source")
+        name = identifier(parts[0], ID_RE, f"{label}.name")
+        if name in WORKSPACE_RESERVED_KEYS:
+            fail(f"{label}.name: имя {name} зарезервировано typed context")
+        if name in repos:
+            fail(f"{label}: повтор имени {name}")
+        repos[name] = {
+            "path": absolute_directory(parts[1], f"{label}.worktree"),
+            "sourcePath": absolute_directory(parts[2], f"{label}.source"),
+        }
+        repo_order.append(name)
+    for name, worktree, source in (
+        ("backend", args.backend_worktree, args.backend_source),
+        ("frontend", args.frontend_worktree, args.frontend_source),
+    ):
+        if not worktree and not source:
+            continue
+        if not worktree or not source:
+            fail(f"{name}: worktree и source задаются вместе")
+        if name in repos:
+            fail(f"{name}: задан и через --repo, и отдельным флагом")
+        repos[name] = {
+            "path": absolute_directory(worktree, f"{name}-worktree"),
+            "sourcePath": absolute_directory(source, f"{name}-source"),
+        }
+        repo_order.append(name)
+    if not repos:
+        fail("нужен хотя бы один репозиторий: --repo имя:worktree:source")
+    worktrees = [repos[name]["path"] for name in repo_order]
+    if len(set(worktrees)) != len(worktrees):
+        fail("repo: worktree повторяется у разных репозиториев")
+    state_dir = absolute_directory(args.state_dir, "state-dir")
+
+    allowed_files = [
+        absolute_file_candidate(
+            item,
+            worktrees,
+            f"allowed-file[{index}]",
+        )
+        for index, item in enumerate(args.allowed_file)
+    ]
+    if len(set(allowed_files)) != len(allowed_files):
+        fail("allowed-file: повтор пути")
+    scope_file = string(args.scope_file, "scope-file", minimum=0, maximum=4_096)
+    if scope_file:
+        absolute_file_candidate(scope_file, [state_dir], "scope-file")
+
+    event_count = args.event_count
+    if event_count < 0:
+        fail("event-count: нужен неотрицательный integer")
+    stage_results = []
+    for index, raw in enumerate(args.stage_result):
+        matched = STAGE_RESULT_RE.fullmatch(raw)
+        if not matched:
+            fail(f"stage-result[{index}]: ожидался node:outcome:sequence")
+        sequence = int(matched.group(3))
+        if not 1 <= sequence <= 999_999:
+            fail(f"stage-result[{index}]: sequence вне диапазона")
+        stage_results.append({
+            "node": matched.group(1),
+            "outcome": matched.group(2),
+            "sequence": sequence,
+        })
+    if len(stage_results) > 500:
+        fail("stage-result: слишком много записей")
+    if [item["sequence"] for item in stage_results] != sorted(
+        item["sequence"] for item in stage_results
+    ):
+        fail("stage-result: записи должны идти по возрастанию sequence")
+    frontend_port = optional_port(args.frontend_port, "frontend-port")
+    api_port = optional_port(args.api_port, "api-port")
+    host = service_host(args.service_host, "service-host")
+
+    actions = list(dict.fromkeys(args.delivery_action))
+    if any(action not in DELIVERY_ACTIONS for action in actions):
+        fail("delivery-action: неизвестное действие")
+    if args.delivery_mode == "publish" and not {
+        "commit",
+        "push",
+        "pull-request",
+    }.issubset(actions):
+        fail("delivery-action: publish требует commit, push и pull-request")
+    targets = parse_targets(args.delivery_target, args.delivery_mode)
+    target_repos = set(repo_order)
+    if {"backend", "frontend"}.issubset(target_repos):
+        # Legacy delivery contract исторически зовёт эти репозитории be/fe.
+        target_repos.update({"be", "fe"})
+    unknown_targets = set(targets) - target_repos
+    if unknown_targets:
+        fail(
+            "delivery-target: репозитории отсутствуют в workspace: "
+            + ", ".join(sorted(unknown_targets))
+        )
+    source_branch = branch_name(args.source_branch, "source-branch")
+
+    artifact = lambda suffix: f"{state_dir}/t{task_id}.{suffix}"
+    return {
+        "task": read_ticket(Path(args.ticket_json), task_id),
+        "attempt": {
+            "id": attempt_id,
+            "engineProtocol": 2,
+            "catalogHash": catalog_hash,
+            "routeId": route_id,
+            "routeHash": route_hash,
+            "selectedBy": args.selected_by,
+        },
+        "project": {
+            "profile": profile,
+            **project,
+        },
+        "workspace": {
+            "mode": workspace_mode,
+            # Репозитории под своими именами: двухрепозиторный профиль по-прежнему
+            # отдаёт workspace.backend/workspace.frontend, однорепозиторный — свой
+            # единственный ключ. Промпт обращается к нужному по имени профиля.
+            **{name: repos[name] for name in repo_order},
+            "repos": repo_order,
+            "stateDir": state_dir,
+            "containerName": string(
+                args.container_name,
+                "container-name",
+                maximum=255,
+            ),
+        },
+        "services": {
+            "frontendUrl": (
+                f"http://{host}:{frontend_port}"
+                if frontend_port
+                else "unavailable"
+            ),
+            "apiUrl": (
+                f"http://{host}:{api_port}"
+                if api_port
+                else "unavailable"
+            ),
+        },
+        "artifacts": {
+            "recon": artifact("recon.md"),
+            "plan": artifact("plan.md"),
+            "diagnosis": artifact("diag.md"),
+            "diagnosisRaw": artifact("diag.raw.md"),
+            "testsDigest": artifact("tests.sha256"),
+            "report": artifact("report.md"),
+            "rejection": artifact("reject.md"),
+            "ship": artifact("ship.md"),
+            "lessons": f"{state_dir}/archive/t{task_id}.lessons-proposed.md",
+            # Консилиум (маршруты consilium-*): мнения/ранги членов и trusted сводка
+            # command-узла COUNCIL_AGG. Route-нейтрально: остальные маршруты ключи
+            # просто не используют.
+            "councilOpinionA": artifact("council.opinion-a.md"),
+            "councilOpinionB": artifact("council.opinion-b.md"),
+            "councilOpinionC": artifact("council.opinion-c.md"),
+            "councilRankA": artifact("council.rank-a.md"),
+            "councilRankB": artifact("council.rank-b.md"),
+            "councilRankC": artifact("council.rank-c.md"),
+            "councilAggregate": artifact("council.aggregate.json"),
+            "councilBrief": artifact("council.brief.md"),
+        },
+        "diagnosis": {
+            "kind": args.diagnosis_kind,
+            "signal": string(args.diagnosis_signal, "diagnosis-signal", maximum=200),
+            "instrumentationRequired": args.instrumentation_required,
+        },
+        "instrumentation": {
+            "mode": "required" if args.instrumentation_required else "optional",
+            "transactionId": args.transaction_id or "not-open",
+            "marker": f"FACTORY-TRACE:t{task_id}",
+            "scopeFile": scope_file or "not-created",
+            "allowedFiles": allowed_files,
+            "phase": args.instrumentation_phase,
+        },
+        "evidence": {
+            "eventCount": event_count,
+            "stageResults": stage_results,
+            "findings": findings,
+        },
+        "decisions": {
+            "cause": decision(args.cause_decision, args.cause_comment),
+            "review": decision(args.review_decision, args.review_comment),
+            "acceptance": decision(
+                args.acceptance_decision,
+                args.acceptance_comment,
+            ),
+        },
+        "delivery": {
+            "mode": args.delivery_mode,
+            "actions": actions,
+            "targetBranches": targets,
+            "sourceBranch": source_branch,
+        },
+        "routeCatalog": {
+            route_id: route_hash,
+        },
+        "stage": {
+            "id": node,
+            "runKey": run_key,
+        },
+    }
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description="Build exact route-v2 context")
+    result.add_argument("--task", required=True)
+    result.add_argument("--profile", required=True)
+    result.add_argument("--attempt", required=True)
+    result.add_argument("--catalog-hash", required=True)
+    result.add_argument("--route", required=True)
+    result.add_argument("--route-hash", required=True)
+    result.add_argument("--node", required=True)
+    result.add_argument("--run-key", required=True)
+    result.add_argument("--ticket-json", required=True)
+    result.add_argument("--project-context-json", required=True)
+    result.add_argument("--repo", action="append", default=[])
+    result.add_argument("--backend-source", default="")
+    result.add_argument("--frontend-source", default="")
+    result.add_argument("--backend-worktree", default="")
+    result.add_argument("--frontend-worktree", default="")
+    result.add_argument("--state-dir", required=True)
+    result.add_argument("--workspace-mode", required=True)
+    result.add_argument("--container-name", required=True)
+    result.add_argument("--frontend-port", default="")
+    result.add_argument("--api-port", default="")
+    # Умолчание петлевое: движок не знает, как проект отличает локальный запуск.
+    # Имя объявляет профиль (PROFILE_SERVICE_HOST) — см. PROFILE-CONTRACT.
+    result.add_argument("--service-host", default="127.0.0.1")
+    result.add_argument("--allowed-file", action="append", default=[])
+    result.add_argument("--scope-file", default="")
+    result.add_argument("--transaction-id", default="")
+    result.add_argument(
+        "--instrumentation-phase",
+        choices=["not-started", "active", "cleaned", "stalled"],
+        default="not-started",
+    )
+    result.add_argument("--instrumentation-required", action="store_true")
+    result.add_argument(
+        "--diagnosis-kind",
+        choices=["functional", "performance", "data", "integration"],
+        default="functional",
+    )
+    result.add_argument("--diagnosis-signal", default="unspecified")
+    result.add_argument("--event-count", type=int, default=0)
+    # Проверенные записи журнала попытки: node:outcome:sequence, по возрастанию.
+    result.add_argument("--stage-result", action="append", default=[])
+    # Производная проекция открытых/закрытых замечаний из проверенного hash-chain.
+    result.add_argument(
+        "--findings-ledger-json",
+        default='{"schema":1,"open":[],"closed":[]}',
+    )
+    result.add_argument(
+        "--selected-by",
+        choices=["human", "scout", "recovery"],
+        default="human",
+    )
+    for name in ("cause", "review", "acceptance"):
+        result.add_argument(
+            f"--{name}-decision",
+            choices=["pending", "approved", "rejected"],
+            default="pending",
+        )
+        result.add_argument(f"--{name}-comment", default="")
+    result.add_argument(
+        "--delivery-mode",
+        choices=["disabled", "publish"],
+        default="publish",
+    )
+    result.add_argument(
+        "--delivery-action",
+        action="append",
+        default=[],
+        choices=sorted(DELIVERY_ACTIONS),
+    )
+    result.add_argument("--delivery-target", action="append", default=[])
+    result.add_argument("--source-branch", required=True)
+    return result
+
+
+def main() -> int:
+    args = parser().parse_args()
+    value = build_context(args)
+    json.dump(value, sys.stdout, ensure_ascii=False, sort_keys=True, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except ContextError as error:
+        print(f"context v2: {error}", file=sys.stderr)
+        raise SystemExit(78)

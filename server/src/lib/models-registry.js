@@ -5,19 +5,17 @@
 //   • уровни эффорта обнаруживаются динамически (executor.efforts(), например парсинг
 //     `claude --help`) — добавит вендор новый уровень (ultra и т.п.) — подхватится само;
 //   • сортировка по tier (сильнее = больше = выше в списке), тоже данные из файла.
-// У каждой модели: id (что передаём CLI), name (с версией — для UI), context (окно),
-// efforts (уровни; null = взять обнаруженные у исполнителя), tier (ранг силы).
+// У каждой модели: id (что передаём CLI), family (долгоживущая policy), name
+// (с версией — для UI), context (окно), efforts (уровни; null = взять обнаруженные
+// у исполнителя), tier (ранг силы).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getExecutors } from './executors/index.js';
 
-// Дефолт, если и файла нет, и динамическое обнаружение не сработало.
-const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'max'];
-
 // Версия правил составления каталога. Меняем, когда меняется САМ принцип отбора моделей
 // (например «в кратком списке — только свежая версия семейства») — иначе у работающих
 // кокпитов в реестре останется список, собранный по старым правилам.
-const CATALOG_SCHEMA = 4;
+const CATALOG_SCHEMA = 6;
 
 let cache = null; // { at, registry }
 const CACHE_MS = 60_000;
@@ -81,10 +79,10 @@ async function mergeDiscovered(file, prov, ex, config) {
 }
 
 /**
- * Каталог установленного CLI (executor.catalog) — ГЛАВНЫЙ источник правды о моделях:
- * что CLI знает, то и показываем, с именами, выведенными из id. Скан дорогой, поэтому
- * гоняем его только при смене версии CLI (`_meta[prov].catalogVersion`) — то есть
- * сразу после обновления исполнителя список сам становится актуальным.
+ * Каталог executor-а — ГЛАВНЫЙ источник правды о моделях: что CLI/аккаунт знает, то и
+ * показываем. Локальные каталоги (`catalogLive !== true`) опрашиваем при смене версии
+ * CLI; живые — при обновлении минутного кэша реестра, чтобы rollout новой модели
+ * появился без обновления Cockpit.
  *
  * Мёрж, а не перезапись: новые модели добавляются, у известных освежаются name/context/tier
  * (кроме записей с `custom: true` — они правлены руками), пропавшие из каталога помечаются
@@ -99,7 +97,8 @@ async function mergeCatalog(file, prov, ex, config) {
   const list = (file[prov] ||= []);
   // Пересобираем и когда сменилась версия CLI, и когда поменялись правила составления
   // каталога (CATALOG_SCHEMA) — иначе у уже работающих кокпитов остался бы старый список.
-  if (list.length && pm.catalogVersion === version && pm.catalogSchema === CATALOG_SCHEMA) return false;
+  const metadataChanged = pm.catalogVersion !== version || pm.catalogSchema !== CATALOG_SCHEMA;
+  if (!ex.catalogLive && list.length && !metadataChanged) return false;
 
   let catalog = null;
   try { catalog = await ex.catalog(config); } catch { catalog = null; }
@@ -111,19 +110,29 @@ async function mergeCatalog(file, prov, ex, config) {
   // из выбора уходит. Иначе список копит всё, что когда-либо видел любой CLI, и превращается
   // в свалку. Исключение — записи с `custom: true`: их добавил человек, их не трогаем.
   const prevById = new Map(list.map((m) => [m.id, m]));
-  const next = catalog.map((m) => {
-    const cur = prevById.get(m.id);
-    // Ручные правки (имя, окно, свои efforts) переживают пересборку.
-    return cur?.custom ? { ...m, ...cur, unknown: false } : { ...m, efforts: cur?.efforts ?? m.efforts };
-  });
+  const next = catalog.map((m) => mergeCatalogModel(m, prevById.get(m.id)));
   const inCatalog = new Set(catalog.map((m) => m.id));
   for (const m of list) {
     if (!inCatalog.has(m.id) && m.custom) next.push({ ...m, unknown: true });
   }
+  const listChanged = JSON.stringify(list) !== JSON.stringify(next);
   file[prov] = next;
   pm.catalogVersion = version;
   pm.catalogSchema = CATALOG_SCHEMA;
-  return true;
+  return metadataChanged || listChanged;
+}
+
+export function mergeCatalogModel(model, current) {
+  // Только явно custom-запись перекрывает живой каталог. Обычная сохранённая копия
+  // не должна удерживать старый список efforts после обновления CLI.
+  return current?.custom ? { ...model, ...current, unknown: false } : { ...model };
+}
+
+export function resolveModelEfforts(modelEfforts, discoveredEfforts, custom = false) {
+  if (custom && Array.isArray(modelEfforts)) return modelEfforts;
+  if (Array.isArray(discoveredEfforts)) return discoveredEfforts;
+  if (Array.isArray(modelEfforts)) return modelEfforts;
+  return [];
 }
 
 /**
@@ -155,7 +164,17 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
       try { discovered = await ex.efforts(config); } catch { discovered = null; }
     }
     registry[prov] = (models || [])
-      .map((m) => ({ ...m, efforts: m.efforts || discovered || FALLBACK_EFFORTS }))
+      .map((m) => {
+        let family = String(m.family || '').trim();
+        if (!family && typeof ex?.modelFamily === 'function') {
+          try { family = String(ex.modelFamily(m) || '').trim(); } catch { family = ''; }
+        }
+        return {
+          ...m,
+          ...(family && { family }),
+          efforts: resolveModelEfforts(m.efforts, discovered, m.custom),
+        };
+      })
       .sort((a, b) => (b.tier || 0) - (a.tier || 0));
   }
   cache = { at: Date.now(), registry };
@@ -166,15 +185,26 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
  * Запись модели + её исполнитель: { provider, model }. null — модели нет в реестре.
  * Нужна там, где важны свойства модели (уровни эффорта, окно контекста), а не только
  * кому её отдать: неподдерживаемый уровень CLI не проглатывает, а падает с ошибкой валидации.
+ * Точный id/алиас имеет приоритет; семейство (`sol`) выбирает актуальную не-extra модель.
  */
-export async function modelInfo(modelId, config) {
+export function modelInfoFromRegistry(modelId, registry) {
   if (!modelId) return null;
-  const registry = await getModelsRegistry(config);
   for (const [provider, models] of Object.entries(registry)) {
     // Алиас CLI (`opus`) отдельной записи не имеет — он привязан к модели, в которую
     // резолвится: запрос со старым выбором всё равно находит свойства нужной модели.
     const model = models.find((m) => m.id === modelId || (m.aliases || []).includes(modelId));
     if (model) return { provider, model };
   }
+  for (const [provider, models] of Object.entries(registry)) {
+    const candidates = models.filter((m) => m.family === modelId);
+    const model = candidates.sort((a, b) =>
+      Number(!!a.extra) - Number(!!b.extra) || Number(b.tier || 0) - Number(a.tier || 0))[0];
+    if (model) return { provider, model };
+  }
   return null;
+}
+
+export async function modelInfo(modelId, config) {
+  if (!modelId) return null;
+  return modelInfoFromRegistry(modelId, await getModelsRegistry(config));
 }

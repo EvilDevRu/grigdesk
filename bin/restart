@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
 # Перезапуск сервера кокпита без конфликтов порта (EADDRINUSE):
-# гасим все процессы на порту, ЖДЁМ освобождения, только потом стартуем новый.
+# гасим все процессы на портах, ЖДЁМ освобождения, только потом стартуем новый.
 set -euo pipefail
 
-PORT="${COCKPIT_PORT:-8140}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="${COCKPIT_LOG:-$ROOT/server/.state/cockpit-server.log}"
-export COCKPIT_MEDIA_PYTHON="${COCKPIT_MEDIA_PYTHON:-$HOME/Workspace/b24-mcp/app/.venv/bin/python}"
 
-busy() { ss -tln 2>/dev/null | grep -q ":$PORT "; }
+# node нужен и серверу, и безопасному чтению корневого .env.
+if ! command -v node >/dev/null 2>&1; then
+  echo "node не найден в PATH" >&2
+  exit 1
+fi
 
-# Все PID'ы, слушающие порт (может быть и зомби от прошлых конфликтов)
-pids=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+# Машинные настройки — из корневого .env, как у bin/cockpit и systemd-юнита. Раньше путь к
+# venv распознавания был прописан прямо здесь, и работа диктовки зависела от способа запуска:
+# поднятый этим скриптом кокпит распознавал, поднятый systemd падал со spawn ... ENOENT.
+source "$ROOT/bin/lib/runtime-env.sh"
+cockpit_add_cli_paths
+cockpit_load_runtime_env "$ROOT"
+PORT="$COCKPIT_EFFECTIVE_PORT"
+# Второй сокет (локальный HTTPS). Ждать его тоже обязательно: сокеты закрываются не
+# одновременно, и новый процесс может стартовать, пока старый ещё держит этот порт.
+TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
+ENV_ARG=("${COCKPIT_NODE_ENV_ARGS[@]}")
+
+listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
+busy() { listening "$PORT" || listening "$TLS_PORT"; }
+
+# Все PID'ы, слушающие наши порты (может быть и зомби от прошлых конфликтов)
+pids=$(ss -tlnp 2>/dev/null | grep -E ":($PORT|$TLS_PORT) " | grep -oP 'pid=\K[0-9]+' | sort -u || true)
 if [ -n "$pids" ]; then
   echo "гашу: $pids"
   kill $pids 2>/dev/null || true
@@ -23,13 +40,14 @@ if [ -n "$pids" ]; then
   fi
 fi
 if busy; then
-  echo "порт :$PORT всё ещё занят — не стартую" >&2
+  listening "$PORT" && echo "порт :$PORT всё ещё занят — не стартую" >&2
+  listening "$TLS_PORT" && echo "порт :$TLS_PORT всё ещё занят — не стартую" >&2
   exit 1
 fi
 
 mkdir -p "$(dirname "$LOG")"
 cd "$ROOT"
-setsid nohup node server/src/app.js </dev/null >>"$LOG" 2>&1 &
+setsid nohup node "${ENV_ARG[@]}" server/src/app.js </dev/null >>"$LOG" 2>&1 &
 disown
 
 # Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health

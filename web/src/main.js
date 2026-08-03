@@ -11,7 +11,14 @@ createApp(App).use(pinia).use(router).mount('#app');
 
 // Ловим предложение установки на устройство (beforeinstallprompt). Слушатель надо повесить
 // как можно раньше: событие прилетает один раз на загрузку, пропустим — кнопки не будет.
-usePwaStore(pinia).initInstall();
+const pwa = usePwaStore(pinia);
+pwa.initInstall();
+// Настройка Screen Wake Lock действует на корне SPA: смена страницы её не сбрасывает,
+// а после возвращения из фона стор запрашивает блокировку повторно.
+pwa.initWakeLock();
+// Permission только синхронизируем. Сам запрос идёт по кнопке в настройках — браузеру
+// для него обязательно нужно явное действие пользователя.
+pwa.initNotifications();
 
 // ВАЖНО: НЕ вешаем глобальный слушатель controllerchange с reload() — с включённым
 // в DevTools «Update on reload» воркер обновляется на каждую загрузку, controllerchange
@@ -31,4 +38,3 @@ const updateSW = registerSW({
     document.addEventListener('visibilitychange', check);
   },
 });
-

@@ -2,6 +2,7 @@
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
+import { familyModels } from '../shared/model-family.js';
 
 let usageAt = 0;
 
@@ -23,6 +24,12 @@ export const useProvidersStore = defineStore('providers', {
       }
       return 'opus';
     },
+    defaultModelRef() {
+      const current = this.modelOf(this.defaultModelId);
+      return current.provider && current.model
+        ? { provider: current.provider.id, model: current.model.id }
+        : null;
+    },
     /**
      * Модели исполнителя, которые видно в выборе. Правило одно на весь кокпит: краткий
      * список = только свежие версии, `extra` (старые версии) — под настройкой; выбранную
@@ -33,8 +40,8 @@ export const useProvidersStore = defineStore('providers', {
     /**
      * Сохранённый выбор → реальная модель. Алиас CLI (`opus`, `sonnet`, `haiku`) отдельным
      * пунктом не показывается: он привязан к модели, в которую резолвится (`aliases`).
-     * Поэтому старый выбор «opus» показывается и уходит как «Opus 4.6», а после обновления
-     * бинаря — как «Opus 5», без ручных миграций сохранённых чатов.
+     * Поэтому старый выбор «opus» и family policy вроде «sol» уходят как актуальная
+     * конкретная модель установленного CLI, без ручных миграций сохранённых чатов.
      */
     resolveModelId: (state) => (id) => {
       if (!id) return '';
@@ -42,6 +49,10 @@ export const useProvidersStore = defineStore('providers', {
         for (const m of p.models || []) {
           if (m.id === id || (m.aliases || []).includes(id)) return m.id;
         }
+      }
+      for (const p of state.providers) {
+        const m = familyModels(p.models || []).find((candidate) => candidate.family === id);
+        if (m) return m.id;
       }
       return id; // реестр не загружен или модель незнакомая — отдаём как есть
     },
@@ -60,6 +71,13 @@ export const useProvidersStore = defineStore('providers', {
      */
     modelOf() {
       return (sessionModel) => {
+        if (sessionModel && typeof sessionModel === 'object') {
+          const providerId = String(sessionModel.provider || '');
+          const modelId = String(sessionModel.model || '');
+          const provider = this.providers.find((item) => item.id === providerId) || null;
+          const model = (provider?.models || []).find((item) => item.id === modelId) || null;
+          return { id: modelId, model, provider };
+        }
         const id = this.resolveModelId(sessionModel) || this.defaultModelId;
         for (const p of this.providers) {
           const model = (p.models || []).find((m) => m.id === id);
@@ -78,14 +96,54 @@ export const useProvidersStore = defineStore('providers', {
       } catch { /* сервер молчит — иконок просто нет */ }
       this.loaded = true;
     },
-    // Потребление лимитов (прогрессбары в тултипе иконки исполнителя). Кэш минута.
-    async loadUsage() {
-      if (Date.now() - usageAt < 60_000) return;
+    // Потребление лимитов (прогрессбары в тултипе иконки исполнителя). Кэш минута;
+    // force — после своих же изменений (доплата), когда ждать минуту нельзя.
+    async loadUsage(force = false) {
+      if (!force && Date.now() - usageAt < 60_000) return;
       usageAt = Date.now();
       try {
         const { usage } = await api.get('/api/providers/usage');
         this.usage = usage || {};
       } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
+    },
+    /**
+     * Своя настройка исполнителя (тумблер в его плашке). Значение применяем сразу,
+     * чтобы тумблер не «отставал», и откатываем, если сервер не принял: схему настроек
+     * объявляет исполнитель, фронт про смысл ключа ничего не знает.
+     */
+    async saveSetting(providerId, settingId, value) {
+      const p = this.providers.find((x) => x.id === providerId);
+      const s = (p?.settings || []).find((x) => x.id === settingId);
+      if (!s) return { ok: false, error: 'настройка не объявлена исполнителем' };
+      const before = s.value;
+      s.value = value;
+      try {
+        const r = await api.post(`/api/providers/${encodeURIComponent(providerId)}/settings`, { settingId, value });
+        if (!r?.ok) { s.value = before; return { ok: false, error: r?.message || 'сервер не принял значение' }; }
+        if (r.settings) p.settings = r.settings;
+        return { ok: true };
+      } catch (e) {
+        s.value = before;
+        return { ok: false, error: e.data?.message || e.message };
+      }
+    },
+    /**
+     * Declarative account action exposed by one provider adapter. requestId is
+     * generated once per click so a provider can make irreversible calls idempotent.
+     */
+    async runUsageAction(providerId, actionId, payload = {}, requestId = '') {
+      const operationId = requestId || globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      try {
+        const r = await api.post(
+          `/api/providers/${encodeURIComponent(providerId)}/usage-actions/${encodeURIComponent(actionId)}`,
+          { requestId: operationId, payload },
+        );
+        if (r?.ok) await this.loadUsage(true);
+        return r || { ok: false, error: 'сервер не ответил' };
+      } catch (e) {
+        return { ok: false, error: e.data?.message || e.message };
+      }
     },
   },
 });

@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "scenario": "unauthenticated_no_prompt",
+  "compatibility": {
+    "cliPackage": "@moonshot-ai/kimi-code",
+    "cliVersion": "0.31.1",
+    "cliIntegrity": "sha512-Hyly4EjzemSjla479jC47h+K98wNvRKOqGwu6mBncI/MlIafqEByUXeGl/9+DsOKdiE6fQTxkxiAcgusBay56Q==",
+    "nodeVersionFloor": "22.19.0",
+    "protocolVersion": 1,
+    "acpSpec": "v0.10.x",
+    "acpSdkVersion": "0.23.0"
+  },
+  "safeguards": {
+    "inheritedEnvironment": false,
+    "isolatedHome": true,
+    "telemetryDisabled": true,
+    "promptSent": false,
+    "credentialMaterialCopied": false
+  },
+  "termination": {
+    "afterStdinEof": "natural",
+    "exitCode": 0,
+    "signal": null
+  },
+  "transcript": [
+    {
+      "direction": "client_to_agent",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {
+            "fs": {
+              "readTextFile": false,
+              "writeTextFile": false
+            }
+          },
+          "clientInfo": {
+            "name": "cockpit-kimi-acp-spike",
+            "version": "0.0.0"
+          }
+        }
+      }
+    },
+    {
+      "direction": "agent_to_client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "promptCapabilities": {
+              "image": true,
+              "audio": false,
+              "embeddedContext": true
+            },
+            "mcpCapabilities": {
+              "http": true,
+              "sse": true
+            },
+            "sessionCapabilities": {
+              "list": {},
+              "resume": {}
+            }
+          },
+          "authMethods": [
+            {
+              "id": "login",
+              "type": "terminal",
+              "name": "Login with Kimi account",
+              "description": "Open the device-code login flow in a terminal.",
+              "args": [
+                "--login"
+              ],
+              "env": {
+                "KIMI_CODE_HOME": "<KIMI_CODE_HOME>"
+              },
+              "_meta": {
+                "terminal-auth": {
+                  "type": "terminal",
+                  "label": "Login with Kimi account",
+                  "command": "<KIMI_BIN>",
+                  "args": [
+                    "login"
+                  ],
+                  "env": {
+                    "KIMI_CODE_HOME": "<KIMI_CODE_HOME>"
+                  }
+                }
+              }
+            }
+          ],
+          "agentInfo": {
+            "name": "Kimi Code CLI",
+            "version": "0.31.1"
+          }
+        }
+      }
+    },
+    {
+      "direction": "client_to_agent",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "session/list",
+        "params": {
+          "cwd": "<WORKSPACE>"
+        }
+      }
+    },
+    {
+      "direction": "agent_to_client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "sessions": [],
+          "nextCursor": null
+        }
+      }
+    },
+    {
+      "direction": "client_to_agent",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/new",
+        "params": {
+          "cwd": "<WORKSPACE>",
+          "mcpServers": []
+        }
+      }
+    },
+    {
+      "direction": "agent_to_client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32000,
+          "message": "Authentication required"
+        }
+      }
+    }
+  ],
+  "stderr": [
+    "Error handling request {",
+    "  jsonrpc: '2.0',",
+    "  id: 3,",
+    "  method: 'session/new',",
+    "  params: {",
+    "    cwd: '<WORKSPACE>',",
+    "    mcpServers: []",
+    "  }",
+    "} { code: -32000, message: 'Authentication required', data: undefined }"
+  ],
+  "startupInventory": [
+    {
+      "path": "<HOME>",
+      "type": "directory",
+      "mode": "700"
+    },
+    {
+      "path": "<KIMI_CODE_HOME>",
+      "type": "directory",
+      "mode": "700"
+    },
+    {
+      "path": "<KIMI_CODE_HOME>/device_id",
+      "type": "file",
+      "mode": "600",
+      "size": 36
+    },
+    {
+      "path": "<KIMI_CODE_HOME>/migrations-effort.json",
+      "type": "file",
+      "mode": "600",
+      "size": 64
+    },
+    {
+      "path": "<SPIKE_ROOT>/tmp",
+      "type": "directory",
+      "mode": "700"
+    },
+    {
+      "path": "<WORKSPACE>",
+      "type": "directory",
+      "mode": "700"
+    },
+    {
+      "path": "<SPIKE_ROOT>/xdg-cache",
+      "type": "directory",
+      "mode": "700"
+    },
+    {
+      "path": "<SPIKE_ROOT>/xdg-config",
+      "type": "directory",
+      "mode": "700"
+    },
+    {
+      "path": "<SPIKE_ROOT>/xdg-data",
+      "type": "directory",
+      "mode": "700"
+    }
+  ],
+  "syscallAudit": {
+    "enabled": true,
+    "attemptedSocketCalls": [],
+    "sensitiveFileCalls": [
+      "access(\"<KIMI_CODE_HOME>/device_id\", F_OK) = -1 ENOENT (No such file or directory)",
+      "mkdir(\"<KIMI_CODE_HOME>\", 0700) = -1 EEXIST (File exists)",
+      "statx(AT_FDCWD, \"<KIMI_CODE_HOME>\", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/device_id\", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0600) = 21",
+      "mkdir(\"<KIMI_CODE_HOME>\", 0700) = -1 EEXIST (File exists)",
+      "statx(AT_FDCWD, \"<KIMI_CODE_HOME>\", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/migrations-effort.json\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)",
+      "access(\"<KIMI_CODE_HOME>/config.toml\", F_OK) = -1 ENOENT (No such file or directory)",
+      "mkdir(\"<KIMI_CODE_HOME>\", 0700) = -1 EEXIST (File exists)",
+      "statx(AT_FDCWD, \"<KIMI_CODE_HOME>\", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/migrations-effort.json\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/migrations-effort.json\", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0600) = 21",
+      "access(\"<KIMI_CODE_HOME>/config.toml\", F_OK) = -1 ENOENT (No such file or directory)",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/plugins/installed.json\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/sessions/wd_workspace_d95eb465b737\", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = -1 ENOENT (No such file or directory)",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/session_index.jsonl\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)",
+      "access(\"<KIMI_CODE_HOME>/config.toml\", F_OK) = -1 ENOENT (No such file or directory)",
+      "openat(AT_FDCWD, \"<KIMI_CODE_HOME>/credentials/kimi-code.json\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)"
+    ]
+  }
+}

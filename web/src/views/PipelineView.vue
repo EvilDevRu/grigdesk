@@ -6,9 +6,22 @@ import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useChatStore } from '../stores/chat.js';
-import { secToHMS } from '../shared/format.js';
+import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
+import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';
 import { sandboxUrl } from '../shared/sandbox.js';
+import { agentActivityLabel } from '../shared/agent-activity.js';
+// «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
+// цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
+import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
+import {
+  attemptResultLabel,
+  providerLabel,
+  runnerChainLabel,
+  runnerModelLabel,
+  runnerNodeLabel,
+  runnerReasonLabel,
+} from '../shared/runner-display.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -32,7 +45,7 @@ const outsideTimers = computed(() => {
   return (d.tasks || []).filter((t) => t.timerRunning && !factoryIds.value.has(t.id));
 });
 function outsideElapsed(t) {
-  return (t.timerElapsed || 0) + (now.value - (board.loadedAt || now.value)) / 1000;
+  return liveTimerSec(t, now.value);
 }
 
 let ticker = null;
@@ -61,7 +74,14 @@ function toggleCard(task) {
   localStorage.setItem('cockpit-cards-collapsed', JSON.stringify([...s]));
 }
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
-const waitingCount = computed(() => filteredTasks.value.filter((t) => waitingReason(t.graph)).length);
+const waitingCount = computed(() => filteredTasks.value
+  .filter((t) => !t.readOnly && waitingReason(t.graph)).length);
+// Встали — это НЕ то же, что «ждут тебя». У ворот конвейер стоит штатно и с кнопкой,
+// а тут движок упёрся и сам позвал человека (или оборвался). Без этого различия REPRO failed
+// выглядит под тем же значком «○ стоит», что и доделанная задача, и ожидание человека незаметно.
+const stalledCount = computed(() => filteredTasks.value.filter((t) => !t.readOnly && t.stall).length);
+const stalledTitles = computed(() => filteredTasks.value
+  .filter((t) => !t.readOnly && t.stall).map((t) => `#${t.task}: ${t.stall.title}`).join('\n'));
 
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref(null);
@@ -79,14 +99,24 @@ let actPoll = null;
 const NODE_DOC = {
   gate_plan: 'plan', plan: 'plan', skeptic: 'plan', validate: 'plan', translator: 'plan',
   scout: 'recon', diagnose: 'diag', hyposkeptic: 'diag', proof: 'diag', gate_cause: 'diag',
-  ship: 'ship', gate_accept: 'report', browser: 'report', measure: 'report',
+  hunt_access: 'diag', hunt_data: 'diag', hunt_errors: 'diag', hunt_race: 'diag', verify: 'diag',
+  baseline: 'diag', perfplan: 'plan', perfskeptic: 'plan',
+  ship: 'ship', gate_accept: 'report', browser: 'report', triage: 'report',
+  measure: 'report', measurecheck: 'report',
 };
 const STAGE_HINT = {
   done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
   skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
   skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
+  fail: 'провалился — стенд не поднялся',
 };
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
+const RUNNER_SOURCE = {
+  'profile-project': 'политика проекта',
+  'profile-stage': 'политика этапа',
+  task: 'переопределение задачи',
+  'task-stage': 'переопределение этапа задачи',
+};
 
 const LIVE_ICONS = { tool: '⚙', subagent: '🤖', text: '💬', think: '🧠' };
 function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
@@ -94,9 +124,14 @@ function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
 function openStage(t, node) {
   stage.value = {
     task: t.task, id: node.nid, key: t.graph.keys?.[node.nid] || node.nid.toUpperCase(),
+    runnerKey: t.graph.runnerKeys?.[node.nid]
+      || t.graph.keys?.[node.nid]
+      || node.nid.toUpperCase(),
     isGate: node.nid.startsWith('gate_'), label: stripEmoji(node.label), sub: node.sub,
+    readOnly: Boolean(t.readOnly || t.graph.readOnly),
     status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
   };
+  loadFactoryRunners();
   stageComment.value = ''; stageActivity.value = null; stageInstruction.value = '';
   stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
   stageLogOpen.value = false;
@@ -117,50 +152,232 @@ async function pollActivity() {
   if (!stage.value) return;
   try { stageActivity.value = await api.get(`/api/tasks/${stage.value.task}/activity`); } catch { /* игнор */ }
 }
+// Модалка живёт дольше этапа: её открывают на бегущем узле и не закрывают. Статус в ней
+// обязан идти за графом, иначе она навсегда остаётся «выполняется сейчас» и продолжает
+// опрашивать активность уже закончившегося этапа, пока конвейер стоит у ворот.
+const stageLive = computed(() => {
+  if (!stage.value) return null;
+  const g = tasks.value.find((x) => Number(x.task) === Number(stage.value.task))?.graph;
+  if (!g?.statuses?.[stage.value.id]) return null;
+  return { status: g.statuses[stage.value.id], meta: g.nodeMeta?.[stage.value.id] || {} };
+});
+watch(stageLive, (live) => {
+  if (!stage.value || !live) return;
+  // Мета (время, длительность, токены, попытки runner-а) обновляется всегда: этап
+  // дописывает её и после того, как перестал быть активным.
+  stage.value.meta = live.meta;
+  if (live.status === stage.value.status) return;
+  stage.value.status = live.status;
+  clearInterval(actPoll);
+  if (live.status === 'run') { pollActivity(); actPoll = setInterval(pollActivity, 3000); }
+  else { stageActivity.value = null; }
+});
+
 // Автопрокрутка ленты действий агента вниз при обновлении.
 watch(() => stageActivity.value?.live?.actions?.length, () => {
   nextTick(() => { if (liveFeed.value) liveFeed.value.scrollTop = liveFeed.value.scrollHeight; });
 });
+// Решение и возврат курсора уходят в журнал попытки СРАЗУ, а продолжение прогона —
+// отдельным resume, который может не подняться (например, профиль правили при живой
+// попытке). Сервер отвечает 200 с resumed:false, и молчать об этом нельзя: карточка
+// выглядит принятой, а конвейер стоит — так на t7802 четыре попытки продолжить
+// прошли «успешно» и ничего не поехало.
+async function warnIfNotResumed(res) {
+  if (!res || res.resumed !== false) return;
+  await alertDialog(`Записано, но прогон не поехал: ${res.resumeError || 'причина — в журнале этапов задачи'}`);
+}
 async function gateDecide(decision) {
   stageBusy.value = 'gate';
-  try { await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value }); await load(); closeStage(); }
-  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  try {
+    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value });
+    await load(); closeStage();
+    await warnIfNotResumed(res);
+  }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 async function forceStatus(status) {
-  if (!confirm(`Принудительно: этап «${stage.value.label}» → ${status}?`)) return;
+  // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним.
+  // Возврат с приёмки на план сносит результаты всего, что между.
+  const question = `Вернуть конвейер на «${stage.value.label}»? Результаты этого узла и всех следующих за ним будут сброшены.`;
+  if (!await confirmDialog(question, { okText: 'Вернуть' })) return;
   stageBusy.value = 'force';
-  try { await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`); await load(); closeStage(); }
-  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  // Указание уезжает тем же запросом, что и сам возврат: сервер кладёт его в журнал
+  // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
+  try {
+    const res = await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
+      { comment: stageComment.value });
+    await load(); closeStage();
+    await warnIfNotResumed(res);
+  }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+}
+async function switchRunner(target) {
+  if (!await confirmDialog(
+    `Остановить текущий запуск ${providerLabel(stage.value.meta.runner.actual)} и продолжить этап через ${providerLabel(target)}?`,
+    { okText: 'Переключить' },
+  )) return;
+  stageBusy.value = 'runner-switch';
+  try {
+    await api.post(`/api/tasks/${stage.value.task}/runner/switch`, {
+      stage: stage.value.runnerKey,
+      target,
+    });
+    await load();
+    closeStage();
+  } catch (e) {
+    alertDialog(`Не удалось переключить исполнителя: ${e.message}`);
+  } finally {
+    stageBusy.value = null;
+  }
+}
+// Исполнители, установленные на фабрике — для override этапа. Тянем один раз,
+// при первом открытии узла; сервер не отдал — блок выбора просто не показываем.
+const factoryRunners = ref([]);
+let factoryRunnersRequested = false;
+function loadFactoryRunners() {
+  if (factoryRunnersRequested) return;
+  factoryRunnersRequested = true;
+  api.get('/api/factory/runners')
+    .then((r) => { factoryRunners.value = r.runners || []; })
+    .catch(() => { /* без списка блок выбора скрыт */ });
+}
+// Текущий primary могли снять с фабрики — тогда добавляем его в список сами,
+// иначе селект соврал бы про действующее значение этапа.
+const stageRunnerOptions = computed(() => {
+  const list = [...factoryRunners.value];
+  const primary = stage.value?.meta?.runner?.primary;
+  if (primary && !list.includes(primary)) list.unshift(primary);
+  return list;
+});
+// Override исполнителя до запуска этапа (бегущий переключают только кнопки switch).
+// '' — снять override этапа: вернётся переопределение задачи с запуска или профиль.
+async function setStageRunner(primary) {
+  stageBusy.value = 'runner-override';
+  try {
+    await taskStore.setStageRunner(stage.value.task, stage.value.runnerKey, primary);
+    await load();
+    closeStage();
+  } catch (e) {
+    alertDialog(`Не удалось сменить исполнителя этапа: ${e.message}`);
+  } finally {
+    stageBusy.value = null;
+  }
+}
+function onStageRunnerPick(event) {
+  const primary = event.target.value;
+  if (primary === (stage.value?.meta?.runner?.primary || '')) return;
+  setStageRunner(primary);
 }
 async function saveInstruction() {
   stageBusy.value = 'instr';
   try { await api.post(`/api/tasks/${stage.value.task}/instruction`, { text: stageInstruction.value }); }
-  catch (e) { alert(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 
-// «Ждёт тебя» — по узлу-воротам в статусе wait/premature.
-const GATE_REASON = {
-  gate_accept: 'принять работу — проверить в браузере', gate_plan: 'утвердить план работ',
-  gate_cause: 'подтвердить причину', gate_demo: 'посмотреть демо-видео', gate_demo_ok: 'принять демо',
-};
-function waitingReason(g) {
-  for (const nid of Object.keys(g.pos)) {
-    const s = g.statuses[nid];
-    if ((s === 'wait' || s === 'premature') && nid.startsWith('gate_')) {
-      return { text: GATE_REASON[nid] || stripEmoji(g.nodes[nid]?.[1]) || nid, premature: s === 'premature' };
-    }
-  }
-  return null;
-}
-
+// Снос идёт до пары минут (docker + схемы БД) — на это время кнопка превращается
+// в индикатор «сношу…», повторный клик заблокирован.
+const sandboxBusy = ref(new Set());
 async function sandboxDown(task) {
-  if (!confirm(`Снести стенд задачи #${task}? Действие необратимо.`)) return;
-  try { await api.post(`/api/tasks/${task}/sandbox/down`); load(); }
-  catch (e) { alert(e.status === 501 ? 'Снос стенда не настроен (COCKPIT_SANDBOX_DOWN_CMD).' : `Ошибка: ${e.message}`); }
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Снести стенд задачи #${task}? Текущий прогон уйдёт в архив, после чего задачу можно будет отправить на конвейер заново. Ветка и незакоммиченные изменения сохранятся.`,
+    { danger: true, okText: 'Снести' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try { await api.post(`/api/tasks/${task}/sandbox/down`); await load(); }
+  catch (e) { alertDialog(e.status === 501 ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.' : `Ошибка: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
-const ROUTE_ICON = { feature: '✨', debug: '🔍', trivial: '⚡', dev: '🛠', quick: '⚡' };
-function stripEmoji(s) { return (s || '').replace(/^[^\wА-Яа-яЁё]+/, '').trim(); }
+// Ручная архивация нужна только задаче, у которой стенда уже нет (например, подъём
+// оборвался до выдачи порта). Обычный «снести стенд» архивирует прогон сам.
+async function closeTask(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Закрыть задачу #${task}? Реестр уйдёт в архив, пустая ветка будет удалена (ветка с коммитами останется).`,
+    { danger: true, okText: 'Закрыть' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try {
+    const r = await api.post(`/api/tasks/${task}/close`);
+    const branches = (r.branches || []).map((b) => `${b.repo}: ${b.state}`).join('; ');
+    await alertDialog(`Задача #${task} закрыта.${branches ? ` Ветки — ${branches}.` : ''}`);
+    await load();
+  } catch (e) { alertDialog(`Ошибка: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
+// Стенд не поднялся — вернуть задачу в работу одной кнопкой. Двумя действиями это было
+// невозможно: «снести стенд» показывается только у живого стенда, а его-то и нет.
+// Пересборки стенда отдельно от прогона в движке не существует, поэтому здесь именно
+// перезапуск конвейера (resume) — со сносом остатков упавшей песочницы перед ним.
+async function sandboxRetry(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Перезапустить стенд задачи #${task}? Остатки упавшей песочницы будут снесены, конвейер продолжит с того места, где встал.`,
+    { okText: 'Перезапустить' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try {
+    const r = await api.post(`/api/tasks/${task}/sandbox/retry`);
+    await load();
+    // Снос мог оставить за собой worktree с незакоммиченными изменениями — тогда новый
+    // подъём упрётся в тот же гард. Сказать об этом надо сразу, а не через двадцать минут
+    // провижининга: в плашке это будет выглядеть как «стенд опять не поднялся» без причины.
+    const warn = (r.downOutput || '').split('\n').filter((s) => s.includes('ВНИМАНИЕ')).join('\n');
+    if (warn) alertDialog(`Конвейер перезапущен, но снос сообщил:\n${warn}`);
+    else if (r.note) alertDialog(r.note);
+  } catch (e) {
+    alertDialog(e.status === 501
+      ? 'Снос стенда не настроен: нет COCKPIT_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      : `Не удалось перезапустить: ${e.message}`);
+  } finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
+// Оборвавшийся прогон продолжает человек кнопкой: новый start движок отклонит,
+// пока у задачи есть открытая попытка. Исторические записи остаются только чтением.
+function canResume(t) {
+  return !t.readOnly && !t.daemonAlive && !!t.attempt
+    && !['completed', 'abandoned'].includes(t.result || '');
+}
+function canRetrySandbox(t) {
+  return !t.readOnly && t.workspaceMode !== 'shared' && t.stall?.stage === 'SANDBOX';
+}
+function canDestroySandbox(t) {
+  return !t.readOnly && t.workspaceMode !== 'shared';
+}
+async function resumeRun(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Продолжить прогон задачи #${task}? Конвейер поедет с того узла, на котором оборвался.`,
+    { okText: 'Продолжить' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try { await api.post(`/api/tasks/${task}/resume`); await load(); }
+  catch (e) { alertDialog(`Не удалось продолжить: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
+// Работающий конвейер останавливает человек кнопкой: движок получает TERM и
+// убирает за собой сам, попытка остаётся открытой для «продолжить прогон».
+function canStop(t) {
+  return !t.readOnly && t.daemonAlive;
+}
+async function stopRun(task) {
+  if (sandboxBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Остановить конвейер задачи #${task}? Текущий этап будет прерван, прогон встанет — продолжить его можно будет кнопкой «продолжить прогон».`,
+    { danger: true, okText: 'Остановить' },
+  )) return;
+  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  try { await api.post(`/api/tasks/${task}/stop`); await load(); }
+  catch (e) { alertDialog(`Не удалось остановить: ${e.message}`); }
+  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+}
+
+const ROUTE_ICON = {
+  feature: '✨', debug: '🔍', trivial: '⚡', hunt: '🕵', perf: '⏱', dev: '🛠', quick: '⚡',
+};
 
 async function load() {
   try {
@@ -188,6 +405,7 @@ function progressClass(g) {
   const s = cur ? g.statuses[cur] : 'done';
   if (s === 'run') return 'pk-run';
   if (s === 'wait' || s === 'premature') return 'pk-wait';
+  if (['stall', 'fail', 'skipbad'].includes(s)) return 'pk-stall';
   return 'pk-done';
 }
 function currentLabel(g) {
@@ -199,6 +417,7 @@ function loopList(g) {
 }
 function cardState(g) {
   const vals = Object.values(g.statuses);
+  if (vals.some((s) => ['stall', 'fail', 'skipbad'].includes(s))) return 'stall';
   if (vals.includes('wait') || vals.includes('premature')) return 'attn';
   if (vals.includes('run')) return 'act';
   return '';
@@ -211,6 +430,7 @@ function cardState(g) {
       <div class="tbrow">
         <h2 class="ttl">Задачи в работе <span class="cnt">{{ filteredTasks.length }}</span>
           <span v-if="waitingCount" class="needme">⏳ ждут тебя: {{ waitingCount }}</span>
+          <span v-if="stalledCount" class="stalledme" :title="stalledTitles">🛑 встали: {{ stalledCount }}</span>
         </h2>
         <div class="tools">
           <button :class="{ on: loopsOn }" @click="toggleLoops">↻ петли</button>
@@ -229,16 +449,22 @@ function cardState(g) {
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
 
-    <article v-for="t in filteredTasks" :key="t.task" class="card" :class="[cardState(t.graph), { collapsed: isCollapsed(t.task) }]">
+    <article v-for="t in filteredTasks" :key="t.task" class="card" :class="[t.readOnly ? 'readonly' : cardState(t.graph), { collapsed: isCollapsed(t.task) }]">
       <header class="head">
         <button v-if="!compact" class="chev" :title="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'" @click="toggleCard(t.task)">
           {{ collapsedSet.has(t.task) ? '▸' : '▾' }}
         </button>
         <button class="task mono" title="Свернуть/развернуть" @click="toggleCard(t.task)">#{{ t.task }}</button>
         <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
+        <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
+              :title="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
+          ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
+        </span>
         <button v-if="title(t.task)" class="ctitle" :title="title(t.task)" @click="ui.openTask(t.task)">{{ title(t.task) }}</button>
         <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
-        <span class="daemon" :class="t.daemonAlive ? 'alive' : 'idle'">{{ t.daemonAlive ? '● идёт' : '○ стоит' }}</span>
+        <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
+          {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
+        </span>
       </header>
 
       <div class="progress">
@@ -251,9 +477,42 @@ function cardState(g) {
       </div>
 
       <!-- Ждёт тебя (видно и в свёрнутом виде) -->
-      <div v-if="waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph).premature }">
+      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph).premature }">
         ⏳ ждёт тебя: {{ waitingReason(t.graph).text }}
         <span v-if="waitingReason(t.graph).premature" class="pm">(преждевременно — хвост не доделан)</span>
+      </div>
+
+      <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
+           пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
+           вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
+           затык надо замечать в списке, а не открывая карточку. -->
+      <div v-if="!t.readOnly && t.stall && isCollapsed(t.task)" class="stalled" :class="t.stall.kind">
+        <div class="srow">
+          <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
+          <span class="stitle">{{ t.stall.title }}</span>
+          <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
+        </div>
+        <div class="shint">{{ t.stall.hint }}</div>
+        <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
+        <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
+             Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
+             к живому порту фронта, — поэтому починка живёт в самой плашке. -->
+        <div v-if="canRetrySandbox(t) || canResume(t)" class="sfix">
+          <button v-if="canRetrySandbox(t)" class="sbretry" :class="{ busy: sandboxBusy.has(t.task) }"
+                  :disabled="sandboxBusy.has(t.task)" @click="sandboxRetry(t.task)">
+            <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> перезапускаю…</span>
+            <span v-else>↻ перезапустить стенд</span>
+          </button>
+          <!-- Оборвавшийся прогон: стенд на месте, продолжать нужно ту же попытку. -->
+          <button v-else class="sbretry" :class="{ busy: sandboxBusy.has(t.task) }"
+                  :disabled="sandboxBusy.has(t.task)" @click="resumeRun(t.task)">
+            <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> продолжаю…</span>
+            <span v-else>▶ продолжить прогон</span>
+          </button>
+          <span class="sfixhint">{{ canRetrySandbox(t)
+            ? 'снесёт остатки песочницы и продолжит конвейер с этого места'
+            : 'та же попытка поедет дальше с узла, на котором оборвалась' }}</span>
+        </div>
       </div>
 
       <div v-if="!isCollapsed(t.task)" class="gwrap">
@@ -271,7 +530,29 @@ function cardState(g) {
           <span class="spin"></span>
           стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
         </span>
-        <button v-if="t.graph.fePort" class="sbdown" @click="sandboxDown(t.task)">⏏ снести стенд</button>
+        <!-- Развёрнутая карточка: продолжение прогона рядом с остальными действиями —
+             плашка затыка видна только у свёрнутой. -->
+        <button v-if="canStop(t)" class="sbstop" :class="{ busy: sandboxBusy.has(t.task) }"
+          :disabled="sandboxBusy.has(t.task)" @click="stopRun(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> останавливаю…</span>
+          <span v-else>■ остановить</span>
+        </button>
+        <button v-if="canResume(t)" class="sbresume" :class="{ busy: sandboxBusy.has(t.task) }"
+          :disabled="sandboxBusy.has(t.task)" @click="resumeRun(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> продолжаю…</span>
+          <span v-else>▶ продолжить прогон</span>
+        </button>
+        <button v-if="t.graph.fePort && canDestroySandbox(t)" class="sbdown" :class="{ busy: sandboxBusy.has(t.task) }"
+          :disabled="sandboxBusy.has(t.task)" @click="sandboxDown(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> сношу стенд…</span>
+          <span v-else>⏏ снести стенд</span>
+        </button>
+        <button v-if="!t.readOnly && !t.graph.fePort && !t.graph.sandbox" class="sbdown"
+          :class="{ busy: sandboxBusy.has(t.task) }" :disabled="sandboxBusy.has(t.task)"
+          @click="closeTask(t.task)">
+          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> закрываю…</span>
+          <span v-else>✓ закрыть задачу</span>
+        </button>
         <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
         <span v-if="t.graph.halted" class="chunk bad">⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}</span>
       </footer>
@@ -305,12 +586,87 @@ function cardState(g) {
           <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
           <span v-if="stage.meta.fails" class="smchip bad">{{ stage.meta.fails }} возвр.</span>
           <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
-          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ stageActivity.journalFresh ? 'агент пишет' : 'тихо' }}</span>
+          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ agentActivityLabel(stageActivity) }}</span>
+        </div>
+
+        <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.
+             Для skipped это единственное, что отличает «нечего было проверять» от
+             «агент сдался» — раньше оно оставалось в журнале прогона. -->
+        <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
+          <span class="sclbl">{{ stage.status === 'skip' || stage.status === 'skipbad' ? 'Почему пропущен' : 'Замечание' }}</span>
+          {{ stage.meta.comment }}
+        </div>
+        <div v-if="stage.meta.stall" class="scomment bad">
+          <span class="sclbl">Почему этап остановился</span>
+          <b>{{ stage.meta.stall.title }}</b>
+          <div>{{ stage.meta.stall.hint }}</div>
         </div>
 
         <div class="sb">
+          <!-- Та же runner-chain, по которой движок реально принимает решение. -->
+          <div v-if="stage.meta.runner" class="sect runner-sect">
+            <div class="secth">
+              Исполнитель
+              <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
+            </div>
+            <div class="runner-chain">
+              <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
+                <span v-if="i" class="runner-arrow">→</span>
+                <span class="runner-hop"
+                      :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }">
+                  <b>{{ providerLabel(id) }}</b>
+                  <small v-if="runnerModelLabel(stage.meta.runner, id)">{{ runnerModelLabel(stage.meta.runner, id) }}</small>
+                </span>
+              </template>
+            </div>
+            <div v-if="stage.meta.runner.actual" class="runner-current"
+                 :class="{ switched: stage.meta.runner.switched }">
+              Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
+              <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
+            </div>
+            <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
+              <div class="runner-attempt-title">Попытки запуска</div>
+              <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
+                <span class="mono">#{{ a.epoch ?? '—' }}</span>
+                <b>{{ providerLabel(a.runner) }}</b>
+                <span v-if="a.model" class="mono">{{ a.model }}</span>
+                <span class="runner-result" :class="{
+                  good: a.result === 'ok',
+                  switched: a.result === 'manual_switch',
+                  bad: a.result && !['ok', 'manual_switch'].includes(a.result),
+                }">
+                  {{ attemptResultLabel(a.result) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="!stage.readOnly && stage.status === 'run' && stage.meta.runner.actual" class="runner-switches">
+              <button v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
+                      :key="id" class="btn runner-switch"
+                      :disabled="stageBusy === 'runner-switch'" @click="switchRunner(id)">
+                {{ stageBusy === 'runner-switch' ? 'переключаю…' : `Переключить сейчас на ${providerLabel(id)}` }}
+              </button>
+            </div>
+            <!-- Override до запуска этапа: бегущий этап переключают только кнопки выше. -->
+            <div v-if="!stage.readOnly && stage.status !== 'run' && stageRunnerOptions.length" class="runner-override">
+              <label class="runner-override-lbl" for="stage-runner">Исполнитель этапа</label>
+              <div class="runner-override-row">
+                <select id="stage-runner" class="runner-select" :disabled="stageBusy === 'runner-override'"
+                        :value="stage.meta.runner.primary" @change="onStageRunnerPick">
+                  <option v-for="id in stageRunnerOptions" :key="id" :value="id">{{ providerLabel(id) }}</option>
+                </select>
+                <button v-if="stage.meta.runner.source === 'task-stage'" class="btn runner-reset"
+                        :disabled="stageBusy === 'runner-override'" @click="setStageRunner('')">
+                  Сбросить
+                </button>
+              </div>
+              <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
+                Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
+              </p>
+            </div>
+          </div>
+
           <!-- Ворота: принять/отклонить — первым делом, если ждёт решения -->
-          <div v-if="stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect gate-sect">
+          <div v-if="!stage.readOnly && stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect gate-sect">
             <div class="secth">Ворота — твоё решение</div>
             <textarea v-model="stageComment" rows="2" placeholder="Что доработать / замечание агенту (при отклонении)"></textarea>
             <div class="gbtns">
@@ -366,9 +722,13 @@ function cardState(g) {
 
           <!-- Действия -->
           <div class="sect sactions">
+            <!-- Указание уезжает тем же запросом, что и возврат: своей кнопки «отправить» нет.
+                 У ворот поле уже есть выше и принадлежит решению — второго не заводим. -->
+            <textarea v-if="!stage.readOnly && !stage.isGate" v-model="stageComment" rows="2"
+              placeholder="Указание агенту при возврате на этот узел — что сделать иначе (необязательно)"></textarea>
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
             <OpenDiffButton :task-id="stage.task" />
-            <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Сделать этот этап текущим">
+            <button v-if="!stage.readOnly && !stage.isGate" class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Вернуть конвейер на этот этап">
               {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
             </button>
           </div>
@@ -388,6 +748,7 @@ function cardState(g) {
 .tbrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-mid); margin: 0; display: flex; align-items: center; gap: 10px; }
 .needme { color: var(--warn); text-transform: none; letter-spacing: 0; font-size: 12px; }
+.stalledme { color: var(--bad); text-transform: none; letter-spacing: 0; font-size: 12px; margin-left: 8px; cursor: help; }
 .projects { display: flex; flex-wrap: wrap; gap: 6px; }
 .pchip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   border-radius: 999px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; }
@@ -401,9 +762,45 @@ function cardState(g) {
   border-radius: 8px; padding: 6px 10px; }
 .waitme.premature { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .waitme .pm { color: var(--bad); }
+
+/* Затык: сильнее «ждёт тебя» по тону — у ворот конвейер стоит штатно, а здесь он упёрся. */
+.stalled { margin: 6px 0 0; font-size: 12.5px; color: var(--bad); border-radius: 8px; padding: 6px 10px;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); }
+.stalled.crashed { color: var(--ink-mid);
+  background: color-mix(in srgb, var(--ink-mid) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ink-mid) 30%, transparent); }
+.stalled .srow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.stalled .stitle { font-weight: 600; }
+.stalled .ssince { margin-left: auto; opacity: .7; font-size: 11.5px; }
+.stalled .shint { margin-top: 2px; opacity: .85; }
+.stalled .scomment { margin-top: 2px; opacity: .85; font-style: italic; }
+.stalled .sfix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.stalled .sfixhint { opacity: .75; font-size: 11.5px; }
+.sbretry { background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
+  color: var(--ink); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.sbretry:hover { border-color: var(--accent); color: var(--accent); }
+.sbretry.busy { border-color: var(--accent); color: var(--accent); cursor: default; opacity: .85; }
+.sbretry .sbspin { border-color: var(--accent); border-top-color: transparent; }
+/* Продолжение прогона — действие созидательное, поэтому акцентом, а не красным. */
+.sbresume { background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.sbresume:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.sbresume.busy { cursor: default; opacity: .85; }
+.sbresume .sbspin { border-color: var(--accent); border-top-color: transparent; }
 .sbdown { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .sbdown:hover { color: var(--bad); border-color: var(--bad); }
+.sbdown.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
+/* Остановка живого прогона — разрушительное действие, красным, как снос стенда. */
+.sbstop { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.sbstop:hover { color: var(--bad); border-color: var(--bad); }
+.sbstop.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
+.sbspin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--bad);
+  border-top-color: transparent; border-radius: 50%; vertical-align: -1px;
+  animation: sbspin .8s linear infinite; }
+@keyframes sbspin { to { transform: rotate(360deg); } }
 .cnt { color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
 .tools { display: flex; gap: 6px; }
 .tools button { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
@@ -416,22 +813,27 @@ function cardState(g) {
   padding: 14px 16px; box-shadow: var(--shadow); border-left: 3px solid var(--line); }
 .card.attn { border-left-color: var(--warn); }
 .card.act { border-left-color: var(--accent); }
+.card.stall { border-left-color: var(--bad); }
 
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .task { font-weight: 650; font-size: 15px; background: none; border: none; color: var(--ink); cursor: pointer; padding: 0; }
 .task:hover { color: var(--accent); }
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
+.runner-policy { font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
+  background: var(--surface-2); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .spacer { flex: 1; }
-.daemon { font-size: 12px; }
+.daemon { font-size: 12px; white-space: nowrap; }
 .daemon.alive { color: var(--good); }
 .daemon.idle { color: var(--ink-mid); }
+.daemon.stall { color: var(--bad); font-weight: 600; }
 
 .progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .pbar-wrap { flex: 1; height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .pbar { height: 100%; border-radius: 999px; transition: width .3s; }
 .pbar.pk-run { background: var(--accent); }
 .pbar.pk-wait { background: var(--warn); }
+.pbar.pk-stall { background: var(--bad); }
 .pbar.pk-done { background: var(--good); }
 .pnum { font-size: 12px; color: var(--ink-mid); flex: none; }
 .pw { font-size: 12px; color: var(--ink); flex: none; }
@@ -486,11 +888,53 @@ function cardState(g) {
 .sbadge.skip { background: var(--surface-2); color: var(--ink-mid); }
 .smchip { font-size: 11.5px; color: var(--ink-mid); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; }
 .smchip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.scomment { margin: 8px 14px 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
+  color: var(--ink-mid); background: var(--surface-2); border-left: 3px solid var(--line); }
+.scomment.bad { color: var(--ink); border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, transparent); }
+.sclbl { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); opacity: .75; margin-bottom: 2px; }
 .jf { font-size: 11px; color: var(--ink-mid); padding: 2px 8px; border-radius: 6px;
   background: var(--surface-2); text-transform: none; letter-spacing: 0; margin-left: auto; }
 .jf.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 
 .sb { padding: 12px 16px; display: flex; flex-direction: column; }
+
+/* Фактическая multi-AI цепочка этапа и история аварийных переключений. */
+.runner-sect { margin-top: 0; padding: 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ground); }
+.runner-source { margin-left: auto; font-size: 10.5px; text-transform: none;
+  letter-spacing: 0; font-weight: 400; opacity: .75; }
+.runner-chain { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.runner-arrow { color: var(--ink-mid); align-self: center; }
+.runner-hop { display: flex; flex-direction: column; gap: 1px; min-width: 92px;
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-mid); }
+.runner-hop small { font: 10.5px var(--mono); color: var(--ink-mid); }
+.runner-hop.reserve { border-style: dashed; }
+.runner-hop.actual { color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.runner-current { font-size: 12px; color: var(--ink-mid); }
+.runner-current.switched { color: var(--warn); }
+.runner-attempts { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line);
+  padding-top: 7px; }
+.runner-attempt-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-mid); }
+.runner-attempt { display: grid; grid-template-columns: 34px 72px minmax(110px, 1fr) auto;
+  align-items: baseline; gap: 7px; font-size: 11.5px; color: var(--ink-mid); }
+.runner-result.good { color: var(--good); }
+.runner-result.switched { color: var(--accent); }
+.runner-result.bad { color: var(--warn); }
+.runner-switches { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+.runner-switch { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+/* Выбор исполнителя до запуска этапа (override) — рядом с фактической цепочкой. */
+.runner-override { border-top: 1px solid var(--line); padding-top: 8px;
+  display: flex; flex-direction: column; gap: 5px; }
+.runner-override-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); }
+.runner-override-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.runner-select { height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--ink); font-size: 12.5px; }
+.runner-reset { color: var(--ink-mid); }
+.runner-reset:hover:not(:disabled) { color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.runner-hint { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.4; }
 
 /* Живая лента действий */
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad);
@@ -538,6 +982,9 @@ function cardState(g) {
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 .sactions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
   border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
+/* Поле указания занимает свою строку целиком: в одном ряду с кнопками оно съёживается
+   до пары сантиметров, и в него никто не пишет. */
+.sactions textarea { flex: 1 0 100%; }
 .sect .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; align-self: flex-start; }
 .sect .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
 .sect .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }

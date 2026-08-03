@@ -3,6 +3,7 @@
 // список приходит с сервера (/api/profiles), выбор — через v-model.
 import { ref } from 'vue';
 import { api } from '../api-client.js';
+import { alertDialog } from './confirm.js';
 
 defineProps({
   profiles: { type: Array, required: true },
@@ -18,7 +19,7 @@ async function addProject() {
   try {
     const res = await api.post('/api/profiles', { id });
     emit('created', { id, profiles: res.profiles || [] });
-  } catch (e) { alert(`Не удалось создать проект: ${e.message}`); }
+  } catch (e) { alertDialog(`Не удалось создать проект: ${e.message}`); }
   finally { creating.value = false; }
 }
 </script>

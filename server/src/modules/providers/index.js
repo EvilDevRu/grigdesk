@@ -6,9 +6,17 @@
 // Не путать с /api/agents — там база агентов-стадий конвейера (промпты).
 import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
-import { getExecutors } from '../../lib/executors/index.js';
+import { getProviderAdapters } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { isOutdated } from '../../lib/executors/_npm-latest.js';
+import { applyProviderSetting, resolveProviderSettings } from '../../lib/provider-settings.js';
+import {
+  createUsageReadCache,
+  executeProviderUsageAction,
+  mergeProviderUsage,
+  normalizeProviderUsage,
+  unsupportedProviderUsage,
+} from '../../lib/provider-usage.js';
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
@@ -21,8 +29,16 @@ async function providersModule(fastify, opts) {
    * Реестр: для каждого исполнителя — probe бинаря, авторизация, модели
    * (из models-registry: редактируемый файл + динамическое обнаружение эффортов).
    */
+  /**
+   * Схему своих настроек объявляет исполнитель (`executor.settings`), выбор человека
+   * лежит в prefs. Собираем их вместе: UI получает готовую декларацию со значением.
+   */
+  function settingsOf(ex) {
+    return resolveProviderSettings(ex, prefs?.read().providerSettings?.[ex.id]);
+  }
+
   async function buildRegistry() {
-    const executors = await getExecutors();
+    const executors = await getProviderAdapters();
     const models = await getModelsRegistry(config);
     const providers = [];
     for (const ex of executors.values()) {
@@ -43,8 +59,13 @@ async function providersModule(fastify, opts) {
         auth: auth.mode,
         authLabel: auth.label,
         available: ok && auth.available,
+        // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
+        chatEnabled: typeof ex.run === 'function',
         installed: ok,
         install: ex.install || null,
+        // Установка и login могут быть разными сценариями. Старые адаптеры пока
+        // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
+        setupCommand: ok ? (ex.login || ex.install || null) : (ex.install || null),
         canUpdate: !!ex.updateCmd,
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
@@ -53,13 +74,41 @@ async function providersModule(fastify, opts) {
         checkedAt: updates.get(ex.id)?.at || null,
         models: models[ex.id] || [],
         modes: modes || [],
+        // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
+        settings: settingsOf(ex),
       });
     }
     return providers;
   }
 
   let cache = null; // { at, providers }
-  let usageCache = null; // { at, usage }
+  const usageCache = createUsageReadCache(async (previousUsage) => {
+    const executors = await getProviderAdapters();
+    const checkedAt = Date.now();
+    // Аккаунты независимы: медленная проверка одного исполнителя не должна
+    // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
+    const entries = await Promise.all([...executors.values()].map(async (ex) => {
+      let current;
+      if (typeof ex.usage !== 'function') {
+        current = unsupportedProviderUsage(ex.name, checkedAt);
+      } else {
+        try {
+          current = normalizeProviderUsage(await ex.usage(config, deps), {
+            providerName: ex.name,
+            checkedAt,
+          });
+        } catch (e) {
+          fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
+          current = normalizeProviderUsage({
+            state: 'unavailable',
+            message: `Не удалось получить лимиты ${ex.name}. Повторим проверку автоматически.`,
+          }, { providerName: ex.name, checkedAt });
+        }
+      }
+      return [ex.id, mergeProviderUsage(previousUsage?.[ex.id], current)];
+    }));
+    return Object.fromEntries(entries);
+  }, { maxAgeMs: CACHE_MS });
 
   // ── Проверка новых версий CLI: периодически и по кнопке, НИКОГДА не обновляет сама ──
   const updates = new Map(); // providerId → { latest, outdated, at }
@@ -67,7 +116,7 @@ async function providersModule(fastify, opts) {
   const FIRST_CHECK_MS = 30_000;             // после старта — не мешая подъёму сервера
 
   async function checkUpdates() {
-    const executors = await getExecutors();
+    const executors = await getProviderAdapters();
     let changed = false;
     for (const ex of executors.values()) {
       if (typeof ex.latestVersion !== 'function') continue;
@@ -101,22 +150,33 @@ async function providersModule(fastify, opts) {
   fastify.post('/api/providers/check-updates', async () => ({ updates: await checkUpdates() }));
 
   // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
-  fastify.get('/api/providers/usage', async () => {
-    if (usageCache && Date.now() - usageCache.at < CACHE_MS) return { usage: usageCache.usage };
-    const executors = await getExecutors();
-    const usage = {};
-    for (const ex of executors.values()) {
-      if (typeof ex.usage !== 'function') continue;
-      try {
-        const u = await ex.usage(config, deps);
-        if (u) usage[ex.id] = u;
-      } catch (e) {
-        fastify.log.warn({ provider: ex.id, err: e.message }, 'usage исполнителя не получен');
-      }
+  fastify.get('/api/providers/usage', async () => ({ usage: await usageCache.read() }));
+
+  /**
+   * Generic provider-account action. The route knows neither billing semantics
+   * nor vendor APIs: each executor exposes an explicit usageActions allow-list.
+   * requestId crosses the boundary for idempotent irreversible actions.
+   */
+  fastify.post('/api/providers/:id/usage-actions/:actionId', async (request, reply) => {
+    const ex = (await getProviderAdapters()).get(String(request.params.id));
+    if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
+    const body = request.body || {};
+    const r = await executeProviderUsageAction(ex, {
+      actionId: request.params.actionId,
+      payload: body.payload,
+      requestId: body.requestId,
+      config,
+      deps,
+    });
+    if (r?.error === 'unknown_usage_action') {
+      return reply.code(400).send({
+        error: r.error,
+        message: `исполнитель ${ex.name} не поддерживает это действие`,
+      });
     }
-    // Сетевой сбой не затирает прошлые данные: лучше слегка устаревшие бары, чем пустые.
-    usageCache = { at: Date.now(), usage: Object.keys(usage).length ? usage : (usageCache?.usage || {}) };
-    return { usage: usageCache.usage };
+    if (r?.ok) usageCache.clear();
+    else fastify.log.warn({ provider: ex.id, action: request.params.actionId, err: r?.error }, 'действие usage не выполнено');
+    return r;
   });
 
   fastify.get('/api/providers', async (request) => {
@@ -132,13 +192,28 @@ async function providersModule(fastify, opts) {
   });
 
   /**
+   * Сохранение своей настройки исполнителя (тумблер в его плашке). Ядро не знает, что
+   * значит настройка: принимаем только объявленные самим executor-ом id и приводим
+   * значение к типу его `kind` — чужой ключ в prefs не попадёт.
+   */
+  fastify.post('/api/providers/:id/settings', async (request, reply) => {
+    const ex = (await getProviderAdapters()).get(String(request.params.id));
+    if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
+    const applied = applyProviderSetting(ex, prefs.read().providerSettings, request.body || {});
+    if (!applied.ok) return reply.code(400).send({ error: applied.error, message: applied.message });
+    prefs.write({ providerSettings: applied.providerSettings });
+    cache = null; // следующий /api/providers отдаст новое значение
+    return { ok: true, settings: applied.settings };
+  });
+
+  /**
    * Обновление CLI исполнителя (кнопка в настройках). Команда — свойство исполнителя
    * (`updateCmd`), ядро про вендоров не знает. После обновления сбрасываем кэши:
    * список моделей пересобирается из НОВОГО бинаря — так «вышел Opus 5» доезжает
    * до кокпита без правок кода.
    */
   fastify.post('/api/providers/:id/update', async (request, reply) => {
-    const ex = (await getExecutors()).get(String(request.params.id));
+    const ex = (await getProviderAdapters()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     if (!ex.updateCmd) return reply.code(400).send({ error: 'no_update', message: `у исполнителя ${ex.name} нет команды обновления` });
     const before = (await ex.probe(config))?.version || '';

@@ -9,8 +9,11 @@ const routes = [
   { path: '/chats', name: 'chats', component: () => import('./views/ChatsView.vue'), meta: { title: 'Чаты' } },
   { path: '/agents', name: 'agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Агенты' } },
   { path: '/diff', name: 'diff', component: () => import('./views/DiffView.vue'), meta: { title: 'Диф' } },
+  { path: '/documents', name: 'documents', component: () => import('./views/DocumentsView.vue'), meta: { title: 'Документ' } },
   { path: '/terminal', name: 'terminal', component: () => import('./views/TerminalView.vue'), meta: { title: 'Терминал' } },
   { path: '/routes', name: 'routes', component: () => import('./views/RoutesView.vue'), meta: { title: 'Маршруты' } },
+  { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Проекты' } },
+  { path: '/code', name: 'code', component: () => import('./views/CodeView.vue'), meta: { title: 'Код' } },
   { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { title: 'Видео' } },
   { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue'), meta: { title: 'Настройки' } },
 ];

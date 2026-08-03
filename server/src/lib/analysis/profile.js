@@ -8,19 +8,19 @@ import path from 'node:path';
 const SEP = '\x1e'; // record separator — в значениях профиля не встречается
 
 /**
- * @param {string} factoryHome корень движка фабрики
- * @param {string} name имя профиля (profiles/<name>.sh)
+ * @param {{factoryHome:string, profilesDir:string}} config пути движка и профилей
+ * @param {string} name имя профиля (profiles/<name>/profile.sh)
  * @returns {Promise<{ctx:string, cwd:string, dirs:string[], repos:Array<{key:string,dir:string}>, markers:string}>}
  */
-export async function loadTriageProfile(factoryHome, name) {
+export async function loadTriageProfile({ factoryHome, profilesDir }, name) {
   const empty = { ctx: '', cwd: '', dirs: [], repos: [], markers: '' };
-  if (!name || !factoryHome) return empty;
-  const file = path.join(factoryHome, 'profiles', `${name}.sh`);
+  if (!name || !factoryHome || !profilesDir) return empty;
+  const file = path.join(profilesDir, name, 'profile.sh');
   const script = `source "${file}" >/dev/null 2>&1 || exit 1
 printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PROFILE_TRIAGE_REPOS" "$PROFILE_TRIAGE_MARKERS"`;
   const out = await new Promise((resolve) => {
     execFile('bash', ['-c', script], {
-      env: { ...process.env, FACTORY_HOME: factoryHome },
+      env: { ...process.env, FACTORY_HOME: factoryHome, FACTORY_PROFILES_DIR: profilesDir },
       timeout: 10000,
     }, (err, stdout) => resolve(err ? null : stdout));
   });

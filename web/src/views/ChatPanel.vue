@@ -17,6 +17,11 @@ const onChats = computed(() => route.name === 'chats');
 // Непрочитанные чаты — на кнопке, чтобы ответ агента было видно из любого раздела.
 // История уже загружена оболочкой (AppShell зовёт ensure), стор общий.
 const unread = computed(() => chat.unreadCount);
+// Агент задал вопрос и ждёт: работа стоит, поэтому такой бейдж перебивает непрочитанные.
+const waiting = computed(() => chat.waitingCount);
+const fabTitle = computed(() => (waiting.value
+  ? `Агент ждёт ответа · чатов: ${waiting.value}`
+  : unread.value ? `Чат с агентом · непрочитанных: ${unread.value}` : 'Чат с агентом'));
 watch(onChats, (v) => { if (v) chat.close(); });
 
 // Закрытие по клику вне панели (мышью). Слушатель живёт только пока панель открыта.
@@ -40,12 +45,11 @@ function openFull() { chat.close(); router.push('/chats'); }
 <template>
   <div v-if="!onChats" class="chatw">
     <Transition name="fab">
-      <button v-if="!open" class="fab" :title="unread ? `Чат с агентом · непрочитанных: ${unread}` : 'Чат с агентом'"
-              @click="chat.toggle()">
+      <button v-if="!open" class="fab" :title="fabTitle" @click="chat.toggle()">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
           <path d="M12 2.2c.4 0 .75.26.87.64l1.9 5.9 5.9 1.9a.92.92 0 0 1 0 1.74l-5.9 1.9-1.9 5.9a.92.92 0 0 1-1.74 0l-1.9-5.9-5.9-1.9a.92.92 0 0 1 0-1.74l5.9-1.9 1.9-5.9c.12-.38.47-.64.87-.64Z" />
         </svg>
-        <span v-if="unread" class="fbadge">{{ unread }}</span>
+        <span v-if="waiting || unread" class="fbadge" :class="{ wait: waiting }">{{ waiting || unread }}</span>
       </button>
     </Transition>
 
@@ -77,6 +81,13 @@ function openFull() { chat.close(); router.push('/chats'); }
 .fbadge { position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px;
   border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
   display: grid; place-items: center; line-height: 1; box-shadow: 0 0 0 2px var(--ground); }
+/* Агент ждёт ответа — работа стоит: жёлтый и пульсирует, чтобы не пропустить из любого раздела */
+.fbadge.wait { background: var(--warn, #e0a33a); color: #1a1206; animation: fabpulse 1.9s ease-in-out infinite; }
+@keyframes fabpulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--ground), 0 0 0 2px color-mix(in srgb, var(--warn, #e0a33a) 70%, transparent); }
+  60% { box-shadow: 0 0 0 2px var(--ground), 0 0 0 8px transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .fbadge.wait { animation: none; } }
 
 .panel { position: fixed; right: 18px; bottom: 18px; z-index: 95; width: min(460px, calc(100vw - 24px));
   height: min(74vh, 660px); display: flex; flex-direction: column;

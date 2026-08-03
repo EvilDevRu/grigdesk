@@ -1,0 +1,2393 @@
+#!/usr/bin/env bash
+# Единственный независимый от провайдера запускатель неизменяемого протокола маршрутов.
+#
+# Он намеренно не уходит в фон, не выбирает провайдера и не ослабляет SHIP. Выбор
+# провайдера и failover задаются только в profiles/<profile>/runners.env. Подготовка
+# проекта остаётся обязанностью профиля. Изолированный профиль создаёт рабочее окружение
+# своим up.sh, shared-профиль использует только заранее существующие checkout и стенд.
+set -uo pipefail
+
+FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
+FACTORY_RUNNERS_DIR="${FACTORY_RUNNERS_DIR:-$FACTORY_HOME/lib/runners}"
+export FACTORY_HOME FACTORY_PROFILES_DIR FACTORY_RUNNERS_DIR
+
+usage() {
+  cat <<'EOF'
+Использование:
+  factory check --profile PROFILE [--route ROUTE]
+                   [--routes-dir ABS]
+
+  factory TASK start --profile PROFILE --route ROUTE --ticket-json ABS
+                   [--routes-dir ABS]
+                   [--state-dir ABS] [--control-dir ABS]
+                   [--runner-primary RUNNER]
+                   [--instrumentation-file REPO:PATH]...
+                   [--diagnosis-kind functional|performance|data|integration]
+                   [--diagnosis-signal TEXT]
+                   [--backend-base REF] [--frontend-base REF]
+                   [--delivery-target repo=branch]...
+                   [--task-comment]
+
+  factory TASK resume --attempt a_<32hex> [те же общие пути]
+
+  factory TASK gate --attempt a_<32hex> --node GATE
+                   --decision approved|rejected [--comment TEXT]
+                   [--commit-only] [те же общие пути]
+
+  factory TASK abandon --attempt a_<32hex> --reason TEXT
+                   [те же общие пути]
+
+  factory TASK recover --attempt a_<32hex> --reason TEXT
+                   --route ROUTE [те же общие пути]
+
+  factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT
+                   [те же общие пути]
+
+--profile обязателен: движок не знает ни одного проекта. Профиль обязан заявить
+capability "route-v2" в graph.json и реализовать route-хуки контракта
+(см. PROFILE-CONTRACT). ROUTE — имя маршрута из current-каталога профиля.
+
+По умолчанию:
+  routes store:     ~/.factory/routes
+  state:            ~/.factory/state
+  trusted control:  ~/.factory/control
+
+Debug требует хотя бы один --instrumentation-file при start. В feature тесты
+замораживаются после TESTS, а доверенный VERIFY проверяет неизменность тестов,
+синтаксис и линтеры без отдельного модельного этапа. SHIP выполняет commit, push
+и PR после approved GATE_ACCEPT; --task-comment дополнительно разрешает
+комментарий во внешней задаче.
+
+--runner-primary фиксирует исполнителя на весь прогон задачи: выбор пишется
+task-level override в реестр и выигрывает у project policy профиля, а failover
+берётся из PROJECT_RUNNER_FAILOVER профиля с убранным выбранным id. Без флага
+цепочка исполнителей живёт только в runners.env профиля.
+
+Abandon закрывает АКТИВНУЮ попытку терминалом abandoned (штатный выход из
+заклинившего прогона). Recover создаёт из abandoned-терминала НОВУЮ попытку
+с чистым bootstrap-состоянием и свежим pin текущего каталога; --route сразу
+пинит маршрут новой попытки (без него она была бы тупиком: resume требует
+route pin). Продолжение после recover — обычный resume с новым --attempt.
+Обе операции берут lock оркестратора задачи и не трогают песочницу.
+
+Gate по умолчанию не только фиксирует решение, но и ведёт маршрут дальше — то
+есть держит оркестратор столько, сколько работает следующий узел. Вызывающему,
+который ждёт ответа синхронно (кокпит — по HTTP), нужен --commit-only: решение
+уходит в журнал попытки, команда выходит, а продолжение запускается отдельным
+resume. Иначе фиксация упирается в чужой таймаут: TERM убивает оркестратор,
+раннер остаётся сиротой, а человек видит «Command failed» на уже принятом
+решении.
+
+Goto — человеческий возврат курсора на ПРОЙДЕННЫЙ узел маршрута (эквивалент
+кнопки «перейти сюда»): пройденные узлы сбрасываются, в журнал ложится событие
+kind=human-rewind с причиной. Вперёд по маршруту прыгать нельзя: исход узла
+получается только его исполнением. После goto продолжай обычным resume.
+
+--reason у abandon, recover и goto — ОДНА строка 1..500 символов без переводов
+строки: причина идёт в доверенный журнал и в промпт следующего агента. Разбор
+кладётся в файл этапа, в причину — ссылка на него. Нарушение отклоняется кодом 2
+с названной границей ДО локов и записи в журнал.
+EOF
+}
+
+die() {
+  printf 'factory: %s\n' "$*" >&2
+  exit 78
+}
+
+canonical_existing_dir() {
+  local value=${1:-} label=${2:-directory} canonical
+  [[ -n "$value" && "$value" == /* && "$value" != *$'\n'* &&
+     "$value" != *$'\t'* && -d "$value" && ! -L "$value" ]] ||
+    die "$label: нужен существующий абсолютный каталог без symlink"
+  canonical=$(realpath -e -- "$value" 2>/dev/null) ||
+    die "$label: путь не разрешается"
+  [[ "$canonical" == "$value" && "$canonical" != / ]] ||
+    die "$label: путь должен быть каноническим и не корневым"
+  printf '%s\n' "$canonical"
+}
+
+canonical_created_dir() {
+  local value=${1:-} label=${2:-directory}
+  [[ -n "$value" && "$value" == /* && "$value" != / &&
+     "$value" != *$'\n'* && "$value" != *$'\t'* ]] ||
+    die "$label: нужен абсолютный не корневой путь"
+  [[ "$(realpath -m -- "$value" 2>/dev/null)" == "$value" ]] ||
+    die "$label: путь должен быть нормализован"
+  mkdir -p -- "$value" || die "$label: каталог не создан"
+  chmod 700 "$value" 2>/dev/null || true
+  canonical_existing_dir "$value" "$label"
+}
+
+canonical_file() {
+  local value=${1:-} label=${2:-file} canonical
+  [[ -n "$value" && "$value" == /* && "$value" != *$'\n'* &&
+     "$value" != *$'\t'* && -f "$value" && ! -L "$value" ]] ||
+    die "$label: нужен существующий абсолютный обычный файл"
+  canonical=$(realpath -e -- "$value" 2>/dev/null) ||
+    die "$label: путь не разрешается"
+  [[ "$canonical" == "$value" ]] || die "$label: symlink-компоненты запрещены"
+  printf '%s\n' "$canonical"
+}
+
+paths_disjoint() {
+  local left=$1 right=$2
+  [[ "$left" != "$right" && "$left" != "$right/"* && "$right" != "$left/"* ]]
+}
+
+profile_has_capability() {
+  local file=$1 cap=$2
+  python3 - "$file" "$cap" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        data = json.load(source)
+except (OSError, ValueError):
+    raise SystemExit(1)
+caps = data.get("capabilities") if isinstance(data, dict) else None
+raise SystemExit(0 if isinstance(caps, list) and sys.argv[2] in caps else 1)
+PY
+}
+
+json_value() {
+  local path=$1
+  python3 -c '
+import json, sys
+value = json.load(sys.stdin)
+for key in sys.argv[1].split("."):
+    value = value[key]
+if isinstance(value, (dict, list)):
+    print(json.dumps(value, ensure_ascii=False, sort_keys=True))
+else:
+    print(value)
+' "$path"
+}
+
+# Из failover-цепочки профиля убирает выбранный primary: task override с цепочкой
+# вида codex,codex routing отклонил бы как invalid, а дубль не несёт смысла.
+runner_failover_without() {
+  local chain=$1 drop=$2 item result=""
+  local IFS=,
+  for item in $chain; do
+    [[ -n "$item" && "$item" != "$drop" ]] || continue
+    result+="${result:+,}$item"
+  done
+  printf '%s\n' "$result"
+}
+
+TASK=""
+MODE=""
+PROFILE=""
+ROUTE=""
+FACTORY_USER_HOME="${HOME:-/nonexistent}"
+# Имена без поколения принадлежат единственному route-движку после cutover.
+ROUTES_DIR="$FACTORY_USER_HOME/.factory/routes"
+V2_STATE="${STATE_DIR:-${FACTORY_STATE:-$FACTORY_USER_HOME/.factory/state}}"
+CONTROL_ROOT="${FACTORY_CONTROL_ROOT:-$FACTORY_USER_HOME/.factory/control}"
+TICKET_JSON=""
+EXPECTED_ATTEMPT=""
+REASON=""
+DIAGNOSIS_KIND=""
+DIAGNOSIS_SIGNAL=""
+RUNNER_PRIMARY_OVERRIDE=""
+RUNNER_FAILOVER_OVERRIDE=""
+GATE_NODE=""
+GATE_DECISION=""
+GATE_COMMENT=""
+GATE_COMMIT_ONLY=0
+BE_BASE_REF=""
+FE_BASE_REF=""
+TASK_COMMENT=0
+declare -a INSTRUMENTATION_SPECS=()
+declare -a DELIVERY_TARGETS=()
+
+# Синхронный control-plane runner/profile/settings не является оркестрацией:
+# он выполняется до разбора route-команд и никогда не запускает pipeline или модель.
+if [[ "${1:-}" == runners || "${1:-}" == profile || "${1:-}" == settings ||
+      "${2:-}" == runner || "${2:-}" == model || "${2:-}" == debug ]]; then
+  export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE"
+  export FACTORY_CONFIG_ROOT="${FACTORY_CONFIG_ROOT:-$FACTORY_USER_HOME/.factory/config}"
+  # shellcheck disable=SC1091
+  source "$FACTORY_HOME/lib/runner-cli.sh"
+  factory_runner_cli "$@"
+  rc=$?
+  (( rc == 2 )) && _runner_cli_usage >&2
+  exit "$rc"
+fi
+
+if [[ "${1:-}" == list ]]; then
+  [[ $# == 1 ]] || die "list не принимает аргументы"
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  for pipeline in "$V2_STATE"/t*.pipeline; do
+    [[ -f "$pipeline" && ! -L "$pipeline" ]] || continue
+    task=${pipeline##*/t}; task=${task%.pipeline}
+    profile=$(awk -F= '$1=="PROFILE"{value=$2} END{print value}' "$pipeline")
+    route=$(awk -F= '$1=="ROUTE"{value=$2} END{print value}' "$pipeline")
+    protocol=$(awk -F= '$1=="CATALOG_PROTOCOL"{value=$2} END{print value}' "$pipeline")
+    [[ "$protocol" == route-v2 ]] || continue
+    printf '#%s [%s] route=%s\n' "$task" "$profile" "$route"
+  done
+  exit 0
+fi
+
+if [[ "${1:-}" == slots ]]; then
+  [[ $# == 3 && "${2:-}" == --profile && "${3:-}" =~ ^[a-z][a-z0-9_-]{0,40}$ ]] ||
+    die "использование: factory slots --profile PROFILE"
+  PROFILE=$3
+  PF_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/profile.sh" profile) || exit 78
+  V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+  export STATE_DIR="$V2_STATE" FACTORY_STATE="$V2_STATE"
+  # shellcheck disable=SC1091
+  source "$FACTORY_HOME/lib/core.sh" >/dev/null 2>&1
+  # shellcheck disable=SC1090
+  source "$PF_FILE" >/dev/null 2>&1
+  if ! declare -F profile_slots >/dev/null; then
+    printf '{"profile":"%s","supported":false,"used":[],"free":[]}\n' "$PROFILE"
+    exit 0
+  fi
+  profile_slots | awk -v prof="$PROFILE" '
+    /^ERROR/ { err=substr($0, 7); next }
+    /^RANGE/ { lo=$2; hi=$3; have=1; next }
+    /^USED/  { used[$2]=1; by[$2]=$3; why[$2]=$4; next }
+    END {
+      if (err != "" || !have) {
+        printf "{\"profile\":\"%s\",\"error\":\"%s\"}\n", prof,
+          (err != "" ? err : "профиль не вернул диапазон слотов")
+        exit 3
+      }
+      printf "{\"profile\":\"%s\",\"range\":[%d,%d],\"used\":[", prof, lo, hi
+      n=0
+      for (k=lo; k<=hi; k++) if (k in used)
+        printf "%s{\"k\":%d,\"by\":\"%s\",\"why\":\"%s\"}",
+          (n++ ? "," : ""), k, by[k], why[k]
+      printf "],\"free\":["
+      n=0
+      for (k=lo; k<=hi; k++) if (!(k in used))
+        printf "%s%d", (n++ ? "," : ""), k
+      printf "]}\n"
+    }'
+  exit ${PIPESTATUS[1]:-0}
+fi
+
+while (( $# > 0 )); do
+  case "$1" in
+    check|start|resume|gate|abandon|recover|goto)
+      [[ -z "$MODE" ]] || die "режим указан повторно"
+      MODE=$1
+      shift
+      ;;
+    --profile)
+      (( $# >= 2 )) || die "после --profile нужно значение"
+      PROFILE=$2
+      shift 2
+      ;;
+    --route)
+      (( $# >= 2 )) || die "после --route нужно значение"
+      ROUTE=$2
+      shift 2
+      ;;
+    --routes-dir)
+      (( $# >= 2 )) || die "после --routes-dir нужен путь"
+      ROUTES_DIR=$2
+      shift 2
+      ;;
+    --state-dir)
+      (( $# >= 2 )) || die "после --state-dir нужен путь"
+      V2_STATE=$2
+      shift 2
+      ;;
+    --control-dir)
+      (( $# >= 2 )) || die "после --control-dir нужен путь"
+      CONTROL_ROOT=$2
+      shift 2
+      ;;
+    --ticket-json)
+      (( $# >= 2 )) || die "после --ticket-json нужен путь"
+      TICKET_JSON=$2
+      shift 2
+      ;;
+    --attempt)
+      (( $# >= 2 )) || die "после --attempt нужен id"
+      [[ -z "$EXPECTED_ATTEMPT" ]] || die "--attempt указан повторно"
+      EXPECTED_ATTEMPT=$2
+      shift 2
+      ;;
+    --reason)
+      (( $# >= 2 )) || die "после --reason нужен текст"
+      [[ -z "$REASON" ]] || die "--reason указан повторно"
+      REASON=$2
+      shift 2
+      ;;
+    --diagnosis-kind)
+      (( $# >= 2 )) || die "после --diagnosis-kind нужно значение"
+      DIAGNOSIS_KIND=$2
+      shift 2
+      ;;
+    --diagnosis-signal)
+      (( $# >= 2 )) || die "после --diagnosis-signal нужен текст"
+      DIAGNOSIS_SIGNAL=$2
+      shift 2
+      ;;
+    --runner-primary)
+      (( $# >= 2 )) || die "после --runner-primary нужен id исполнителя"
+      [[ -z "$RUNNER_PRIMARY_OVERRIDE" ]] || die "--runner-primary указан повторно"
+      RUNNER_PRIMARY_OVERRIDE=$2
+      shift 2
+      ;;
+    --node|--gate)
+      (( $# >= 2 )) || die "после $1 нужен gate id"
+      [[ -z "$GATE_NODE" ]] || die "gate id указан повторно"
+      GATE_NODE=$2
+      shift 2
+      ;;
+    --decision)
+      (( $# >= 2 )) || die "после --decision нужно approved|rejected"
+      GATE_DECISION=$2
+      shift 2
+      ;;
+    --comment)
+      (( $# >= 2 )) || die "после --comment нужен текст"
+      GATE_COMMENT=$2
+      shift 2
+      ;;
+    --commit-only)
+      GATE_COMMIT_ONLY=1
+      shift
+      ;;
+    --instrumentation-file)
+      (( $# >= 2 )) || die "после --instrumentation-file нужен repo:path"
+      INSTRUMENTATION_SPECS+=("$2")
+      shift 2
+      ;;
+    --backend-base)
+      (( $# >= 2 )) || die "после --backend-base нужен commit/ref"
+      BE_BASE_REF=$2
+      shift 2
+      ;;
+    --frontend-base)
+      (( $# >= 2 )) || die "после --frontend-base нужен commit/ref"
+      FE_BASE_REF=$2
+      shift 2
+      ;;
+    --delivery-target)
+      (( $# >= 2 )) || die "после --delivery-target нужен repo=branch"
+      DELIVERY_TARGETS+=("$2")
+      shift 2
+      ;;
+    --task-comment)
+      TASK_COMMENT=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ -z "$TASK" && "$1" =~ ^[1-9][0-9]{0,18}$ ]]; then
+        TASK=$1
+        shift
+      else
+        die "неизвестный аргумент: $1"
+      fi
+      ;;
+  esac
+done
+
+[[ "$MODE" == check || "$MODE" == start || "$MODE" == resume ||
+   "$MODE" == gate || "$MODE" == abandon || "$MODE" == recover ||
+   "$MODE" == goto ]] ||
+  die "укажи check, start, resume, gate, abandon, recover или goto"
+# Task-level override исполнителя рождается только вместе с новой попыткой;
+# остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
+[[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
+  die "--runner-primary допустим только при start"
+# Движок не знает ни одного проекта: профиль обязателен, готовность к v2 он
+# заявляет capability в graph.json, а конкретику отдаёт v2-хуками контракта.
+[[ -n "$PROFILE" && "$PROFILE" =~ ^[a-z][a-z0-9_-]{0,40}$ ]] ||
+  die "нужен --profile (движок не знает проектов)"
+[[ -z "$ROUTE" || "$ROUTE" =~ ^[a-z][a-z0-9_-]{0,40}$ ]] ||
+  die "route: недопустимое имя (маршрут валидируется по current-каталогу)"
+
+ROUTES_DIR=$(canonical_existing_dir "$ROUTES_DIR" routes-dir) || exit 78
+PF_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/profile.sh" profile) || exit 78
+RUNNER_CONFIG_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/runners.env" runners-config) || exit 78
+GRAPH_FILE=$(canonical_file "$FACTORY_PROFILES_DIR/$PROFILE/graph.json" graph) || exit 78
+profile_has_capability "$GRAPH_FILE" route-v2 ||
+  die "профиль $PROFILE не заявляет capability \"route-v2\" в graph.json"
+
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/profile-config.sh"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/runners-catalog.sh"
+profile_config_validate "$RUNNER_CONFIG_FILE" ||
+  die "canonical runners.env не прошёл проверку"
+[[ "$(profile_config_get "$RUNNER_CONFIG_FILE" RUNNERS_COVERAGE)" == required ]] ||
+  die "runners.env обязан требовать coverage"
+
+CURRENT_CATALOG=""
+CURRENT_ROUTE_JSON=""
+CURRENT_ROUTE_DELIVERY=""
+if [[ "$MODE" == check || "$MODE" == start ]]; then
+  CURRENT_JSON=$(
+    "$FACTORY_HOME/bin/factory-route" \
+      --routes-dir "$ROUTES_DIR" --profile "$PROFILE" current
+  ) || die "current catalog v2 не прошёл проверку"
+  CURRENT_CATALOG=$(json_value catalogHash <<<"$CURRENT_JSON") ||
+    die "catalog hash не прочитан"
+  if [[ -n "$ROUTE" ]]; then
+    CURRENT_ROUTE_JSON=$(
+      "$FACTORY_HOME/bin/factory-route" \
+        --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
+        --catalog-hash "$CURRENT_CATALOG" --route "$ROUTE"
+    ) ||
+      die "route=$ROUTE отсутствует в current catalog"
+    CURRENT_ROUTE_DELIVERY=$(python3 -c '
+import json
+import sys
+machine = json.load(sys.stdin)["machine"]
+print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) else "disabled")
+' <<<"$CURRENT_ROUTE_JSON") || die "delivery topology route=$ROUTE не прочитана"
+  fi
+fi
+
+if [[ "$MODE" == check ]]; then
+  [[ -z "$TASK" && -z "$EXPECTED_ATTEMPT" && -z "$TICKET_JSON" ]] ||
+    die "check не принимает task, attempt или ticket"
+  printf 'OK profile=%s catalog=%s' "$PROFILE" "$CURRENT_CATALOG"
+  if [[ -n "$ROUTE" ]]; then
+    printf ' route=%s delivery=%s' "$ROUTE" "$CURRENT_ROUTE_DELIVERY"
+  fi
+  printf '\n'
+  exit 0
+fi
+
+if [[ "$MODE" == start && "$CURRENT_ROUTE_DELIVERY" == disabled ]] && {
+     (( ${#DELIVERY_TARGETS[@]} > 0 )) || (( TASK_COMMENT != 0 ));
+   }; then
+  die "route=$ROUTE не имеет ship и не принимает delivery targets/actions"
+fi
+
+[[ "${FACTORY_FORBID_LIVE:-0}" != 1 ]] ||
+  die "live lifecycle запрещён текущим окружением"
+[[ "$TASK" =~ ^[1-9][0-9]{0,18}$ ]] || die "нужен положительный TASK"
+if [[ "$MODE" == start ]]; then
+  [[ -n "$ROUTE" ]] || die "start требует --route"
+  [[ -n "$TICKET_JSON" ]] || die "start требует --ticket-json"
+  TICKET_JSON=$(canonical_file "$TICKET_JSON" ticket-json) || exit 78
+  [[ -z "$EXPECTED_ATTEMPT" && -z "$GATE_NODE" && -z "$GATE_DECISION" ]] ||
+    die "start не принимает attempt или gate decision"
+  if [[ "$ROUTE" == debug ]]; then
+    (( ${#INSTRUMENTATION_SPECS[@]} > 0 )) ||
+      die "debug start требует --instrumentation-file repo:path"
+  elif (( ${#INSTRUMENTATION_SPECS[@]} > 0 )); then
+    die "--instrumentation-file нужен только маршруту debug"
+  fi
+  if [[ -n "$DIAGNOSIS_KIND" ]]; then
+    [[ "$DIAGNOSIS_KIND" =~ ^(functional|performance|data|integration)$ ]] ||
+      die "diagnosis-kind: functional|performance|data|integration"
+  fi
+  [[ ${#DIAGNOSIS_SIGNAL} -le 200 && "$DIAGNOSIS_SIGNAL" != *$'\n'* &&
+     "$DIAGNOSIS_SIGNAL" != *$'\t'* ]] ||
+    die "diagnosis-signal: до 200 символов одной строкой"
+  if [[ -n "$RUNNER_PRIMARY_OVERRIDE" ]]; then
+    [[ "$RUNNER_PRIMARY_OVERRIDE" =~ ^[a-z][a-z0-9_-]*$ ]] ||
+      die "runner-primary: недопустимый id исполнителя"
+    runners_catalog_list | grep -Fxq "$RUNNER_PRIMARY_OVERRIDE" ||
+      die "runner-primary: исполнитель не установлен: $RUNNER_PRIMARY_OVERRIDE"
+    # Failover задаётся парой с primary: routing при task override не подмешивает
+    # профильный, поэтому переносим его сюда с убранным выбранным id.
+    RUNNER_FAILOVER_OVERRIDE=$(
+      runner_failover_without \
+        "$(profile_config_get "$RUNNER_CONFIG_FILE" PROJECT_RUNNER_FAILOVER)" \
+        "$RUNNER_PRIMARY_OVERRIDE"
+    )
+  fi
+else
+  [[ "$EXPECTED_ATTEMPT" =~ ^a_[a-f0-9]{32}$ ]] ||
+    die "$MODE требует точный --attempt a_<32hex>"
+  [[ -z "$TICKET_JSON" && ${#INSTRUMENTATION_SPECS[@]} -eq 0 &&
+     ${#DELIVERY_TARGETS[@]} -eq 0 && "$TASK_COMMENT" == 0 &&
+     -z "$BE_BASE_REF" && -z "$FE_BASE_REF" &&
+     -z "$DIAGNOSIS_KIND" && -z "$DIAGNOSIS_SIGNAL" ]] ||
+    die "$MODE использует immutable ticket, scope, diagnosis, sandbox и delivery попытки"
+fi
+if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
+  [[ -n "$REASON" ]] || die "$MODE требует --reason"
+else
+  [[ -z "$REASON" ]] || die "--reason допустим только в abandon, recover и goto"
+fi
+if [[ "$MODE" == goto ]]; then
+  [[ "$GATE_NODE" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] ||
+    die "goto требует --node с узлом маршрута"
+fi
+if [[ "$MODE" == recover ]]; then
+  [[ -n "$ROUTE" ]] || die "recover требует --route для новой попытки"
+elif [[ "$MODE" == abandon ]]; then
+  [[ -z "$ROUTE" ]] || die "--route не используется в abandon"
+fi
+if [[ "$MODE" == gate ]]; then
+  [[ "$GATE_NODE" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] ||
+    die "gate требует --node"
+  [[ "$GATE_DECISION" == approved || "$GATE_DECISION" == rejected ]] ||
+    die "gate требует --decision approved|rejected"
+elif [[ -n "$GATE_DECISION" || -n "$GATE_COMMENT" || "$GATE_COMMIT_ONLY" == 1 ]] ||
+     { [[ -n "$GATE_NODE" && "$MODE" != goto ]]; }; then
+  die "gate arguments допустимы только в режиме gate"
+fi
+
+V2_STATE=$(canonical_created_dir "$V2_STATE" state-dir) || exit 78
+CONTROL_ROOT=$(canonical_created_dir "$CONTROL_ROOT" control-dir) || exit 78
+paths_disjoint "$V2_STATE" "$CONTROL_ROOT" ||
+  die "provider-writable state и trusted control должны быть непересекающимися"
+
+export STATE_DIR="$V2_STATE"
+export FACTORY_STATE="$V2_STATE"
+export FACTORY_ROUTE_STATE_DIR="$V2_STATE"
+export FACTORY_CONTROL_ROOT="$CONTROL_ROOT"
+export PROFILE_NAME="$PROFILE"
+unset BASH_ENV ENV
+
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/core.sh"
+# shellcheck disable=SC1090
+source "$PF_FILE"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/attempt-state.sh"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/route-runtime.sh"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/profile-preflight.sh"
+
+# Форму причины проверяем СРАЗУ после загрузки ledger-библиотеки: до локов, до
+# профиля и до единой строки в журнале. Иначе человек узнаёт о лишних символах
+# только из «код 2» в конце разбора попытки. Правило живёт ровно в одном месте —
+# _attempt_state_reason, здесь именно её вызов, а не вторая копия границ.
+if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
+  _attempt_state_reason "$REASON" || exit $?
+fi
+
+# Все проектные величины приходят из route-хуков профиля (PROFILE-CONTRACT);
+# движок только fail-closed валидирует форму. В isolated пути workspace могут ещё
+# не существовать (их создаст up.sh); в shared они обязаны быть основным checkout.
+v2_hook_path_shape() {
+  local value=${1:-} label=${2:-path}
+  [[ -n "$value" && "$value" == /* && "$value" != / &&
+     "$value" != *$'\n'* && "$value" != *$'\t'* ]] ||
+    die "$label: хук профиля вернул не абсолютный путь"
+  [[ "$(realpath -m -- "$value" 2>/dev/null)" == "$value" ]] ||
+    die "$label: путь должен быть нормализован"
+  printf '%s\n' "$value"
+}
+
+declare -a V2_REPO_NAMES=()
+declare -a V2_REPO_SOURCES=()
+declare -a V2_REPO_WORKTREES=()
+
+declare -F profile_workspace_mode >/dev/null ||
+  die "профиль $PROFILE не реализует profile_workspace_mode"
+V2_WORKSPACE_MODE=$(profile_workspace_mode) ||
+  die "profile_workspace_mode отказал"
+[[ "$V2_WORKSPACE_MODE" == isolated || "$V2_WORKSPACE_MODE" == shared ]] ||
+  die "profile_workspace_mode: допускается только isolated или shared"
+
+v2_repo_seen() {
+  local requested=$1 known
+  for known in "${V2_REPO_NAMES[@]}"; do
+    [[ "$known" == "$requested" ]] && return 0
+  done
+  return 1
+}
+
+v2_add_repository() {
+  local name=$1 source=$2 worktree=$3 known
+  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] ||
+    die "repositories: недопустимое имя $name"
+  case "$name" in
+    generation|repos|stateDir|containerName)
+      die "repositories: имя $name зарезервировано typed context"
+      ;;
+  esac
+  [[ "$source" != *:* && "$worktree" != *:* &&
+     "$source" != *[[:space:]]* && "$worktree" != *[[:space:]]* &&
+     "$source" != *\"* && "$worktree" != *\"* &&
+     "$source" != *\\* && "$worktree" != *\\* ]] ||
+    die "repositories: путь содержит символ, не поддерживаемый transport контекста"
+  ! v2_repo_seen "$name" || die "repositories: имя $name повторяется"
+  source=$(canonical_existing_dir "$source" "repository-$name-source") || exit 78
+  worktree=$(v2_hook_path_shape "$worktree" "repository-$name-worktree") || exit 78
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    [[ "$worktree" == "$source" ]] ||
+      die "shared workspace $name обязан совпадать с source checkout"
+  else
+    paths_disjoint "$worktree" "$source" ||
+      die "isolated workspace $name не должен пересекаться с source checkout"
+  fi
+  for known in "${V2_REPO_WORKTREES[@]}"; do
+    paths_disjoint "$worktree" "$known" ||
+      die "worktree репозиториев должны быть непересекающимися"
+  done
+  V2_REPO_NAMES+=("$name")
+  V2_REPO_SOURCES+=("$source")
+  V2_REPO_WORKTREES+=("$worktree")
+  (( ${#V2_REPO_NAMES[@]} <= 16 )) ||
+    die "repositories: допускается не больше 16 репозиториев"
+}
+
+v2_load_repositories() {
+  local output line name source worktree rest
+  declare -F profile_repositories >/dev/null ||
+    die "профиль $PROFILE не реализует profile_repositories"
+  output=$(profile_repositories "$TASK") || die "profile_repositories отказал"
+  [[ -n "$output" ]] || die "profile_repositories вернул пустой список"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" && "$line" == *$'\t'* ]] ||
+      die "profile_repositories: ожидалось имя<TAB>source<TAB>workspace"
+    name=${line%%$'\t'*}
+    rest=${line#*$'\t'}
+    [[ "$rest" == *$'\t'* ]] ||
+      die "profile_repositories: не хватает пути workspace"
+    source=${rest%%$'\t'*}
+    worktree=${rest#*$'\t'}
+    [[ -n "$source" && -n "$worktree" && "$worktree" != *$'\t'* ]] ||
+      die "profile_repositories: в строке должно быть ровно три поля"
+    v2_add_repository "$name" "$source" "$worktree"
+  done <<<"$output"
+  (( ${#V2_REPO_NAMES[@]} > 0 )) || die "профиль не объявил ни одного репозитория"
+}
+
+for v2_hook in profile_source_branch profile_container profile_stand_alive; do
+  declare -F "$v2_hook" >/dev/null ||
+    die "профиль $PROFILE не реализует route-хук $v2_hook (см. PROFILE-CONTRACT)"
+done
+unset v2_hook
+
+v2_load_repositories
+for v2_index in "${!V2_REPO_WORKTREES[@]}"; do
+  for v2_source_index in "${!V2_REPO_SOURCES[@]}"; do
+    if [[ "$V2_WORKSPACE_MODE" == shared && "$v2_index" == "$v2_source_index" ]]; then
+      continue
+    fi
+    paths_disjoint "${V2_REPO_WORKTREES[$v2_index]}" "${V2_REPO_SOURCES[$v2_source_index]}" ||
+      die "workspace задачи не должен пересекаться с чужим source-репозиторием"
+  done
+done
+unset v2_index v2_source_index
+V2_PRIMARY_WORKTREE=${V2_REPO_WORKTREES[0]}
+printf -v V2_AGENT_DIRS '%s ' "${V2_REPO_WORKTREES[@]}"
+V2_AGENT_DIRS=${V2_AGENT_DIRS% }
+V2_SOURCE_BRANCH=$(profile_source_branch "$TASK") || die "profile_source_branch отказал"
+[[ "$V2_SOURCE_BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$ &&
+   "$V2_SOURCE_BRANCH" != *..* ]] ||
+  die "source-branch: недопустимое имя ветки"
+V2_CONTAINER=$(profile_container "$TASK") || die "profile_container отказал"
+[[ "$V2_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$ ]] ||
+  die "container: недопустимое имя"
+declare -F profile_project_context >/dev/null ||
+  die "профиль $PROFILE не реализует profile_project_context"
+V2_PROJECT_CONTEXT_JSON=$(profile_project_context) || die "profile_project_context отказал"
+V2_PROJECT_CONTEXT_JSON=$(python3 -c '
+import json
+import sys
+
+try:
+    raw = sys.argv[1]
+    if len(raw.encode("utf-8")) > 32768:
+        raise SystemExit(1)
+    value = json.loads(raw)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+if not isinstance(value, dict) or set(value) != {"stack", "guardrails"}:
+    raise SystemExit(1)
+stack = value["stack"]
+guardrails = value["guardrails"]
+valid = (
+    isinstance(stack, list) and 1 <= len(stack) <= 64
+    and isinstance(guardrails, list) and len(guardrails) <= 100
+    and all(isinstance(item, str) and 1 <= len(item) <= 500 for item in stack)
+    and all(isinstance(item, str) and 1 <= len(item) <= 2000 for item in guardrails)
+)
+if not valid:
+    raise SystemExit(1)
+print(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+' "$V2_PROJECT_CONTEXT_JSON") ||
+  die "profile_project_context вернул недопустимую схему JSON"
+V2_SERVICE_HOST=${PROFILE_SERVICE_HOST:-127.0.0.1}
+[[ "$V2_SERVICE_HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,61}[A-Za-z0-9])?$ ]] ||
+  die "PROFILE_SERVICE_HOST: нужно имя хоста или адрес без схемы, порта и слэшей"
+
+declare -a V2_SHARED_RESOURCES=()
+V2_SHARED_LEASE_BOUND=0
+V2_SHARED_LEASE_CLAIMED=0
+if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+  declare -F profile_service_ports >/dev/null ||
+    die "shared-профиль обязан реализовать profile_service_ports"
+  v2_ports=$(profile_service_ports "$TASK") || die "profile_service_ports отказал"
+  IFS=$'\t' read -r V2_FE_PORT V2_API_PORT v2_extra <<<"$v2_ports"
+  [[ -z "$v2_extra" && "$V2_FE_PORT" =~ ^[1-9][0-9]{3,4}$ &&
+     "$V2_API_PORT" =~ ^[1-9][0-9]{3,4}$ &&
+     "$V2_FE_PORT" -le 65535 && "$V2_API_PORT" -le 65535 ]] ||
+    die "profile_service_ports: ожидалось FE_PORT<TAB>API_PORT"
+  unset v2_extra
+
+  declare -F profile_exclusive_resources >/dev/null ||
+    die "shared-профиль обязан реализовать profile_exclusive_resources"
+  v2_resources=$(profile_exclusive_resources "$TASK") ||
+    die "profile_exclusive_resources отказал"
+  mapfile -t V2_SHARED_RESOURCES <<<"$v2_resources"
+  (( ${#V2_SHARED_RESOURCES[@]} > 0 && ${#V2_SHARED_RESOURCES[@]} <= 32 )) ||
+    die "profile_exclusive_resources: нужно от 1 до 32 ресурсов"
+  mapfile -t V2_SHARED_RESOURCES < <(printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | LC_ALL=C sort -u)
+  for v2_resource in "${V2_SHARED_RESOURCES[@]}"; do
+    [[ "$v2_resource" =~ ^[a-z][a-z0-9_-]{0,31}:.{1,480}$ &&
+       "$v2_resource" != *$'\n'* && "$v2_resource" != *$'\t'* ]] ||
+      die "profile_exclusive_resources: недопустимый ресурс"
+  done
+  for v2_worktree in "${V2_REPO_WORKTREES[@]}"; do
+    printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | grep -Fxq "workspace:$v2_worktree" ||
+      die "shared-профиль обязан арендовать workspace:$v2_worktree"
+    v2_git_dir=$(git -C "$v2_worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
+      die "shared workspace не является Git checkout: $v2_worktree"
+    v2_common_dir=$(git -C "$v2_worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+      die "shared workspace не имеет Git common dir: $v2_worktree"
+    v2_git_dir=$(realpath -e -- "$v2_git_dir") || exit 78
+    v2_common_dir=$(realpath -e -- "$v2_common_dir") || exit 78
+    [[ "$v2_git_dir" == "$v2_common_dir" ]] ||
+      die "shared workspace обязан быть основным checkout, а не linked worktree"
+    [[ "$(git -C "$v2_worktree" symbolic-ref --quiet --short HEAD 2>/dev/null)" == "$V2_SOURCE_BRANCH" ]] ||
+      die "shared checkout находится не на закреплённой ветке $V2_SOURCE_BRANCH"
+  done
+  printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | grep -Fxq "stand:$V2_CONTAINER" ||
+    die "shared-профиль обязан арендовать stand:$V2_CONTAINER"
+  unset v2_ports v2_resources v2_resource v2_worktree v2_git_dir v2_common_dir
+else
+  V2_FE_PORT=""
+  V2_API_PORT=""
+fi
+
+V2_SANDBOX_ENV="$STATE_DIR/t${TASK}.env"
+V2_SCOPE_FILE="$STATE_DIR/t${TASK}.instrumentation-scope.list"
+V2_ATTEMPT=""
+V2_TRUSTED_TICKET=""
+V2_SCOPE_SPEC=""
+V2_DELIVERY_SPEC=""
+V2_HAS_SHIP=""
+V2_DELIVERY_MODE=""
+V2_SCOPE_EXPECTED_HASH=""
+
+# Агент всегда получает workspace из точного route-контракта профиля.
+profile_agent_cwd() {
+  [[ -d "$V2_PRIMARY_WORKTREE" ]] && printf '%s\n' "$V2_PRIMARY_WORKTREE"
+}
+
+v2_log() {
+  flog "$TASK" "route: $*"
+}
+
+v2_lock() {
+  local lock_dir
+  lock_dir="$(factory_control_root)/protocol-v2/orchestrators"
+  mkdir -p -- "$lock_dir" || return 1
+  [[ -d "$lock_dir" && ! -L "$lock_dir" ]] || return 78
+  exec {V2_LOCK_FD}>"$lock_dir/t${TASK}.lock" || return 1
+  flock -n "$V2_LOCK_FD" || return 73
+}
+
+v2_shared_lease_dir() {
+  printf '%s/protocol-v2/shared-leases\n' "$(factory_control_root)"
+}
+
+v2_shared_owner_path() {
+  local resource=$1 digest
+  digest=$(printf '%s' "$resource" | sha256sum | awk '{print $1}') || return 1
+  [[ "$digest" =~ ^[a-f0-9]{64}$ ]] || return 78
+  printf '%s/%s.owner\n' "$(v2_shared_lease_dir)" "$digest"
+}
+
+v2_shared_owner_get() {
+  local file=$1 key=$2
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); value=$0} END {print value}' \
+    "$file" 2>/dev/null
+}
+
+v2_shared_lease_lock() {
+  local output_var=$1 dir lock_fd
+  dir=$(v2_shared_lease_dir) || return
+  mkdir -p -- "$dir" || return 1
+  chmod 700 "$dir" 2>/dev/null || true
+  [[ -d "$dir" && ! -L "$dir" ]] || return 78
+  exec {lock_fd}>"$dir/.claim.lock" || return 1
+  flock -n "$lock_fd" || {
+    eval "exec ${lock_fd}>&-"
+    return 73
+  }
+  printf -v "$output_var" '%s' "$lock_fd"
+}
+
+v2_shared_lease_unlock() {
+  local fd=$1
+  flock -u "$fd" 2>/dev/null || true
+  eval "exec ${fd}>&-"
+}
+
+v2_shared_owner_valid() {
+  local file=$1 resource=$2 expected_attempt=$3 encoded decoded digest
+  [[ -f "$file" && ! -L "$file" &&
+     "$(stat -c '%a:%h' "$file" 2>/dev/null)" == 600:1 ]] || return 78
+  digest=$(printf '%s' "$resource" | sha256sum | awk '{print $1}') || return 1
+  encoded=$(v2_shared_owner_get "$file" RESOURCE_B64)
+  decoded=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || return 78
+  [[ "$decoded" == "$resource" &&
+     "$(v2_shared_owner_get "$file" SCHEMA)" == 1 &&
+     "$(v2_shared_owner_get "$file" PROFILE)" == "$PROFILE" &&
+     "$(v2_shared_owner_get "$file" TASK)" == "$TASK" &&
+     "$(v2_shared_owner_get "$file" ATTEMPT)" == "$expected_attempt" &&
+     "$(v2_shared_owner_get "$file" RESOURCE_HASH)" == "$digest" ]] || return 75
+}
+
+v2_shared_owner_write() {
+  local resource=$1 attempt=$2 file dir tmp digest encoded
+  file=$(v2_shared_owner_path "$resource") || return
+  dir=${file%/*}
+  digest=${file##*/}; digest=${digest%.owner}
+  encoded=$(printf '%s' "$resource" | base64 -w0) || return 1
+  tmp=$(mktemp "$dir/.owner.XXXXXX") || return 1
+  {
+    printf 'SCHEMA=1\nPROFILE=%s\nTASK=%s\nATTEMPT=%s\n' \
+      "$PROFILE" "$TASK" "$attempt"
+    printf 'RESOURCE_HASH=%s\nRESOURCE_B64=%s\n' "$digest" "$encoded"
+  } >"$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  chmod 600 "$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  mv -f -- "$tmp" "$file"
+}
+
+# Durable lease остаётся на диске между foreground-командами и human gates. Короткий
+# flock сериализует CAS всех ресурсов, но владельцем является exact task/attempt.
+v2_shared_lease_claim() {
+  [[ "$V2_WORKSPACE_MODE" == shared ]] || return 0
+  local fd resource file created_file
+  local -a created=()
+  v2_shared_lease_lock fd || return
+  for resource in "${V2_SHARED_RESOURCES[@]}"; do
+    file=$(v2_shared_owner_path "$resource") || {
+      v2_shared_lease_unlock "$fd"
+      return 78
+    }
+    if [[ -e "$file" || -L "$file" ]]; then
+      # SIGKILL до создания attempt мог оставить только pending owner. Per-task
+      # flock уже наш, а start выше доказал отсутствие active-attempt; такой CAS
+      # безопасно подхватывается тем же task/profile.
+      v2_shared_owner_valid "$file" "$resource" pending || {
+        v2_shared_lease_unlock "$fd"
+        return 73
+      }
+    fi
+  done
+  for resource in "${V2_SHARED_RESOURCES[@]}"; do
+    file=$(v2_shared_owner_path "$resource") || {
+      v2_shared_lease_unlock "$fd"
+      return 78
+    }
+    [[ -e "$file" || -L "$file" ]] && continue
+    v2_shared_owner_write "$resource" pending || {
+      for created_file in "${created[@]}"; do rm -f -- "$created_file"; done
+      v2_shared_lease_unlock "$fd"
+      return 1
+    }
+    file=$(v2_shared_owner_path "$resource") || {
+      v2_shared_lease_unlock "$fd"
+      return 78
+    }
+    created+=("$file")
+  done
+  v2_shared_lease_unlock "$fd"
+  V2_SHARED_LEASE_CLAIMED=1
+}
+
+v2_shared_lease_require() {
+  local expected_attempt=$1 fd resource file rc=0
+  [[ "$V2_WORKSPACE_MODE" == shared ]] || return 0
+  v2_shared_lease_lock fd || return
+  for resource in "${V2_SHARED_RESOURCES[@]}"; do
+    file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
+    v2_shared_owner_valid "$file" "$resource" "$expected_attempt" || {
+      rc=$?
+      break
+    }
+  done
+  v2_shared_lease_unlock "$fd"
+  return "$rc"
+}
+
+v2_shared_lease_bind() {
+  local attempt=$1 fd resource rc=0
+  [[ "$V2_WORKSPACE_MODE" == shared ]] || return 0
+  [[ "$attempt" =~ ^a_[a-f0-9]{32}$ ]] || return 78
+  v2_shared_lease_lock fd || return
+  for resource in "${V2_SHARED_RESOURCES[@]}"; do
+    v2_shared_owner_valid "$(v2_shared_owner_path "$resource")" "$resource" pending || {
+      rc=$?
+      break
+    }
+  done
+  if (( rc == 0 )); then
+    for resource in "${V2_SHARED_RESOURCES[@]}"; do
+      v2_shared_owner_write "$resource" "$attempt" || { rc=$?; break; }
+    done
+  fi
+  v2_shared_lease_unlock "$fd"
+  (( rc == 0 )) || return "$rc"
+  V2_SHARED_LEASE_BOUND=1
+}
+
+v2_shared_lease_release() {
+  local expected_attempt=$1 fd resource file rc=0
+  [[ "$V2_WORKSPACE_MODE" == shared ]] || return 0
+  v2_shared_lease_lock fd || return
+  for resource in "${V2_SHARED_RESOURCES[@]}"; do
+    file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
+    v2_shared_owner_valid "$file" "$resource" "$expected_attempt" || {
+      rc=$?
+      break
+    }
+  done
+  if (( rc == 0 )); then
+    for resource in "${V2_SHARED_RESOURCES[@]}"; do
+      file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
+      rm -f -- "$file" || { rc=1; break; }
+    done
+  fi
+  v2_shared_lease_unlock "$fd"
+  (( rc == 0 )) || return "$rc"
+  V2_SHARED_LEASE_CLAIMED=0
+  V2_SHARED_LEASE_BOUND=0
+}
+
+v2_copy_once() {
+  local source=$1 destination=$2 mode=$3 dir tmp source_hash existing_hash
+  [[ -f "$source" && ! -L "$source" ]] || return 78
+  dir=$(dirname "$destination")
+  [[ -d "$dir" && ! -L "$dir" ]] || return 78
+  source_hash=$(sha256sum -- "$source" | awk '{print $1}') || return 1
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    [[ -f "$destination" && ! -L "$destination" ]] || return 75
+    existing_hash=$(sha256sum -- "$destination" | awk '{print $1}') || return 1
+    [[ "$existing_hash" == "$source_hash" ]] || return 75
+    return 0
+  fi
+  tmp=$(mktemp "$dir/.v2-copy.XXXXXX") || return 1
+  cp -- "$source" "$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  chmod "$mode" "$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  mv -- "$tmp" "$destination"
+}
+
+v2_attempt_artifacts() {
+  local root
+  root=$(attempt_state_v2_task_root "$TASK") || return
+  printf '%s/attempts/%s/artifacts\n' "$root" "$V2_ATTEMPT"
+}
+
+# Repo/project-часть профиля закрепляется рядом с route pins. Профиль остаётся
+# локальным кодом и может быть отредактирован между командами, но resume не имеет
+# права молча перенести активную попытку в другой worktree или подменить guardrails.
+v2_materialize_profile_contract() {
+  local manifest=$1 project_context=$2 index resource
+  {
+    printf 'schema\t1\n'
+    printf 'repos-mode\tgeneric\n'
+    printf 'workspace-mode\t%s\n' "$V2_WORKSPACE_MODE"
+    printf 'stand-ownership\t%s\n' "$([[ "$V2_WORKSPACE_MODE" == shared ]] && printf external || printf task)"
+    printf 'source-branch\t%s\n' "$V2_SOURCE_BRANCH"
+    printf 'container\t%s\n' "$V2_CONTAINER"
+    printf 'service-host\t%s\n' "$V2_SERVICE_HOST"
+    if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+      printf 'frontend-port\t%s\napi-port\t%s\n' "$V2_FE_PORT" "$V2_API_PORT"
+      for resource in "${V2_SHARED_RESOURCES[@]}"; do
+        printf 'exclusive-resource\t%s\n' "$resource"
+      done
+    fi
+    for index in "${!V2_REPO_NAMES[@]}"; do
+      printf 'repo\t%s\t%s\t%s\n' \
+        "${V2_REPO_NAMES[$index]}" \
+        "${V2_REPO_SOURCES[$index]}" \
+        "${V2_REPO_WORKTREES[$index]}"
+    done
+  } >"$manifest" || return 1
+  printf '%s\n' "$V2_PROJECT_CONTEXT_JSON" >"$project_context" || return 1
+}
+
+v2_install_profile_contract() {
+  local artifacts manifest project_context manifest_tmp project_tmp rc
+  artifacts=$(v2_attempt_artifacts) || return
+  manifest="$artifacts/profile-contract.tsv"
+  project_context="$artifacts/project-context.json"
+  manifest_tmp=$(mktemp "$STATE_DIR/.v2-profile-contract.XXXXXX") || return 1
+  project_tmp=$(mktemp "$STATE_DIR/.v2-project-context.XXXXXX") || {
+    rm -f -- "$manifest_tmp"
+    return 1
+  }
+  v2_materialize_profile_contract "$manifest_tmp" "$project_tmp" || {
+    rc=$?
+    rm -f -- "$manifest_tmp" "$project_tmp"
+    return "$rc"
+  }
+  if [[ "$MODE" == start ]]; then
+    v2_copy_once "$manifest_tmp" "$manifest" 400 &&
+      v2_copy_once "$project_tmp" "$project_context" 400 || {
+        rc=$?
+        rm -f -- "$manifest_tmp" "$project_tmp"
+        return "$rc"
+      }
+  fi
+  [[ -f "$manifest" && ! -L "$manifest" &&
+     "$(stat -c '%a:%h' "$manifest" 2>/dev/null)" == 400:1 &&
+     -f "$project_context" && ! -L "$project_context" &&
+     "$(stat -c '%a:%h' "$project_context" 2>/dev/null)" == 400:1 ]] || {
+    rm -f -- "$manifest_tmp" "$project_tmp"
+    return 78
+  }
+  cmp -s -- "$manifest_tmp" "$manifest" &&
+    cmp -s -- "$project_tmp" "$project_context" || {
+      # Расхождение называем полем: без адреса человек получает «нужен человек»
+      # на каждом resume и не знает, что именно уехало в профиле, — на t7802 это
+      # стоило четырёх немых попыток продолжить прогон.
+      v2_log "контракт попытки разошёлся с профилем — $(attempt_state_contract_drift_v2 \
+        "$manifest" "$manifest_tmp" "$project_context" "$project_tmp")"
+      rm -f -- "$manifest_tmp" "$project_tmp"
+      return 75
+    }
+  rm -f -- "$manifest_tmp" "$project_tmp"
+  V2_PROJECT_CONTEXT_JSON=$(<"$project_context") || return 78
+}
+
+# Проверенные записи журнала попытки (node:outcome:sequence) для evidence
+# контекста: цепочка событий только что переверифицирована чтением курсора,
+# сами файлы событий immutable (0400). init и паузы без исхода пропускаются.
+v2_ledger_stage_results() {
+  local task=$1 attempt=$2 root
+  root=$(attempt_state_v2_task_root "$task") || return
+  python3 - "$root/attempts/$attempt/stage-results" <<'PY'
+import json
+import os
+import re
+import stat
+import sys
+
+directory = sys.argv[1]
+name_re = re.compile(r"^event\.[0-9]{20}\.[a-f0-9]{64}\.json$")
+node_re = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+outcome_re = re.compile(r"^[a-z][a-z-]{0,20}$")
+rows = []
+try:
+    names = sorted(os.listdir(directory))
+except FileNotFoundError:
+    names = []
+except OSError:
+    raise SystemExit(78)
+for name in names:
+    if not name_re.fullmatch(name):
+        continue
+    path = os.path.join(directory, name)
+    try:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
+            raise SystemExit(78)
+        with open(path, encoding="utf-8") as source:
+            event = json.load(source)
+    except (OSError, ValueError):
+        raise SystemExit(78)
+    if not isinstance(event, dict) or event.get("kind") == "init":
+        continue
+    outcome = event.get("outcome")
+    if outcome in (None, ""):
+        continue
+    node = event.get("node")
+    sequence = event.get("sequence")
+    if (
+        not isinstance(node, str) or not node_re.fullmatch(node)
+        or not isinstance(outcome, str) or not outcome_re.fullmatch(outcome)
+        or not isinstance(sequence, int) or isinstance(sequence, bool)
+        or not 1 <= sequence <= 999_999
+    ):
+        raise SystemExit(78)
+    rows.append((sequence, node, outcome))
+rows.sort()
+for sequence, node, outcome in rows:
+    print(f"{node}:{outcome}:{sequence}")
+PY
+}
+
+v2_install_ticket() {
+  local destination
+  destination="$(v2_attempt_artifacts)/ticket.json"
+  if [[ "$MODE" == start ]]; then
+    v2_copy_once "$TICKET_JSON" "$destination" 400 || return
+  fi
+  [[ -f "$destination" && ! -L "$destination" &&
+     "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
+  V2_TRUSTED_TICKET=$destination
+}
+
+# Диагноз попытки immutable, как ticket: заданный на start сохраняется в артефактах
+# и переживает resume/gate. Без файла контекст держит честные дефолты
+# (functional/unspecified) — молчаливой потери заданных значений быть не может.
+v2_install_diagnosis() {
+  local destination tmp
+  destination="$(v2_attempt_artifacts)/diagnosis.env"
+  if [[ "$MODE" == start && ( -n "$DIAGNOSIS_KIND" || -n "$DIAGNOSIS_SIGNAL" ) ]]; then
+    tmp=$(mktemp "$STATE_DIR/.v2-diagnosis.XXXXXX") || return 1
+    printf 'KIND=%s\nSIGNAL=%s\n' \
+      "${DIAGNOSIS_KIND:-functional}" "${DIAGNOSIS_SIGNAL:-unspecified}" >"$tmp" || {
+      rm -f -- "$tmp"
+      return 1
+    }
+    v2_copy_once "$tmp" "$destination" 400 || {
+      rm -f -- "$tmp"
+      return 75
+    }
+    rm -f -- "$tmp"
+  fi
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    [[ -f "$destination" && ! -L "$destination" &&
+       "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
+    DIAGNOSIS_KIND=$(sed -n 's/^KIND=//p' "$destination" | head -1)
+    DIAGNOSIS_SIGNAL=$(sed -n 's/^SIGNAL=//p' "$destination" | head -1)
+    [[ "$DIAGNOSIS_KIND" =~ ^(functional|performance|data|integration)$ &&
+       ${#DIAGNOSIS_SIGNAL} -le 200 ]] || return 78
+  fi
+}
+
+v2_parse_scope_spec() {
+  local value=$1 repo rel part
+  [[ "$value" == *:* && "$value" != *$'\n'* && "$value" != *$'\t'* &&
+     "$value" != *\\* ]] || return 2
+  repo=${value%%:*}
+  rel=${value#*:}
+  [[ "$repo" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] || return 2
+  v2_repo_seen "$repo" || return 2
+  [[ -n "$rel" && "$rel" != /* && "$rel" != */ &&
+     "$rel" != . && "$rel" != .. ]] || return 2
+  IFS=/ read -r -a parts <<<"$rel"
+  for part in "${parts[@]}"; do
+    [[ -n "$part" && "$part" != . && "$part" != .. ]] || return 2
+  done
+  case "$rel" in
+    .git|.git/*|.env|.env.*|*/.env|*/.env.*|.slot|*/.slot) return 2 ;;
+  esac
+  printf '%s\t%s\n' "$repo" "$rel"
+}
+
+v2_install_scope_spec() {
+  local destination tmp spec parsed
+  destination="$(v2_attempt_artifacts)/instrumentation-scope.tsv"
+  # Артефакт создаётся только когда scope явно задан (--instrumentation-file, то
+  # есть для debug). Остальные маршруты не должны получать пустой или неуместный
+  # instrumentation scope.
+  if [[ "$MODE" == start && ${#INSTRUMENTATION_SPECS[@]} -gt 0 ]]; then
+    tmp=$(mktemp "$(dirname "$destination")/.scope-spec.XXXXXX") || return 1
+    for spec in "${INSTRUMENTATION_SPECS[@]}"; do
+      parsed=$(v2_parse_scope_spec "$spec") || {
+        rm -f -- "$tmp"
+        return 2
+      }
+      printf '%s\n' "$parsed" >>"$tmp"
+    done
+    LC_ALL=C sort -u -o "$tmp" "$tmp" || {
+      rm -f -- "$tmp"
+      return 1
+    }
+    [[ -s "$tmp" ]] || {
+      rm -f -- "$tmp"
+      return 2
+    }
+    chmod 400 "$tmp" || return 1
+    mv -- "$tmp" "$destination" || return 1
+  fi
+  if [[ "$ROUTE" == debug ]]; then
+    [[ -f "$destination" && ! -L "$destination" &&
+       "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
+    V2_SCOPE_SPEC=$destination
+  elif [[ -e "$destination" || -L "$destination" ]]; then
+    return 78
+  fi
+}
+
+v2_delivery_target_valid() {
+  local value=$1 repo branch
+  [[ "$value" == *=* && "$value" != *$'\n'* && "$value" != *$'\t'* ]] || return 2
+  repo=${value%%=*}
+  branch=${value#*=}
+  [[ "$repo" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ &&
+     "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$ &&
+     "$branch" != *..* && "$branch" != *//* && "$branch" != *"@{"* &&
+     "$branch" != */ && "$branch" != *. && "$branch" != *.lock ]] || return 2
+  v2_repo_seen "$repo" || return 2
+  printf '%s\t%s\n' "$repo" "$branch"
+}
+
+# Источник истины — закреплённая машина попытки, а не имя маршрута. Так новый
+# read-only маршрут автоматически получает disabled, а старые feature/debug/trivial
+# продолжают publish без отдельного case в launcher.
+v2_detect_delivery_contract() {
+  local mode
+  mode=$("$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" |
+    python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) else "disabled")
+') || return 78
+  case "$mode" in
+    publish)
+      V2_HAS_SHIP=1
+      V2_DELIVERY_MODE=publish
+      ;;
+    disabled)
+      V2_HAS_SHIP=0
+      V2_DELIVERY_MODE=disabled
+      ;;
+    *) return 78 ;;
+  esac
+}
+
+v2_install_delivery_spec() {
+  local destination tmp action target parsed
+  destination="$(v2_attempt_artifacts)/delivery.tsv"
+  if [[ "$V2_HAS_SHIP" == 0 ]]; then
+    # У no-ship маршрута нет даже пустого delivery-контракта: отсутствие файла,
+    # actions и targets является частью проверяемой границы.
+    if [[ "$MODE" == start ]] && {
+         (( ${#DELIVERY_TARGETS[@]} > 0 )) || (( TASK_COMMENT != 0 ));
+       }; then
+      return 2
+    fi
+    [[ ! -e "$destination" && ! -L "$destination" ]] || return 78
+    V2_DELIVERY_SPEC=""
+    DELIVERY_TARGETS=()
+    TASK_COMMENT=0
+    return 0
+  fi
+  [[ "$V2_HAS_SHIP" == 1 ]] || return 78
+  if [[ "$MODE" == start ]]; then
+    if (( ${#DELIVERY_TARGETS[@]} == 0 )); then
+      # У произвольного набора репозиториев движок не угадывает ни имена,
+      # ни целевые ветки. Их обязан явно закрепить вызывающий start.
+      return 2
+    fi
+    tmp=$(mktemp "$(dirname "$destination")/.delivery.XXXXXX") || return 1
+    for action in commit push pull-request; do
+      printf 'action\t%s\n' "$action" >>"$tmp"
+    done
+    (( TASK_COMMENT == 0 )) || printf 'action\ttask-comment\n' >>"$tmp"
+    for target in "${DELIVERY_TARGETS[@]}"; do
+      parsed=$(v2_delivery_target_valid "$target") || {
+        rm -f -- "$tmp"
+        return 2
+      }
+      printf 'target\t%s\n' "${parsed//$'\t'/=}" >>"$tmp"
+    done
+    LC_ALL=C sort -u -o "$tmp" "$tmp" || {
+      rm -f -- "$tmp"
+      return 1
+    }
+    chmod 400 "$tmp" || return 1
+    mv -- "$tmp" "$destination" || return 1
+  fi
+  [[ -f "$destination" && ! -L "$destination" &&
+     "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
+  V2_DELIVERY_SPEC=$destination
+  DELIVERY_TARGETS=()
+  TASK_COMMENT=0
+  while IFS=$'\t' read -r action target; do
+    case "$action:$target" in
+      action:commit|action:push|action:pull-request) ;;
+      action:task-comment) TASK_COMMENT=1 ;;
+      target:*)
+        parsed=$(v2_delivery_target_valid "$target") || return 78
+        DELIVERY_TARGETS+=("${parsed//$'\t'/=}")
+        ;;
+      *)
+        return 78
+        ;;
+    esac
+  done <"$destination"
+  (( ${#DELIVERY_TARGETS[@]} > 0 )) || return 78
+  grep -Fxq $'action\tcommit' "$destination" &&
+    grep -Fxq $'action\tpush' "$destination" &&
+    grep -Fxq $'action\tpull-request' "$destination"
+}
+
+v2_sandbox_state() {
+  local count=0 expected=1 worktree
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    if [[ ! -e "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]]; then
+      printf 'absent\n'
+    elif [[ -f "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]]; then
+      printf 'ready\n'
+    else
+      printf 'partial\n'
+    fi
+    return 0
+  fi
+  [[ -e "$V2_SANDBOX_ENV" || -L "$V2_SANDBOX_ENV" ]] && count=$((count + 1))
+  for worktree in "${V2_REPO_WORKTREES[@]}"; do
+    expected=$((expected + 1))
+    [[ -e "$worktree" || -L "$worktree" ]] && count=$((count + 1))
+  done
+  if (( count == 0 )); then
+    printf 'absent\n'
+  elif (( count == expected )) &&
+       [[ -f "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]]; then
+    for worktree in "${V2_REPO_WORKTREES[@]}"; do
+      [[ -d "$worktree" && ! -L "$worktree" ]] || {
+        printf 'partial\n'
+        return 0
+      }
+    done
+    printf 'ready\n'
+  else
+    printf 'partial\n'
+  fi
+}
+
+v2_materialize_shared_env() {
+  local output=$1 index
+  {
+    printf 'TASK=%s\nPROTOCOL=route-v2\nWORKSPACE_MODE=shared\n' "$TASK"
+    printf 'STAND_OWNERSHIP=external\nCONTAINER=%s\nSERVICE_HOST=%s\n' \
+      "$V2_CONTAINER" "$V2_SERVICE_HOST"
+    printf 'SB_K=0\nAPI_PORT=%s\nFE_PORT=%s\nSOURCE_BRANCH=%s\n' \
+      "$V2_API_PORT" "$V2_FE_PORT" "$V2_SOURCE_BRANCH"
+    printf 'REPO_COUNT=%s\n' "${#V2_REPO_NAMES[@]}"
+    for index in "${!V2_REPO_NAMES[@]}"; do
+      printf 'REPO_%s_NAME=%s\nREPO_%s_SOURCE=%s\nREPO_%s_WT=%s\nREPO_%s_BRANCH=%s\n' \
+        "$index" "${V2_REPO_NAMES[$index]}" \
+        "$index" "${V2_REPO_SOURCES[$index]}" \
+        "$index" "${V2_REPO_WORKTREES[$index]}" \
+        "$index" "$V2_SOURCE_BRANCH"
+    done
+  } >"$output"
+}
+
+v2_write_shared_env() {
+  local tmp existing_hash expected_hash
+  tmp=$(mktemp "$STATE_DIR/.route-env.XXXXXX") || return 1
+  v2_materialize_shared_env "$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  chmod 600 "$tmp" || {
+    rm -f -- "$tmp"
+    return 1
+  }
+  if [[ -e "$V2_SANDBOX_ENV" || -L "$V2_SANDBOX_ENV" ]]; then
+    [[ -f "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]] || {
+      rm -f -- "$tmp"
+      return 78
+    }
+    existing_hash=$(sha256sum -- "$V2_SANDBOX_ENV" | awk '{print $1}') || return 1
+    expected_hash=$(sha256sum -- "$tmp" | awk '{print $1}') || return 1
+    rm -f -- "$tmp"
+    [[ "$existing_hash" == "$expected_hash" ]] || return 75
+    return 0
+  fi
+  [[ "$MODE" == start || "$MODE" == recover ]] || {
+    rm -f -- "$tmp"
+    return 73
+  }
+  mv -- "$tmp" "$V2_SANDBOX_ENV"
+}
+
+v2_env_get() {
+  local key=$1
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); value=$0} END {print value}' \
+    "$V2_SANDBOX_ENV"
+}
+
+v2_read_sandbox() {
+  local task sb_k source_branch repo_count workspace_mode protocol ownership
+  local index name source worktree branch container service_host actual_branch
+  [[ -f "$V2_SANDBOX_ENV" && ! -L "$V2_SANDBOX_ENV" ]] || return 78
+  task=$(v2_env_get TASK)
+  sb_k=$(v2_env_get SB_K)
+  V2_API_PORT=$(v2_env_get API_PORT)
+  V2_FE_PORT=$(v2_env_get FE_PORT)
+  [[ "$task" == "$TASK" && "$sb_k" =~ ^[0-9]+$ &&
+     "$V2_API_PORT" =~ ^[1-9][0-9]{3,4}$ &&
+     "$V2_FE_PORT" =~ ^[1-9][0-9]{3,4}$ ]] || return 78
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    protocol=$(v2_env_get PROTOCOL)
+    workspace_mode=$(v2_env_get WORKSPACE_MODE)
+    ownership=$(v2_env_get STAND_OWNERSHIP)
+    container=$(v2_env_get CONTAINER)
+    service_host=$(v2_env_get SERVICE_HOST)
+    [[ "$protocol" == route-v2 && "$workspace_mode" == shared &&
+       "$ownership" == external && "$container" == "$V2_CONTAINER" &&
+       "$service_host" == "$V2_SERVICE_HOST" ]] || return 78
+  else
+    workspace_mode=$(v2_env_get WORKSPACE_MODE)
+    ownership=$(v2_env_get STAND_OWNERSHIP)
+    [[ "$workspace_mode" == isolated && "$ownership" == task ]] || return 78
+  fi
+  source_branch=$(v2_env_get SOURCE_BRANCH)
+  repo_count=$(v2_env_get REPO_COUNT)
+  [[ "$source_branch" == "$V2_SOURCE_BRANCH" &&
+     "$repo_count" == "${#V2_REPO_NAMES[@]}" ]] || return 78
+  for index in "${!V2_REPO_NAMES[@]}"; do
+    name=$(v2_env_get "REPO_${index}_NAME")
+    source=$(v2_env_get "REPO_${index}_SOURCE")
+    worktree=$(v2_env_get "REPO_${index}_WT")
+    branch=$(v2_env_get "REPO_${index}_BRANCH")
+    [[ "$name" == "${V2_REPO_NAMES[$index]}" &&
+       "$source" == "${V2_REPO_SOURCES[$index]}" &&
+       "$worktree" == "${V2_REPO_WORKTREES[$index]}" &&
+       "$branch" == "$V2_SOURCE_BRANCH" ]] || return 78
+  done
+  for worktree in "${V2_REPO_WORKTREES[@]}"; do
+    git -C "$worktree" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 78
+    if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+      actual_branch=$(git -C "$worktree" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
+        return 75
+      [[ "$actual_branch" == "$V2_SOURCE_BRANCH" ]] || return 75
+    fi
+  done
+  # Только health: решение о start/create shared-стенда движок никогда не принимает.
+  profile_stand_alive "$TASK" || return 73
+  set_st "$TASK" FE_PORT "$V2_FE_PORT" API_PORT "$V2_API_PORT" SB_K "$sb_k" \
+    WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+    STAND_OWNERSHIP "$([[ "$V2_WORKSPACE_MODE" == shared ]] && printf external || printf task)" \
+    CONTAINER "$V2_CONTAINER"
+}
+
+v2_sandbox_up() {
+  local state
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    v2_write_shared_env || return
+    v2_read_sandbox
+    return
+  fi
+  state=$(v2_sandbox_state) || return
+  case "$state" in
+    ready)
+      ;;
+    absent)
+      [[ "$MODE" == start ]] || return 73
+      STATE_DIR="$STATE_DIR" \
+        FACTORY_WORKSPACE_MODE=isolated \
+        FACTORY_REQUIRE_NEW_SANDBOX=1 \
+        FACTORY_BE_BASE_REF="$BE_BASE_REF" \
+        FACTORY_FE_BASE_REF="$FE_BASE_REF" \
+        bash "$FACTORY_PROFILES_DIR/$PROFILE/up.sh" "$TASK" \
+        >>"$LOGDIR/t${TASK}.orch.log" 2>&1 || return
+      ;;
+    partial)
+      v2_log "обнаружена частично созданная песочница; автоматическое удаление запрещено"
+      return 75
+      ;;
+    *)
+      return 78
+      ;;
+  esac
+  v2_read_sandbox
+}
+
+route_v2_workspace_roots() {
+  printf '%s\n' "${V2_REPO_WORKTREES[@]}"
+}
+
+route_v2_instrumentation_isolation() {
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    printf 'exclusive-shared-checkout-v1\n'
+  else
+    printf 'exclusive-worktree-v1\n'
+  fi
+}
+
+# instrumentation-transaction.sh принимает primary checkout только с этой trusted
+# аттестацией: exact lease активной попытки и exact набор закреплённых roots.
+instrumentation_tx_shared_lease_invariant() {
+  local roots_file=$1 expected actual
+  [[ "$V2_WORKSPACE_MODE" == shared && -n "$V2_ATTEMPT" ]] || return 78
+  v2_shared_lease_require "$V2_ATTEMPT" || return 75
+  expected=$(printf '%s\n' "${V2_REPO_WORKTREES[@]}" | LC_ALL=C sort -u) || return 1
+  actual=$(LC_ALL=C sort -u -- "$roots_file") || return 1
+  [[ "$actual" == "$expected" ]] || return 75
+}
+
+route_v2_instrumentation_restored() {
+  local task=$1 scope_file=$2
+  [[ "$task" == "$TASK" && -f "$scope_file" && ! -L "$scope_file" ]] || return 78
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    v2_shared_lease_require "$V2_ATTEMPT" || return 75
+    declare -F profile_instrumentation_restored >/dev/null ||
+      return 78
+    profile_instrumentation_restored "$TASK" "$scope_file"
+  fi
+}
+
+route_v2_sensitive_files() {
+  local root suffix candidate
+  for root in "${V2_REPO_WORKTREES[@]}"; do
+    for suffix in .env .env.testing .slot; do
+      candidate="$root/$suffix"
+      [[ -e "$candidate" || -L "$candidate" ]] && printf '%s\n' "$candidate"
+    done
+  done
+  return 0
+}
+
+v2_scope_candidate() {
+  local root=$1 rel=$2 absolute parent canonical_parent
+  [[ -n "$rel" && "$rel" != /* && "$rel" != *$'\n'* && "$rel" != *$'\t'* ]] ||
+    return 2
+  case "$rel" in
+    .git|.git/*|.env|.env.*|*/.env|*/.env.*|.slot|*/.slot) return 3 ;;
+  esac
+  absolute="$root/$rel"
+  parent=$(dirname "$absolute")
+  [[ -d "$parent" && ! -L "$parent" ]] || return 2
+  canonical_parent=$(realpath -e -- "$parent" 2>/dev/null) || return 2
+  [[ "$canonical_parent/$(basename "$absolute")" == "$absolute" &&
+     "$absolute" == "$root/"* && ! -L "$absolute" && ! -d "$absolute" ]] || return 2
+  printf '%s\n' "$absolute"
+}
+
+v2_publish_scope_tmp() {
+  local tmp=$1
+  LC_ALL=C sort -u -o "$tmp" "$tmp" || return 1
+  [[ -s "$tmp" ]] || return 73
+  chmod 600 "$tmp" || return 1
+  mv -f -- "$tmp" "$V2_SCOPE_FILE" || return 1
+  V2_SCOPE_EXPECTED_HASH=$(sha256sum -- "$V2_SCOPE_FILE" | awk '{print $1}') ||
+    return 1
+}
+
+v2_scope_from_spec() {
+  local tmp repo rel root candidate index
+  tmp=$(mktemp "$STATE_DIR/.scope.XXXXXX") || return 1
+  while IFS=$'\t' read -r repo rel; do
+    root=""
+    for index in "${!V2_REPO_NAMES[@]}"; do
+      [[ "${V2_REPO_NAMES[$index]}" == "$repo" ]] && {
+        root=${V2_REPO_WORKTREES[$index]}
+        break
+      }
+    done
+    [[ -n "$root" ]] || { rm -f -- "$tmp"; return 78; }
+    candidate=$(v2_scope_candidate "$root" "$rel")
+    case "$?" in
+      0) printf '%s\n' "$candidate" >>"$tmp" ;;
+      *) rm -f -- "$tmp"; return 78 ;;
+    esac
+  done <"$V2_SCOPE_SPEC"
+  v2_publish_scope_tmp "$tmp"
+}
+
+v2_scope_from_diff() {
+  local tmp root rel candidate rc
+  tmp=$(mktemp "$STATE_DIR/.scope.XXXXXX") || return 1
+  for root in "${V2_REPO_WORKTREES[@]}"; do
+    while IFS= read -r -d '' rel; do
+      candidate=$(v2_scope_candidate "$root" "$rel")
+      rc=$?
+      case "$rc" in
+        0) printf '%s\n' "$candidate" >>"$tmp" ;;
+        3) ;;
+        *) rm -f -- "$tmp"; return 78 ;;
+      esac
+    done < <(
+      {
+        git -C "$root" diff --name-only -z HEAD --
+        git -C "$root" ls-files --others --exclude-standard -z
+      } | sort -zu
+    )
+  done
+  v2_publish_scope_tmp "$tmp"
+}
+
+v2_prepare_scope() {
+  case "$ROUTE" in
+    debug) v2_scope_from_spec ;;
+    feature) v2_scope_from_diff ;;
+    *) return 78 ;;
+  esac
+}
+
+route_v2_instrumentation_scope_invariant() {
+  local invariant_task=$1 invariant_attempt=$2 scope=$3 hash
+  [[ "$invariant_task" == "$TASK" && "$invariant_attempt" == "$V2_ATTEMPT" &&
+     "$scope" == "$V2_SCOPE_FILE" && -f "$scope" && ! -L "$scope" &&
+     "$(stat -c '%a:%h' "$scope" 2>/dev/null)" == 600:1 &&
+     "$V2_SCOPE_EXPECTED_HASH" =~ ^[a-f0-9]{64}$ ]] || return 75
+  hash=$(sha256sum -- "$scope" | awk '{print $1}') || return 75
+  [[ "$hash" == "$V2_SCOPE_EXPECTED_HASH" ]]
+}
+
+v2_decision() {
+  local key=$1 value
+  value=$(get "$TASK" "$key")
+  case "$value" in
+    approved|rejected) printf '%s\n' "$value" ;;
+    *) printf 'pending\n' ;;
+  esac
+}
+
+v2_review_decision() {
+  local value
+  value=$(get "$TASK" REVIEW)
+  case "$value" in
+    done) printf 'approved\n' ;;
+    failed) printf 'rejected\n' ;;
+    *) printf 'pending\n' ;;
+  esac
+}
+
+route_v2_context_for_node() {
+  local context_task=$1 context_attempt=$2 context_node=$3
+  local context_run_key=$4 context_output=$5 cursor event_count=0
+  local transaction_id="" instrumentation_phase=not-started scope_arg=""
+  local cause review acceptance allowed action target index
+  local ledger_results ledger_line findings_ledger
+  local -a args=()
+
+  cursor=$(attempt_stage_state_read_v2 "$context_task" "$context_attempt" 2>/dev/null || true)
+  if [[ -n "$cursor" ]]; then
+    event_count=$(json_value eventSequence <<<"$cursor" 2>/dev/null || printf '0')
+  fi
+  [[ "$event_count" =~ ^[0-9]+$ ]] || return 78
+  ledger_results=$(v2_ledger_stage_results "$context_task" "$context_attempt") || return 78
+  # Bootstrap исполняется до рождения stage-ledger и по определению не может иметь
+  # findings. Все узлы закреплённого маршрута получают проекцию только после полной
+  # проверки уже инициализированного hash-chain.
+  if [[ "$context_node" == scout ]]; then
+    findings_ledger='{"schema":1,"open":[],"closed":[]}'
+  else
+    findings_ledger=$(attempt_stage_state_findings_v2 \
+      "$context_task" "$context_attempt") || return 78
+  fi
+
+  if [[ "$context_node" == instrument || "$context_node" == trace ]]; then
+    v2_prepare_scope || return
+    transaction_id="v2-${context_attempt#*_}-s${event_count}"
+    instrumentation_phase=active
+  elif [[ -f "$V2_SCOPE_FILE" && ! -L "$V2_SCOPE_FILE" ]]; then
+    V2_SCOPE_EXPECTED_HASH=$(sha256sum -- "$V2_SCOPE_FILE" | awk '{print $1}') ||
+      return 1
+    transaction_id=$(_route_v2_transaction_active_id "$context_task" 2>/dev/null || true)
+    case "$context_node" in
+      diagnose|hyposkeptic|proof)
+        [[ -n "$transaction_id" ]] && instrumentation_phase=active
+        ;;
+      *)
+        instrumentation_phase=cleaned
+        ;;
+    esac
+  fi
+  [[ -n "$transaction_id" ]] || transaction_id=not-open
+
+  cause=$(v2_decision CAUSE_DECISION)
+  review=$(v2_review_decision)
+  acceptance=$(v2_decision ACCEPTANCE_DECISION)
+  args=(
+    "$FACTORY_HOME/bin/factory-context"
+    --task "$context_task"
+    --profile "$PROFILE"
+    --attempt "$context_attempt"
+    --catalog-hash "$ROUTE_V2_CATALOG"
+    --route "$ROUTE_V2_ROUTE"
+    --route-hash "$ROUTE_V2_ROUTE_HASH"
+    --node "$context_node"
+    --run-key "$context_run_key"
+    --ticket-json "$V2_TRUSTED_TICKET"
+    --project-context-json "$V2_PROJECT_CONTEXT_JSON"
+    --state-dir "$STATE_DIR"
+    --workspace-mode "$V2_WORKSPACE_MODE"
+    --container-name "$V2_CONTAINER"
+    --frontend-port "$V2_FE_PORT"
+    --api-port "$V2_API_PORT"
+    # Имя хоста стенда — слово профиля. Порт свой у каждой песочницы, а вот петля
+    # это или localhost, знает только проект: приложение вправе включать продовую
+    # авторизацию по window.location.hostname (инцидент t8165).
+    --service-host "$V2_SERVICE_HOST"
+    --transaction-id "$transaction_id"
+    --instrumentation-phase "$instrumentation_phase"
+    --event-count "$event_count"
+    --findings-ledger-json "$findings_ledger"
+    --cause-decision "$cause"
+    --cause-comment "$(get "$TASK" CAUSE_DECISION_COMMENT)"
+    --review-decision "$review"
+    --review-comment "$(get "$TASK" REVIEW_COMMENT)"
+    --acceptance-decision "$acceptance"
+    --acceptance-comment "$(get "$TASK" ACCEPTANCE_DECISION_COMMENT)"
+    --delivery-mode "$V2_DELIVERY_MODE"
+    --source-branch "$V2_SOURCE_BRANCH"
+    --diagnosis-kind "${DIAGNOSIS_KIND:-functional}"
+    --diagnosis-signal "${DIAGNOSIS_SIGNAL:-unspecified}"
+  )
+  for index in "${!V2_REPO_NAMES[@]}"; do
+    args+=(
+      --repo
+      "${V2_REPO_NAMES[$index]}:${V2_REPO_WORKTREES[$index]}:${V2_REPO_SOURCES[$index]}"
+    )
+  done
+  # Инструментация обязательна, когда контракт scope попытки непустой
+  # (debug start с --instrumentation-file); признак переживает resume вместе
+  # с immutable-артефактом scope.
+  [[ ! -s "$V2_SCOPE_SPEC" ]] || args+=(--instrumentation-required)
+  while IFS= read -r ledger_line; do
+    [[ -n "$ledger_line" ]] && args+=(--stage-result "$ledger_line")
+  done <<<"$ledger_results"
+  if [[ -f "$V2_SCOPE_FILE" && ! -L "$V2_SCOPE_FILE" ]]; then
+    args+=(--scope-file "$V2_SCOPE_FILE")
+    while IFS= read -r allowed || [[ -n "$allowed" ]]; do
+      [[ -n "$allowed" ]] && args+=(--allowed-file "$allowed")
+    done <"$V2_SCOPE_FILE"
+  fi
+  if [[ "$V2_HAS_SHIP" == 1 ]]; then
+    for action in commit push pull-request; do
+      args+=(--delivery-action "$action")
+    done
+    (( TASK_COMMENT == 0 )) || args+=(--delivery-action task-comment)
+    for target in "${DELIVERY_TARGETS[@]}"; do
+      args+=(--delivery-target "$target")
+    done
+  fi
+  "${args[@]}" >"$context_output"
+}
+
+# Скелет этапных ключей реестра — из runKeys закреплённого бандла (bootstrap
+# SCOUT + main + tail + status-узлы), а не из v1-списка: в реестре не должно
+# быть узлов, которых нет в маршруте.
+v2_registry_stage_keys() {
+  # Каталог приходит параметром: на start он только что выбран (CURRENT_CATALOG),
+  # на recovery берётся ЗАКРЕПЛЁННЫЙ пин новой попытки. Реестр обязан описывать
+  # маршрут, по которому пойдёт диспетчер, а не тот, что опубликован прямо сейчас.
+  local catalog=${1:-$CURRENT_CATALOG}
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
+    --catalog-hash "$catalog" --route "$ROUTE" | python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+keys = ["SCOUT"]
+by_id = {n["id"]: n for n in machine["nodes"] if isinstance(n, dict)}
+for phase in ("main", "tail"):
+    for node_id in machine["sequence"][phase]:
+        node = by_id.get(node_id) or {}
+        key = node.get("key") if node.get("executor") == "status" else node.get("runKey")
+        if isinstance(key, str) and key and key not in keys:
+            keys.append(key)
+print(" ".join(keys))
+'
+}
+
+v2_gate_state_key() {
+  case "$1" in
+    gate_plan) printf 'PLAN_DECISION\n' ;;
+    gate_cause) printf 'CAUSE_DECISION\n' ;;
+    gate_accept) printf 'ACCEPTANCE_DECISION\n' ;;
+    *) return 2 ;;
+  esac
+}
+
+v2_gate_pipeline_key() {
+  case "$1" in
+    gate_plan) printf 'GATE_PLAN\n' ;;
+    gate_cause) printf 'GATE_CAUSE\n' ;;
+    gate_accept) printf 'GATE_ACCEPT\n' ;;
+    *) return 2 ;;
+  esac
+}
+
+# Переводит exact reset из закреплённого route ledger в вторичный реестр Cockpit.
+# Ни фиксированного списка стадий, ни семантики --replan/--reject-accept здесь нет:
+# набор узлов берётся из immutable event, а runKey — из pinned machine.
+route_v2_project_latest_reset() {
+  local task=$1 attempt=$2 event_tmp description_tmp projection_tmp rc
+  local node executor run_key decision_key
+  local -a updates=()
+  _route_v2_load_attempt "$task" "$attempt" || return
+  event_tmp=$(mktemp "$(factory_control_root)/.route-event.XXXXXX") || return 1
+  description_tmp=$(mktemp "$(factory_control_root)/.route-description.XXXXXX") || {
+    rm -f -- "$event_tmp"
+    return 1
+  }
+  projection_tmp=$(mktemp "$(factory_control_root)/.route-projection.XXXXXX") || {
+    rm -f -- "$event_tmp" "$description_tmp"
+    return 1
+  }
+  attempt_stage_state_latest_event_v2 "$task" "$attempt" >"$event_tmp" || {
+    rc=$?
+    rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
+    return "$rc"
+  }
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" \
+    --profile "$ROUTE_V2_PROFILE" \
+    describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" \
+    --route "$ROUTE_V2_ROUTE" >"$description_tmp" || {
+      rc=$?
+      rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
+      return "$rc"
+    }
+  python3 - "$event_tmp" "$description_tmp" >"$projection_tmp" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    event = json.load(source)
+with open(sys.argv[2], encoding="utf-8") as source:
+    description = json.load(source)
+
+if event.get("kind") not in {"commit", "human-rewind"}:
+    raise SystemExit(3)
+action = event.get("action")
+if not isinstance(action, dict) or set(action) != {"rewind", "reset"}:
+    raise SystemExit(3)
+reset = action.get("reset")
+if (
+    not isinstance(reset, list)
+    or not reset
+    or reset[0] != action.get("rewind")
+    or len(reset) != len(set(reset))
+):
+    raise SystemExit(78)
+machine = description.get("machine")
+nodes = machine.get("nodes") if isinstance(machine, dict) else None
+if not isinstance(nodes, list):
+    raise SystemExit(78)
+by_id = {}
+for item in nodes:
+    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+        raise SystemExit(78)
+    if item["id"] in by_id:
+        raise SystemExit(78)
+    by_id[item["id"]] = item
+for node_id in reset:
+    item = by_id.get(node_id)
+    if not isinstance(item, dict) or item.get("executor") not in {"agent", "command", "gate"}:
+        raise SystemExit(78)
+    run_key = item.get("runKey")
+    if not isinstance(run_key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", run_key):
+        raise SystemExit(78)
+    print(node_id, item["executor"], run_key, sep="\t")
+PY
+  rc=$?
+  if (( rc == 3 )); then
+    rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
+    return 0
+  fi
+  if (( rc != 0 )); then
+    rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
+    return "$rc"
+  fi
+  while IFS=$'\t' read -r node executor run_key || [[ -n "$node" ]]; do
+    [[ -n "$node" && -n "$run_key" ]] || continue
+    updates+=("$run_key" pending "${run_key}_COMMENT" "")
+    if [[ "$executor" == gate ]]; then
+      decision_key=$(v2_gate_state_key "$node") || {
+        rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
+        return 78
+      }
+      updates+=("$decision_key" pending "${decision_key}_COMMENT" "")
+    fi
+  done <"$projection_tmp"
+  rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
+  (( ${#updates[@]} > 0 )) || return 78
+  set_st "$task" "${updates[@]}"
+}
+
+# Фиксация решения ворот: CAS в журнале попытки плюс проекция в реестр, по
+# которой кокпит рисует ворота. Продолжение маршрута сюда не входит намеренно —
+# см. --commit-only в справке.
+v2_gate_commit() {
+  local attempt=$1 gate_key pipeline_gate_key rc
+  gate_key=$(v2_gate_state_key "$GATE_NODE") ||
+    die "неизвестный gate node для профиля: $GATE_NODE"
+  pipeline_gate_key=$(v2_gate_pipeline_key "$GATE_NODE") ||
+    die "нет UI-проекции для gate node: $GATE_NODE"
+  route_v2_gate_decide \
+    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" >/dev/null || {
+    rc=$?
+    v2_log "gate CAS не принят (код $rc)"
+    return "$rc"
+  }
+  set_st "$TASK" "$gate_key" "$GATE_DECISION" \
+    "${gate_key}_COMMENT" "${GATE_COMMENT//$'\n'/ }" \
+    "$pipeline_gate_key" "$GATE_DECISION" \
+    "${pipeline_gate_key}_COMMENT" "${GATE_COMMENT//$'\n'/ }"
+  v2_log "gate $GATE_NODE=$GATE_DECISION зафиксирован"
+}
+
+v2_on_signal() {
+  local signal=$1 rc=130 stop_rc cleanup_rc
+  [[ "$signal" == TERM ]] && rc=143
+  trap - TERM INT
+  v2_log "получен $signal; останавливаю exact active runner"
+  runtime_interrupt_trusted_active "$TASK" "" "" "" \
+    "${FACTORY_TERM_GRACE_SECONDS:-5}"
+  stop_rc=$?
+  if (( stop_rc == 0 )) && [[ -n "$V2_ATTEMPT" ]]; then
+    route_v2_cleanup_active_instrumentation "$TASK" "$V2_ATTEMPT"
+    cleanup_rc=$?
+    (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+      set_st "$TASK" STALLED_HUMAN 1
+      v2_log "instrumentation cleanup требует человека (код $cleanup_rc)"
+    }
+  else
+    set_st "$TASK" STALLED_HUMAN 1
+    v2_log "quiescence runner не доказана; baseline не изменён (код $stop_rc)"
+  fi
+  exit "$rc"
+}
+
+v2_on_exit() {
+  local rc=$?
+  trap - EXIT TERM INT
+  if [[ "$(get "$TASK" ORCH_PID)" == "$$" ]]; then
+    set_st "$TASK" ORCH_PID ""
+  fi
+  if [[ "$V2_WORKSPACE_MODE" == shared && "$V2_SHARED_LEASE_CLAIMED" == 1 &&
+        "$V2_SHARED_LEASE_BOUND" == 0 ]]; then
+    v2_shared_lease_release pending >/dev/null 2>&1 || true
+  fi
+  exit "$rc"
+}
+
+v2_main() {
+  local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
+  local gate_key pipeline_gate_key gate_node cursor stop stop_node
+  mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
+  v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
+  trap 'v2_on_signal TERM' TERM
+  trap 'v2_on_signal INT' INT
+  trap v2_on_exit EXIT
+
+  if [[ "$MODE" == start ]]; then
+    [[ ! -e "$STATE_DIR/t${TASK}.pipeline" &&
+       ! -L "$STATE_DIR/t${TASK}.pipeline" &&
+       ! -e "$STATE_DIR/t${TASK}.env" &&
+       ! -L "$STATE_DIR/t${TASK}.env" ]] ||
+      die "t${TASK} уже занята существующим route или историческим состоянием"
+    route_task_root=$(attempt_state_v2_task_root "$TASK") || return 78
+    [[ ! -e "$route_task_root/active-attempt.json" &&
+       ! -L "$route_task_root/active-attempt.json" ]] ||
+      die "t${TASK} уже имеет active immutable attempt"
+  fi
+
+  profile_runner_host_preflight "$PROFILE" || {
+    rc=$?
+    v2_log "runner preflight не пройден (код $rc)"
+    return "$rc"
+  }
+
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    if [[ "$MODE" == start ]]; then
+      v2_shared_lease_claim || {
+        rc=$?
+        v2_log "shared resources уже заняты или lease повреждён (код $rc)"
+        return "$rc"
+      }
+      profile_stand_alive "$TASK" || {
+        rc=73
+        v2_log "внешний shared-стенд не прошёл health; lifecycle не запускался"
+        return "$rc"
+      }
+    else
+      v2_shared_lease_require "$EXPECTED_ATTEMPT" || {
+        rc=$?
+        v2_log "shared lease не принадлежит exact attempt (код $rc)"
+        return "$rc"
+      }
+      V2_SHARED_LEASE_CLAIMED=1
+      V2_SHARED_LEASE_BOUND=1
+    fi
+  fi
+
+  if [[ "$MODE" == start ]]; then
+    set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
+      PROFILE "$PROFILE" \
+      ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
+      ORCH_PID "$$" STALLED_HUMAN 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
+    # Явный task-level override исполнителя фиксируется в реестре сразу после
+    # его создания: вся дальнейшая маршрутизация читает цепочку из реестра.
+    if [[ -n "$RUNNER_PRIMARY_OVERRIDE" ]]; then
+      set_st "$TASK" RUNNER_OVERRIDE_PRIMARY "$RUNNER_PRIMARY_OVERRIDE" \
+        RUNNER_OVERRIDE_FAILOVER "$RUNNER_FAILOVER_OVERRIDE" || return
+    fi
+    attempt=$(attempt_state_begin_v2 "$TASK" "$PROFILE" "$ROUTES_DIR") || {
+      rc=$?
+      v2_log "attempt не создан (код $rc)"
+      return "$rc"
+    }
+    V2_ATTEMPT=$attempt
+    v2_shared_lease_bind "$attempt" || {
+      rc=$?
+      v2_log "shared lease не закреплён за attempt (код $rc)"
+      return "$rc"
+    }
+    route_hash=$(attempt_state_select_route_v2 "$TASK" "$attempt" "$ROUTE") || {
+      rc=$?
+      v2_log "route pin не создан (код $rc)"
+      return "$rc"
+    }
+  else
+    attempt=$EXPECTED_ATTEMPT
+    V2_ATTEMPT=$attempt
+    _route_v2_load_attempt "$TASK" "$attempt" || {
+      rc=$?
+      v2_log "active attempt/pins не прошли exact resume (код $rc)"
+      return "$rc"
+    }
+    pinned_profile=$ROUTE_V2_PROFILE
+    pinned_route=$ROUTE_V2_ROUTE
+    pinned_routes=$ROUTE_V2_ROUTES_DIR
+    [[ "$pinned_profile" == "$PROFILE" && "$pinned_routes" == "$ROUTES_DIR" ]] ||
+      die "resume-параметры расходятся с immutable pins"
+    [[ -z "$ROUTE" || "$ROUTE" == "$pinned_route" ]] ||
+      die "--route расходится с immutable pin"
+    ROUTE=$pinned_route
+    route_hash=$ROUTE_V2_ROUTE_HASH
+  fi
+
+  # Для start pins появились только что; resume уже загрузил их выше. Проверяем
+  # один и тот же immutable bundle перед любым context/delivery действием.
+  if [[ "$MODE" == start ]]; then
+    _route_v2_load_attempt "$TASK" "$attempt" || return
+  fi
+  v2_detect_delivery_contract || {
+    rc=$?
+    v2_log "delivery topology закреплённого маршрута не прочитана (код $rc)"
+    return "$rc"
+  }
+  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 DELIVERY_MODE "$V2_DELIVERY_MODE"
+
+  set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
+    ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
+
+  v2_install_profile_contract || {
+    rc=$?
+    v2_log "repo/project contract попытки изменился или повреждён (код $rc)"
+    return "$rc"
+  }
+
+  # Решению ворот не нужны ни стенд, ни bootstrap, ни восстановление
+  # инструментации: это запись в журнал попытки. --commit-only фиксирует её и
+  # выходит, поэтому синхронный вызов остаётся коротким и предсказуемым; весь
+  # прогон дальше по маршруту поднимает отдельный resume.
+  if [[ "$MODE" == gate && "$GATE_COMMIT_ONLY" == 1 ]]; then
+    v2_gate_commit "$attempt" || return
+    return 0
+  fi
+
+  v2_install_ticket || {
+    rc=$?
+    v2_log "immutable ticket не установлен (код $rc)"
+    return "$rc"
+  }
+  v2_install_diagnosis || {
+    rc=$?
+    v2_log "immutable diagnosis не установлен (код $rc)"
+    return "$rc"
+  }
+  v2_install_scope_spec || {
+    rc=$?
+    v2_log "instrumentation scope contract не установлен (код $rc)"
+    return "$rc"
+  }
+  v2_install_delivery_spec || {
+    rc=$?
+    v2_log "delivery contract не установлен (код $rc)"
+    return "$rc"
+  }
+
+  v2_sandbox_up || {
+    rc=$?
+    set_st "$TASK" STALLED_HUMAN 1
+    v2_log "среда профиля не готова (код $rc)"
+    return "$rc"
+  }
+  export PROFILE_AGENT_CWD="$V2_PRIMARY_WORKTREE"
+  export PROFILE_AGENT_DIRS="$V2_AGENT_DIRS"
+  export ROUTE_V2_INSTRUMENTATION_SCOPE_FILE="$V2_SCOPE_FILE"
+
+  _route_v2_load_attempt "$TASK" "$attempt" || return
+  route_v2_dispatch_bootstrap "$TASK" "$attempt" >/dev/null || {
+    rc=$?
+    set_st "$TASK" STALLED_HUMAN 1
+    v2_log "bootstrap не подтверждён (код $rc)"
+    return "$rc"
+  }
+  attempt_stage_state_init_v2 "$TASK" "$attempt" "$ROUTE" >/dev/null || {
+    rc=$?
+    v2_log "route cursor не инициализирован (код $rc)"
+    return "$rc"
+  }
+  if [[ "$MODE" != start ]]; then
+    # Если предыдущий процесс умер после ledger CAS, но до UI reset, immutable
+    # последнее событие остаётся повторяемым источником проекции.
+    route_v2_project_latest_reset "$TASK" "$attempt" || {
+      rc=$?
+      v2_log "route reset projection не восстановлена (код $rc)"
+      return "$rc"
+    }
+    route_v2_recover_instrumentation "$TASK" "$attempt" || {
+      rc=$?
+      v2_log "instrumentation recovery не завершён (код $rc)"
+      return "$rc"
+    }
+  fi
+  if [[ "$MODE" == gate ]]; then
+    v2_gate_commit "$attempt" || return
+  fi
+
+  route_v2_dispatch_until_pause "$TASK" "$attempt" 64
+  rc=$?
+  case "$rc" in
+    20)
+      cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
+      gate_node=$(json_value currentNode <<<"$cursor") || return 78
+      pipeline_gate_key=$(v2_gate_pipeline_key "$gate_node") || {
+        set_st "$TASK" STALLED_HUMAN 1
+        v2_log "human gate $gate_node не имеет UI-проекции"
+        return 78
+      }
+      set_st "$TASK" "$pipeline_gate_key" waiting STALLED_HUMAN 1
+      v2_log "пауза на human gate $gate_node"
+      return 0
+      ;;
+    21)
+      cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
+      stop=$(json_value stop <<<"$cursor") || return 78
+      if [[ "$stop" == done ]]; then
+        attempt_state_finish_v2 "$TASK" "$attempt" >/dev/null || return
+        v2_shared_lease_release "$attempt" || {
+          rc=$?
+          set_st "$TASK" STALLED_HUMAN 1 RESULT lease-release-failed
+          v2_log "маршрут завершён, но shared lease не освобождён (код $rc)"
+          return "$rc"
+        }
+        set_st "$TASK" STALLED_HUMAN 0 RESULT completed
+        v2_log "маршрут завершён; SHIP и RETRO подтверждены"
+        return 0
+      fi
+      set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
+      if [[ "$stop" == no-progress || "$stop" == rewind-limit ]]; then
+        stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
+        [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78
+        v2_log "${stop_node^^}: маршрут остановлен: $stop"
+      else
+        v2_log "маршрут остановлен: $stop"
+      fi
+      return 0
+      ;;
+    0)
+      return 0
+      ;;
+    *)
+      set_st "$TASK" STALLED_HUMAN 1
+      v2_log "dispatcher остановлен fail-closed (код $rc)"
+      return "$rc"
+      ;;
+  esac
+}
+
+# Выходы этапов предшественницы уносим с диска (см. attempt-state.sh): иначе новая
+# попытка принимает их за свои. Список унесённого — в журнал, чтобы человек знал,
+# где искать, если понадобится сравнить с прошлым заходом.
+v2_quarantine_state_artifacts() {
+  local from_attempt=$1 moved base rc
+  # Именно подстановка, а не пайп: у process substitution код возврата не забрать,
+  # а молча пройти мимо неубранного артефакта — ровно та ошибка, от которой чиним.
+  moved=$(attempt_state_quarantine_artifacts_v2 "$TASK" "$from_attempt" "$STATE_DIR")
+  rc=$?
+  if (( rc != 0 )); then
+    v2_log "recovery: артефакты предшественницы не убраны (код $rc)"
+    return "$rc"
+  fi
+  while IFS= read -r base || [[ -n "$base" ]]; do
+    [[ -n "$base" ]] || continue
+    v2_log "recovery: артефакт $base убран в архив попытки $from_attempt"
+  done <<<"$moved"
+  return 0
+}
+
+# Административные операции над attempt state: без песочницы, каталога маршрутов
+# и диспетчеризации. Lock оркестратора берём тот же, что у start/resume, — abandon
+# под живым foreground-прогоном обязан получить отказ, а не резать попытку под ним.
+v2_admin_main() {
+  local rc out
+  mkdir -p "$STATE_DIR/logs"
+  v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
+  if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
+    case "$MODE" in
+      abandon|goto)
+        v2_shared_lease_require "$EXPECTED_ATTEMPT" || {
+          rc=$?
+          v2_log "$MODE: exact shared lease не подтверждён (код $rc)"
+          return "$rc"
+        }
+        ;;
+      recover)
+        v2_shared_lease_claim || {
+          rc=$?
+          v2_log "recover: shared resources заняты (код $rc)"
+          return "$rc"
+        }
+        ;;
+    esac
+  fi
+  if [[ "$MODE" == goto ]]; then
+    # Возврат курсора работает по ЗАКРЕПЛЁННОМУ маршруту попытки, поэтому pins
+    # загружаем так же, как перед диспетчеризацией.
+    _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+  fi
+  if [[ "$MODE" == abandon ]]; then
+    V2_ATTEMPT=$EXPECTED_ATTEMPT
+    runtime_interrupt_trusted_active "$TASK" "" "" "" \
+      "${FACTORY_TERM_GRACE_SECONDS:-5}"
+    rc=$?
+    (( rc == 0 || rc == 3 )) || {
+      v2_log "abandon: runner quiescence не доказана (код $rc)"
+      return "$rc"
+    }
+    route_v2_cleanup_active_instrumentation "$TASK" "$EXPECTED_ATTEMPT"
+    rc=$?
+    (( rc == 0 || rc == 3 )) || {
+      v2_log "abandon: instrumentation cleanup не завершён (код $rc)"
+      return "$rc"
+    }
+    attempt_state_abandon_v2 "$TASK" "$EXPECTED_ATTEMPT" "$REASON" || {
+      rc=$?
+      v2_log "abandon $EXPECTED_ATTEMPT не принят (код $rc)"
+      return "$rc"
+    }
+    # Pipeline-проекция для кокпита — только если реестр v2 уже существует:
+    # abandon законен и для попытки, упавшей до первой записи реестра.
+    v2_shared_lease_release "$EXPECTED_ATTEMPT" || {
+      rc=$?
+      v2_log "abandon: shared lease не освобождён (код $rc)"
+      return "$rc"
+    }
+    [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
+      set_st "$TASK" STALLED_HUMAN 1 RESULT abandoned
+    v2_log "attempt $EXPECTED_ATTEMPT закрыт терминалом abandoned: $REASON"
+    printf 'abandoned %s\n' "$EXPECTED_ATTEMPT"
+    return 0
+  fi
+  local route_hash old_artifacts new_artifacts name new_catalog
+  if [[ "$MODE" == goto ]]; then
+    local reset
+    # Сбрасываем целевой узел и всё, что идёт после него по последовательности
+    # маршрута: возврат назад обязан снять результаты пройденного хвоста.
+    reset=$("$FACTORY_HOME/bin/factory-route" \
+      --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
+      --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" |
+      python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+target = sys.argv[1]
+chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
+if target not in chain:
+    raise SystemExit(2)
+print(",".join(chain[chain.index(target):]))
+' "$GATE_NODE") || {
+      v2_log "goto: узел $GATE_NODE отсутствует в маршруте"
+      return 2
+    }
+    attempt_stage_state_human_rewind_v2 \
+      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" || {
+      rc=$?
+      v2_log "goto $GATE_NODE не принят (код $rc)"
+      return "$rc"
+    }
+    route_v2_project_latest_reset "$TASK" "$EXPECTED_ATTEMPT" || {
+      rc=$?
+      v2_log "goto $GATE_NODE записан, но reset-проекция не завершена (код $rc)"
+      return "$rc"
+    }
+    [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
+      set_st "$TASK" STALLED_HUMAN 0 RESULT human-rewind
+    v2_log "курсор возвращён человеком на узел $GATE_NODE: $REASON"
+    printf 'rewound %s\n' "$GATE_NODE"
+    return 0
+  fi
+  out=$(attempt_state_recover_v2 "$TASK" "$EXPECTED_ATTEMPT" "$REASON") || {
+    rc=$?
+    [[ "$V2_WORKSPACE_MODE" != shared ]] || v2_shared_lease_release pending || true
+    v2_log "recover из $EXPECTED_ATTEMPT не принят (код $rc)"
+    return "$rc"
+  }
+  v2_shared_lease_bind "$out" || {
+    rc=$?
+    v2_log "recovery attempt создан, но shared lease не закреплён (код $rc)"
+    return "$rc"
+  }
+  route_hash=$(attempt_state_select_route_v2 "$TASK" "$out" "$ROUTE") || {
+    rc=$?
+    v2_log "route pin для recovery $out не создан (код $rc)"
+    return "$rc"
+  }
+  # Recovery наследует ВХОДНЫЕ immutable-контракты предшественницы (ticket,
+  # delivery, scope, diagnosis) — иначе попытка тупиковая: resume только
+  # проверяет артефакты и создавать их не имеет права. Результаты работы
+  # (bootstrap.json) намеренно не переносятся: recovery = чистый bootstrap.
+  old_artifacts="$(attempt_state_v2_task_root "$TASK")/attempts/$EXPECTED_ATTEMPT/artifacts"
+  V2_ATTEMPT=$out
+  new_artifacts=$(v2_attempt_artifacts) || return 78
+  [[ -d "$new_artifacts" && ! -L "$new_artifacts" ]] || return 78
+  for name in ticket.json delivery.tsv instrumentation-scope.tsv diagnosis.env \
+    profile-contract.tsv project-context.json; do
+    [[ -f "$old_artifacts/$name" && ! -L "$old_artifacts/$name" ]] || continue
+    v2_copy_once "$old_artifacts/$name" "$new_artifacts/$name" 400 || {
+      rc=$?
+      v2_log "recovery: артефакт $name не перенесён (код $rc)"
+      return "$rc"
+    }
+  done
+  v2_quarantine_state_artifacts "$EXPECTED_ATTEMPT" || return
+  # Реестр — проекция для кокпита, но его читают и агенты: PLAN может увидеть в нём
+  # TESTS=done/TCRITIC=done от отменённой попытки и полезть искать
+  # несуществующие тесты. Новая попытка обязана начинать с pending по всем узлам
+  # своего маршрута, иначе «чистый bootstrap» врёт и человеку, и агентам.
+  if [[ -f "$STATE_DIR/t${TASK}.pipeline" ]]; then
+    new_catalog=$(_attempt_state_json get \
+      "$(attempt_state_v2_task_root "$TASK")/attempts/$out/attempt.json" catalogHash) ||
+      return 78
+    set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
+      STALLED_HUMAN 0 RESULT recovered ATTEMPT_ID "$out" \
+      ROUTE "$ROUTE" ROUTE_HASH "$route_hash" ORCH_PID "" \
+      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
+  fi
+  v2_log "recovery attempt $out создан из $EXPECTED_ATTEMPT: $REASON"
+  printf '%s\n' "$out"
+}
+
+if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
+  v2_admin_main
+else
+  v2_main
+fi

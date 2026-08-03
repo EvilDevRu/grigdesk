@@ -71,7 +71,7 @@ function toggle(i, row) {
   expanded.value[i] = !expanded.value[i];
 }
 function hasBody(row) {
-  return !!(row.text || row.preview || row.diff || row.res?.text || row.sub);
+  return !!(row.text || row.command || row.preview || row.diff || row.res?.text || row.sub);
 }
 
 // Иконка и подпись вида шага.
@@ -132,7 +132,7 @@ function toolLabel(name) {
           <button class="head" :class="kindOf(r.name).cls" @click="toggle(i, r)">
             <span class="ico">{{ kindOf(r.name).ico }}</span>
             <span class="nm">{{ toolLabel(r.name) }}</span>
-            <span class="ttl">{{ r.title }}</span>
+            <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
             <span v-if="r.diff" class="stat">{{ diffStat(r) }}</span>
             <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
             <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">{{ r.res.ok ? '✓' : '✕' }}</span>
@@ -141,6 +141,8 @@ function toolLabel(name) {
           </button>
           <div v-if="expanded[i]" class="body-wrap">
             <div v-if="r.sub" class="path">{{ r.sub }}</div>
+            <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
+            <pre v-if="r.command" class="body command">{{ r.command }}</pre>
             <!-- Дифф правки в две колонки: слева убранное, справа добавленное -->
             <div v-if="r.diff" class="diff">
               <div class="dhead"><span>было</span><span>стало</span></div>
@@ -201,6 +203,7 @@ function toolLabel(name) {
 .body { margin: 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
   font-size: 11.5px; line-height: 1.45; color: var(--ink-mid); white-space: pre-wrap; word-break: break-word;
   max-height: 260px; overflow: auto; }
+.body.command { color: var(--ink); overflow-wrap: anywhere; }
 .step.think .body { margin-left: 26px; }
 .body.res.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 

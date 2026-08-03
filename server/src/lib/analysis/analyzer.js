@@ -86,7 +86,25 @@ export class Analyzer {
       note: path.join(this.dir, `t${id}.md`),
       status: path.join(this.dir, `t${id}.status.json`),
       log: path.join(this.dir, `t${id}.log`),
+      clarify: path.join(this.dir, `t${id}.clarify.md`),
     };
+  }
+
+  /**
+   * Локальные уточнения человека к задаче. НЕ комментарии B24: те видит заказчик,
+   * а рабочие пояснения (ответы на вопросы триажа, скрины) — внутренняя кухня.
+   * Файл накапливается append'ом; его читают триаж и запуск конвейера.
+   */
+  async readClarifications(id) {
+    try { return await fs.readFile(this._paths(id).clarify, 'utf8'); } catch { return ''; }
+  }
+
+  async appendClarification(id, text) {
+    const stamp = new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+    const cur = await this.readClarifications(id);
+    await fs.mkdir(this.dir, { recursive: true });
+    await fs.writeFile(this._paths(id).clarify, `${cur}${cur ? '\n' : ''}## ${stamp}\n${text.trim()}\n`);
+    return this.readClarifications(id);
   }
 
   async _writeStatus(id, st) {
@@ -102,7 +120,7 @@ export class Analyzer {
   async profile() {
     if (!this._profile) {
       const name = this.config.factoryProfile || (await this.factoryState.primaryProfile().catch(() => '')) || '';
-      this._profile = await loadTriageProfile(this.config.factoryHome, name);
+      this._profile = await loadTriageProfile(this.config, name);
     }
     return this._profile;
   }
@@ -248,6 +266,7 @@ export class Analyzer {
         title: ticket.title,
         description: ticket.description,
         comments: ticket.comments,
+        clarifications: await this.readClarifications(id),
         profile,
         jsonPath: p.json,
         notePath: p.note,
@@ -314,6 +333,9 @@ export class Analyzer {
       '--permission-mode', 'acceptEdits',
       '--output-format', 'json',
       '--add-dir', this.dir,
+      // Вложения из кокпита (фото к уточнениям триажа): в комментариях лежат
+      // абсолютные пути к файлам этой папки — агент открывает их Read'ом.
+      '--add-dir', path.join(this.config.chatsDir, 'attachments'),
     ];
     for (const d of profile.dirs) args.push('--add-dir', d);
     const cwd = profile.cwd || this.config.factoryHome;

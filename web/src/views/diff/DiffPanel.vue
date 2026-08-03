@@ -1,48 +1,12 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-// Ядро редактора + подсветка всех базовых языков (Monarch, главный поток).
-// НЕ тянем language/typescript|json (им нужны свои воркеры и они сыплют «Missing requestHandler»);
-// для read-only дифа языковые сервисы не нужны — только подсветка.
-import * as monaco from 'monaco-editor/editor/editor.api';
-import 'monaco-editor/basic-languages/monaco.contribution';
-import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
+import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';
 import { api } from '../../shared/api-client.js';
 
 // Ядро дифа задачи (дерево файлов + Monaco). Переиспользуется на роуте /diff и в модале.
+// Обвязка Monaco (воркер, тема, языки) — общая с плагином «Код»: shared/monaco.js.
 const props = defineProps({ taskId: { type: [String, Number], default: '' } });
 const tid = computed(() => String(props.taskId || '').replace(/[^0-9]/g, ''));
-
-// Воркеры Monaco: для дифа достаточно editor.worker (в нём считается сравнение).
-self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
-
-// Тема под палитру кокпита (определяем один раз на модуль).
-monaco.editor.defineTheme('cockpit-dark', {
-  base: 'vs-dark', inherit: true, rules: [],
-  colors: {
-    'editor.background': '#0a0c10',
-    'editorGutter.background': '#0a0c10',
-    'editor.foreground': '#e7eaf0',
-    'editorLineNumber.foreground': '#3a4453',
-    'editorLineNumber.activeForeground': '#8a93a3',
-    'diffEditor.insertedLineBackground': '#3fb95015',
-    'diffEditor.removedLineBackground': '#f0564c15',
-    'diffEditor.insertedTextBackground': '#3fb95028',
-    'diffEditor.removedTextBackground': '#f0564c28',
-    'editorWidget.background': '#151b24',
-    'editorOverviewRuler.border': '#00000000',
-    'scrollbarSlider.background': '#2e374288',
-    'scrollbarSlider.hoverBackground': '#2e3742cc',
-  },
-});
-
-// Язык по расширению файла (подсветка).
-const LANG = {
-  php: 'php', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
-  ts: 'typescript', tsx: 'typescript', vue: 'html', json: 'json', css: 'css', scss: 'scss',
-  html: 'html', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'shell', bash: 'shell',
-  py: 'python', sql: 'sql', xml: 'xml', env: 'ini', ini: 'ini', blade: 'html',
-};
-function langOf(p) { const ext = (p.split('.').pop() || '').toLowerCase(); return LANG[ext] || 'plaintext'; }
 
 const loading = ref(false);
 const error = ref('');
@@ -117,13 +81,10 @@ function disposeModels() { models.forEach((m) => m.dispose()); models = []; }
 function mountEditor() {
   if (diffEditor || !host.value) return;
   diffEditor = monaco.editor.createDiffEditor(host.value, {
-    theme: 'cockpit-dark', readOnly: true, automaticLayout: true,
-    renderSideBySide: sideBySide.value, fontSize: 12.5, lineHeight: 18,
-    minimap: { enabled: false }, scrollBeyondLastLine: false,
+    ...READONLY_OPTS,
+    renderSideBySide: sideBySide.value,
     renderOverviewRuler: true, ignoreTrimWhitespace: false,
     hideUnchangedRegions: { enabled: true, minimumLineCount: 3, contextLineCount: 3 },
-    // Фичи, которым нужен языковой воркер (у нас только editor.worker) — выкл, чтобы не сыпать в консоль.
-    links: false, occurrencesHighlight: 'off', stickyScroll: { enabled: false }, codeLens: false,
   });
 }
 function showFile(f) {

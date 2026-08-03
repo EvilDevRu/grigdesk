@@ -1,72 +1,59 @@
 <script setup>
-import { ref, computed, watchEffect, onMounted, onBeforeUnmount, onUnmounted } from 'vue';
+import { ref, computed, watchEffect, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/api-client.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
 import { useUiContextStore } from '../stores/ui-context.js';
-import { layoutRoute } from '../shared/route-layout.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ProjectSwitcher from '../shared/ui/ProjectSwitcher.vue';
 
-// Конструктор маршрутов: вся правка — кликом по схеме. Клик по блоку открывает
-// меню действий (вставить этап до/после, возврат, убрать); возвраты добавляются
-// «связыванием»: выбрал источник → кликнул цель. Никаких дублирующих списков.
-const routes = ref([]);
-const agents = ref([]);
+// Маршруты проекта — ОПУБЛИКОВАННЫЙ каталог, а не редактируемая копия.
+// Правится маршрут в самом профиле (routes/), кокпит даёт две кнопки —
+// «Проверить» и «Опубликовать» — и список ревизий с откатом указателя.
+// Редактора здесь нет намеренно: схема попытки закреплена хешем, и правка
+// «на лету» означала бы, что бегущая задача идёт по одному, а показывается
+// другое.
 const profiles = ref([]);
 const profile = ref(localStorage.getItem('cockpit-project') || '');
 const loading = ref(true);
 const error = ref('');
-const selectedId = ref('');
-const form = ref(null);   // { title, stages, returns }
-const isNew = ref(false);
-const saving = ref(false);
+const publishSupported = ref(false);
+const currentHash = ref(null);
+const revisions = ref([]);
+const selectedRoute = ref('');
+const graph = ref(null);
+const graphError = ref('');
+const graphLoading = ref(false);
+const busy = ref('');            // 'validate' | 'publish' | 'rollback'
 const notice = ref('');
+const report = ref(null);        // сырой ответ публикатора — в «подробностях»
 
-// Состояние конструктора.
-const popup = ref(null);      // { nid, x, y, mode: 'menu'|'pick', insertAt }
-const linkFrom = ref('');     // источник возврата в режиме связывания
-const pickFilter = ref('');
-const canvasEl = ref(null);
-const popupEl = ref(null);
-const promptEd = ref(null);   // { nid, text } — редактор промпта узла
-const applying = ref(false);  // «применить во все схемы» в процессе
+const HELP_PANEL = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes/), здесь только проверка, публикация и откат.';
+const HELP_REVISIONS = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие останутся на своей.';
 
-// Репортим открытый маршрут в UI-контекст — чат с агентом знает, что открыто.
 const ui = useUiContextStore();
-watchEffect(() => { if (selectedId.value) ui.set('routes', { project: profile.value, route: selectedId.value }); });
+watchEffect(() => { if (profile.value) ui.set('routes', { project: profile.value, route: selectedRoute.value || null }); });
 onUnmounted(() => ui.clear('routes'));
 
-const HELP_SCHEMA = 'Правка — кликом по схеме: клик по блоку открывает действия (промпт этапа, вставить этап, возврат при провале, убрать). Схема раскладывается сама; возвраты — красные дуги.';
-const HELP_PROMPT = 'Промпт принадлежит месту в схеме, а не агенту: при добавлении узла сюда копируется заготовка из шаблона агента, дальше текст живёт в этой схеме и тюнится под её маршрут. «Из шаблона» — заменить текущий текст заготовкой; «Применить во все схемы» — разнести этот текст по всем схемам проекта с этим этапом (например, после добавления уроков прогонов).';
+const currentRevision = computed(() => revisions.value.find((r) => r.isCurrent) || null);
+// Состав каталога: id маршрута → хеш его ревизии (пины каталога).
+const routeList = computed(() => Object.entries(currentRevision.value?.routes || {})
+  .map(([id, hash]) => ({ id, hash }))
+  .sort((a, b) => a.id.localeCompare(b.id)));
+const selected = computed(() => routeList.value.find((r) => r.id === selectedRoute.value) || null);
+const published = computed(() => Boolean(currentHash.value));
 
-const agentsById = computed(() => Object.fromEntries(agents.value.map((a) => [a.id, a])));
-const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
-
-const original = computed(() => routes.value.find((r) => r.id === selectedId.value) || null);
-const dirty = computed(() => {
-  if (isNew.value) return true;
-  if (!form.value || !original.value) return false;
-  const { id, ...orig } = original.value;
-  return JSON.stringify(form.value) !== JSON.stringify(orig);
-});
-
-const previewGraph = computed(() => (form.value && form.value.stages.length
-  ? layoutRoute(form.value.stages, form.value.returns, agentsById.value)
-  : null));
-
-// Кандидаты на вставку: агенты, которых ещё нет в цепочке (с фильтром по подписи).
-const pickList = computed(() => {
-  const used = new Set(form.value?.stages || []);
-  const q = pickFilter.value.trim().toLowerCase();
-  return agents.value
-    .filter((a) => !used.has(a.id))
-    .filter((a) => !q || (a.label || a.id).toLowerCase().includes(q) || a.id.includes(q));
-});
-
-// Возвраты, идущие ИЗ узла попапа (правятся прямо в меню).
-const popupReturns = computed(() => (popup.value && form.value
-  ? form.value.returns.filter((r) => r.from === popup.value.nid) : []));
+function shortHash(hash) { return hash ? String(hash).slice(0, 12) : '—'; }
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+function say(text, bad = false) {
+  notice.value = bad ? `Ошибка: ${text}` : text;
+  setTimeout(() => { if (notice.value.includes(text)) notice.value = ''; }, bad ? 8000 : 3000);
+}
 
 async function load() {
   loading.value = true; error.value = '';
@@ -78,15 +65,44 @@ async function load() {
         localStorage.setItem('cockpit-project', profile.value);
       }
     }
-    const [r, a] = await Promise.all([
-      api.get(`/api/routes/${profile.value}`),
-      api.get('/api/agents'),
-    ]);
-    routes.value = r.routes || [];
-    agents.value = a.agents || [];
-    if (!selectedId.value && routes.value.length) select(routes.value[0].id);
+    if (!profile.value) return;
+    const data = await api.get(`/api/routes/${profile.value}/revisions`);
+    publishSupported.value = !!data.publishSupported;
+    currentHash.value = data.currentCatalogHash;
+    revisions.value = data.revisions || [];
+    if (!routeList.value.some((r) => r.id === selectedRoute.value)) {
+      selectedRoute.value = routeList.value[0]?.id || '';
+    }
+    await loadGraph();
   } catch (e) { error.value = e.message; }
   finally { loading.value = false; }
+}
+
+async function loadGraph() {
+  graph.value = null; graphError.value = '';
+  if (!selected.value) return;
+  graphLoading.value = true;
+  try {
+    const { id, hash } = selected.value;
+    // ?c=<catalogHash> в URL обязателен: когда-то схема отдавалась с immutable, и браузер
+    // до сих пор может держать тот старый ответ по голому пути — иной query = промах кеша.
+    graph.value = (await api.get(`/api/routes/${profile.value}/routes/${id}/${hash}/graph?c=${currentHash.value}`)).graph;
+  } catch (e) { graphError.value = e.message; }
+  finally { graphLoading.value = false; }
+}
+
+function selectRoute(id) {
+  if (id === selectedRoute.value) return;
+  selectedRoute.value = id;
+  loadGraph();
+}
+
+function switchProfile(next) {
+  if (next === profile.value) return;
+  profile.value = next; localStorage.setItem('cockpit-project', next);
+  selectedRoute.value = ''; graph.value = null; report.value = null; notice.value = '';
+  revisions.value = []; currentHash.value = null;
+  load();
 }
 
 function onProjectCreated({ id, profiles: fresh }) {
@@ -94,286 +110,138 @@ function onProjectCreated({ id, profiles: fresh }) {
   switchProfile(id);
 }
 
-async function switchProfile(pr) {
-  if (pr === profile.value) return;
-  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
-  profile.value = pr; localStorage.setItem('cockpit-project', pr);
-  selectedId.value = ''; form.value = null; isNew.value = false; notice.value = '';
-  closePopup(); linkFrom.value = '';
-  load();
-}
-
-function closePopup() { popup.value = null; pickFilter.value = ''; }
-
-async function select(id) {
-  const r = routes.value.find((x) => x.id === id);
-  if (!r) return;
-  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
-  selectedId.value = id; isNew.value = false; notice.value = '';
-  closePopup(); linkFrom.value = '';
-  const { id: _, ...rest } = r;
-  form.value = JSON.parse(JSON.stringify(rest));
-}
-
-async function createNew() {
-  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
-  selectedId.value = ''; isNew.value = true; notice.value = '';
-  closePopup(); linkFrom.value = '';
-  form.value = { id: '', title: '', stages: [], returns: [], prompts: {} };
-}
-
-// ── Клик по узлу схемы ──
-function onNode(n, ev) {
-  if (linkFrom.value) {
-    // Режим связывания: клик по цели создаёт возврат.
-    if (n.nid !== linkFrom.value) {
-      form.value.returns.push({ from: linkFrom.value, to: n.nid, label: '✗' });
-    }
-    linkFrom.value = '';
-    return;
-  }
-  const rect = canvasEl.value.getBoundingClientRect();
-  popup.value = {
-    nid: n.nid, mode: 'menu', insertAt: 0,
-    x: Math.min(ev.clientX - rect.left + canvasEl.value.scrollLeft, canvasEl.value.scrollWidth - 290),
-    y: ev.clientY - rect.top + canvasEl.value.scrollTop + 10,
-  };
-}
-
-// ── Действия меню ──
-function startInsert(offset) {
-  const i = form.value.stages.indexOf(popup.value.nid);
-  popup.value = { ...popup.value, mode: 'pick', insertAt: i + offset };
-}
-function startInsertFirst(ev) {
-  const rect = canvasEl.value.getBoundingClientRect();
-  popup.value = { nid: '', mode: 'pick', insertAt: 0, x: ev.clientX - rect.left, y: ev.clientY - rect.top + 10 };
-}
-function pickAgent(id) {
-  form.value.stages.splice(popup.value.insertAt, 0, id);
-  // Инстанцирование: заготовка промпта копируется из шаблона агента в схему.
-  if (!form.value.prompts) form.value.prompts = {};
-  const tpl = (agentsById.value[id]?.prompt || '').trim();
-  if (tpl && !form.value.prompts[id]) form.value.prompts[id] = tpl;
-  closePopup();
-}
-function startLink() {
-  linkFrom.value = popup.value.nid;
-  closePopup();
-}
-function removeNode() {
-  const id = popup.value.nid;
-  form.value.stages = form.value.stages.filter((s) => s !== id);
-  form.value.returns = form.value.returns.filter((r) => r.from !== id && r.to !== id);
-  if (form.value.prompts) delete form.value.prompts[id];
-  closePopup();
-}
-
-// ── Промпт узла ──
-function openPrompt() {
-  promptEd.value = { nid: popup.value.nid, text: form.value.prompts?.[popup.value.nid] || '' };
-  closePopup();
-}
-function promptFromTemplate() {
-  promptEd.value.text = (agentsById.value[promptEd.value.nid]?.prompt || '').trim();
-}
-function promptOk() {
-  const { nid, text } = promptEd.value;
-  if (!form.value.prompts) form.value.prompts = {};
-  if (text.trim()) form.value.prompts[nid] = text.trim();
-  else delete form.value.prompts[nid];
-  promptEd.value = null;
-}
-// Разнести текст этого узла по всем схемам проекта, где есть этот этап
-// (другие маршруты пишутся на сервер сразу, текущий — через «Сохранить»).
-async function promptApplyAll() {
-  const { nid, text } = promptEd.value;
-  const others = routes.value.filter((r) => r.id !== selectedId.value && r.stages.includes(nid));
-  const label = agentsById.value[nid]?.label || nid;
-  if (!(await confirmDialog(
-    `Записать этот промпт «${label}» во все схемы проекта (${others.length + 1} шт.)? Их текущие тексты этапа будут заменены.`,
-    { okText: 'Применить' },
+// Проверка и публикация делает сам профиль (routes/publish.mjs) — состав
+// маршрутов, промпты и bootstrap знает только он. Кокпит передаёт ровно два
+// своих аргумента: куда публиковать и поверх какой ревизии.
+async function run(mode) {
+  if (busy.value) return;
+  if (mode === 'publish' && !(await confirmDialog(
+    `Опубликовать каталог «${profile.value}»? Новые попытки пойдут по новой ревизии; уже бегущие останутся на своей.`,
+    { okText: 'Опубликовать' },
   ))) return;
-  applying.value = true;
+  busy.value = mode; notice.value = ''; report.value = null;
   try {
-    for (const r of others) {
-      const { id, ...rest } = r;
-      await api.put(`/api/routes/${profile.value}/${id}`, { ...rest, prompts: { ...rest.prompts, [nid]: text.trim() } });
-    }
-    promptOk();
-    notice.value = `Промпт разнесён по ${others.length + 1} схемам`;
-    setTimeout(() => { notice.value = ''; }, 3000);
-    // Обновляем список, не трогая открытую форму (она сохранится своей кнопкой).
-    const fresh = (await api.get(`/api/routes/${profile.value}`)).routes || [];
-    const cur = routes.value.find((r) => r.id === selectedId.value);
-    routes.value = fresh.map((r) => (r.id === selectedId.value && cur ? cur : r));
-  } catch (e) { notice.value = `Ошибка: ${e.message}`; }
-  finally { applying.value = false; }
-}
-function removeReturn(r) {
-  form.value.returns = form.value.returns.filter((x) => x !== r);
-}
-
-// Закрытие: клик мимо попапа, Esc — и попап, и режим связывания.
-function onDocDown(e) {
-  if (popup.value && popupEl.value && !popupEl.value.contains(e.target)) closePopup();
-}
-function onKey(e) {
-  if (e.key === 'Escape') { closePopup(); linkFrom.value = ''; promptEd.value = null; }
-}
-
-async function save() {
-  if (!form.value) return;
-  saving.value = true; notice.value = '';
-  try {
-    if (isNew.value) {
-      const created = await api.post(`/api/routes/${profile.value}`, form.value);
-      isNew.value = false; selectedId.value = created.id;
+    const body = mode === 'publish'
+      ? { mode, expectedCatalogHash: currentHash.value }
+      : { mode };
+    const res = await api.post(`/api/routes/${profile.value}/publish`, body);
+    report.value = res.result;
+    if (mode === 'publish') {
+      await load();
+      say(res.result?.catalogCreated === false
+        ? 'Ревизия не изменилась — публиковать было нечего'
+        : `Опубликовано: ${shortHash(res.result?.catalogHash)}`);
     } else {
-      await api.put(`/api/routes/${profile.value}/${selectedId.value}`, form.value);
+      say('Проверка прошла');
     }
-    await load();
-    const cur = routes.value.find((r) => r.id === selectedId.value);
-    if (cur) { const { id: _, ...rest } = cur; form.value = JSON.parse(JSON.stringify(rest)); }
-    notice.value = 'Сохранено';
-    setTimeout(() => { notice.value = ''; }, 2000);
-  } catch (e) { notice.value = `Ошибка: ${e.message}`; }
-  finally { saving.value = false; }
+  } catch (e) { say(e.message, true); }
+  finally { busy.value = ''; }
 }
 
-async function del() {
-  if (!selectedId.value || isNew.value) return;
-  if (!(await confirmDialog(`Удалить маршрут «${selectedId.value}»?`, { danger: true, okText: 'Удалить' }))) return;
+// Откат — тот же CAS, что и публикация: указатель двигается, только если он
+// сейчас там, где мы думаем. Иначе кто-то опубликовал параллельно, и мы бы
+// молча затёрли его ревизию.
+async function rollback(rev) {
+  if (busy.value || rev.isCurrent) return;
+  if (!(await confirmDialog(
+    `Перевести current на ревизию ${shortHash(rev.catalogHash)} от ${fmtWhen(rev.createdAt)}?`,
+    { okText: 'Откатить' },
+  ))) return;
+  busy.value = 'rollback'; notice.value = '';
   try {
-    await api.del(`/api/routes/${profile.value}/${selectedId.value}`);
-    selectedId.value = ''; form.value = null;
+    await api.put(`/api/routes/${profile.value}/current`, {
+      desiredCatalogHash: rev.catalogHash,
+      expectedCatalogHash: currentHash.value,
+    });
     await load();
-  } catch (e) { notice.value = `Ошибка: ${e.message}`; }
+    say(`Текущая ревизия — ${shortHash(rev.catalogHash)}`);
+  } catch (e) { say(e.message, true); await load(); }
+  finally { busy.value = ''; }
 }
 
-onMounted(() => {
-  load();
-  document.addEventListener('mousedown', onDocDown);
-  document.addEventListener('keydown', onKey);
-});
-onBeforeUnmount(() => {
-  document.removeEventListener('mousedown', onDocDown);
-  document.removeEventListener('keydown', onKey);
-});
+onMounted(load);
 </script>
 
 <template>
   <div class="routes-page">
-    <!-- Список маршрутов -->
+    <!-- Состав опубликованного каталога -->
     <aside class="list">
       <div class="list-head">
         <span class="ttl">Маршруты</span>
-        <button class="btn accent" @click="createNew">+ Новый</button>
+        <HelpTip :text="HELP_PANEL" />
       </div>
       <ProjectSwitcher :profiles="profiles" :model-value="profile"
                        @update:model-value="switchProfile" @created="onProjectCreated" />
-      <div v-if="loading && !routes.length" class="pad muted"><span class="spin"></span> Загружаю…</div>
-      <div v-else-if="error && !routes.length" class="pad bad">{{ error }}</div>
-      <button v-for="r in routes" :key="r.id" class="item" :class="{ sel: r.id === selectedId && !isNew }" @click="select(r.id)">
+      <div v-if="loading && !revisions.length" class="pad muted"><span class="spin"></span> Загружаю…</div>
+      <div v-else-if="error" class="pad bad">{{ error }}</div>
+      <div v-else-if="!published" class="pad muted">Каталог не опубликован</div>
+      <button v-for="r in routeList" :key="r.id" class="item" :class="{ sel: r.id === selectedRoute }"
+              @click="selectRoute(r.id)">
         <span class="rid mono">{{ r.id }}</span>
-        <span class="nm muted">{{ r.title }}</span>
-        <span class="chip mono">{{ r.stages.length }}</span>
+        <span class="chip mono" :title="r.hash">{{ shortHash(r.hash) }}</span>
       </button>
     </aside>
 
-    <!-- Конструктор -->
-    <section v-if="form" class="editor">
-      <header class="ehead">
-        <template v-if="isNew">
-          <input v-model.trim="form.id" class="fld idfld mono" placeholder="id (напр. hotfix)" spellcheck="false" />
-        </template>
-        <template v-else>
-          <span class="eid mono">{{ selectedId }}</span>
-        </template>
-        <input v-model="form.title" class="fld titlefld" placeholder="Название (необязательно)" />
-        <HelpTip :text="HELP_SCHEMA" />
+    <section class="panel">
+      <header class="phead">
+        <span class="ttl">{{ profile || '—' }}</span>
+        <span v-if="published" class="hash mono" :title="currentHash">current {{ shortHash(currentHash) }}</span>
+        <span v-else class="muted">маршрутов ещё нет</span>
         <span class="grow"></span>
         <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
-        <button v-if="!isNew" class="btn danger" @click="del">Удалить</button>
-        <button class="btn accent" :disabled="saving || !dirty || (isNew && !form.id)" @click="save">
-          <span v-if="saving" class="spin"></span> Сохранить
-        </button>
+        <template v-if="publishSupported">
+          <button class="btn" :disabled="!!busy" @click="run('validate')">
+            <span v-if="busy === 'validate'" class="spin"></span> Проверить
+          </button>
+          <button class="btn accent" :disabled="!!busy" @click="run('publish')">
+            <span v-if="busy === 'publish'" class="spin"></span> Опубликовать
+          </button>
+        </template>
+        <span v-else class="muted nopub" title="Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs">
+          нет скрипта публикации
+        </span>
       </header>
 
-      <!-- Баннер режима связывания -->
-      <div v-if="linkFrom" class="linkbar">
-        ↩ Возврат из «{{ agentsById[linkFrom]?.label || linkFrom }}» — кликни этап, куда возвращаться при провале.
-        <span class="muted">Esc — отмена</span>
+      <!-- Каталог ещё не опубликован: честно говорим, чего не хватает -->
+      <div v-if="!published && !loading" class="hint">
+        <p>У проекта нет опубликованного каталога маршрутов.</p>
+        <p class="muted">Каталог собирает сам профиль: <span class="mono">routes/publish.mjs</span>.
+          Как только он появится, здесь заработают проверка, публикация и откат.</p>
       </div>
 
-      <!-- Схема = рабочее поле -->
-      <div ref="canvasEl" class="canvas" :class="{ linking: linkFrom }">
-        <FactoryGraph v-if="previewGraph" :graph="previewGraph" reference interactive @node="onNode" />
-        <div v-else class="empty-canvas">
-          <button class="btn accent big" @click="startInsertFirst">+ Первый этап</button>
-        </div>
-
-        <!-- Попап действий узла -->
-        <div v-if="popup" ref="popupEl" class="popup" :style="{ left: popup.x + 'px', top: popup.y + 'px' }">
-          <template v-if="popup.mode === 'menu'">
-            <div class="phead">
-              <span class="pic">{{ KIND_ICON[agentsById[popup.nid]?.kind] || '🤖' }}</span>
-              <span class="pname">{{ agentsById[popup.nid]?.label || popup.nid }}</span>
-            </div>
-            <button class="pact" @click="openPrompt">📝 Промпт этапа<span v-if="!form.prompts?.[popup.nid]" class="muted"> (пусто)</span></button>
-            <button class="pact" @click="startInsert(0)">⇤ Вставить этап до</button>
-            <button class="pact" @click="startInsert(1)">⇥ Вставить этап после</button>
-            <button class="pact" @click="startLink">↩ Возврат при провале…</button>
-            <div v-if="popupReturns.length" class="prets">
-              <div class="plbl">Возвраты отсюда</div>
-              <div v-for="r in popupReturns" :key="r.to" class="pret">
-                <span class="pto">→ {{ agentsById[r.to]?.label || r.to }}</span>
-                <input v-model="r.label" class="fld plabel" placeholder="подпись" />
-                <button class="x" title="Убрать возврат" @click="removeReturn(r)">✕</button>
-              </div>
-            </div>
-            <button class="pact danger" @click="removeNode">✕ Убрать этап</button>
-          </template>
-
-          <template v-else>
-            <div class="phead"><span class="pname">Какой этап вставить?</span></div>
-            <input v-model="pickFilter" class="fld pfilter" placeholder="поиск по базе агентов…" />
-            <div class="plist">
-              <button v-for="a in pickList" :key="a.id" class="pact" @click="pickAgent(a.id)">
-                <span class="pic">{{ KIND_ICON[a.kind] }}</span> {{ a.label || a.id }}
-              </button>
-              <div v-if="!pickList.length" class="muted pempty">Все агенты уже в цепочке</div>
-            </div>
-          </template>
-        </div>
+      <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
+      <div v-else class="canvas">
+        <div v-if="graphLoading" class="mid muted"><span class="spin"></span> Схема…</div>
+        <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
+        <FactoryGraph v-else-if="graph" :graph="graph" reference />
+        <div v-else class="mid muted">Выбери маршрут слева</div>
       </div>
 
-      <!-- Редактор промпта узла: текст живёт в схеме, шаблон агента — только заготовка -->
-      <div v-if="promptEd" class="pm-back" @mousedown.self="promptEd = null">
-        <div class="pm">
-          <header class="pm-head">
-            <span class="pic">{{ KIND_ICON[agentsById[promptEd.nid]?.kind] || '🤖' }}</span>
-            <span class="pname">{{ agentsById[promptEd.nid]?.label || promptEd.nid }}</span>
-            <span class="muted pm-sub">промпт этапа в схеме «{{ isNew ? form.id || 'новая' : selectedId }}»</span>
-            <HelpTip :text="HELP_PROMPT" />
-          </header>
-          <textarea v-model="promptEd.text" class="pm-text mono" spellcheck="false"
-                    :placeholder="agentsById[promptEd.nid]?.kind === 'human' ? 'Человеческие ворота — обычно без промпта, конвейер ждёт решения в дашборде' : 'Текст промпта этого узла…'"></textarea>
-          <footer class="pm-foot">
-            <button class="btn" :disabled="!agentsById[promptEd.nid]?.prompt" @click="promptFromTemplate">Из шаблона</button>
-            <button class="btn" :disabled="applying || !promptEd.text.trim()" @click="promptApplyAll">
-              <span v-if="applying" class="spin"></span> Применить во все схемы
-            </button>
-            <span class="grow"></span>
-            <button class="btn" @click="promptEd = null">Отмена</button>
-            <button class="btn accent" @click="promptOk">Готово</button>
-          </footer>
-        </div>
-      </div>
-    </section>
+      <!-- Ответ публикатора: показываем как есть, формат — его дело -->
+      <details v-if="report" class="report">
+        <summary>Отчёт публикатора</summary>
+        <pre class="mono">{{ JSON.stringify(report, null, 2) }}</pre>
+      </details>
 
-    <section v-else class="editor empty">
-      <p class="muted">Выбери маршрут слева или создай новый</p>
+      <!-- Ревизии и откат -->
+      <section v-if="revisions.length" class="revs">
+        <div class="revs-head">
+          <span class="ttl">Ревизии каталога</span>
+          <HelpTip :text="HELP_REVISIONS" />
+          <span class="muted rcount">{{ revisions.length }}</span>
+        </div>
+        <div class="rrow" v-for="rev in revisions" :key="rev.catalogHash" :class="{ cur: rev.isCurrent }">
+          <span class="rhash mono" :title="rev.catalogHash">{{ shortHash(rev.catalogHash) }}</span>
+          <span class="rwhen muted">{{ fmtWhen(rev.createdAt) }}</span>
+          <span v-if="rev.integrity !== 'ok'" class="rbad bad" :title="rev.integrity">повреждена</span>
+          <span v-else class="rroutes muted">{{ Object.keys(rev.routes || {}).join(', ') }}</span>
+          <span class="grow"></span>
+          <span v-if="rev.isCurrent" class="rcur">current</span>
+          <button v-else class="btn small" :disabled="!!busy || rev.integrity !== 'ok'" @click="rollback(rev)">
+            Откатить
+          </button>
+        </div>
+      </section>
     </section>
   </div>
 </template>
@@ -381,87 +249,65 @@ onBeforeUnmount(() => {
 <style scoped>
 .routes-page { height: 100%; display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
 
-/* ── Список ── */
+/* ── Состав каталога ── */
 .list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
-.list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 10px; }
+.list-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 10px; }
 .ttl { font-weight: 700; font-size: 13.5px; }
 .item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none;
   border: none; color: var(--ink); padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .item:hover { background: var(--surface); }
 .item.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.item .rid { flex: none; font-weight: 700; color: var(--node-code); font-size: 12.5px; }
-.item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.item .rid { flex: 1; min-width: 0; font-weight: 700; color: var(--node-code); font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { flex: none; font-size: 10px; color: var(--ink-mid); background: var(--surface-2);
   border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
 .pad { padding: 12px 8px; }
 
-/* ── Конструктор ── */
-.editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 16px 16px; gap: 10px; }
-.editor.empty { align-items: center; justify-content: center; }
-.ehead { display: flex; align-items: center; gap: 10px; }
-.eid { font-size: 14px; font-weight: 700; color: var(--node-code); }
-.idfld { max-width: 200px; }
-.titlefld { max-width: 340px; }
+/* ── Панель ── */
+.panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 16px 16px; gap: 10px; }
+.phead { display: flex; align-items: center; gap: 10px; }
+.hash { font-size: 12px; color: var(--ink-mid); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 8px; }
 .grow { flex: 1; }
 .notice { font-size: 12.5px; color: var(--good); }
 .notice.bad { color: var(--bad); }
+.nopub { font-size: 12px; cursor: help; }
 
-.linkbar { background: color-mix(in srgb, var(--bad) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--line));
-  color: var(--ink); border-radius: 9px; padding: 8px 12px; font-size: 12.5px; display: flex; gap: 10px; align-items: center; }
+.hint { border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+  padding: 14px 16px; font-size: 13px; line-height: 1.6; }
+.hint p { margin: 0 0 6px; }
+.hint p:last-child { margin: 0; }
 
-/* Схема — рабочее поле */
 .canvas { position: relative; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line);
   border-radius: 10px; background: var(--surface); padding: 14px; }
 .canvas :deep(svg.graph) { min-width: 1700px; }
-.canvas.linking :deep(.ng) { cursor: crosshair; }
-.empty-canvas { height: 100%; display: flex; align-items: center; justify-content: center; }
+.mid { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; }
 
-/* Попап действий */
-.popup { position: absolute; z-index: 40; width: 280px; background: var(--surface-2);
-  border: 1px solid var(--line-2); border-radius: 11px; box-shadow: 0 14px 40px #000b; padding: 8px; }
-.phead { display: flex; align-items: center; gap: 7px; padding: 4px 6px 8px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
-.pic { font-size: 12px; }
-.pname { font-weight: 700; font-size: 13px; }
-.pact { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none; border: none;
-  color: var(--ink); padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
-.pact:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.pact.danger { color: var(--bad); }
-.pact.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.report { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 12px; }
+.report summary { cursor: pointer; font-size: 12.5px; }
+.report pre { margin: 8px 0 4px; max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.5;
+  color: var(--ink-mid); }
 
-.prets { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
-.plbl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); padding: 2px 6px 6px; }
-.pret { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; }
-.pto { font-size: 12px; flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plabel { flex: 1; min-width: 0; padding: 4px 8px; font-size: 12px; }
-.x { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 11px; padding: 2px 4px; }
-.x:hover { color: var(--bad); }
-
-/* Редактор промпта узла */
-.pm-back { position: fixed; inset: 0; z-index: 60; background: #0008; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.pm { width: min(860px, 100%); height: min(640px, 100%); display: flex; flex-direction: column; gap: 10px;
-  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 13px; box-shadow: 0 18px 60px #000c; padding: 14px 16px 16px; }
-.pm-head { display: flex; align-items: center; gap: 8px; }
-.pm-sub { font-size: 12px; }
-.pm-text { flex: 1; resize: none; background: var(--ground); border: 1px solid var(--line); color: var(--ink);
-  border-radius: 10px; padding: 12px 14px; font-size: 12.5px; line-height: 1.55; }
-.pm-text:focus { outline: none; border-color: var(--line-2); }
-.pm-foot { display: flex; align-items: center; gap: 8px; }
-
-.pfilter { width: 100%; margin-bottom: 6px; }
-.plist { max-height: 260px; overflow-y: auto; }
-.pempty { font-size: 12px; padding: 6px 8px; }
-
-.fld { background: var(--surface); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
-  padding: 7px 10px; font-size: 13px; font-family: inherit; }
-.fld:focus { outline: none; border-color: var(--line-2); }
+/* ── Ревизии ── */
+.revs { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px;
+  max-height: 30vh; overflow-y: auto; flex: none; }
+.revs-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 8px; }
+.rcount { font-size: 11.5px; }
+.rrow { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-top: 1px solid var(--line);
+  font-size: 12.5px; }
+.rrow.cur { background: color-mix(in srgb, var(--good) 8%, transparent); }
+.rhash { flex: none; color: var(--node-code); }
+.rwhen { flex: none; font-size: 12px; }
+.rroutes { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.rcur { font-size: 11.5px; color: var(--good); }
+.rbad { font-size: 12px; }
 
 .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
   padding: 7px 13px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
 .btn:hover { border-color: var(--line-2); }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
-.btn.big { padding: 10px 18px; font-size: 13.5px; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
 .bad { color: var(--bad); }
 
 @media (max-width: 820px) {

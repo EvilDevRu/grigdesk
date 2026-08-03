@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# Все проверки профиля в одном месте: factory-check [профиль ...] [--quick] [--host-preflight]
+#   --quick — изолированный временный state, без запуска Cockpit и без запросов к моделям.
+#   --host-preflight — metadata-only проверка CLI/каталогов; требует RUN_HOST_PREFLIGHT=1.
+# Ноль на выходе = профиль готов вести задачи — либо честно заявил, что не ведёт их
+# вовсе (`"launchable": false` в graph.json: проверки запуска для него пропускаются).
+set -uo pipefail
+FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+export FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/profile-config.sh"
+
+QUICK=0; HOST_PREFLIGHT=0; PROFILES=()
+for a in "$@"; do
+  case "$a" in
+    --quick) QUICK=1 ;;
+    --host-preflight) HOST_PREFLIGHT=1 ;;
+    *) PROFILES+=("$a") ;;
+  esac
+done
+FACTORY_HOST_STATE="${FACTORY_STATE:-${STATE_DIR:-${HOME:-/tmp}/.factory/state}}"
+
+FACTORY_CHECK_ROOT=""
+_factory_check_cleanup() {
+  case "$FACTORY_CHECK_ROOT" in
+    /tmp/factory-check.*)
+      [[ -d "$FACTORY_CHECK_ROOT" ]] && rm -rf -- "$FACTORY_CHECK_ROOT"
+      ;;
+  esac
+}
+trap _factory_check_cleanup EXIT INT TERM
+
+if (( QUICK == 1 )); then
+  FACTORY_CHECK_ROOT=$(mktemp -d /tmp/factory-check.XXXXXX)
+  export FACTORY_STATE="$FACTORY_CHECK_ROOT/state"
+  export STATE_DIR="$FACTORY_STATE"
+  export FACTORY_CONFIG_ROOT="$FACTORY_CHECK_ROOT/config"
+  export XDG_CONFIG_HOME="$FACTORY_CHECK_ROOT/xdg-config"
+  export XDG_STATE_HOME="$FACTORY_CHECK_ROOT/xdg-state"
+  export XDG_CACHE_HOME="$FACTORY_CHECK_ROOT/xdg-cache"
+  mkdir -p "$FACTORY_STATE" "$FACTORY_CONFIG_ROOT" "$XDG_CONFIG_HOME" \
+    "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+else
+  export FACTORY_STATE="${FACTORY_STATE:-${STATE_DIR:-$HOME/.factory/state}}"
+  export STATE_DIR="${STATE_DIR:-$FACTORY_STATE}"
+fi
+
+if [[ "${FACTORY_TESTING:-0}" == 1 && -n "${FACTORY_CHECK_STATE_REPORT:-}" ]]; then
+  printf '%s\n' "$FACTORY_STATE" >"$FACTORY_CHECK_STATE_REPORT"
+fi
+if [[ "${FACTORY_TESTING:-0}" == 1 && "${FACTORY_CHECK_ONLY_ISOLATION:-0}" == 1 ]]; then
+  exit 0
+fi
+
+if [[ ${#PROFILES[@]} -eq 0 ]]; then
+  mapfile -t PROFILES < <(
+    find "$FACTORY_PROFILES_DIR" -mindepth 2 -maxdepth 2 -type f -name profile.sh \
+      -printf '%h\n' 2>/dev/null | xargs -r -n1 basename | sort
+  )
+fi
+
+RC=0
+for prof in "${PROFILES[@]}"; do
+  echo "── $prof ───────────────────────────────────────────"
+
+  # Единственный исполняемый контракт — immutable route. Профиль без capability
+  # остаётся читаемой конфигурацией, но не считается готовым к запуску.
+  graph_json="$FACTORY_PROFILES_DIR/${prof}/graph.json"
+
+  # Профиль, который задач не ведёт вообще (только triage-конфигурация и allow-list для
+  # чата кокпита), заявляет это полем "launchable": false. Без него проверка требовала
+  # route-контракт от КАЖДОГО каталога в profiles/ и держала общий код возврата на
+  # единице вечно: «ЕСТЬ ПРОБЛЕМЫ» перестало что-либо значить, потому что не отличало
+  # сломанный конвейер от профиля, у которого конвейера нет по замыслу, — а проверку,
+  # которая всегда красная, перестают читать.
+  launch_state=$(python3 - "$graph_json" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        data = json.load(source)
+except Exception:                                            # noqa: BLE001
+    raise SystemExit(0)                                      # форму разберёт проверка ниже
+if not isinstance(data, dict) or data.get("launchable") is not False:
+    raise SystemExit(0)
+caps = data.get("capabilities")
+print("both" if isinstance(caps, list) and "route-v2" in caps else "off")
+PY
+  )
+  if [[ "$launch_state" == both ]]; then
+    # Движок поле не читает: с заявленной capability прогон пойдёт, а проверка будет
+    # молчать про route и стенд. Такое расхождение опаснее любого из двух состояний.
+    echo "✗ запуск: launchable: false вместе с capability route-v2 — оставь что-то одно:"
+    echo "  движок поле не читает, прогон пойдёт, а route/стенд останутся непроверенными"
+    RC=1
+    echo
+    continue
+  fi
+  if [[ "$launch_state" == off ]]; then
+    echo "○ запуск: профиль задач не ведёт (launchable: false) — route, стенд и"
+    echo "  исполнители не проверяются; factory start откажет fail-closed"
+    echo
+    continue
+  fi
+
+  if [[ -f "$graph_json" ]] && python3 - "$graph_json" <<'PY' 2>/dev/null
+import json
+import sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+caps = data.get("capabilities") if isinstance(data, dict) else None
+raise SystemExit(0 if isinstance(caps, list) and "route-v2" in caps else 1)
+PY
+  then
+    route_miss=$(bash -c "
+      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' 2>/dev/null
+      for f in profile_workspace_mode profile_repositories profile_project_context \
+        profile_source_branch profile_container profile_stand_alive; do
+        declare -F \$f >/dev/null || echo \"нет route-хука \$f\"
+      done
+      mode=\$(profile_workspace_mode 2>/dev/null)
+      [[ \"\$mode\" == isolated || \"\$mode\" == shared ]] ||
+        echo 'profile_workspace_mode должен вернуть isolated или shared'
+      if [[ \"\$mode\" == shared ]]; then
+        for f in profile_service_ports profile_exclusive_resources \
+          profile_instrumentation_restored; do
+          declare -F \$f >/dev/null || echo \"нет shared-хука \$f\"
+        done
+      fi
+    ")
+    if [[ -n "$route_miss" ]]; then
+      echo "$route_miss" | sed 's/^/✗ route: /'
+      RC=1
+    else
+      echo "✓ route: capability заявлена, workspace/stand hooks на месте"
+    fi
+
+    # Проверки формы PROFILE_VOLATILE_PATHS здесь больше нет: сторож транзакции не следит
+    # за игнорируемыми git файлами, и список исключений к ним отменён целиком — почему
+    # именно, расписано в lib/instrumentation-transaction.sh над _instrumentation_tx_snapshot.
+    # Пришедшее ему на смену требование «рабочее дерево самодостаточно, без общих inode
+    # с внешним миром» статически не проверить: worktree существует только под живую задачу.
+
+    # Форма имени хоста стенда. Схему и порт подставляет движок, поэтому «http://host»
+    # или «host:5192» в значении дают неоткрываемый адрес, а узнаётся это только когда
+    # браузерный агент уже стоит перед мёртвой страницей (инцидент t8165).
+    host_bad=$(bash -c "
+      source '$FACTORY_PROFILES_DIR/${prof}/profile.sh' 2>/dev/null
+      host=\${PROFILE_SERVICE_HOST:-127.0.0.1}
+      [[ \"\$host\" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,61}[A-Za-z0-9])?\$ ]] ||
+        echo \"«\$host» — нужно голое имя хоста или адрес, без схемы, порта и слэшей\"
+    ")
+    if [[ -n "$host_bad" ]]; then
+      echo "$host_bad" | sed 's/^/✗ хост стенда: /'
+      RC=1
+    else
+      echo "✓ хост стенда: имя годится для адреса, который получит браузерный агент"
+    fi
+  else
+    echo "✗ route: capability route-v2 отсутствует; запуск fail-closed"
+    RC=1
+  fi
+
+  runner_config="$FACTORY_PROFILES_DIR/${prof}/runners.env"
+  if ! profile_config_validate "$runner_config"; then
+    echo "✗ canonical runner config отсутствует или некорректен: $runner_config"
+    RC=1
+  elif [[ "$(profile_config_get "$runner_config" RUNNERS_COVERAGE)" != required ]]; then
+    echo "✗ $runner_config: требуется RUNNERS_COVERAGE=required"
+    RC=1
+  else
+    echo "✓ исполнители: canonical config обязателен и валиден"
+  fi
+
+  if (( HOST_PREFLIGHT == 1 )); then
+    if [[ "${RUN_HOST_PREFLIGHT:-0}" != 1 ]]; then
+      echo "✗ host preflight требует явного RUN_HOST_PREFLIGHT=1"
+      RC=1
+    else
+      # shellcheck disable=SC1091
+      source "$FACTORY_HOME/lib/profile-preflight.sh"
+      if (
+        export STATE_DIR="$FACTORY_HOST_STATE"
+        export FACTORY_STATE="$FACTORY_HOST_STATE"
+        profile_runner_host_preflight "$prof"
+      ); then
+        echo "✓ исполнители: host preflight готов"
+      else
+        echo "✗ исполнители: host preflight не пройден"
+        RC=1
+      fi
+    fi
+  fi
+  echo
+done
+
+[[ $RC -eq 0 ]] && echo "ГОТОВО: профили можно запускать" || echo "ЕСТЬ ПРОБЛЕМЫ — см. выше"
+exit $RC

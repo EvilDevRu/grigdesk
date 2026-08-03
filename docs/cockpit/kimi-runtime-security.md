@@ -1,0 +1,115 @@
+# KimiRuntime: security gate
+
+Статус на 2026-08-02: `GO_CONTAINED_MVP` для profile `kimi-contained-v1` и закреплённой
+версии Kimi Code `0.31.1` на текущем host.
+
+Это узкое разрешение на запуск Kimi из чатов через единственный contained runtime. Оно не
+разрешает прямой spawn CLI, наследование host environment, автоматические permissions или запуск
+другой версии без повторного аудита и preflight.
+
+## Измеренный host preflight
+
+| Gate | Результат | Детали |
+|---|---|---|
+| Linux | pass | текущий host Linux |
+| Bubblewrap | pass | `0.6.1`; user/mount/pid/ipc/uts/network namespaces реально запускаются |
+| cgroup v2 | pass | transient user-systemd service применяет CPU, memory, swap и process limits; `KillMode=control-group` убивает всё дерево |
+| Egress proxy | pass | versioned policy `kimi-code-0.31.1-egress-v1` доступна только через private Unix socket |
+| Credential mount | pass | host credentials mount-ятся rw на весь запуск; transient unmount barrier снят — см. ниже |
+
+Прямая делегация writable cgroup subtree сервису всё ещё недоступна. Runtime не ослабляет gate:
+он использует проверенную альтернативу через transient user-systemd service и перед каждым
+запуском сверяет реально применённые свойства unit. Process group сама по себе заменой cgroup не
+считается.
+
+## Границы contained runtime
+
+- [sandbox builder](../../server/src/lib/kimi/sandbox.js) создаёт пустой bwrap root без
+  `ro-bind /`, изолирует сеть и монтирует только минимальный runtime, текущий workspace,
+  прошедшие boundary gate дополнительные каталоги (`extraDirs`, writable bind) и явно
+  переданные read-only вложения. `kimi acp` флага `--add-dir` не имеет, поэтому
+  дополнительные каталоги объявляются сессии через `[workspace] additional_dir` в
+  `local.toml`: на каждый ход собирается per-run каталог-маска с одним server-owned
+  `local.toml`, который заменяет `<projectRoot>/.kimi-code` целиком (ro-bind одиночного
+  файла поверх ro-маски bwrap отклоняет). `projectRoot` вычисляется как у самого kimi —
+  ближайший видимый предок cwd с `.git` (внутри sandbox это cwd либо доверенный
+  extra-предок); у предка маска заодно скрывает его проектный `local.toml`, который
+  иначе читался бы напрямую и мог объявить workspace-ом, например, `/kimi-home`.
+  Доверенный каталог, СОДЕРЖАЩИЙ server-owned control state (например, общий
+  родитель репозитория cockpit), не отклоняется: он монтируется, а control state
+  внутри (kimi home, runtime/broker профиль, factory state/control, `chats/` с
+  `.bindings`, `server/.state`, `.env`) прячется пустым read-only mount-ом поверх —
+  ни чтение токенов в контекст, ни порча session/bindings/wrapper невозможны.
+  Отклоняются только системные корни и сам control state как отдельный extra;
+- Kimi получает заново построенные `HOME`, XDG и `KIMI_CODE_HOME`; provider, SSH, Git, npm/cloud
+  credentials и host config/plugins/MCP/skills не наследуются;
+- сервер создаёт отдельный Kimi home для каждого чата и привязывает ACP session к chat/provider,
+  cwd, model, auth profile и security profile через CAS sidecar;
+- [egress proxy](../../server/src/lib/kimi/egress-proxy.js) допускает только HTTPS CONNECT к точным
+  `api.kimi.com:443` и `auth.kimi.com:443`, проверяет каждый DNS result и соединяется с уже
+  проверенным публичным IP;
+- дочерний Kimi process запускается без capabilities и с `no_new_privs`;
+- systemd ограничивает runtime до `CPUQuota=200%`, `MemoryMax=2G`, `MemorySwapMax=0`,
+  `TasksMax=256`, `RuntimeMaxSec=2h`, запрещает core dump и убивает всю cgroup при cancel/exit;
+- [attachment staging](../../server/src/lib/kimi/attachments.js) не монтирует исходный общий
+  каталог: regular files проверяются через fd с `O_NOFOLLOW`, копируются в private staging и
+  становятся read-only;
+- [ACP client](../../server/src/lib/kimi/acp-client.js) ограничивает размер входного frame и
+  накопленного ответа; transport обрабатывает cancel и reverse requests без shell interpolation;
+- разрешены только ручные режимы `default` и `plan`; `auto` и `yolo` в продукт не выставлены.
+  Кокпит-режим «Авто» — не ACP-режим, а политика ответов на permission-запросы поверх
+  `default` ([`auto-approve.js`](../../server/src/lib/chat/auto-approve.js)): деструктивные и
+  неизвестные действия по-прежнему решает человек, security boundary остаётся на runtime.
+
+## Проверки
+
+[Offline adversarial suite](../../tests/server/kimi-security.test.js) покрывает traversal,
+outside-root, symlink, directory, TOCTOU-sensitive staging, size limits, sensitive env, private и
+special-use DNS/IP, broad workspace mounts и несоответствие runtime profile.
+
+[Fake ACP lifecycle](../../tests/server/kimi-runtime.test.js) проверяет initialize, раннее
+сохранение session ID, config, prompt, permission reverse RPC, `/status`, cancel и отсутствие retry
+после подтверждённого prompt.
+
+Живой contained probe системного Kimi `0.31.1` подтвердил без model prompt:
+
+- `initialize` с ACP protocol `1`;
+- authenticated `session/new`;
+- получение и установку model/thinking/mode config options;
+- штатный exit без утечки credential content.
+
+Содержимое credentials не читалось, не копировалось и не логировалось. Этот probe не отправлял
+model prompt и не расходовал квоту.
+
+## Credential barrier снят (2026-08-02)
+
+Первый живой ход с model prompt выявил несовместимость barrier-а с Kimi `0.31.1`: OAuthManager
+перечитывает credential file на каждый model request (`ensureFresh → loadState → storage.load`,
+in-memory cache между запросами нет). Unmount `/kimi-home/credentials` при первом CONNECT к
+`api.kimi.com` пропускал только первый request: следующий (шаг 2, сразу после tool calls и
+approve) получал `auth.login_required` → ACP `Authentication required`. Wire transcripts обеих
+живых сессий обрывались на `step.begin` второго шага до построения `llm.request`.
+
+Барьер и весь control-канал (control socket + umount) удалены: credentials остаются
+смонтированными rw на весь запуск, refresh токена штатно пишется в host файл. Остаточный риск:
+tool-код внутри sandbox способен прочитать OAuth-файл, но эксфильтрация ограничена egress
+allowlist (только `api.kimi.com`/`auth.kimi.com`) либо записью в workspace — уровень экспозиции
+не выше, чем у остальных исполнителей, работающих на host без sandbox. Long-term направление —
+host-side token broker, выдающий sandbox только short-lived access tokens без `refresh_token`.
+
+Отдельный явно разрешённый live smoke 2026-08-02 подтвердил egress и доставку
+до `llm.request`. Первый ход пользователь отменил через UI; transport отправил ACP cancel. Resume
+этой отменённой session принял следующий prompt, но Kimi `0.31.1` не создал новый `llm.request` и
+вернул пустой ход. Это закреплено как несовместимость resume-after-cancel: Cockpit инвалидирует
+binding после stop и пустого post-prompt результата, не делает опасный автоповтор и требует
+явного нового сообщения в чистой session.
+
+## Оставшиеся ограничения MVP
+
+- успешный многошаговый ответ после снятия credential barrier, question flow,
+  `/compact` и cancel во время tool ещё требуют отдельных явно разрешённых квотных smoke;
+- allowlist закреплён за Kimi Code `0.31.1`; новая версия или новые endpoints должны закрыто
+  провалить compatibility/preflight до отдельного аудита;
+- `auto`/`yolo`, произвольные MCP/plugins/skills и host config остаются запрещены;
+- нужно сохранить дополнительные обезличенные fixtures usage/context и успешного event ordering,
+  а live adversarial suite расширить detached-child и DNS-rebinding сценариями.

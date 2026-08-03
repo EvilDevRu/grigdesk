@@ -46,7 +46,7 @@ const arc = computed(() => `${(total.value / 5) * CIRC} ${CIRC}`);
 <template>
   <span v-if="busy" class="tri busy" :title="state === 'running' ? 'триаж идёт' : 'в очереди триажа'"><span class="dot"></span></span>
   <span v-else-if="state === 'failed' && !a" class="tri chip bad" :title="row?.status?.error || 'триаж упал'">!</span>
-  <HelpTip v-else-if="a" align="right" fixed>
+  <HelpTip v-else-if="a" align="right">
     <span class="tri">
       <span class="chip" :class="tone('cx', a.complexity)">сложн {{ a.complexity }}</span>
       <span class="chip" :class="tone('risk', a.risk)">риск {{ a.risk }}</span>

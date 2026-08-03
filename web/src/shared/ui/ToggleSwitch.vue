@@ -3,13 +3,14 @@
 defineProps({
   modelValue: { type: Boolean, required: true },
   label: { type: String, default: '' },
+  disabled: { type: Boolean, default: false },
 });
 const emit = defineEmits(['update:modelValue']);
 </script>
 
 <template>
   <button class="tsw" :class="{ on: modelValue }" type="button" role="switch" :aria-checked="modelValue"
-          @click="emit('update:modelValue', !modelValue)">
+          :disabled="disabled" @click="emit('update:modelValue', !modelValue)">
     <span class="track"><span class="knob"></span></span>
     <span v-if="label" class="tlbl">{{ label }}</span>
   </button>
@@ -22,6 +23,7 @@ const emit = defineEmits(['update:modelValue']);
   color: var(--ink-mid); font-size: 12px; font-family: var(--mono);
 }
 .tsw:hover { color: var(--ink); }
+.tsw:disabled { cursor: default; opacity: .5; }
 .tsw.on { color: var(--accent); }
 
 .track {

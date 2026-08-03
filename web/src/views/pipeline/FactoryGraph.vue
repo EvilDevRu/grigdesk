@@ -1,6 +1,8 @@
 <script setup>
 import { computed } from 'vue';
 import { nodeGeom, edgePath, computeViewBox, MARKS, START_DOT } from '../../shared/graph-geom.js';
+import { graphStallView } from '../../shared/graph-stall.js';
+import { runnerChainLabel, runnerModelLabel, runnerNodeLabel } from '../../shared/runner-display.js';
 
 // graph — ответ /api/tasks/:id/graph; loopsOn — показывать потенциальные fail-рёбра.
 const props = defineProps({
@@ -12,6 +14,7 @@ const props = defineProps({
 const emit = defineEmits(['node']);
 
 const doneLike = new Set(['done', 'skip']);
+const stallView = computed(() => (props.reference ? null : graphStallView(props.graph)));
 
 // Тесный viewBox по узлам (убирает пустоту зашитого vb).
 const vb = computed(() => computeViewBox(props.graph.pos, props.graph.nodes));
@@ -57,21 +60,39 @@ const nodeEls = computed(() => {
     const sub = def[2] || '';
     const { cx, cy, hw, hh } = nodeGeom(nid, g.pos, g.nodes);
     const status = props.reference ? 'ref' : ((g.statuses || {})[nid] || 'pending');
+    const runnerMeta = g.nodeMeta?.[nid]?.runner || null;
+    const runner = runnerMeta ? runnerNodeLabel(runnerMeta) : '';
+    const runnerModel = runnerMeta ? runnerModelLabel(runnerMeta) : '';
+    const nodeStall = stallView.value?.node === nid ? stallView.value : null;
     const rx = kind === 'human' ? hh : 6;
     const points = kind === 'code'
       ? `${cx},${cy - hh} ${cx + hw},${cy} ${cx},${cy + hh} ${cx - hw},${cy}`
       : null;
     return {
       nid, kind, label, sub, cx, cy, hw, hh, rx, points, status,
+      runner, runnerModel, runnerSwitched: !!runnerMeta?.switched,
+      nodeTitle: [
+        nodeStall ? `${nodeStall.title}${nodeStall.hint ? ` — ${nodeStall.hint}` : ''}` : '',
+        runnerMeta ? `${runnerChainLabel(runnerMeta)}${runnerModel ? ` · модель ${runnerModel}` : ''}` : '',
+      ].filter(Boolean).join('\n'),
       mark: MARKS[status] || '',
       subY: kind === 'code' ? cy + hh + 12 : cy + hh + 13,
+      runnerY: cy + hh + (sub ? 24 : 13),
     };
   });
 });
 </script>
 
 <template>
-  <svg class="graph" :viewBox="vb" preserveAspectRatio="xMidYMid meet">
+  <div class="graph-shell">
+    <div v-if="stallView" class="graph-stop" role="alert">
+      <span class="graph-stop-stage">🛑 {{ stallView.nodeLabel }}</span>
+      <strong>{{ stallView.title }}</strong>
+      <span v-if="stallView.fails != null" class="graph-stop-fails">{{ stallView.fails }} сбоев</span>
+      <span v-if="stallView.hint" class="graph-stop-hint">{{ stallView.hint }}</span>
+    </div>
+
+    <svg class="graph" :viewBox="vb" preserveAspectRatio="xMidYMid meet">
     <defs>
       <marker id="arr" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
         <path d="M0,0 L8,4 L0,8 z" />
@@ -92,15 +113,31 @@ const nodeEls = computed(() => {
     <!-- узлы -->
     <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`, { clickable: interactive || !reference }]"
        @click="(interactive || !reference) && emit('node', n, $event)">
+      <title v-if="n.nodeTitle">{{ n.nodeTitle }}</title>
       <polygon v-if="n.points" :points="n.points" />
       <rect v-else :x="n.cx - n.hw" :y="n.cy - n.hh" :width="n.hw * 2" :height="n.hh * 2" :rx="n.rx" />
       <text :x="n.cx" :y="n.cy + 4" text-anchor="middle" class="nlbl">{{ n.label }}<tspan class="mk" :class="`mk-${n.status}`"> {{ n.mark }}</tspan></text>
       <text v-if="n.sub" :x="n.cx" :y="n.subY" text-anchor="middle" class="sub">{{ n.sub }}</text>
+      <text v-if="n.runner" :x="n.cx" :y="n.runnerY" text-anchor="middle"
+            class="runner" :class="{ switched: n.runnerSwitched }">
+        {{ n.runner }}<tspan v-if="n.runnerModel"> · {{ n.runnerModel }}</tspan>
+      </text>
     </g>
-  </svg>
+    </svg>
+  </div>
 </template>
 
 <style scoped>
+.graph-shell { width: 100%; }
+.graph-stop { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline;
+  gap: 4px 10px; margin: 2px 0 8px; padding: 8px 11px; color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 38%, transparent); border-radius: 8px;
+  font-size: 12px; line-height: 1.35; }
+.graph-stop-stage { font-weight: 700; white-space: nowrap; }
+.graph-stop strong { font-weight: 650; }
+.graph-stop-fails { white-space: nowrap; font-family: var(--mono); opacity: .85; }
+.graph-stop-hint { grid-column: 2 / -1; color: var(--ink-mid); }
 .graph { width: 100%; height: auto; display: block; }
 /* Наконечник наследует цвет своей линии (context-stroke), а не всегда серый */
 #arr path { fill: context-stroke; }
@@ -116,6 +153,8 @@ const nodeEls = computed(() => {
 .nt-code rect, .nt-code polygon { stroke: var(--node-code); }
 .nlbl { fill: var(--ink); font-size: 11px; font-family: var(--sans); }
 .sub { fill: var(--ink-mid); font-size: 9.5px; font-family: var(--mono); }
+.runner { fill: var(--accent); font-size: 8.5px; font-family: var(--mono); }
+.runner.switched { fill: var(--warn); font-weight: 650; }
 .mk { font-size: 11px; }
 .mk-done { fill: var(--good); }
 .mk-run { fill: var(--accent); }
@@ -137,6 +176,11 @@ const nodeEls = computed(() => {
   filter: drop-shadow(0 0 9px var(--warn)); animation: nodepulse 2.2s ease-in-out infinite; }
 .ns-stall rect, .ns-stall polygon, .ns-premature rect, .ns-premature polygon {
   stroke: var(--bad); stroke-width: 2.2; filter: drop-shadow(0 0 8px var(--bad)); }
+/* Провал узла: сплошной красный, без прозрачности — упавший стенд должен бросаться
+   в глаза, а не теряться среди непройденных этапов. */
+.ns-fail rect, .ns-fail polygon { stroke: var(--bad); stroke-width: 2.2; fill: #2a1113; }
+.ns-fail { opacity: 1; }
+.mk-fail { fill: var(--bad); }
 .ns-skipbad rect, .ns-skipbad polygon { stroke: var(--bad); stroke-dasharray: 5 4;
   filter: drop-shadow(0 0 6px var(--bad)); }
 
@@ -156,4 +200,8 @@ const nodeEls = computed(() => {
 @keyframes nodepulse { 50% { opacity: .55; } }
 @keyframes flow { to { stroke-dashoffset: -13; } }
 @media (prefers-reduced-motion: reduce) { .e-flow, .ns-run rect, .ns-wait rect { animation: none; } }
+@media (max-width: 720px) {
+  .graph-stop { grid-template-columns: 1fr auto; }
+  .graph-stop strong, .graph-stop-hint { grid-column: 1 / -1; }
+}
 </style>

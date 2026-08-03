@@ -18,7 +18,34 @@ export function secToHMS(s) {
   return `${H}:${p(M)}:${p(S)}`;
 }
 
+/**
+ * Живое время таймера задачи, в секундах.
+ *
+ * B24 в getTodayData отдаёт `timer_elapsed = 0` даже у идущего таймера (проверено:
+ * ноль у всех четырёх задач с `timer_running`), а настоящую точку отсчёта кладёт в
+ * `timer_started_at` (Unix, СЕКУНДЫ). Раньше считали от момента загрузки доски —
+ * на экране был возраст вкладки, а не время работы: задача, взятая в 13:50, после
+ * F5 показывала «0:00:40». Поэтому у идущего таймера считаем от старта.
+ *
+ * Накопленное (`timerElapsed`) для идущего НЕ прибавляем: B24 его здесь не заполняет,
+ * а если однажды начнёт — прибавка дала бы двойной счёт текущей сессии.
+ */
+export function liveTimerSec(task, nowMs) {
+  const stored = Number(task?.timerElapsed) || 0;
+  if (!task?.timerRunning) return stored;
+  const startedSec = Number(task.timerStartedAt) || 0;
+  // Старта нет (старый кеш доски) — показываем хотя бы накопленное, а не ноль.
+  if (!startedSec) return stored;
+  return Math.max(0, nowMs / 1000 - startedSec);
+}
+
 /** Знаковая дельта для «vs вчера». */
+export function fmtBytes(n) {
+  if (!Number.isFinite(n)) return '';
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} КБ`;
+  return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+}
+
 export function signed(n, suffix = '') {
   const v = Number(n) || 0;
   const s = v > 0 ? '+' : '';

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "profile": "kimi-contained-v1",
+  "decision": "NO_GO",
+  "checks": {
+    "platform": {
+      "ok": true,
+      "platform": "linux"
+    },
+    "bubblewrap": {
+      "ok": true,
+      "version": "0.6.1",
+      "namespaces": [
+        "user",
+        "mount",
+        "pid",
+        "ipc",
+        "uts",
+        "network"
+      ]
+    },
+    "cgroupV2": {
+      "ok": false,
+      "version": 2,
+      "basePath": "<COCKPIT_CGROUP>",
+      "controllers": [
+        "memory",
+        "pids"
+      ],
+      "missingControllers": [
+        "cpu"
+      ],
+      "writable": false,
+      "killFile": false,
+      "reason": "cgroup_delegation_insufficient"
+    },
+    "egressProxy": {
+      "ok": false,
+      "reason": "egress_proxy_not_configured"
+    }
+  }
+}

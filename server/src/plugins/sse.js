@@ -1,6 +1,6 @@
 // Плагин SSE — push-обновления окну вместо polling'а.
-// `fs.watch` на STATE_DIR (с дебаунсом) → рассылка события `state-change` всем клиентам.
-// Эндпоинт: GET /api/events (text/event-stream).
+// `fs.watch` на единственном каталоге состояния → рассылка события
+// `state-change` всем клиентам. Эндпоинт: GET /api/events (text/event-stream).
 import fp from 'fastify-plugin';
 import fs from 'node:fs';
 
@@ -17,14 +17,17 @@ async function ssePlugin(fastify, opts) {
   }
   fastify.decorate('sse', { broadcast });
 
-  // Дебаунс: файловые изменения приходят пачками, шлём не чаще раза в 300 мс.
+  // Файловые изменения приходят пачками, шлём не чаще
+  // раза в 300 мс. Событие безадресное («что-то изменилось»), поэтому склейка законна.
   let timer = null;
   let watcher = null;
+  const onChange = () => {
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; broadcast('state-change', { at: Date.now() }); }, 300);
+  };
+  // Каталога может ещё не быть — сервер остаётся доступен, но пишет явное предупреждение.
   try {
-    watcher = fs.watch(stateDir, () => {
-      if (timer) return;
-      timer = setTimeout(() => { timer = null; broadcast('state-change', { at: Date.now() }); }, 300);
-    });
+    watcher = fs.watch(stateDir, onChange);
   } catch (err) {
     fastify.log.warn(`fs.watch на ${stateDir} не запущен: ${err.message}`);
   }
@@ -49,7 +52,7 @@ async function ssePlugin(fastify, opts) {
 
   fastify.addHook('onClose', async () => {
     if (timer) clearTimeout(timer);
-    if (watcher) watcher.close();
+    watcher?.close();
     for (const res of clients) { try { res.end(); } catch { /* уже закрыт */ } }
     clients.clear();
   });

@@ -1,5 +1,5 @@
 // Порт логики графа конвейера из factory/lib/dashboard.py:
-//  - загрузка схемы профиля (profiles/<profile>.graph.json),
+//  - загрузка схемы профиля (profiles/<profile>/graph.json),
 //  - расчёт статуса каждого узла (pipeline_statuses),
 //  - разбор возвратов/остановок из журнала (loop_facts).
 // Геометрия узлов и кривые рёбер считаются на клиенте (graph-geom.js) — здесь только данные.
@@ -13,27 +13,50 @@ const ST_MAP = {
   failed: 'stall', rejected: 'stall', blocked: 'skipbad',
 };
 
-const _cache = new Map(); // profile → parsed graph.json
+const _cache = new Map(); // profilesDir + profile → parsed graph.json
 
 /** Загружает и кеширует схему профиля. */
-export function loadGraph(factoryHome, profile) {
-  if (_cache.has(profile)) return _cache.get(profile);
-  const file = path.join(factoryHome, 'profiles', `${profile}.graph.json`);
+export function loadGraph(profilesDir, profile) {
+  const key = `${profilesDir}\0${profile}`;
+  if (_cache.has(key)) return _cache.get(key);
+  const file = path.join(profilesDir, profile, 'graph.json');
   const g = JSON.parse(fs.readFileSync(file, 'utf8'));
-  _cache.set(profile, g);
+  _cache.set(key, g);
   return g;
 }
 
 /** Определение графа для маршрута: узлы, ключи, optional, vb, pos, edges. */
 export function graphForRoute(g, route) {
-  const r = g.routes[route] || g.routes[g.default_route];
+  // Разметки может не быть вовсе. Профиль, перешедший на route-v2, держит nodes/routes/pos
+  // только ради read-only показа старых реестров, а после чистки graph.json их не остаётся:
+  // картинку рисует закреплённый бандл (route-graph.js). Сюда такой профиль попадает лишь
+  // историческим реестром без CATALOG_PROTOCOL=route-v2 — и падал на `r.pos`, отдавая
+  // человеку «Cannot read properties of undefined» вместо ответа, чего именно смотреть нечем.
+  const r = g.routes?.[route] || g.routes?.[g.default_route];
+  if (!r?.pos) {
+    const known = Object.keys(g.routes || {});
+    throw new Error(
+      `в graph.json профиля нет разметки маршрута «${route || g.default_route || '—'}»`
+      + (known.length
+        ? `; в файле есть только ${known.join(', ')}`
+        : ': профиль перешёл на route-v2, у исторического реестра схемы больше нет'),
+    );
+  }
   const optional = new Set([...(g.optional?.['*'] || []), ...(g.optional?.[route] || [])]);
   // Узлы: оверрайд профиля поверх глобального каталога стадий (stages.js).
   const nodes = {};
   for (const id of Object.keys(r.pos)) nodes[id] = resolveNode(id, g.nodes?.[id]);
+  const runnerKeys = Object.fromEntries(Object.entries({
+    ...(g.runner_keys?.['*'] || {}),
+    ...(g.runner_keys?.[route] || {}),
+  }).filter(([id]) => id in r.pos));
   return {
     nodes,                     // id → [kind, label, sub] (профиль + каталог)
     keys: g.keys || {},        // id → registry key
+    // Визуальный узел может быть внутренней фазой одного runner-stage:
+    // например plan/skeptic/translator на feature-маршруте выполняет единый PLAN.
+    // Маппинг route-specific и не смешивается со status keys.
+    runnerKeys,
     optional: [...optional],
     vb: r.vb,
     pos: r.pos,                // id → [x, y]

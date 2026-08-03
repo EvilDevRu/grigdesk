@@ -1,0 +1,147 @@
+// Почему конвейер стоит.
+//
+// Движок умеет останавливаться САМ: три попытки этапа без результата, два возврата
+// в сборку без толку, упавший стенд, нехватка прав на запись статуса. В каждом из
+// этих случаев он ставит STALLED_HUMAN=1 и пишет причину строкой в
+// logs/tNNNN.stages.log — и на этом всё. Кокпит флаг читал (`stalledHuman` в сводке
+// задачи), но не показывал нигде: единственным индикатором оставалось «○ стоит» по
+// живости демона, одинаковое и для доделанной задачи, и для той, что ждёт человека.
+//
+// REPRO может не воспроизвести баг, движок корректно встанет и позовёт человека,
+// но без отдельного признака человек об этом не узнает. Этот модуль достаёт причину из журнала и
+// формулирует её так, чтобы по ней было понятно, что делать.
+import { parseStagesLog } from './stages-parse.js';
+
+// Формулировки движка (lib/core.sh) → человеческая причина и что с ней делать.
+// Порядок не важен: ищем с конца журнала, берём первое совпадение.
+const HALT_RULES = [
+  {
+    re: /^([A-Z][A-Z0-9_]*): маршрут остановлен: no-progress$/,
+    build: (m) => ({
+      stage: m[1],
+      title: `${m[1]}: исправления не меняют набор замечаний`,
+      hint: 'автоматика увидела повтор или осцилляцию findings — реши конфликт вручную либо вернись с новой гипотезой',
+    }),
+  },
+  {
+    re: /^([A-Z][A-Z0-9_]*): маршрут остановлен: rewind-limit$/,
+    build: (m) => ({
+      stage: m[1],
+      title: `${m[1]}: исчерпан защитный лимит возвратов`,
+      hint: 'старый этап не передал typed findings — посмотри комментарий и выбери точку возврата вручную',
+    }),
+  },
+  {
+    re: /^([A-Z_]+): (\d+) возврата не помогли/,
+    build: (m) => ({
+      stage: m[1],
+      title: `${m[1]}: ${m[2]} возврата не помогли`,
+      hint: 'этап падает раз за разом — посмотри его отчёт: чинить, менять план или вести руками',
+    }),
+  },
+  {
+    re: /^([A-Z_]+): 3 попытки без результата/,
+    build: (m) => ({
+      stage: m[1],
+      title: `${m[1]}: агент трижды не отчитался о результате`,
+      hint: 'этап не выставил статус — обычно упирается в бюджет времени, права или недоступный инструмент',
+    }),
+  },
+  {
+    re: /^([A-Z_]+): агенту не дали записать результат/,
+    build: (m) => ({
+      stage: m[1],
+      title: `${m[1]}: агенту не хватило прав записать статус`,
+      hint: 'повтор бесполезен — нужны права на запись в реестр (песочница/settings этапа)',
+    }),
+  },
+  {
+    re: /^sandbox_up упал/,
+    build: () => ({
+      stage: 'SANDBOX',
+      title: 'стенд не поднялся',
+      hint: 'смотри хвост logs/tNNNN.orch.log — чаще всего занятый порт или недоснесённая песочница',
+    }),
+  },
+  {
+    // Первая форма — текущая нейтральная; вторая нужна только для чтения
+    // архивных журналов, созданных до operational cutover.
+    re: /^(?:(?:v2: )?свежая v2-песочница|(?:v2: )?среда профиля) не готова \(код (\d+)\)/,
+    build: (m) => ({
+      stage: 'SANDBOX',
+      title: `среда профиля не готова (код ${m[1]})`,
+      hint: m[1] === '75'
+        ? 'проверь exact checkout/ветку; для isolated-режима отдельно проверь остатки песочницы, shared-ресурсы не удаляй'
+        : 'смотри хвост logs/tNNNN.orch.log; shared-стенд должен восстановить его внешний владелец',
+    }),
+  },
+  {
+    re: /^([A-Z_]+): агент убит по таймауту/,
+    build: (m) => ({
+      stage: m[1],
+      title: `${m[1]}: агент убит по таймауту`,
+      hint: 'работа этапа потеряна целиком — поднимай лимит времени этапа, а не правь промпт',
+    }),
+  },
+];
+
+/**
+ * Классифицирует остановку конвейера.
+ *
+ * @param {{registry: object, timeline?: Array<{ts,event}>, logText?: string, daemonAlive: boolean}} o
+ * @returns {null | {kind:'human'|'crashed', stage:string|null, title:string, detail:string|null,
+ *                   since:string|null, hint:string, fails:number|null, comment:string|null}}
+ *          null — конвейер не стоит (идёт, доделан или ждёт на воротах).
+ */
+export function detectStall({ registry = {}, timeline, logText, daemonAlive }) {
+  const events = timeline || (logText ? parseStagesLog(logText) : []);
+  const stalled = registry.STALLED_HUMAN === '1';
+
+  // Демон жив — конвейер работает или стоит на воротах (у ворот своя кнопка, это не затык).
+  if (daemonAlive && !stalled) return null;
+
+  let found = null;
+  for (let i = events.length - 1; i >= 0 && !found; i -= 1) {
+    for (const rule of HALT_RULES) {
+      const m = rule.re.exec(events[i].event);
+      if (!m) continue;
+      found = { ...rule.build(m), detail: events[i].event, since: events[i].ts };
+      break;
+    }
+  }
+
+  if (stalled) {
+    // Пауза у ворот — НЕ затык: «у ворот своя кнопка» (жёлтая плашка «ждёт тебя»
+    // + чип). Единый launcher на гейте ставит STALLED_HUMAN=1 и выходит — без этой
+    // ветки штатная пауза красила узел в stall, убивала waitingReason и рисовала
+    // красное «причина не нашлась в журнале».
+    const gate = Object.keys(registry)
+      .find((k) => /^GATE_[A-Z_]+$/.test(k) && registry[k] === 'waiting');
+    if (gate && !found) return null;
+    const base = found || {
+      stage: null,
+      title: 'конвейер остановлен и ждёт человека',
+      hint: 'причина не нашлась в журнале — смотри logs/tNNNN.stages.log',
+      detail: null,
+      since: events.length ? events[events.length - 1].ts : null,
+    };
+    const fails = base.stage && registry[`${base.stage}_FAILS`] ? Number(registry[`${base.stage}_FAILS`]) : null;
+    const comment = base.stage ? (registry[`${base.stage}_COMMENT`] || null) : null;
+    return { kind: 'human', fails, comment, ...base };
+  }
+
+  // Флага нет, а демона тоже нет: конвейер оборвался молча — упал, был убит или
+  // зачищен вместе с cgroup. Отличаем от нормального финала по последней строке.
+  const last = events.length ? events[events.length - 1] : null;
+  if (!last || /конвейер завершён/.test(last.event)) return null;
+  return {
+    kind: 'crashed',
+    stage: found?.stage || null,
+    title: found?.title || 'конвейер оборвался, не дойдя до конца',
+    detail: found?.detail || last.event,
+    since: found?.since || last.ts,
+    hint: 'демона нет, а конвейер не закрыт — запусти заново (resume продолжит с этого места)',
+    fails: null,
+    comment: null,
+  };
+}

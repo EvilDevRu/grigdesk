@@ -1,4 +1,4 @@
-// MediaAdapter — распознавание речи из видео/аудио (перенос медиа-конвейера b24-mcp).
+// MediaAdapter — локальное распознавание речи из видео/аудио.
 // Node-обвязка + Python whisper (venv через COCKPIT_MEDIA_PYTHON). Async job-модель:
 // ingest сразу возвращает jobId, статус читается поллингом (файлы в mediaDir/jobs).
 import path from 'node:path';

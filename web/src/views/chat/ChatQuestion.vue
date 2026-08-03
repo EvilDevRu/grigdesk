@@ -88,12 +88,18 @@ function submit() {
   background: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; color: var(--ink); font-size: 12.5px; }
 .q-opt:hover { background: var(--surface-2); }
 .q-opt.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.q-mark { flex: none; width: 12px; height: 12px; border: 1.5px solid var(--line-2); border-radius: 50%; align-self: center; }
+/* Отметку держим у первой строки: пояснение может занять несколько строк, и по центру
+   высокой строки кружок отрывается от названия. */
+.q-mark { flex: none; width: 12px; height: 12px; border: 1.5px solid var(--line-2); border-radius: 50%;
+  align-self: flex-start; margin-top: 2px; }
 .q-mark.multi { border-radius: 3px; }
 .q-opt.on .q-mark { border-color: var(--accent); background: var(--accent);
   box-shadow: inset 0 0 0 2.5px var(--ground); }
 .q-name { flex: none; }
-.q-desc { color: var(--ink-mid); font-size: 11.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Пояснение — то, чем варианты и отличаются: показываем целиком, с переносом.
+   Обрезка многоточием прятала как раз ту часть, ради которой его читают. */
+.q-desc { color: var(--ink-mid); font-size: 11.5px; min-width: 0; line-height: 1.45;
+  overflow-wrap: anywhere; }
 .q-opt.own .q-name { color: var(--ink-mid); }
 .q-own { width: 100%; margin-top: 5px; height: 30px; background: var(--ground); border: 1px solid var(--line);
   border-radius: 8px; color: var(--ink); padding: 0 10px; font-size: 12.5px; font-family: inherit; }

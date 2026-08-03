@@ -112,5 +112,8 @@ export function computeViewBox(pos, nodes) {
 // Метка статуса узла (порт MARKS).
 export const MARKS = {
   done: '✓', run: '●', wait: '⏳', stall: '⚠', skipbad: '⚠', premature: '⚠',
+  // fail — узел провалился (пока это только ромб песочницы: стенд не поднялся).
+  // Без своей метки упавшая песочница выглядит на схеме так же, как непройденная.
+  fail: '✗',
   skip: '—', idle: '?', pending: '',
 };

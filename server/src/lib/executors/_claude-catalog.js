@@ -1,6 +1,6 @@
 // Каталог моделей Claude — БЕЗ хардкода версий: список берётся из самого бинаря CLI.
-// Почему так: подпись модели («Opus 4.8») быстро протухает, а алиас `opus` резолвится
-// той версией CLI, что стоит на хосте (на 2.1.85 это claude-opus-4-6, на 2.1.220 — Opus 5).
+// Почему так: подпись модели быстро протухает, а алиас `opus` резолвится той версией CLI,
+// которая установлена на хосте.
 // Единственный источник, всегда совпадающий с реальностью и не требующий ключей/сети, —
 // набор идентификаторов, вшитый в установленный бинарь. Имя выводим из id.
 //
@@ -13,6 +13,11 @@ import path from 'node:path';
 // Минор ограничен двумя цифрами — иначе в улов попадают датированные id
 // (claude-opus-4-1-20250805) и версия «4.20250805».
 const MODEL_RE = /claude-(opus|sonnet|haiku|fable)-(\d{1,2})(?:-(\d{1,2}))?(\[1m\])?(?![\w-])/g;
+
+// OAuth refresh использует публичную пару «token endpoint + client id», встроенную в CLI.
+// Ищем их как единый блок рядом с callback: брать id отдельно и подставлять к другому
+// endpoint нельзя — refresh token ушёл бы не тому OAuth-клиенту.
+const OAUTH_RE = /(https:\/\/[^\x00\s"'<>]+\/oauth\/token)[\s\S]{0,4096}?https:\/\/[^\x00\s"'<>]+\/oauth\/code\/callback[\s\S]{0,512}?([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})/i;
 
 // Сколько последних версий каждого семейства держать в кратком списке. Одна: в работе нужна
 // свежая модель, остальное — за тумблером «показывать все». Вариант [1m] той же версии
@@ -57,7 +62,8 @@ async function resolveBin(bin) {
  */
 async function scanBinary(binPath) {
   const found = new Map(); // id → { family, major, minor, big }
-  const OVERLAP = 64;
+  let oauth = null;
+  const OVERLAP = 8192;
   let tail = '';
   await new Promise((resolve, reject) => {
     const rs = createReadStream(binPath, { highWaterMark: 4 * 1024 * 1024 });
@@ -67,12 +73,32 @@ async function scanBinary(binPath) {
       for (const m of text.matchAll(MODEL_RE)) {
         found.set(m[0], { family: m[1], major: m[2], minor: m[3] || '', big: !!m[4] });
       }
+      if (!oauth) {
+        const match = text.match(OAUTH_RE);
+        if (match) oauth = { tokenUrl: match[1], clientId: match[2] };
+      }
       tail = text.slice(-OVERLAP);
     });
     rs.on('end', resolve);
     rs.on('error', reject);
   });
-  return found;
+  return { models: found, oauth };
+}
+
+const binaryCache = new Map(); // realpath бинаря → Promise<{models, oauth}>
+
+async function binaryMetadata(config) {
+  const binPath = await resolveBin(config.claudeBin);
+  if (!binPath) return null;
+  if (!binaryCache.has(binPath)) {
+    binaryCache.set(binPath, scanBinary(binPath).catch(() => null));
+  }
+  return binaryCache.get(binPath);
+}
+
+/** Публичные OAuth-метаданные установленного Claude CLI или null. */
+export async function claudeOauthMetadata(config) {
+  return (await binaryMetadata(config))?.oauth || null;
 }
 
 /**
@@ -81,11 +107,8 @@ async function scanBinary(binPath) {
  * Возвращает null, если бинарь не найден/не читается — реестр останется на прежних данных.
  */
 export async function claudeCatalog(config) {
-  const binPath = await resolveBin(config.claudeBin);
-  if (!binPath) return null;
-  let found;
-  try { found = await scanBinary(binPath); } catch { return null; }
-  if (!found.size) return null;
+  const found = (await binaryMetadata(config))?.models;
+  if (!found?.size) return null;
 
   // Бинарь помнит и древности (Opus 4.0, Sonnet 3.7…). Из каталога их НЕ выбрасываем —
   // помечаем `extra: true` («не в кратком списке»), а показывать ли, решает настройка
@@ -108,6 +131,7 @@ export async function claudeCatalog(config) {
         if (vi === 0 && !m.big && !latestOf.has(family)) latestOf.set(family, m.id);
         models.push({
           id: m.id,
+          family: m.family,
           name: modelName(m.family, m.major, m.minor, m.big),
           context: m.big ? 1000000 : 200000,
           tier: modelTier(m.family, m.major, m.minor, m.big),
@@ -121,8 +145,8 @@ export async function claudeCatalog(config) {
   // Алиасы CLI (`opus`/`sonnet`/`haiku`) отдельными пунктами НЕ показываем: это та же самая
   // модель под другим именем, два пункта на одно и то же только путают. Вместо этого
   // привязываем алиас к модели, в которую CLI его резолвит (последняя версия семейства) —
-  // сохранённый где-то выбор «opus» отображается как «Opus 4.6» и туда же уходит запрос.
-  // После обновления бинаря тот же выбор сам станет «Opus 5»: никакого хардкода, всё из CLI.
+  // сохранённый где-то выбор «opus» отображается как актуальная Opus и туда же уходит запрос.
+  // После обновления бинаря тот же выбор сам переедет на новую версию: всё берётся из CLI.
   for (const [alias, family] of [['opus', 'opus'], ['sonnet', 'sonnet'], ['haiku', 'haiku']]) {
     const rec = models.find((m) => m.id === latestOf.get(family));
     if (rec) (rec.aliases ||= []).push(alias);

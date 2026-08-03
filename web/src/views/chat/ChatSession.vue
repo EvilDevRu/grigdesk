@@ -4,25 +4,84 @@ import { useRouter } from 'vue-router';
 import { api } from '../../shared/api-client.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useTasksStore } from '../../stores/tasks.js';
+import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import HelpTip from '../../shared/ui/HelpTip.vue';
+import { confirmDialog } from '../../shared/ui/confirm.js';
 import { mdToHtml } from '../../shared/md.js';
+import { documentLinkFromClick, documentRouteHref } from '../../features/documents/links.js';
+import { useDocumentPreviewStore } from '../../stores/document-preview.js';
+import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
 
 // Одна сессия чата. Переиспользуется в плавающей панели и на странице «Агенты».
 const props = defineProps({
   sid: { type: String, required: true },
   variant: { type: String, default: 'panel' }, // 'panel' | 'page'
 });
+// back — «назад к списку чатов»: кнопка живёт в шапке, но видна только на узком экране,
+// где список и чат делят одну колонку (показом управляет CSS, не JS).
+const emit = defineEmits(['back']);
 
 const router = useRouter();
 const chat = useChatStore();
 const tasks = useTasksStore();
+const ui = useUiStore();
+const documentPreview = useDocumentPreviewStore();
+
+function onMarkdownClick(event) {
+  if (!isPlainClick(event)) return;
+  const image = event.target?.closest?.('img');
+  if (image) {
+    event.preventDefault();
+    documentPreview.showImage({
+      src: image.currentSrc || image.getAttribute('src'),
+      name: image.getAttribute('alt') || image.getAttribute('title') || 'Изображение',
+      mime: '',
+    });
+    return;
+  }
+  const href = documentLinkFromClick(event);
+  if (!href) return;
+  event.preventDefault();
+  documentPreview.show(href);
+}
+
+function isPlainClick(event) {
+  return event?.button === 0
+    && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+function onAttachmentClick(event, attachment) {
+  if (!isImg(attachment) || !isPlainClick(event)) return;
+  event.preventDefault();
+  documentPreview.showImage({
+    src: api.url(attachment.url),
+    name: attachment.name,
+    mime: attachment.mime,
+  });
+}
 
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid) || null);
+
+// ── Название чата (шапка на странице «Чаты» — в панели своё, вкладками, см. ChatTabs) ──
+const editingTitle = ref(false);
+const titleVal = ref('');
+const titleEl = ref(null);
+async function startTitleEdit() {
+  titleVal.value = chat.tabLabel(sess.value);
+  editingTitle.value = true;
+  await nextTick();
+  titleEl.value?.focus();
+  titleEl.value?.select();
+}
+function commitTitle() {
+  if (editingTitle.value) chat.setTitle(props.sid, titleVal.value.trim());
+  editingTitle.value = false;
+}
 
 // ── Модели из реестра исполнителей (/api/providers): группы по ИИ, сила — сверху,
 // у каждой модели свои уровни эффорта и своё окно контекста. Хардкода нет:
@@ -32,7 +91,7 @@ prov.load();
 // Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
-const current = computed(() => prov.modelOf(sess.value?.model));
+const current = computed(() => prov.modelOf(sess.value?.modelRef || sess.value?.model));
 const modelId = computed(() => current.value.id);
 const currentModel = computed(() => current.value.model);
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь кокпит).
@@ -40,10 +99,10 @@ const provGroups = computed(() => prov.providers
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
-const effortLevels = computed(() => currentModel.value?.efforts || ['low', 'medium', 'high', 'max']);
+const effortLevels = computed(() => currentModel.value?.efforts || []);
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
-const modes = computed(() => prov.modesOf(sess.value?.model));
+const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));
 const currentMode = computed(() => {
   const want = sess.value?.mode;
   const list = modes.value;
@@ -51,42 +110,58 @@ const currentMode = computed(() => {
   return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
 });
 const modeHint = computed(() => modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента');
-const ctxWindow = computed(() => currentModel.value?.context || CONTEXT_WINDOW);
+// Codex сообщает эффективное окно только в token_count конкретной сессии (например,
+// catalog 272k × 95% = 258.4k). Оно точнее каталожного fallback и потому приоритетно.
+const ctxWindow = computed(() => sess.value?.contextWindow || currentModel.value?.context || CONTEXT_WINDOW);
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
 const modelUnknown = computed(() => !!currentModel.value?.unknown);
-// Чем CLI отработал на самом деле (из потока последнего ответа) — алиасы он резолвит сам,
-// поэтому «Opus — последняя» может оказаться какой угодно версией.
-const lastRun = computed(() => {
-  const msgs = sess.value?.messages || [];
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'assistant' && msgs[i].actualModel) return msgs[i];
-  }
-  return null;
+// Последний завершённый ход с моделью. Claude сообщает `actualModel` из потока,
+// Codex JSONL пока его не отдаёт — у него честно показываем «запрошено», иначе
+// поиск последнего непустого факта откатывался к старому Claude-ответу.
+const lastRun = computed(() => lastModelRun(sess.value?.messages || []));
+const lastRunView = computed(() => modelRunView(lastRun.value));
+const lastRequestedName = computed(() => {
+  const id = lastRun.value?.model;
+  return id ? (prov.modelOf(id).model?.name || id) : '';
 });
-// Рассинхрон выбора и факта: для алиаса это норма (он и должен резолвиться),
-// для конкретной модели — повод показать, чем на самом деле считали.
-const modelMismatch = computed(() => {
-  const a = lastRun.value?.actualModel;
-  const want = lastRun.value?.model;
-  if (!a || !want) return false;
-  return !a.startsWith(String(want).replace(/\[1m\]$/, '')) && a !== want;
-});
-function onModelChange(e) {
+async function onModelChange(e) {
+  // Reset Kimi асинхронный и на время запроса перерисовывает select со старой моделью.
+  // Поэтому выбранный id надо снять с DOM до await, иначе после подтверждения здесь
+  // снова окажется K3 и визуально успешный reset отменит саму смену модели.
+  const select = e.target;
+  const nextModelId = select.value;
   const oldProv = current.value.provider?.id;
-  const newProv = prov.modelOf(e.target.value).provider?.id;
-  chat.setModel(props.sid, e.target.value);
+  const newProv = prov.modelOf(nextModelId).provider?.id;
   // Сменили ИИ (claude ↔ gpt) — sessionId прежнего исполнителя несовместим,
   // резюмить им нельзя: сбрасываем контекст, история чата остаётся.
-  if (oldProv && newProv && oldProv !== newProv && sess.value?.sessionId) {
-    chat.resetContext(props.sid);
+  // У старого фронта Kimi reset был только локальным: в истории id уже мог быть null,
+  // а server-owned binding — всё ещё жив. Поэтому для Kimi сбрасываем sidecar даже без
+  // видимого sessionId; revision позволяет стору отличить сохранённый чат от нового.
+  if (oldProv && newProv && oldProv !== newProv && (sess.value?.sessionId || oldProv === 'kimi')) {
+    // Для Kimi reset меняет server-owned binding. Модель переключаем только после
+    // подтверждения, иначе при сетевой ошибке старую сессию было бы уже не сбросить.
+    if (!await chat.resetContext(props.sid)) {
+      select.value = modelId.value;
+      return;
+    }
   }
-  // У новой модели может не быть текущего уровня эффорта — подгоняем.
+  chat.setModel(props.sid, nextModelId);
+  // У новой модели может не быть текущего уровня эффорта — снимаем явный выбор.
+  // Выбирать другую ступень за пользователя нельзя.
   const lv = effortLevels.value;
-  if (sess.value && !lv.includes(sess.value.effort)) {
-    chat.setEffort(props.sid, lv.includes('high') ? 'high' : lv[lv.length - 1]);
+  if (sess.value?.effort && lv.length && !lv.includes(sess.value.effort)) {
+    chat.setEffort(props.sid, '');
   }
 }
+
+// Реестр загружается асинхронно и может обновиться уже после открытия чата.
+// Когда он принёс достоверный список, старое неподдерживаемое значение не сохраняем.
+watch(effortLevels, (levels) => {
+  if (sess.value?.effort && levels.length && !levels.includes(sess.value.effort)) {
+    chat.setEffort(props.sid, '');
+  }
+}, { immediate: true });
 
 // ── Список задач для селекта (с ЗАГОЛОВКАМИ, не только номером) ──
 let taskListPromise = null;
@@ -102,13 +177,19 @@ onMounted(async () => {
   chat.loadConveyor();
   const list = await fetchTaskList();
   taskOpts.value = list.map((t) => ({ task: String(t.task), route: t.route, title: '' }));
-  // Подтягиваем названия из B24 (для «#7785 · Ключевые фразы…»).
+  // Подтягиваем названия из B24 (для «#<TASK> · Название задачи…»).
   list.forEach((t) => tasks.load(t.task).then((d) => {
     const o = taskOpts.value.find((x) => x.task === String(t.task));
     if (o && d?.title) o.title = d.title;
   }).catch(() => {}));
 });
 function optLabel(o) { return `#${o.task} · ${o.title || o.route || 'задача'}`; }
+const activeTaskLabel = computed(() => {
+  const id = String(sess.value?.taskId || '');
+  if (!id) return 'Без привязки к задаче';
+  const option = taskOpts.value.find((o) => o.task === id);
+  return option ? optLabel(option) : `#${id}`;
+});
 function onTaskChange(e) {
   const val = e.target.value;
   const o = taskOpts.value.find((x) => x.task === val);
@@ -117,10 +198,95 @@ function onTaskChange(e) {
 
 // ── Контекст (окно — у каждой модели своё, из реестра) ──
 const ctxPct = computed(() => Math.min(100, Math.round(((sess.value?.contextTokens || 0) / ctxWindow.value) * 100)));
-const ctxClass = computed(() => (ctxPct.value >= 85 ? 'hi' : ctxPct.value >= 60 ? 'mid' : ''));
-// Кольцо-индикатор контекста (клик — сброс контекста).
+// ── Порог «дорогого» разговора ────────────────────────────────────────────────
+// Цвет кольца НЕ по проценту окна и НЕ по вбитому числу: красное там, где кокпит и так
+// сожмёт («Настройки → Запуски → Сжимать контекст чата»), но не позже потолка окна модели.
+// Процент окна как единственный ориентир врёт тем сильнее, чем окно больше: на 1M
+// «жёлтые» 60% — это 600k, а дорожает разговор уже с ~250k (кокпит поднимает процесс CLI
+// на каждое сообщение, выше этого кэш промпта на новом ходу не совпадает, и вся переписка
+// пишется в кэш заново по двойному тарифу вместо чтения по десятой доле).
+// Абсолютное число без потолка врало бы в другую сторону: у модели с окном 200k порог
+// 200k недостижим, кольцо осталось бы зелёным до самого конца разговора.
+const CTX_CEIL_RATIO = 0.8;  // потолок: доля окна модели, дальше которой ждать нельзя
+const CTX_WARN_RATIO = 0.8;  // жёлтое — на подходе к порогу
+const ctxLimit = computed(() => {
+  const ceil = Math.round(ctxWindow.value * CTX_CEIL_RATIO);
+  const want = chat.compactWindow || 0; // 0 — автосжатие в настройках выключено
+  return want > 0 ? Math.min(want, ceil) : ceil;
+});
+const CODEX_CONTEXT_METRIC = 'active-input-v1';
+const ctxUnavailable = computed(() => current.value?.provider?.id === 'codex'
+  && !!sess.value?.sessionId
+  && sess.value?.contextMetric !== CODEX_CONTEXT_METRIC);
+const ctxClass = computed(() => {
+  if (ctxUnavailable.value) return '';
+  const tokens = sess.value?.contextTokens || 0;
+  if (tokens >= ctxLimit.value) return 'hi';
+  if (tokens >= ctxLimit.value * CTX_WARN_RATIO) return 'mid';
+  return '';
+});
+const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate);
+const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+const spentHint = computed(() => {
+  const total = sess.value?.totalInputTokens || 0;
+  if (!total) return '';
+  const cached = sess.value?.cachedInputTokens || 0;
+  return ` · за сессию обработано ${fmtTokens(total)} входных токенов${cached ? `, из них ${fmtTokens(cached)} из кэша` : ''}`;
+});
+const ctxTitle = computed(() => {
+  const s = sess.value;
+  const tokens = fmtTokens(s?.contextTokens);
+  if (s?.compacting) return 'Сжимаю контекст…';
+  if (!s?.sessionId) return s?.pendingSeed ? 'Контекст сжат — выжимка уедет со следующим сообщением' : 'Контекст: пусто';
+  if (s?.compactedAt && !s.contextTokens) return 'Контекст сжат — размер покажется после следующего хода';
+  const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
+  if (ctxUnavailable.value) return `Точная заполненность Codex появится после следующего завершённого хода${spentHint.value} · ${hint}`;
+  const warn = (s?.contextTokens || 0) >= ctxLimit.value * CTX_WARN_RATIO ? ' · разговор уже дорогой, пора сжать' : '';
+  const window = fmtTokens(ctxWindow.value);
+  const estimate = ctxIsEstimate.value ? 'примерно ' : '';
+  return `Контекст: ${estimate}${tokens} из ${window} токенов (${ctxPct.value}%)${warn}${spentHint.value} · ${hint}`;
+});
+// Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;
-const ringDash = computed(() => RING_C * (1 - ctxPct.value / 100));
+// На время сжатия дуга — короткий бегунок: кольцо в этот момент вращается, а полное
+// (или почти полное) кольцо при вращении выглядело бы неподвижным.
+const SPIN_DASH = RING_C * 0.75;
+const ringDash = computed(() => (sess.value?.compacting ? SPIN_DASH : RING_C * (1 - ctxPct.value / 100)));
+
+/**
+ * Клик по кольцу. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
+ * продолжает с выжимки. Alt+клик оставлен под прежнее поведение кольца — полный сброс
+ * памяти агента: путать эти два действия дорого (после сброса переписка на экране
+ * остаётся, а агент не помнит ничего), поэтому у каждого свой вопрос и свой текст.
+ */
+async function onCtxClick(e) {
+  const s = sess.value;
+  if (!s?.sessionId || s.compacting || s.sending) return;
+  if (e.altKey) {
+    const ok = await confirmDialog(
+      'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. Переписка на экране останется, но вернуть агенту контекст будет уже нельзя.',
+      { title: 'Сбросить память агента?', okText: 'Сбросить', danger: true },
+    );
+    if (ok) await chat.resetContext(props.sid);
+    return;
+  }
+  const contextNow = ctxUnavailable.value
+    ? 'Точный размер текущего контекста пока недоступен.'
+    : `Сейчас в контексте ${fmtTokens(s.contextTokens)} токенов.`;
+  const ok = await confirmDialog(
+    `${contextNow} Агент соберёт из разговора рабочую выжимку и продолжит с неё — что решили, чего касались, что осталось. Это полноценный ход: он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.`,
+    { title: 'Сжать контекст чата?', okText: 'Сжать' },
+  );
+  if (ok) chat.compact(props.sid);
+}
+
+// Сжатие или server-owned reset замораживают управление: менять модель/задачу/права
+// посреди перехода нельзя. Поле ввода, вложения и диктовка остаются живыми; сама кнопка
+// отправки ждёт завершения перехода.
+const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting);
+const frozenHint = computed(() => (sess.value?.sessionResetting
+  ? 'Сбрасывается память агента — отправка будет доступна после подтверждения сервера'
+  : 'Идёт сжатие контекста — отправка будет доступна сразу после него'));
 
 // ── «Прочитано» ──
 // Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
@@ -155,8 +321,8 @@ watch(() => [
   sess.value?.messages?.length,
   sess.value?.steps?.length,
   sess.value?.sending,
-  chat.permReq?.pid,
-  chat.questionReq?.pid,
+  chat.permFor(props.sid)?.pid,
+  chat.questionFor(props.sid)?.pid,
 ], autoScroll);
 // Переключение на другой чат: подставляем его черновик и — в конец истории.
 watch(() => props.sid, async () => {
@@ -180,7 +346,7 @@ onUnmounted(() => { flushDraft(); window.removeEventListener('beforeunload', flu
 async function submit() {
   const t = input.value.trim();
   const atts = pending.value.slice();
-  if ((!t && !atts.length) || !sess.value) return;
+  if ((!t && !atts.length) || !sess.value || frozen.value) return;
   // Точное имя команды — выполняем её, а не шлём агенту.
   if (COMMANDS.some((c) => c.cmd === t)) { runCommand(t); return; }
   input.value = '';
@@ -190,7 +356,12 @@ async function submit() {
   clearTimeout(draftTimer);
   chat.setDraft(props.sid, '');
   pending.value = [];
-  await chat.send(props.sid, t, atts);
+  const accepted = await chat.send(props.sid, t, atts);
+  if (accepted === false) {
+    input.value = t;
+    pending.value = atts;
+    chat.setDraft(props.sid, t);
+  }
 }
 function onKey(e) {
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
@@ -206,6 +377,7 @@ function onKey(e) {
 
 // ── Слэш-команды: ввод «/» открывает меню со списком и описаниями (как в Claude Code) ──
 const COMMANDS = [
+  { cmd: '/compact', desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки' },
   { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента' },
   { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)' },
   { cmd: '/new', desc: 'Открыть новый чат' },
@@ -220,10 +392,14 @@ watch(cmdMatches, (m) => { if (cmdIndex.value >= m.length) cmdIndex.value = 0; }
 function runCommand(cmd) {
   input.value = '';
   cmdIndex.value = 0;
-  if (cmd === '/clear') {
+  if (cmd === '/compact') {
+    // Тот же путь, что у кольца: подтверждение обязательно — сжатие тратит ход агента.
+    onCtxClick({ altKey: false });
+  } else if (cmd === '/clear') {
     pending.value = [];
     chat.clearChat(props.sid);
-    chat.resetContext(props.sid);
+    // Историю только что вычистили — плашка о сбросе осталась бы единственной записью.
+    chat.resetContext(props.sid, { note: false });
   } else if (cmd === '/reset') {
     chat.resetContext(props.sid);
   } else if (cmd === '/new') {
@@ -344,13 +520,11 @@ async function copyMsg(m, i) {
   } catch { /* не скопировалось — молча */ }
 }
 
-// ── Спросы агента: разрешение на действие и вопрос (AskUserQuestion). Оба запроса
-// глобальные (приходят по SSE в стор) — берём только адресованные этому чату. ──
-const perm = computed(() => forThisChat(chat.permReq));
-const question = computed(() => forThisChat(chat.questionReq));
-function forThisChat(req) {
-  return req && (!req.chatKey || req.chatKey === props.sid) ? req : null;
-}
+// ── Спросы агента: разрешение на действие и вопрос (AskUserQuestion). Все висящие
+// запросы лежат в сторе (приходят по SSE, после F5 — из /api/chat/waiting);
+// берём адресованные этому чату. Висят, пока не ответишь: агент их ждёт. ──
+const perm = computed(() => chat.permFor(props.sid));
+const question = computed(() => chat.questionFor(props.sid));
 
 // ── Действие «На конвейер» с защитой ──
 const onConveyor = computed(() => chat.isOnConveyor(sess.value?.taskId));
@@ -358,36 +532,108 @@ const launchMsg = ref(null);
 async function toConveyor() {
   const s = sess.value; if (!s?.taskId) return;
   if (onConveyor.value) { router.push('/pipeline'); chat.close(); return; }
-  launchMsg.value = 'запуск…';
+  ui.openTaskLaunch(s.taskId);
+  launchMsg.value = 'выбери маршрут и проверь параметры запуска в карточке задачи';
+}
+
+// Debug открывается отдельным разговором, но остаётся в worktree этой же задачи.
+// Здесь только готовим черновик: ни отправки агенту, ни запуска конвейера по клику нет.
+const DEBUG_HINT = 'Откроется отдельный Debug-чат в той же песочнице задачи. Новый конвейер не создаётся, черновик останется неотправленным.';
+const debugOpening = ref(false);
+const debugMsg = ref('');
+const debugTaskTitle = computed(() => {
+  const task = String(sess.value?.taskId || '');
+  return taskOpts.value.find((o) => o.task === task)?.title || sess.value?.title || '';
+});
+function recentDebugContext(messages = []) {
+  return messages
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && String(m.text || '').trim())
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? 'Пользователь' : 'Агент'}: ${String(m.text).trim()}`)
+    .join('\n\n')
+    .slice(-3000);
+}
+async function openDebug() {
+  const s = sess.value;
+  if (!s?.taskId || s.purpose === 'debug' || debugOpening.value) return;
+  debugOpening.value = true;
+  debugMsg.value = '';
   try {
-    const r = await tasks.launch(s.taskId, s.messages.map((m) => m.text).join('\n').slice(-3000));
-    launchMsg.value = r.outcome === 'already_running' ? 'уже идёт' : r.outcome === 'launched' ? `запущено (${r.profile})` : (r.note || 'отправлено');
-    chat.loadConveyor();
-  } catch (e) { launchMsg.value = `ошибка: ${e.message}`; }
+    await chat.openDebugFor({
+      taskId: s.taskId,
+      taskTitle: debugTaskTitle.value,
+      sourceChatId: s.id,
+      context: recentDebugContext(s.messages),
+    });
+    await router.push('/chats');
+  } catch (e) {
+    debugMsg.value = `ошибка: ${e.message}`;
+  } finally {
+    debugOpening.value = false;
+  }
 }
 </script>
 
 <template>
-  <div v-if="sess" class="cs" :class="variant"
+  <div v-if="sess" class="cs" :class="[variant, { frozen }]"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
       <div class="drop-box">📎 Отпусти, чтобы приложить</div>
     </div>
-    <!-- Панель управления: селект задачи слева, настройки прижаты вправо -->
+    <!-- Шапка в два ряда: сверху название и задача, снизу — настройки хода.
+         Высота фиксирована токеном --chat-head-h: линия под шапкой чата идёт по той же
+         горизонтали, что и линия под шапкой списка чатов слева. -->
     <div class="cs-top">
+      <div class="hrow">
+        <!-- Назад к списку — только когда список и чат делят одну колонку (мобила) -->
+        <button v-if="variant === 'page'" class="back" title="К списку чатов" aria-label="К списку чатов"
+                @click="emit('back')">←</button>
+        <!-- Название чата — только на странице «Чаты»: в плавающей панели его уже показывают вкладки -->
+        <div v-if="variant === 'page'" class="ttl">
+          <input v-if="editingTitle" ref="titleEl" v-model="titleVal" class="ctitle-edit"
+                 @keydown.enter="commitTitle" @keydown.esc="editingTitle = false" @blur="commitTitle" />
+          <template v-else>
+            <span class="ctitle" :title="chat.tabLabel(sess)" @dblclick="startTitleEdit">
+              {{ chat.tabLabel(sess) }}
+            </span>
+            <!-- Карандаш, а не только двойной клик: переименование иначе не найти -->
+            <button class="tedit" title="Переименовать чат" aria-label="Переименовать чат"
+                    @click="startTitleEdit">✎</button>
+          </template>
+        </div>
+        <HelpTip class="task-tip" :text="activeTaskLabel" align="left" :trigger-focusable="false"
+                 :tip-style="{ maxWidth: 'min(520px, calc(100vw - 16px))' }">
+          <span class="sel task">
+            <span class="lbl">задача</span>
+            <select :value="sess.taskId || ''" :disabled="frozen" @change="onTaskChange">
+              <option value="">без задачи</option>
+              <option v-for="o in taskOpts" :key="o.task" :value="o.task">{{ optLabel(o) }}</option>
+            </select>
+          </span>
+        </HelpTip>
+      </div>
       <div class="col bar">
-        <div class="sel task">
-          <span class="lbl">задача</span>
-          <select :value="sess.taskId || ''" @change="onTaskChange">
-            <option value="">без задачи</option>
-            <option v-for="o in taskOpts" :key="o.task" :value="o.task">{{ optLabel(o) }}</option>
-          </select>
+        <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
+             иначе показываем запрошенный id и не откатываемся к старому ходу другого ИИ. -->
+        <div v-if="lastRunView.model || modelUnknown" class="factbar">
+          <template v-if="lastRun">
+            <span class="fb" :class="{ warn: lastRunView.mismatch }">
+              последний ход · {{ lastRunView.source }}: <b>{{ lastRunView.model }}</b>
+              <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
+            </span>
+            <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
+          </template>
+          <span v-if="modelUnknown" class="fb warn"
+                title="установленный CLI не знает эту модель — обнови его в настройках">
+            установленный CLI не знает эту модель — обнови его в настройках
+          </span>
         </div>
         <div class="spacer"></div>
         <div class="sel model">
           <span class="lbl">модель</span>
-          <select :value="modelId" :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
+          <select :value="modelId" :disabled="frozen"
+                  :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
                   @change="onModelChange">
             <template v-if="provGroups.length">
               <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
@@ -406,15 +652,18 @@ async function toConveyor() {
         <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
         <div v-if="modes.length" class="sel mode">
           <span class="lbl">режим</span>
-          <select :value="currentMode" :title="modeHint" @change="chat.setMode(sid, $event.target.value)">
+          <select :value="currentMode" :disabled="frozen" :title="modeHint" @change="chat.setMode(sid, $event.target.value)">
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
           </select>
         </div>
-        <EffortSlider :model-value="sess.effort" :levels="effortLevels" @update:model-value="chat.setEffort(sid, $event)" />
-        <!-- Контекст: маленькое кольцо-заполнение; клик — сброс контекста -->
-        <button class="ctx-ring" :class="ctxClass" :disabled="!sess.sessionId"
-                :title="`Контекст: ${(sess.contextTokens || 0).toLocaleString('ru')} токенов (${ctxPct}%)` + (sess.sessionId ? ' · клик — сбросить' : ' · пусто')"
-                @click="chat.resetContext(sid)">
+        <EffortSlider v-if="effortLevels.length" :model-value="sess.effort" :levels="effortLevels"
+                      @update:model-value="chat.setEffort(sid, $event)" />
+        <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
+             Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента. -->
+        <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
+                :disabled="!sess.sessionId || sess.compacting || sess.sending"
+                :title="ctxTitle" :aria-label="ctxTitle"
+                @click="onCtxClick">
           <svg viewBox="0 0 24 24">
             <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
             <circle class="rfg" cx="12" cy="12" r="9" fill="none" stroke-width="3" stroke-linecap="round"
@@ -422,19 +671,12 @@ async function toConveyor() {
           </svg>
         </button>
       </div>
-      <!-- Что реально ушло в запуск: модель, которой CLI отработал, и уровень усилия.
-           Здесь виден любой рассинхрон между выбором в кокпите и фактом. -->
-      <div v-if="lastRun || modelUnknown" class="factbar">
-        <template v-if="lastRun">
-          <span class="fb" :class="{ warn: modelMismatch }">
-            факт: <b>{{ lastRun.actualModel }}</b>
-            <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
-          </span>
-          <span v-if="modelMismatch" class="fb warn">— выбрано «{{ currentModel?.name || lastRun.model }}»</span>
-        </template>
-        <span v-if="modelUnknown" class="fb warn">установленный CLI не знает эту модель — обнови его в настройках</span>
-      </div>
     </div>
+
+    <!-- Плашки «переписка не сохраняется» здесь НЕТ намеренно: saveError — состояние
+         общее (сервер не принимает запись вообще), а рисовалась бы она внутри открытого
+         чата и висела бы в каждом, куда ни зайди. Об этой беде сообщает разовое
+         оповещение из стора (_saveFailed), а сама переписка держится снимком в браузере. -->
 
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
     <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
@@ -448,7 +690,8 @@ async function toConveyor() {
         </div>
         <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
           <div v-if="m.attachments?.length" class="m-atts">
-            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener">
+            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
+               @click="onAttachmentClick($event, a)">
               <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
               <span v-else class="m-file">📄 {{ a.name }}</span>
             </a>
@@ -459,13 +702,20 @@ async function toConveyor() {
               <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
             </svg>
             <span>Агент</span>
-            <span v-if="m.actualModel" class="amodel">{{ m.actualModel }}<template v-if="m.effort"> · {{ m.effort }}</template></span>
+            <span v-if="m.actualModel || m.model" class="amodel">
+              {{ m.actualModel || m.model }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
+            </span>
           </div>
+          <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
+               а не наперегонки (два CLI на одну сессию убивают друг друга). -->
+          <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
           <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
           <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
           <div v-if="m.text" class="mrow">
-            <!-- Ответ агента — маркдауном (заголовки/списки/код), текст экранируется в md.js -->
-            <div v-if="m.role === 'assistant'" class="text md" v-html="mdToHtml(m.text)"></div>
+            <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
+            <div v-if="m.role === 'assistant'" class="text md"
+                 v-html="mdToHtml(m.text, { resolveHref: documentRouteHref })"
+                 @click="onMarkdownClick"></div>
             <div v-else class="text">{{ m.text }}</div>
             <button class="copy" :class="{ done: copiedIdx === i }"
                     :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
@@ -486,25 +736,39 @@ async function toConveyor() {
             <span class="spin"></span> думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
           </div>
         </div>
+        <!-- Связь этого окна с сервером оборвалась посреди хода. Сам ход при этом идёт:
+             он живёт в процессе сервера, а не во вкладке, и ответ вернётся через
+             chats/pending. Плашка ЛОКАЛЬНАЯ (поле offline в историю не едет) — порвалось
+             у этого окна, другим устройствам показывать нечего. -->
+        <div v-if="sess.offline" class="msg offline">
+          <div class="text">📡 Связь с сервером прервалась — ход продолжается, ответ появится, когда связь вернётся.</div>
+        </div>
       </div>
     </div>
 
-    <!-- Действие на конвейер (только для задачи) -->
-    <div v-if="sess.taskId && sess.messages?.length" class="cs-act">
+    <!-- Действия задачи: конвейер или отдельный Debug-чат в той же песочнице. -->
+    <div v-if="sess.taskId && (sess.messages?.length || sess.purpose !== 'debug')" class="cs-act">
       <div class="col act-row">
-        <button class="act" :class="{ onconv: onConveyor }" @click="toConveyor">
+        <button v-if="sess.messages?.length" class="act" :class="{ onconv: onConveyor }" :disabled="frozen" @click="toConveyor">
           🏭 {{ onConveyor ? 'Уже на конвейере →' : 'На конвейер' }}
         </button>
+        <HelpTip v-if="sess.purpose !== 'debug'" class="debug-tip" :text="DEBUG_HINT"
+                 align="left" :trigger-focusable="false">
+          <button class="act debug-act" :disabled="frozen || debugOpening" @click="openDebug">
+            🐞 {{ debugOpening ? 'Открываю…' : 'Исправлять' }}
+          </button>
+        </HelpTip>
         <span v-if="launchMsg" class="lm muted">{{ launchMsg }}</span>
+        <span v-if="debugMsg" class="lm muted">{{ debugMsg }}</span>
       </div>
     </div>
 
     <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
     <ChatQuestion v-if="question" :req="question"
-                  @answer="chat.answerQuestion($event)" @skip="chat.answerQuestion([])" />
+                  @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
 
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
-    <ChatPermission v-if="perm" :req="perm" @answer="chat.answerPerm" />
+    <ChatPermission v-if="perm" :req="perm" @answer="(allow, remember) => chat.answerPerm(perm.pid, allow, remember)" />
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
@@ -555,12 +819,18 @@ async function toConveyor() {
             </svg>
           </button>
           </HelpTip>
-          <!-- Пока агент работает, та же кнопка останавливает ход: заодно спасает от зависших -->
-          <button v-if="sess.sending" class="send stop" :disabled="sess.stopping"
-                  :title="sess.stopping ? 'Останавливаю…' : 'Остановить агента'" @click="chat.stop(sid)">
+          <!-- Пока агент работает, рядом появляется «стоп». Отправку при этом НЕ прячем:
+               следующее сообщение можно готовить и слать сразу — сервер поставит его
+               в очередь и пустит следом (раньше оно молча пропадало). -->
+          <button v-if="sess.sending || sess.compacting" class="send stop" :disabled="sess.stopping"
+                  :title="sess.stopping ? 'Останавливаю…'
+                    : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'" @click="chat.stop(sid)">
             <span class="sq"></span>
           </button>
-          <button v-else class="send" :disabled="!input.trim() && !pending.length" title="Отправить (Enter)" @click="submit">↑</button>
+          <button class="send" :disabled="frozen || (!input.trim() && !pending.length)"
+                  :title="frozen ? frozenHint
+                    : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
+                  @click="submit">↑</button>
         </div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
@@ -576,13 +846,43 @@ async function toConveyor() {
 
 .col { width: 100%; min-width: 0; }
 
-.cs-top { padding: 12px 22px; border-bottom: 1px solid var(--line); }
+.cs-top { display: flex; flex-direction: column; gap: 4px; padding: 8px 22px; border-bottom: 1px solid var(--line); }
+/* На странице высота шапки — общий с левым списком токен, иначе две разделительные линии
+   расходятся. min-height, а не height: редкое предупреждение о модели важнее ровной линии —
+   пусть шапка подрастёт, чем текст обрежется. */
+.page .cs-top { min-height: var(--chat-head-h); justify-content: center; }
+/* Ряд настроек на странице НЕ переносится: перенос — это плюс 30px к шапке и разъехавшиеся
+   линии. Вместо переноса ряд ужимается (см. shrink у .factbar), а на узком экране страница
+   и так уходит в одну колонку, где шапке разрешено расти. */
+.page .bar { flex-wrap: nowrap; }
+.hrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
+.back { display: none; flex: none; width: 30px; height: 30px; margin-left: -6px; border: none; border-radius: 8px;
+  background: none; color: var(--ink-mid); font-size: 17px; line-height: 1; cursor: pointer; place-items: center; }
+.back:hover { background: var(--surface-2); color: var(--ink); }
+/* Название чата — как заголовок карточки, рядом карандаш переименования */
+.ttl { display: flex; align-items: center; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.ctitle { font-size: 15px; font-weight: 600; cursor: default; line-height: 1.3;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Карандаш приглушён, пока не наводишь на шапку: он нужен редко, но должен быть виден
+   всегда — двойным кликом по названию переименование никто не находит. */
+.tedit { flex: none; width: 24px; height: 24px; border: none; border-radius: 6px; background: none;
+  color: var(--ink-mid); font-size: 12px; cursor: pointer; display: grid; place-items: center;
+  opacity: .5; transition: opacity .12s, color .12s, background .12s; }
+.hrow:hover .tedit { opacity: 1; }
+.tedit:hover { background: var(--surface-2); color: var(--ink); opacity: 1; }
+.tedit:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+.ctitle-edit { width: 100%; max-width: 420px; height: 26px; background: var(--ground); border: 1px solid var(--line-2);
+  border-radius: 7px; color: var(--ink); font-size: 14px; font-weight: 600; padding: 0 8px; outline: none; font-family: inherit; }
 .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .sel { position: relative; }
-/* Задача сжимается первой: правая группа (модель · эффорт · контекст) должна
-   помещаться в один ряд, иначе кольцо контекста переносится на вторую строку */
-.sel.task { flex: 0 1 320px; min-width: 120px; }
+/* На странице задача делит верхний ряд с названием чата: ей — правая половина, но
+   ужимается она первой (название важнее). Полное название задачи доступно по ховеру
+   в общем HelpTip — внешний overflow страницы его не обрежет. */
+.task-tip { flex: 0 1 420px; max-width: 520px; min-width: 150px; }
+.task-tip :deep(.ht-tr) { width: 100%; min-width: 0; cursor: default; }
+.sel.task { width: 100%; min-width: 0; }
 /* Селект модели сжимаемый: в узкой плавающей панели ряд «модель + эффорт + кольцо»
    должен оставаться одним рядом, а не разъезжаться на три */
 .sel.model { flex: 0 1 140px; min-width: 84px; }
@@ -590,10 +890,12 @@ async function toConveyor() {
    она вставала В НАЧАЛО второго ряда и сдвигала селект модели вправо (кривой отступ);
    вместо неё ряд заполняет растянутый селект модели. */
 .panel .spacer { display: none; }
-.panel .sel.task { flex: 1 1 100%; }
+.panel .task-tip { flex: 1 1 100%; max-width: none; min-width: 0; }
 /* basis 0 (не auto!): естественная ширина селекта — по самой длинной опции,
    с ней эффорт и кольцо выдавливаются на третий ряд */
 .panel .sel.model { flex: 1 1 0; min-width: 84px; }
+/* В узкой панели факт-строке места в ряду нет — уводим её своим рядом под контролы */
+.panel .factbar { order: 9; flex: 1 1 100%; }
 /* Панель — строка состояния, а не форма: у контролов нет своих коробок, только
    подпись-метка, значение и шеврон. Разделители — тонкие вертикальные линии. */
 .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
@@ -604,6 +906,11 @@ async function toConveyor() {
   border-bottom: 1px solid transparent; color: var(--ink); padding: 0 16px 0 0; font-size: 12.5px; font-family: inherit;
   cursor: pointer; text-overflow: ellipsis; }
 .sel select:hover { border-bottom-color: var(--line-2); }
+/* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, слайдеру
+   усилия своего disabled не заводили — гасим его вместе с рядом действий. Композер не
+   трогаем: печатать во время сжатия можно, нельзя только отправить. */
+.sel select:disabled { opacity: .5; cursor: default; }
+.cs.frozen .bar :deep(.eff), .cs.frozen .cs-act { opacity: .5; pointer-events: none; }
 .sel select:focus { outline: none; border-bottom-color: var(--accent); }
 /* Раскрытый список системный — ему нужен непрозрачный фон, иначе на тёмной теме нечитаемо */
 .sel select option, .sel select optgroup { background: var(--surface); color: var(--ink); }
@@ -618,6 +925,15 @@ async function toConveyor() {
 .ctx-ring .rfg { stroke: var(--good); transition: stroke-dashoffset .3s; }
 .ctx-ring.mid .rfg { stroke: var(--warn); }
 .ctx-ring.hi .rfg { stroke: var(--bad); }
+/* У Codex это не порог заполненности, а только вход последнего хода — не тревожим красным. */
+.ctx-ring.estimate .rfg { stroke: var(--accent); opacity: .8; }
+/* Сжатие идёт: у него нет ленты шагов, поэтому единственный признак работы — само
+   кольцо. Крутим его как спиннер (дуга на это время короткая — см. SPIN_DASH), иначе
+   нажатие выглядело бы как «кнопка ничего не сделала». */
+.ctx-ring.compacting { opacity: 1 !important; }
+.ctx-ring.compacting .rfg { stroke: var(--accent); }
+.ctx-ring.compacting svg { animation: ctx-spin .8s linear infinite; }
+@keyframes ctx-spin { to { transform: rotate(1turn); } }
 .ctx-ring:not(:disabled):hover { background: var(--surface-2); }
 .ctx-ring:disabled { cursor: default; opacity: .7; }
 
@@ -656,43 +972,76 @@ async function toConveyor() {
 .ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
   letter-spacing: .04em; text-transform: uppercase; color: var(--ink-mid); }
 .ahead svg { width: 12px; height: 12px; color: #d97757; }
-/* Модель, которой ответ реально посчитан (из потока CLI) */
+/* Модель хода: факт из потока CLI либо честно помеченный запрос */
 .amodel { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .75;
   font-family: var(--mono, monospace); font-size: 10.5px; }
 
-/* Строка факта под панелью управления: что ушло в запуск на самом деле */
-.factbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--ink-mid); }
+/* Строка последнего хода — слева в ряду настроек (она и селект модели про одно и то же),
+   поэтому ужимается многоточием: своим рядом она раздувала шапку и рвала выравнивание.
+   shrink 100 — при нехватке места ряд отбирает ширину у неё, а не у селектов: подпись
+   информационная, а контролами пользуются. */
+.factbar { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden;
+  flex: 0 100 auto; font-size: 11px; color: var(--ink-mid); }
+.fb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb b { font-weight: 600; font-family: var(--mono, monospace); color: var(--ink); }
 .fb.warn { color: var(--warn, #e0a33a); }
 .fb.warn b { color: var(--warn, #e0a33a); }
 /* Маркдаун ответа */
 .text.md :deep(p) { margin: 0 0 8px; }
 .text.md :deep(p:last-child) { margin-bottom: 0; }
-.text.md :deep(h3), .text.md :deep(h4), .text.md :deep(h5), .text.md :deep(h6) { margin: 14px 0 6px; font-size: 14px; }
-.text.md :deep(ul) { margin: 4px 0 8px; padding-left: 20px; }
+.text.md :deep(h1), .text.md :deep(h2), .text.md :deep(h3),
+.text.md :deep(h4), .text.md :deep(h5), .text.md :deep(h6) {
+  margin: 14px 0 6px; font-size: 14px; line-height: 1.35; }
+.text.md :deep(ul), .text.md :deep(ol) { margin: 4px 0 8px; padding-left: 20px; }
 .text.md :deep(li) { margin: 2px 0; }
+.text.md :deep(a) { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.text.md :deep(a:hover) { color: color-mix(in srgb, var(--accent) 75%, white); }
+.text.md :deep(blockquote) { margin: 6px 0 8px; padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--line); color: var(--ink-mid); }
 .text.md :deep(code) { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 .text.md :deep(pre) { background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
   padding: 10px 12px; overflow-x: auto; margin: 6px 0 8px; }
 .text.md :deep(pre code) { background: none; padding: 0; }
+.text.md :deep(table) { display: block; max-width: 100%; overflow-x: auto;
+  border-collapse: collapse; margin: 6px 0 8px; }
+.text.md :deep(th), .text.md :deep(td) { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+.text.md :deep(th) { background: var(--surface-2); }
+.text.md :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.text.md :deep(img) { display: block; max-width: min(100%, 760px); height: auto; border-radius: 8px; margin: 6px 0 8px;
+  cursor: zoom-in; }
 /* md-текст не pre-wrap (маркдаун сам управляет блоками) */
 .msg.assistant .text.md { white-space: normal; }
 /* Ошибка — компактная плашка по содержимому, а не баннер во всю ширину */
+/* Обрыв связи — предупреждение, а не провал: цвет «внимание», не «ошибка». */
+.msg.offline { align-self: flex-start; max-width: 80%; }
+.msg.offline .text { background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); color: var(--muted); }
 .msg.error { align-self: flex-start; max-width: 80%; }
 .msg.error .text { background: color-mix(in srgb, var(--bad) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
   color: var(--bad); padding: 8px 12px; border-radius: 10px; font-size: 12.5px; }
 .msg.error .text::before { content: '⚠ '; }
 
+/* Служебная плашка самого кокпита (сжали контекст, сбросили память агента) — это не
+   реплика: её не говорил ни агент, ни человек. Поэтому по центру, без пузыря и подписи. */
+.msg.note { align-self: center; max-width: 90%; }
+.msg.note .text { font-size: 12.5px; color: var(--ink-mid); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; text-align: center; }
+
+/* Запись истории не проходит — предупреждение поперёк всей ширины, над лентой:
+   это не ошибка одного сообщения, а риск потерять весь разговор. */
 .cs-act { padding: 8px 22px; border-top: 1px solid var(--line); }
 .act-row { display: flex; align-items: center; gap: 10px; }
 .act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
 .act.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .lm { font-size: 12px; }
 
-/* Вложения в сообщениях: превью-картинки, клик — оригинал */
+/* Вложения в сообщениях: картинка открывается в общем viewer-е, файл — как оригинал. */
+.m-queued { font-size: 12px; color: var(--ink-mid); margin-bottom: 4px; }
+.msg.user .m-queued { text-align: right; }
 .m-atts { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg.user .m-atts { justify-content: flex-end; }
-.m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.m-atts img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--line); display: block;
+  cursor: zoom-in; }
 .m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .m-atts a { text-decoration: none; }
 
@@ -746,4 +1095,52 @@ async function toConveyor() {
 /* Пока агент работает — та же кнопка становится «стоп» (квадрат), как в плеере */
 .send.stop { background: var(--bad); }
 .send.stop .sq { width: 11px; height: 11px; border-radius: 2px; background: #fff; display: block; }
+
+/* ── Планшет (до 1099): ряд настроек без подписей-меток ─────────────────────────
+   Рядом со списком чату остаётся ~400px, и в такую ширину ряд влезает только так.
+   Значение каждого контрола говорит само за себя (модель, режим, уровень), а полное
+   название есть в подсказке по ховеру. Поля страницы тоже ужимаем. */
+@media (max-width: 1099px) {
+  .page .cs-top { padding: 8px 14px; }
+  .page .cs-body { padding: 0 11px 0 14px; }
+  .page .cs-act, .page .cs-input { padding-left: 14px; padding-right: 14px; }
+  .page .task-tip { flex: 0 1 300px; }
+  .page .sel.model .lbl, .page .sel.mode .lbl, .page .bar :deep(.eff .cap) { display: none; }
+  .page .sel.model { flex: 0 1 118px; }
+}
+
+/* ── Планшет-портрет и телефон: список и чат делят одну колонку ──────────────────
+   Порог 900, а не 760: в 400px, что остаётся чату рядом со списком, ряд настроек уже
+   не помещается, а резать контролы хуже, чем показывать по одной колонке (так же
+   ведут себя почтовики и мессенджеры на планшете в портрете). Строение шапки то же —
+   ширины теперь хватает: колонка одна. */
+@media (max-width: 899px) {
+  .page .back { display: grid; }
+  .page .task-tip { flex: 0 1 380px; }
+}
+
+/* ── Телефон: шапке разрешено расти ──────────────────────────────────────────────
+   Выравнивать тут нечего (шапка на экране одна), а ряд контролов в 340px не влезает:
+   название с задачей и настройки расходятся по своим рядам, поля — к минимуму. */
+@media (max-width: 759px) {
+  .page .cs-top { min-height: 0; justify-content: flex-start; padding: 8px 10px; }
+  /* Переносится только задача: «назад» и название остаются одной строкой — иначе
+     кнопка занимает целый ряд в одиночку и шапка съедает пятую часть экрана. */
+  .page .hrow { flex-wrap: wrap; }
+  .page .task-tip { flex: 1 1 100%; max-width: none; min-width: 0; }
+  .page .bar { flex-wrap: wrap; }
+  /* Факт-строка своим рядом — в одном ряду с контролами от неё осталось бы три буквы */
+  .page .factbar { order: 9; flex: 1 1 100%; }
+  .page .spacer { display: none; }
+  .page .sel.model { flex: 1 1 0; }
+  .page .sel.task .lbl { display: none; }
+  .page :deep(.eff .track) { width: 62px; }
+  .page .cs-body { padding: 0 6px 0 12px; margin: 16px 0; }
+  .page .cs-act, .page .cs-input { padding-left: 12px; padding-right: 12px; }
+  .page .cs-input { padding-bottom: 12px; }
+  /* Иначе длинный текст режется в узкий столбик */
+  .page .msg.user { max-width: 92%; }
+  .page .msg .text { font-size: 14px; }
+  .page .m-atts img { max-width: 62vw; }
+}
 </style>

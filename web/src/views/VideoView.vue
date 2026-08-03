@@ -1,9 +1,14 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue';
 import { api } from '../shared/api-client.js';
+import { usePluginsStore } from '../stores/plugins.js';
+
+// Раздел — плагин «Видео → задачи»: выключенный показывает заглушку вместо формы.
+const plugins = usePluginsStore();
+if (!plugins.loaded) plugins.load();
+const pluginOff = computed(() => plugins.loaded && !plugins.enabled('video'));
 
 const BASE = (import.meta.env.VITE_BRAIN_URL || '').replace(/\/$/, '');
-const TOKEN = import.meta.env.VITE_COCKPIT_TOKEN || '';
 
 const doctorOk = ref(null);
 const uploading = ref(false);
@@ -31,8 +36,11 @@ async function onFile(e) {
   try {
     const fd = new FormData();
     fd.append('file', file);
+    // Авторизация — сессионной cookie (у fetch она уходит по умолчанию на своём origin).
+    // Заголовка `X-Cockpit-Token` здесь быть не должно: он теперь принадлежит локальным CLI,
+    // а из клиентского кода его значение пришлось бы класть в публичный бандл.
     const res = await fetch(`${BASE}/api/media/upload`, {
-      method: 'POST', body: fd, headers: TOKEN ? { 'X-Cockpit-Token': TOKEN } : {},
+      method: 'POST', body: fd, credentials: 'include',
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
@@ -79,6 +87,8 @@ onUnmounted(() => clearInterval(poll));
 <template>
   <div class="video">
     <h2 class="ttl">Видео → задачи</h2>
+    <div v-if="pluginOff" class="muted lead">Плагин «Видео → задачи» выключен. Включить — «Настройки → Плагины».</div>
+    <template v-else>
     <p class="muted lead">Загрузи запись встречи — кокпит распознает речь и поможет собрать одну или несколько задач. Без вкладки VS Code.</p>
 
     <p v-if="doctorOk === false" class="err">⚠ Медиа-конвейер не готов (ffmpeg/venv/whisper). Проверь окружение сервера.</p>
@@ -129,6 +139,7 @@ onUnmounted(() => clearInterval(poll));
         </div>
       </section>
     </div>
+    </template>
   </div>
 </template>
 
