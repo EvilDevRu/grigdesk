@@ -177,9 +177,22 @@ watch(stageLive, (live) => {
 watch(() => stageActivity.value?.live?.actions?.length, () => {
   nextTick(() => { if (liveFeed.value) liveFeed.value.scrollTop = liveFeed.value.scrollHeight; });
 });
+// Решение и возврат курсора уходят в журнал попытки СРАЗУ, а продолжение прогона —
+// отдельным resume, который может не подняться (например, профиль правили при живой
+// попытке). Сервер отвечает 200 с resumed:false, и молчать об этом нельзя: карточка
+// выглядит принятой, а конвейер стоит — так на t7802 четыре попытки продолжить
+// прошли «успешно» и ничего не поехало.
+async function warnIfNotResumed(res) {
+  if (!res || res.resumed !== false) return;
+  await alertDialog(`Записано, но прогон не поехал: ${res.resumeError || 'причина — в журнале этапов задачи'}`);
+}
 async function gateDecide(decision) {
   stageBusy.value = 'gate';
-  try { await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value }); await load(); closeStage(); }
+  try {
+    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value });
+    await load(); closeStage();
+    await warnIfNotResumed(res);
+  }
   catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
 async function forceStatus(status) {
@@ -191,9 +204,10 @@ async function forceStatus(status) {
   // Указание уезжает тем же запросом, что и сам возврат: сервер кладёт его в журнал
   // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
   try {
-    await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
+    const res = await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
       { comment: stageComment.value });
     await load(); closeStage();
+    await warnIfNotResumed(res);
   }
   catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }

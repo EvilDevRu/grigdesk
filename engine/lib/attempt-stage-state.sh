@@ -7,7 +7,7 @@
 #   attempt_stage_state_latest_event_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
 #   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME \
-#     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT]
+#     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT] [RECOVERY]
 #
 # Изменяемый курсор и его только дополняемый журнал событий с цепочкой хешей хранятся только в
 # <control-root>/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT>/stage-results.
@@ -71,6 +71,11 @@ FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
 # схема просила ещё один автоматический rewind, но этот же переход уже дважды не помог.
 CURSOR_STOP_TARGETS = DECLARED_STOP_TARGETS | {"rewind-limit", "no-progress"}
 HUMAN_RESUMABLE_STOP_TARGETS = {"human", "rewind-limit", "no-progress"}
+# Коммит восстановления: диагностический узел закрыт `failed` не потому, что его
+# исполнили, а потому что при подъёме после обрыва снята инструментация, на которой он
+# стоял. Узел не работал, значит и указание человека к нему не отработано — по этой
+# метке `human_rewind_note` отличает такой коммит от настоящего захода.
+RECOVERY_COMMIT_REASON = "узел не исполнялся: при восстановлении снята инструментация"
 
 
 def fail(code=78):
@@ -350,6 +355,11 @@ def human_rewind_note(directory, node):
     # Снимается ПЕРВЫМ ЖЕ коммитом узла: указание отработано, и подсовывать его
     # следующему заходу — врать ему о том, зачем он здесь. Возврат туда же второй раз
     # кладёт новое событие со своей причиной, поэтому «последнее слово» всегда свежее.
+    # Исключение — коммит восстановления: узел закрыт из-за снятой инструментации,
+    # ни один агент его не открывал, и указание обязано дожить до настоящего захода.
+    # Иначе выходит петля, которую и ловили на t7802: человек прикладывает решение,
+    # жмёт «продолжить», подъём закрывает узел `failed` за отсутствующую разметку,
+    # маршрут уводит на instrument — и обратно узел входит уже без решения.
     # reason() строгая: события пишутся через ту же валидацию, поэтому непроходной
     # текст здесь означает порчу журнала, а её нельзя проглатывать молча.
     identifier(node)
@@ -370,6 +380,11 @@ def human_rewind_note(directory, node):
             continue
         if event.get("kind") == "human-rewind":
             note = reason(event.get("reason"))
+        elif (
+            event.get("kind") == "commit"
+            and event.get("reason") == RECOVERY_COMMIT_REASON
+        ):
+            continue
         elif event.get("kind") in {"commit", "rewind-limit", "no-progress"}:
             note = ""
     return note
@@ -773,7 +788,7 @@ elif OP == "prepare-pause":
     dump(event)
 
 elif OP == "prepare-human-rewind":
-    runtime_path, node, reset_csv, rewind_reason, at = ARGS
+    runtime_path, results_dir, node, reset_csv, rewind_reason, at = ARGS
     runtime = regular_json(runtime_path)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
@@ -794,7 +809,17 @@ elif OP == "prepare-human-rewind":
         and cursor.get("stop") not in HUMAN_RESUMABLE_STOP_TARGETS
     ):
         fail(75)
-    if cursor.get("currentNode") == node and cursor.get("state") == "ready":
+    # Возврат несёт ДВЕ вещи: курсор и указание человека. Курсор может уже стоять там,
+    # указание — нет, и раньше такой заход считался пустым: событие не ложилось, а
+    # `factory goto` всё равно печатал «курсор возвращён» и отвечал успехом. На t7802
+    # так пропало решение владельца, набранное в «перейти сюда» на текущем узле, —
+    # заход диагностики ушёл без него. Гасим только настоящий повтор (тот же узел и
+    # ровно то же указание, ещё не отработанное коммитом) — как в prepare-pause.
+    if (
+        cursor.get("currentNode") == node
+        and cursor.get("state") == "ready"
+        and human_rewind_note(results_dir, node) == rewind_reason
+    ):
         fail(10)
     sequence = integer(runtime.get("sequence")) + 1
     event = event_base(runtime, sequence, at, "human-rewind", node)
@@ -826,7 +851,10 @@ elif OP == "prepare-commit":
         rewind_limit_raw,
         verdict_b64,
         no_progress_limit_raw,
+        recovery_raw,
     ) = ARGS
+    if recovery_raw not in {"0", "1"}:
+        fail()
     runtime = regular_json(runtime_path)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
@@ -865,7 +893,9 @@ elif OP == "prepare-commit":
     no_progress_limit = decimal(no_progress_limit_raw, 10)
     sequence = integer(runtime.get("sequence")) + 1
     event_kind = "commit"
-    event_reason = None
+    # Метка восстановления живёт только на обычном коммите: остановки rewind-limit и
+    # no-progress называют себя сами и всё равно зовут человека к журналу.
+    event_reason = RECOVERY_COMMIT_REASON if recovery_raw == "1" else None
     after = derive_commit_cursor(cursor, action, node, outcome, sequence)
     if validate_action(action) == "rewind":
         rewind_history = automatic_rewind_history(
@@ -1174,9 +1204,13 @@ elif OP == "validate-ledger":
                 if event["after"] != expected_cursor:
                     fail()
             elif event["kind"] == "commit":
+                # Коммит объясняет себя исходом, а не текстом, поэтому свободного
+                # reason у него нет — ровно одно исключение — метка восстановления:
+                # она константа, её пишет только движок и по ней указание человека
+                # переживает закрытие узла за снятую инструментацию.
                 if (
                     cursor["state"] not in {"ready", "paused"}
-                    or event["reason"] is not None
+                    or event["reason"] not in (None, RECOVERY_COMMIT_REASON)
                 ):
                     fail()
                 identifier(event["outcome"])
@@ -1512,7 +1546,7 @@ attempt_stage_state_human_rewind_v2() {
   fi
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-human-rewind \
-      "$runtime_tmp" "$node" "$reset" "$reason" "$now" >"$event_tmp"
+      "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$reset" "$reason" "$now" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$runtime_tmp"
@@ -1633,7 +1667,7 @@ attempt_stage_state_pause_v2() {
 }
 
 attempt_stage_state_commit_v2() {
-  local task attempt node outcome rewind_limit verdict_b64 no_progress_limit
+  local task attempt node outcome rewind_limit verdict_b64 no_progress_limit recovery
   local failure_owner root lock_fd
   local runtime_tmp transition_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
@@ -1643,8 +1677,12 @@ attempt_stage_state_commit_v2() {
   rewind_limit=${5:-0}
   verdict_b64=${6:-}
   no_progress_limit=${7:-0}
+  # Восьмой аргумент — «узел закрыт восстановлением, а не заходом»: единственный
+  # коммит, который не снимает указание человека с узла.
+  recovery=${8:-0}
   [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
+  [[ "$recovery" == 0 || "$recovery" == 1 ]] || return 2
   run_state_verdict_validate "$outcome" "$verdict_b64" || return
   failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
   root=$(attempt_state_v2_task_root "$task") || return
@@ -1684,7 +1722,7 @@ attempt_stage_state_commit_v2() {
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-commit \
       "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" \
-      "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" >"$event_tmp"
+      "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" "$recovery" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$transition_tmp" "$runtime_tmp"

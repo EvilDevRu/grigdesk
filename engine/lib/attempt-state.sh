@@ -10,6 +10,7 @@
 #   attempt_state_finish_v2 TASK ATTEMPT_ID
 #   attempt_state_abandon_v2 TASK ATTEMPT_ID REASON
 #   attempt_state_recover_v2 TASK PREVIOUS_ATTEMPT_ID REASON
+#   attempt_state_contract_drift_v2 PINNED_TSV ACTUAL_TSV PINNED_JSON ACTUAL_JSON
 #
 # Коды ошибок: 2 — неверный аргумент/путь, 73 — уже существует/активно,
 # 75 — CAS-конфликт active pointer, 78 — повреждённое или несовместимое состояние.
@@ -1014,6 +1015,54 @@ attempt_state_quarantine_artifacts_v2() {
     printf '%s\n' "$base"
   done
   return 0
+}
+
+# Какие поля закреплённого контракта попытки разошлись с текущим профилем.
+#
+# Профиль — локальный код и правится между командами; resume обязан упереться в
+# расхождение, иначе активная попытка молча уедет в другой worktree или под другие
+# guardrails. Но голый код 75 — тупик: человек видит «нужен человек» и идёт читать
+# движок. Возвращаем ИМЕНА разошедшихся полей и только их: значения бывают
+# многострочными и длинными (guardrails), а для решения хватает адреса.
+#
+# Вывод — одна строка для журнала; сам по себе он ничего не решает и не является
+# основанием пропустить расхождение.
+attempt_state_contract_drift_v2() {
+  local pinned_manifest=${1:-} actual_manifest=${2:-} pinned_context=${3:-} actual_context=${4:-}
+  local manifest_fields context_fields parts=() joined
+  manifest_fields=$(awk -F'\t' '
+    FNR == NR { pinned[$1] = pinned[$1] $0 "\n"; next }
+    { actual[$1] = actual[$1] $0 "\n" }
+    END {
+      for (key in pinned) if (pinned[key] != actual[key]) print key
+      for (key in actual) if (!(key in pinned)) print key
+    }' "$pinned_manifest" "$actual_manifest" 2>/dev/null | sort -u | paste -sd, -)
+  context_fields=$(python3 - "$pinned_context" "$actual_context" <<'PY' 2>/dev/null
+import json
+import sys
+
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as source:
+            return json.load(source)
+    except (OSError, ValueError):
+        return None
+
+
+pinned, actual = load(sys.argv[1]), load(sys.argv[2])
+if not isinstance(pinned, dict) or not isinstance(actual, dict):
+    print("нечитаем" if pinned != actual else "")
+else:
+    keys = sorted(k for k in set(pinned) | set(actual) if pinned.get(k) != actual.get(k))
+    print(",".join(keys))
+PY
+  )
+  [[ -n "$manifest_fields" ]] && parts+=("profile-contract: $manifest_fields")
+  [[ -n "$context_fields" ]] && parts+=("project-context: $context_fields")
+  (( ${#parts[@]} )) || parts=("расхождение не локализовано")
+  printf -v joined '%s; ' "${parts[@]}"
+  printf '%s\n' "${joined%'; '}"
 }
 
 attempt_state_recover_v2() {

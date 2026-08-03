@@ -521,6 +521,17 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             "rejection": artifact("reject.md"),
             "ship": artifact("ship.md"),
             "lessons": f"{state_dir}/archive/t{task_id}.lessons-proposed.md",
+            # Консилиум (маршруты consilium-*): мнения/ранги членов и trusted сводка
+            # command-узла COUNCIL_AGG. Route-нейтрально: остальные маршруты ключи
+            # просто не используют.
+            "councilOpinionA": artifact("council.opinion-a.md"),
+            "councilOpinionB": artifact("council.opinion-b.md"),
+            "councilOpinionC": artifact("council.opinion-c.md"),
+            "councilRankA": artifact("council.rank-a.md"),
+            "councilRankB": artifact("council.rank-b.md"),
+            "councilRankC": artifact("council.rank-c.md"),
+            "councilAggregate": artifact("council.aggregate.json"),
+            "councilBrief": artifact("council.brief.md"),
         },
         "diagnosis": {
             "kind": args.diagnosis_kind,

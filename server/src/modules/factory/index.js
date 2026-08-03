@@ -23,6 +23,7 @@ import {
   normalizeFactoryLaunchInputs,
 } from '../../lib/factory-launch-contract.js';
 import {
+  confirmRouteResume, logLength, readLogSince,
   runRouteEngine, spawnRouteEngine, readLaunchLog, routeUnitActive,
   startRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
@@ -246,16 +247,47 @@ async function factoryModule(fastify, opts) {
    * Само решение (gate/goto) уже записано в журнал попытки, поэтому провал ЗАПУСКА
    * продолжения — не отказ операции, а состояние «записано, но не поехало»: его
    * возвращаем полем, чтобы человек нажал «Продолжить», а не гадал.
+   *
+   * Регистрации юнита мало: движок держит весь fail-closed преflight (pins, контракт
+   * профиля, тикет) в первых секундах и выходит кодом 75/78, а `systemd-run` к тому
+   * моменту давно вернул 0. Поэтому запуск ПОДТВЕРЖДАЕМ и причину берём из журнала
+   * этапов — только то, что дописано после нашего запуска, без чужих строк.
    */
   async function resumeRouteAttempt(id, { profile, attempt, why }) {
+    const stagesLog = path.join(config.stateDir, 'logs', `t${id}.stages.log`);
+    const from = await logLength(stagesLog);
     const launch = await spawnRouteEngine(config, {
       task: id,
       args: routeResumeArgs(config, { task: id, profile, attempt }),
     });
     if (!launch.ok) {
       fastify.log.warn({ task: id, err: launch.message }, `route resume ${why} не запустился — продолжить вручную`);
+      return launch;
     }
-    return launch;
+    const confirmed = await confirmRouteResume({
+      attempt,
+      identity: async () => {
+        try {
+          const { registry } = await factoryState.readRegistry(id);
+          return {
+            attempt: registry.ATTEMPT_ID || '',
+            alive: factoryState.isDaemonAlive(registry.ORCH_PID, id),
+          };
+        } catch { return null; }
+      },
+      // Без systemd быстрый выход уже поймал сам spawn (он ждёт код 3 секунды),
+      // поэтому здесь остаётся только финальная проверка identity.
+      unitAlive: launch.unit ? () => routeUnitActive(id) : async () => true,
+      reason: () => readLogSince(stagesLog, from),
+    });
+    if (!confirmed.ok) {
+      fastify.log.warn(
+        { task: id, outcome: confirmed.outcome, err: confirmed.message },
+        `route resume ${why} не поднялся — прогон стоит`,
+      );
+      return { ...launch, ok: false, message: confirmed.message };
+    }
+    return { ...launch, ok: true };
   }
 
   /**

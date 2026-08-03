@@ -492,10 +492,10 @@ _route_v2_mark_node_running() {
 # же immutable событие и безопасно повторит reset до запуска очередного узла.
 _route_v2_commit_and_project() {
   local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
-  local verdict_b64=${6:-} no_progress_limit=${7:-0} cursor rc
+  local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0} cursor rc
   cursor=$(attempt_stage_state_commit_v2 \
     "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
-    "$verdict_b64" "$no_progress_limit") || return
+    "$verdict_b64" "$no_progress_limit" "$recovery") || return
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
       rc=$?
@@ -1517,7 +1517,10 @@ route_v2_recover_instrumentation() {
         (( rc == 0 )) || return "$rc"
         [[ "$completed" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 78
       fi
-      _route_v2_commit_and_project "$task" "$attempt" "$node" failed >/dev/null ||
+      # Восьмым аргументом помечаем коммит как восстановительный: узел закрывается за
+      # снятую разметку, а не за свой заход, поэтому указание человека остаётся висеть
+      # на нём и доедет до настоящего исполнения после повторной инструментации.
+      _route_v2_commit_and_project "$task" "$attempt" "$node" failed 0 '' 0 1 >/dev/null ||
         return
       ;;
   esac

@@ -11,6 +11,7 @@ server/node_modules.cockpit-backup-*/
 .state/
 **/.state/
 __pycache__/
+BUGS.md
 
 # Local project profiles can contain machine-specific paths, credentials and runtimes.
 /profiles/

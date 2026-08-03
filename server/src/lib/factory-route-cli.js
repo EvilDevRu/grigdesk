@@ -222,6 +222,62 @@ export async function readLaunchLog(file, bytes = 2000) {
 }
 
 /**
+ * Длина журнала в СИМВОЛАХ на момент запуска — точка отсчёта для `readLogSince`.
+ *
+ * Не размер в байтах: журнал этапов пишется по-русски, и смешение единиц срезало бы
+ * причину отказа посередине символа.
+ */
+export async function logLength(file) {
+  try { return (await fs.readFile(file, 'utf8')).length; } catch { return 0; }
+}
+
+/** Что движок дописал в журнал ПОСЛЕ запуска: причина быстрого отказа без чужих строк. */
+export async function readLogSince(file, offset, { lines = 3, limit = 400 } = {}) {
+  try {
+    const text = await fs.readFile(file, 'utf8');
+    return text.slice(offset).trim().split('\n').filter(Boolean).slice(-lines)
+      .join('; ')
+      .slice(-limit);
+  } catch { return ''; }
+}
+
+/**
+ * Подтвердить, что resume действительно поднял оркестратор.
+ *
+ * `systemd-run` возвращает 0 сразу после регистрации юнита, поэтому мёртвый прогон
+ * выглядел запущенным: юнит умирал через пару секунд на fail-closed преflight
+ * (например, контракт профиля разошёлся с закреплённым — код 75), а кокпит отвечал
+ * «продолжено». Человек жал кнопку снова и снова видел успех — на t7802 так прошли
+ * четыре попытки подряд.
+ *
+ * Один живой ORCH_PID ничего не доказывает: движок пишет его ДО проверки контракта,
+ * поэтому «жив» держится ровно те две секунды, что и обречённый процесс. Ждём, пока
+ * окно быстрых отказов пройдёт целиком, и только потом считаем прогон поднятым;
+ * смерть юнита внутри окна — отказ с причиной из журнала этапов.
+ *
+ * @returns {Promise<{ ok: boolean, outcome: 'running'|'exited'|'unconfirmed', message?: string }>}
+ */
+export async function confirmRouteResume({
+  attempt, identity, unitAlive, reason,
+  settleMs = 6000, stepMs = 250,
+}) {
+  const deadline = Date.now() + settleMs;
+  while (Date.now() < deadline) {
+    await sleep(stepMs);
+    if (!(await unitAlive())) {
+      return { ok: false, outcome: 'exited', message: await reason() || 'прогон вышел сразу после запуска' };
+    }
+  }
+  const current = await identity();
+  if (current && current.alive && current.attempt === attempt) return { ok: true, outcome: 'running' };
+  return {
+    ok: false,
+    outcome: 'unconfirmed',
+    message: await reason() || 'оркестратор не подтвердил запуск попытки',
+  };
+}
+
+/**
  * Запустить route-движок в отвязанном юните.
  *
  * Юнит именно transient-**сервис**, а не scope: оркестратор живёт часами и обязан

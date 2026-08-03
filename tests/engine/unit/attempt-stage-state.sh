@@ -298,6 +298,30 @@ assert_eq "$note_text" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" i
 assert_eq "" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" check)" \
   "указание адресное — соседний узел его не получает"
 
+# Возврат на узел, где курсор УЖЕ стоит, — основной путь кокпита: человек жмёт
+# «перейти сюда» на текущем этапе именно затем, чтобы приложить к нему указание.
+# Раньше такой заход считался пустым (курсор двигать некуда), событие не ложилось, а
+# `factory goto` печатал «курсор возвращён» и отвечал успехом: указание пропадало
+# молча. На t7802 так потерялось решение владельца, и следующий заход диагностики
+# ушёл без него.
+note_same=$(event_count "$(attempt_state_v2_task_root 58)/attempts/$note_attempt")
+attempt_stage_state_human_rewind_v2 58 "$note_attempt" instrument \
+  instrument,check,gate_plan,retro "$note_text" >/dev/null
+assert_rc 0 "$?" "повтор возврата с тем же указанием принят"
+assert_eq "$note_same" \
+  "$(event_count "$(attempt_state_v2_task_root 58)/attempts/$note_attempt")" \
+  "дословный повтор указания не кладёт второго события"
+
+note_fresh='инвариант «одна живая группа» — закон, зелёный тест переписывается'
+attempt_stage_state_human_rewind_v2 58 "$note_attempt" instrument \
+  instrument,check,gate_plan,retro "$note_fresh" >/dev/null
+assert_rc 0 "$?" "новое указание на текущем узле принято"
+assert_eq "$note_fresh" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" instrument)" \
+  "последнее слово человека доезжает до узла, на котором курсор уже стоял"
+assert_eq $((note_same + 1)) \
+  "$(event_count "$(attempt_state_v2_task_root 58)/attempts/$note_attempt")" \
+  "новое указание ложится событием, а не теряется"
+
 # Тот же исход после возврата — законный результат, а не «повтор упавшего процесса».
 # Идемпотентность по (узел, исход) переживала возврат курсора, и переигранный узел с
 # прежним исходом не клал события: курсор не двигался, а диспетчер видел тот же узел
@@ -319,6 +343,33 @@ assert_eq "$note_after" "$note_again" "идемпотентный повтор �
 assert_eq "$note_events" \
   "$(event_count "$(attempt_state_v2_task_root 58)/attempts/$note_attempt")" \
   "идемпотентный повтор не кладёт второго события"
+
+# Коммит восстановления узел НЕ исполнял: подъём после обрыва снимает инструментацию,
+# на которой стоял диагностический узел, и закрывает его `failed`, чтобы маршрут
+# переразметил заново. Указание человека такой коммит снимать не имеет права — иначе
+# получается петля t7802: решение владельца приложено, «продолжить» закрывает узел за
+# отсутствующую разметку, и обратно узел входит уже без решения.
+note_recovery='смотри на обе ветки записи, не только на restore'
+attempt_stage_state_human_rewind_v2 58 "$note_attempt" instrument \
+  instrument,check,gate_plan,retro "$note_recovery" >/dev/null
+assert_rc 0 "$?" "указание к узлу перед восстановлением принято"
+note_recovered=$(attempt_stage_state_commit_v2 58 "$note_attempt" instrument done 0 '' 0 1)
+assert_rc 0 "$?" "коммит восстановления принят"
+assert_eq check "$(json_field "$note_recovered" currentNode)" \
+  "восстановление двигает курсор так же, как обычный коммит"
+assert_eq "$note_recovery" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" instrument)" \
+  "коммит восстановления не снимает указание: узел его не отрабатывал"
+# Маршрут после восстановления возвращает курсор на тот же узел (в debug — через
+# повторную инструментацию), и вот ЭТОТ заход указание уже отрабатывает.
+attempt_stage_state_human_rewind_v2 58 "$note_attempt" instrument \
+  instrument,check,gate_plan,retro "$note_recovery" >/dev/null
+assert_rc 0 "$?" "курсор вернулся на узел после восстановления"
+assert_eq "$note_recovery" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" instrument)" \
+  "указание дожило до настоящего захода"
+attempt_stage_state_commit_v2 58 "$note_attempt" instrument done >/dev/null
+assert_rc 0 "$?" "настоящий заход после восстановления закрывает узел"
+assert_eq "" "$(attempt_stage_state_human_note_v2 58 "$note_attempt" instrument)" \
+  "отработанное указание снимает именно исполнение узла"
 
 # Автономный rewind имеет движковый бюджет поверх immutable route: два одинаковых
 # возврата исполняются, третий атомарно останавливает попытку. Это не route-policy:

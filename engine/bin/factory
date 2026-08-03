@@ -1062,6 +1062,11 @@ v2_install_profile_contract() {
   }
   cmp -s -- "$manifest_tmp" "$manifest" &&
     cmp -s -- "$project_tmp" "$project_context" || {
+      # Расхождение называем полем: без адреса человек получает «нужен человек»
+      # на каждом resume и не знает, что именно уехало в профиле, — на t7802 это
+      # стоило четырёх немых попыток продолжить прогон.
+      v2_log "контракт попытки разошёлся с профилем — $(attempt_state_contract_drift_v2 \
+        "$manifest" "$manifest_tmp" "$project_context" "$project_tmp")"
       rm -f -- "$manifest_tmp" "$project_tmp"
       return 75
     }
