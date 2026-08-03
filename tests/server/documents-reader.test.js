@@ -119,3 +119,37 @@ test('DOC-05: providers подключаются независимо, конф�
     statusCode: 500,
   });
 });
+
+test('DOC-06: локальные растровые изображения доступны только внутри source', async (t) => {
+  const { root, outside, reader } = await fixture(t);
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
+  await fs.mkdir(path.join(root, 'assets'));
+  await fs.writeFile(path.join(root, 'assets', 'logo.png'), png);
+  await fs.writeFile(path.join(outside, 'secret.png'), png);
+  await fs.symlink(path.join(outside, 'secret.png'), path.join(root, 'assets', 'secret.png'));
+
+  const asset = await reader.readAsset({ source: 'test', path: 'assets/logo.png' });
+  assert.equal(asset.contentType, 'image/png');
+  assert.deepEqual(asset.content, png);
+  await assert.rejects(
+    () => reader.readAsset({ source: 'test', path: 'assets/secret.png' }),
+    { code: 'document_outside_roots', statusCode: 403 },
+  );
+  await assert.rejects(
+    () => reader.readAsset({ source: 'test', path: 'assets/logo.svg' }),
+    { code: 'document_asset_type_not_allowed', statusCode: 415 },
+  );
+
+  const app = Fastify({ logger: false });
+  await app.register(documentsModule, { reader });
+  t.after(() => app.close());
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/documents/asset?source=test&path=assets%2Flogo.png',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['content-type'], 'image/png');
+  assert.equal(response.headers['x-content-type-options'], 'nosniff');
+  assert.equal(response.headers['cache-control'], 'private, no-store');
+  assert.deepEqual(response.rawPayload, png);
+});

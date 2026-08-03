@@ -10,8 +10,16 @@ const ALLOWED_EXTENSIONS = new Map([
   ['.markdown', 'markdown'],
   ['.txt', 'text'],
 ]);
+const ALLOWED_ASSET_EXTENSIONS = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+]);
 
 const DEFAULT_MAX_BYTES = 1_500_000;
+const DEFAULT_MAX_ASSET_BYTES = 5_000_000;
 const READ_CHUNK_BYTES = 64 * 1024;
 
 export class DocumentReadError extends Error {
@@ -34,6 +42,10 @@ function isInside(root, target) {
 
 function formatOf(filePath) {
   return ALLOWED_EXTENSIONS.get(path.extname(filePath).toLowerCase()) || '';
+}
+
+function assetTypeOf(filePath) {
+  return ALLOWED_ASSET_EXTENSIONS.get(path.extname(filePath).toLowerCase()) || '';
 }
 
 async function canonicalDirectory(entry) {
@@ -86,9 +98,10 @@ function publicReadError(error) {
 }
 
 export class DocumentReader {
-  constructor({ rootProviders = [], maxBytes = DEFAULT_MAX_BYTES } = {}) {
+  constructor({ rootProviders = [], maxBytes = DEFAULT_MAX_BYTES, maxAssetBytes = DEFAULT_MAX_ASSET_BYTES } = {}) {
     this.rootProviders = [...rootProviders];
     this.maxBytes = Math.max(1, Number(maxBytes) || DEFAULT_MAX_BYTES);
+    this.maxAssetBytes = Math.max(1, Number(maxAssetBytes) || DEFAULT_MAX_ASSET_BYTES);
   }
 
   /** Зарегистрировать ещё один источник корней на этапе сборки приложения. */
@@ -225,6 +238,55 @@ export class DocumentReader {
         source: { id: source.id, label: source.label },
         content,
       };
+    } catch (error) {
+      throw publicReadError(error);
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+
+  /** Картинки Markdown читаются по тем же границам source/realpath, но как Buffer. */
+  async readAsset(documentRef) {
+    const sourceId = String(documentRef?.source || '');
+    const relativePath = String(documentRef?.path || '');
+    if (!sourceId || !relativePath || relativePath.includes('\0') || path.isAbsolute(relativePath)) {
+      fail('document_bad_ref', 'Некорректная ссылка на изображение', 400);
+    }
+    if (!assetTypeOf(relativePath)) {
+      fail('document_asset_type_not_allowed', 'Поддерживаются PNG, JPEG, GIF и WebP', 415);
+    }
+    const roots = await this.roots();
+    const source = roots.find((root) => root.id === sourceId);
+    if (!source) fail('document_unknown_source', 'Источник документов не найден', 404);
+    const candidate = path.resolve(source.path, relativePath);
+    if (!isInside(source.path, candidate)) {
+      fail('document_outside_roots', 'Изображение находится вне разрешённого корня', 403);
+    }
+    let canonical;
+    try { canonical = await fs.realpath(candidate); }
+    catch (error) { throw publicReadError(error); }
+    if (!isInside(source.path, canonical)) {
+      fail('document_outside_roots', 'Изображение находится вне разрешённого корня', 403);
+    }
+    const contentType = assetTypeOf(canonical);
+    if (!contentType) fail('document_asset_type_not_allowed', 'Целевой файл имеет неподдерживаемый тип', 415);
+
+    let handle;
+    try {
+      const flags = FS.O_RDONLY | (FS.O_NOFOLLOW || 0) | (FS.O_NONBLOCK || 0);
+      handle = await fs.open(canonical, flags);
+      const stat = await handle.stat();
+      if (!stat.isFile()) fail('document_not_file', 'Путь не является обычным файлом', 415);
+      if (stat.size > this.maxAssetBytes) {
+        fail('document_too_large', `Изображение больше ${this.maxAssetBytes} байт`, 413);
+      }
+      let openedPath = canonical;
+      try { openedPath = await fs.realpath(`/proc/self/fd/${handle.fd}`); } catch { /* см. read() */ }
+      if (!isInside(source.path, openedPath)) {
+        fail('document_unsafe_path', 'Путь изменился во время открытия', 403);
+      }
+      const content = await readLimited(handle, this.maxAssetBytes);
+      return { content, contentType, size: content.length, modifiedAt: stat.mtime.toISOString() };
     } catch (error) {
       throw publicReadError(error);
     } finally {

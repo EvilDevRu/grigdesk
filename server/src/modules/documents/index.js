@@ -49,6 +49,25 @@ async function documentsModule(fastify, opts) {
     }
     return answer(reply, request, () => reader.read({ source, path: filePath }));
   });
+
+  fastify.get('/api/documents/asset', async (request, reply) => {
+    const source = String(request.query?.source || '');
+    const filePath = String(request.query?.path || '');
+    if (!source || !filePath) {
+      reply.header('Cache-Control', 'private, no-store');
+      return reply.code(400).send({
+        error: 'document_ref_required',
+        message: 'Не указана ссылка на изображение',
+      });
+    }
+    return answer(reply, request, async () => {
+      const asset = await reader.readAsset({ source, path: filePath });
+      reply.type(asset.contentType);
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('Cross-Origin-Resource-Policy', 'same-origin');
+      return reply.send(asset.content);
+    });
+  });
 }
 
 export default fp(documentsModule, { name: 'module-documents' });

@@ -96,8 +96,12 @@ async function compileChatSession() {
       'const mdToHtml = (text) => text;',
     )
     .replace(
-      "import { documentRouteHref } from '../../features/documents/links.js';",
-      'const documentRouteHref = () => "";',
+      "import { documentLinkFromClick, documentRouteHref } from '../../features/documents/links.js';",
+      'const documentLinkFromClick = () => ""; const documentRouteHref = () => "";',
+    )
+    .replace(
+      "import { useDocumentPreviewStore } from '../../stores/document-preview.js';",
+      'const useDocumentPreviewStore = () => globalThis.__chatTaskTooltipDocumentPreview || ({ show() {}, showImage() {} });',
     )
     .replace(
       "import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';",
@@ -184,6 +188,7 @@ test('ChatSession передаёт в тултип полное загружен
   const debugCalls = [];
   const routes = [];
   const openedTasks = [];
+  const previewedImages = [];
   const session = {
     id: 'chat-42',
     taskId: '42',
@@ -192,7 +197,11 @@ test('ChatSession передаёт в тултип полное загружен
     effort: '',
     mode: '',
     messages: [
-      { role: 'user', text: 'Ошибка в форме' },
+      {
+        role: 'user',
+        text: 'Ошибка в форме',
+        attachments: [{ file: 'shot.png', name: 'Скриншот.png', url: '/api/chat/files/shot.png', mime: 'image/png' }],
+      },
       { role: 'assistant', text: 'Воспроизвел проблему' },
     ],
     steps: [],
@@ -206,10 +215,15 @@ test('ChatSession передаёт в тултип полное загружен
     sending: false,
   };
   globalThis.__chatTaskTooltipApi = {
+    url(path) { return path; },
     async get(path) {
       assert.equal(path, '/api/tasks');
       return { tasks: [{ task: '42', route: 'demo-profile' }] };
     },
+  };
+  globalThis.__chatTaskTooltipDocumentPreview = {
+    show() {},
+    showImage(image) { previewedImages.push(image); },
   };
   globalThis.__chatTaskTooltipChatStore = () => ({
     sessions: [session],
@@ -252,6 +266,7 @@ test('ChatSession передаёт в тултип полное загружен
     delete globalThis.__chatTaskTooltipUiStore;
     delete globalThis.__chatTaskTooltipProvidersStore;
     delete globalThis.__chatTaskTooltipRouter;
+    delete globalThis.__chatTaskTooltipDocumentPreview;
   });
 
   const [{ mount, flushPromises }, ChatSession] = await Promise.all([
@@ -274,6 +289,13 @@ test('ChatSession передаёт в тултип полное загружен
   assert.match(ringTitle, /Контекст: 83[\s\u00a0]286 из 258[\s\u00a0]400 токенов \(32%\)/);
   assert.match(ringTitle, /за сессию обработано 25[\s\u00a0]626[\s\u00a0]388 входных токенов/);
   assert.match(ringTitle, /25[\s\u00a0]025[\s\u00a0]792 из кэша/);
+
+  await wrapper.find('.m-atts a').trigger('click');
+  assert.deepEqual(previewedImages, [{
+    src: '/api/chat/files/shot.png',
+    name: 'Скриншот.png',
+    mime: 'image/png',
+  }]);
 
   const debugTip = wrapper.find('.debug-tip');
   assert.match(debugTip.attributes('data-text'), /отдельный Debug-чат в той же песочнице/);

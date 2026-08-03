@@ -42,6 +42,25 @@ test('обычная внешняя ссылка защищена от дост�
   assert.match(html, /rel="noopener noreferrer"/);
 });
 
+test('viewer документов показывает разрешённый HTML и удаляет исполняемые атрибуты', async () => {
+  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
+  const browser = new Window({ url: 'http://cockpit.test/' });
+  const html = mdToHtml([
+    '<p align="center"><strong>Заголовок</strong><br><script>alert(1)</script></p>',
+    '<img src="assets/logo.png" width="88" onerror="alert(2)">',
+  ].join('\n'), {
+    allowHtml: true,
+    sanitizerDocument: browser.document,
+    resolveImageHref: (href) => `/api/documents/asset?path=${encodeURIComponent(href)}`,
+  });
+
+  assert.match(html, /<p align="center"><strong>Заголовок<\/strong><br>/);
+  assert.match(html, /src="\/api\/documents\/asset\?path=assets%2Flogo\.png"/);
+  assert.match(html, /width="88"/);
+  assert.doesNotMatch(html, /<script\b|onerror=/i);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
 test('превью превращает Markdown в чистый однострочный текст', () => {
   const text = mdToText([
     '**Технический план**: [`ChatSession.vue`](/home/user/ChatSession.vue:60)',
