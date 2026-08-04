@@ -139,7 +139,13 @@ async function systemModule(fastify, opts) {
   }
 
   async function rebuildWebBundle() {
-    const install = await runNpm(['install', '--no-audit', '--no-fund']);
+    // `--include=dev` обязателен. Юнит кокпита ставит NODE_ENV=production, а `npm
+    // install` наследует его от сервера и по этому признаку не просто пропускает
+    // devDependencies, а ВЫЧИЩАЕТ уже стоящие. Весь инструмент сборки (vite,
+    // @vitejs/plugin-vue, vite-plugin-pwa) лежит именно там — кнопка сносила то,
+    // чем через строчку собирается бандл, и валилась на «vite: not found», оставив
+    // web/node_modules без dev-зависимостей до ручного `npm install`.
+    const install = await runNpm(['install', '--include=dev', '--no-audit', '--no-fund']);
     if (install.code !== 0) {
       return { code: 'web_dependencies_failed', message: `npm install завершился ошибкой${install.timedOut ? ' (таймаут)' : ''}.\n${outputTail(install.output)}` };
     }

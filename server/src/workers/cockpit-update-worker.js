@@ -262,7 +262,11 @@ async function main() {
     // npm может не создать node_modules у пакета без зависимостей; публикация каталога
     // при этом всё равно должна быть детерминированной.
     await mkdir(path.join(source, 'server', 'node_modules'), { recursive: true });
-    await command('npm', ['ci', '--no-audit', '--no-fund'], { cwd: path.join(source, 'web') },
+    // `--include=dev` по той же причине, что и в кнопке пересборки: инструмент сборки
+    // web живёт в devDependencies. Через systemd-run worker стартует с чистым env и
+    // NODE_ENV не наследует, но fallback-ветка запускает его обычным spawn от сервера —
+    // там production передаётся, dev-зависимости не ставятся и сборка падает.
+    await command('npm', ['ci', '--include=dev', '--no-audit', '--no-fund'], { cwd: path.join(source, 'web') },
       'web_dependencies_failed', 'Не удалось установить зависимости web.');
 
     await stage(statePath, jobId, 'building');

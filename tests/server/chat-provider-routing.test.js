@@ -30,6 +30,7 @@ async function apiFixture(t, { executor = null } = {}) {
     chatsDir: path.join(root, 'chats'),
     chatStoreLegacyPath: path.join(root, 'legacy.json'),
     chatBindingsDir: path.join(root, 'bindings'),
+    rootDir: root,
     factoryHome: root,
     agentsDir: path.join(root, 'agents'),
     port: 18140,

@@ -366,7 +366,12 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
     project = project_context(args.project_context_json)
     findings = findings_ledger(args.findings_ledger_json)
 
-    # Репозитории профиля: произвольный список `--repo имя:worktree:source`.
+    # Репозитории профиля: произвольный список `--repo имя:worktree:source:branch`.
+    # Ветка своя у каждого репозитория — у проекта из нескольких репозиториев
+    # каноничные ветки могут не совпадать, и агент должен видеть именно свою.
+    # Трёхпольную форму принимаем только как rolling-upgrade совместимость: уже
+    # запущенный shell старого launcher-а переживает замену этого отдельного
+    # executable и передаёт прежний --repo до конца своего текущего узла.
     # Двухрепозиторные флаги остаются как совместимый сахар для профилей вида
     # backend+frontend; однорепозиторному профилю достаточно одного --repo.
     repos: dict[str, dict[str, str]] = {}
@@ -374,8 +379,11 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
     for index, item in enumerate(args.repo):
         label = f"repo[{index}]"
         parts = string(item, label, maximum=8_192).split(":")
-        if len(parts) != 3:
-            fail(f"{label}: ожидался формат имя:worktree:source")
+        if len(parts) not in {3, 4}:
+            fail(
+                f"{label}: ожидался формат имя:worktree:source:branch "
+                "(или legacy имя:worktree:source)"
+            )
         name = identifier(parts[0], ID_RE, f"{label}.name")
         if name in WORKSPACE_RESERVED_KEYS:
             fail(f"{label}.name: имя {name} зарезервировано typed context")
@@ -384,6 +392,10 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
         repos[name] = {
             "path": absolute_directory(parts[1], f"{label}.worktree"),
             "sourcePath": absolute_directory(parts[2], f"{label}.source"),
+            "branch": branch_name(
+                parts[3] if len(parts) == 4 else args.source_branch,
+                f"{label}.branch",
+            ),
         }
         repo_order.append(name)
     for name, worktree, source in (
@@ -399,10 +411,12 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
         repos[name] = {
             "path": absolute_directory(worktree, f"{name}-worktree"),
             "sourcePath": absolute_directory(source, f"{name}-source"),
+            # У сахара своего поля ветки нет: он описывает профиль с одной общей веткой.
+            "branch": branch_name(args.source_branch, "source-branch"),
         }
         repo_order.append(name)
     if not repos:
-        fail("нужен хотя бы один репозиторий: --repo имя:worktree:source")
+        fail("нужен хотя бы один репозиторий: --repo имя:worktree:source:branch")
     worktrees = [repos[name]["path"] for name in repo_order]
     if len(set(worktrees)) != len(worktrees):
         fail("repo: worktree повторяется у разных репозиториев")
@@ -519,6 +533,10 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             "testsDigest": artifact("tests.sha256"),
             "report": artifact("report.md"),
             "rejection": artifact("reject.md"),
+            # Контракт приёмки, выписанный REVIEW при первом отказе: полный список
+            # условий, который BUILD закрывает целиком, а REVIEW проверяет на повторных
+            # заходах, вместо поиска очередного одиночного примера нарушения.
+            "reviewContract": artifact("review-contract.md"),
             "ship": artifact("ship.md"),
             "lessons": f"{state_dir}/archive/t{task_id}.lessons-proposed.md",
             # Консилиум (маршруты consilium-*): мнения/ранги членов и trusted сводка

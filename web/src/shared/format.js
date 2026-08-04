@@ -19,6 +19,24 @@ export function secToHMS(s) {
 }
 
 /**
+ * Чистое время работы узлов конвейера.
+ *
+ * workSec уже содержит все завершённые проходы и петли текущей попытки. Если сейчас
+ * исполняется рабочий узел, сервер добавляет runningSinceMs — дотикиваем только этот
+ * незавершённый интервал. Ожидание ворот лежит отдельно и сюда не входит.
+ */
+export function pipelineWorkSec(timing, nowMs) {
+  const stored = Number(timing?.workSec);
+  if (!Number.isFinite(stored) || stored < 0) return null;
+  const sinceMs = Number(timing?.runningSinceMs);
+  const now = Number(nowMs);
+  const live = Number.isFinite(sinceMs) && sinceMs > 0 && Number.isFinite(now)
+    ? Math.max(0, Math.floor((now - sinceMs) / 1000))
+    : 0;
+  return Math.floor(stored) + live;
+}
+
+/**
  * Живое время таймера задачи, в секундах.
  *
  * B24 в getTodayData отдаёт `timer_elapsed = 0` даже у идущего таймера (проверено:

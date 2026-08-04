@@ -15,8 +15,8 @@ import {
   TICKET_LIMITS, TicketError, buildTicket, serializeTicket, validateTicket, writeTicketFile,
 } from '../../server/src/lib/factory-ticket.js';
 import {
-  routeAbandonArgs, routeCheckArgs, routeGateArgs, routeGotoArgs, routeResumeArgs, routeStartArgs,
-  routeMessage, startRegistryIdentity,
+  parseRouteWorkTime, routeAbandonArgs, routeCheckArgs, routeGateArgs, routeGotoArgs,
+  routeMessage, routeResumeArgs, routeStartArgs, routeWorkTimeArgs, startRegistryIdentity,
 } from '../../server/src/lib/factory-route-cli.js';
 
 const CONFIG = {
@@ -128,11 +128,26 @@ test('ARGS-01: каталоги задаются явными аргумента
     () => routeGotoArgs(CONFIG, {
       task: '8200', profile: 'demo', attempt: 'a_1', node: 'build', reason: 'назад',
     }),
+    () => routeWorkTimeArgs(CONFIG, { task: '8200', profile: 'demo', attempt: 'a_1' }),
   ]) {
     const built = build();
     assert.ok(built.includes('--state-dir') && !built.includes('--legacy-state-dir')
       && built.includes('--control-dir') && built.includes('--routes-dir'), built.join(' '));
   }
+});
+
+test('ARGS-01c: work-time разбирается только как безопасные целые счётчики', () => {
+  assert.deepEqual(parseRouteWorkTime([
+    'work_time_s=14157',
+    'gate_wait_s=232',
+    'last_event_at=1785748665',
+  ].join('\n')), {
+    workSec: 14157,
+    gateWaitSec: 232,
+    lastEventSec: 1785748665,
+  });
+  assert.equal(parseRouteWorkTime('work_time_s=не число'), null);
+  assert.equal(parseRouteWorkTime('gate_wait_s=1'), null);
 });
 
 test('ARGS-01b: UI launch передаёт immutable debug и delivery inputs явными аргументами', () => {

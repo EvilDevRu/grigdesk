@@ -118,7 +118,7 @@ async function factoryModule(fastify, opts) {
       repos: managed.trusted.repositories.map((repo) => ({
         name: repo.name,
         path: repo.workspace,
-        branch: managed.trusted.sourceBranch,
+        branch: repo.branch,
       })),
     };
     return { ...managed, env, sandbox };

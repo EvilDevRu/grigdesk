@@ -18,6 +18,7 @@ import { CredsStore } from './lib/b24/creds-store.js';
 import { ClaudeAuthStore } from './lib/claude-auth-store.js';
 import { PrefsStore } from './lib/prefs-store.js';
 import { FactoryDebugSettings } from './lib/factory-debug.js';
+import { readRouteWorkTime } from './lib/factory-route-cli.js';
 import { TaskFavoritesStore } from './lib/task-favorites-store.js';
 import { TaskFavoritesService } from './lib/task-favorites-service.js';
 
@@ -105,6 +106,7 @@ async function build() {
     routesDir: config.routesDir,
     profilesDir: config.profilesDir,
     controlDir: config.factoryControlDir,
+    workTimeReader: (identity) => readRouteWorkTime(config, identity),
   });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });

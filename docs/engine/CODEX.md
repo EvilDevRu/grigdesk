@@ -7,7 +7,8 @@
   engine/server/CLI используют единый `FACTORY_PROFILES_DIR`, плоской legacy-раскладки больше нет;
 - полный offline suite запускается без Cockpit и без model call;
 - live state мигрирован с backup в `~/.factory/state/migrations/`;
-- metadata-only host preflight прошёл для `arsenkin`, `cockpit` и `rdesigner`;
+- metadata-only host preflight проверен на локальных профилях с разными runner chain и
+  workspace mode;
 - текущая поставка проверяется без перезапуска Cockpit и без вызова реальных моделей;
 - Cockpit API и UI поднимают canonical runner chain, task/stage override, model family,
   actual provider/model, причину failover и историю attempt; активный run можно безопасно
@@ -31,10 +32,10 @@
 
 ## Зачем это нужно
 
-Проекты выбирают исполнителя независимо:
+Проекты выбирают исполнителя независимо. Например:
 
-- `arsenkin` может идти Claude → Codex;
-- `rdesigner` может идти Codex → Claude;
+- один локальный профиль может идти Claude → Codex;
+- другой локальный профиль может идти Codex → Claude;
 - отдельный этап или задача может принудительно выбрать другую цепочку;
 - исчерпание лимита или временная недоступность primary не должны останавливать конвейер,
   если следующий исполнитель совместим и готов;
@@ -64,22 +65,22 @@ task-stage → task → profile-stage → profile-project
 
 ```bash
 # Постоянная политика проекта
-engine/bin/factory profile arsenkin runner set claude --failover codex
-engine/bin/factory profile rdesigner runner set codex --failover claude
+engine/bin/factory profile <PROFILE_A> runner set claude --failover codex
+engine/bin/factory profile <PROFILE_B> runner set codex --failover claude
 
 # Политика отдельного этапа
-engine/bin/factory profile arsenkin runner set REVIEW codex --failover claude
+engine/bin/factory profile <PROFILE> runner set REVIEW codex --failover claude
 
 # Временная политика задачи
-engine/bin/factory 7379 runner set codex --failover claude
-engine/bin/factory 7379 runner set REVIEW claude --failover codex
+engine/bin/factory <TASK> runner set codex --failover claude
+engine/bin/factory <TASK> runner set REVIEW claude --failover codex
 
 # Переключить только активный run
-engine/bin/factory 7379 runner switch codex
+engine/bin/factory <TASK> runner switch codex
 
 # Посмотреть разрешённую цепочку
-engine/bin/factory profile arsenkin runner show
-engine/bin/factory 7379 runner show
+engine/bin/factory profile <PROFILE> runner show
+engine/bin/factory <TASK> runner show
 ```
 
 ## Интерфейс Cockpit
@@ -169,11 +170,11 @@ Codex:  sol / terra
 Пример:
 
 ```bash
-engine/bin/factory profile arsenkin model set DEFAULT claude \
+engine/bin/factory profile <PROFILE> model set DEFAULT claude \
   family=opus version=latest effort=max
-engine/bin/factory profile arsenkin model set DEFAULT codex \
+engine/bin/factory profile <PROFILE> model set DEFAULT codex \
   family=sol version=latest effort=xhigh
-engine/bin/factory profile arsenkin model set LINT claude \
+engine/bin/factory profile <PROFILE> model set LINT claude \
   family=haiku version=latest effort=medium
 ```
 
@@ -326,9 +327,9 @@ task → profile → global → off
 
 ```bash
 engine/bin/factory settings debug set decisions
-engine/bin/factory profile arsenkin debug set verbose --for 2h
-engine/bin/factory 7379 debug set verbose --for 30m
-engine/bin/factory 7379 debug clear
+engine/bin/factory profile <PROFILE> debug set verbose --for 2h
+engine/bin/factory <TASK> debug set verbose --for 30m
+engine/bin/factory <TASK> debug clear
 ```
 
 Task debug имеет TTL по умолчанию. Логи типизированы и не содержат prompt, credentials,

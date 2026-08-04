@@ -191,7 +191,7 @@ single=(
   --run-key BROWSER
   --ticket-json "$ticket"
   --project-context-json '{"stack":["Python 3.11","Three.js"],"guardrails":["Одна GPU; рендеры только последовательно."]}'
-  --repo "rdesigner:$single_worktree:$single_source"
+  --repo "rdesigner:$single_worktree:$single_source:factory/t42"
   --state-dir "$state"
   --workspace-mode shared
   --container-name rdesigner-t42
@@ -220,15 +220,38 @@ done
 assert_rc 78 "$?" "project context rejects unknown fields"
 
 "$tool" "${single[@]}" \
-  --repo "rdesigner:$single_worktree:$single_source" >/dev/null 2>&1
+  --repo "rdesigner:$single_worktree:$single_source:factory/t42" >/dev/null 2>&1
 assert_rc 78 "$?" "single repository context rejects a duplicate repo"
 
 reserved=("${single[@]}")
 for index in "${!reserved[@]}"; do
-  [[ "${reserved[$index]}" == "rdesigner:$single_worktree:$single_source" ]] &&
-    reserved[$index]="generation:$single_worktree:$single_source"
+  [[ "${reserved[$index]}" == "rdesigner:$single_worktree:$single_source:factory/t42" ]] &&
+    reserved[$index]="generation:$single_worktree:$single_source:factory/t42"
 done
 "$tool" "${reserved[@]}" >/dev/null 2>&1
 assert_rc 78 "$?" "repository name cannot overwrite typed workspace metadata"
+
+# Ветка своя у каждого репозитория: агент обязан видеть ветку СВОЕГО checkout, иначе
+# в проекте из нескольких репозиториев с разными канонами он читает чужую.
+assert_eq 'factory/t42' "$(jq -r '.workspace.rdesigner.branch' <<<"$single_output")" \
+  "repository carries its own pinned branch"
+
+short_repo=("${single[@]}")
+for index in "${!short_repo[@]}"; do
+  [[ "${short_repo[$index]}" == "rdesigner:$single_worktree:$single_source:factory/t42" ]] &&
+    short_repo[$index]="rdesigner:$single_worktree:$single_source"
+done
+short_output=$("$tool" "${short_repo[@]}")
+assert_rc 0 "$?" "legacy launcher repo survives a rolling context-builder update"
+assert_eq 'factory/t42' "$(jq -r '.workspace.rdesigner.branch' <<<"$short_output")" \
+  "legacy repo inherits the explicitly pinned common source branch"
+
+bad_branch=("${single[@]}")
+for index in "${!bad_branch[@]}"; do
+  [[ "${bad_branch[$index]}" == "rdesigner:$single_worktree:$single_source:factory/t42" ]] &&
+    bad_branch[$index]="rdesigner:$single_worktree:$single_source:../evil"
+done
+"$tool" "${bad_branch[@]}" >/dev/null 2>&1
+assert_rc 78 "$?" "repository branch name is validated like any other branch"
 
 finish_tests

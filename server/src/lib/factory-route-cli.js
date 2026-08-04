@@ -94,6 +94,12 @@ export function routeAbandonArgs(config, { task, profile, attempt, reason }) {
     '--reason', reason, ...routePathArgs(config)];
 }
 
+/** Read-only сводка чистого времени из проверенного журнала попытки. */
+export function routeWorkTimeArgs(config, { task, profile, attempt }) {
+  return [String(task), 'work-time', '--profile', profile, '--attempt', attempt,
+    ...routePathArgs(config)];
+}
+
 /**
  * Identity of a fully pinned fresh start as projected by the route engine.
  *
@@ -152,6 +158,31 @@ export function runRouteEngine(config, args, { timeout = 30000 } = {}) {
       });
     });
   });
+}
+
+export function parseRouteWorkTime(output) {
+  const fields = {};
+  for (const line of String(output || '').trim().split('\n')) {
+    const match = /^(work_time_s|gate_wait_s|last_event_at)=([0-9]+)$/.exec(line.trim());
+    if (match) fields[match[1]] = Number(match[2]);
+  }
+  if (!Number.isSafeInteger(fields.work_time_s)) return null;
+  if (!Number.isSafeInteger(fields.gate_wait_s)) fields.gate_wait_s = 0;
+  if (!Number.isSafeInteger(fields.last_event_at)) fields.last_event_at = 0;
+  return {
+    workSec: fields.work_time_s,
+    gateWaitSec: fields.gate_wait_s,
+    lastEventSec: fields.last_event_at,
+  };
+}
+
+/**
+ * Старые активные попытки могли появиться до реестровой проекции WORK_TIME_S.
+ * Движок проверяет их hash-chain и возвращает ту же сводку без изменения попытки.
+ */
+export async function readRouteWorkTime(config, identity) {
+  const result = await runRouteEngine(config, routeWorkTimeArgs(config, identity), { timeout: 10000 });
+  return result.ok ? parseRouteWorkTime(result.stdout) : null;
 }
 
 /** Отказ движка — человеку: его собственный текст плюс расшифровка кода. */

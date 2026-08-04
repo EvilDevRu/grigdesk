@@ -44,6 +44,9 @@ usage() {
   factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT
                    [те же общие пути]
 
+  factory TASK work-time --attempt a_<32hex>
+                   [те же общие пути]
+
 --profile обязателен: движок не знает ни одного проекта. Профиль обязан заявить
 capability "route-v2" в graph.json и реализовать route-хуки контракта
 (см. PROFILE-CONTRACT). ROUTE — имя маршрута из current-каталога профиля.
@@ -83,6 +86,11 @@ Goto — человеческий возврат курсора на ПРОЙД�
 кнопки «перейти сюда»): пройденные узлы сбрасываются, в журнал ложится событие
 kind=human-rewind с причиной. Вперёд по маршруту прыгать нельзя: исход узла
 получается только его исполнением. После goto продолжай обычным resume.
+
+Work-time — read-only сводка учтённого времени попытки: work_time_s (работа
+узлов без ворот), gate_wait_s (ожидание решений на воротах) и last_event_at
+(эпоха последнего события журнала). Журнал sealed (попытка терминальна) —
+читается последняя проекция из реестра.
 
 --reason у abandon, recover и goto — ОДНА строка 1..500 символов без переводов
 строки: причина идёт в доверенный журнал и в промпт следующего агента. Разбор
@@ -274,7 +282,7 @@ fi
 
 while (( $# > 0 )); do
   case "$1" in
-    check|start|resume|gate|abandon|recover|goto)
+    check|start|resume|gate|abandon|recover|goto|work-time)
       [[ -z "$MODE" ]] || die "режим указан повторно"
       MODE=$1
       shift
@@ -398,8 +406,8 @@ done
 
 [[ "$MODE" == check || "$MODE" == start || "$MODE" == resume ||
    "$MODE" == gate || "$MODE" == abandon || "$MODE" == recover ||
-   "$MODE" == goto ]] ||
-  die "укажи check, start, resume, gate, abandon, recover или goto"
+   "$MODE" == goto || "$MODE" == work-time ]] ||
+  die "укажи check, start, resume, gate, abandon, recover, goto или work-time"
 # Task-level override исполнителя рождается только вместе с новой попыткой;
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
@@ -569,6 +577,25 @@ if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   _attempt_state_reason "$REASON" || exit $?
 fi
 
+# Read-only сводка учтённого времени: журнал попытки и pinned describe-route,
+# без песочницы и runner-контрактов. Sealed-попытку журнал не отдаёт (75) —
+# тогда читаем последнюю проекцию из реестра.
+if [[ "$MODE" == work-time ]]; then
+  wt_work="" wt_gate="" wt_since=""
+  wt_summary=$(route_v2_work_time "$TASK" "$EXPECTED_ATTEMPT") &&
+    IFS=$'\t' read -r wt_work wt_gate wt_since <<<"$wt_summary"
+  if [[ ! "$wt_work" =~ ^[0-9]+$ ]]; then
+    wt_work=$(get "$TASK" WORK_TIME_S)
+    wt_gate=$(get "$TASK" GATE_WAIT_S)
+    wt_since=$(get "$TASK" WORK_TIMER_SINCE)
+  fi
+  [[ "$wt_work" =~ ^[0-9]+$ ]] ||
+    die "нет данных о времени: журнал попытки sealed и проекция в реестре не построена"
+  printf 'work_time_s=%s\ngate_wait_s=%s\nlast_event_at=%s\n' \
+    "$wt_work" "${wt_gate:-0}" "${wt_since:-0}"
+  exit 0
+fi
+
 # Все проектные величины приходят из route-хуков профиля (PROFILE-CONTRACT);
 # движок только fail-closed валидирует форму. В isolated пути workspace могут ещё
 # не существовать (их создаст up.sh); в shared они обязаны быть основным checkout.
@@ -585,6 +612,7 @@ v2_hook_path_shape() {
 declare -a V2_REPO_NAMES=()
 declare -a V2_REPO_SOURCES=()
 declare -a V2_REPO_WORKTREES=()
+declare -a V2_REPO_BRANCHES=()
 
 declare -F profile_workspace_mode >/dev/null ||
   die "профиль $PROFILE не реализует profile_workspace_mode"
@@ -678,10 +706,28 @@ unset v2_index v2_source_index
 V2_PRIMARY_WORKTREE=${V2_REPO_WORKTREES[0]}
 printf -v V2_AGENT_DIRS '%s ' "${V2_REPO_WORKTREES[@]}"
 V2_AGENT_DIRS=${V2_AGENT_DIRS% }
-V2_SOURCE_BRANCH=$(profile_source_branch "$TASK") || die "profile_source_branch отказал"
-[[ "$V2_SOURCE_BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$ &&
-   "$V2_SOURCE_BRANCH" != *..* ]] ||
-  die "source-branch: недопустимое имя ветки"
+# Ветка закрепляется НА РЕПОЗИТОРИЙ, а не на профиль: у проекта из нескольких
+# репозиториев каноничные ветки могут не совпадать (parser стоит на main, ag — на
+# master). Профиль, который игнорирует второй аргумент, отдаёт одно значение на всех
+# и продолжает работать как раньше.
+for v2_index in "${!V2_REPO_NAMES[@]}"; do
+  v2_branch=$(profile_source_branch "$TASK" "${V2_REPO_NAMES[$v2_index]}") ||
+    die "profile_source_branch отказал на репозитории ${V2_REPO_NAMES[$v2_index]}"
+  [[ "$v2_branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$ && "$v2_branch" != *..* ]] ||
+    die "source-branch: недопустимое имя ветки у репозитория ${V2_REPO_NAMES[$v2_index]}"
+  V2_REPO_BRANCHES+=("$v2_branch")
+done
+# В isolated это имя ВНОВЬ СОЗДАВАЕМОЙ ветки задачи (route-task-<TASK>) — одной на всю
+# попытку: разные значения разъехались бы с worktree и доставкой. Расхождение осмысленно
+# только в shared, где ветка описывает уже существующий checkout человека.
+if [[ "$V2_WORKSPACE_MODE" != shared ]]; then
+  for v2_branch in "${V2_REPO_BRANCHES[@]}"; do
+    [[ "$v2_branch" == "${V2_REPO_BRANCHES[0]}" ]] ||
+      die "isolated-профиль обязан закрепить одну ветку на все репозитории"
+  done
+fi
+V2_SOURCE_BRANCH=${V2_REPO_BRANCHES[0]}
+unset v2_index v2_branch
 V2_CONTAINER=$(profile_container "$TASK") || die "profile_container отказал"
 [[ "$V2_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$ ]] ||
   die "container: недопустимое имя"
@@ -745,7 +791,8 @@ if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
        "$v2_resource" != *$'\n'* && "$v2_resource" != *$'\t'* ]] ||
       die "profile_exclusive_resources: недопустимый ресурс"
   done
-  for v2_worktree in "${V2_REPO_WORKTREES[@]}"; do
+  for v2_index in "${!V2_REPO_WORKTREES[@]}"; do
+    v2_worktree=${V2_REPO_WORKTREES[$v2_index]}
     printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | grep -Fxq "workspace:$v2_worktree" ||
       die "shared-профиль обязан арендовать workspace:$v2_worktree"
     v2_git_dir=$(git -C "$v2_worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
@@ -756,12 +803,13 @@ if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     v2_common_dir=$(realpath -e -- "$v2_common_dir") || exit 78
     [[ "$v2_git_dir" == "$v2_common_dir" ]] ||
       die "shared workspace обязан быть основным checkout, а не linked worktree"
-    [[ "$(git -C "$v2_worktree" symbolic-ref --quiet --short HEAD 2>/dev/null)" == "$V2_SOURCE_BRANCH" ]] ||
-      die "shared checkout находится не на закреплённой ветке $V2_SOURCE_BRANCH"
+    v2_head=$(git -C "$v2_worktree" symbolic-ref --quiet --short HEAD 2>/dev/null)
+    [[ "$v2_head" == "${V2_REPO_BRANCHES[$v2_index]}" ]] ||
+      die "shared checkout ${V2_REPO_NAMES[$v2_index]} стоит на ветке ${v2_head:-(detached HEAD)}, а закреплена ${V2_REPO_BRANCHES[$v2_index]}"
   done
   printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | grep -Fxq "stand:$V2_CONTAINER" ||
     die "shared-профиль обязан арендовать stand:$V2_CONTAINER"
-  unset v2_ports v2_resources v2_resource v2_worktree v2_git_dir v2_common_dir
+  unset v2_ports v2_resources v2_resource v2_index v2_worktree v2_head v2_git_dir v2_common_dir
 else
   V2_FE_PORT=""
   V2_API_PORT=""
@@ -1004,8 +1052,25 @@ v2_attempt_artifacts() {
 # Repo/project-часть профиля закрепляется рядом с route pins. Профиль остаётся
 # локальным кодом и может быть отредактирован между командами, но resume не имеет
 # права молча перенести активную попытку в другой worktree или подменить guardrails.
+v2_profile_contract_repo_format() {
+  local manifest=$1
+  awk -F '\t' '
+    $1 == "repo" {
+      count++
+      if (NF == 4) legacy++
+      else if (NF == 5) current++
+      else invalid = 1
+    }
+    END {
+      if (count == 0 || invalid || (legacy && current)) exit 78
+      print legacy ? "legacy" : "current"
+    }
+  ' "$manifest"
+}
+
 v2_materialize_profile_contract() {
-  local manifest=$1 project_context=$2 index resource
+  local manifest=$1 project_context=$2 repo_format=${3:-current} index resource
+  [[ "$repo_format" == current || "$repo_format" == legacy ]] || return 78
   {
     printf 'schema\t1\n'
     printf 'repos-mode\tgeneric\n'
@@ -1021,10 +1086,18 @@ v2_materialize_profile_contract() {
       done
     fi
     for index in "${!V2_REPO_NAMES[@]}"; do
-      printf 'repo\t%s\t%s\t%s\n' \
-        "${V2_REPO_NAMES[$index]}" \
-        "${V2_REPO_SOURCES[$index]}" \
-        "${V2_REPO_WORKTREES[$index]}"
+      if [[ "$repo_format" == legacy ]]; then
+        printf 'repo\t%s\t%s\t%s\n' \
+          "${V2_REPO_NAMES[$index]}" \
+          "${V2_REPO_SOURCES[$index]}" \
+          "${V2_REPO_WORKTREES[$index]}"
+      else
+        printf 'repo\t%s\t%s\t%s\t%s\n' \
+          "${V2_REPO_NAMES[$index]}" \
+          "${V2_REPO_SOURCES[$index]}" \
+          "${V2_REPO_WORKTREES[$index]}" \
+          "${V2_REPO_BRANCHES[$index]}"
+      fi
     done
   } >"$manifest" || return 1
   printf '%s\n' "$V2_PROJECT_CONTEXT_JSON" >"$project_context" || return 1
@@ -1032,6 +1105,7 @@ v2_materialize_profile_contract() {
 
 v2_install_profile_contract() {
   local artifacts manifest project_context manifest_tmp project_tmp rc
+  local repo_format=current pinned_source_branch branch
   artifacts=$(v2_attempt_artifacts) || return
   manifest="$artifacts/profile-contract.tsv"
   project_context="$artifacts/project-context.json"
@@ -1040,7 +1114,43 @@ v2_install_profile_contract() {
     rm -f -- "$manifest_tmp"
     return 1
   }
-  v2_materialize_profile_contract "$manifest_tmp" "$project_tmp" || {
+  if [[ "$MODE" != start ]]; then
+    [[ -f "$manifest" && ! -L "$manifest" &&
+       "$(stat -c '%a:%h' "$manifest" 2>/dev/null)" == 400:1 &&
+       -f "$project_context" && ! -L "$project_context" &&
+       "$(stat -c '%a:%h' "$project_context" 2>/dev/null)" == 400:1 ]] || {
+      rm -f -- "$manifest_tmp" "$project_tmp"
+      return 78
+    }
+    repo_format=$(v2_profile_contract_repo_format "$manifest") || {
+      rc=$?
+      rm -f -- "$manifest_tmp" "$project_tmp"
+      return "$rc"
+    }
+    if [[ "$repo_format" == legacy ]]; then
+      pinned_source_branch=$(awk -F '\t' '
+        $1 == "source-branch" { count++; value=$2; if (NF != 2) invalid=1 }
+        END {
+          if (count != 1 || invalid) exit 78
+          print value
+        }
+      ' "$manifest") || {
+        rc=$?
+        rm -f -- "$manifest_tmp" "$project_tmp"
+        return "$rc"
+      }
+      # Старый manifest закреплял одну общую ветку. Принимать его можно лишь пока
+      # новый профиль всё ещё объявляет эту ветку для КАЖДОГО repo; иначе второй
+      # repo незаметно сменил бы checkout, которого legacy-артефакт не описывает.
+      for branch in "${V2_REPO_BRANCHES[@]}"; do
+        [[ "$branch" == "$pinned_source_branch" ]] || {
+          rm -f -- "$manifest_tmp" "$project_tmp"
+          return 75
+        }
+      done
+    fi
+  fi
+  v2_materialize_profile_contract "$manifest_tmp" "$project_tmp" "$repo_format" || {
     rc=$?
     rm -f -- "$manifest_tmp" "$project_tmp"
     return "$rc"
@@ -1381,7 +1491,7 @@ v2_materialize_shared_env() {
         "$index" "${V2_REPO_NAMES[$index]}" \
         "$index" "${V2_REPO_SOURCES[$index]}" \
         "$index" "${V2_REPO_WORKTREES[$index]}" \
-        "$index" "$V2_SOURCE_BRANCH"
+        "$index" "${V2_REPO_BRANCHES[$index]}"
     done
   } >"$output"
 }
@@ -1458,14 +1568,17 @@ v2_read_sandbox() {
     [[ "$name" == "${V2_REPO_NAMES[$index]}" &&
        "$source" == "${V2_REPO_SOURCES[$index]}" &&
        "$worktree" == "${V2_REPO_WORKTREES[$index]}" &&
-       "$branch" == "$V2_SOURCE_BRANCH" ]] || return 78
+       "$branch" == "${V2_REPO_BRANCHES[$index]}" ]] || return 78
   done
-  for worktree in "${V2_REPO_WORKTREES[@]}"; do
+  # Цикл идёт по индексам, а не по путям: ветка теперь своя у каждого репозитория,
+  # и по одному только пути её не сопоставить.
+  for index in "${!V2_REPO_WORKTREES[@]}"; do
+    worktree=${V2_REPO_WORKTREES[$index]}
     git -C "$worktree" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 78
     if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
       actual_branch=$(git -C "$worktree" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
         return 75
-      [[ "$actual_branch" == "$V2_SOURCE_BRANCH" ]] || return 75
+      [[ "$actual_branch" == "${V2_REPO_BRANCHES[$index]}" ]] || return 75
     fi
   done
   # Только health: решение о start/create shared-стенда движок никогда не принимает.
@@ -1744,7 +1857,7 @@ route_v2_context_for_node() {
   for index in "${!V2_REPO_NAMES[@]}"; do
     args+=(
       --repo
-      "${V2_REPO_NAMES[$index]}:${V2_REPO_WORKTREES[$index]}:${V2_REPO_SOURCES[$index]}"
+      "${V2_REPO_NAMES[$index]}:${V2_REPO_WORKTREES[$index]}:${V2_REPO_SOURCES[$index]}:${V2_REPO_BRANCHES[$index]}"
     )
   done
   # Инструментация обязательна, когда контракт scope попытки непустой
@@ -1915,6 +2028,19 @@ PY
   rm -f -- "$event_tmp" "$description_tmp" "$projection_tmp"
   (( ${#updates[@]} > 0 )) || return 78
   set_st "$task" "${updates[@]}"
+}
+
+# Проекция учтённого времени из route ledger в вторичный реестр: работа узлов
+# без ворот (WORK_TIME_S), ожидание ворот (GATE_WAIT_S) и эпоха последнего
+# события журнала (WORK_TIMER_SINCE) — по ней доска дотикивает живой интервал
+# текущего узла. Витрина: падение здесь не отменяет уже записанный ledger event.
+route_v2_project_work_time() {
+  local task=$1 attempt=$2 summary work_s gate_s since
+  summary=$(route_v2_work_time "$task" "$attempt") || return
+  IFS=$'\t' read -r work_s gate_s since <<<"$summary"
+  [[ "$work_s" =~ ^[0-9]+$ && "$gate_s" =~ ^[0-9]+$ && "$since" =~ ^[0-9]+$ ]] ||
+    return 78
+  set_st "$task" WORK_TIME_S "$work_s" GATE_WAIT_S "$gate_s" WORK_TIMER_SINCE "$since"
 }
 
 # Фиксация решения ворот: CAS в журнале попытки плюс проекция в реестр, по
@@ -2329,6 +2455,8 @@ print(",".join(chain[chain.index(target):]))
       v2_log "goto $GATE_NODE записан, но reset-проекция не завершена (код $rc)"
       return "$rc"
     }
+    # Витрина таймера: метка последнего события сдвинулась на human-rewind.
+    route_v2_project_work_time "$TASK" "$EXPECTED_ATTEMPT" || true
     [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
       set_st "$TASK" STALLED_HUMAN 0 RESULT human-rewind
     v2_log "курсор возвращён человеком на узел $GATE_NODE: $REASON"

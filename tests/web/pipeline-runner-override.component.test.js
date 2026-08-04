@@ -53,8 +53,8 @@ async function compilePipelineView() {
       'const useChatStore = globalThis.__pipelineRunnerChatStore;',
     )
     .replace(
-      "import { liveTimerSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const secToHMS = (n) => String(n ?? 0);',
+      "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
+      'const liveTimerSec = () => 0; const pipelineWorkSec = (tm) => tm?.workSec ?? null; const secToHMS = (n) => String(n ?? 0);',
     )
     .replace(
       "import { mdToHtml } from '../shared/md.js';",

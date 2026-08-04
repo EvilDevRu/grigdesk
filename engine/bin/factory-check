@@ -126,6 +126,34 @@ PY
           profile_instrumentation_restored; do
           declare -F \$f >/dev/null || echo \"нет shared-хука \$f\"
         done
+        # Ветка закреплена НА РЕПОЗИТОРИЙ — сверяем фактический HEAD каждого checkout.
+        # Без этой проверки расхождение всплывало только отказом 78 на первом же
+        # действии движка, включая приёмку уже сделанной работы (задача 90002).
+        # TASK здесь пуст: у shared-профиля workspace совпадает с source checkout
+        # человека и от номера задачи не зависит по построению.
+        while IFS=\$'\t' read -r rname rsource rwt; do
+          [[ -n \"\$rname\" && -n \"\$rwt\" ]] || continue
+          want=\$(profile_source_branch '' \"\$rname\" 2>/dev/null)
+          have=\$(git -C \"\$rwt\" symbolic-ref --quiet --short HEAD 2>/dev/null)
+          if [[ -z \"\$have\" ]]; then
+            echo \"checkout \$rname (\$rwt): не Git checkout или detached HEAD\"
+          elif [[ \"\$have\" != \"\$want\" ]]; then
+            echo \"checkout \$rname стоит на ветке \$have, а профиль закрепил \$want\"
+          fi
+        done < <(profile_repositories '' 2>/dev/null)
+      else
+        # В isolated это имя вновь создаваемой ветки задачи — оно обязано быть одним
+        # на все репозитории, иначе движок откажет 78 уже на запуске.
+        first=''
+        while IFS=\$'\t' read -r rname rsource rwt; do
+          [[ -n \"\$rname\" ]] || continue
+          want=\$(profile_source_branch 1 \"\$rname\" 2>/dev/null)
+          if [[ -z \"\$first\" ]]; then
+            first=\$want
+          elif [[ \"\$want\" != \"\$first\" ]]; then
+            echo \"isolated: репозиторий \$rname закреплён на \$want, а первый — на \$first\"
+          fi
+        done < <(profile_repositories 1 2>/dev/null)
       fi
     ")
     if [[ -n "$route_miss" ]]; then

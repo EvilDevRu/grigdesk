@@ -22,7 +22,7 @@ import { kimiAutoDecision } from '../../lib/chat/auto-approve.js';
 import { MAX_CHAT_STEPS } from '../../lib/chat/stream-steps.js';
 import {
   KIMI_AUTH_PROFILE_ID,
-  KIMI_SECURITY_PROFILE,
+  kimiSecurityProfile,
 } from '../../lib/kimi/profile.js';
 import {
   normalizeModelRef,
@@ -492,7 +492,9 @@ async function chatModule(fastify, opts) {
     // мог завести новый id, и запуск со старым потерял бы контекст разговора. Пустой
     // sessionId не трогаем: это осознанный старт нового разговора, а не устаревшая копия.
     if (queued && sessionId && lastSession.get(chatKey)) sessionId = lastSession.get(chatKey);
-    let cwd = config.factoryHome;
+    // Чат без задачи стартует из корня репозитория кокпита: исполнитель сразу видит
+    // корневые AGENTS.md/CLAUDE.md, а engine/ остаётся внутри рабочего дерева.
+    let cwd = config.rootDir;
     // Настройка читается перед каждым ходом: кнопка в настройках действует сразу,
     // без рестарта сервера и без изменения глобальных конфигов конкретных CLI.
     const extraDirs = [...(prefs?.read().trustedDirectories || [])];
@@ -527,7 +529,7 @@ async function chatModule(fastify, opts) {
         cwdRealpath,
         model,
         authProfileId: KIMI_AUTH_PROFILE_ID,
-        securityProfile: KIMI_SECURITY_PROFILE,
+        securityProfile: kimiSecurityProfile(config),
       };
       const current = await bindingStore.read(chatKey);
       const identityMatches = current

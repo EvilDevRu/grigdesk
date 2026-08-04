@@ -5,20 +5,26 @@ source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 profiles="$TEST_ROOT/profiles"
 mkdir -p "$profiles/fixture"
 
-cat >"$profiles/fixture/profile.sh" <<'PROFILE'
+# Shared checkout фикстуры — настоящий Git-репозиторий: factory-check сверяет
+# фактический HEAD с закреплённой веткой, и подделать её каталогом нельзя.
+checkout="$TEST_ROOT/work/fixture-checkout"
+mkdir -p "$checkout"
+git -C "$checkout" init -q -b main
+
+cat >"$profiles/fixture/profile.sh" <<PROFILE
 #!/usr/bin/env bash
 PROFILE_NAME=fixture
 PROFILE_SERVICE_HOST=127.0.0.1
 
 profile_workspace_mode() { printf 'shared\n'; }
-profile_repositories() { printf 'fixture\t/tmp/fixture\t/tmp/fixture\n'; }
+profile_repositories() { printf 'fixture\t$checkout\t$checkout\n'; }
 profile_project_context() { printf '{"stack":["fixture"],"guardrails":[]}\n'; }
 profile_source_branch() { printf 'main\n'; }
 profile_container() { printf 'fixture\n'; }
 profile_stand_alive() { return 0; }
 profile_service_ports() { printf '8080\t8081\n'; }
 profile_exclusive_resources() {
-  printf '%s\n' 'workspace:/tmp/fixture' 'stand:fixture'
+  printf '%s\n' 'workspace:$checkout' 'stand:fixture'
 }
 profile_instrumentation_restored() { return 0; }
 
@@ -55,6 +61,17 @@ if [[ "$output" == *"промпт"* || "$output" == *"PROFILE_ROUTE_STAGES"* ||
 else
   test_ok "factory-check ignores legacy route arrays/prompts/fanout"
 fi
+
+# Расхождение ветки видно ДО запуска. Раньше проверка смотрела только наличие хуков,
+# и увести checkout можно было незаметно: движок сообщал об этом отказом на первом же
+# действии по задаче — включая приёмку уже сделанной работы (задача 90002).
+git -C "$checkout" symbolic-ref HEAD refs/heads/master
+run_check
+assert_rc 1 "$?" "shared checkout on the wrong branch fails closed"
+output=$(<"$TEST_ROOT/check-contract.out")
+assert_contains "$output" "стоит на ветке master" "wrong branch names the actual branch"
+assert_contains "$output" "закрепил main" "wrong branch names the pin"
+git -C "$checkout" symbolic-ref HEAD refs/heads/main
 
 python3 - "$profiles/fixture/graph.json" <<'PY'
 import json
@@ -107,5 +124,65 @@ run_check
 assert_rc 1 "$?" "service host with scheme and port is rejected"
 assert_contains "$(<"$TEST_ROOT/check-contract.out")" "нужно голое имя хоста" \
   "invalid service host has explicit diagnostic"
+
+# Ветка закрепляется НА РЕПОЗИТОРИЙ: у проекта из нескольких репозиториев каноничные
+# ветки могут не совпадать, и проверка обязана сверять каждый checkout со СВОИМ пином.
+second="$TEST_ROOT/work/fixture-second"
+mkdir -p "$second"
+git -C "$second" init -q -b release
+cat >"$profiles/fixture/profile.sh" <<PROFILE
+#!/usr/bin/env bash
+PROFILE_NAME=fixture
+PROFILE_SERVICE_HOST=127.0.0.1
+
+profile_workspace_mode() { printf 'shared\n'; }
+profile_repositories() {
+  printf 'fixture\t$checkout\t$checkout\n'
+  printf 'second\t$second\t$second\n'
+}
+profile_project_context() { printf '{"stack":["fixture"],"guardrails":[]}\n'; }
+profile_source_branch() {
+  case "\$2" in
+    second) printf 'release\n' ;;
+    *) printf 'main\n' ;;
+  esac
+}
+profile_container() { printf 'fixture\n'; }
+profile_stand_alive() { return 0; }
+profile_service_ports() { printf '8080\t8081\n'; }
+profile_exclusive_resources() {
+  printf '%s\n' 'workspace:$checkout' 'workspace:$second' 'stand:fixture'
+}
+profile_instrumentation_restored() { return 0; }
+PROFILE
+run_check
+assert_rc 0 "$?" "shared repositories may pin different branches"
+
+# А вот в isolated «ветка» — имя вновь создаваемой ветки задачи, одной на всю попытку:
+# разные значения движок отвергает на запуске, и проверка обязана сказать это раньше.
+cat >"$profiles/fixture/profile.sh" <<PROFILE
+#!/usr/bin/env bash
+PROFILE_NAME=fixture
+PROFILE_SERVICE_HOST=127.0.0.1
+
+profile_workspace_mode() { printf 'isolated\n'; }
+profile_repositories() {
+  printf 'fixture\t$checkout\t$checkout-wt-\$1\n'
+  printf 'second\t$second\t$second-wt-\$1\n'
+}
+profile_project_context() { printf '{"stack":["fixture"],"guardrails":[]}\n'; }
+profile_source_branch() {
+  case "\$2" in
+    second) printf 'release\n' ;;
+    *) printf 'route-task-\$1\n' ;;
+  esac
+}
+profile_container() { printf 'fixture\n'; }
+profile_stand_alive() { return 0; }
+PROFILE
+run_check
+assert_rc 1 "$?" "isolated profile pinning more than one branch fails closed"
+assert_contains "$(<"$TEST_ROOT/check-contract.out")" "isolated: репозиторий second" \
+  "isolated branch divergence names the offending repository"
 
 finish_tests

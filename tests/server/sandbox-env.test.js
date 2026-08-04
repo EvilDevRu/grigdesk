@@ -179,6 +179,7 @@ async function chatServer(t, root, env, calls) {
       chatsDir: path.join(root, 'chats'),
       chatStoreLegacyPath: path.join(root, 'legacy-chats.json'),
       chatBindingsDir: path.join(root, 'bindings'),
+      rootDir: root,
       factoryHome: root,
       agentsDir: path.join(root, 'agents'),
       port: 18140,

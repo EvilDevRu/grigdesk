@@ -73,9 +73,8 @@
 Резервный Python-dashboard написан на stdlib (`http.server`, `subprocess`, `json`) — ни venv,
 ни веб-фреймворка. Основной интерфейс — Cockpit на `:8140`; `bin/dashboard` сохранён как
 диагностический/совместимый просмотр состояния, а не как второй источник управления.
-Его arsenkin-панель таймера вызывает `b24-timer.mjs`, который переиспользует Cockpit
-`B24Client` и `server/.state/b24-creds.json`. Для fallback-dashboard выделен отдельный cookie
-jar; внешний B24-checkout не требуется.
+Проектные панели и интеграции резервного dashboard принадлежат локальному профилю: движок
+не содержит их путей, credential policy или дополнительных зависимостей.
 
 **По необходимости:**
 
@@ -83,9 +82,8 @@ jar; внешний B24-checkout не требуется.
   через отдельный scope: иначе рестарт пульта убьёт демона вместе с агентом
   ([ENGINE.md](../docs/engine/ENGINE.md)).
 - **Стек проекта требует профиль, а не движок.** Движок не знает ни одного проекта, поэтому и
-  требований к стеку не предъявляет: `docker` с compose, `node`/`npm`, `gh`, `curl`, `ffmpeg` нужны
-  ровно настолько, насколько их зовут хуки стенда и этапы конкретного профиля. Например, `arsenkin`
-  просит docker, node/npm, `gh` (PR) и `ffmpeg` (демо-видео) — у другого профиля набор свой.
+  требований к стеку не предъявляет. Любые дополнительные CLI и сервисы объявляет локальный
+  профиль, а их наличие проверяет его preflight.
 
 ---
 
@@ -94,11 +92,11 @@ jar; внешний B24-checkout не требуется.
 ```bash
 export FACTORY_STATE=$HOME/.factory/state          # где живут реестры задач (по умолчанию)
 
-bin/factory <TASK> start  --profile arsenkin --ticket "текст задачи"
-bin/factory <TASK> resume --profile arsenkin       # продолжить после ворот/смерти/ребута
-bin/factory list                                    # активные задачи
+bin/factory <TASK> start  --profile <PROFILE> --ticket "текст задачи"
+bin/factory <TASK> resume --profile <PROFILE>  # продолжить после ворот/смерти/ребута
+bin/factory list                               # активные задачи
 
-bin/dashboard arsenkin 8070                          # резервная диагностика, не основной UI
+bin/dashboard <PROFILE> <PORT>                  # резервная диагностика, не основной UI
 ```
 
 - `claude` и `codex` — самостоятельные CLI; авторизация и каталоги проверяются host preflight.
@@ -110,19 +108,18 @@ bin/dashboard arsenkin 8070                          # резервная диа
 до model call. Конфиг задаётся явно через CLI или вручную по контракту и включает coverage gate:
 
 ```bash
-bin/factory profile arsenkin runner set claude --failover codex
-bin/factory profile rdesigner runner set codex --failover claude
+bin/factory profile <PROFILE> runner set claude --failover codex
 
 # family — долгоживущая настройка; latest берёт новую версию из локального каталога
-bin/factory profile arsenkin model set DEFAULT claude family=opus version=latest effort=max
-bin/factory profile arsenkin model set DEFAULT codex family=sol version=latest effort=xhigh
+bin/factory profile <PROFILE> model set DEFAULT claude family=opus version=latest effort=max
+bin/factory profile <PROFILE> model set DEFAULT codex family=sol version=latest effort=xhigh
 
 # preflight читает metadata/версии/auth, но не посылает model prompt
-RUN_HOST_PREFLIGHT=1 bin/factory-check arsenkin --host-preflight
+RUN_HOST_PREFLIGHT=1 bin/factory-check <PROFILE> --host-preflight
 
-bin/factory 8126 runner show
-bin/factory 8126 runner set REVIEW codex --failover claude
-bin/factory 8126 runner switch REVIEW codex
+bin/factory <TASK> runner show
+bin/factory <TASK> runner set REVIEW codex --failover claude
+bin/factory <TASK> runner switch REVIEW codex
 ```
 
 Наличие `runners.env` само по себе не разрешает model call: после каждой правки routing/model
@@ -140,12 +137,12 @@ policy нужен свежий host preflight. Неизвестная ошибк
 bin/factory settings debug set decisions
 
 # только один проект
-bin/factory profile arsenkin debug set errors
+bin/factory profile <PROFILE> debug set errors
 
 # временно одна задача; без --for действует два часа
-bin/factory 8126 debug set verbose --for 2h
-bin/factory 8126 debug show
-bin/factory 8126 debug clear
+bin/factory <TASK> debug set verbose --for 2h
+bin/factory <TASK> debug show
+bin/factory <TASK> debug clear
 
 # явно выключить для всей фабрики
 bin/factory settings debug set off
@@ -244,10 +241,10 @@ bin/factory <TASK> start --profile <имя> --ticket "…"
 
 ---
 
-## Профили
+## Локальные профили
 
-| Профиль | Проект | Стек | Стенд |
-|---|---|---|---|
-| `arsenkin` | arsenkin.ru | Laravel 12 + Restify (BE), Vue 3 + Vite (FE), мультитенант MySQL + ClickHouse, Horizon | своя песочница на задачу |
-| `cockpit` | этот репозиторий | Fastify + Vue 3 / Vite | изолированный dev-экземпляр на задачу |
-| `rdesigner` | локальный ИИ-дизайнер интерьера | Python + 3D-пайплайн (чертёж → 3D → кадр) | один общий постоянный |
+Фактический список подключённых проектов намеренно не публикуется в документации движка.
+Профили находятся в игнорируемом Git каталоге `profiles/<name>/` и выбирают один из
+контрактных режимов: изолированный workspace со стендом задачи либо shared workspace с
+внешним стендом. Требования к обоим режимам описаны в
+[PROFILE-CONTRACT.md](../docs/engine/PROFILE-CONTRACT.md).

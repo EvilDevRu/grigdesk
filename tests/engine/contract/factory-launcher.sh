@@ -271,6 +271,49 @@ assert_eq 3 "$(find "$lease_dir" -maxdepth 1 -type f -name '*.owner' | wc -l | t
 assert_eq "$attempt" "$(awk -F= '$1=="ATTEMPT"{print $2}' "$lease_dir"/*.owner | sort -u)" \
   "every durable resource lease belongs to the paused exact attempt"
 
+# Ветка закреплена НА РЕПОЗИТОРИЙ и едет в обоих артефактах попытки. Без этого поля
+# проект, у которого репозитории стоят на разных ветках, не описать: движку и кокпиту
+# пришлось бы требовать от всех checkout одну ветку — на этом и встала задача 90002.
+manifest="$shared_control/protocol-v2/tasks/t${fixture_task}/attempts/$attempt/artifacts/profile-contract.tsv"
+assert_eq shared-main "$(awk -F'\t' '$1=="repo" && $2=="app"{print $5}' "$manifest")" \
+  "attempt manifest pins the branch of every repository"
+assert_eq shared-main "$(awk -F= '$1=="REPO_0_BRANCH"{print $2}' "$shared_state/t${fixture_task}.env")" \
+  "run snapshot records the branch per repository"
+
+# Симулируем попытку, начатую launcher-ом до добавления branch в каждую repo-строку.
+# Артефакт остаётся immutable во время настоящей попытки; здесь fixture намеренно
+# строит его старую форму, чтобы проверить rolling upgrade без перепиновки.
+legacy_manifest="$manifest.legacy"
+awk -F '\t' 'BEGIN { OFS="\t" } $1=="repo" { NF=4 } { print }' \
+  "$manifest" >"$legacy_manifest"
+chmod 600 "$manifest"
+mv -- "$legacy_manifest" "$manifest"
+chmod 400 "$manifest"
+legacy_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" resume --profile "$profile_id" --attempt "$attempt" \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 0 "$?" "active attempt with a legacy repo manifest survives launcher upgrade"
+assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "legacy manifest resume preserves the exact paused cursor"
+
+# Уход shared checkout с закреплённой ветки — это не предупреждение: агент работал бы
+# не в том дереве, которое зафиксировал контракт попытки.
+git -C "$shared_repo" checkout -qb wandered
+drift=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" resume --profile "$profile_id" --attempt "$attempt" \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 78 "$?" "shared checkout moved off its pinned branch stops the attempt"
+assert_contains "$drift" 'app стоит на ветке wandered' \
+  "branch drift names the repository and the branch it actually sits on"
+git -C "$shared_repo" checkout -q shared-main
+git -C "$shared_repo" branch -qD wandered
+
 second_task=9002
 second_ticket="$TEST_ROOT/ticket-${second_task}.json"
 sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$second_task\"/" \

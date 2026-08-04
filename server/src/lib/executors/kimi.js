@@ -1,6 +1,9 @@
-// Kimi Code подключён через contained ACP runtime. Host CLI используется только как
-// version-pinned бинарник и источник managed OAuth; host config/skills/plugins/MCP
-// процесс чата не видит.
+// Kimi Code подключён по ACP. Два режима запуска (config.kimiLaunchMode):
+// host (умолчание) — прямой хост-процесс, parity с claude: host fs/config/credentials;
+// contained — server-owned contained ACP profile (bwrap + cgroup + egress allowlist),
+// host config/skills/plugins/MCP процесс чата не видит. Откат: COCKPIT_KIMI_LAUNCH_MODE=contained.
+// Режимный securityProfile для session bindings вычисляет chat-модуль
+// (kimiSecurityProfile), статичное поле ниже — каталожная подпись contained-профиля.
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';

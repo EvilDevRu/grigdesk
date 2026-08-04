@@ -1,5 +1,47 @@
 # KimiRuntime: security gate
 
+Статус на 2026-08-04: основной режим запуска Kimi-чатов — **host** (`kimiLaunchMode=host`,
+умолчание): прямой дочерний процесс сервера `kimi acp`, parity с claude. Contained-профиль
+`kimi-contained-v1` сохранён и включается откатом `COCKPIT_KIMI_LAUNCH_MODE=contained`;
+всё описанное ниже относится к contained и по-прежнему действует при откате.
+
+## Host-режим (умолчание с 2026-08-04)
+
+`server/src/lib/kimi/host-launch.js` строит запуск `kimi acp` прямым spawn-ом сервера с
+`KIMI_CODE_HOME = config.kimiHome` (реальный `~/.kimi-code`) и caller-env chat-модуля —
+тем же, что получает claude. Мотивация: contained-профиль не давал read-доступа к
+диагностике движка (`~/.factory/**`), что блокировало разборы инцидентов из чата.
+
+Что осознанно отключается относительно contained:
+
+- mount/pid/net namespace изоляция и маски control state: процесс видит host FS целиком,
+  включая `~/.factory`, `server/.state`, токены окружения сервера (как claude);
+- egress allowlist: сеть прямая (как у claude/codex);
+- cgroup-лимиты (CPU/memory/RuntimeMaxSec): остаётся chat watchdog модуля;
+- per-chat KIMI_CODE_HOME и broker config: host config/skills/plugins/hooks/MCP
+  наследуются (parity с claude `~/.claude`);
+- жёсткий pin версии: расхождение — предупреждение в лог (host CLI обновляет
+  пользователь). ACP `protocolVersion === 1` остаётся обязательным;
+- staging вложений: файлы читаются по исходным путям (корень `chats/attachments`
+  по-прежнему проверяется);
+- `extraDirs` (prefs.trustedDirectories): у `kimi acp` нет `--add-dir`, у ACP нет
+  additionalDirs — pre-authorization невозможен. Доступ за пределами cwd закрывает
+  permission-система Kimi (промпты; в cockpit-режиме «Авто» — auto-approve.js).
+  Проектный `.kimi-code/local.toml` читается нативно.
+
+Что остаётся: ACP contract (initialize/session/resume/prompt/cancel), ручные режимы
+`default`/`plan` (auto/yolo по-прежнему не выставлены), permission reverse RPC с
+всплывашкой в UI, политика «Авто» поверх, CAS session bindings — с новым profile id
+`kimi-host-v1`: contained bindings несовместимы и ротируются одноразово при переключении
+(contained-сессии жили в per-chat runtime home, host-процессу недоступном). Проверка
+credentials (`0600`, владелец) и исполняемости бинаря — та же, что в contained.
+
+Покрытие: `tests/server/kimi-host-launch.test.js` (launch contract) и host-кейсы в
+`tests/server/kimi-runtime.test.js` (прямой spawn без proxy/preflight/systemd, ACP-ход,
+корень вложений).
+
+## Contained-профиль (откат)
+
 Статус на 2026-08-02: `GO_CONTAINED_MVP` для profile `kimi-contained-v1` и закреплённой
 версии Kimi Code `0.31.1` на текущем host.
 

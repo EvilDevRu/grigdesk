@@ -58,12 +58,24 @@ function stallNodeId(def, statuses, stage) {
 }
 
 export class FactoryStateAdapter {
-  /** @param {{ stateDir: string, profilesDir: string, routesDir?: string|null, controlDir?: string|null }} opts */
-  constructor({ stateDir, profilesDir, routesDir = null, controlDir = null }) {
+  /**
+   * @param {{
+   *   stateDir: string,
+   *   profilesDir: string,
+   *   routesDir?: string|null,
+   *   controlDir?: string|null,
+   *   workTimeReader?: ((identity: {task:string,profile:string,attempt:string}) => Promise<object|null>)|null,
+   * }} opts
+   */
+  constructor({
+    stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
+  }) {
     this.stateDir = stateDir;
     this.profilesDir = profilesDir;
     this.routesDir = routesDir;
     this.controlDir = controlDir;
+    this.workTimeReader = workTimeReader;
+    this._workTimeCache = new Map();
     this._routesStore = null;
   }
 
@@ -237,6 +249,47 @@ export class FactoryStateAdapter {
     return { registry: parsePipeline(text), mtime: stat.mtimeMs };
   }
 
+  /**
+   * Проекция времени обычно уже лежит в реестре. Для попыток, начатых до появления
+   * WORK_TIME_S, один раз на версию реестра просим read-only `factory work-time`
+   * проверить исходный ledger. Так старый активный прогон получает честную цифру,
+   * но сервер не дублирует у себя проверку hash-chain и классификацию узлов.
+   */
+  async readWorkTime(task, registry, trusted, mtime) {
+    const uint = (value) => {
+      if (!/^(0|[1-9][0-9]*)$/.test(String(value ?? ''))) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) ? parsed : null;
+    };
+    const projectedWork = uint(registry.WORK_TIME_S);
+    if (projectedWork !== null) {
+      return {
+        workSec: projectedWork,
+        gateWaitSec: uint(registry.GATE_WAIT_S) ?? 0,
+        lastEventSec: uint(registry.WORK_TIMER_SINCE) ?? 0,
+      };
+    }
+    if (!trusted || typeof this.workTimeReader !== 'function') return null;
+
+    const cacheKey = `${trusted.attempt}:${mtime}`;
+    const cached = this._workTimeCache.get(String(task));
+    if (cached?.key === cacheKey) return cached.promise;
+
+    const promise = Promise.resolve(this.workTimeReader({
+      task: String(task), profile: trusted.profile, attempt: trusted.attempt,
+    })).then((value) => {
+      const workSec = uint(value?.workSec);
+      if (workSec === null) return null;
+      return {
+        workSec,
+        gateWaitSec: uint(value?.gateWaitSec) ?? 0,
+        lastEventSec: uint(value?.lastEventSec) ?? 0,
+      };
+    }).catch(() => null);
+    this._workTimeCache.set(String(task), { key: cacheKey, promise });
+    return promise;
+  }
+
   /** Карта статусов этапов маршрута: STAGE → { status, at, fails, dur, fanout }. */
   buildStageMap(registry) {
     const route = registry.ROUTE || 'feature';
@@ -386,6 +439,24 @@ export class FactoryStateAdapter {
       else if (!alive && !env.FE_PORT && statuses.sandbox === 'done') statuses.sandbox = 'pending';
     }
 
+    // Чистое время работы текущей попытки приходит из hash-chained route ledger через
+    // движковую проекцию реестра. WORK_TIME_S уже суммирует ВСЕ повторные заходы узлов,
+    // а GATE_WAIT_S хранит ожидание решений отдельно. Последний незавершённый рабочий
+    // интервал дотикивает клиент от WORK_TIMER_SINCE, но только пока действительно жив
+    // демон и горит не-human узел. Старую проекцию восстанавливаем только через
+    // проверенный ledger; без него таймер не выдумываем.
+    const workTime = await this.readWorkTime(task, registry, trusted, mtime);
+    const working = alive && !stall && Object.entries(statuses).some(([nid, status]) => (
+      status === 'run' && nid !== 'sandbox' && def.nodes[nid]?.[0] !== 'human'
+    ));
+    const timing = workTime === null ? null : {
+      workSec: workTime.workSec,
+      gateWaitSec: workTime.gateWaitSec,
+      runningSinceMs: working && workTime.lastEventSec > 0
+        ? workTime.lastEventSec * 1000
+        : null,
+    };
+
     // Прогресс: done/skip/idle из узлов маршрута.
     const chain = Object.keys(def.pos).filter((n) => n !== 'sandbox');
     const doneCount = chain.filter((n) => ['done', 'skip', 'idle'].includes(statuses[n])).length;
@@ -455,6 +526,9 @@ export class FactoryStateAdapter {
       // Стенд ещё строится (портов нет) — отдаём прогресс сборки для футера карточки.
       sandbox,
       progress: { done: doneCount, total: chain.length, current: cur },
+      // Чистая работа узлов текущей попытки без ожидания человека на воротах.
+      // null только когда нет ни реестровой проекции, ни доступного trusted ledger.
+      timing,
       updatedAt: mtime,
     };
   }

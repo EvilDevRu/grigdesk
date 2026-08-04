@@ -6,7 +6,7 @@ import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useChatStore } from '../stores/chat.js';
-import { liveTimerSec, secToHMS } from '../shared/format.js';
+import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';
 import { sandboxUrl } from '../shared/sandbox.js';
@@ -46,6 +46,22 @@ const outsideTimers = computed(() => {
 });
 function outsideElapsed(t) {
   return liveTimerSec(t, now.value);
+}
+
+// Чистая работа узлов конвейера (не путать с таймером B24). Завершённые петли уже
+// накоплены движком в workSec; если рабочий узел жив, дотикиваем только его текущий
+// интервал. Ожидание человека на воротах хранится отдельно и сюда не попадает.
+function elapsedSec(t) {
+  return pipelineWorkSec(t.graph?.timing, now.value);
+}
+function elapsedLabel(t) {
+  const sec = elapsedSec(t);
+  return sec == null ? '' : secToHMS(sec);
+}
+function elapsedTitle(t) {
+  return t.graph?.timing
+    ? 'чистая работа текущей попытки: петли учитываются, ожидание человека на воротах — нет'
+    : '';
 }
 
 let ticker = null;
@@ -289,12 +305,19 @@ async function sandboxDown(task) {
   finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
-// Ручная архивация нужна только задаче, у которой стенда уже нет (например, подъём
-// оборвался до выдачи порта). Обычный «снести стенд» архивирует прогон сам.
-async function closeTask(task) {
+// Ручная архивация нужна задаче, стенд которой кокпит не сносит: его либо уже нет
+// (подъём оборвался до выдачи порта), либо он не наш (shared checkout). Там, где стенд
+// наш, прогон архивирует сам «снести стенд».
+async function closeTask(t) {
+  const task = t.task;
   if (sandboxBusy.value.has(task)) return;
+  // Про ветки говорим только там, где кокпит их правда трогает: в shared-режиме
+  // основное рабочее дерево не наше, и никакой branch lifecycle к нему не применяется.
+  const branchNote = canDestroySandbox(t)
+    ? ' Пустая ветка будет удалена (ветка с коммитами останется).'
+    : ' Общий checkout и его ветки не затрагиваются.';
   if (!await confirmDialog(
-    `Закрыть задачу #${task}? Реестр уйдёт в архив, пустая ветка будет удалена (ветка с коммитами останется).`,
+    `Закрыть задачу #${task}? Реестр уйдёт в архив.${branchNote}`,
     { danger: true, okText: 'Закрыть' },
   )) return;
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
@@ -345,6 +368,17 @@ function canRetrySandbox(t) {
 }
 function canDestroySandbox(t) {
   return !t.readOnly && t.workspaceMode !== 'shared';
+}
+// «Закрыть задачу» = убрать прогон с экрана в архив. Разрешено, когда кокпиту нечего
+// сносить: стенда нет ЛИБО стенд не его. Прежнее условие смотрело только на порт фронта
+// и молча означало «есть порт = есть НАША песочница, закрывать через снос стенда». В
+// shared-режиме порт есть всегда (стенд общий, живёт вне задачи и переживает её), а
+// кнопки «снести стенд» там нет по определению — доведённый до конца прогон оставался
+// на экране НАВСЕГДА: убрать его было нечем ни одной кнопкой. Ровно так залипла
+// выполненная задача 90002 профиля parser. Сервер в shared-режиме при закрытии не
+// трогает ни стенд, ни ветки — только переносит проекцию реестра в архив.
+function canCloseTask(t) {
+  return !t.readOnly && !t.graph.sandbox && (!t.graph.fePort || !canDestroySandbox(t));
 }
 async function resumeRun(task) {
   if (sandboxBusy.value.has(task)) return;
@@ -465,6 +499,8 @@ function cardState(g) {
         <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
           {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
         </span>
+        <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
+        <span v-if="t.graph.timing" class="elapsed mono" :title="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
       </header>
 
       <div class="progress">
@@ -547,9 +583,11 @@ function cardState(g) {
           <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> сношу стенд…</span>
           <span v-else>⏏ снести стенд</span>
         </button>
-        <button v-if="!t.readOnly && !t.graph.fePort && !t.graph.sandbox" class="sbdown"
+        <!-- Класс sbclose — только адрес кнопки (оформление общее с «снести стенд»):
+             обе выглядят одинаково, а различать их надо и тесту, и глазами в разметке. -->
+        <button v-if="canCloseTask(t)" class="sbdown sbclose"
           :class="{ busy: sandboxBusy.has(t.task) }" :disabled="sandboxBusy.has(t.task)"
-          @click="closeTask(t.task)">
+          @click="closeTask(t)">
           <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> закрываю…</span>
           <span v-else>✓ закрыть задачу</span>
         </button>
@@ -827,6 +865,7 @@ function cardState(g) {
 .daemon.alive { color: var(--good); }
 .daemon.idle { color: var(--ink-mid); }
 .daemon.stall { color: var(--bad); font-weight: 600; }
+.elapsed { font-size: 12px; color: var(--ink-mid); white-space: nowrap; }
 
 .progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .pbar-wrap { flex: 1; height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }

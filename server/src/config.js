@@ -11,6 +11,14 @@ const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
 const chatsDir = process.env.COCKPIT_CHATS_DIR || path.join(rootDir, 'chats');
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
 
+// Запуск kimi-чатов: host — прямой дочерний процесс сервера (parity с claude: host
+// fs/config/credentials, без namespace/cgroup/egress allowlist), contained — прежний
+// hardened bwrap-профиль (откат).
+const kimiLaunchMode = process.env.COCKPIT_KIMI_LAUNCH_MODE || 'host';
+if (!['host', 'contained'].includes(kimiLaunchMode)) {
+  throw new Error(`COCKPIT_KIMI_LAUNCH_MODE: допустимо host|contained, получено "${kimiLaunchMode}"`);
+}
+
 export const config = {
   // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось через Tailscale.
   port: Number(process.env.COCKPIT_PORT) || 8140,
@@ -41,9 +49,11 @@ export const config = {
   claudeOauthTokenUrl: process.env.COCKPIT_CLAUDE_OAUTH_TOKEN_URL || '',
   // Бинарь Codex CLI (GPT-исполнитель OpenAI). Не установлен → провайдер «недоступен».
   codexBin: process.env.COCKPIT_CODEX_BIN || 'codex',
-  // Kimi ставится обычным внешним CLI, как Claude/Codex. В чатах он запускается не
-  // напрямую, а через server-owned contained ACP profile (bwrap + user systemd cgroup
+  // Kimi ставится обычным внешним CLI, как Claude/Codex. Режим запуска задаёт
+  // kimiLaunchMode: host — обычный хост-процесс с наследованием host config (как claude),
+  // contained — server-owned contained ACP profile (bwrap + user systemd cgroup
   // + versioned HTTPS allowlist); host config/hooks/plugins/MCP runtime не наследует.
+  kimiLaunchMode,
   kimiBin: process.env.COCKPIT_KIMI_BIN || 'kimi',
   kimiHome: process.env.COCKPIT_KIMI_HOME
     || process.env.KIMI_CODE_HOME

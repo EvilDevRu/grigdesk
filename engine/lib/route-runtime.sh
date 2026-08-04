@@ -10,6 +10,7 @@
 #   route_v2_dispatch_next TASK ATTEMPT
 #   route_v2_dispatch_until_pause TASK ATTEMPT [MAX_STEPS]
 #   route_v2_gate_decide TASK ATTEMPT NODE approved|rejected
+#   route_v2_work_time TASK ATTEMPT
 #
 # Коды возврата:
 #   0   зафиксирован один узел / цикл достиг запрошенной границы
@@ -192,6 +193,63 @@ elif op == "node":
     print(executor, phase, run_key, policy, fanout_mode, fanout_max, fanout_degrade,
           retry_no_result, retry_product, provider_attempts, provider_strategy,
           browser, timeout_class, command_id, sep="\t")
+elif op == "work-time":
+    # Join pinned describe-route (value) со сводкой work-time из журнала: работа
+    # узлов без ворот отдельно от ожидания ворот. Классификация — по executor
+    # бандла, а не по имени узла; узел журнала вне машины маршрута = порча.
+    (ledger_path,) = args
+    try:
+        info = os.lstat(ledger_path)
+        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            fail()
+        with open(ledger_path, encoding="utf-8") as source:
+            ledger = json.load(source, parse_constant=lambda _: fail())
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        fail()
+    machine = value.get("machine") if isinstance(value, dict) else None
+    nodes = machine.get("nodes") if isinstance(machine, dict) else None
+    if not isinstance(nodes, list):
+        fail()
+    executors = {}
+    for item in nodes:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            fail()
+        if item["id"] in executors or item.get("executor") not in {
+            "agent", "command", "gate", "status",
+        }:
+            fail()
+        executors[item["id"]] = item["executor"]
+    if (
+        not isinstance(ledger, dict)
+        or ledger.get("schema") != 1
+        or not isinstance(ledger.get("nodes"), dict)
+    ):
+        fail()
+    last_event_at = ledger.get("lastEventAt")
+    if last_event_at is not None and (
+        not isinstance(last_event_at, int)
+        or isinstance(last_event_at, bool)
+        or last_event_at < 0
+    ):
+        fail()
+    work = 0
+    gate = 0
+    for node_id, seconds in ledger["nodes"].items():
+        # Узел-статус — проекция чужого результата, он никогда не исполняется и
+        # не коммитится: интервал на его имени = порча журнала, не «работа».
+        if (
+            node_id not in executors
+            or executors[node_id] == "status"
+            or not isinstance(seconds, int)
+            or isinstance(seconds, bool)
+            or seconds < 0
+        ):
+            fail()
+        if executors[node_id] == "gate":
+            gate += seconds
+        else:
+            work += seconds
+    print(work, gate, last_event_at or 0, sep="\t")
 else:
     fail()
 PY
@@ -492,16 +550,21 @@ _route_v2_mark_node_running() {
 # же immutable событие и безопасно повторит reset до запуска очередного узла.
 _route_v2_commit_and_project() {
   local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
-  local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0} cursor rc
+  local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0}
+  local target_budget=${9:-0} cursor rc
   cursor=$(attempt_stage_state_commit_v2 \
     "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" "$recovery") || return
+    "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget") || return
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
       rc=$?
       _route_v2_fail "route projection failed after committed ledger event (code $rc)" || true
       return "$rc"
     }
+  fi
+  if declare -F route_v2_project_work_time >/dev/null; then
+    # Витрина таймера: ошибка пересчёта не останавливает маршрут.
+    route_v2_project_work_time "$task" "$attempt" || true
   fi
   printf '%s\n' "$cursor"
 }
@@ -1223,6 +1286,11 @@ route_v2_dispatch_next() {
   if [[ "$executor" == gate ]]; then
     attempt_stage_state_pause_v2 \
       "$task" "$attempt" "$node" "human gate: $node" >/dev/null || return
+    if declare -F route_v2_project_work_time >/dev/null; then
+      # Метка последнего события = вход в ворота: по ней доска дотикивает
+      # ожидание решения. Витрина: ошибка пересчёта не удерживает диспетчер.
+      route_v2_project_work_time "$task" "$attempt" || true
+    fi
     return 20
   fi
   [[ "$executor" == agent || "$executor" == command ]] ||
@@ -1247,6 +1315,10 @@ route_v2_dispatch_next() {
   # предыдущего захода, переделывает работу с нуля.
   local outcome="" cleanup_rc attempt_no=1 retry_reason="" verdict_b64=""
   local hard_rewind_limit=2 no_progress_limit=0
+  # Суммарный предохранитель по target за попытку: per-arc лимиты не ловят
+  # чередование дуг в один узел (на 8162 в build шесть раз возвращал review и
+  # один раз lint, не исчерпав ни одной дуги). Решением человека не обнуляется.
+  local target_rewind_budget=10
   local tries_left=$(( 1 + retry_no_result + provider_attempts ))
   local product_left=$retry_product
   # Указание человека при возврате курсора сюда. Читаем ОДИН раз на вход в узел, а не
@@ -1319,7 +1391,7 @@ route_v2_dispatch_next() {
   fi
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" || return
+    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" || return
   # Черновик хода снимаем ТОЛЬКО после УСПЕШНОГО терминального коммита: между заходами он
   # нужен после обрыва, а после закрытого узла становится чужими заметками для того,
   # кто вернётся сюда по человеческому goto.
@@ -1383,6 +1455,42 @@ route_v2_gate_decide() {
   rm -f -- "$description_tmp"
   [[ "$executor" == gate ]] || return 78
   _route_v2_commit_and_project "$task" "$attempt" "$node" "$outcome"
+}
+
+# Сводка учтённого времени попытки: работа узлов без ворот отдельно от ожидания
+# ворот. Секунды по узлам даёт журнальная проекция attempt_stage_state_work_time_v2,
+# классификацию (ворота ли узел) — executor из закреплённого describe-route.
+# Вывод TSV: WORK_S, GATE_WAIT_S, LAST_EVENT_EPOCH (0 — событий ещё нет).
+route_v2_work_time() {
+  local task attempt description_tmp ledger_tmp rc
+  _route_v2_require_isolation || return
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _route_v2_load_attempt "$task" "$attempt" || return
+  description_tmp=$(mktemp "$(factory_control_root)/.route-v2-machine.XXXXXX") || return 1
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" \
+    --profile "$ROUTE_V2_PROFILE" \
+    describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" \
+    --route "$ROUTE_V2_ROUTE" >"$description_tmp" || {
+      rc=$?
+      rm -f -- "$description_tmp"
+      return "$rc"
+    }
+  ledger_tmp=$(mktemp "$(factory_control_root)/.route-v2-work-time.XXXXXX") || {
+    rm -f -- "$description_tmp"
+    return 1
+  }
+  attempt_stage_state_work_time_v2 "$task" "$attempt" >"$ledger_tmp" || {
+    rc=$?
+    rm -f -- "$description_tmp" "$ledger_tmp"
+    return "$rc"
+  }
+  _route_v2_json work-time "$description_tmp" "$ledger_tmp"
+  rc=$?
+  rm -f -- "$description_tmp" "$ledger_tmp"
+  return "$rc"
 }
 
 # Отменяет транзакцию, которой владеет именно эта попытка. Сначала свежая контрольная точка

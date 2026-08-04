@@ -2,6 +2,7 @@
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 source "$FACTORY_HOME/lib/attempt-stage-state.sh"
+source "$FACTORY_HOME/lib/route-runtime.sh"
 
 publisher="$FACTORY_TESTS_HOME/fixtures/routes-publish.mjs"
 routes_dir="$TEST_ROOT/routes"
@@ -553,10 +554,13 @@ assert_file_exists "$core_event" \
 assert_contains "$(json_field "$(cat "$core_event")" reason)" 'shared-cause' \
   "журнал называет замечание, которое ремонт не снимает"
 
-# Обратная сторона того же сторожа: замечания закрываются по одному, набор строго
-# сужается — пересечение непусто, но это прогресс, и обрывать цикл нельзя.
+# Форма 8162: три круга с общим ядром и строго сужающимся хвостом. Сужение
+# хвоста — не прогресс, пока само ядро переживает каждый ремонт: на 8162 правило
+# «строгое сужение = прогресс» разоружило сторож, и дуга review→build крутилась
+# 3.5 часа, пока конвейер не остановил человек.
 shrink_attempt=$(begin_selected 64 a_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee)
 assert_rc 0 "$?" "попытка для сужающегося набора подготовлена"
+shrink_dir="$(attempt_state_v2_task_root 64)/attempts/$shrink_attempt"
 attempt_stage_state_init_v2 64 "$shrink_attempt" debug >/dev/null
 shrink_first=$(run_state_verdict_encode failed build \
   'kept-finding=замечание, которое чинят последним' \
@@ -567,13 +571,27 @@ shrink_second=$(run_state_verdict_encode failed build \
   'closed-second=замечание, закрытое вторым')
 shrink_third=$(run_state_verdict_encode failed build \
   'kept-finding=замечание, которое чинят последним')
-for verdict in "$shrink_first" "$shrink_second" "$shrink_third"; do
+for verdict in "$shrink_first" "$shrink_second"; do
   attempt_stage_state_commit_v2 64 "$shrink_attempt" instrument done >/dev/null
   shrinking=$(attempt_stage_state_commit_v2 \
     64 "$shrink_attempt" check failed 6 "$verdict" 2)
   assert_eq ready "$(json_field "$shrinking" state)" \
-    "последовательное закрытие замечаний остаётся прогрессом"
+    "закрытие хвоста в пределах окна ещё допускает исправление"
 done
+attempt_stage_state_commit_v2 64 "$shrink_attempt" instrument done >/dev/null
+shrink_stop=$(attempt_stage_state_commit_v2 \
+  64 "$shrink_attempt" check failed 6 "$shrink_third" 2)
+assert_rc 0 "$?" "третий заход с живым ядром фиксируется атомарно"
+assert_eq stopped "$(json_field "$shrink_stop" state)" \
+  "сужение хвоста при живом ядре останавливает цикл"
+assert_eq no-progress "$(json_field "$shrink_stop" stop)" \
+  "неснятое ядро — отсутствие прогресса, а не hard ceiling"
+shrink_event=$(find "$shrink_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_file_exists "$shrink_event" \
+  "остановка по ядру записана отдельным неизменяемым событием"
+assert_contains "$(json_field "$(cat "$shrink_event")" reason)" 'kept-finding' \
+  "журнал называет замечание, пережившее все ремонты серии"
 
 # Наборы вообще не пересекаются: каждый заход находит новое. Ядра нет, значит и
 # повода останавливать цикл раньше hard ceiling тоже нет.
@@ -589,6 +607,129 @@ for finding in first second third; do
   assert_eq ready "$(json_field "$fresh" state)" \
     "полностью новый набор замечаний прогрессом и остаётся"
 done
+
+# Суммарный бюджет возвратов в target: ловит серию, где ни один per-arc сторож
+# не срабатывает (замечания каждый раз свежие, лимит дуги далеко), а круги
+# копятся. Бюджет решением человека НЕ обнуляется — иначе «вернул курсор»
+# выдавало бы новую порцию кругов.
+budget_attempt=$(begin_selected 67 a_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6)
+assert_rc 0 "$?" "попытка для суммарного бюджета подготовлена"
+budget_dir="$(attempt_state_v2_task_root 67)/attempts/$budget_attempt"
+attempt_stage_state_init_v2 67 "$budget_attempt" debug >/dev/null
+for round in 1 2 3; do
+  budget_verdict=$(run_state_verdict_encode failed build \
+    "budget-finding-$round=свежее замечание круга $round")
+  attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
+  budget_run=$(attempt_stage_state_commit_v2 \
+    67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+  assert_eq ready "$(json_field "$budget_run" state)" \
+    "возврат $round укладывается в суммарный бюджет"
+done
+budget_verdict=$(run_state_verdict_encode failed build \
+  'budget-finding-4=свежее замечание четвёртого круга')
+attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
+budget_stop=$(attempt_stage_state_commit_v2 \
+  67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+assert_rc 0 "$?" "четвёртый возврат при бюджете трёх фиксируется атомарно"
+assert_eq stopped "$(json_field "$budget_stop" state)" \
+  "исчерпанный суммарный бюджет останавливает курсор"
+assert_eq rewind-limit "$(json_field "$budget_stop" stop)" \
+  "остановка по бюджету остаётся human-resumable rewind-limit"
+budget_event=$(find "$budget_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "rewind-limit"')
+assert_contains "$(json_field "$(cat "$budget_event")" reason)" \
+  'суммарный бюджет автоматических возвратов' \
+  "журнал отличает бюджет от лимита дуги"
+assert_contains "$(json_field "$(cat "$budget_event")" reason)" 'уже выполнено 3' \
+  "журнал называет исчерпанный размер бюджета"
+
+# Решение человека не выдаёт новый бюджет: после goto сам же счётчик держит
+# серию остановленной, пока человек не решит судьбу попытки целиком.
+attempt_stage_state_human_rewind_v2 67 "$budget_attempt" instrument \
+  instrument,check,gate_plan,retro 'проверить с человеческим указанием' >/dev/null
+attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
+budget_after_human=$(attempt_stage_state_commit_v2 \
+  67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+assert_eq stopped "$(json_field "$budget_after_human" state)" \
+  "человеческий возврат не обнуляет суммарный бюджет"
+assert_eq rewind-limit "$(json_field "$budget_after_human" stop)" \
+  "причина остановки после goto — тот же исчерпанный бюджет"
+
+# --- Учёт отработанного времени по узлам (work-time) ---
+# Часы под контролем теста: интервал [предыдущее событие -> коммит] относится
+# к узлу коммита; pause получает ноль, поэтому ожидание ворот не размазывается
+# по рабочим узлам.
+wt_attempt=$(begin_selected 66 a_0123456789abcdef0123456789abcdef)
+assert_rc 0 "$?" "work-time attempt is prepared"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T00:00:00Z' \
+  attempt_stage_state_init_v2 66 "$wt_attempt" debug >/dev/null
+assert_rc 0 "$?" "work-time init uses the controlled clock"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T00:02:00Z' \
+  attempt_stage_state_commit_v2 66 "$wt_attempt" instrument done >/dev/null
+assert_rc 0 "$?" "work-time agent node commits"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T00:02:05Z' \
+  attempt_stage_state_commit_v2 66 "$wt_attempt" check done >/dev/null
+assert_rc 0 "$?" "work-time command node commits"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T00:02:05Z' \
+  attempt_stage_state_pause_v2 66 "$wt_attempt" gate_plan 'human gate: gate_plan' >/dev/null
+assert_rc 0 "$?" "work-time gate entry pauses the cursor"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T01:02:05Z' \
+  attempt_stage_state_commit_v2 66 "$wt_attempt" gate_plan approved >/dev/null
+assert_rc 0 "$?" "work-time gate decision commits"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T01:03:05Z' \
+  attempt_stage_state_commit_v2 66 "$wt_attempt" retro done >/dev/null
+assert_rc 0 "$?" "work-time tail node commits"
+
+wt=$(attempt_stage_state_work_time_v2 66 "$wt_attempt")
+assert_rc 0 "$?" "work-time projection reads the verified ledger"
+assert_eq 120 "$(json_field "$wt" nodes instrument)" \
+  "agent node gets the interval since the previous event"
+assert_eq 5 "$(json_field "$wt" nodes check)" \
+  "command node gets its dispatch interval"
+assert_eq 3600 "$(json_field "$wt" nodes gate_plan)" \
+  "gate node gets the human decision wait"
+assert_eq 60 "$(json_field "$wt" nodes retro)" \
+  "tail node gets the post-gate interval"
+wt_last=$(date -u -d '2026-01-01 01:03:05' +%s)
+assert_eq "$wt_last" "$(json_field "$wt" lastEventAt)" \
+  "lastEventAt is the epoch of the newest ledger event"
+
+# Классификация ворот — по executor из pinned describe-route, а не по имени:
+# работа узлов без ворот отдельно, ожидание ворот отдельно.
+"$FACTORY_HOME/bin/factory-route" \
+  --routes-dir "$routes_dir" --profile demo-profile describe-route \
+  --catalog-hash "$catalog_hash" --route debug >"$TEST_ROOT/work/wt-describe.json"
+assert_rc 0 "$?" "describe-route for the pinned debug machine"
+printf '%s\n' "$wt" >"$TEST_ROOT/work/wt-ledger.json"
+wt_joined=$(_route_v2_json work-time \
+  "$TEST_ROOT/work/wt-describe.json" "$TEST_ROOT/work/wt-ledger.json")
+assert_rc 0 "$?" "work-time join classifies nodes by bundle executor"
+assert_eq "$(printf '185\t3600\t%s' "$wt_last")" "$wt_joined" \
+  "work excludes gate wait; gate wait and last event stay separate"
+
+printf '%s\n' '{"schema":1,"nodes":{"ghost":7},"lastEventAt":1}' \
+  >"$TEST_ROOT/work/wt-ledger-bad.json"
+_route_v2_json work-time \
+  "$TEST_ROOT/work/wt-describe.json" "$TEST_ROOT/work/wt-ledger-bad.json" >/dev/null 2>&1
+assert_rc 78 "$?" "ledger node outside the route machine fails closed"
+
+# Коммит восстановления не получает интервала и обрывает его: простой между
+# обрывом и подъёмом — не работа узла.
+rec_attempt=$(begin_selected 68 a_fedcba9876543210fedcba9876543210)
+assert_rc 0 "$?" "recovery work-time attempt is prepared"
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T00:00:00Z' \
+  attempt_stage_state_init_v2 68 "$rec_attempt" debug >/dev/null
+ATTEMPT_STAGE_STATE_TIME_OVERRIDE='2026-01-01T03:00:00Z' \
+  attempt_stage_state_commit_v2 68 "$rec_attempt" instrument failed 0 "" 0 1 >/dev/null
+assert_rc 0 "$?" "recovery commit closes the unrun node"
+rec_wt=$(attempt_stage_state_work_time_v2 68 "$rec_attempt")
+assert_rc 0 "$?" "work-time projection reads the recovery ledger"
+assert_eq 0 "$("$NODE_BIN" -e \
+  'const v=JSON.parse(process.argv[1]); process.stdout.write(String(Object.keys(v.nodes).length));' \
+  "$rec_wt")" \
+  "recovery commit gets no work interval"
+assert_eq "$(date -u -d '2026-01-01 03:00:00' +%s)" "$(json_field "$rec_wt" lastEventAt)" \
+  "lastEventAt still tracks the newest event"
 
 legacy_after=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \

@@ -7,7 +7,8 @@
 #   attempt_stage_state_latest_event_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
 #   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME \
-#     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT] [RECOVERY]
+#     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT] [RECOVERY] \
+#     [TARGET_BUDGET]
 #
 # Изменяемый курсор и его только дополняемый журнал событий с цепочкой хешей хранятся только в
 # <control-root>/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT>/stage-results.
@@ -442,6 +443,43 @@ def automatic_rewind_history(directory, node, target):
     return snapshots
 
 
+def automatic_rewind_count(directory, target):
+    # Суммарный счёт АВТОМАТИЧЕСКИХ возвратов в один target за попытку —
+    # последний предохранитель, не зависящий от поведения агента: ни typed
+    # verdict, ни честность контракта приёмки, ни стабильность finding id на
+    # него не влияют. Per-arc лимиты не ловят чередование дуг: на 8162 в build
+    # шесть раз возвращал review и один раз lint, не исчерпав ни одной дуги.
+    # В отличие от истории дуги, решение человека (human-rewind, rejected на
+    # gate) счёт НЕ обнуляет — иначе «перезапустил серию» выдавал бы новый
+    # бюджет; остановка по бюджету остаётся human-resumable, так что человеку
+    # он не мешает, а безмолвная серия кругов обрывается.
+    identifier(target)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        fail()
+    events = []
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match:
+            events.append((int(match.group(1)), name))
+    events.sort()
+    count = 0
+    for _, name in events:
+        event = regular_json(os.path.join(directory, name))
+        action = event.get("action")
+        if (
+            event.get("kind") == "commit"
+            # Rejected на human gate — решение человека, а не автоматический
+            # возврат: его закрывает сам факт новой человеческой обратной связи.
+            and event.get("outcome") != "rejected"
+            and isinstance(action, dict)
+            and action.get("rewind") == target
+        ):
+            count += 1
+    return count
+
+
 def stable_core_reason(window, owner):
     # Замечание, пережившее каждый ремонт окна. Наборы при этом не совпадают,
     # поэтому проверки повтора и осцилляции молчат, — а цикл уже доказал, что
@@ -454,12 +492,12 @@ def stable_core_reason(window, owner):
         core &= set(item[1])
     if not core:
         return None
-    # Закрытие замечаний по одному — прогресс, даже пока последнее ещё открыто:
-    # строгое сужение набора хотя бы на одном переходе снимает подозрение.
-    if any(
-        set(after[1]) < set(before[1]) for before, after in zip(window, window[1:])
-    ):
-        return None
+    # Прогрессом считается только сужение, затрагивающее само ядро. Ядро —
+    # пересечение окна, поэтому его элементы пережили КАЖДЫЙ ремонт серии, и
+    # сужение за их счёт невозможно по построению: отброшенный хвост
+    # сопутствующих замечаний прогрессом не считается. Правило «строгое сужение =
+    # прогресс» разоружило сторож на 8162: ревью закрыло сопутствующее замечание
+    # при живом ядре, подозрение снялось, и цикл пошёл на новый круг.
     # reason() ограничен 500 символами, а findings бывает до 32: перечисляем
     # первые три и говорим, сколько осталось, — иначе длинное ядро уронило бы
     # запись события, то есть сторож ломал бы то, что охраняет.
@@ -852,6 +890,7 @@ elif OP == "prepare-commit":
         verdict_b64,
         no_progress_limit_raw,
         recovery_raw,
+        target_budget_raw,
     ) = ARGS
     if recovery_raw not in {"0", "1"}:
         fail()
@@ -891,6 +930,7 @@ elif OP == "prepare-commit":
     )
     rewind_limit = decimal(rewind_limit_raw, 10)
     no_progress_limit = decimal(no_progress_limit_raw, 10)
+    target_budget = decimal(target_budget_raw, 10)
     sequence = integer(runtime.get("sequence")) + 1
     event_kind = "commit"
     # Метка восстановления живёт только на обычном коммите: остановки rewind-limit и
@@ -930,6 +970,27 @@ elif OP == "prepare-commit":
             event_reason = (
                 f"автоматический лимит возвратов исчерпан: {node} → "
                 f"{action['rewind']}; уже выполнено {rewind_limit}"
+            )
+            after = {
+                "state": "stopped",
+                "currentNode": None,
+                "stop": "rewind-limit",
+                "pauseReason": None,
+                "lastCommit": {
+                    "node": node,
+                    "outcome": outcome,
+                    "sequence": sequence,
+                },
+            }
+        elif target_budget and (
+            automatic_rewind_count(results_dir, action["rewind"]) >= target_budget
+        ):
+            # Последний предохранитель: срабатывает после no-progress и лимита
+            # дуги, чтобы их конкретные причины не тонули в общем бюджете.
+            event_kind = "rewind-limit"
+            event_reason = (
+                f"суммарный бюджет автоматических возвратов исчерпан за попытку: "
+                f"{node} → {action['rewind']}; уже выполнено {target_budget}"
             )
             after = {
                 "state": "stopped",
@@ -1065,6 +1126,44 @@ elif OP == "findings-ledger":
             "closed": [item for item in ordered if item["status"] == "closed"],
         }
     )
+
+elif OP == "work-time":
+    # Производная проекция immutable events: сколько секунд проработал каждый
+    # узел. Интервал [предыдущее событие -> коммит] относится к узлу коммита,
+    # поэтому повторные заходы после rewind накапливаются, а pause и human-rewind
+    # получают ноль (это время ворот и человека). Коммит восстановления не
+    # получает интервала и обрывает его: простой между обрывом и подъёмом — не
+    # работа узла. Классификация узлов (ворота ли это) сюда не поднимается:
+    # executor знает только вызывающая сторона по pinned describe-route.
+    (directory,) = ARGS
+    try:
+        names = sorted(
+            name for name in os.listdir(directory) if EVENT_RE.fullmatch(name)
+        )
+    except OSError:
+        fail()
+    per_node = {}
+    previous_at = None
+    last_at = None
+    for name in names:
+        event = regular_json(os.path.join(directory, name))
+        at = int(
+            datetime.datetime.strptime(
+                timestamp(event.get("at")), "%Y-%m-%dT%H:%M:%SZ"
+            )
+            .replace(tzinfo=datetime.timezone.utc)
+            .timestamp()
+        )
+        if (
+            event.get("kind") in {"commit", "rewind-limit", "no-progress"}
+            and event.get("reason") != RECOVERY_COMMIT_REASON
+            and previous_at is not None
+        ):
+            node = identifier(event.get("node"))
+            per_node[node] = per_node.get(node, 0) + max(0, at - previous_at)
+        previous_at = at
+        last_at = at
+    dump({"schema": 1, "nodes": per_node, "lastEventAt": last_at})
 
 elif OP == "validate-ledger":
     directory, task, attempt, profile, catalog, route, route_hash, entry = ARGS
@@ -1616,6 +1715,32 @@ attempt_stage_state_findings_v2() {
   return "$rc"
 }
 
+# Производная проекция immutable events: отработанное время по узлам в секундах
+# плюс метка последнего события (JSON: nodes, lastEventAt). Чтение, ничего не
+# пишет; при повреждении hash-chain падает до построения проекции.
+attempt_stage_state_work_time_v2() {
+  local task attempt lock_fd runtime_tmp rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.runtime-work-time.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_json work-time "$ASTAGE_RESULTS_DIR"
+    rc=$?
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
 attempt_stage_state_pause_v2() {
   local task attempt node reason root lock_fd runtime_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
@@ -1668,7 +1793,7 @@ attempt_stage_state_pause_v2() {
 
 attempt_stage_state_commit_v2() {
   local task attempt node outcome rewind_limit verdict_b64 no_progress_limit recovery
-  local failure_owner root lock_fd
+  local target_budget failure_owner root lock_fd
   local runtime_tmp transition_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
@@ -1680,8 +1805,13 @@ attempt_stage_state_commit_v2() {
   # Восьмой аргумент — «узел закрыт восстановлением, а не заходом»: единственный
   # коммит, который не снимает указание человека с узла.
   recovery=${8:-0}
+  # Девятый — суммарный бюджет автоматических возвратов в target за попытку:
+  # последний предохранитель после no-progress и лимита дуги, решением человека
+  # не обнуляется.
+  target_budget=${9:-0}
   [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
+  [[ "$target_budget" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$recovery" == 0 || "$recovery" == 1 ]] || return 2
   run_state_verdict_validate "$outcome" "$verdict_b64" || return
   failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
@@ -1722,7 +1852,8 @@ attempt_stage_state_commit_v2() {
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-commit \
       "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" \
-      "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" "$recovery" >"$event_tmp"
+      "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" "$recovery" \
+      "$target_budget" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$transition_tmp" "$runtime_tmp"

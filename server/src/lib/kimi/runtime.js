@@ -12,6 +12,7 @@ import {
   createKimiEgressProxy,
   KIMI_EGRESS_ALLOWLIST_VERSION,
 } from './egress-proxy.js';
+import { buildKimiHostLaunch } from './host-launch.js';
 import { KIMI_MODELS } from './profile.js';
 import { inspectKimiRuntimeHost } from './runtime-preflight.js';
 import {
@@ -140,6 +141,7 @@ function waitForExit(child) {
  */
 export async function runContainedKimi({
   config,
+  env,
   message,
   cwd,
   extraDirs = [],
@@ -160,32 +162,58 @@ export async function runContainedKimi({
   const spawnProcess = deps.spawn || spawn;
   const makeProxy = deps.createProxy || createKimiEgressProxy;
   const buildLaunch = deps.buildLaunch || buildKimiSandboxLaunch;
+  const buildHost = deps.buildHostLaunch || buildKimiHostLaunch;
   const preflight = deps.preflight || inspectKimiRuntimeHost;
   const stopUnit = deps.stopUnit || stopKimiUnit;
-  await (deps.assertVersion || assertPinnedVersion)(config);
+  // Режимы запуска: host (умолчание конфига) — прямой хост-процесс, contained —
+  // прежний bwrap-профиль. Отсутствие ключа трактуем как contained: старые вызовы
+  // и тесты без обновлённого конфига получают прежнее, более строгое поведение.
+  const launchMode = config.kimiLaunchMode === 'host' ? 'host' : 'contained';
+  const checkVersion = deps.assertVersion || assertPinnedVersion;
+  if (launchMode === 'host') {
+    // Host CLI обновляется пользователем: жёсткий пин ломал бы чат при любом
+    // апгрейде. Protocol gate в initializeKimiAcp остаётся обязательным.
+    await checkVersion(config).catch((error) => {
+      log?.warn({ reason: error?.message }, 'Kimi host: pinned version gate пропущен, продолжаю по ACP protocol gate');
+    });
+  } else {
+    await checkVersion(config);
+  }
 
   const modelInfo = KIMI_MODELS.find((entry) => entry.id === model);
   if (!modelInfo) throw new Error(`Kimi model не прошла pinned catalog gate: ${model}`);
   if (effort && !modelInfo.efforts.includes(effort)) throw new Error(`Kimi effort не поддерживается: ${effort}`);
 
-  const runtimeBase = path.resolve(config.kimiRuntimeHome);
-  if (!String(chatKey || '').trim()) throw new Error('Kimi runtime требует server-owned chatKey');
-  const chatHash = createHash('sha256').update(String(chatKey)).digest('hex');
-  // Каждому чату — отдельный KIMI_CODE_HOME: shell/tool одной модели физически
-  // не может прочитать transcript/session state другого чата.
-  const runtimeHome = path.join(runtimeBase, 'chats', chatHash);
-  const brokerHome = path.join(runtimeBase, 'broker');
-  // Unix socket path на Linux ограничен 107 байтами. Короткий 80-bit id
-  // сохраняет уникальность запуска, не протаскивая UUID и длинные имена каталогов
-  // в оба socket path.
-  const runId = randomUUID().replaceAll('-', '').slice(0, 20);
-  const runDir = path.join(brokerHome, 'r', runId);
-  const egressDir = runDir;
-  const stagingParent = path.join(runDir, 'a');
-  await Promise.all([runtimeHome, brokerHome, egressDir, stagingParent]
-    .map((dir) => fs.mkdir(dir, { recursive: true, mode: 0o700 })));
-  const egressSocketPath = path.join(egressDir, KIMI_EGRESS_SOCKET_FILE);
-  const proxy = makeProxy({ socketPath: egressSocketPath });
+  // contained-only состояние: per-chat KIMI_CODE_HOME, broker, egress socket,
+  // staging вложений. Host-режим пишет сессии в реальный kimiHome и ничего из
+  // этого не создаёт.
+  let runtimeHome = null;
+  let brokerHome = null;
+  let runId = null;
+  let runDir = null;
+  let stagingParent = null;
+  let egressSocketPath = null;
+  let proxy = null;
+  if (launchMode === 'contained') {
+    const runtimeBase = path.resolve(config.kimiRuntimeHome);
+    if (!String(chatKey || '').trim()) throw new Error('Kimi runtime требует server-owned chatKey');
+    const chatHash = createHash('sha256').update(String(chatKey)).digest('hex');
+    // Каждому чату — отдельный KIMI_CODE_HOME: shell/tool одной модели физически
+    // не может прочитать transcript/session state другого чата.
+    runtimeHome = path.join(runtimeBase, 'chats', chatHash);
+    brokerHome = path.join(runtimeBase, 'broker');
+    // Unix socket path на Linux ограничен 107 байтами. Короткий 80-bit id
+    // сохраняет уникальность запуска, не протаскивая UUID и длинные имена каталогов
+    // в оба socket path.
+    runId = randomUUID().replaceAll('-', '').slice(0, 20);
+    runDir = path.join(brokerHome, 'r', runId);
+    const egressDir = runDir;
+    stagingParent = path.join(runDir, 'a');
+    await Promise.all([runtimeHome, brokerHome, egressDir, stagingParent]
+      .map((dir) => fs.mkdir(dir, { recursive: true, mode: 0o700 })));
+    egressSocketPath = path.join(egressDir, KIMI_EGRESS_SOCKET_FILE);
+    proxy = makeProxy({ socketPath: egressSocketPath });
+  }
   let staged = null;
   let child = null;
   let launch = null;
@@ -196,37 +224,57 @@ export async function runContainedKimi({
   const normalizeStep = createKimiStepNormalizer({ model, cwd, mode: permissionMode || 'manual' });
 
   try {
-    await proxy.start();
-    const gate = await preflight({
-      bubblewrap: { bwrapBin: config.kimiBwrapBin },
-      systemd: { systemdRunBin: config.kimiSystemdRunBin, systemctlBin: config.kimiSystemctlBin },
-      egress: { socketPath: egressSocketPath, allowlistVersion: KIMI_EGRESS_ALLOWLIST_VERSION },
-    });
-    if (gate.decision !== 'GO_CONTAINED_MVP') {
-      log?.error({ checks: gate.checks }, 'Kimi runtime security gate: NO_GO');
-      throw new Error('Kimi не запущен: security gate NO_GO');
+    if (proxy) {
+      await proxy.start();
+      const gate = await preflight({
+        bubblewrap: { bwrapBin: config.kimiBwrapBin },
+        systemd: { systemdRunBin: config.kimiSystemdRunBin, systemctlBin: config.kimiSystemctlBin },
+        egress: { socketPath: egressSocketPath, allowlistVersion: KIMI_EGRESS_ALLOWLIST_VERSION },
+      });
+      if (gate.decision !== 'GO_CONTAINED_MVP') {
+        log?.error({ checks: gate.checks }, 'Kimi runtime security gate: NO_GO');
+        throw new Error('Kimi не запущен: security gate NO_GO');
+      }
     }
 
     if (attachmentPaths.length) {
-      staged = await stageKimiAttachments({
-        allowedRoot: path.join(config.chatsDir, 'attachments'),
-        stagingParent,
-        manifest: attachmentPaths.map((sourcePath, index) => ({
-          id: `attachment-${index}`,
-          sourcePath,
-          name: path.basename(sourcePath),
-        })),
+      const allowedRoot = path.resolve(config.chatsDir, 'attachments');
+      if (launchMode === 'host') {
+        // Host-процесс читает вложения по исходным путям; staging не нужен, но
+        // корень всё равно проверяем — пути приходят от chat-модуля.
+        for (const sourcePath of attachmentPaths) {
+          const resolved = path.resolve(sourcePath);
+          if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) {
+            throw new Error('kimi_attachment_outside_root');
+          }
+        }
+      } else {
+        staged = await stageKimiAttachments({
+          allowedRoot,
+          stagingParent,
+          manifest: attachmentPaths.map((sourcePath, index) => ({
+            id: `attachment-${index}`,
+            sourcePath,
+            name: path.basename(sourcePath),
+          })),
+        });
+      }
+    }
+    if (launchMode === 'host') {
+      // extraDirs намеренно не передаются: у `kimi acp` нет --add-dir, а у ACP нет
+      // additionalDirs. Доступ за пределами cwd закрывает permission-система Kimi.
+      launch = await buildHost({ config, cwd, env });
+    } else {
+      const safeExtraDirs = extraDirs.filter((dir) => path.resolve(dir) !== path.resolve(config.chatsDir, 'attachments'));
+      launch = await buildLaunch({
+        config: { ...config, kimiRuntimeHome: runtimeHome, kimiRuntimeBroker: brokerHome },
+        cwd,
+        extraDirs: safeExtraDirs,
+        attachmentDir: staged?.stagingDir,
+        egressSocketPath,
+        unit: `cockpit-kimi-${runId}.service`,
       });
     }
-    const safeExtraDirs = extraDirs.filter((dir) => path.resolve(dir) !== path.resolve(config.chatsDir, 'attachments'));
-    launch = await buildLaunch({
-      config: { ...config, kimiRuntimeHome: runtimeHome, kimiRuntimeBroker: brokerHome },
-      cwd,
-      extraDirs: safeExtraDirs,
-      attachmentDir: staged?.stagingDir,
-      egressSocketPath,
-      unit: `cockpit-kimi-${runId}.service`,
-    });
     if (launch.rejectedExtraDirs?.length) {
       log?.warn({
         count: launch.rejectedExtraDirs.length,
@@ -240,7 +288,7 @@ export async function runContainedKimi({
     }
     child = spawnProcess(launch.command, launch.args, {
       cwd: launch.cwdReal,
-      env: kimiSystemdClientEnv(),
+      env: launchMode === 'host' ? launch.env : kimiSystemdClientEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const exit = waitForExit(child);
@@ -289,7 +337,7 @@ export async function runContainedKimi({
         try { client.notify('session/cancel', { sessionId }); } catch { /* transport уже закрыт */ }
       }
       setTimeout(() => {
-        stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin }).catch(() => {});
+        if (launch?.unit) stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin }).catch(() => {});
         child.kill('SIGTERM');
       }, 1_500).unref?.();
     };
@@ -297,7 +345,11 @@ export async function runContainedKimi({
     signal?.addEventListener('abort', abort, { once: true });
 
     const initialized = await initializeKimiAcp(client);
-    if (initialized?.protocolVersion !== 1 || initialized?.agentInfo?.version !== REQUIRED_KIMI_VERSION) {
+    // В host-режиме patch-версия host CLI не пинится (обновляет пользователь):
+    // проверяем только протокол. contained держит полный pinned contract.
+    const versionMatches = launchMode === 'host'
+      || initialized?.agentInfo?.version === REQUIRED_KIMI_VERSION;
+    if (initialized?.protocolVersion !== 1 || !versionMatches) {
       throw new Error('Kimi ACP protocol/version не совпал с pinned contract');
     }
     let currentSession = sessionId || '';
@@ -312,13 +364,23 @@ export async function runContainedKimi({
       await onSessionCreated?.(currentSession);
       sessionId = currentSession;
     }
-    await client.request('session/set_config_option', {
-      sessionId: currentSession, configId: 'model', value: model,
+    const setConfigOption = (configId, value) => client.request('session/set_config_option', {
+      sessionId: currentSession, configId, value,
     }, 15_000);
-    if (effort) {
-      await client.request('session/set_config_option', {
-        sessionId: currentSession, configId: 'thinking', value: effort,
-      }, 15_000);
+    if (launchMode === 'host') {
+      // Host config может не определять pinned id вида kimi-code/k3: модель/effort —
+      // best-effort, фактическую покажет /status. Отказ не должен валить ход.
+      await setConfigOption('model', model).catch((error) => {
+        log?.warn({ model, reason: error?.message }, 'Kimi host: модель не принята host config, остаётся default');
+      });
+      if (effort) {
+        await setConfigOption('thinking', effort).catch((error) => {
+          log?.warn({ effort, reason: error?.message }, 'Kimi host: effort не принят host config');
+        });
+      }
+    } else {
+      await setConfigOption('model', model);
+      if (effort) await setConfigOption('thinking', effort);
     }
     // ACP-режимов два: default и plan. Кокпит-режим «auto» сюда не маппится: это
     // политика ответов на permission-запросы (auto-approve.js), сам ACP остаётся
@@ -364,7 +426,7 @@ export async function runContainedKimi({
       }),
     ]);
     if (ended.signal === 'TIMEOUT') {
-      await stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin });
+      if (launch?.unit) await stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin });
       child.kill('SIGTERM');
     }
 
@@ -412,9 +474,9 @@ export async function runContainedKimi({
       if (launch?.unit) await stopUnit(launch.unit, { systemctlBin: config.kimiSystemctlBin });
       child.kill('SIGTERM');
     }
-    await proxy.close().catch(() => {});
+    await proxy?.close().catch(() => {});
     await staged?.cleanup?.().catch(() => {});
-    await fs.rm(runDir, { recursive: true, force: true }).catch(() => {});
+    if (runDir) await fs.rm(runDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 

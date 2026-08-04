@@ -89,3 +89,43 @@ test('typed no-progress stop identifies the exact reviewer node', () => {
   assert.match(stall.hint, /findings/);
   assert.equal(stall.comment, 'валидный regex всё ещё возвращает 422');
 });
+
+// Финал маршрута v2 — не обрыв. Формулировку движка поменяли, а сторож остался на
+// v1-строке: доведённый до конца прогон висел как «✖ оборвалась» с советом «запусти
+// заново» поверх уже закрытой попытки.
+test('завершённый маршрут v2 не считается обрывом', () => {
+  const stall = detectStall({
+    registry: { WF_STATUS: 'running', RETRO: 'done', RESULT: 'completed' },
+    daemonAlive: false,
+    logText: [
+      '2026-08-04 15:01:46 [t90002] route: узел retro: подготовка к исполнению',
+      '2026-08-04 15:04:26 [t90002] route: маршрут завершён; SHIP и RETRO подтверждены',
+      '',
+    ].join('\n'),
+  });
+  assert.equal(stall, null);
+});
+
+test('архивный журнал v1 по-прежнему читается как завершённый', () => {
+  const stall = detectStall({
+    registry: {},
+    daemonAlive: false,
+    logText: '2026-05-01 10:00:00 [t7001] конвейер завершён\n',
+  });
+  assert.equal(stall, null);
+});
+
+// Незакрытая лиза блокирует следующий прогон по тем же ресурсам, поэтому строка
+// «маршрут завершён, но…» обязана остаться видимой, а не тонуть в слове «завершён».
+test('маршрут, не отпустивший shared lease, остаётся видимым', () => {
+  const stall = detectStall({
+    registry: { WF_STATUS: 'running' },
+    daemonAlive: false,
+    logText: [
+      '2026-08-04 15:04:26 [t90003] route: маршрут завершён, но shared lease не освобождён (код 73)',
+      '',
+    ].join('\n'),
+  });
+  assert.equal(stall.kind, 'crashed');
+  assert.match(stall.detail, /shared lease не освобождён/);
+});

@@ -476,6 +476,26 @@ def pipeline_statuses(task, sandbox_status, profile=None, route=None):
     return st
 
 
+def work_timer(pf, st):
+    """Таймер чистой работы узлов без ворот — проекция route ledger (WORK_TIME_S).
+
+    Журнал пишет committed-секунды на каждом коммите; живой интервал текущего
+    узла дотикивается от WORK_TIMER_SINCE (эпоха последнего события журнала).
+    None — прогон не v2 или проекция ещё не построена (ворота старых прогонов
+    в elapsed не попали бы иначе: показывать «0:00» было бы враньём).
+    """
+    raw = pf.get('WORK_TIME_S', '')
+    if not raw.isdigit():
+        return None
+    elapsed = int(raw)
+    running = any(s == 'run' for nid, s in st.items()
+                  if not nid.startswith(('gate_', '_')))
+    since = pf.get('WORK_TIMER_SINCE', '')
+    if running and since.isdigit():
+        elapsed += max(0, int(time.time()) - int(since))
+    return {'elapsed': elapsed, 'running': running}
+
+
 # ---------- Конвейер фабрики: SVG-граф ----------
 
 # ---- Узлы: описание (вид, подпись, сноска). Координаты — НЕ здесь: они у каждого маршрута свои.
@@ -1265,6 +1285,9 @@ PROJECT_RULES
 .tmr .ic { vertical-align:0; }
 .tmr .tval { font-weight:600; }
 .tmr.on { color:var(--good); text-shadow:0 0 8px #39d35355; }
+/* Чистая работа узлов (проекция route ledger) — не путать с внешним B24-таймером */
+.tmr.wtm { color:var(--ink2); }
+.tmr.wtm.on { color:var(--info); text-shadow:0 0 8px #58a6ff55; }
 .ic { width:15px; height:15px; display:inline-block; vertical-align:-2px; }
 .runbtn { background:#39d3531a; border:1px solid var(--good); color:var(--good); border-radius:var(--r-md);
   cursor:pointer; padding:3px 12px; font:12px ui-monospace,monospace;
@@ -1598,6 +1621,16 @@ def render():
                          f'{ICON_CLOCK}<b class="tval">{fmt_hms(tmr["elapsed"])}</b></span>')
                 p.append(f'<button class="tbtn{on}" onclick="timerAct(\'{b["task"]}\',\'{act}\')" '
                          f'title="{hint}" aria-label="{hint} таймера задачи {b["task"]}">{btn}</button>')
+            wt = work_timer(pf_card, st)
+            if wt:
+                hint = 'чистая работа узлов без ворот'
+                gate_wait = pf_card.get('GATE_WAIT_S', '')
+                if gate_wait.isdigit() and int(gate_wait) > 0:
+                    hint += f' · ожидание ворот {fmt_hms(int(gate_wait))}'
+                on = ' on' if wt['running'] else ''
+                p.append(f'<span class="tmr wtm{on}" data-run="{1 if wt["running"] else 0}" '
+                         f'data-el="{wt["elapsed"]}" title="{hint}">'
+                         f'{ICON_CLOCK}<b class="tval">{fmt_hms(wt["elapsed"])}</b></span>')
             p.append('</span>')
 
             # ── Предупреждения собираем здесь, а показываем в подвале: в шапке они забивали заголовок

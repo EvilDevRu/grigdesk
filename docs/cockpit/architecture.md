@@ -207,6 +207,7 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 Python-dashboard тоже использует Cockpit `B24Client` и хранилище кредов, но держит отдельный
 cookie jar, чтобы два процесса не перезаписывали один файл. Прямых путей к внешнему checkout
 в рабочем коде нет; внешние host hooks/settings/containers находятся вне репозитория.
+Полный контракт авторизации, HTTP и мутаций — в [b24.md](b24.md).
 
 ## Плагины кокпита
 
@@ -252,7 +253,7 @@ plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ вхо
 
 ## Авто-шип фабрики
 
-SHIP-этап arsenkin-профиля публикует сам: чистка диффа → merge origin/master (конфликт →
-abort + пометка, решает PR) → тесты → коммит `Task NNNN - ...` (без Co-Authored-By) → push →
-`gh pr create` (существующий PR не дублирует) → `b24 comment` со ссылками → итог в ship.md.
-Права: PROFILE_AGENT_ALLOW += gh pr create/view/list, b24. Не запушил → SHIP failed.
+SHIP-этап публикует по правилам выбранного профиля: чистка диффа → интеграция с базовой
+веткой (конфликт → abort и отдельный PR) → тесты → коммит → push → создание или обновление
+PR → комментарий в настроенный трекер → итог в `ship.md`. Конкретные команды и разрешения
+принадлежат локальному профилю и не хардкодятся в Cockpit. Не запушил → SHIP failed.

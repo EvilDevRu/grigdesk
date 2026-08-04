@@ -3,6 +3,15 @@ import path from 'node:path';
 
 export const KIMI_AUTH_PROFILE_ID = 'kimi-code-oauth';
 export const KIMI_SECURITY_PROFILE = 'kimi-contained-v1';
+// Host-режим (kimiLaunchMode=host): прямой хост-процесс без namespace/cgroup/egress
+// allowlist. Отдельный profile id, потому что session bindings пинятся к профилю:
+// contained-сессии жили в per-chat runtime home и host-процессу недоступны, а значит
+// при смене режима binding обязан ротироваться, а не молча резюмить чужое состояние.
+export const KIMI_HOST_SECURITY_PROFILE = 'kimi-host-v1';
+
+export function kimiSecurityProfile(config) {
+  return config?.kimiLaunchMode === 'host' ? KIMI_HOST_SECURITY_PROFILE : KIMI_SECURITY_PROFILE;
+}
 
 // Каталог намеренно version-pinned к проверенному ACP runtime 0.31.1. Новые модели
 // добавляются только после обновления contract fixtures, а не молча из host config.

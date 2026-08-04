@@ -13,7 +13,8 @@ coverage и error policy; он описан в [multi-AI контракте дв
   Codex — `codex exec --json` / `codex exec resume`. По задаче cwd = первый worktree
   из exact-списка `REPO_COUNT`/`REPO_<i>_*`, остальные передаются через `--add-dir`.
   Для старых песочниц без `REPO_*` совместимо читаются `BE_WT` и `FE_WT`.
-  Без задачи cwd = `config.factoryHome`; страница «Агенты» переопределяет его на `agents/`.
+  Без задачи cwd = `config.rootDir` (корень репозитория кокпита — исполнитель сразу видит
+  корневые AGENTS.md/CLAUDE.md); страница «Агенты» переопределяет его на `agents/`.
   Codex работает в `workspace-write`: пишет в cwd и дополнительные `--add-dir`, но не получает
   полный доступ к хосту. `sandbox_workspace_write.network_access=true` разрешает сетевые
   команды внутри этой песочницы (`gh`, `git`, пакетные менеджеры).
@@ -22,12 +23,17 @@ coverage и error policy; он описан в [multi-AI контракте дв
 - **Доверенные каталоги** задаются один раз в «Настройки → Исполнители» и хранятся в
   `prefs.trustedDirectories`. Сервер проверяет realpath каждого существующего абсолютного
   каталога, не разрешает `/`, убирает дубли и перед каждым новым ходом добавляет список в
-  `extraDirs`. Claude и Codex превращают его в `--add-dir`. У `kimi acp` такого флага нет:
-  его sandbox монтирует каталоги writable bind-ом и объявляет их сессии через server-owned
+  `extraDirs`. Claude и Codex превращают его в `--add-dir`. У `kimi acp` такого флага нет.
+  Запуск Kimi имеет два режима (`config.kimiLaunchMode`, умолчание `host`): в host-режиме
+  Kimi — прямой хост-процесс (parity с claude: host fs/config/credentials, permission-система
+  самого CLI), и `extraDirs` ему недоступны — доступ за пределами cwd идёт через
+  permission-промпты. В contained-режиме sandbox монтирует каталоги writable bind-ом и
+  объявляет их сессии через server-owned
   `local.toml` (`[workspace] additional_dir`) в per-run каталоге-маске, заменяющем
   `<projectRoot>/.kimi-code` целиком (kimi-runtime-security.md). Доверенный каталог может
-  содержать сам репозиторий cockpit: server-owned control state внутри него (`chats/`,
-  `server/.state`, `.env`, runtime/factory state) прячется пустым read-only mount-ом.
+  содержать сам репозиторий cockpit: в contained-режиме server-owned control state внутри
+  него (`chats/`, `server/.state`, `.env`, runtime/factory state) прячется пустым read-only
+  mount-ом; в host-режиме этой маски нет — как у claude.
   Глобальные `~/.claude` и
   `~/.codex` Cockpit не переписывает, активный ход не меняется — следующий подхватывает
   настройку без рестарта.

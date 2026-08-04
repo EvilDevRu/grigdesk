@@ -219,3 +219,98 @@ test('status parser не подменяет точное измерение оц
   });
   assert.equal(parseStatus('broken', 262144).contextIsEstimate, true);
 });
+
+test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-ход и permissions без изменений', async (t) => {
+  const f = await fixture(t);
+  const process = new FakeAcpProcess();
+  const calls = { preflight: 0, proxy: 0, buildLaunch: 0, buildHost: 0, stopUnit: 0 };
+  const out = await runContainedKimi({
+    config: { ...f.config, kimiLaunchMode: 'host' },
+    // chatKey в host-режиме не нужен для состояния; передаём для parity с contained.
+    chatKey: 'chat-host-a',
+    cwd: f.cwd,
+    env: { PATH: '/usr/bin', CUSTOM_FLAG: '1' },
+    message: 'offline fake prompt',
+    model: 'kimi-code/k3',
+    effort: 'high',
+    permissionMode: 'default',
+    onPermission: async () => ({ allow: true }),
+    deps: {
+      // Host-режим: расхождение pinned версии — предупреждение, а не падение хода.
+      assertVersion: async () => { throw new Error('version mismatch'); },
+      createProxy: () => { calls.proxy += 1; throw new Error('host: proxy не должен создаваться'); },
+      preflight: async () => { calls.preflight += 1; throw new Error('host: preflight не должен вызываться'); },
+      buildLaunch: async () => { calls.buildLaunch += 1; throw new Error('host: contained builder не должен вызываться'); },
+      buildHostLaunch: async (options) => {
+        calls.buildHost += 1;
+        assert.equal(options.cwd, f.cwd);
+        assert.equal(options.env.CUSTOM_FLAG, '1');
+        return {
+          command: 'fake-host',
+          args: ['acp'],
+          env: { ...options.env, KIMI_CODE_HOME: f.config.kimiHome },
+          cwdReal: f.cwd,
+          unit: null,
+        };
+      },
+      spawn: (command, args, options) => {
+        assert.equal(command, 'fake-host');
+        assert.deepEqual(args, ['acp']);
+        assert.equal(options.cwd, f.cwd);
+        assert.equal(options.env.KIMI_CODE_HOME, f.config.kimiHome);
+        assert.equal(options.env.HTTPS_PROXY, undefined);
+        return process;
+      },
+      stopUnit: async () => { calls.stopUnit += 1; },
+    },
+  });
+  assert.equal(out.reply, 'Готово.');
+  assert.equal(out.sessionId, 'session-1');
+  assert.equal(out.contextTokens, 12_345);
+  assert.deepEqual(calls, { preflight: 0, proxy: 0, buildLaunch: 0, buildHost: 1, stopUnit: 0 });
+});
+
+test('host runtime: вложения идут по исходным путям, чужой корень отклоняется', async (t) => {
+  const f = await fixture(t);
+  const attachments = [path.join(f.config.chatsDir, 'attachments', 'note.txt')];
+  const process = new FakeAcpProcess();
+  const out = await runContainedKimi({
+    config: { ...f.config, kimiLaunchMode: 'host' },
+    chatKey: 'chat-host-b',
+    cwd: f.cwd,
+    env: {},
+    message: `прочти ${attachments[0]}`,
+    attachmentPaths: attachments,
+    model: 'kimi-code/k3',
+    permissionMode: 'default',
+    onPermission: async () => ({ allow: true }),
+    deps: {
+      assertVersion: async () => '0.31.1',
+      buildHostLaunch: async () => ({ command: 'fake-host', args: ['acp'], env: {}, cwdReal: f.cwd, unit: null }),
+      spawn: () => process,
+      stopUnit: async () => {},
+    },
+  });
+  assert.equal(out.reply, 'Готово.');
+  // Staging не выполнялся: текст сообщения с исходным путём дошёл до агента как есть.
+  const prompt = process.messages.find((message) => message.method === 'session/prompt');
+  assert.ok(prompt.params.prompt[0].text.includes(attachments[0]));
+
+  await assert.rejects(
+    runContainedKimi({
+      config: { ...f.config, kimiLaunchMode: 'host' },
+      chatKey: 'chat-host-c',
+      cwd: f.cwd,
+      env: {},
+      message: 'x',
+      attachmentPaths: ['/etc/passwd'],
+      model: 'kimi-code/k3',
+      deps: {
+        assertVersion: async () => '0.31.1',
+        buildHostLaunch: async () => { throw new Error('до launch недоходим'); },
+        spawn: () => { throw new Error('до spawn недоходим'); },
+      },
+    }),
+    /kimi_attachment_outside_root/,
+  );
+});

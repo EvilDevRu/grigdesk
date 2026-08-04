@@ -151,7 +151,15 @@ function addMount(args, kind, source, destination, madeDirs) {
 }
 
 async function canonicalDirectory(candidate, label) {
-  const real = await fs.realpath(candidate);
+  // Отсутствующий путь и «файл вместо каталога» — один и тот же отказ и должны
+  // называться одинаково: сырой ENOENT из realpath уезжал наружу мимо именованных
+  // причин, и вызывающий не мог отличить битый cwd от поломки рантайма.
+  let real;
+  try {
+    real = await fs.realpath(candidate);
+  } catch (error) {
+    throw new Error(`${label}_not_directory`, { cause: error });
+  }
   if (!(await fs.stat(real)).isDirectory()) throw new Error(`${label}_not_directory`);
   return real;
 }
@@ -412,8 +420,10 @@ export function kimiSystemdClientEnv(source = process.env) {
 }
 
 export {
+  assertExecutable,
   assertPrivateCredentialDir,
   buildWorkspaceLocalToml,
+  canonicalDirectory,
   resolveVisibleProjectRoot,
   WORKSPACE_LOCAL_TOML_FILE,
   WORKSPACE_MASK_DIR,

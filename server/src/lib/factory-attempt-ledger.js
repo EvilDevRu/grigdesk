@@ -175,8 +175,13 @@ function parseProfileContract(text) {
     const fields = line.split('\t');
     const key = fields.shift();
     if (key === 'repo') {
-      if (fields.length !== 3) fail('profile contract: invalid repo');
-      repositories.push({ name: fields[0], source: fields[1], workspace: fields[2] });
+      // Три поля — манифест, записанный до пина ветки на репозиторий: ветка там
+      // общая и лежит в singleton source-branch. Такие попытки уже завершены, но
+      // журнал читается и по ним, поэтому форма остаётся допустимой.
+      if (fields.length !== 3 && fields.length !== 4) fail('profile contract: invalid repo');
+      repositories.push({
+        name: fields[0], source: fields[1], workspace: fields[2], branch: fields[3] ?? null,
+      });
     } else if (key === 'exclusive-resource') {
       if (fields.length !== 1 || !fields[0]) fail('profile contract: invalid resource');
       resources.push(fields[0]);
@@ -212,13 +217,21 @@ function parseProfileContract(text) {
   }
   const names = new Set();
   for (const repo of repositories) {
+    // У манифеста старой формы своей ветки нет — там она общая, из source-branch.
+    if (repo.branch === null) repo.branch = sourceBranch;
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(repo.name) || names.has(repo.name)
         || !path.isAbsolute(repo.source) || !path.isAbsolute(repo.workspace)
-        || /[\n\t]/.test(repo.source) || /[\n\t]/.test(repo.workspace)) {
+        || /[\n\t]/.test(repo.source) || /[\n\t]/.test(repo.workspace)
+        || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,79}$/.test(repo.branch)
+        || repo.branch.includes('..')) {
       fail('profile contract: invalid repository topology');
     }
     if (workspaceMode === 'shared' && repo.source !== repo.workspace) {
       fail('profile contract: shared source/workspace mismatch');
+    }
+    // В isolated ветка — имя вновь создаваемой ветки задачи, одной на всю попытку.
+    if (workspaceMode !== 'shared' && repo.branch !== sourceBranch) {
+      fail('profile contract: isolated attempt pins more than one branch');
     }
     names.add(repo.name);
   }
@@ -364,7 +377,7 @@ export function verifyFactoryAttemptEnvironment(trusted, env) {
     if (env[`REPO_${index}_NAME`] !== repo.name
         || env[`REPO_${index}_SOURCE`] !== repo.source
         || env[`REPO_${index}_WT`] !== repo.workspace
-        || env[`REPO_${index}_BRANCH`] !== trusted.sourceBranch) {
+        || env[`REPO_${index}_BRANCH`] !== repo.branch) {
       fail('sandbox env repository topology disagrees with trusted profile contract');
     }
   }
