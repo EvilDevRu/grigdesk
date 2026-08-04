@@ -141,6 +141,13 @@ const boardChipTitle = computed(() => {
 // Считает вотчер оповещений: он и так обходит все задачи, второго обхода не заводим.
 const notifyWatch = useNotifyWatchStore();
 notifyWatch.start();
+const pipelineBadgeStyle = computed(() => {
+  const s = notifyWatch.badgeSummary;
+  return {
+    '--pipeline-error-end': `${s.errorEnd}%`,
+    '--pipeline-waiting-end': `${s.waitingEnd}%`,
+  };
+});
 
 const badges = computed(() => {
   const out = {};
@@ -154,9 +161,11 @@ const badges = computed(() => {
   if (notifyWatch.attentionCount) {
     out['/pipeline'] = {
       n: notifyWatch.attentionCount,
-      // Вставший конвейер тревожнее ждущих ворот: у ворот есть кнопка, а тут — авария.
-      // Зависший ход туда же: он жжёт лимит этапа прямо сейчас.
-      kind: notifyWatch.stalled.length || notifyWatch.silent.length ? 'stall' : 'wait',
+      kind: 'pipeline',
+      // Вставший конвейер тревожнее ждущих ворот. Класс задаёт только цвет пульса,
+      // сам круг теперь всегда сохраняет все красные, жёлтые и синие доли.
+      pulseKind: notifyWatch.badgeSummary.errorCount ? 'stall' : 'wait',
+      style: pipelineBadgeStyle.value,
       title: notifyWatch.attentionTitle,
     };
   }
@@ -234,9 +243,13 @@ const { connected } = useSse((name) => {
               <span v-if="boardNavActivity.unseenCount && boardNavActivity.activeTimerCount"
                     class="boardnew" aria-hidden="true"></span>
             </span>
-            <!-- Требует человека: жёлтый — работа стоит и ждёт меня (вопрос агента,
-                 ворота конвейера), красный — конвейер встал, синий — непрочитанное -->
-            <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
+            <!-- У конвейера цветной круг показывает состав: красный — аварии, жёлтый —
+                 готовые задачи на воротах, синий — ещё выполняются. Число внутри не
+                 включает синие задачи. У остальных разделов чип остаётся одноцветным. -->
+            <span v-if="badges[item.to]" class="navbadge"
+                  :class="[badges[item.to].kind, badges[item.to].pulseKind]"
+                  :style="badges[item.to].style"
+                  role="status" :aria-label="badges[item.to].title"
                   :title="badges[item.to].title">{{ badges[item.to].n }}</span>
           </span>
           <span class="lbl">{{ item.label }}</span>
@@ -490,6 +503,21 @@ const { connected } = useSse((name) => {
 .navbadge.wait, .navbadge.stall { animation: badgepulse 1.9s ease-in-out infinite; }
 .navbadge.wait { background: var(--warn, #e0a33a); color: #1a1206; --pulse: var(--warn, #e0a33a); }
 .navbadge.stall { background: var(--bad, #f0564c); color: #fff; --pulse: var(--bad, #f0564c); }
+/* Составной чип — кольцо, чтобы число читалось одинаково и на красном, и на жёлтом.
+   Границы секторов приходят из реальных количеств; синий входит в знаменатель круга,
+   но не в число по центру. */
+.navbadge.pipeline {
+  width: 18px; min-width: 18px; height: 18px; padding: 0; color: #fff;
+  font-size: 9px; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px #000, 0 0 2px #000;
+  background:
+    radial-gradient(circle, var(--sidebar) 0 42%, transparent 48%),
+    conic-gradient(
+      var(--bad, #f0564c) 0 var(--pipeline-error-end),
+      var(--warn, #e0a33a) var(--pipeline-error-end) var(--pipeline-waiting-end),
+      var(--accent) var(--pipeline-waiting-end) 100%
+    );
+}
 @keyframes badgepulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse, var(--warn, #e0a33a)) 65%, transparent); }
   60% { box-shadow: 0 0 0 5px transparent; }

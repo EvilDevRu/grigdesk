@@ -9,6 +9,7 @@ import { api } from '../shared/api-client.js';
 import { notify } from '../shared/notify.js';
 import { waitingReason } from '../shared/pipeline-wait.js';
 import { silenceReason } from '../shared/agent-activity.js';
+import { pipelineBadgeSummary } from '../shared/pipeline-nav-badge.js';
 
 let started = false;
 let checking = false;
@@ -16,16 +17,17 @@ const notified = new Set(); // задачи, о которых уже звони
 const silenceNotified = new Set(); // то же для молчащих ходов, ключ «задача:этап»
 
 export const useNotifyWatchStore = defineStore('notifyWatch', {
-  // Три разные беды, поэтому и три списка: waiting — конвейер стоит на воротах и ждёт
+  // Три разные беды плюс обычная работа, поэтому списки раздельные: waiting — конвейер стоит на воротах и ждёт
   // РЕШЕНИЯ (это штатно, в интерфейсе есть кнопка); stalled — движок упёрся или оборвался
   // (кнопки нет, надо разбираться); silent — формально всё идёт, но агент молчит дольше
   // порога, и без звонка это заметно только по сгоревшему лимиту этапа. Смешивать их
-  // в одну цифру нельзя.
-  state: () => ({ waiting: [], stalled: [], silent: [] }),
+  // в одну цифру нельзя. running нужен только синему сектору и в цифру внимания не входит.
+  state: () => ({ waiting: [], stalled: [], silent: [], running: [] }),
   getters: {
-    // Цифра чипа: сколько ЗАДАЧ требуют человека. Задача может одновременно ждать у ворот
-    // и числиться вставшей — в чипе она одна.
-    attentionCount: (s) => new Set([...s.waiting, ...s.stalled, ...s.silent].map((x) => x.task)).size,
+    // Число в центре — только задачи, требующие человека. Обычные живые ходы участвуют
+    // в синем секторе круга, но это число не увеличивают.
+    badgeSummary: (s) => pipelineBadgeSummary(s),
+    attentionCount() { return this.badgeSummary.attentionCount; },
     // Подсказка чипа: сводка + поимённо, чтобы не открывать конвейер ради «кто именно».
     attentionTitle: (s) => {
       const lines = [];
@@ -40,6 +42,13 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
       if (s.silent.length) {
         lines.push(`💤 молчат: ${s.silent.length}`);
         lines.push(...s.silent.map((x) => `#${x.task}: ${x.text}`));
+      }
+      const summary = pipelineBadgeSummary(s);
+      if (summary.runningCount) {
+        const attention = new Set([...s.waiting, ...s.stalled, ...s.silent].map((x) => x.task));
+        const running = s.running.filter((x) => !attention.has(x.task));
+        lines.push(`🔵 в работе: ${summary.runningCount}`);
+        lines.push(...running.map((x) => `#${x.task}`));
       }
       return lines.join('\n');
     },
@@ -66,8 +75,10 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         const waiting = [];
         const stalled = [];
         const silentRuns = [];
+        const running = [];
         for (const t of tasks || []) {
           const id = String(t.task);
+          if (t.daemonAlive) running.push({ task: id });
           // Затык виден уже в сводке задачи — графа для него не нужно.
           if (t.stall) stalled.push({ task: id, kind: t.stall.kind, title: t.stall.title });
           const q = silenceReason(t, silenceWindow);
@@ -96,6 +107,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         this.waiting = waiting;
         this.stalled = stalled;
         this.silent = silentRuns;
+        this.running = running;
       } catch { /* сервер недоступен — оставляем прошлую картину, проверим в следующий раз */ }
       finally { checking = false; }
     },
