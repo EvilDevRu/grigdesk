@@ -7,23 +7,22 @@ runner_kimi_probe() {
   local version
   command -v kimi >/dev/null 2>&1 || return 4
   version=$(factory_exec provider kimi --version) || return
-  # Fail-closed пин 0.31.1 (KIMI.md): `kimi upgrade` кладёт kimi.bak и молча ломает
-  # пин, поэтому другая версия остаётся недоступной, пока сигнатуры classify не
-  # пересмотрены под новый CLI.
-  [[ "$version" =~ (^|[[:space:]])0\.31\.1([[:space:]]|$) ]] || return 4
+  # Версия — диагностика конкретного run, а не допуск. Совместимость Kimi
+  # обеспечивают terminal CAS и fail-closed classify: незнакомый отказ остаётся
+  # unknown и не запускает стадию повторно только из-за смены semver.
   printf '%s\n' "$version"
 }
 
 runner_kimi_catalog() {
   # Живого machine-readable каталога у CLI нет; pinned models.tsv по KIMI.md
   # (managed:kimi-code, default kimi-code/k3). Release — порядок предпочтения,
-  # default-модель выше. Окно совместимости min=max=0.31.1 — тот же fail-closed
-  # пин, что в probe/classify.
+  # default-модель выше. `*` в границах runtime означает совместимость по
+  # контракту потока и классификатора, а не разрешение угадывать новые ошибки.
   printf '%s\n' \
-    $'kimi-code/k3\tkimi\tk3\t1\tdefault\t100\t1\t0\t1\t0.31.1\t0.31.1' \
-    $'kimi-code/k3-256k\tkimi\tk3\t1\tdefault\t90\t1\t0\t1\t0.31.1\t0.31.1' \
-    $'kimi-code/kimi-for-coding\tkimi\tkimi-for-coding\t1\tdefault\t80\t1\t0\t1\t0.31.1\t0.31.1' \
-    $'kimi-code/kimi-for-coding-highspeed\tkimi\tkimi-for-coding-highspeed\t1\tdefault\t70\t1\t0\t1\t0.31.1\t0.31.1'
+    $'kimi-code/k3\tkimi\tk3\t1\tdefault\t100\t1\t0\t1\t*\t*' \
+    $'kimi-code/k3-256k\tkimi\tk3\t1\tdefault\t90\t1\t0\t1\t*\t*' \
+    $'kimi-code/kimi-for-coding\tkimi\tkimi-for-coding\t1\tdefault\t80\t1\t0\t1\t*\t*' \
+    $'kimi-code/kimi-for-coding-highspeed\tkimi\tkimi-for-coding-highspeed\t1\tdefault\t70\t1\t0\t1\t*\t*'
 }
 
 runner_kimi_default_policy() {
@@ -50,8 +49,8 @@ runner_kimi_capabilities() {
 # Поэтому effort применяется через per-run home: копия config.toml с переписанной
 # секцией [thinking], credentials/oauth — symlink на дефолтный home (OAuth refresh
 # обязан попадать в общее хранилище). CLI невалидный effort молча нормализует в high
-# (spike 2026-08-03, migrations-effort.json), поэтому набор low|high|max пиннутого
-# CLI проверяется здесь fail-closed, до вызова модели.
+# (spike 2026-08-03, migrations-effort.json), поэтому набор low|high|max раннер
+# проверяет здесь fail-closed, до вызова модели.
 _runner_kimi_prepare_home() {
   local run_home=$1 effort=$2
   local default_home=${KIMI_CODE_HOME:-"${HOME:?HOME or KIMI_CODE_HOME is required}/.kimi-code"}
@@ -177,15 +176,15 @@ PYTHON
 }
 
 runner_kimi_classify() {
-  local run_dir=$1 rc=$2 version verified source_kind
+  local run_dir=$1 rc=$2 verified source_kind
   [[ "$rc" == 0 ]] && { printf 'ok\n'; return; }
   [[ "$rc" == 124 ]] && { printf 'timeout\n'; return; }
-  version=$(_runner_kimi_meta "$run_dir" CLI_VERSION)
   verified=$(_runner_kimi_meta "$run_dir" FIXTURE_VERIFIED)
   source_kind=$(_runner_kimi_meta "$run_dir" SOURCE)
-  [[ "$version" == 0.31.1 ]] || { printf 'unknown\n'; return; }
   # Любая сигнатура допускается только из runtime или проверенной fixture.
-  # Непроверенный текст ошибки остаётся unknown и никогда не меняет ИИ.
+  # Непроверенный текст ошибки остаётся unknown и никогда не меняет ИИ. Версия
+  # намеренно не участвует: одинаковая доказанная сигнатура плюс отсутствие
+  # model/tool activity безопасны при любом semver; новая форма уйдёт в unknown.
   if [[ "$verified" != 1 && "$source_kind" != runtime ]]; then
     printf 'unknown\n'
     return

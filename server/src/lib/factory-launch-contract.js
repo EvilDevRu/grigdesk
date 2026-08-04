@@ -11,6 +11,11 @@ const TASK_RE = /^[1-9][0-9]{0,18}$/;
 const REPOSITORY_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 const DIAGNOSIS_KINDS = new Set(['functional', 'performance', 'data', 'integration']);
+// Дополнительные действия доставки, которые профиль может разрешить прогону. Словарь
+// принадлежит движку (factory-context DELIVERY_ACTIONS минус обязательная для publish
+// тройка commit/push/pull-request); здесь он продублирован fail-closed, чтобы профиль
+// не смог закрепить в immutable contract попытки действие, которого движок не знает.
+const OPTIONAL_DELIVERY_ACTIONS = new Set(['task-comment']);
 
 // profile.sh — trusted executable configuration, которую всё равно source-ит factory.
 // Аргументы идут позиционно, а не интерполируются в shell source.
@@ -23,7 +28,11 @@ delivery=""
 if declare -F profile_delivery_targets >/dev/null; then
   delivery=$(profile_delivery_targets "$2") || exit 4
 fi
-printf '%s\036%s\036%s' "$repositories" "$delivery" "$PROFILE_TRIAGE_REPOS"
+delivery_actions=""
+if declare -F profile_delivery_actions >/dev/null; then
+  delivery_actions=$(profile_delivery_actions "$2") || exit 5
+fi
+printf '%s\036%s\036%s\036%s' "$repositories" "$delivery" "$PROFILE_TRIAGE_REPOS" "$delivery_actions"
 `;
 
 export class FactoryLaunchContractError extends Error {
@@ -59,6 +68,9 @@ function validBranch(branch) {
  * Читает generic repository topology и целевые ветки Cockpit из профиля.
  * `profile_delivery_targets` не ослабляет engine contract: сервер передаёт каждую
  * настроенную ветку движку явным `--delivery-target`, но браузер их не выбирает.
+ * Опциональный `profile_delivery_actions` (по строке на действие) решает, какие
+ * дополнительные действия доставки разрешены publish-прогону; без хука разрешена
+ * только обязательная тройка commit/push/pull-request.
  */
 export async function loadFactoryLaunchProfile(config, profile, task) {
   profile = String(profile || '');
@@ -87,8 +99,16 @@ export async function loadFactoryLaunchProfile(config, profile, task) {
   });
 
   const sections = stdout.split(RECORD_SEPARATOR);
-  if (sections.length !== 3) fail('profile.sh вернул неоднозначный launch contract');
-  const [repositoriesRaw, targetsRaw, triageRaw] = sections;
+  if (sections.length !== 4) fail('profile.sh вернул неоднозначный launch contract');
+  const [repositoriesRaw, targetsRaw, triageRaw, deliveryActionsRaw] = sections;
+  const deliveryActions = [];
+  for (const action of outputLines(deliveryActionsRaw, 'profile_delivery_actions')) {
+    if (!OPTIONAL_DELIVERY_ACTIONS.has(action) || deliveryActions.includes(action)) {
+      fail(`profile_delivery_actions: неизвестное или повторное действие ${action}`);
+    }
+    deliveryActions.push(action);
+  }
+  deliveryActions.sort();
   const repositories = [];
   const names = new Set();
   for (const line of outputLines(repositoriesRaw, 'profile_repositories')) {
@@ -135,6 +155,7 @@ export async function loadFactoryLaunchProfile(config, profile, task) {
       triageKey: triageBySource.get(repo.source) || null,
       targetBranch: targets.get(repo.name) || '',
     })),
+    deliveryActions,
   };
 }
 
@@ -186,6 +207,7 @@ export function normalizeFactoryLaunchInputs({
   instrumentationFiles = [],
   diagnosisKind = '',
   diagnosisSignal = '',
+  profileDeliveryActions = [],
 }) {
   if (!['publish', 'disabled'].includes(deliveryMode)) fail('маршрут не объявил delivery mode');
   const repoList = Array.isArray(repositories) ? repositories : [];
@@ -244,6 +266,9 @@ export function normalizeFactoryLaunchInputs({
     deliveryTargets: deliveryMode === 'publish'
       ? repoList.map((repo) => `${repo.name}=${configuredTargets.get(repo.name)}`)
       : [],
+    // Дополнительные действия доставки — решение профиля (`profile_delivery_actions`),
+    // а не кокпита: движок выдаёт `task-comment` только по явному флагу.
+    taskComment: deliveryMode === 'publish' && profileDeliveryActions.includes('task-comment'),
     instrumentationFiles: [...instrumentation].sort(),
     diagnosisKind,
     diagnosisSignal,

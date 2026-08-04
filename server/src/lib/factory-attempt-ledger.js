@@ -253,6 +253,76 @@ function projectionTerminal(result) {
   return null;
 }
 
+// Каноническая форма runtime-проекции журнала этапов: json.dumps(sort_keys,
+// separators=(",",":"), ensure_ascii=False) + "\n" — байт в байт как digest_value
+// движка (engine/lib/attempt-stage-state.sh). Чисел с плавающей точкой в схеме нет,
+// поэтому JSON.stringify за терминал достаточно.
+function canonicalJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.keys(value).sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+    .join(',')}}`;
+}
+
+const NODE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+const CURSOR_STOP_TARGETS = new Set(['human', 'failed', 'done', 'rewind-limit', 'no-progress']);
+
+function validCursorReason(value) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 500
+    && ![...value].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
+}
+
+/**
+ * Курсор журнала этапов (stage-results/runtime.json): где маршрут реально стоит.
+ * Это единственный проверяемый источник «ждут ли ворота решения»: реестровая
+ * проекция может опережать журнал (статус узла записан, коммит не лёг — t8164).
+ * Отсутствие файла — норма для молодой попытки до инициализации курсора (null);
+ * битый конверт/контрольная сумма — порча trusted ledger и fail-closed.
+ */
+function validateStageRuntime(envelope, task, attempt) {
+  exactKeys(envelope, ['checksum', 'runtime'], 'stage runtime');
+  if (!HASH_RE.test(envelope.checksum || '')) fail('stage runtime: invalid checksum');
+  const actual = createHash('sha256')
+    .update(`${canonicalJson(envelope.runtime)}\n`, 'utf8')
+    .digest('hex');
+  if (actual !== envelope.checksum) fail('stage runtime: checksum mismatch');
+  const { runtime } = envelope;
+  exactKeys(runtime, [
+    'schema', 'protocolVersion', 'taskId', 'attemptId', 'profile', 'catalogHash',
+    'route', 'routeHash', 'entry', 'sequence', 'headEventHash', 'cursor',
+  ], 'stage runtime');
+  if (runtime.schema !== 1 || runtime.protocolVersion !== 2
+      || runtime.taskId !== task || runtime.attemptId !== attempt
+      || !PROFILE_RE.test(runtime.profile || '') || !HASH_RE.test(runtime.catalogHash || '')
+      || !ROUTE_RE.test(runtime.route || '') || !HASH_RE.test(runtime.routeHash || '')
+      || !NODE_ID_RE.test(runtime.entry || '')
+      || !Number.isSafeInteger(runtime.sequence) || runtime.sequence < 0
+      || !HASH_RE.test(runtime.headEventHash || '')) {
+    fail('stage runtime: identity mismatch');
+  }
+  const { cursor } = runtime;
+  exactKeys(cursor, ['currentNode', 'lastCommit', 'pauseReason', 'state', 'stop'], 'stage runtime cursor');
+  const executableNode = NODE_ID_RE.test(cursor.currentNode || '');
+  const validState = cursor.state === 'ready'
+    ? executableNode && cursor.stop === null && cursor.pauseReason === null
+    : cursor.state === 'paused'
+      ? executableNode && cursor.stop === null && validCursorReason(cursor.pauseReason)
+      : cursor.state === 'stopped'
+        ? cursor.currentNode === null && cursor.pauseReason === null
+          && CURSOR_STOP_TARGETS.has(cursor.stop)
+        : false;
+  if (!validState) {
+    fail('stage runtime cursor: identity mismatch');
+  }
+  return {
+    node: cursor.currentNode,
+    state: cursor.state,
+    stop: cursor.stop,
+    pauseReason: cursor.pauseReason,
+  };
+}
+
 /**
  * Read and verify the engine-owned attempt ledger. Provider-writable `.pipeline`
  * is accepted only as a projection whose pinned identity and terminal class match.
@@ -338,6 +408,23 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   );
   const contract = parseProfileContract(contractBytes.toString('utf8'));
 
+  // Курсор — проекция журнала этапов. Молодая попытка до инициализации курсора
+  // файла ещё не имеет: null, а не отказ — иначе вновь запущенная задача на
+  // минуты стала бы read-only.
+  let cursor = null;
+  const stageResultsDir = path.join(attemptDir, 'stage-results');
+  if (await fs.lstat(stageResultsDir).then(
+    (stat) => stat.isDirectory() && !stat.isSymbolicLink(),
+    () => false,
+  )) {
+    await trustedDirectory(stageResultsDir, 'stage results');
+    const runtimeFile = path.join(stageResultsDir, 'runtime.json');
+    if (await fs.lstat(runtimeFile).then(() => true, () => false)) {
+      const { value } = await regularJson(runtimeFile, 'stage runtime');
+      cursor = validateStageRuntime(value, task, attempt);
+    }
+  }
+
   if (registry.PROFILE !== attemptState.profile || registry.ROUTE !== routePin.routeId
       || registry.ROUTE_HASH !== routePin.routeHash
       || projectionTerminal(registry.RESULT) !== terminal) {
@@ -347,12 +434,14 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   return {
     task,
     attempt,
+    createdAt: attemptState.createdAt,
     profile: attemptState.profile,
     catalogHash: attemptState.catalogHash,
     route: routePin.routeId,
     routeHash: routePin.routeHash,
     terminal,
     terminalRecord,
+    cursor,
     ...contract,
   };
 }

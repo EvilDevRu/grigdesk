@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir, mkdtemp, rm, stat, utimes, writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +10,7 @@ import {
   activeRunnerReason,
   loadRunnerConfig,
   readRunnerAttempts,
+  readRunnerWorkTime,
   resolveRunnerState,
 } from '../../server/src/lib/runner-state.js';
 
@@ -120,4 +123,54 @@ test('runner config and attempts are read from canonical profile files', async (
       reason: 'fallback_limit', result: 'ok', rc: 0, source: 'runtime',
     },
   ]);
+});
+
+test('runner work time sums process spans instead of gaps between route events', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runner-work-time-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stateDir = path.join(root, 'state');
+
+  async function completed(stage, id, durationMs) {
+    const runDir = path.join(stateDir, 'logs', 'runs', 't8164', stage, id);
+    await mkdir(runDir, { recursive: true });
+    const meta = path.join(runDir, 'meta.env');
+    await writeFile(meta, [
+      'SCHEMA=1', 'TASK=8164', `STAGE=${stage}`, `RUN_ID=${id}`,
+      'RESULT_CLASS=ok', 'RC=0', '',
+    ].join('\n'));
+    const started = (await stat(runDir)).birthtimeMs;
+    const finished = new Date(Math.ceil(started / 1000) * 1000 + durationMs);
+    await utimes(meta, finished, finished);
+    return (await stat(meta)).mtimeMs - started;
+  }
+
+  const buildMs = await completed('BUILD', 'run-build', 5 * 60 * 1000);
+  const lintMs = await completed('LINT', 'run-lint', 3 * 60 * 1000);
+  // Scout и календарная пауза между двумя route events в этот счётчик не входят.
+  await completed('SCOUT', 'run-scout', 60 * 60 * 1000);
+  const activeDir = path.join(
+    stateDir, 'logs', 'runs', 't8164', 'REVIEW', 'run-review-active',
+  );
+  await mkdir(activeDir, { recursive: true });
+  const activeStarted = (await stat(activeDir)).birthtimeMs;
+
+  assert.deepEqual(await readRunnerWorkTime(
+    stateDir,
+    '8164',
+    ['BUILD', 'LINT', 'REVIEW'],
+    {
+      sinceMs: activeStarted - 60_000,
+      activeRuns: { REVIEW: 'run-review-active' },
+    },
+  ), {
+    workSec: Math.floor((buildMs + lintMs) / 1000),
+    runningSinceMs: activeStarted,
+    completedRuns: 2,
+  });
+  assert.equal(await readRunnerWorkTime(
+    stateDir,
+    '8164',
+    ['BUILD', 'LINT'],
+    { sinceMs: Date.now() + 60_000 },
+  ), null, 'run-каталоги предыдущей attempt не попадают в новый счётчик');
 });

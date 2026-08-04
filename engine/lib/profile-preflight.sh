@@ -44,6 +44,7 @@ profile_runner_host_preflight() {
   local family version variant exact defaults
   local probe_output runner_version
   declare -A preflight_probe_ready=()
+  declare -A preflight_structural_ready=()
   providers=$(mktemp "$coverage_dir/.providers.XXXXXX") || return 78
   plans=$(mktemp "$coverage_dir/.plans.XXXXXX") || {
     rm -f -- "$providers"
@@ -89,8 +90,10 @@ profile_runner_host_preflight() {
     if runner_registry_has "$provider" && runner_contract_check "$provider" &&
        _multi_catalog_model "$provider" "$family" "$version" "$variant" "$exact" "$runner_version"; then
       structural_level=native
+      preflight_structural_ready["$provider"]=1
     else
       structural_level=unavailable
+      preflight_structural_ready["$provider"]=0
     fi
     _multi_catalog_cleanup
     printf '%s\tRUNNER\t%s\t%s\n' "$profile" "$provider" "$structural_level" >>"$plans"
@@ -104,7 +107,7 @@ profile_runner_host_preflight() {
     return 78
   }
 
-  local unavailable=0 total=0
+  local unavailable=0 total=0 unavailable_runners=""
   while IFS= read -r provider; do
     [[ -n "$provider" ]] || continue
     total=$((total + 1))
@@ -114,6 +117,14 @@ profile_runner_host_preflight() {
     else
       host_status=unavailable
       unavailable=$((unavailable + 1))
+    fi
+    if [[ "$host_status" == unavailable ||
+          "${preflight_structural_ready[$provider]:-0}" != 1 ]]; then
+      if [[ -n "$unavailable_runners" ]]; then
+        unavailable_runners+=",$provider"
+      else
+        unavailable_runners=$provider
+      fi
     fi
     printf 'runner\t%s\t%s\n' "$provider" "$host_status" >>"$results"
   done <"$providers"
@@ -135,8 +146,9 @@ profile_runner_host_preflight() {
   {
     printf 'SCHEMA=1\nKIND=host\nHASH=%s\nSTRUCTURAL_HASH=%s\n' \
       "$host_hash" "$structural_hash"
-    printf 'CATALOG_REVISION=%s\nTOTAL=%s\nUNAVAILABLE=%s\nFETCHED_AT=%s\nEXPIRES_AT=%s\n' \
-      "$revision" "$total" "$unavailable" "$now" "$((now + ttl))"
+    printf 'CATALOG_REVISION=%s\nTOTAL=%s\nUNAVAILABLE=%s\nUNAVAILABLE_RUNNERS=%s\n' \
+      "$revision" "$total" "$unavailable" "$unavailable_runners"
+    printf 'FETCHED_AT=%s\nEXPIRES_AT=%s\n' "$now" "$((now + ttl))"
   } >"$tmp" || {
     rm -f -- "$tmp" "$providers" "$plans" "$results"
     return 78

@@ -84,7 +84,8 @@ kimi_unknown="$TEST_ROOT/kimi-unknown-version"
 cp -a "$FACTORY_TESTS_HOME/fixtures/classifiers/kimi-no-login" "$kimi_unknown"
 sed -i 's/CLI_VERSION=.*/CLI_VERSION=999.0.0/' "$kimi_unknown/meta.env"
 actual=$(runner_call kimi classify "$kimi_unknown" 1)
-assert_eq unknown "$actual" "unknown Kimi CLI version fails closed"
+assert_eq provider_unavailable "$actual" \
+  "new Kimi semver preserves a proven no-activity classifier signature"
 
 kimi_unverified="$TEST_ROOT/kimi-unverified-fixture"
 cp -a "$FACTORY_TESTS_HOME/fixtures/classifiers/kimi-no-login" "$kimi_unverified"

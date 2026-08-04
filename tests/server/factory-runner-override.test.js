@@ -186,6 +186,7 @@ async function fixture(t) {
   // Проекция графа проверяется своими тестами; здесь важны guard'ы endpoint'а,
   // поэтому узел подставляется управляемым двойником.
   const graph = {
+    daemonAlive: false,
     keys: { build: 'BUILD' },
     runnerKeys: { build: 'BUILD' },
     nodes: { build: ['agent', 'Build', ''] },
@@ -249,6 +250,7 @@ test('override на legacy и закрытой попытке fail-closed', asyn
 
 test('override на этапе с активным запуском отправляет в switch', async (t) => {
   const { app, graph, callsLog } = await fixture(t);
+  graph.daemonAlive = true;
   graph.statuses.build = 'run';
   graph.nodeMeta.build.runner.actual = 'claude';
   const response = await app.inject({
@@ -257,6 +259,52 @@ test('override на этапе с активным запуском отправ
   assert.equal(response.statusCode, 409, response.body);
   assert.equal(response.json().error, 'runner_active_use_switch');
   assert.equal(await missing(callsLog), true);
+});
+
+test('остановленный run со старым runner.actual принимает override для следующего resume', async (t) => {
+  const { app, graph, callsLog } = await fixture(t);
+  graph.daemonAlive = false;
+  graph.statuses.build = 'run';
+  graph.nodeMeta.build.runner.actual = 'claude';
+
+  const response = await app.inject({
+    method: 'POST', url: '/api/tasks/8/runner/override', payload: { stage: 'BUILD', primary: 'codex' },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().ok, true);
+  assert.match(await readFile(callsLog, 'utf8'), /^8 runner set BUILD codex$/m);
+});
+
+test('live-switch остановленного run отвечает понятной ошибкой до вызова движка', async (t) => {
+  const { app, graph, callsLog } = await fixture(t);
+  graph.daemonAlive = false;
+  graph.statuses.build = 'run';
+  graph.nodeMeta.build.runner.actual = 'claude';
+
+  const response = await app.inject({
+    method: 'POST', url: '/api/tasks/8/runner/switch', payload: { stage: 'BUILD', target: 'codex' },
+  });
+
+  assert.equal(response.statusCode, 409, response.body);
+  assert.equal(response.json().error, 'runner_not_active');
+  assert.match(response.json().message, /Прогон остановлен/);
+  assert.equal(await missing(callsLog), true);
+});
+
+test('live-switch живого run вызывает canonical runner switch', async (t) => {
+  const { app, graph, callsLog } = await fixture(t);
+  graph.daemonAlive = true;
+  graph.statuses.build = 'run';
+  graph.nodeMeta.build.runner.actual = 'claude';
+
+  const response = await app.inject({
+    method: 'POST', url: '/api/tasks/8/runner/switch', payload: { stage: 'BUILD', target: 'codex' },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().ok, true);
+  assert.match(await readFile(callsLog, 'utf8'), /^8 runner switch BUILD codex$/m);
 });
 
 test('override отклоняет этап вне маршрута попытки', async (t) => {

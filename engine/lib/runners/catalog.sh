@@ -60,8 +60,11 @@ _catalog_version_le() {
 
 _catalog_runner_compatible() {
   local actual=$1 minimum=$2 maximum=$3
-  _catalog_version_le "$minimum" "$actual" || return 1
-  _catalog_version_le "$actual" "$maximum"
+  # `*` — явная совместимость по контракту, а не по semver. Она нужна раннерам,
+  # у которых новый CLI допускается тем же fail-closed парсером: фактическая
+  # версия всё равно попадает в meta.env, но сама по себе не гасит provider.
+  [[ "$minimum" == '*' ]] || _catalog_version_le "$minimum" "$actual" || return 1
+  [[ "$maximum" == '*' ]] || _catalog_version_le "$actual" "$maximum"
 }
 
 catalog_resolve() {

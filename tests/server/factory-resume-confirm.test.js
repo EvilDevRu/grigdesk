@@ -8,7 +8,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { confirmRouteResume, logLength, readLogSince } from '../../server/src/lib/factory-route-cli.js';
+import {
+  confirmRouteResume, logLength, readLogSince, routeFailure,
+} from '../../server/src/lib/factory-route-cli.js';
 
 const ATTEMPT = 'a_00112233445566778899aabbccddeeff';
 
@@ -81,6 +83,21 @@ test('в причину попадает только дописанное по�
   const reason = await readLogSince(file, from);
   assert.equal(reason, 'контракт попытки разошёлся с профилем; код 75');
   assert.ok(!reason.includes('старая строка'), 'чужие строки журнала в причину не попадают');
+});
+
+test('typed preflight прошлого запуска не типизирует новый несвязанный отказ', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-log-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 't7788.launch.log');
+  await writeFile(file,
+    'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=kimi\n', 'utf8');
+  const from = await logLength(file);
+  await writeFile(file,
+    'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=kimi\nновый отказ контракта\n',
+    'utf8');
+  const current = await readLogSince(file, from, { lines: 10, limit: 2000 });
+  assert.equal(current, 'новый отказ контракта');
+  assert.equal(routeFailure(current), null);
 });
 
 test('пустой журнал не оставляет отказ без текста', async (t) => {

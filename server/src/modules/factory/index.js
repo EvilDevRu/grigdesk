@@ -24,8 +24,8 @@ import {
 } from '../../lib/factory-launch-contract.js';
 import {
   confirmRouteResume, logLength, readLogSince,
-  runRouteEngine, spawnRouteEngine, readLaunchLog, routeUnitActive,
-  startRegistryIdentity, stopRouteOrchestrator,
+  runRouteEngine, spawnRouteEngine, routeUnitActive,
+  routeFailure, startRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
 } from '../../lib/factory-route-cli.js';
 import {
@@ -38,6 +38,15 @@ import { loadRunnerConfig, resolveProjectRunnerState } from '../../lib/runner-st
 import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
 
 const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]*$/;
+
+// Проекция runner.actual хранит последнего исполнителя этапа и после stop, поэтому
+// сама по себе не означает живой процесс. Для live-switch нужны одновременно живой
+// оркестратор и активный именно этот этап; остановленному этапу разрешаем stage override,
+// который подхватит следующий resume.
+function runnerStageIsLive(graph, registry, nodeId, stage) {
+  if (!graph?.daemonAlive) return false;
+  return graph.statuses?.[nodeId] === 'run' || Boolean(registry?.[`ACTIVE_RUN_${stage}`]);
+}
 
 async function factoryModule(fastify, opts) {
   const { factoryState, config, prefs, b24, analyzer } = opts;
@@ -281,11 +290,17 @@ async function factoryModule(fastify, opts) {
       reason: () => readLogSince(stagesLog, from),
     });
     if (!confirmed.ok) {
+      const failure = routeFailure(confirmed.message);
       fastify.log.warn(
         { task: id, outcome: confirmed.outcome, err: confirmed.message },
         `route resume ${why} не поднялся — прогон стоит`,
       );
-      return { ...launch, ok: false, message: confirmed.message };
+      return {
+        ...launch,
+        ok: false,
+        message: failure?.message || confirmed.message,
+        failure,
+      };
     }
     return { ...launch, ok: true };
   }
@@ -361,6 +376,7 @@ async function factoryModule(fastify, opts) {
         instrumentationFiles,
         diagnosisKind,
         diagnosisSignal,
+        profileDeliveryActions: launchProfile.deliveryActions,
       });
     } catch (e) {
       if (e instanceof FactoryLaunchContractError) {
@@ -433,7 +449,17 @@ async function factoryModule(fastify, opts) {
     });
     if (!launch.ok) {
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
-      return { status: 500, body: { outcome: 'invalid', message: launch.message || 'прогон не запустился' } };
+      return {
+        status: 500,
+        body: {
+          outcome: 'invalid',
+          ...(launch.failure ? {
+            error: launch.failure.error,
+            runners: launch.failure.runners,
+          } : {}),
+          message: launch.message || 'прогон не запустился',
+        },
+      };
     }
 
     // Одного ORCH_PID недостаточно: движок пишет его в начальную проекцию ДО pin-а
@@ -470,12 +496,14 @@ async function factoryModule(fastify, opts) {
       }
       if (launch.unit && !(await routeUnitActive(id))) {
         if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
-        const tail = await readLaunchLog(launch.logFile);
+        const tail = await readLogSince(launch.logFile, launch.logOffset, { lines: 10, limit: 2000 });
+        const failure = routeFailure(tail);
         return {
           status: 500,
           body: {
             outcome: 'invalid',
-            message: `прогон не стартовал — ${tail || `смотри ${launch.logFile}`}`,
+            ...(failure ? { error: failure.error, runners: failure.runners } : {}),
+            message: failure?.message || `прогон не стартовал — ${tail || `смотри ${launch.logFile}`}`,
           },
         };
       }
@@ -751,6 +779,21 @@ async function factoryModule(fastify, opts) {
     if (trusted.terminal) {
       return reply.code(409).send({ error: 'attempt_terminal', message: `попытка закрыта (${trusted.terminal})` });
     }
+    // CAS ворот в движке принимает решение только для узла, на котором стоит
+    // курсор журнала (ready|paused). Реестровая проекция опережает журнал, когда
+    // диспетчер встал fail-closed после захода узла: кокпит рисовал ворота, до
+    // которых маршрут не дошёл, и клик уезжал в гарантированный отказ 75 (t8164).
+    // Проверяем сами — ответ «что сейчас делать» вместо голого кода движка.
+    const gateNode = key.toLowerCase();
+    const { cursor } = trusted;
+    if (!cursor || cursor.node !== gateNode || !['ready', 'paused'].includes(cursor.state)) {
+      return reply.code(409).send({
+        error: 'gate_not_current',
+        message: cursor
+          ? `маршрут не стоит на этих воротах: журнал на узле ${cursor.node} (${cursor.state}) — сначала продолжи или верни прогон`
+          : 'маршрут ещё не дошёл до ворот: курсор журнала не инициализирован — решение принять нельзя',
+      });
+    }
     const attempt = trusted.attempt;
     const value = decision === 'approve' ? 'approved' : 'rejected';
     const comment = ((request.body || {}).comment || '').replace(/\n/g, ' ').slice(0, 500);
@@ -758,7 +801,7 @@ async function factoryModule(fastify, opts) {
       task: id,
       profile: trusted.profile,
       attempt,
-      node: key.toLowerCase(),
+      node: gateNode,
       decision: value,
       comment,
     }));
@@ -766,7 +809,14 @@ async function factoryModule(fastify, opts) {
       return reply.code(409).send({ error: 'gate_rejected', message: committed.message });
     }
     const resumed = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'после ворот' });
-    return { ok: true, key, value, resumed: resumed.ok, resumeError: resumed.message || null };
+    return {
+      ok: true,
+      key,
+      value,
+      resumed: resumed.ok,
+      resumeError: resumed.message || null,
+      resumeFailure: resumed.failure || null,
+    };
   });
 
   // Доверенный человеческий возврат курсора. Произвольная запись статуса удалена.
@@ -802,7 +852,15 @@ async function factoryModule(fastify, opts) {
     const resumed = await resumeRouteAttempt(id, {
       profile: trusted.profile, attempt: trusted.attempt, why: 'после возврата',
     });
-    return { ok: true, key, status: 'running', node, resumed: resumed.ok, resumeError: resumed.message || null };
+    return {
+      ok: true,
+      key,
+      status: 'running',
+      node,
+      resumed: resumed.ok,
+      resumeError: resumed.message || null,
+      resumeFailure: resumed.failure || null,
+    };
   });
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
@@ -829,10 +887,12 @@ async function factoryModule(fastify, opts) {
         || Object.keys(graph.keys || {}).find((nid) => graph.keys[nid] === stage)
         || Object.keys(graph.nodes || {}).find((nid) => nid.toUpperCase() === stage);
       const runner = nodeId ? graph.nodeMeta?.[nodeId]?.runner : null;
-      if (!runner?.actual) {
+      if (!nodeId || !runnerStageIsLive(graph, managed.registry, nodeId, stage) || !runner?.actual) {
         return reply.code(409).send({
           error: 'runner_not_active',
-          message: 'У этапа нет активного запуска для переключения.',
+          message: graph.daemonAlive
+            ? 'У этапа нет активного запуска для переключения.'
+            : 'Прогон остановлен: выберите исполнителя этапа, затем нажмите «Продолжить прогон».',
         });
       }
       if (target === runner.actual || !runner.chain.includes(target)) {
@@ -884,7 +944,8 @@ async function factoryModule(fastify, opts) {
           message: `этап ${stage} не найден в маршруте попытки`,
         });
       }
-      if (graph.nodeMeta?.[nodeId]?.runner?.actual) {
+      if (runnerStageIsLive(graph, managed.registry, nodeId, stage)
+          && graph.nodeMeta?.[nodeId]?.runner?.actual) {
         return reply.code(409).send({
           error: 'runner_active_use_switch',
           message: 'Этап сейчас выполняется — меняйте исполнителя переключением активного запуска.',
@@ -1226,7 +1287,13 @@ async function factoryModule(fastify, opts) {
     }
     const attempt = trusted.attempt;
     const launch = await resumeRouteAttempt(id, { profile: trusted.profile, attempt, why: 'по кнопке' });
-    if (!launch.ok) return reply.code(500).send({ error: 'resume_failed', message: launch.message });
+    if (!launch.ok) {
+      return reply.code(500).send({
+        error: launch.failure?.error || 'resume_failed',
+        ...(launch.failure ? { runners: launch.failure.runners } : {}),
+        message: launch.message,
+      });
+    }
     return { ok: true, outcome: 'launched', attempt };
   });
 

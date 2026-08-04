@@ -2,6 +2,7 @@
 set -uo pipefail
 source "$FACTORY_TESTS_HOME/lib/testlib.sh"
 source "$FACTORY_HOME/lib/runners/kimi.sh"
+source "$FACTORY_HOME/lib/runners/catalog.sh"
 
 # У kimi CLI нет argv-флага effort: раннер обязан применить запрошенный effort через
 # per-run KIMI_CODE_HOME — копия config.toml с переписанной секцией [thinking],
@@ -26,12 +27,22 @@ effort = "high"
 EOF
 export KIMI_CODE_HOME="$default_home"
 
+fake_bin="$TEST_ROOT/bin"
+mkdir -p "$fake_bin"
+printf '#!/usr/bin/env bash\nexit 97\n' >"$fake_bin/kimi"
+chmod +x "$fake_bin/kimi"
+export PATH="$fake_bin:$PATH"
+
 CAPTURE_FILE="$TEST_ROOT/kimi-argv.tsv"
 CAPTURE_ENV="$TEST_ROOT/kimi-home-env.txt"
 factory_exec() {
   local kind=$1
   shift
   [[ "$kind" == provider ]] || return 2
+  if [[ "$1" == kimi && "$2" == --version ]]; then
+    printf 'kimi %s\n' "${FAKE_KIMI_VERSION:-0.31.1}"
+    return 0
+  fi
   : >"$CAPTURE_FILE"
   local index=0 arg
   for arg in "$@"; do
@@ -41,6 +52,23 @@ factory_exec() {
   printenv KIMI_CODE_HOME >"$CAPTURE_ENV"
   return 0
 }
+
+# Semver не является допуском Kimi: обновление не должно выключать профиль,
+# пока тот же адаптер может запустить CLI и незнакомые отказы оставляет unknown.
+export FAKE_KIMI_VERSION=0.31.1
+assert_contains "$(runner_kimi_probe)" '0.31.1' "original Kimi version is observable"
+export FAKE_KIMI_VERSION=0.32.0
+assert_contains "$(runner_kimi_probe)" '0.32.0' "updated Kimi version passes the same probe"
+
+kimi_catalog="$TEST_ROOT/kimi-catalog"
+mkdir -p "$kimi_catalog"
+runner_kimi_catalog >"$kimi_catalog/models.tsv"
+assert_eq kimi-code/k3 \
+  "$(catalog_resolve "$kimi_catalog" kimi k3 latest auto 0.31.1)" \
+  "Kimi catalog resolves the original runtime"
+assert_eq kimi-code/k3 \
+  "$(catalog_resolve "$kimi_catalog" kimi k3 latest auto 0.32.0)" \
+  "Kimi catalog compatibility is contract-based, not semver-pinned"
 
 run_dir="$TEST_ROOT/run-max"
 mkdir -p "$run_dir"

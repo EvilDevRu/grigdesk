@@ -16,7 +16,7 @@ import {
 } from '../../server/src/lib/factory-ticket.js';
 import {
   parseRouteWorkTime, routeAbandonArgs, routeCheckArgs, routeGateArgs, routeGotoArgs,
-  routeMessage, routeResumeArgs, routeStartArgs, routeWorkTimeArgs, startRegistryIdentity,
+  routeFailure, routeMessage, routeResumeArgs, routeStartArgs, routeWorkTimeArgs, startRegistryIdentity,
 } from '../../server/src/lib/factory-route-cli.js';
 
 const CONFIG = {
@@ -170,6 +170,28 @@ test('ARGS-01b: UI launch передаёт immutable debug и delivery inputs я
   ]);
 });
 
+test('ARGS-01d: publish launch разрешает task-comment явным флагом движку', () => {
+  const args = routeStartArgs(CONFIG, {
+    task: '8166',
+    profile: 'arsenkin',
+    route: 'feature',
+    ticketFile: '/state/tickets/t8166.ticket.json',
+    deliveryTargets: ['backend=master', 'frontend=main'],
+    taskComment: true,
+  });
+  // Флаг идёт последним: delivery contract читается из immutable-файла попытки,
+  // порядок остальных аргументов от этого не меняется.
+  assert.deepEqual(args.slice(-5), [
+    '--delivery-target', 'backend=master',
+    '--delivery-target', 'frontend=main',
+    '--task-comment',
+  ]);
+  assert.equal(routeStartArgs(CONFIG, {
+    task: '8166', profile: 'arsenkin', route: 'hunt',
+    ticketFile: '/state/tickets/t8166.ticket.json',
+  }).includes('--task-comment'), false);
+});
+
 test('ARGS-02: check не имеет побочных эффектов, gate всегда --commit-only', () => {
   assert.deepEqual(routeCheckArgs(CONFIG, { profile: 'demo', route: 'feature' }), [
     'check', '--profile', 'demo', '--route', 'feature', '--routes-dir', CONFIG.routesDir,
@@ -185,6 +207,17 @@ test('ARGS-03: коды отказа движка объясняются чел�
   assert.match(routeMessage(78, 'die: маршрут не найден'), /контракт/);
   assert.match(routeMessage(73, ''), /занято/);
   assert.match(routeMessage(75, ''), /частично/);
+  const preflight = 'runner preflight не пройден [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=kimi,codex]';
+  assert.deepEqual(routeFailure(preflight), {
+    error: 'runner_preflight_unavailable',
+    runners: ['kimi', 'codex'],
+    message: 'недоступны исполнители профиля: kimi, codex',
+  });
+  assert.equal(routeMessage(1, preflight), 'недоступны исполнители профиля: kimi, codex (код 1)');
+  assert.equal(routeFailure('FACTORY_ERROR=runner_preflight_unavailable'), null,
+    'typed unavailable без runner id считается повреждённым');
+  assert.equal(routeFailure('обычная shell-ошибка с кодом 1'), null,
+    'голый код 1 не выдаётся за preflight');
   assert.equal(routeMessage(0, ' готово \n'), 'готово');
 });
 

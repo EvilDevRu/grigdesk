@@ -48,7 +48,7 @@ export function routeStartArgs(config, {
   task, profile, route, ticketFile,
   runnerPrimary = '',
   instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
-  deliveryTargets = [],
+  deliveryTargets = [], taskComment = false,
 }) {
   const args = [String(task), 'start', '--profile', profile, '--route', route,
     '--ticket-json', ticketFile];
@@ -60,6 +60,9 @@ export function routeStartArgs(config, {
   if (diagnosisKind) args.push('--diagnosis-kind', diagnosisKind);
   if (diagnosisSignal) args.push('--diagnosis-signal', diagnosisSignal);
   for (const target of deliveryTargets) args.push('--delivery-target', target);
+  // Комментарий со ссылками на PR во внешней задаче — отдельное immutable-действие
+  // `task-comment` в delivery contract попытки; без флага движок его не выдаёт.
+  if (taskComment) args.push('--task-comment');
   return args;
 }
 
@@ -149,12 +152,14 @@ export function runRouteEngine(config, args, { timeout = 30000 } = {}) {
       maxBuffer: 1024 * 1024,
     }, (err, stdout, stderr) => {
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
+      const output = stderr || stdout || err?.message || '';
       resolve({
         code,
         ok: code === 0,
         stdout: String(stdout || ''),
         stderr: String(stderr || ''),
-        message: routeMessage(code, stderr || stdout || err?.message || ''),
+        message: routeMessage(code, output),
+        failure: routeFailure(output),
       });
     });
   });
@@ -185,11 +190,33 @@ export async function readRouteWorkTime(config, identity) {
   return result.ok ? parseRouteWorkTime(result.stdout) : null;
 }
 
-/** Отказ движка — человеку: его собственный текст плюс расшифровка кода. */
+/**
+ * Typed-отказ движка. Код 1 сам по себе ничего не доказывает: preflight
+ * распознаётся только по стабильному FACTORY_ERROR-маркеру из engine.
+ */
+export function routeFailure(output) {
+  const text = String(output || '');
+  const marker = /FACTORY_ERROR=(runner_preflight_unavailable|runner_preflight_failed)(?:\s+RUNNERS=([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)*))?/.exec(text);
+  if (!marker) return null;
+  const runners = marker[2] ? marker[2].split(',') : [];
+  const unavailable = marker[1] === 'runner_preflight_unavailable';
+  if (unavailable && runners.length === 0) return null;
+  return {
+    error: marker[1],
+    runners,
+    message: unavailable
+      ? `недоступны исполнители профиля: ${runners.join(', ')}`
+      : 'проверка исполнителей профиля не выполнена',
+  };
+}
+
+/** Отказ движка — человеку: typed-причина либо его текст плюс расшифровка кода. */
 export function routeMessage(code, output) {
+  const failure = routeFailure(output);
   const tail = String(output || '').trim().split('\n').filter(Boolean).slice(-3).join('; ').slice(-400);
   const hint = ROUTE_EXIT_HINTS[code];
   if (!code) return tail;
+  if (failure) return `${failure.message} (код ${code})`;
   return [tail, hint ? `(код ${code}: ${hint})` : `(код ${code})`].filter(Boolean).join(' ');
 }
 
@@ -315,12 +342,16 @@ export async function confirmRouteResume({
  * пережить рестарт кокпита, а его собственный обработчик TERM должен успеть снять
  * инструментацию (KillMode=mixed в factoryUnitArgs).
  *
- * @returns {Promise<{ ok: boolean, unit: string|null, logFile: string, message?: string,
- *                     exited?: number|null }>}
+ * @returns {Promise<{ ok: boolean, unit: string|null, logFile: string, logOffset: number,
+ *                     message?: string, exited?: number|null,
+ *                     failure?: { error: string, runners: string[], message: string }|null }>}
  */
 export async function spawnRouteEngine(config, { task, args, extraEnv = {} }) {
   const logFile = path.join(config.stateDir, `t${task}.launch.log`);
   await fs.mkdir(config.stateDir, { recursive: true });
+  // launch.log переиспользуется задачей. Typed-ошибку разрешено брать только из
+  // текущего запуска, иначе старый preflight замаскирует новый несвязанный отказ.
+  const logOffset = await logLength(logFile);
   const env = routeLaunchEnv(config, extraEnv);
   const haveSystemd = await new Promise((res) => execFile('systemd-run', ['--version'], (err) => res(!err)));
 
@@ -338,9 +369,18 @@ export async function spawnRouteEngine(config, { task, args, extraEnv = {} }) {
     });
     await out.close();
     if (exited) {
-      return { ok: false, unit: null, logFile, exited, message: routeMessage(exited, await readLaunchLog(logFile)) };
+      const output = await readLogSince(logFile, logOffset, { lines: 10, limit: 2000 });
+      return {
+        ok: false,
+        unit: null,
+        logFile,
+        logOffset,
+        exited,
+        message: routeMessage(exited, output),
+        failure: routeFailure(output),
+      };
     }
-    return { ok: true, unit: null, logFile, exited: null };
+    return { ok: true, unit: null, logFile, logOffset, exited: null };
   }
 
   const unit = routeUnitName(task);
@@ -357,6 +397,14 @@ export async function spawnRouteEngine(config, { task, args, extraEnv = {} }) {
       resolve(err ? { ok: false, message: String(stderr || err.message).trim().slice(-400) } : { ok: true });
     });
   });
-  if (!started.ok) return { ok: false, unit, logFile, message: `юнит не зарегистрирован: ${started.message}` };
-  return { ok: true, unit, logFile, exited: null };
+  if (!started.ok) {
+    return {
+      ok: false,
+      unit,
+      logFile,
+      logOffset,
+      message: `юнит не зарегистрирован: ${started.message}`,
+    };
+  }
+  return { ok: true, unit, logFile, logOffset, exited: null };
 }

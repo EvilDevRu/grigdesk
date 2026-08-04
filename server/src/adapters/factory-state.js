@@ -21,6 +21,7 @@ import {
   activeRunnerReason,
   loadRunnerConfig,
   readRunnerAttempts,
+  readRunnerWorkTime,
   resolveRunnerState,
 } from '../lib/runner-state.js';
 
@@ -255,39 +256,93 @@ export class FactoryStateAdapter {
    * проверить исходный ledger. Так старый активный прогон получает честную цифру,
    * но сервер не дублирует у себя проверку hash-chain и классификацию узлов.
    */
-  async readWorkTime(task, registry, trusted, mtime) {
+  async readWorkTime(task, registry, trusted, mtime, {
+    stateDir = this.stateDir,
+    runnerStages = [],
+  } = {}) {
     const uint = (value) => {
       if (!/^(0|[1-9][0-9]*)$/.test(String(value ?? ''))) return null;
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) ? parsed : null;
     };
     const projectedWork = uint(registry.WORK_TIME_S);
+    let ledger = null;
     if (projectedWork !== null) {
-      return {
+      ledger = {
         workSec: projectedWork,
         gateWaitSec: uint(registry.GATE_WAIT_S) ?? 0,
         lastEventSec: uint(registry.WORK_TIMER_SINCE) ?? 0,
       };
+    } else if (trusted && typeof this.workTimeReader === 'function') {
+      const cacheKey = `${trusted.attempt}:${mtime}`;
+      const cached = this._workTimeCache.get(String(task));
+      let promise = cached?.key === cacheKey ? cached.promise : null;
+      if (!promise) {
+        promise = Promise.resolve(this.workTimeReader({
+          task: String(task), profile: trusted.profile, attempt: trusted.attempt,
+        })).then((value) => {
+          const workSec = uint(value?.workSec);
+          if (workSec === null) return null;
+          return {
+            workSec,
+            gateWaitSec: uint(value?.gateWaitSec) ?? 0,
+            lastEventSec: uint(value?.lastEventSec) ?? 0,
+          };
+        }).catch(() => null);
+        this._workTimeCache.set(String(task), { key: cacheKey, promise });
+      }
+      ledger = await promise;
     }
-    if (!trusted || typeof this.workTimeReader !== 'function') return null;
 
-    const cacheKey = `${trusted.attempt}:${mtime}`;
-    const cached = this._workTimeCache.get(String(task));
-    if (cached?.key === cacheKey) return cached.promise;
+    // Старый route ledger измеряет расстояние между событиями. После остановки
+    // оркестратора это расстояние включает часы/дни простоя и приписывает их
+    // следующему узлу (именно так t8164 получила почти 29 лишних часов у LINT).
+    // Для исполняемой v2-попытки считаем реальные процессы runner-а, ограниченные
+    // createdAt trusted attempt; ledger оставляем источником ожидания ворот.
+    if (trusted && this.hasRouteProjectionIdentity(registry) && runnerStages.length) {
+      const activeRuns = Object.fromEntries(runnerStages.map((stage) => [
+        stage,
+        registry[stage] === 'running' ? registry[`ACTIVE_RUN_${stage}`] || null : null,
+      ]));
+      const runner = await readRunnerWorkTime(stateDir, task, runnerStages, {
+        sinceMs: Date.parse(trusted.createdAt || ''),
+        activeRuns,
+      });
+      if (runner) {
+        return {
+          workSec: runner.workSec,
+          gateWaitSec: ledger?.gateWaitSec ?? uint(registry.GATE_WAIT_S) ?? 0,
+          lastEventSec: 0,
+          runningSinceMs: runner.runningSinceMs,
+          source: 'runner-telemetry',
+          approximate: true,
+        };
+      }
 
-    const promise = Promise.resolve(this.workTimeReader({
-      task: String(task), profile: trusted.profile, attempt: trusted.attempt,
-    })).then((value) => {
-      const workSec = uint(value?.workSec);
-      if (workSec === null) return null;
-      return {
-        workSec,
-        gateWaitSec: uint(value?.gateWaitSec) ?? 0,
-        lastEventSec: uint(value?.lastEventSec) ?? 0,
-      };
-    }).catch(() => null);
-    this._workTimeCache.set(String(task), { key: cacheKey, promise });
-    return promise;
+      const touched = runnerStages.some((stage) => ![
+        '', 'idle', 'pending', 'skipped',
+      ].includes(registry[stage] || ''));
+      if (!touched) {
+        return {
+          workSec: 0,
+          gateWaitSec: ledger?.gateWaitSec ?? uint(registry.GATE_WAIT_S) ?? 0,
+          lastEventSec: 0,
+          runningSinceMs: null,
+          source: 'runner-telemetry',
+          approximate: true,
+        };
+      }
+      // Уже исполнявшийся маршрут без run-артефактов нельзя честно оценить:
+      // лучше не показывать число, чем снова выдать календарный простой за работу.
+      return null;
+    }
+
+    return ledger && {
+      ...ledger,
+      runningSinceMs: null,
+      source: 'route-ledger',
+      approximate: true,
+    };
   }
 
   /** Карта статусов этапов маршрута: STAGE → { status, at, fails, dur, fanout }. */
@@ -439,22 +494,30 @@ export class FactoryStateAdapter {
       else if (!alive && !env.FE_PORT && statuses.sandbox === 'done') statuses.sandbox = 'pending';
     }
 
-    // Чистое время работы текущей попытки приходит из hash-chained route ledger через
-    // движковую проекцию реестра. WORK_TIME_S уже суммирует ВСЕ повторные заходы узлов,
-    // а GATE_WAIT_S хранит ожидание решений отдельно. Последний незавершённый рабочий
-    // интервал дотикивает клиент от WORK_TIMER_SINCE, но только пока действительно жив
-    // демон и горит не-human узел. Старую проекцию восстанавливаем только через
-    // проверенный ledger; без него таймер не выдумываем.
-    const workTime = await this.readWorkTime(task, registry, trusted, mtime);
+    // У route-v2 чистую работу считаем по реально запущенным runner-процессам этой
+    // trusted attempt. Bootstrap Scout не входит в закреплённую машину маршрута и в
+    // счётчик не попадает. Старый event-to-event ledger оставлен для gate wait и
+    // исторических read-only реестров: его рабочие интервалы включают простой после
+    // падения оркестратора, поэтому для исполняемой попытки ими пользоваться нельзя.
+    const runnerStages = [...new Set(Object.keys(def.pos)
+      .filter((nid) => nid !== 'scout' && def.nodes[nid]?.[0] === 'agent')
+      .map((nid) => def.runnerKeys[nid] || def.keys[nid] || nid.toUpperCase()))];
+    const workTime = await this.readWorkTime(task, registry, trusted, mtime, {
+      stateDir,
+      runnerStages,
+    });
     const working = alive && !stall && Object.entries(statuses).some(([nid, status]) => (
       status === 'run' && nid !== 'sandbox' && def.nodes[nid]?.[0] !== 'human'
     ));
     const timing = workTime === null ? null : {
       workSec: workTime.workSec,
       gateWaitSec: workTime.gateWaitSec,
-      runningSinceMs: working && workTime.lastEventSec > 0
-        ? workTime.lastEventSec * 1000
+      runningSinceMs: working
+        ? (workTime.runningSinceMs
+          ?? (workTime.lastEventSec > 0 ? workTime.lastEventSec * 1000 : null))
         : null,
+      source: workTime.source,
+      approximate: workTime.approximate,
     };
 
     // Прогресс: done/skip/idle из узлов маршрута.
@@ -527,7 +590,8 @@ export class FactoryStateAdapter {
       sandbox,
       progress: { done: doneCount, total: chain.length, current: cur },
       // Чистая работа узлов текущей попытки без ожидания человека на воротах.
-      // null только когда нет ни реестровой проекции, ни доступного trusted ledger.
+      // Для route-v2 это сумма реальных runner-запусков; при утраченной телеметрии
+      // возвращаем null, а не заведомо ложный календарный интервал из старого ledger.
       timing,
       updatedAt: mtime,
     };

@@ -26,6 +26,8 @@ host="$STATE_DIR/coverage/fixture/host.env"
 assert_file_exists "$structural" "profile preflight writes structural artifact"
 assert_file_exists "$host" "profile preflight writes host artifact"
 assert_eq 0 "$(coverage_artifact_get "$host" UNAVAILABLE)" "both configured providers are ready"
+assert_eq "" "$(coverage_artifact_get "$host" UNAVAILABLE_RUNNERS)" \
+  "ready preflight publishes an empty runner detail"
 assert_file_missing "$TEST_ROOT/invocations" "preflight never invokes runner run method"
 
 export FAKE_BETA_PROBE=missing
@@ -33,6 +35,8 @@ profile_runner_host_preflight fixture 200 60 >/dev/null 2>&1
 assert_rc 1 "$?" "unavailable failover makes host preflight fail closed"
 assert_eq 1 "$(coverage_artifact_get "$host" UNAVAILABLE)" \
   "unavailable configured provider is counted"
+assert_eq beta "$(coverage_artifact_get "$host" UNAVAILABLE_RUNNERS)" \
+  "host artifact names the unavailable configured provider"
 
 mktemp() { return 1; }
 profile_runner_host_preflight fixture 300 60 >/dev/null 2>&1

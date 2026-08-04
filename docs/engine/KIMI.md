@@ -1,6 +1,7 @@
 # Kimi в Factory: spike batch-режима и статус внедрения
 
-Дата spike: 2026-08-02. CLI: `kimi` 0.31.1 (pinned, `~/.kimi-code/bin/kimi`).
+Дата spike: 2026-08-02. Наблюдавшийся CLI: `kimi` 0.31.1
+(`~/.kimi-code/bin/kimi`).
 План — локальный черновик `docs/plans/kimi-factory-runner-plan.md` (вне репозитория).
 Generic-контракт: [ADDING-RUNNER.md](ADDING-RUNNER.md).
 
@@ -98,13 +99,31 @@ Skills без `--skills-dir`
 подхватываются auto-discovery из user и project каталогов (по `--help`) — раннер
 наследует это поведение, как запуск из терминала (принятый риск).
 
-## Каталог и версии
+## Каталог и совместимость CLI
 
-Pinned CLI: **0.31.1** (probe fail-closed: другая версия → недоступен; `kimi upgrade`
-существует и кладёт `kimi.bak` — обновление ломает пин, это отдельное решение).
+Версия CLI **не является допуском**. `probe` требует доступный `kimi` и успешный
+`kimi --version`, а наблюдаемую версию сохраняет в metadata конкретного provider run
+для диагностики. Обновление между узлами маршрута допустимо: immutable-контракт
+попытки закрепляет маршрут и входы, но не исполняемый CLI.
+
+Граница безопасности здесь не semver, а протокол движка:
+
+- успех этапа принимается только через run-scoped CAS `stage-result`;
+- известная отказная сигнатура применяется лишь при доказанном отсутствии
+  assistant/tool activity;
+- новая или изменившаяся форма отказа классифицируется `unknown`, поэтому не вызывает
+  автоматический failover и повторное выполнение стадии;
+- версия остаётся в `meta.env`, то есть расследование не теряет фактический runtime.
+
+Это гарантирует корректность оркестрации, а не одинаковое качество модели или побочные
+особенности CLI во всех релизах. `kimi upgrade` может менять их; если изменение не ломает
+доказанный протокол, Factory его специально не блокирует.
+
 Модели (из `config.toml`, `kimi provider list`: `managed:kimi-code`, source=oauth,
 default `kimi-code/k3`): `kimi-code/k3`, `kimi-code/k3-256k`, `kimi-code/kimi-for-coding`,
 `kimi-code/kimi-for-coding-highspeed`. Каталог раннера — pinned models.tsv с этими id.
+Границы совместимости runtime в этих строках — `*/*`: список моделей закреплён
+адаптером, но semver CLI его не выключает.
 
 Effort: argv-флага и env-переменной у `-p` нет (по `--help`), но `[thinking].effort`
 из config.toml применяется — см. «Effort через per-run home» ниже.
@@ -140,3 +159,5 @@ effort → конфиг копируется без правки (наследу
 - Egress не фильтруется (CLI к тому же игнорирует proxy env).
 - Общий credential file с чат-рантаймом Cockpit; гонки OAuth refresh — наблюдать в live.
 - Auto-discovery skills/config из home и project каталогов — как у запуска из терминала.
+- CLI может обновиться между узлами одной route-attempt; фактическая версия каждого
+  provider run записывается, а незнакомый отказ остаётся `unknown` без автоповтора.

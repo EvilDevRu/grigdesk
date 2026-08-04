@@ -98,18 +98,21 @@ async function compilePipelineView() {
 }
 
 // Задача №42 на маршруте feature: два узла, у plan — runner-мета с заданным источником.
-function makeFixture({ status = 'wait', source = 'profile-stage', readOnly = false, actual = null } = {}) {
+function makeFixture({
+  status = 'wait', source = 'profile-stage', readOnly = false, actual = null, daemonAlive = true,
+} = {}) {
   const factoryTask = {
     task: 42,
     profile: 'arsenkin',
     route: 'feature',
     readOnly,
-    daemonAlive: true,
+    daemonAlive,
     attempt: null,
     result: null,
     stall: null,
   };
   const graph = {
+    daemonAlive,
     route: 'feature',
     readOnly,
     nodes: { plan: [0, '📋 План'], gate_plan: [1, '🚦 Ворота плана'] },
@@ -283,6 +286,22 @@ test('этап в run: блока выбора нет, остаются толь
   assert.equal(wrapper.find('.runner-override').exists(), false);
   const switches = wrapper.get('.runner-switches');
   assert.match(switches.text(), /Переключить сейчас на Codex/);
+});
+
+test('остановленный run: вместо live-switch показывается override для следующего resume', async (t) => {
+  const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(
+    t,
+    makeFixture({ status: 'run', actual: 'claude', daemonAlive: false }),
+  );
+  await openPlanStage('run');
+
+  assert.equal(wrapper.find('.runner-switches').exists(), false);
+  const block = wrapper.get('.runner-override');
+  assert.match(block.text(), /Прогон остановлен/);
+  assert.match(block.text(), /Продолжить прогон/);
+
+  await wrapper.get('#stage-runner').setValue('codex');
+  assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
 });
 
 test('readOnly: блока выбора исполнителя нет', async (t) => {

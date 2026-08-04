@@ -118,7 +118,10 @@ phase, policy, status owner, retry и все переходы, но запрещ
 Граф в UI строится из **закреплённой машины попытки**, а не из live `graph.json`:
 main/tail задают узлы, rewind — красные рёбра, штатный `skipped` без `stop` — optional.
 Маршрут без канонического `ship` законен и отображается без публикационного хвоста; engine
-передаёт ему `delivery.mode=disabled` и не создаёт actions/targets. Тексты одинаково
+передаёт ему `delivery.mode=disabled` и не создаёт actions/targets. Publish-маршруты
+профиля с `task-comment` в хуке `profile_delivery_actions` кокпит запускает с
+`--task-comment`: узел `ship` оставляет во внешней задаче комментарий со ссылками
+на PR (см. [b24.md](b24.md)). Тексты одинаково
 названных ворот ключуются парой `route/node`, поэтому `hunt/gate_accept` не называется
 браузерной приёмкой изменения.
 

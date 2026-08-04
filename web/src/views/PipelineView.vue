@@ -48,19 +48,23 @@ function outsideElapsed(t) {
   return liveTimerSec(t, now.value);
 }
 
-// Чистая работа узлов конвейера (не путать с таймером B24). Завершённые петли уже
-// накоплены движком в workSec; если рабочий узел жив, дотикиваем только его текущий
-// интервал. Ожидание человека на воротах хранится отдельно и сюда не попадает.
+// Чистая работа узлов конвейера (не путать с таймером B24). Для закреплённого маршрута
+// сервер складывает фактические runner-запуски текущей попытки: паузы между ними и
+// ожидание человека на воротах сюда не попадают.
 function elapsedSec(t) {
   return pipelineWorkSec(t.graph?.timing, now.value);
 }
 function elapsedLabel(t) {
   const sec = elapsedSec(t);
-  return sec == null ? '' : secToHMS(sec);
+  if (sec == null) return '';
+  return `${t.graph?.timing?.approximate ? '≈' : ''}${secToHMS(sec)}`;
 }
 function elapsedTitle(t) {
+  if (t.graph?.timing?.source === 'runner-telemetry') {
+    return 'фактическое время запущенных агентов текущей попытки: паузы между запусками и ожидание человека на воротах не входят';
+  }
   return t.graph?.timing
-    ? 'чистая работа текущей попытки: петли учитываются, ожидание человека на воротах — нет'
+    ? 'оценка по журналу маршрута: ожидание человека на воротах не входит'
     : '';
 }
 
@@ -145,6 +149,7 @@ function openStage(t, node) {
       || node.nid.toUpperCase(),
     isGate: node.nid.startsWith('gate_'), label: stripEmoji(node.label), sub: node.sub,
     readOnly: Boolean(t.readOnly || t.graph.readOnly),
+    daemonAlive: Boolean(t.graph.daemonAlive),
     status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
   };
   loadFactoryRunners();
@@ -161,7 +166,9 @@ function openStage(t, node) {
   }
   api.get(`/api/tasks/${t.task}/instruction`).then((r) => { stageInstruction.value = r.text || ''; }).catch(() => {});
   clearInterval(actPoll);
-  if (node.status === 'run') { pollActivity(); actPoll = setInterval(pollActivity, 3000); }
+  if (node.status === 'run' && t.graph.daemonAlive) {
+    pollActivity(); actPoll = setInterval(pollActivity, 3000);
+  }
 }
 function closeStage() { stage.value = null; clearInterval(actPoll); }
 async function pollActivity() {
@@ -175,17 +182,24 @@ const stageLive = computed(() => {
   if (!stage.value) return null;
   const g = tasks.value.find((x) => Number(x.task) === Number(stage.value.task))?.graph;
   if (!g?.statuses?.[stage.value.id]) return null;
-  return { status: g.statuses[stage.value.id], meta: g.nodeMeta?.[stage.value.id] || {} };
+  return {
+    status: g.statuses[stage.value.id],
+    meta: g.nodeMeta?.[stage.value.id] || {},
+    daemonAlive: Boolean(g.daemonAlive),
+  };
 });
 watch(stageLive, (live) => {
   if (!stage.value || !live) return;
   // Мета (время, длительность, токены, попытки runner-а) обновляется всегда: этап
   // дописывает её и после того, как перестал быть активным.
   stage.value.meta = live.meta;
-  if (live.status === stage.value.status) return;
+  if (live.status === stage.value.status && live.daemonAlive === stage.value.daemonAlive) return;
   stage.value.status = live.status;
+  stage.value.daemonAlive = live.daemonAlive;
   clearInterval(actPoll);
-  if (live.status === 'run') { pollActivity(); actPoll = setInterval(pollActivity, 3000); }
+  if (live.status === 'run' && live.daemonAlive) {
+    pollActivity(); actPoll = setInterval(pollActivity, 3000);
+  }
   else { stageActivity.value = null; }
 });
 
@@ -265,6 +279,14 @@ const stageRunnerOptions = computed(() => {
   if (primary && !list.includes(primary)) list.unshift(primary);
   return list;
 });
+// status=run и runner.actual остаются в проекции после ручного stop. Live-switch
+// безопасен только при живом оркестраторе; остановленному прогону показываем override,
+// который будет применён следующим «Продолжить прогон».
+const stageRunnerLive = computed(() => Boolean(
+  stage.value?.daemonAlive
+  && stage.value?.status === 'run'
+  && stage.value?.meta?.runner?.actual,
+));
 // Override исполнителя до запуска этапа (бегущий переключают только кнопки switch).
 // '' — снять override этапа: вернётся переопределение задачи с запуска или профиль.
 async function setStageRunner(primary) {
@@ -677,7 +699,7 @@ function cardState(g) {
                 </span>
               </div>
             </div>
-            <div v-if="!stage.readOnly && stage.status === 'run' && stage.meta.runner.actual" class="runner-switches">
+            <div v-if="!stage.readOnly && stageRunnerLive" class="runner-switches">
               <button v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
                       :key="id" class="btn runner-switch"
                       :disabled="stageBusy === 'runner-switch'" @click="switchRunner(id)">
@@ -685,7 +707,7 @@ function cardState(g) {
               </button>
             </div>
             <!-- Override до запуска этапа: бегущий этап переключают только кнопки выше. -->
-            <div v-if="!stage.readOnly && stage.status !== 'run' && stageRunnerOptions.length" class="runner-override">
+            <div v-if="!stage.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
               <label class="runner-override-lbl" for="stage-runner">Исполнитель этапа</label>
               <div class="runner-override-row">
                 <select id="stage-runner" class="runner-select" :disabled="stageBusy === 'runner-override'"
@@ -699,6 +721,9 @@ function cardState(g) {
               </div>
               <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
                 Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
+              </p>
+              <p v-if="stage.status === 'run' && !stage.daemonAlive" class="runner-hint">
+                Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
               </p>
             </div>
           </div>

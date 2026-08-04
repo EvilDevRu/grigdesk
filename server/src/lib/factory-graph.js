@@ -100,10 +100,19 @@ export function computeNodeStatuses({ pf, pos, keys, optional, mtimeMs }) {
   const doneLike = new Set(['done', 'skip']);
 
   // Ворота ждут, если всё до них пройдено (не дожидаясь записи waiting).
-  chain.forEach((nid, i) => {
-    if (!nid.startsWith('gate_') || st[nid] !== 'pending') return;
-    if (chain.slice(0, i).every((p) => doneLike.has(st[p]))) st[nid] = 'wait';
-  });
+  // Только для исторических реестров: v1-движок записи waiting не делал, и без
+  // доинференса штатная пауза была невидима. Реестр route-v2 — проекция, которую
+  // узел пишет ДО коммита в журнал: этап отработал, диспетчер встал fail-closed,
+  // курсор остался на узле, а реестр уже «done» → доинференс рисовал воротам
+  // ложное «ждёт тебя», и решение уезжало в CAS, обязанный отказать (t8164:
+  // reject на gate_accept при курсоре на lint). В v2 пауза на воротах — явная
+  // запись движка (GATE_*=waiting + STALLED_HUMAN=1), верим только ей.
+  if (pf.CATALOG_PROTOCOL !== 'route-v2') {
+    chain.forEach((nid, i) => {
+      if (!nid.startsWith('gate_') || st[nid] !== 'pending') return;
+      if (chain.slice(0, i).every((p) => doneLike.has(st[p]))) st[nid] = 'wait';
+    });
+  }
 
   // Гард ворот: недоделанный хвост маршрута → «преждевременно».
   chain.forEach((nid, i) => {

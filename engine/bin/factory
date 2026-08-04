@@ -2102,6 +2102,7 @@ v2_on_exit() {
 
 v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
+  local unavailable_runners preflight_message
   local gate_key pipeline_gate_key gate_node cursor stop stop_node
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
@@ -2121,11 +2122,36 @@ v2_main() {
       die "t${TASK} уже имеет active immutable attempt"
   fi
 
-  profile_runner_host_preflight "$PROFILE" || {
-    rc=$?
-    v2_log "runner preflight не пройден (код $rc)"
-    return "$rc"
-  }
+  # Решение человека на воротах в режиме --commit-only не запускает ни одного
+  # агента: это CAS в журнале попытки плюс проекция в реестр. Требовать от него
+  # готовности ВСЕХ раннеров хоста означало запирать стоящий маршрут при любом
+  # отказе чужого CLI: preflight отдавал код 1 — и человек не мог ни принять
+  # ворота, ни отклонить их (t7788: обновление Kimi проявило эту связанность).
+  # Продолжение маршрута идёт отдельным resume — там preflight на месте, и
+  # недоступный раннер по-прежнему не пустит агентов в работу.
+  if [[ "$MODE" != gate || "$GATE_COMMIT_ONLY" != 1 ]]; then
+    profile_runner_host_preflight "$PROFILE" || {
+      rc=$?
+      unavailable_runners=""
+      # Только rc=1 означает свежий полноценный preflight с недоступным runner.
+      # При storage/contract-ошибке старый host.env нельзя выдавать за причину.
+      if (( rc == 1 )); then
+        unavailable_runners=$(coverage_artifact_get \
+          "$STATE_DIR/coverage/$PROFILE/host.env" UNAVAILABLE_RUNNERS)
+      fi
+      if [[ -n "$unavailable_runners" ]]; then
+        preflight_message="runner preflight не пройден: недоступны $unavailable_runners"
+        v2_log "$preflight_message [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=$unavailable_runners] (код $rc)"
+        printf '%s [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=%s]\n' \
+          "$preflight_message" "$unavailable_runners" >&2
+      else
+        preflight_message="runner preflight не пройден"
+        v2_log "$preflight_message [FACTORY_ERROR=runner_preflight_failed] (код $rc)"
+        printf '%s [FACTORY_ERROR=runner_preflight_failed]\n' "$preflight_message" >&2
+      fi
+      return "$rc"
+    }
+  fi
 
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     if [[ "$MODE" == start ]]; then
@@ -2207,6 +2233,31 @@ v2_main() {
     v2_log "delivery topology закреплённого маршрута не прочитана (код $rc)"
     return "$rc"
   }
+  # Решению ворот не нужны ни стенд, ни bootstrap, ни восстановление
+  # инструментации: это запись в журнал попытки. --commit-only фиксирует её и
+  # выходит, поэтому синхронный вызов остаётся коротким и предсказуемым; весь
+  # прогон дальше по маршруту поднимает отдельный resume.
+  # STALLED_HUMAN для commit-only снимается ТОЛЬКО после успешного CAS: упавший
+  # gate (устаревший узел ворот, код 75) иначе стирал маркер остановки у стоящего
+  # маршрута — кокпит терял «ждёт человека» и дорисовывал ложную паузу на воротах
+  # (t8164: reject на gate_accept при курсоре на lint).
+  if [[ "$MODE" == gate && "$GATE_COMMIT_ONLY" == 1 ]]; then
+    set_st "$TASK" ORCH_PID "$$" DELIVERY_MODE "$V2_DELIVERY_MODE"
+
+    set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
+      ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
+
+    v2_install_profile_contract || {
+      rc=$?
+      v2_log "repo/project contract попытки изменился или повреждён (код $rc)"
+      return "$rc"
+    }
+
+    v2_gate_commit "$attempt" || return
+    set_st "$TASK" STALLED_HUMAN 0 || return
+    return 0
+  fi
+
   set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 DELIVERY_MODE "$V2_DELIVERY_MODE"
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
@@ -2217,15 +2268,6 @@ v2_main() {
     v2_log "repo/project contract попытки изменился или повреждён (код $rc)"
     return "$rc"
   }
-
-  # Решению ворот не нужны ни стенд, ни bootstrap, ни восстановление
-  # инструментации: это запись в журнал попытки. --commit-only фиксирует её и
-  # выходит, поэтому синхронный вызов остаётся коротким и предсказуемым; весь
-  # прогон дальше по маршруту поднимает отдельный resume.
-  if [[ "$MODE" == gate && "$GATE_COMMIT_ONLY" == 1 ]]; then
-    v2_gate_commit "$attempt" || return
-    return 0
-  fi
 
   v2_install_ticket || {
     rc=$?

@@ -95,7 +95,10 @@ assert_contains "$source_text" '"$pipeline_gate_key" waiting STALLED_HUMAN 1' \
   "a paused trusted cursor is projected as a waiting Cockpit gate"
 # Синхронному вызывающему (кокпит по HTTP) нужен выход сразу после фиксации:
 # иначе gate ведёт маршрут дальше и переживает чужой таймаут только сиротой.
+# Снятие STALLED_HUMAN — строго ПОСЛЕ CAS: упавший commit-only не имеет права
+# стирать маркер остановки у стоящего маршрута (t8164).
 assert_contains "$source_text" 'v2_gate_commit "$attempt" || return
+    set_st "$TASK" STALLED_HUMAN 0 || return
     return 0' \
   "--commit-only records the decision and leaves the route to a separate resume"
 assert_contains "$source_text" 'GATE_COMMIT_ONLY" == 1 ]] ||' \
@@ -238,6 +241,28 @@ assert_contains "$lock_error" "оркестратор t${fixture_task} уже р
 assert_file_missing "$shared_state/t${fixture_task}.pipeline" \
   "task lock loser publishes no route registry"
 
+# t7788: недоступный provider обязан закрыть операции, которые реально запускают
+# агентов. Проверяем start на отдельной задаче до захвата shared-ресурсов основным
+# fixture; ни attempt, ни вторичная pipeline-проекция появиться не должны.
+preflight_task=9003
+preflight_ticket="$TEST_ROOT/ticket-${preflight_task}.json"
+sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$preflight_task\"/" \
+  "$ticket" >"$preflight_ticket"
+blocked_start=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$preflight_task" start --profile "$profile_id" \
+    --route feature \
+    --ticket-json "$preflight_ticket" \
+    --delivery-target app=main \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 1 "$?" "start remains fail-closed when a configured runner is unavailable"
+assert_contains "$blocked_start" 'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=alpha' \
+  "failed start returns a typed preflight reason with the runner id"
+assert_file_missing "$shared_state/t${preflight_task}.pipeline" \
+  "failed runner preflight creates no route projection"
+
 shared_start=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" start --profile "$profile_id" \
@@ -365,6 +390,26 @@ assert_rc 0 "$repair_resume_rc" "resume repairs an unprojected immutable reset"
 assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "projection repair reruns the target before pausing at the gate"
 
+# t8164: решение прислали для ворот, на которых курсор НЕ стоит (в закреплённом
+# маршруте такого узла вовсе нет). Упавший commit-only обязан сохранить маркер
+# остановки: раньше STALLED_HUMAN сбрасывался ещё до CAS, и кокпит терял «ждёт
+# человека» у стоящего маршрута, дорисовывая ложные ворота дальше по цепочке.
+alien_gate=$(FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" gate --profile "$profile_id" \
+    --attempt "$attempt" \
+    --node gate_accept \
+    --decision rejected \
+    --commit-only \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 78 "$?" "commit-only gate on a node outside the pinned route refuses early"
+assert_eq 1 "$(awk -F= '$1=="STALLED_HUMAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "failed commit-only gate preserves the human-stall marker"
+assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "failed commit-only gate leaves the paused gate projection untouched"
+
 reject_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" gate --profile "$profile_id" \
@@ -394,6 +439,23 @@ else
   test_ok "generic reset creates no legacy phantom stages"
 fi
 
+# Форма отказа t8164: после rewind курсор стоит на plan, а решение повторно
+# прислали для gate_plan. CAS на устаревшем узле ворот — ровно код 75, и
+# записанное ранее решение остаётся видимым.
+stale_gate=$(FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" gate --profile "$profile_id" \
+    --attempt "$attempt" \
+    --node gate_plan \
+    --decision approved \
+    --commit-only \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 75 "$?" "stale gate cursor refuses the commit-only CAS"
+assert_eq rejected "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "stale gate refusal keeps the recorded decision visible"
+
 resume_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" resume --profile "$profile_id" \
@@ -411,7 +473,7 @@ assert_eq done "$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}
 assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "rerun pauses at a fresh plan decision"
 
-gate_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+gate_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" gate --profile "$profile_id" \
     --attempt "$attempt" \
@@ -430,6 +492,21 @@ fi
 assert_rc 0 "$gate_rc" "commit-only gate verifies and preserves the exact shared lease"
 assert_eq "$attempt" "$(awk -F= '$1=="ATTEMPT"{print $2}' "$lease_dir"/*.owner | sort -u)" \
   "human decision does not release shared resources before resumed work"
+
+# То же состояние с тем же сломанным probe: решение уже записано, но resume
+# обязан остановиться до нового agent run. Именно эта асимметрия потерялась в
+# инциденте, когда общий preflight ошибочно стоял перед gate --commit-only.
+blocked_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_ALPHA_RESULT=done \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" resume --profile "$profile_id" --attempt "$attempt" \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 1 "$?" "resume remains fail-closed after a commit-only gate"
+assert_contains "$blocked_resume" 'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=alpha' \
+  "failed resume returns a typed preflight reason with the runner id"
+assert_eq approved "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "failed resume preserves the already committed human decision"
 
 # Слишком длинная причина — самая частая ошибка человека за CLI и в модалке кокпита.
 # Отказ обязан прийти ДО локов и проекции, с названной границей: кокпит показывает

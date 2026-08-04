@@ -12,6 +12,7 @@ import { parsePipeline } from './pipeline-parse.js';
 const PROVIDER_ID = /^[a-z][a-z0-9_-]*$/;
 const PROFILE_ID = /^[a-z0-9][a-z0-9_-]*$/;
 const STAGE_ID = /^[A-Z][A-Z0-9_]*$/;
+const RUN_ID = /^[A-Za-z0-9._-]+$/;
 
 function uniqueProviders(values) {
   const out = [];
@@ -157,7 +158,7 @@ export async function readRunnerAttempts(stateDir, task, stage) {
   }
   const attempts = [];
   await Promise.all(ids.map(async (id) => {
-    if (!/^[A-Za-z0-9._-]+$/.test(id)) return;
+    if (!RUN_ID.test(id)) return;
     try {
       const meta = parsePipeline(await fsp.readFile(path.join(root, id, 'meta.env'), 'utf8'));
       attempts.push({
@@ -175,4 +176,87 @@ export async function readRunnerAttempts(stateDir, task, stage) {
   attempts.sort((a, b) => (a.epoch ?? Number.MAX_SAFE_INTEGER) - (b.epoch ?? Number.MAX_SAFE_INTEGER)
     || a.id.localeCompare(b.id));
   return attempts.slice(-20);
+}
+
+/**
+ * Фактическое время процессов runner-а для текущей route-attempt.
+ *
+ * Начало запуска — birthtime его каталога, конец завершённого — mtime финального
+ * meta.env. В отличие от route ledger это не расстояние между соседними событиями:
+ * простой после падения оркестратора не приклеивается к следующему этапу. Каталоги
+ * старых попыток той же задачи отсекаются по createdAt trusted attempt.
+ */
+export async function readRunnerWorkTime(
+  stateDir,
+  task,
+  stages,
+  { sinceMs = 0, activeRuns = {} } = {},
+) {
+  const taskId = String(task || '');
+  if (!/^\d+$/.test(taskId) || !Array.isArray(stages)) return null;
+  const stageIds = [...new Set(stages.filter((stage) => STAGE_ID.test(String(stage || ''))))];
+  if (!stageIds.length) return null;
+
+  const lowerBound = Number.isFinite(Number(sinceMs)) && Number(sinceMs) > 0
+    ? Number(sinceMs)
+    : 0;
+  let completedMs = 0;
+  let completedRuns = 0;
+  let runningSinceMs = null;
+
+  await Promise.all(stageIds.map(async (stage) => {
+    const root = path.join(stateDir, 'logs', 'runs', `t${taskId}`, stage);
+    let ids;
+    try { ids = await fsp.readdir(root); } catch { return; }
+    await Promise.all(ids.map(async (id) => {
+      if (!RUN_ID.test(id)) return;
+      const runDir = path.join(root, id);
+      let runStat;
+      try { runStat = await fsp.lstat(runDir); } catch { return; }
+      const startedAtMs = Number(runStat.birthtimeMs);
+      if (!runStat.isDirectory() || runStat.isSymbolicLink()
+          || !Number.isFinite(startedAtMs) || startedAtMs <= 0 || startedAtMs < lowerBound) return;
+
+      const active = activeRuns?.[stage] === id;
+      let meta;
+      let metaStat;
+      try {
+        const metaPath = path.join(runDir, 'meta.env');
+        const statValue = await fsp.lstat(metaPath);
+        if (!statValue.isFile() || statValue.isSymbolicLink()) return;
+        const text = await fsp.readFile(metaPath, 'utf8');
+        meta = parsePipeline(text);
+        metaStat = statValue;
+      } catch {
+        // run-state успевает назвать active run до первой записи meta.env.
+        if (active && (runningSinceMs === null || startedAtMs < runningSinceMs)) {
+          runningSinceMs = startedAtMs;
+        }
+        return;
+      }
+
+      // Новые meta несут полную identity; старые диагностические записи могли
+      // обходиться без TASK/STAGE/RUN_ID, поэтому проверяем поля только когда они есть.
+      if ((meta.TASK && meta.TASK !== taskId)
+          || (meta.STAGE && meta.STAGE !== stage)
+          || (meta.RUN_ID && meta.RUN_ID !== id)) return;
+
+      if (meta.RESULT_CLASS) {
+        const finishedAtMs = Number(metaStat.mtimeMs);
+        if (Number.isFinite(finishedAtMs) && finishedAtMs >= startedAtMs) {
+          completedMs += finishedAtMs - startedAtMs;
+          completedRuns += 1;
+        }
+      } else if (active && (runningSinceMs === null || startedAtMs < runningSinceMs)) {
+        runningSinceMs = startedAtMs;
+      }
+    }));
+  }));
+
+  if (!completedRuns && runningSinceMs === null) return null;
+  return {
+    workSec: Math.floor(completedMs / 1000),
+    runningSinceMs,
+    completedRuns,
+  };
 }
