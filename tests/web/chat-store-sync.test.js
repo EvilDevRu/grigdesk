@@ -258,7 +258,8 @@ test('WEB-12: ответ из pending после обрыва фонового �
     assert.equal(url, '/api/chat/pending');
     return {
       pending: [{
-        id: 'orphan-1', chatKey: 'c1', role: 'assistant', reply: 'Дошло после сна', at: 400,
+        id: 'orphan-1', chatKey: 'c1', role: 'assistant', reply: 'Дошло после сна',
+        userText: 'Вопрос, потерянный окном', userSentAt: 250, at: 400,
       }],
     };
   };
@@ -269,6 +270,12 @@ test('WEB-12: ответ из pending после обрыва фонового �
   assert.equal(chatNotifications()[0][1], 'Дошло после сна');
   assert.equal(chat.sessions[0].unread, true);
   assert.equal(chat.sessions[0].offline, false);
+  assert.deepEqual(chat.sessions[0].messages.slice(-2).map((message) => ({
+    role: message.role, text: message.text, sentAt: message.sentAt,
+  })), [
+    { role: 'user', text: 'Вопрос, потерянный окном', sentAt: 250 },
+    { role: 'assistant', text: 'Дошло после сна', sentAt: undefined },
+  ]);
 
   // Тот же pending до подтверждения DELETE может попасть в следующую сверку.
   await chat._collectPending();

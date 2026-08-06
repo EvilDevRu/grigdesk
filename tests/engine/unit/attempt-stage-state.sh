@@ -37,6 +37,71 @@ assert_rc 0 "$?" "immutable route fixture is published"
 catalog_hash=$(json_field "$published" catalogHash)
 route_hash=$(json_field "$published" routeHash)
 
+# Свободный текст ворот нельзя молча адресовать автоматическому command: он не читает
+# промпт и первым же коммитом погасил бы указание. Stop при этом законен — текст
+# остаётся аудитом решения, а не обещанием следующему агенту.
+feedback_description="$TEST_ROOT/feedback-description.json"
+cat >"$feedback_description" <<'JSON'
+{
+  "machine": {
+    "nodes": [
+      {"id":"verify","executor":"command"},
+      {"id":"author","executor":"agent"},
+      {
+        "id":"gate_command","executor":"gate",
+        "on":{"rejected":{"rewind":"verify","reset":["verify","gate_command"]}}
+      },
+      {
+        "id":"gate_next_command","executor":"gate",
+        "on":{"rejected":{"next":"verify"}}
+      },
+      {
+        "id":"gate_next_agent","executor":"gate",
+        "on":{"rejected":{"next":"author"}}
+      },
+      {
+        "id":"gate_stop","executor":"gate",
+        "on":{"rejected":{"stop":"human"}}
+      }
+    ]
+  }
+}
+JSON
+feedback_guard=$(_route_v2_gate_feedback_guard \
+  "$feedback_description" gate_command 'исправь проверку' 2>&1)
+assert_rc 78 "$?" "feedback-bearing gate refuses a command rewind target"
+assert_contains "$feedback_guard" 'executor=command' \
+  "command target refusal explains why feedback cannot be delivered"
+_route_v2_gate_feedback_guard \
+  "$feedback_description" gate_next_command 'перепроверь дальше' >/dev/null 2>&1
+assert_rc 78 "$?" "feedback-bearing rejected next also refuses a command target"
+_route_v2_gate_feedback_guard \
+  "$feedback_description" gate_next_agent 'исправь по пути дальше'
+assert_rc 0 "$?" "feedback-bearing rejected next accepts an agent target"
+_route_v2_gate_feedback_guard "$feedback_description" gate_stop 'остановить работу'
+assert_rc 0 "$?" "rejected stop may retain feedback as immutable audit"
+
+next_feedback_dir="$TEST_ROOT/next-feedback-events"
+mkdir -p "$next_feedback_dir"
+next_feedback='переделай следующий агентский узел'
+next_feedback_event="$next_feedback_dir/event.00000000000000000001.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+cat >"$next_feedback_event" <<JSON
+{"kind":"commit","node":"gate_next_agent","outcome":"rejected","reason":"$next_feedback","action":{"next":"author"}}
+JSON
+chmod 400 "$next_feedback_event"
+assert_eq "$next_feedback" \
+  "$(_attempt_stage_state_json human-note "$next_feedback_dir" author)" \
+  "rejected next addresses feedback to its agent target"
+assert_eq "" "$(_attempt_stage_state_json human-note "$next_feedback_dir" verify)" \
+  "rejected next feedback remains target-specific"
+next_feedback_commit="$next_feedback_dir/event.00000000000000000002.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json"
+cat >"$next_feedback_commit" <<'JSON'
+{"kind":"commit","node":"author","outcome":"done","reason":null,"action":{"next":"retro"}}
+JSON
+chmod 400 "$next_feedback_commit"
+assert_eq "" "$(_attempt_stage_state_json human-note "$next_feedback_dir" author)" \
+  "agent commit clears feedback delivered through rejected next"
+
 # Рядом с управляющим состоянием существует старый реестр; он должен остаться побайтно неизменным.
 printf 'PROFILE=legacy\nROUTE=feature\nBUILD=done\n' >"$STATE_DIR/t51.pipeline"
 legacy_before=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
@@ -132,7 +197,9 @@ assert_rc 0 "$?" "command-node transition commits"
 assert_eq gate_plan "$(json_field "$after_check" currentNode)" \
   "command outcome advances to the pinned gate"
 
-rewound=$(attempt_stage_state_commit_v2 51 "$attempt" gate_plan rejected)
+gate_feedback='сначала уточни план по замечанию приёмки'
+rewound=$(attempt_stage_state_commit_v2 \
+  51 "$attempt" gate_plan rejected 0 '' 0 0 0 "$gate_feedback")
 assert_rc 0 "$?" "gate rejection commits the verified rewind"
 assert_eq instrument "$(json_field "$rewound" currentNode)" \
   "rewind target is derived from the route transition"
@@ -145,6 +212,24 @@ assert_eq instrument "$(json_field "$(cat "$rewind_event")" action rewind)" \
 assert_eq instrument,check,gate_plan \
   "$("$NODE_BIN" -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.action.reset.join(","));' "$(cat "$rewind_event")")" \
   "rewind ledger event preserves the exact reset interval"
+assert_eq "$gate_feedback" "$(json_field "$(cat "$rewind_event")" reason)" \
+  "rejected gate feedback is durable in the immutable event"
+assert_eq "$gate_feedback" "$(attempt_stage_state_human_note_v2 51 "$attempt" instrument)" \
+  "rejected gate feedback is addressed to the declared rewind target"
+rewind_events=$(event_count "$attempt_dir")
+rewound_again=$(attempt_stage_state_commit_v2 \
+  51 "$attempt" gate_plan rejected 0 '' 0 0 0 "$gate_feedback")
+assert_rc 0 "$?" "exact rejected feedback retry is idempotent"
+assert_eq "$rewound" "$rewound_again" \
+  "exact rejected feedback retry returns the committed cursor"
+assert_eq "$rewind_events" "$(event_count "$attempt_dir")" \
+  "exact rejected feedback retry appends no event"
+attempt_stage_state_commit_v2 \
+  51 "$attempt" gate_plan rejected 0 '' 0 0 0 'уже другое замечание' \
+  >/dev/null 2>&1
+assert_rc 75 "$?" "changed feedback cannot masquerade as an idempotent retry"
+assert_eq "$gate_feedback" "$(attempt_stage_state_human_note_v2 51 "$attempt" instrument)" \
+  "conflicting retry preserves the originally committed feedback"
 latest_rewind=$(attempt_stage_state_latest_event_v2 51 "$attempt")
 assert_rc 0 "$?" "latest-event API verifies the immutable ledger before projection"
 assert_eq 4 "$(json_field "$latest_rewind" sequence)" \
@@ -159,6 +244,8 @@ assert_eq check "$(json_field "$after_replay" currentNode)" \
   "replayed node advances normally"
 assert_eq 5 "$(json_field "$after_replay" eventSequence)" \
   "replay is a new append-only event rather than history mutation"
+assert_eq "" "$(attempt_stage_state_human_note_v2 51 "$attempt" instrument)" \
+  "target commit clears rejected gate feedback after it was handled"
 
 read_back=$(attempt_stage_state_read_v2 51 "$attempt")
 assert_rc 0 "$?" "read verifies the complete hash chain and pointer checksum"

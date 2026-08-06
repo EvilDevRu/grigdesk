@@ -56,10 +56,12 @@ settings_arg=$(awk -F '\t' '$2 == "--settings" { getline; sub(/^[^\t]*\t/, ""); 
 assert_eq "$settings" "$settings_arg" "--settings points inside the trusted control root"
 source_arg=$(awk -F '\t' '$2 == "--setting-sources" { getline; sub(/^[^\t]*\t/, ""); print; exit }' "$CAPTURE_FILE")
 assert_eq '' "$source_arg" "empty --setting-sources disables user, project and local settings"
-for flag in --strict-mcp-config --disable-slash-commands --safe-mode; do
+for flag in --strict-mcp-config --disable-slash-commands; do
   grep -Fxq -- "$flag" <<<"$argv"
   assert_rc 0 "$?" "Claude route argv includes $flag"
 done
+grep -Fxq -- '--safe-mode' <<<"$argv"
+assert_rc 1 "$?" "safe-mode снят: агентам конвейера нужна память CLAUDE.md из worktree"
 grep -Fxq -- '--mcp-config' <<<"$argv"
 assert_rc 1 "$?" "strict MCP mode loads no filesystem MCP configuration"
 grep -Fxq -- '--bare' <<<"$argv"

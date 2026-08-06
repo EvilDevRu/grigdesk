@@ -80,6 +80,7 @@ exit 99
     b24: null,
     analyzer: {
       readClarifications: async () => null,
+      readOpenQuestions: async () => null,
       async get() {
         return {
           analysis: {

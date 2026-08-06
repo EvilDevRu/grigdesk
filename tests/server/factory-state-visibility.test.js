@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
+import { buildTicket, writeTicketFile } from '../../server/src/lib/factory-ticket.js';
 import factoryModule from '../../server/src/modules/factory/index.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -263,7 +264,7 @@ async function server(t, fx) {
     config: fx.config,
     prefs: { read: () => ({}) },
     b24: null,
-    analyzer: { readClarifications: async () => null },
+    analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();
   t.after(async () => app.close());
@@ -285,6 +286,28 @@ test('STATE-01: один root показывает current и legacy как read
   assert.equal(current.result, null);
   assert.equal(current.workspaceMode, 'isolated');
   assert.equal('generation' in current, false);
+});
+
+test('STATE-01b: список задач берёт заголовок ручного запуска из тикета', async (t) => {
+  const fx = await fixture(t);
+  await writeTicketFile({
+    dir: fx.config.ticketsDir,
+    task: '8',
+    ticket: buildTicket({
+      task: '8',
+      title: 'Задача без Bitrix',
+      description: 'Постановка пришла из чата.',
+      acceptanceCriteria: ['заголовок виден в конвейере'],
+      sourceUrl: 'http://127.0.0.1:8140/api/tasks/8',
+    }),
+  });
+  const app = await server(t, fx);
+
+  const response = await app.inject({ method: 'GET', url: '/api/tasks' });
+  assert.equal(response.statusCode, 200, response.body);
+  const tasks = response.json().tasks;
+  assert.equal(tasks.find((task) => task.task === '8').title, 'Задача без Bitrix');
+  assert.equal(tasks.find((task) => task.task === '7').title, null);
 });
 
 test('STATE-02: missing pinned route fails graph instead of falling back to graph.json', async (t) => {

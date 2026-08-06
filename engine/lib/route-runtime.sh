@@ -9,7 +9,7 @@
 #   route_v2_dispatch_bootstrap TASK ATTEMPT
 #   route_v2_dispatch_next TASK ATTEMPT
 #   route_v2_dispatch_until_pause TASK ATTEMPT [MAX_STEPS]
-#   route_v2_gate_decide TASK ATTEMPT NODE approved|rejected
+#   route_v2_gate_decide TASK ATTEMPT NODE approved|rejected [REJECT_FEEDBACK]
 #   route_v2_work_time TASK ATTEMPT
 #
 # Коды возврата:
@@ -193,6 +193,37 @@ elif op == "node":
     print(executor, phase, run_key, policy, fanout_mode, fanout_max, fanout_degrade,
           retry_no_result, retry_product, provider_attempts, provider_strategy,
           browser, timeout_class, command_id, sep="\t")
+elif op == "gate-feedback-target":
+    node_id = args[0]
+    machine = value.get("machine") if isinstance(value, dict) else None
+    nodes = machine.get("nodes") if isinstance(machine, dict) else None
+    if not isinstance(nodes, list):
+        fail()
+    matches = [item for item in nodes if isinstance(item, dict) and item.get("id") == node_id]
+    if len(matches) != 1 or matches[0].get("executor") != "gate":
+        fail()
+    on = matches[0].get("on")
+    transition = on.get("rejected") if isinstance(on, dict) else None
+    if not isinstance(transition, dict):
+        fail()
+    modes = set(transition) & {"next", "rewind", "stop", "escalate"}
+    if len(modes) != 1:
+        fail()
+    mode = next(iter(modes))
+    if mode not in {"next", "rewind"}:
+        print(mode)
+    else:
+        target = transition.get(mode)
+        target_matches = [
+            item for item in nodes
+            if isinstance(item, dict) and item.get("id") == target
+        ]
+        if len(target_matches) != 1:
+            fail()
+        executor = target_matches[0].get("executor")
+        if executor not in {"agent", "command", "gate"}:
+            fail()
+        print(mode, target, executor, sep="\t")
 elif op == "work-time":
     # Join pinned describe-route (value) со сводкой work-time из журнала: работа
     # узлов без ворот отдельно от ожидания ворот. Классификация — по executor
@@ -253,6 +284,18 @@ elif op == "work-time":
 else:
     fail()
 PY
+}
+
+_route_v2_gate_feedback_guard() {
+  local description=$1 node=$2 feedback=${3:-} mode target executor
+  [[ -n "$feedback" ]] || return 0
+  IFS=$'\t' read -r mode target executor \
+    < <(_route_v2_json gate-feedback-target "$description" "$node") || return
+  if [[ ( "$mode" == rewind || "$mode" == next ) && "$executor" != agent ]]; then
+    _route_v2_fail \
+      "комментарий rejected нельзя доставить: $mode ведёт в $target (executor=$executor), нужен agent" || return
+  fi
+  return 0
 }
 
 _route_v2_active_result() {
@@ -551,10 +594,11 @@ _route_v2_mark_node_running() {
 _route_v2_commit_and_project() {
   local task=$1 attempt=$2 node=$3 outcome=$4 rewind_limit=${5:-0}
   local verdict_b64=${6:-} no_progress_limit=${7:-0} recovery=${8:-0}
-  local target_budget=${9:-0} cursor rc
+  local target_budget=${9:-0} reject_feedback=${10:-} cursor rc
   cursor=$(attempt_stage_state_commit_v2 \
     "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget") || return
+    "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget" \
+    "$reject_feedback") || return
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
       rc=$?
@@ -1389,6 +1433,17 @@ route_v2_dispatch_next() {
     hard_rewind_limit=6
     no_progress_limit=2
   fi
+  # exhausted синтезирует host после серии запусков без terminal status. Последний
+  # run-state поэтому всё ещё active, а вторичная проекция — running: на доске это
+  # выглядит как живой агент после фактической остановки маршрута. Закрываем exact
+  # fencing record доверенным control-path и показываем узел как failed; run id/epoch
+  # остаются на месте, чтобы следующий запуск получил строго большую эпоху.
+  if [[ "$outcome" == exhausted ]]; then
+    run_state_control_update \
+      "$task" "$run_key" failed \
+      "${run_key}_COMMENT" "исчерпан бюджет повторов: раннер не зафиксировал результат" \
+      || return
+  fi
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
     "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" || return
@@ -1423,7 +1478,7 @@ route_v2_dispatch_until_pause() {
 }
 
 route_v2_gate_decide() {
-  local task attempt node outcome description_tmp executor phase run_key policy rc
+  local task attempt node outcome reject_feedback description_tmp executor phase run_key policy rc
   local fanout_mode fanout_max fanout_degrade retry_no_result retry_product provider_attempts
   local provider_strategy browser_policy timeout_class command_id
   _route_v2_require_isolation || return
@@ -1431,7 +1486,9 @@ route_v2_gate_decide() {
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   node=$(_attempt_stage_state_node_id "${3:-}") || return
   outcome=${4:-}
+  reject_feedback=${5:-}
   [[ "$outcome" == approved || "$outcome" == rejected ]] || return 2
+  [[ "$outcome" == rejected ]] || reject_feedback=
   _route_v2_require_runner_invariant "$task" || return
   _route_v2_load_attempt "$task" "$attempt" || return
   description_tmp=$(mktemp "$(factory_control_root)/.route-v2-machine.XXXXXX") || return 1
@@ -1452,9 +1509,15 @@ route_v2_gate_decide() {
       rm -f -- "$description_tmp"
       return 78
     }
+  _route_v2_gate_feedback_guard "$description_tmp" "$node" "$reject_feedback" || {
+    rc=$?
+    rm -f -- "$description_tmp"
+    return "$rc"
+  }
   rm -f -- "$description_tmp"
   [[ "$executor" == gate ]] || return 78
-  _route_v2_commit_and_project "$task" "$attempt" "$node" "$outcome"
+  _route_v2_commit_and_project \
+    "$task" "$attempt" "$node" "$outcome" 0 '' 0 0 0 "$reject_feedback"
 }
 
 # Сводка учтённого времени попытки: работа узлов без ворот отдельно от ожидания

@@ -5,7 +5,10 @@ import {
   attemptResultLabel,
   PROVIDER_LABELS,
   providerLabel,
+  runnerAttemptModelLabel,
   runnerChainLabel,
+  runnerEffortLabel,
+  runnerModelEffortLabel,
   runnerModelLabel,
   runnerNodeLabel,
   runnerReasonLabel,
@@ -44,14 +47,31 @@ test('chain and emergency switch are visible without model-version hardcoding', 
     switched: true,
     model: 'gpt-5.6-sol',
     models: {
-      claude: { family: 'opus', version: 'latest' },
-      codex: { family: 'sol', version: 'latest' },
+      claude: { family: 'opus', version: 'latest', effort: 'max' },
+      codex: { family: 'sol', version: 'latest', effort: 'max' },
     },
+    attempts: [
+      { runner: 'claude', model: 'opus', effort: 'high' },
+      { runner: 'codex', model: 'gpt-5.6-sol', effort: 'ultra' },
+    ],
   };
   assert.equal(runnerChainLabel(runner), 'Claude → Codex');
   assert.equal(runnerNodeLabel(runner), 'Codex · резерв');
   assert.equal(runnerModelLabel(runner), 'gpt-5.6-sol');
   assert.equal(runnerModelLabel(runner, 'claude'), 'opus');
+  assert.equal(runnerEffortLabel(runner), 'ultra');
+  assert.equal(runnerModelEffortLabel(runner), 'gpt-5.6-sol · effort ultra');
+  assert.equal(runnerModelEffortLabel(runner, 'claude'), 'opus · effort high');
+  assert.equal(runnerAttemptModelLabel(runner.attempts[0]), 'opus · effort high');
   assert.equal(runnerReasonLabel(runner.reason), 'закончился лимит');
   assert.equal(attemptResultLabel('manual_switch'), 'переключён вручную');
+});
+
+test('missing attempt telemetry falls back to runner policy', () => {
+  const runner = {
+    primary: 'codex', actual: 'codex', model: 'gpt-5.6-sol',
+    attempts: [{ runner: 'codex', model: 'gpt-5.6-sol' }],
+    models: { codex: { family: 'sol', version: 'latest', effort: 'max' } },
+  };
+  assert.equal(runnerModelEffortLabel(runner), 'gpt-5.6-sol · effort max');
 });

@@ -68,6 +68,24 @@ async function factoryModule(fastify, opts) {
         && /^[a-f0-9]{64}$/.test(registry.ROUTE_HASH || ''))
   );
 
+  // Заголовок нужен списку конвейеров независимо от трекера. Каждый route-запуск
+  // уже имеет валидный тикет в server-owned хранилище, поэтому ручные задачи без
+  // Bitrix не должны навсегда оставаться с «загрузка названия…». Полный description
+  // в список не кладём: один тикет может занимать до 256 КиБ.
+  const storedTicketTitle = async (task) => {
+    const id = String(task ?? '');
+    if (!/^[1-9][0-9]{0,18}$/.test(id) || !config.ticketsDir) return null;
+    try {
+      const file = path.join(config.ticketsDir, `t${id}.ticket.json`);
+      const ticket = validateTicket(JSON.parse(await fs.readFile(file, 'utf8')), id);
+      return ticket.title;
+    } catch {
+      // У исторического реестра тикета может не быть. Это не делает сам реестр
+      // нечитаемым: UI по-прежнему попробует получить название из Bitrix.
+      return null;
+    }
+  };
+
   // Historical registry files remain readable, but never reach an executable, a
   // lifecycle script or a writer. Every mutation calls this guard first.
   const managedRegistry = async (id, reply) => {
@@ -136,9 +154,13 @@ async function factoryModule(fastify, opts) {
   // Список всех задач с картой статусов этапов.
   fastify.get('/api/tasks', async () => {
     const tasks = await factoryState.listTasks();
+    const titledTasks = await Promise.all(tasks.map(async (task) => ({
+      ...task,
+      title: await storedTicketTitle(task.task),
+    })));
     // Порог молчания едет вместе со списком: «этот ход завис» обязаны считать одинаково
     // чип в навигации, оповещение и карточка задачи, а хранится он в настройках.
-    return { tasks, silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0) };
+    return { tasks: titledTasks, silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0) };
   });
 
   // Деталь одной задачи: реестр + карта этапов + таймлайн.
@@ -233,6 +255,23 @@ async function factoryModule(fastify, opts) {
       sections.push({
         title: '[Внутренние уточнения человека — приоритетнее описания; пометки «[приложено фото: /путь]» открывай инструментом Read]',
         text: clarify.slice(0, 6000),
+      });
+    }
+    const open = await analyzer.readOpenQuestions(id);
+    if (open) {
+      const lines = [];
+      if (open.questions.length) {
+        lines.push('Вопросы к человеку:');
+        open.questions.forEach((q, i) => lines.push(`${i + 1}. ${q}`));
+      }
+      if (open.unknowns.length) {
+        if (lines.length) lines.push('');
+        lines.push('Технические неизвестные (проверить по коду при планировании):');
+        open.unknowns.forEach((u, i) => lines.push(`${i + 1}. ${u}`));
+      }
+      sections.push({
+        title: '[Открытые вопросы триажа — начинай с них: отвечай первой секцией плана «## Открытые решения»; ответы человека в уточнениях выше приоритетнее и снимают вопрос]',
+        text: lines.join('\n').slice(0, 4000),
       });
     }
     if (b24) {

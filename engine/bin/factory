@@ -576,6 +576,13 @@ source "$FACTORY_HOME/lib/profile-preflight.sh"
 if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   _attempt_state_reason "$REASON" || exit $?
 fi
+# HTTP-слой уже сворачивает перевод строки в пробел; прямой CLI сохраняет ту же
+# совместимость. Остальные границы общие с reason, потому что rejected-комментарий
+# теперь становится доверенным указанием следующему агенту.
+if [[ "$MODE" == gate && -n "$GATE_COMMENT" ]]; then
+  GATE_COMMENT=${GATE_COMMENT//$'\n'/ }
+  _attempt_state_reason "$GATE_COMMENT" || exit $?
+fi
 
 # Read-only сводка учтённого времени: журнал попытки и pinned describe-route,
 # без песочницы и runner-контрактов. Sealed-попытку журнал не отдаёт (75) —
@@ -2053,15 +2060,15 @@ v2_gate_commit() {
   pipeline_gate_key=$(v2_gate_pipeline_key "$GATE_NODE") ||
     die "нет UI-проекции для gate node: $GATE_NODE"
   route_v2_gate_decide \
-    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" >/dev/null || {
+    "$TASK" "$attempt" "$GATE_NODE" "$GATE_DECISION" "$GATE_COMMENT" >/dev/null || {
     rc=$?
     v2_log "gate CAS не принят (код $rc)"
     return "$rc"
   }
   set_st "$TASK" "$gate_key" "$GATE_DECISION" \
-    "${gate_key}_COMMENT" "${GATE_COMMENT//$'\n'/ }" \
+    "${gate_key}_COMMENT" "$GATE_COMMENT" \
     "$pipeline_gate_key" "$GATE_DECISION" \
-    "${pipeline_gate_key}_COMMENT" "${GATE_COMMENT//$'\n'/ }"
+    "${pipeline_gate_key}_COMMENT" "$GATE_COMMENT"
   v2_log "gate $GATE_NODE=$GATE_DECISION зафиксирован"
 }
 

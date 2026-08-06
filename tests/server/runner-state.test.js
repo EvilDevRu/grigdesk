@@ -22,7 +22,10 @@ test('runner state follows engine precedence and exposes an emergency switch', (
     STAGE_BUILD_FAILOVER: 'claude',
     MODEL_DEFAULT_CLAUDE_FAMILY: 'opus',
     MODEL_DEFAULT_CLAUDE_VERSION: 'latest',
+    MODEL_DEFAULT_CLAUDE_EFFORT: 'max',
     MODEL_DEFAULT_CODEX_FAMILY: 'sol',
+    MODEL_DEFAULT_CODEX_EFFORT: 'xhigh',
+    MODEL_BUILD_CODEX_EFFORT: 'ultra',
   };
   const registry = {
     RUNNER_OVERRIDE_STAGE_BUILD: 'claude,codex',
@@ -47,7 +50,9 @@ test('runner state follows engine precedence and exposes an emergency switch', (
   assert.equal(state.catalogRevision, '2026-07-29');
   assert.equal(state.switched, true);
   assert.equal(state.models.claude.family, 'opus');
+  assert.equal(state.models.claude.effort, 'max');
   assert.equal(state.models.codex.family, 'sol');
+  assert.equal(state.models.codex.effort, 'ultra');
 });
 
 test('runner state falls back from stage policy to project policy', () => {
@@ -104,6 +109,7 @@ test('runner config and attempts are read from canonical profile files', async (
   await mkdir(path.join(runRoot, 'run-a'), { recursive: true });
   await writeFile(path.join(runRoot, 'run-b', 'meta.env'), [
     'SCHEMA=1', 'RUNNER=codex', 'EPOCH=2', 'MODEL=gpt-5.6-sol',
+    'EFFORT=ultra',
     'ROUTE_REASON=fallback_limit',
     'RESULT_CLASS=ok', 'RC=0', 'SOURCE=runtime', '',
   ].join('\n'));
@@ -116,11 +122,11 @@ test('runner config and attempts are read from canonical profile files', async (
   assert.deepEqual(await readRunnerAttempts(path.join(root, 'state'), '42', 'BUILD'), [
     {
       id: 'run-a', epoch: 1, runner: 'claude', model: 'opus', reason: null,
-      result: 'limited', rc: 1, source: 'runtime',
+      effort: null, result: 'limited', rc: 1, source: 'runtime',
     },
     {
       id: 'run-b', epoch: 2, runner: 'codex', model: 'gpt-5.6-sol',
-      reason: 'fallback_limit', result: 'ok', rc: 0, source: 'runtime',
+      effort: 'ultra', reason: 'fallback_limit', result: 'ok', rc: 0, source: 'runtime',
     },
   ]);
 });

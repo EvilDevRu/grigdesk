@@ -166,6 +166,7 @@ export async function readRunnerAttempts(stateDir, task, stage) {
         epoch: /^\d+$/.test(meta.EPOCH || '') ? Number(meta.EPOCH) : null,
         runner: PROVIDER_ID.test(meta.RUNNER || '') ? meta.RUNNER : null,
         model: meta.MODEL || null,
+        effort: meta.EFFORT || null,
         reason: meta.ROUTE_REASON || null,
         result: meta.RESULT_CLASS || null,
         rc: /^-?\d+$/.test(meta.RC || '') ? Number(meta.RC) : null,

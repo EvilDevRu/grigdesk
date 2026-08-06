@@ -71,6 +71,13 @@ function isConnectionError(error) {
     || error?.name === 'AbortError';
 }
 
+// Время отправки хранится у самой реплики, а не вычисляется из updatedAt чата:
+// последний меняется и после ответа агента, переименования и синхронизации окон.
+function messageSentAt(value) {
+  const sentAt = Number(value);
+  return Number.isSafeInteger(sentAt) && sentAt > 0 ? sentAt : 0;
+}
+
 // Ответ может приехать тремя путями: прямо в send(), из chats/pending после обрыва
 // вкладки или синхронизацией истории с другого устройства. Ключи не дают одному ответу
 // зазвонить дважды, если пути пересеклись. Set ограничиваем, чтобы долгая вкладка не росла.
@@ -412,7 +419,11 @@ export const useChatStore = defineStore('chat', {
         if (s && !(s.messages || []).some((m) => m.pid === p.id)) {
           // Гонка last-write-wins могла затереть сам вопрос — восстанавливаем его перед ответом.
           if (p.userText && !(s.messages || []).slice(-12).some((m) => m.role === 'user' && m.text === p.userText)) {
-            s.messages.push({ role: 'user', text: p.userText, pid: `${p.id}:u` });
+            const sentAt = messageSentAt(p.userSentAt);
+            s.messages.push({
+              role: 'user', text: p.userText, pid: `${p.id}:u`,
+              ...(sentAt ? { sentAt } : {}),
+            });
           }
           s.messages.push({
             role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id,
@@ -1297,13 +1308,20 @@ export const useChatStore = defineStore('chat', {
       const queued = !!s.sending;
       // Вложения в истории — только ссылки на серверные файлы (file/name/url/mime).
       const atts = attachments.map((a) => ({ file: a.file, name: a.name, url: a.url, mime: a.mime }));
-      s.messages.push({ role: 'user', text, ...(atts.length ? { attachments: atts } : {}), ...(queued ? { queued: true } : {}) });
+      // Фиксируем именно момент отправки запроса. updatedAt всего чата для этого не
+      // годится: он ещё несколько раз изменится, пока агент ответит и история сохранится.
+      const sentAt = Date.now();
+      s.messages.push({
+        role: 'user', text, sentAt,
+        ...(atts.length ? { attachments: atts } : {}),
+        ...(queued ? { queued: true } : {}),
+      });
       // Счётчик незакрытых отправок: «думает…» гасим, только когда закончилась ПОСЛЕДНЯЯ,
       // иначе ответ первого хода снимал бы индикатор у ещё работающего второго.
       s.inflight = (s.inflight || 0) + 1;
       s.sending = true; s.error = null; s.offline = false;
       if (!queued) { s.progressTokens = 0; s.steps = []; } // лента предыдущего хода уже уехала в своё сообщение
-      s.updatedAt = Date.now();
+      s.updatedAt = sentAt;
       // После сжатия «выжимкой» сессии ещё нет: агент увидит состояние работы первым
       // блоком этого сообщения. В переписку на экране блок не попадает — там уже есть и
       // вся история, и плашка о сжатии. Снимаем семя ДО запроса (иначе гонка со вторым
@@ -1342,7 +1360,7 @@ export const useChatStore = defineStore('chat', {
           message: seed ? `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}\n[/Выжимка]\n\n${text}` : text,
           model: resolvedModel.id, modelRef: s.modelRef,
           effort: requestEffort, mode: s.mode || '',
-          sessionId: s.sessionId, context, chatKey: id, requestTitle,
+          sessionId: s.sessionId, context, chatKey: id, requestTitle, sentAt,
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
         // Сервер вырезал служебный маркер из ответа и вернул готовое трёхсловное имя.

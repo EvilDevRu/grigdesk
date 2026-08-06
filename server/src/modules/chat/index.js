@@ -107,6 +107,47 @@ async function chatModule(fastify, opts) {
     return `[Контекст кокпита]\n${lines.join('\n')}\n[/Контекст]\n\n`;
   }
 
+  // Потолок описания в конверте: поле ticket.description допускает до 100 000 символов
+  // (TICKET_LIMITS), тащить всё в каждый ход чата расточительно — детали агент при
+  // надобности дочитает из самого файла, путь к которому указан в маркере обрезки.
+  const TICKET_DESCRIPTION_MAX = 6000;
+
+  /**
+   * Контекст выбранной в чате задачи: тикет лежит в server-owned хранилище
+   * (config.ticketsDir, lib/factory-ticket.js) и до сих пор агенту не передавался —
+   * выбор задачи влиял только на cwd. Чтение лучшее усилие: задача без тикета
+   * (ручная, историческая) или битый файл не должны ронять ход чата.
+   */
+  async function taskTicketBlock(id) {
+    const task = String(id ?? '');
+    if (!/^[1-9][0-9]{0,18}$/.test(task) || !config.ticketsDir) return '';
+    try {
+      const file = path.join(config.ticketsDir, `t${task}.ticket.json`);
+      const ticket = JSON.parse(await fs.readFile(file, 'utf8'));
+      const title = String(ticket?.title || '').trim();
+      const lines = [`В чате выбрана задача #${task}${title ? `: «${title}»` : ''}.`];
+      let description = String(ticket?.description || '').trim();
+      if (description) {
+        if (description.length > TICKET_DESCRIPTION_MAX) {
+          description = `${description.slice(0, TICKET_DESCRIPTION_MAX)}\n[описание обрезано; полный текст: ${file}]`;
+        }
+        lines.push(`Описание задачи:\n${description}`);
+      }
+      const criteria = (Array.isArray(ticket?.acceptanceCriteria) ? ticket.acceptanceCriteria : [])
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
+      if (criteria.length) {
+        lines.push(`Критерии приёмки:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}`);
+      }
+      const sourceUrl = String(ticket?.sourceUrl || '').trim();
+      if (sourceUrl) lines.push(`Источник: ${sourceUrl}`);
+      lines.push('Используй контекст задачи, только если просьба к нему относится. На отвлечённые вопросы отвечай как обычно, без упоминания задачи.');
+      return `[Задача чата]\n${lines.join('\n')}\n[/Задача чата]\n\n`;
+    } catch {
+      return '';
+    }
+  }
+
   /**
    * Единый запуск выбранного executor-а. cwd/доп-директории зависят от наличия задачи
    * и UI-контекста (страницы, с которой пишет пользователь).
@@ -485,9 +526,18 @@ async function chatModule(fastify, opts) {
 
   async function runChatTurn(reply, request, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
-    chatKey, queued, requestTitle, compact, target,
+    chatKey, queued, requestTitle, sentAt, compact, target,
   }) {
     const wantsTitle = requestTitle === true;
+    // Клиент фиксирует момент нажатия «отправить» до durable save. Он нужен только
+    // страховочной записи pending: если окно закрылось и вопрос пришлось восстановить,
+    // его точное время не должно превращаться во время готовности ответа.
+    const userSentAt = Number.isSafeInteger(sentAt) && sentAt > 0 ? sentAt : 0;
+    const orphanUser = {
+      userText: message || '',
+      hadAttachments: !!attachments?.length,
+      ...(userSentAt ? { userSentAt } : {}),
+    };
     // Сообщение ждало в очереди — его sessionId устарел: пока оно стояло, предыдущий ход
     // мог завести новый id, и запуск со старым потерял бы контекст разговора. Пустой
     // sessionId не трогаем: это осознанный старт нового разговора, а не устаревшая копия.
@@ -573,10 +623,12 @@ async function chatModule(fastify, opts) {
     // исполнителя: родная слэш-команда CLI (сессия сохраняется) либо выжимка текстом,
     // если слэш-команд в неинтерактивном режиме он не понимает (lib/executors/index.js).
     const plan = compact ? (executor?.compaction || { kind: 'summary' }) : null;
+    // Тикет выбранной задачи — только обычному ходу: служебному сжатию он не нужен.
+    const ticket = plan ? '' : await taskTicketBlock(id);
     const fullMessage = plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
-        contextPrefix(context, mode.hint) + attachBlock + (message || 'Посмотри вложения.'),
+        contextPrefix(context, mode.hint) + ticket + attachBlock + (message || 'Посмотри вложения.'),
         wantsTitle,
       );
     // Режим прав выбирает пользователь в чате; страница даёт лишь дефолт для своих
@@ -771,7 +823,7 @@ async function chatModule(fastify, opts) {
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
           chatKey, role: 'assistant', ...out, model: model || null, effort: runEffort || null,
-          userText: message || '', hadAttachments: !!attachments?.length, at: Date.now() });
+          ...orphanUser, at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
@@ -799,7 +851,7 @@ async function chatModule(fastify, opts) {
                 chatKey,
                 role: 'error',
                 reply: resetMessage,
-                userText: message || '',
+                ...orphanUser,
                 sessionResetFailed: true,
                 at: Date.now(),
               });
@@ -830,7 +882,7 @@ async function chatModule(fastify, opts) {
         if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
         if (request.socket.destroyed && chatKey) {
           await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-            chatKey, role: 'assistant', ...stoppedOut, userText: message || '', at: Date.now() });
+            chatKey, role: 'assistant', ...stoppedOut, ...orphanUser, at: Date.now() });
           fastify.sse.broadcast('chat-orphan', { chatKey });
           return reply;
         }
@@ -838,7 +890,7 @@ async function chatModule(fastify, opts) {
       }
       if (request.socket.destroyed && chatKey) {
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'error', reply: err.message, userText: message || '',
+          chatKey, role: 'error', reply: err.message, ...orphanUser,
           sessionReset: !!err.sessionReset, sessionResetFailed: !!err.sessionResetFailed,
           at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
@@ -931,22 +983,22 @@ async function chatModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
     });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
     const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle,
+      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
     });
   });
 

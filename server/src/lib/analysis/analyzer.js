@@ -99,6 +99,20 @@ export class Analyzer {
     try { return await fs.readFile(this._paths(id).clarify, 'utf8'); } catch { return ''; }
   }
 
+  /**
+   * Открытые вопросы (questions) и технические неизвестные (unknowns) последнего
+   * триажа. Это мост «триаж → конвейер»: запуск вклеивает их в тикет, и планировщик
+   * начинает с них (секция «## Открытые решения»), а не переспрашивает человека с нуля.
+   */
+  async readOpenQuestions(id) {
+    const analysis = await this._readJson(this._paths(id).json);
+    if (!analysis) return null;
+    const clean = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : []);
+    const questions = clean(analysis.questions);
+    const unknowns = clean(analysis.unknowns);
+    return questions.length || unknowns.length ? { questions, unknowns } : null;
+  }
+
   async appendClarification(id, text) {
     const stamp = new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
     const cur = await this.readClarifications(id);

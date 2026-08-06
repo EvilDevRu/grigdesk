@@ -25,8 +25,9 @@
 - `parseLoops(stagesLog)` — возвраты `возврат в X из-за KEY` → счётчик по узлу; `halted`.
 
 `getTaskGraph(task)` собирает всё + `nodeMeta` (AT/DUR/FANOUT/FAILS/TOKENS, runner chain,
-семейства моделей, actual/reason и последние attempt из `logs/runs/`) + проектную/задачную
-`runnerPolicy` + `progress` (done/total/current) + порты стенда из `tNNNN.env`. Если движок
+семейства и effective effort моделей, actual/reason и последние attempt с фактическими
+`model`/`effort` из `logs/runs/`) + проектную/задачную `runnerPolicy` + `progress`
+(done/total/current) + порты стенда из `tNNNN.env`. Если движок
 поставил `STALLED_HUMAN` или оборвался, ответ также содержит `stall` с причиной, подсказкой
 и `node`; соответствующий узел получает `stall`/`fail`, даже если реестр этапа остался
 в `running`. Причина дублируется в `nodeMeta.<node>.stall` для модалки конкретного агента.
@@ -65,6 +66,22 @@ read-only реестры могут использовать старый route 
 Live-переключение показывается только при живом оркестраторе: после stop исторические
 `status=run`/`runner.actual` не считаются процессом, вместо кнопки switch модалка даёт выбрать
 stage override, который вступит в силу по кнопке «Продолжить прогон».
+
+### Модель и effort в модалке узла
+
+Маршрут не несёт model policy: его `runKey` только выбирает stage, а
+`server/src/lib/runner-state.js` резолвит `MODEL_<STAGE>_<PROVIDER>_*` →
+`MODEL_DEFAULT_<PROVIDER>_*` из `profiles/<profile>/runners.env`. API отдаёт результат в
+`nodeMeta.<node>.runner.models[provider]`.
+
+В цепочке исполнителей модель и effort показаны одной строкой, например
+`gpt-5.6-sol · effort ultra`. Если provider уже запускался, UI берёт effort последней его
+попытки из `runner.attempts[].effort`; это значение launcher записал в
+`logs/runs/t<TASK>/<STAGE>/<RUN>/meta.env`.
+Так завершённый этап продолжает показывать фактический effort даже после смены policy.
+До первого запуска или при legacy telemetry без `EFFORT` используется effective policy.
+Строки «Попытки запуска» всегда показывают собственные `model · effort`, когда эти поля
+присутствуют, и не приписывают исторической попытке новое значение из профиля.
 
 ## Палитра
 

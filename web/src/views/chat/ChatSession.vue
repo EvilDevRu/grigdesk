@@ -520,6 +520,32 @@ async function copyMsg(m, i) {
   } catch { /* не скопировалось — молча */ }
 }
 
+// Как в мессенджере: в пузыре показываем только компактные часы и минуты, а полную
+// локальную дату оставляем в подсказке и семантическом <time>. Старым сообщениям без
+// sentAt время не придумываем — updatedAt относится ко всему чату, а не к запросу.
+const messageTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+const messageDateTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
+  dateStyle: 'medium', timeStyle: 'short',
+});
+function validMessageTime(value) {
+  const time = Number(value);
+  return Number.isSafeInteger(time) && time > 0 ? time : 0;
+}
+function messageTime(value) {
+  const time = validMessageTime(value);
+  return time ? messageTimeFormatter.format(new Date(time)) : '';
+}
+function messageTimeTitle(value) {
+  const time = validMessageTime(value);
+  return time ? `Отправлено ${messageDateTimeFormatter.format(new Date(time))}` : '';
+}
+function messageTimeIso(value) {
+  const time = validMessageTime(value);
+  return time ? new Date(time).toISOString() : '';
+}
+
 // ── Спросы агента: разрешение на действие и вопрос (AskUserQuestion). Все висящие
 // запросы лежат в сторе (приходят по SSE, после F5 — из /api/chat/waiting);
 // берём адресованные этому чату. Висят, пока не ответишь: агент их ждёт. ──
@@ -711,13 +737,16 @@ async function openDebug() {
           <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
           <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
           <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
-          <div v-if="m.text" class="mrow">
+          <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
             <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md"
                  v-html="mdToHtml(m.text, { resolveHref: documentRouteHref })"
                  @click="onMarkdownClick"></div>
-            <div v-else class="text">{{ m.text }}</div>
-            <button class="copy" :class="{ done: copiedIdx === i }"
+            <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
+              v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
+              :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
+              :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
+            <button v-if="m.text" class="copy" :class="{ done: copiedIdx === i }"
                     :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
               <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12" />
@@ -966,7 +995,12 @@ async function openDebug() {
 .page .msg .text { font-size: 14.5px; }
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
 .msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
-.msg.user .text { background: color-mix(in srgb, var(--accent) 18%, transparent); padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
+.msg.user .text { display: flow-root; background: color-mix(in srgb, var(--accent) 18%, transparent);
+  padding: 9px 13px; border-radius: 14px 14px 4px 14px; }
+/* Время запроса — внутри нижнего правого угла пузыря, как в Telegram: часы и минуты
+   не спорят с текстом, полная дата доступна по наведению. */
+.m-time { float: right; margin: .72em 0 0 9px; color: color-mix(in srgb, var(--ink-mid) 82%, transparent);
+  font-size: 10px; font-weight: 400; line-height: 1; white-space: nowrap; user-select: none; }
 /* Агент — слева, с подписью и акцентной полоской, текст маркдауном */
 .msg.assistant { align-self: stretch; border-left: 2px solid color-mix(in srgb, #d97757 45%, transparent); padding-left: 13px; }
 .ahead { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;

@@ -73,13 +73,16 @@ test('stale durable save повторяет CAS и запускает ход р�
     };
   };
   let posts = 0;
+  let requestSentAt = 0;
   apiHarness.post = async (url, body) => {
     posts += 1;
     assert.equal(url, '/api/chat');
     assert.deepEqual(body.modelRef, { provider: 'test-provider', model: 'chosen-model' });
+    requestSentAt = body.sentAt;
     return { reply: 'План готов', model: 'chosen-model' };
   };
 
+  const beforeSend = Date.now();
   await chat.send('stale-chat', 'Составь план в md');
 
   assert.equal(puts.length, 2);
@@ -91,6 +94,10 @@ test('stale durable save повторяет CAS и запускает ход р�
   assert.equal(chat.sessions[0].offline, false);
   assert.equal(chat.sessions[0].sending, false);
   assert.equal(chat.sessions[0].messages.at(-1).text, 'План готов');
+  const userMessage = chat.sessions[0].messages.find((message) => message.role === 'user');
+  assert.ok(userMessage.sentAt >= beforeSend && userMessage.sentAt <= Date.now());
+  assert.equal(requestSentAt, userMessage.sentAt, 'сервер получает исходное время запроса для pending-восстановления');
+  assert.equal(puts[0].messages[0].sentAt, userMessage.sentAt, 'время попадает в durable историю до model POST');
 });
 
 test('неисчерпаемый stale не маскируется под обрыв и не запускает агента', async () => {

@@ -183,7 +183,7 @@ async function server(t, fx) {
     config: fx.config,
     prefs: { read: () => ({}) },
     b24: null,
-    analyzer: { readClarifications: async () => null },
+    analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();
   t.after(async () => app.close());

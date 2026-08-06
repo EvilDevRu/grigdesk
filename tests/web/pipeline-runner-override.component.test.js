@@ -78,7 +78,7 @@ async function compilePipelineView() {
     )
     .replace(
       /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptResultLabel, providerLabel, runnerChainLabel, runnerModelLabel, runnerNodeLabel, runnerReasonLabel }'
+      'const { attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel, runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
       + ' = globalThis.__pipelineRunnerDisplay;',
     )
     .replace(
@@ -128,6 +128,11 @@ function makeFixture({
           source,
           actual,
           model: null,
+          models: {
+            claude: { family: 'opus', version: 'latest', effort: 'max' },
+            codex: { family: 'sol', version: 'latest', effort: 'ultra' },
+          },
+          attempts: [],
           reason: null,
           switched: false,
         },
@@ -254,6 +259,36 @@ test('небегущий этап: блок выбора исполнителя 
 
   await select.setValue('codex');
   assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
+});
+
+test('модалка показывает policy effort до запуска и фактический effort в попытке', async (t) => {
+  const fixture = makeFixture({ status: 'done', actual: 'codex' });
+  Object.assign(fixture.graph.nodeMeta.plan.runner, {
+    model: 'gpt-5.6-sol',
+    attempts: [{
+      id: 'run-1', epoch: 1, runner: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh',
+      result: 'ok',
+    }],
+  });
+  const { wrapper, openPlanStage } = await mountPipeline(t, fixture);
+  await openPlanStage('done');
+
+  const hops = wrapper.findAll('.runner-hop');
+  assert.match(hops[0].text(), /opus · effort max/);
+  // У уже запущенного Codex telemetry xhigh важнее обновлённой policy ultra.
+  assert.match(hops[1].text(), /gpt-5\.6-sol · effort xhigh/);
+  assert.match(wrapper.get('.runner-attempt').text(), /gpt-5\.6-sol · effort xhigh/);
+});
+
+test('ручной запуск без Bitrix показывает заголовок сохранённого тикета', async (t) => {
+  const fixture = makeFixture();
+  fixture.factoryTask.title = 'Исправить источник задачи API';
+  const { wrapper } = await mountPipeline(t, fixture);
+
+  const title = wrapper.get('.ctitle');
+  assert.equal(title.text(), 'Исправить источник задачи API');
+  assert.equal(title.element.tagName, 'SPAN');
+  assert.equal(wrapper.text().includes('загрузка названия'), false);
 });
 
 test('источник task-stage: видна «Сбросить» с честной подписью, клик шлёт пустой primary', async (t) => {

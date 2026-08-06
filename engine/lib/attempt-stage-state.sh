@@ -8,7 +8,7 @@
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
 #   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME \
 #     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT] [RECOVERY] \
-#     [TARGET_BUDGET]
+#     [TARGET_BUDGET] [REJECT_FEEDBACK]
 #
 # Изменяемый курсор и его только дополняемый журнал событий с цепочкой хешей хранятся только в
 # <control-root>/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT>/stage-results.
@@ -127,6 +127,39 @@ def reason(value):
     ):
         fail()
     return value
+
+
+def is_recovery_commit(event):
+    # У rejected тот же reason несёт человеческое замечание ворот. Даже если человек
+    # дословно ввёл служебную константу восстановления, это всё ещё feedback: исход
+    # однозначно отделяет решение ворот от внутреннего recovery-коммита.
+    return (
+        event.get("kind") == "commit"
+        and event.get("outcome") != "rejected"
+        and event.get("reason") == RECOVERY_COMMIT_REASON
+    )
+
+
+def event_at_sequence(directory, sequence):
+    # runtime.lastCommit называет последовательность, но имя immutable-файла ещё
+    # содержит hash. Для exact-idempotency нужен сам зафиксированный reason: сравнение
+    # только node/outcome превращает повтор rejected с ДРУГИМ текстом в ложный успех.
+    sequence = integer(sequence)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        fail()
+    matches = []
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match and int(match.group(1)) == sequence:
+            matches.append(name)
+    if len(matches) != 1:
+        fail()
+    event = regular_json(os.path.join(directory, matches[0]))
+    if not isinstance(event, dict) or event.get("sequence") != sequence:
+        fail()
+    return event
 
 
 def validate_verdict(value, outcome):
@@ -350,9 +383,10 @@ def derive_commit_cursor(before, action, node, outcome, sequence):
 
 def human_rewind_note(directory, node):
     # Указание, оставленное человеком при возврате курсора на узел. Живёт в журнале
-    # попытки событием human-rewind и обязано доехать до промпта того захода, ради
-    # которого узел и вернули: иначе человек жмёт «перейти сюда», агент входит с тем
-    # же заданием, что и в прошлый раз, и повторяет ту же ошибку.
+    # попытки событием human-rewind либо причиной rejected-коммита ворот и обязано
+    # доехать до промпта того захода, ради которого узел вернули: иначе человек жмёт
+    # «перейти сюда»/«на доработку», агент входит с тем же заданием, что и в прошлый
+    # раз, и повторяет ту же ошибку.
     # Снимается ПЕРВЫМ ЖЕ коммитом узла: указание отработано, и подсовывать его
     # следующему заходу — врать ему о том, зачем он здесь. Возврат туда же второй раз
     # кладёт новое событие со своей причиной, поэтому «последнее слово» всегда свежее.
@@ -377,14 +411,27 @@ def human_rewind_note(directory, node):
     note = ""
     for _, name in events:
         event = regular_json(os.path.join(directory, name))
-        if not isinstance(event, dict) or event.get("node") != node:
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        # Rejected фиксируется на самом gate, но адресовано указание агенту, куда
+        # объявленный маршрутом next/rewind переводит курсор. Mutable gate-comment
+        # при отдельном resume очищается reset-проекцией, поэтому источник здесь
+        # только immutable commit-event.
+        if (
+            event.get("kind") == "commit"
+            and event.get("outcome") == "rejected"
+            and isinstance(action, dict)
+            and (action.get("rewind") == node or action.get("next") == node)
+            and event.get("reason") is not None
+        ):
+            note = reason(event.get("reason"))
+            continue
+        if event.get("node") != node:
             continue
         if event.get("kind") == "human-rewind":
             note = reason(event.get("reason"))
-        elif (
-            event.get("kind") == "commit"
-            and event.get("reason") == RECOVERY_COMMIT_REASON
-        ):
+        elif is_recovery_commit(event):
             continue
         elif event.get("kind") in {"commit", "rewind-limit", "no-progress"}:
             note = ""
@@ -891,6 +938,7 @@ elif OP == "prepare-commit":
         no_progress_limit_raw,
         recovery_raw,
         target_budget_raw,
+        feedback_raw,
     ) = ARGS
     if recovery_raw not in {"0", "1"}:
         fail()
@@ -909,12 +957,25 @@ elif OP == "prepare-commit":
     # агента до потолка шагов — деньгами и часами за отказ записать один факт.
     # После нового коммита узла возврат перестаёт считаться свежим, и повтор упавшего
     # процесса снова гасится идемпотентностью — ровно как задумано.
-    if (
+    same_last_commit = (
         isinstance(last, dict)
         and last.get("node") == node
         and last.get("outcome") == outcome
-        and not human_rewind_note(results_dir, node)
-    ):
+    )
+    if same_last_commit and outcome == "rejected":
+        # Crash-retry допустим только пока lastCommit является последним событием и
+        # только с дословно тем же feedback. Иначе UI мог бы показать новый текст,
+        # хотя immutable ledger сохранил старый. Если курсор позже явно вернули на те
+        # же ворота, это уже новое решение, а не retry старого CAS.
+        if integer(runtime.get("sequence")) == integer(last.get("sequence"), 1):
+            committed = event_at_sequence(results_dir, last.get("sequence"))
+            requested_reason = feedback_raw if feedback_raw else None
+            if committed.get("reason") != requested_reason:
+                fail(75)
+            fail(10)
+        if cursor.get("currentNode") != node:
+            fail(75)
+    if same_last_commit and not human_rewind_note(results_dir, node):
         fail(10)
     if cursor.get("state") not in {"ready", "paused"} or cursor.get("currentNode") != node:
         fail(75)
@@ -933,11 +994,20 @@ elif OP == "prepare-commit":
     target_budget = decimal(target_budget_raw, 10)
     sequence = integer(runtime.get("sequence")) + 1
     event_kind = "commit"
-    # Метка восстановления живёт только на обычном коммите: остановки rewind-limit и
-    # no-progress называют себя сами и всё равно зовут человека к журналу.
-    event_reason = RECOVERY_COMMIT_REASON if recovery_raw == "1" else None
+    action_mode = validate_action(action)
+    # Метка восстановления и замечание rejected-ворот используют reason, но
+    # взаимоисключаются по исходу. Rejected→stop тоже сохраняет комментарий для
+    # аудита; доставить его следующему узлу можно только при объявленном rewind.
+    if feedback_raw:
+        if outcome != "rejected" or recovery_raw != "0":
+            fail(2)
+        event_reason = reason(feedback_raw)
+    else:
+        # Метка восстановления живёт только на обычном коммите: остановки
+        # rewind-limit и no-progress называют себя сами и всё равно зовут человека.
+        event_reason = RECOVERY_COMMIT_REASON if recovery_raw == "1" else None
     after = derive_commit_cursor(cursor, action, node, outcome, sequence)
-    if validate_action(action) == "rewind":
+    if action_mode == "rewind":
         rewind_history = automatic_rewind_history(
             results_dir,
             node,
@@ -1156,7 +1226,7 @@ elif OP == "work-time":
         )
         if (
             event.get("kind") in {"commit", "rewind-limit", "no-progress"}
-            and event.get("reason") != RECOVERY_COMMIT_REASON
+            and not is_recovery_commit(event)
             and previous_at is not None
         ):
             node = identifier(event.get("node"))
@@ -1303,16 +1373,21 @@ elif OP == "validate-ledger":
                 if event["after"] != expected_cursor:
                     fail()
             elif event["kind"] == "commit":
-                # Коммит объясняет себя исходом, а не текстом, поэтому свободного
-                # reason у него нет — ровно одно исключение — метка восстановления:
-                # она константа, её пишет только движок и по ней указание человека
-                # переживает закрытие узла за снятую инструментацию.
-                if (
-                    cursor["state"] not in {"ready", "paused"}
-                    or event["reason"] not in (None, RECOVERY_COMMIT_REASON)
-                ):
+                # Обычно коммит объясняет себя исходом. Два строго различимых
+                # исключения: константа recovery и bounded reason у rejected. При
+                # rewind это ещё и замечание человека целевому узлу; при stop —
+                # неизменяемый аудит причины остановки.
+                if cursor["state"] not in {"ready", "paused"}:
                     fail()
                 identifier(event["outcome"])
+                commit_mode = validate_action(event["action"])
+                if event["reason"] is not None:
+                    if event["reason"] == RECOVERY_COMMIT_REASON:
+                        pass
+                    elif event["outcome"] == "rejected":
+                        reason(event["reason"])
+                    else:
+                        fail()
                 expected_cursor = derive_commit_cursor(
                     cursor,
                     event["action"],
@@ -1793,7 +1868,7 @@ attempt_stage_state_pause_v2() {
 
 attempt_stage_state_commit_v2() {
   local task attempt node outcome rewind_limit verdict_b64 no_progress_limit recovery
-  local target_budget failure_owner root lock_fd
+  local target_budget reject_feedback failure_owner root lock_fd
   local runtime_tmp transition_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
@@ -1809,10 +1884,14 @@ attempt_stage_state_commit_v2() {
   # последний предохранитель после no-progress и лимита дуги, решением человека
   # не обнуляется.
   target_budget=${9:-0}
+  # Десятый — замечание человека у rejected-ворот. Оно ложится в immutable reason
+  # коммита и адресуется узлу rewind через общий канал human note.
+  reject_feedback=${10:-}
   [[ "$rewind_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$no_progress_limit" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$target_budget" =~ ^(0|[1-9]|10)$ ]] || return 2
   [[ "$recovery" == 0 || "$recovery" == 1 ]] || return 2
+  [[ -z "$reject_feedback" ]] || _attempt_state_reason "$reject_feedback" || return
   run_state_verdict_validate "$outcome" "$verdict_b64" || return
   failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
   root=$(attempt_state_v2_task_root "$task") || return
@@ -1853,7 +1932,7 @@ attempt_stage_state_commit_v2() {
     _attempt_stage_state_json prepare-commit \
       "$runtime_tmp" "$transition_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$outcome" \
       "$now" "$rewind_limit" "$verdict_b64" "$no_progress_limit" "$recovery" \
-      "$target_budget" >"$event_tmp"
+      "$target_budget" "$reject_feedback" >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$transition_tmp" "$runtime_tmp"

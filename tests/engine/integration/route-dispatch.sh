@@ -15,6 +15,7 @@ rewind_task=9004
 evidence_task=9005
 hunt_task=9006
 command_task=9007
+stop_feedback_task=9008
 instrumentation_marker="FACTORY-TRACE:t${debug_task}"
 base_repo="$TEST_ROOT/source"
 worktree="$TEST_ROOT/worktree-t${debug_task}"
@@ -194,6 +195,41 @@ assert_eq stopped "$(json_field "$terminal" state)" \
 assert_eq done "$(json_field "$terminal" stop)" \
   "successful tail stops at done"
 
+# Rejected без rewind раньше законно принимал комментарий в mutable-проекцию. После
+# переноса текста в ledger этот маршрут нельзя сломать: reason остаётся аудитом
+# человеческой остановки, хотя доставлять его следующему узлу некуда.
+ATTEMPT_STATE_ID_OVERRIDE=a_90089008900890089008900890089008
+stop_feedback_attempt=$(attempt_state_begin_v2 \
+  "$stop_feedback_task" "$profile_id" "$routes_dir")
+stop_feedback_begin_rc=$?
+unset ATTEMPT_STATE_ID_OVERRIDE
+assert_rc 0 "$stop_feedback_begin_rc" "stop-feedback attempt begins"
+attempt_state_select_route_v2 \
+  "$stop_feedback_task" "$stop_feedback_attempt" debug >/dev/null
+attempt_stage_state_init_v2 \
+  "$stop_feedback_task" "$stop_feedback_attempt" debug >/dev/null
+for stop_node in repro instrument diagnose hyposkeptic proof translator; do
+  attempt_stage_state_commit_v2 \
+    "$stop_feedback_task" "$stop_feedback_attempt" "$stop_node" done >/dev/null
+  assert_rc 0 "$?" "stop-feedback route advances through $stop_node"
+done
+attempt_stage_state_pause_v2 \
+  "$stop_feedback_task" "$stop_feedback_attempt" gate_cause 'human gate: gate_cause' \
+  >/dev/null
+stop_feedback='причина отвергнута, продолжать нельзя'
+route_v2_gate_decide \
+  "$stop_feedback_task" "$stop_feedback_attempt" gate_cause rejected "$stop_feedback" \
+  >/dev/null
+assert_rc 0 "$?" "rejected stop commits with bounded human feedback"
+stop_feedback_cursor=$(attempt_stage_state_read_v2 \
+  "$stop_feedback_task" "$stop_feedback_attempt")
+assert_eq stopped "$(json_field "$stop_feedback_cursor" state)" \
+  "rejected stop remains a terminal human decision"
+stop_feedback_event=$(attempt_stage_state_latest_event_v2 \
+  "$stop_feedback_task" "$stop_feedback_attempt")
+assert_eq "$stop_feedback" "$(json_field "$stop_feedback_event" reason)" \
+  "rejected stop preserves feedback in the immutable audit"
+
 # Узел обязан гореть на доске ДО запуска агента, а не с момента, когда раннер забрал запуск:
 # между входом в узел и стартом агента идут рендер промпта, открытие транзакции и снимок
 # рабочих деревьев, и всё это время доска иначе показывает прошлый узел. Фейковый агент
@@ -214,20 +250,18 @@ assert_contains "$(cat "$STATUS_AT_START")" 'BUILD=running' \
 CALLS_LOG="$TEST_ROOT/retry-agent-calls.log"
 SILENT_LEFT=0
 run_agent() {
-  local task=$1 prompt=$2 stage=$3 file
+  local task=$1 prompt=$2 stage=$3 run_id token=fake-token
   [[ "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" =~ ^(state-only|workspace-write|transactional-write)$ ]] ||
     return 91
   printf '%s\n' "$stage" >>"$CALLS_LOG"
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
+  run_id="fake-${stage}-${FAKE_EPOCH}"
+  run_state_begin "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" || return
   if [[ "$stage" == BUILD ]] && (( SILENT_LEFT > 0 )); then
     SILENT_LEFT=$((SILENT_LEFT - 1))
     return 0
   fi
-  file=$(run_state_active_file "$task" "$stage") || return
-  _run_state_write \
-    "$file" "fake-${stage}-${FAKE_EPOCH}" "$FAKE_EPOCH" \
-    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-    committed done
+  run_state_apply_result "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" done
 }
 
 ATTEMPT_STATE_ID_OVERRIDE=a_90029002900290029002900290029002
@@ -273,6 +307,13 @@ assert_eq stopped "$(json_field "$stopped" state)" \
   "exhausted transition stops the route"
 assert_eq human "$(json_field "$stopped" stop)" \
   "bundle routes exhausted to a human stop"
+exhausted_run_file=$(run_state_active_file "$exhausted_task" BUILD)
+assert_eq failed "$(pipeline_store_get "$exhausted_task" BUILD)" \
+  "synthetic exhausted closes the running stage projection"
+assert_eq committed "$(_run_state_get "$exhausted_run_file" STATE)" \
+  "synthetic exhausted closes the exact run fencing record"
+assert_eq failed "$(_run_state_get "$exhausted_run_file" RESULT)" \
+  "closed run records a failed provider attempt for diagnostics"
 route_v2_dispatch_next "$exhausted_task" "$exhausted_attempt" >/dev/null
 assert_rc 21 "$?" "stopped cursor reports terminal state on the next dispatch"
 

@@ -36,6 +36,29 @@ export function runnerModelLabel(runner, provider = runner?.actual || runner?.pr
     : policy.family;
 }
 
+// Для уже стартовавшего provider-а показываем telemetry конкретного запуска, а не
+// сегодняшнюю policy профиля: конфиг мог измениться после завершения этапа. Старые
+// meta/API могли ещё не отдавать EFFORT — тогда показываем доступную policy как fallback.
+export function runnerEffortLabel(runner, provider = runner?.actual || runner?.primary) {
+  if (!runner || !provider) return '';
+  const attempts = Array.isArray(runner.attempts) ? runner.attempts : [];
+  const latest = attempts.findLast((attempt) => attempt?.runner === provider);
+  if (latest?.effort) return String(latest.effort);
+  return String(runner.models?.[provider]?.effort || '');
+}
+
+export function runnerModelEffortLabel(runner, provider = runner?.actual || runner?.primary) {
+  const model = runnerModelLabel(runner, provider);
+  const effort = runnerEffortLabel(runner, provider);
+  return [model, effort ? `effort ${effort}` : ''].filter(Boolean).join(' · ');
+}
+
+export function runnerAttemptModelLabel(attempt) {
+  const model = String(attempt?.model || '');
+  const effort = String(attempt?.effort || '');
+  return [model, effort ? `effort ${effort}` : ''].filter(Boolean).join(' · ');
+}
+
 const REASONS = {
   primary: 'основной исполнитель',
   fallback_limit: 'закончился лимит',

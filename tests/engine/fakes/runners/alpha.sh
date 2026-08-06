@@ -14,7 +14,11 @@ runner_alpha_capabilities() {
 }
 
 runner_alpha_run() {
+  local _task=$1 prompt=$2 _stage=$3
   printf 'alpha\n' >>"${TEST_ROOT:?}/invocations"
+  if [[ -n "${FAKE_ALPHA_PROMPT_FILE:-}" ]]; then
+    printf '%s\n' "$prompt" >"$FAKE_ALPHA_PROMPT_FILE"
+  fi
   case "${FAKE_ALPHA_RESULT:-limited}" in
     done)
       FACTORY_STATUS_FD=7 bash "$FACTORY_HOME/lib/stage-result.sh" \

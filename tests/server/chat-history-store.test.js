@@ -57,7 +57,9 @@ test('readOne отдаёт один чат и молчит про несущес
   const chat = {
     id: 'chat-2',
     title: 'Начат на планшете',
-    messages: [{ role: 'user', text: 'Привет с планшета' }],
+    messages: [{
+      role: 'user', text: 'Привет с планшета', sentAt: Date.UTC(2026, 6, 30, 9, 15),
+    }],
     createdAt: Date.UTC(2026, 6, 30),
     updatedAt: Date.UTC(2026, 6, 30),
   };

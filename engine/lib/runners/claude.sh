@@ -137,8 +137,12 @@ runner_claude_run() {
     --setting-sources ""
     --strict-mcp-config
     --disable-slash-commands
-    --safe-mode
   )
+  # --safe-mode сознательно снят: конвейерным агентам нужна память проекта
+  # (CLAUDE.md с @-импортами знаний) из cwd-ворктри. Границу держат оставшиеся
+  # флаги: с пустым --setting-sources hooks/плагины/проектным агентам неоткуда
+  # загрузиться, --strict-mcp-config без --mcp-config не поднимает MCP,
+  # --disable-slash-commands глушит skills.
   [[ -z "$model" ]] || args+=(--model "$model")
   [[ -z "$effort" ]] || args+=(--effort "$effort")
   local add_dir

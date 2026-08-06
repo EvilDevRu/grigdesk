@@ -189,6 +189,7 @@ test('ChatSession передаёт в тултип полное загружен
   const routes = [];
   const openedTasks = [];
   const previewedImages = [];
+  const sentAt = new Date(2026, 7, 5, 14, 7).getTime();
   const session = {
     id: 'chat-42',
     taskId: '42',
@@ -200,6 +201,7 @@ test('ChatSession передаёт в тултип полное загружен
       {
         role: 'user',
         text: 'Ошибка в форме',
+        sentAt,
         attachments: [{ file: 'shot.png', name: 'Скриншот.png', url: '/api/chat/files/shot.png', mime: 'image/png' }],
       },
       { role: 'assistant', text: 'Воспроизвел проблему' },
@@ -289,6 +291,12 @@ test('ChatSession передаёт в тултип полное загружен
   assert.match(ringTitle, /Контекст: 83[\s\u00a0]286 из 258[\s\u00a0]400 токенов \(32%\)/);
   assert.match(ringTitle, /за сессию обработано 25[\s\u00a0]626[\s\u00a0]388 входных токенов/);
   assert.match(ringTitle, /25[\s\u00a0]025[\s\u00a0]792 из кэша/);
+  const messageTime = wrapper.find('.msg.user .m-time');
+  assert.equal(messageTime.text(), new Intl.DateTimeFormat('ru-RU', {
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(new Date(sentAt)));
+  assert.equal(messageTime.attributes('datetime'), new Date(sentAt).toISOString());
+  assert.match(messageTime.attributes('title'), /^Отправлено /);
 
   await wrapper.find('.m-atts a').trigger('click');
   assert.deepEqual(previewedImages, [{

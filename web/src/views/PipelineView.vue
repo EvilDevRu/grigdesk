@@ -17,8 +17,9 @@ import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
 import {
   attemptResultLabel,
   providerLabel,
+  runnerAttemptModelLabel,
   runnerChainLabel,
-  runnerModelLabel,
+  runnerModelEffortLabel,
   runnerNodeLabel,
   runnerReasonLabel,
 } from '../shared/runner-display.js';
@@ -35,8 +36,17 @@ const error = ref(null);
 const loaded = ref(false);
 const now = ref(Date.now());
 
-// Названия задач фабрики (из B24) — для кликабельного заголовка карточки.
-function title(taskNum) { return taskStore.title(taskNum); }
+// Тикет — обязательный вход route-прогона, поэтому его заголовок доступен и задачам
+// без трекера. Живое название B24 оставляем приоритетным и только его делаем
+// кликабельным: ручной тикет не должен открывать модалку несуществующей B24-задачи.
+function b24Title(taskNum) { return taskStore.title(taskNum); }
+function title(taskOrNum) {
+  const taskNum = typeof taskOrNum === 'object' ? taskOrNum.task : taskOrNum;
+  const task = typeof taskOrNum === 'object'
+    ? taskOrNum
+    : tasks.value.find((item) => Number(item.task) === Number(taskNum));
+  return b24Title(taskNum) || task?.title || null;
+}
 
 // Таймеры, идущие ВНЕ фабрики: активные задачи доски, которых нет на конвейере.
 const factoryIds = computed(() => new Set(tasks.value.map((t) => Number(t.task))));
@@ -516,7 +526,8 @@ function cardState(g) {
               :title="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
           ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
         </span>
-        <button v-if="title(t.task)" class="ctitle" :title="title(t.task)" @click="ui.openTask(t.task)">{{ title(t.task) }}</button>
+        <button v-if="b24Title(t.task)" class="ctitle" :title="title(t)" @click="ui.openTask(t.task)">{{ title(t) }}</button>
+        <span v-else-if="title(t)" class="ctitle ticket" :title="title(t)">{{ title(t) }}</span>
         <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
         <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
           {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
@@ -675,7 +686,7 @@ function cardState(g) {
                 <span class="runner-hop"
                       :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }">
                   <b>{{ providerLabel(id) }}</b>
-                  <small v-if="runnerModelLabel(stage.meta.runner, id)">{{ runnerModelLabel(stage.meta.runner, id) }}</small>
+                  <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
                 </span>
               </template>
             </div>
@@ -689,7 +700,7 @@ function cardState(g) {
               <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
                 <span class="mono">#{{ a.epoch ?? '—' }}</span>
                 <b>{{ providerLabel(a.runner) }}</b>
-                <span v-if="a.model" class="mono">{{ a.model }}</span>
+                <span v-if="runnerAttemptModelLabel(a)" class="mono">{{ runnerAttemptModelLabel(a) }}</span>
                 <span class="runner-result" :class="{
                   good: a.result === 'ok',
                   switched: a.result === 'manual_switch',
@@ -919,6 +930,8 @@ function cardState(g) {
 .ctitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   background: none; border: none; color: var(--ink); text-align: left; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
 .ctitle:hover { color: var(--accent); }
+.ctitle.ticket { cursor: default; }
+.ctitle.ticket:hover { color: var(--ink); }
 
 .outside { margin-top: 4px; }
 .outside .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-mid); margin: 0 0 8px; }

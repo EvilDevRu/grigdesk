@@ -283,7 +283,27 @@ EOF
 # из окна само задание этапа, а ценен в нём именно конец — то, на чём заход оборвался.
 _stage_checkpoint_block() {
   local f=$1 body
-  body=$(tail -c 6000 -- "$f" 2>/dev/null) || return 0
+  # Байтовый tail может начать UTF-8 хвост с continuation-byte, если граница попала
+  # внутрь многобайтного символа. Тогда один русский checkpoint отравляет весь prompt,
+  # и provider отказывает ещё до model call. Python уже является зависимостью движка;
+  # берём тот же ограниченный хвост и отбрасываем только неполные/битые последовательности.
+  body=$(python3 - "$f" 2>/dev/null <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+try:
+    size = os.path.getsize(path)
+    with open(path, "rb") as source:
+        source.seek(max(0, size - 6000))
+        chunk = source.read(6000)
+except OSError:
+    raise SystemExit(1)
+
+text = chunk.decode("utf-8", errors="ignore").replace("\0", "")
+sys.stdout.buffer.write(text.encode("utf-8"))
+PY
+  ) || return 0
   [[ -n "$body" ]] || return 0
   cat <<EOF
 ---

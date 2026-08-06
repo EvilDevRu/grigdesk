@@ -137,7 +137,7 @@ exit 0
     config,
     prefs: { read: () => ({}) },
     b24: null,
-    analyzer: { readClarifications: async () => null, async get() { return null; } },
+    analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null, async get() { return null; } },
   });
   await app.ready();
   t.after(async () => {

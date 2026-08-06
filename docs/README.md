@@ -23,7 +23,7 @@
 
 ## Движок фабрики
 
-- [CODEX.md](engine/CODEX.md) — статус и контракт мульти-ИИ, failover и диагностики.
+- [MULTI-AI.md](engine/MULTI-AI.md) — статус и контракт мульти-ИИ, failover и диагностики.
 - [ENGINE.md](engine/ENGINE.md) — архитектура движка, инварианты и проверки.
 - [KIMI.md](engine/KIMI.md) — Kimi runner, классификация отказов и contract-based совместимость CLI.
 - [ADDING-RUNNER.md](engine/ADDING-RUNNER.md) — подключение нового provider runner.

@@ -140,6 +140,24 @@ prompt=$(cat "$TEST_ROOT/prompt")
 assert_contains "$prompt" 'ПОСЛЕДНЯЯ СТРОКА' "из длинного черновика взят конец"
 assert_eq 0 "$(( ${#prompt} > 20000 ? 1 : 0 ))" "длинный черновик обрезан, а не вставлен целиком"
 
+# Байтовый потолок может попасть внутрь многобайтного символа. На живой задаче
+# tail -c начинал хвост русского checkpoint с continuation-byte, и Codex трижды
+# отклонял весь prompt как invalid UTF-8, даже не начиная REVIEW.
+{ printf 'Ж'; head -c 5999 /dev/zero | tr '\0' 'x'; } >"$ckpt"
+FACTORY_ROUTE_TIMEOUT_CLASS=build run_agent 41 'сделай работу' BUILD >/dev/null 2>&1
+if python3 - "$TEST_ROOT/prompt" <<'PY'
+from pathlib import Path
+import sys
+
+Path(sys.argv[1]).read_bytes().decode("utf-8")
+PY
+then
+  test_ok "обрезанный внутри многобайтного символа черновик не портит UTF-8 промпта"
+else
+  test_fail "обрезанный внутри многобайтного символа черновик не портит UTF-8 промпта" \
+    "prompt содержит недопустимую UTF-8 последовательность"
+fi
+
 # Черновик соседнего этапа своим не считается.
 printf 'заметки тестов\n' >"$(_stage_checkpoint_path 41 TESTS)"
 rm -f "$ckpt"

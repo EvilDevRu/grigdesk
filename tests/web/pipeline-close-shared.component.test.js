@@ -57,7 +57,7 @@ async function compilePipelineView() {
     )
     .replace(
       /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptResultLabel, providerLabel, runnerChainLabel, runnerModelLabel, runnerNodeLabel, runnerReasonLabel }'
+      'const { attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel, runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
       + ' = globalThis.__pipelineCloseDisplay;',
     )
     .replace("import FactoryGraph from './pipeline/FactoryGraph.vue';", 'const FactoryGraph = globalThis.__pipelineCloseFactoryGraph;')

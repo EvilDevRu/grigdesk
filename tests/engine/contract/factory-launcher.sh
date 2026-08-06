@@ -410,13 +410,14 @@ assert_eq 1 "$(awk -F= '$1=="STALLED_HUMAN"{print $2}' "$shared_state/t${fixture
 assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "failed commit-only gate leaves the paused gate projection untouched"
 
+reject_feedback='уточнить план'
 reject_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" gate --profile "$profile_id" \
     --attempt "$attempt" \
     --node gate_plan \
     --decision rejected \
-    --comment 'уточнить план' \
+    --comment "$reject_feedback" \
     --commit-only \
     --routes-dir "$routes" \
     --state-dir "$shared_state" \
@@ -439,6 +440,22 @@ else
   test_ok "generic reset creates no legacy phantom stages"
 fi
 
+changed_retry=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" gate --profile "$profile_id" \
+    --attempt "$attempt" \
+    --node gate_plan \
+    --decision rejected \
+    --comment 'другое замечание после crash-retry' \
+    --commit-only \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+assert_rc 75 "$?" "changed rejected feedback loses exact idempotency CAS"
+assert_eq "$reject_feedback" \
+  "$(awk -F= '$1=="GATE_PLAN_COMMENT"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "conflicting gate retry cannot project text absent from the ledger"
+
 # Форма отказа t8164: после rewind курсор стоит на plan, а решение повторно
 # прислали для gate_plan. CAS на устаревшем узле ворот — ровно код 75, и
 # записанное ранее решение остаётся видимым.
@@ -456,7 +473,9 @@ assert_rc 75 "$?" "stale gate cursor refuses the commit-only CAS"
 assert_eq rejected "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "stale gate refusal keeps the recorded decision visible"
 
+rejected_prompt="$TEST_ROOT/rejected-gate.prompt"
 resume_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+  FAKE_ALPHA_PROMPT_FILE="$rejected_prompt" \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" resume --profile "$profile_id" \
     --attempt "$attempt" \
@@ -472,6 +491,15 @@ assert_eq done "$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}
   "rewound plan executes again"
 assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "rerun pauses at a fresh plan decision"
+assert_eq "" "$(awk -F= '$1=="GATE_PLAN_COMMENT"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "resume may clear the mutable gate comment projection"
+assert_file_exists "$rejected_prompt" \
+  "rewound agent prompt is captured after a separate resume"
+assert_contains "$(cat "$rejected_prompt")" \
+  '## Указание человека при возврате на этот узел' \
+  "separate resume delivers rejected feedback through the priority human block"
+assert_contains "$(cat "$rejected_prompt")" "$reject_feedback" \
+  "separate resume preserves the exact rejected feedback text"
 
 gate_result=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \

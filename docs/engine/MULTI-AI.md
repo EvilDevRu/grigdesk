@@ -1,4 +1,4 @@
-# Несколько ИИ в Factory: контракт и статус внедрения
+# Multi-AI в Factory: контракт и статус внедрения
 
 Статус на 2026-07-29:
 
@@ -10,9 +10,9 @@
 - metadata-only host preflight проверен на локальных профилях с разными runner chain и
   workspace mode;
 - текущая поставка проверяется без перезапуска Cockpit и без вызова реальных моделей;
-- Cockpit API и UI поднимают canonical runner chain, task/stage override, model family,
-  actual provider/model, причину failover и историю attempt; активный run можно безопасно
-  переключить на разрешённый резерв;
+- Cockpit API и UI поднимают canonical runner chain, task/stage override, model family/effort,
+  actual provider/model/effort, причину failover и историю attempt; активный run можно
+  безопасно переключить на разрешённый резерв;
 - всплывашка исполнителя показывает структурированное состояние лимитов: Claude — через
   OAuth usage, Codex — через read-only `account/rateLimits/read` официального app-server;
   актуальные или последние успешные бары, необходимость входа, отказ аккаунта, rate limit
@@ -98,12 +98,14 @@ engine/bin/factory <TASK> runner show
 На узле этапа:
 
 - свой override, если он есть;
-- семейство модели, а не зафиксированный маркетинговый номер;
-- фактический provider/model последней попытки;
+- семейство модели и effective effort из `runners.env`, а не policy из route schema;
+- фактический provider/model/effort последней попытки;
 - значок автоматического переключения;
 - блокирующая причина, если продолжать нельзя.
 
-`graph.json.runner_keys` связывает внутренние визуальные фазы с реальным runner-stage.
+`runKey` исполняемых узлов закреплённого route bundle связывает внутренние визуальные фазы
+с реальным runner-stage; API проецирует их в карту `runnerKeys` (для legacy её источником
+остаётся `graph.json.runner_keys`).
 Например, несколько узлов планирования могут показывать одну попытку `PLAN`, не выдумывая
 несуществующие запуски `PLANS`/`SKEPTIC`.
 
@@ -112,10 +114,16 @@ engine/bin/factory <TASK> runner show
 Карточка активной попытки показывает:
 
 - `primary`, текущего исполнителя и следующий допустимый failover;
-- фактическую модель;
+- модель и effort рядом, например `gpt-5.6-sol · effort ultra`;
 - номер попытки;
 - причину предыдущего переключения;
 - команду «переключить этот run» на другого кандидата разрешённой цепочки.
+
+Launcher пишет `MODEL` и `EFFORT` каждого реального запуска в его `meta.env`; Cockpit отдаёт
+оба поля в `runner.attempts[]`. В верхней карточке уже запускавшегося provider-а фактический
+effort последней попытки имеет приоритет над текущей policy: изменение `runners.env` не должно
+переписывать историю завершённого этапа. До первого запуска или для старой telemetry без
+`EFFORT` интерфейс показывает effective policy из `runner.models[provider].effort`.
 
 `POST /api/tasks/:id/runner/switch` доступен только при активной попытке, сверяет target
 с canonical chain и делегирует изменение `engine/bin/factory <task> runner switch`.
@@ -126,8 +134,8 @@ CAS по `run/epoch` и точную process group проверяет engine; Co
 
 ```text
 BUILD
-1. Claude / opus-family — limit_exhausted
-2. Codex / sol-family — running
+1. Claude / opus-family / effort max — limit_exhausted
+2. Codex / gpt-5.6-sol / effort ultra — running
 ```
 
 ### Блокирующие состояния

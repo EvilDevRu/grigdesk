@@ -74,6 +74,11 @@ task-stage → task → profile-stage → profile-project
 Модель задаётся семейством. `version=latest` обновляет actual id только внутри семейства;
 неизвестный exact id движок не угадывает.
 
+Route bundle не хранит `provider`, `model` или `effort`. Исполняемый узел задаёт только
+`runKey`; по нему движок выбирает stage-policy `MODEL_<RUN_KEY>_<PROVIDER>_*` с fallback
+на `MODEL_DEFAULT_<PROVIDER>_*` из `runners.env`. Поэтому опубликованный маршрут остаётся
+provider-neutral, а смена модели или effort не требует публикации новой схемы.
+
 Допустимые семейства объявляет сам раннер (`runner_<provider>_family_alias`), потому что без
 каталога семейство уходит в CLI как имя модели: у `claude` это `opus|fable|sonnet|haiku`,
 у `codex` семейных алиасов нет — там семейство обязано прийти из каталога.
@@ -154,9 +159,12 @@ host-channel не нужны. Сам broker остаётся host-процесс
 
 Claude route runner доступен только для аудированной native CLI `2.1.220`. Engine передаёт
 ему один файл `--settings` из приватного `CONTROL_DIR` (regular, owner-only, mode `0400`) и
-запускает с `--setting-sources ''`, `--safe-mode`, `--strict-mcp-config` без `--mcp-config`
+запускает с `--setting-sources ''`, `--strict-mcp-config` без `--mcp-config`
 и `--disable-slash-commands`. Так user/project/local settings, hooks, skills и произвольные
 MCP не расширяют route policy; credential store при этом не отключается (`--bare` запрещён).
+`--safe-mode` снят намеренно: агентам конвейера нужна память проекта (CLAUDE.md с
+@-импортами знаний) из worktree, а hooks/skills/MCP остаются закрытыми перечисленными
+флагами.
 Файл требует native Bash sandbox `enabled=true`, `failIfUnavailable=true`, запрещает
 unsandboxed escape hatch и не содержит `excludedCommands`. `CONTROL_DIR` закрыт одновременно
 через `sandbox.filesystem.denyRead/denyWrite` и deny правил инструментов
