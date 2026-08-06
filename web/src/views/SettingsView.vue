@@ -151,6 +151,24 @@ async function saveProviderSetting(p, s, value) {
   if (!r.ok) setMsg.value = { ...setMsg.value, [key]: `Не сохранилось: ${r.error}` };
 }
 
+// Текстовые/числовые настройки: сохранение по Enter и по уходу фокуса. Enter сразу
+// уводит фокус, так что сохранение одно — повторный blur видит то же значение и молчит;
+// неизменённое значение тоже не шлём (каждый клик мимо инпута не должен будить сервер).
+// Сюда же попадает 'range' без валидного потолка — он рисуется числовым инпутом.
+function commitProviderSetting(p, s, event) {
+  const el = event?.target;
+  if (!el) return;
+  if (s.kind === 'number' || s.kind === 'range') {
+    const num = Number(el.value);
+    if (!Number.isFinite(num)) { el.value = s.value; return; } // мусор → назад к сохранённому
+    if (num === s.value) return;
+    saveProviderSetting(p, s, num);
+    return;
+  }
+  if (el.value === s.value) return;
+  saveProviderSetting(p, s, el.value);
+}
+
 // Проверка новых версий CLI. Сервер и сам проверяет раз в 6 часов (индикатор в топбаре),
 // эта кнопка — «посмотреть прямо сейчас». Обновление НИКОГДА не запускается само.
 const checking = ref(false);
@@ -837,6 +855,23 @@ onMounted(() => {
                   <ToggleSwitch v-if="s.kind === 'toggle'" :model-value="!!s.value"
                                 :disabled="s.disabled === true" :label="s.label"
                                 @update:model-value="(v) => saveProviderSetting(p, s, v)" />
+                  <!-- Ползунок (num_ctx у Ollama): потолок вычисляет исполнитель.
+                       Без валидного max падаем обратно в числовой инпут ниже. -->
+                  <template v-else-if="s.kind === 'range' && Number(s.max) > Number(s.min)">
+                    <span class="pvsetlbl">{{ s.label }}</span>
+                    <input type="range" class="pvsetrange" :min="s.min" :max="s.max" :step="s.step || 1"
+                           :value="s.value" :disabled="s.disabled === true"
+                           @change="(e) => saveProviderSetting(p, s, Number(e.target.value))" />
+                    <span class="pvrangeval">{{ Number(s.value).toLocaleString('ru') }} / {{ Number(s.max).toLocaleString('ru') }}</span>
+                  </template>
+                  <template v-else-if="s.kind === 'text' || s.kind === 'number' || s.kind === 'range'">
+                    <span class="pvsetlbl">{{ s.label }}</span>
+                    <input class="pvsetinput" :type="s.kind === 'range' ? 'number' : s.kind"
+                           :min="s.kind === 'text' ? undefined : (Number(s.min) || 512)"
+                           :value="s.value" :disabled="s.disabled === true"
+                           @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
+                           @blur="(e) => commitProviderSetting(p, s, e)" />
+                  </template>
                   <span v-else class="pvsetlbl">{{ s.label }}</span>
                   <span v-if="s.note" class="pvsoon">{{ s.note }}</span>
                 </div>
@@ -1698,6 +1733,14 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .pvsetttl { font-size: 12px; color: var(--ink-mid); text-transform: uppercase; letter-spacing: .04em; }
 .pvsetrow { display: grid; gap: 3px; }
 .pvsetline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pvsetinput { flex: 1; min-width: 140px; padding: 6px 9px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--ground); color: var(--ink); font-size: 13px; }
+.pvsetinput:focus { outline: none; border-color: var(--accent); }
+.pvsetinput:disabled { opacity: .55; cursor: not-allowed; }
+.pvsetrange { flex: 1; min-width: 140px; accent-color: var(--accent); }
+.pvsetrange:disabled { opacity: .55; cursor: not-allowed; }
+.pvrangeval { font-size: 12px; color: var(--mut, var(--ink-mid)); white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
 .pvsetlbl { font-size: 13px; }
 /* Ручка объявлена исполнителем, но ещё не подключена к ходу */
 .pvsoon { font-size: 11px; border: 1px solid var(--line); border-radius: 999px;

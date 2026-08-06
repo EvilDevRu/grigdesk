@@ -6,10 +6,21 @@
 // Отдельным файлом — чтобы правило «чужой ключ в настройки не попадёт» проверялось
 // тестом без поднятия сервера (как у provider-usage.js).
 
+/**
+ * Декларация настроек исполнителя: статичный массив (claude/codex/kimi) либо
+ * async-функция (config) → массив (ollama: потолок ползунка numCtx зависит от живого
+ * железа и демона). Оба вида приводим к массиву здесь, дальше код единый.
+ */
+async function declaredSettings(executor, config) {
+  const decl = executor?.settings;
+  const list = typeof decl === 'function' ? await decl(config) : decl;
+  return Array.isArray(list) ? list : [];
+}
+
 /** Объявленные исполнителем настройки со значениями из prefs. */
-export function resolveProviderSettings(executor, savedForProvider) {
+export async function resolveProviderSettings(executor, savedForProvider, config) {
   const saved = savedForProvider || {};
-  return (executor?.settings || []).map((s) => ({
+  return (await declaredSettings(executor, config)).map((s) => ({
     ...s,
     value: s.id in saved ? saved[s.id] : s.value,
   }));
@@ -18,7 +29,7 @@ export function resolveProviderSettings(executor, savedForProvider) {
 /** Значение по типу настройки. Неизвестный kind передаём как есть — тип задаёт исполнитель. */
 function coerce(kind, value) {
   if (kind === 'toggle') return !!value;
-  if (kind === 'number') return Number(value);
+  if (kind === 'number' || kind === 'range') return Number(value);
   return value;
 }
 
@@ -27,8 +38,8 @@ function coerce(kind, value) {
  * @returns {{ ok: true, providerSettings: object, settings: object[] }
  *          | { ok: false, error: string, message: string }}
  */
-export function applyProviderSetting(executor, allSaved, { settingId, value } = {}) {
-  const decl = (executor?.settings || []).find((s) => s.id === String(settingId || ''));
+export async function applyProviderSetting(executor, allSaved, { settingId, value } = {}, config) {
+  const decl = (await declaredSettings(executor, config)).find((s) => s.id === String(settingId || ''));
   if (!decl) {
     return {
       ok: false,
@@ -41,5 +52,5 @@ export function applyProviderSetting(executor, allSaved, { settingId, value } = 
     ...all,
     [executor.id]: { ...(all[executor.id] || {}), [decl.id]: coerce(decl.kind, value) },
   };
-  return { ok: true, providerSettings, settings: resolveProviderSettings(executor, providerSettings[executor.id]) };
+  return { ok: true, providerSettings, settings: await resolveProviderSettings(executor, providerSettings[executor.id], config) };
 }

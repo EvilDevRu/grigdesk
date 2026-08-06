@@ -64,6 +64,10 @@ export const config = {
   kimiSystemdRunBin: process.env.COCKPIT_KIMI_SYSTEMD_RUN_BIN || '/usr/bin/systemd-run',
   kimiSystemctlBin: process.env.COCKPIT_KIMI_SYSTEMCTL_BIN || '/usr/bin/systemctl',
   kimiCaBundle: process.env.COCKPIT_KIMI_CA_BUNDLE || '/etc/ssl/certs/ca-certificates.crt',
+  // Машинный override адреса демона Ollama. Обычный путь — настройка «Адрес демона»
+  // в UI («Настройки → Исполнители», prefs.providerSettings.ollama.host); env — для
+  // стендов, где prefs не трогают.
+  ollamaBaseUrl: process.env.COCKPIT_OLLAMA_HOST || '',
   // Реестр моделей исполнителей (редактируемый; сеется из lib/models-registry.js).
   modelsPath: process.env.COCKPIT_MODELS_PATH || path.join(__dirname, '..', '.state', 'models.json'),
   // Автообнаружение новых моделей Anthropic ХОСТОВЫМ OAuth-токеном CLI (~/.claude/.credentials.json).

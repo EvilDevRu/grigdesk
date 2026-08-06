@@ -736,6 +736,10 @@ async function chatModule(fastify, opts) {
         mcpConfig,
         permissionPromptTool: 'mcp__cockpit-perm__approve',
         providerSettings: currentPrefs.providerSettings?.[executor.id] || {},
+        // Server-owned снапшот истории чата: stateless HTTP-исполнители (Ollama)
+        // реплеят из него разговор; CLI-исполнители поле игнорируют. Содержит и
+        // текущее сообщение (клиент сохранил его до POST) — дубликат срезает executor.
+        chatHistory: target.record?.messages,
         // Claude получает порог через env выше, Codex — как официальный config override
         // в своих exec-args. Одно значение настроек, transport выбирает сам executor.
         compactWindow,

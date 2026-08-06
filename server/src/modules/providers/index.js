@@ -50,11 +50,12 @@ async function providersModule(fastify, opts) {
    * (из models-registry: редактируемый файл + динамическое обнаружение эффортов).
    */
   /**
-   * Схему своих настроек объявляет исполнитель (`executor.settings`), выбор человека
-   * лежит в prefs. Собираем их вместе: UI получает готовую декларацию со значением.
+   * Схему своих настроек объявляет исполнитель (`executor.settings` — массив или
+   * async-функция от config), выбор человека лежит в prefs. Собираем их вместе:
+   * UI получает готовую декларацию со значением.
    */
-  function settingsOf(ex) {
-    return resolveProviderSettings(ex, prefs?.read().providerSettings?.[ex.id]);
+  async function settingsOf(ex) {
+    return resolveProviderSettings(ex, prefs?.read().providerSettings?.[ex.id], config);
   }
 
   async function buildRegistry() {
@@ -101,7 +102,7 @@ async function providersModule(fastify, opts) {
         modes: modes || [],
         commands,
         // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
-        settings: settingsOf(ex),
+        settings: await settingsOf(ex),
       });
     }
     return providers;
@@ -225,7 +226,7 @@ async function providersModule(fastify, opts) {
   fastify.post('/api/providers/:id/settings', async (request, reply) => {
     const ex = (await getProviderAdapters()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
-    const applied = applyProviderSetting(ex, prefs.read().providerSettings, request.body || {});
+    const applied = await applyProviderSetting(ex, prefs.read().providerSettings, request.body || {}, config);
     if (!applied.ok) return reply.code(400).send({ error: applied.error, message: applied.message });
     prefs.write({ providerSettings: applied.providerSettings });
     cache = null; // следующий /api/providers отдаст новое значение

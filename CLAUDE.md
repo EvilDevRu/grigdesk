@@ -131,6 +131,11 @@
   `slashCommand` в `POST /api/chat` — см. `docs/cockpit/chat-agents.md`), `POST /api/providers/:id/update`
   обновляет CLI кнопкой из настроек, `POST /api/providers/check-updates` — проверка новых версий
   (она же идёт фоном раз в 6 часов → SSE `providers-update` → точка на иконке в топбаре).
+  Ollama (`ollama.js`) — локальный HTTP-исполнитель: простой чат без инструментов и режимов,
+  живой каталог моделей из `/api/tags` демона (`catalogLive`), адрес демона и `num_ctx` —
+  свои настройки исполнителя в prefs (`providerSettings.ollama`); `num_ctx` — ползунок,
+  чей потолок вычисляется от памяти машины (свободная VRAM + 60% ОЗУ − веса модели,
+  делённые на оценку KV-кэша из `model_info`), а `run()` клампит его по per-model оценке.
   **Автообновления нет и не будет: кокпит только сообщает**
   (см. `docs/cockpit/chat-agents.md`).
   `GET /api/providers/usage` — полосы потребления лимитов во всплывашке шапки;
