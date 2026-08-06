@@ -22,6 +22,66 @@ function probe(bin) {
   });
 }
 
+// Локальные ACP-команды Kimi: исполняются сервером ACP без вызова модели и отвечают
+// текстом в ленту. Состав зафиксирован гейтом исполняемости (2026-08-06, полный
+// серверный pipeline) против pinned 0.31.1: TUI-команды (/new, /clear, /model, /goal…)
+// ACP не знает — отвечает «Unknown ACP command», в список их брать нельзя. При смене
+// pinned-версии список пересматривается вместе с contract gate.
+// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (кокпит сильнее).
+const KIMI_ACP_COMMANDS = [
+  { cmd: '/status', desc: 'Состояние сессии: модель, режим, контекст', run: 'prompt' },
+  { cmd: '/usage', desc: 'Расход контекста и токенов сессии', run: 'prompt' },
+  { cmd: '/tasks', desc: 'Фоновые задачи этой сессии', run: 'prompt' },
+  { cmd: '/mcp', desc: 'Состояние MCP-серверов сессии', run: 'prompt' },
+  { cmd: '/help', desc: 'Список ACP-команд Kimi', run: 'prompt' },
+  { cmd: '/compact', desc: 'Сжать контекст разговора', run: 'prompt' },
+];
+
+// Пользовательские скиллы (<активный home>/skills/<имя>/SKILL.md) ACP исполняет как
+// слэш-команды /<имя>: /help их не перечисляет, но вызов работает и уходит модели
+// (гейт 2026-08-06, pinned 0.31.1). Сканируем home АКТИВНОГО режима: host — kimiHome,
+// contained — kimiRuntimeHome (хостовых скиллов contained-профиль не видит). Проектный
+// уровень (<cwd>/.kimi-code/skills) не сканируем: глобальный кэш /api/providers не
+// знает cwd конкретного чата. Имя — из frontmatter `name`, иначе имя каталога;
+// описание — frontmatter `description`, обрезанное до 120 (контракт меню).
+function kimiSkillFrontmatter(text) {
+  const fm = String(text || '').match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!fm) return {};
+  const field = (key) => {
+    const line = fm[1].split(/\r?\n/).find((l) => new RegExp(`^${key}\\s*:`).test(l));
+    return line ? line.replace(new RegExp(`^${key}\\s*:\\s*`), '').replace(/^["']|["']$/g, '').trim() : '';
+  };
+  return { name: field('name'), description: field('description') };
+}
+
+async function scanKimiUserSkills(config) {
+  const home = config?.kimiLaunchMode === 'contained' ? config?.kimiRuntimeHome : config?.kimiHome;
+  if (!home) return [];
+  const dir = path.join(home, 'skills');
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const skills = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const text = await fs.readFile(path.join(dir, entry.name, 'SKILL.md'), 'utf8');
+      const { name, description } = kimiSkillFrontmatter(text);
+      const skillName = name || entry.name;
+      if (!/^[\w][\w.-]*$/.test(skillName)) continue;
+      skills.push({
+        cmd: `/${skillName}`,
+        desc: (description || 'Пользовательский скилл').slice(0, 120),
+        run: 'prompt',
+      });
+    } catch { /* нет SKILL.md или не читается — пропускаем */ }
+  }
+  return skills;
+}
+
 export default {
   id: 'kimi',
   name: 'Kimi Code',
@@ -63,6 +123,12 @@ export default {
   },
 
   seedModels() { return kimiSeedModels(); },
+
+  async commands(config) {
+    const skills = await scanKimiUserSkills(config);
+    const builtin = new Set(KIMI_ACP_COMMANDS.map((c) => c.cmd));
+    return [...KIMI_ACP_COMMANDS, ...skills.filter((s) => !builtin.has(s.cmd))];
+  },
 
   // Каталог version-pinned: live provider list может содержать пользовательские API
   // keys, поэтому runtime и реестр его автоматически не вызывают.

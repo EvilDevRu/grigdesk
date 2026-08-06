@@ -520,6 +520,29 @@ export function buildCodexExecArgs({
   return args;
 }
 
+// TUI-команды Codex. `codex exec` слэш-текст отдаёт модели как обычный промпт, поэтому
+// весь список информационный (run: 'none'): исполнить их можно только в интерактивном
+// TUI самого CLI. Состав сверен с бинарём codex-cli 0.145.0 (гейт 2026-08-06);
+// /undo, /quit, /exit в этой версии отсутствуют.
+const CODEX_TUI_HINT = 'Исполняется только в TUI Codex';
+const CODEX_TUI_COMMANDS = [
+  { cmd: '/model', desc: 'Сменить модель и уровень рассуждений' },
+  { cmd: '/approvals', desc: 'Режим согласования действий агента' },
+  { cmd: '/status', desc: 'Состояние сессии и конфигурации' },
+  { cmd: '/review', desc: 'Ревизия изменений рабочего дерева' },
+  { cmd: '/diff', desc: 'Показать diff рабочего дерева' },
+  { cmd: '/new', desc: 'Начать новую сессию' },
+  { cmd: '/resume', desc: 'Возобновить сохранённую сессию' },
+  { cmd: '/fork', desc: 'Ответвить текущую сессию' },
+  { cmd: '/init', desc: 'Сгенерировать AGENTS.md' },
+  { cmd: '/mcp', desc: 'Состояние MCP-серверов' },
+  { cmd: '/skills', desc: 'Список доступных скиллов' },
+  { cmd: '/goal', desc: 'Поставить автономную цель' },
+  { cmd: '/feedback', desc: 'Отправить отзыв разработчикам' },
+  { cmd: '/help', desc: 'Справка по командам' },
+  { cmd: '/compact', desc: 'Сжать контекст разговора' },
+].map((c) => ({ ...c, run: 'none', hint: CODEX_TUI_HINT }));
+
 export default {
   id: 'codex',
   name: 'GPT (Codex)',
@@ -534,6 +557,8 @@ export default {
   compaction: { kind: 'summary' },
 
   bin(config) { return config.codexBin; },
+
+  commands() { return CODEX_TUI_COMMANDS; },
 
   probe(config) {
     return new Promise((resolve) => {

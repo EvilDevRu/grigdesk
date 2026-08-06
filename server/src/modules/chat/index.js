@@ -526,9 +526,8 @@ async function chatModule(fastify, opts) {
 
   async function runChatTurn(reply, request, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
-    chatKey, queued, requestTitle, sentAt, compact, target,
+    chatKey, queued, requestTitle, sentAt, compact, slashCommand, target,
   }) {
-    const wantsTitle = requestTitle === true;
     // Клиент фиксирует момент нажатия «отправить» до durable save. Он нужен только
     // страховочной записи pending: если окно закрылось и вопрос пришлось восстановить,
     // его точное время не должно превращаться во время готовности ответа.
@@ -617,6 +616,30 @@ async function chatModule(fastify, opts) {
     // fallback к Claude здесь больше нет.
     const info = { provider: target.provider, model: target.modelInfo };
     const executor = await executorResolver(target.provider);
+
+    // Служебный слэш-ход провайдерской команды (меню «/» в чате). Признак принимаем
+    // строго: команда обязана быть в списке commands() исполнителя с run:'prompt', а
+    // текст хода — ей самой (с необязательными аргументами через пробел). Иначе полем
+    // можно было бы обойти титул-хук и договорённости о повторах для обычного текста.
+    let slash = null;
+    if (!compact && slashCommand != null) {
+      const want = String(slashCommand);
+      const text = String(message || '').trim();
+      const list = typeof executor?.commands === 'function'
+        ? await Promise.resolve(executor.commands(config)).catch(() => [])
+        : [];
+      slash = list.find((c) => c.cmd === want && c.run === 'prompt'
+        && (text === c.cmd || text.startsWith(`${c.cmd} `))) || null;
+      if (!slash) {
+        return reply.code(400).send({
+          error: 'unknown_slash_command',
+          message: `Команда ${want} не поддерживается исполнителем ${target.provider}.`,
+        });
+      }
+    }
+    // Служебному ходу титул-хук не приклеиваем: склейка превратила бы точную команду
+    // в обычный промпт (kimi матчит ACP-команды побуквенно — гейт §3.2).
+    const wantsTitle = requestTitle === true && !slash;
 
     // Сжатие контекста (кнопка на кольце) — служебный ход, а не сообщение человека: ни
     // контекст страницы, ни вложения, ни хук заголовка ему не нужны. План берём у
@@ -770,8 +793,9 @@ async function chatModule(fastify, opts) {
       // он пришлёт сообщение заново (а он пришлёт — и получит то же самое).
       // Ход сжатия не повторяем: у родного компакта stdout пуст ВСЕГДА (вывод слэш-команды
       // локальный, в поток он не идёт), так что «пустой ход» тут — норма, а второй прогон
-      // сжал бы уже сжатое.
-      if (mayRetryEmptyRun(executor, out, { compact: !!plan })) {
+      // сжал бы уже сжатое. Та же логика у служебного слэш-хода: команда выполнена, повтор
+      // небезопасен (например claude /clear начал бы ещё одну сессию).
+      if (!slash && mayRetryEmptyRun(executor, out, { compact: !!plan })) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         out = await executor.run(runArgs);
       }
@@ -780,7 +804,8 @@ async function chatModule(fastify, opts) {
       // выдавать `(пусто)` как успешный ответ нельзя. Для pinned Kimi 0.31.1 это также
       // наблюдалось после resume отменённого хода; инвалидируем только binding, чтобы
       // следующий ЯВНЫЙ запрос пользователя начал чистую session без автоповтора.
-      if (!plan && target.provider === 'kimi' && out?.emptyRun) {
+      // Служебный слэш-ход под эту ловушку не попадает: молчание команды — штатно.
+      if (!slash && !plan && target.provider === 'kimi' && out?.emptyRun) {
         try {
           await invalidateKimiSession(chatKey, {
             expectedSessionId: out.sessionId || sessionId || '',
@@ -815,6 +840,11 @@ async function chatModule(fastify, opts) {
           compact: { kind: plan.kind, seed },
         };
       }
+      // Служебная команда без вывода — не «пустой ход», а штатное молчание локальной
+      // команды: подтверждаем плашкой (role: note на клиенте), как это делает сжатие.
+      if (slash && !String(out?.reply || '').trim()) {
+        out = { ...out, reply: `✓ Команда ${slash.cmd} выполнена локально — вывода нет.`, note: true };
+      }
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
@@ -822,7 +852,7 @@ async function chatModule(fastify, opts) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-          chatKey, role: 'assistant', ...out, model: model || null, effort: runEffort || null,
+          chatKey, role: out?.note ? 'note' : 'assistant', ...out, model: model || null, effort: runEffort || null,
           ...orphanUser, at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
@@ -983,22 +1013,22 @@ async function chatModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
+      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
     });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
     const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt,
+      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
     });
   });
 

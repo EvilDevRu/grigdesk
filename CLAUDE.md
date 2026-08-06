@@ -126,7 +126,9 @@
 - Исполнители (ИИ): модульно в `server/src/lib/executors/` (один файл = один ИИ; файлы на `_` —
   вспомогательные, загрузчик их пропускает). Модели Claude берутся ИЗ БИНАРЯ установленного CLI
   (`_claude-catalog.js`) и мёржатся в редактируемый `server/.state/models.json` — никаких
-  захардкоженных версий. `GET /api/providers` отдаёт всё для UI, `POST /api/providers/:id/update`
+  захардкоженных версий. `GET /api/providers` отдаёт всё для UI (включая слэш-команды
+  исполнителя — поле `commands?` контракта; меню «/» в чате, признак служебного хода
+  `slashCommand` в `POST /api/chat` — см. `docs/cockpit/chat-agents.md`), `POST /api/providers/:id/update`
   обновляет CLI кнопкой из настроек, `POST /api/providers/check-updates` — проверка новых версий
   (она же идёт фоном раз в 6 часов → SSE `providers-update` → точка на иконке в топбаре).
   **Автообновления нет и не будет: кокпит только сообщает**

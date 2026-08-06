@@ -746,6 +746,68 @@ export function claudeProviderSettingsArgs(settings = {}) {
   return ['--settings', JSON.stringify({ fastMode: settings.fastMode === true })];
 }
 
+// Слэш-команды Claude для меню чата. Print-режим (`-p --resume`) перехватывает их сам:
+// состав проверен гейтом исполняемости (2026-08-06, claude 2.1.220). /status, /vim и
+// прочие TUI-only отвечают «isn't available in this environment» — не берём; /clear
+// ОПАСЕН (молча начинает НОВУЮ сессию с пустым stdout → ложный emptyRun) — не берём.
+// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (кокпит сильнее).
+const CLAUDE_BUILTIN_COMMANDS = [
+  { cmd: '/cost', desc: 'Стоимость и длительность сессии', run: 'prompt' },
+  { cmd: '/usage', desc: 'Расход токенов сессии', run: 'prompt' },
+  { cmd: '/context', desc: 'Оценка заполнения контекста', run: 'prompt' },
+  { cmd: '/model', desc: 'Текущая модель CLI и доступные алиасы', run: 'prompt' },
+  { cmd: '/compact', desc: 'Сжать контекст разговора', run: 'prompt' },
+];
+
+// Описание пользовательской команды: frontmatter `description` или первая непустая
+// строка markdown-тела. Обрезается до 120 символов (контракт меню).
+function claudeCommandDesc(text) {
+  const fallback = 'Пользовательская команда';
+  const source = String(text || '');
+  const fm = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (fm) {
+    const line = fm[1].split(/\r?\n/).find((l) => /^description\s*:/.test(l));
+    if (line) {
+      const desc = line.replace(/^description\s*:\s*/, '').replace(/^["']|["']$/g, '').trim();
+      if (desc) return desc.slice(0, 120);
+    }
+  }
+  const body = fm ? source.slice(fm[0].length) : source;
+  const first = body.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+  return (first || fallback).slice(0, 120);
+}
+
+/**
+ * Пользовательские команды уровня машины: $CLAUDE_CONFIG_DIR/commands/*.md
+ * (по умолчанию ~/.claude/commands). Имя файла = имя команды. В print-режиме CLI
+ * расширяет шаблон и шлёт модели (проверено гейтом) — все они run: 'prompt'.
+ * Каталога может не быть, файл может не прочитаться — пропускаем, реестр не валится.
+ * Проектный уровень (<cwd>/.claude/commands) намеренно не сканируется: глобальный кэш
+ * /api/providers не знает cwd конкретного чата (план §6).
+ */
+async function scanClaudeUserCommands() {
+  const dir = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'commands');
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const commands = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    try {
+      const text = await fs.readFile(path.join(dir, entry.name), 'utf8');
+      commands.push({
+        cmd: `/${entry.name.slice(0, -3)}`,
+        desc: claudeCommandDesc(text),
+        run: 'prompt',
+      });
+    } catch { /* битый файл — пропускаем */ }
+  }
+  return commands;
+}
+
 export default {
   id: 'claude',
   name: 'Claude',
@@ -781,6 +843,10 @@ export default {
   compaction: { kind: 'native', message: '/compact' },
 
   bin(config) { return config.claudeBin; },
+
+  async commands() {
+    return [...CLAUDE_BUILTIN_COMMANDS, ...await scanClaudeUserCommands()];
+  },
 
   async probe(config) {
     const out = await exec(config.claudeBin, ['--version'], { timeout: 10_000 });

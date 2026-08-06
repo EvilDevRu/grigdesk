@@ -21,9 +21,29 @@ import {
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
 
+// Меню слэш-команд доверяет только валидным записям контракта (executors/index.js):
+// cmd вида '/name', run ∈ prompt|none, desc до 120 символов.
+function normalizeCommands(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((c) => c
+      && typeof c.cmd === 'string' && /^\/\S+$/.test(c.cmd)
+      && typeof c.desc === 'string' && c.desc.trim()
+      && (c.run === 'prompt' || c.run === 'none'))
+    .map((c) => ({
+      cmd: c.cmd,
+      desc: c.desc.trim().slice(0, 120),
+      run: c.run,
+      ...(c.hint ? { hint: String(c.hint).slice(0, 120) } : {}),
+      ...(c.args ? { args: true } : {}),
+    }));
+}
+
 async function providersModule(fastify, opts) {
   const { config, claudeAuth, prefs } = opts;
   const deps = { claudeAuth };
+  // Точка подмены для офлайн-тестов: реестр не знает про конкретных вендоров.
+  const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
 
   /**
    * Реестр: для каждого исполнителя — probe бинаря, авторизация, модели
@@ -38,7 +58,7 @@ async function providersModule(fastify, opts) {
   }
 
   async function buildRegistry() {
-    const executors = await getProviderAdapters();
+    const executors = await adaptersOf();
     const models = await getModelsRegistry(config);
     const providers = [];
     for (const ex of executors.values()) {
@@ -48,6 +68,11 @@ async function providersModule(fastify, opts) {
       if (ok && typeof ex.modes === 'function') {
         try { modes = await ex.modes(config); } catch { modes = null; }
       }
+      // Слэш-команды исполнителя для меню чата. Источники cwd-независимы, поэтому
+      // легально едут в том же глобальном кэше; падение сканера одного ИИ не валит реестр.
+      const commands = typeof ex.commands === 'function'
+        ? normalizeCommands(await Promise.resolve(ex.commands(config)).catch(() => []))
+        : [];
       providers.push({
         id: ex.id,
         name: ex.name,
@@ -74,6 +99,7 @@ async function providersModule(fastify, opts) {
         checkedAt: updates.get(ex.id)?.at || null,
         models: models[ex.id] || [],
         modes: modes || [],
+        commands,
         // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
         settings: settingsOf(ex),
       });

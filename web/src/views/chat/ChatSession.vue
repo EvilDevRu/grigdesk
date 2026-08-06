@@ -347,8 +347,10 @@ async function submit() {
   const t = input.value.trim();
   const atts = pending.value.slice();
   if ((!t && !atts.length) || !sess.value || frozen.value) return;
-  // Точное имя команды — выполняем её, а не шлём агенту.
-  if (COMMANDS.some((c) => c.cmd === t)) { runCommand(t); return; }
+  // Точное имя команды — выполняем её, а не шлём агенту. Провайдерские run:'prompt'
+  // идут тем же путём (служебный ход); run:'none' исполнить не можем — обычное сообщение.
+  const exact = allCommands.value.find((c) => c.cmd === t && c.run !== 'none');
+  if (exact) { runCommand(exact); return; }
   input.value = '';
   atBottom.value = true; // своё сообщение всегда показываем — как в мессенджерах
   // Черновик отправленного сообщения гасим сразу: дебаунс успел бы записать его
@@ -365,44 +367,106 @@ async function submit() {
 }
 function onKey(e) {
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
-  const m = cmdMatches.value;
-  if (m.length) {
-    if (e.key === 'ArrowDown') { e.preventDefault(); cmdIndex.value = (cmdIndex.value + 1) % m.length; return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); cmdIndex.value = (cmdIndex.value - 1 + m.length) % m.length; return; }
-    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); runCommand(m[Math.min(cmdIndex.value, m.length - 1)].cmd); return; }
+  // Навигация по выбираемым пунктам (cmdNav): заголовки и run:'none' пропускаются.
+  const m = cmdNav.value;
+  if (cmdMatches.value.length) {
+    if (e.key === 'ArrowDown' && m.length) { e.preventDefault(); cmdIndex.value = (cmdIndex.value + 1) % m.length; return; }
+    if (e.key === 'ArrowUp' && m.length) { e.preventDefault(); cmdIndex.value = (cmdIndex.value - 1 + m.length) % m.length; return; }
+    if ((e.key === 'Enter' || e.key === 'Tab') && m.length) { e.preventDefault(); runCommand(m[Math.min(cmdIndex.value, m.length - 1)]); return; }
     if (e.key === 'Escape') { input.value = ''; return; }
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); submit(); }
 }
 
 // ── Слэш-команды: ввод «/» открывает меню со списком и описаниями (как в Claude Code) ──
+// Две секции: клиентские команды кокпита и команды CLI выбранной модели (провайдерский
+// список приезжает в /api/providers, контракт — server/src/lib/executors/index.js).
 const COMMANDS = [
-  { cmd: '/compact', desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки' },
-  { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента' },
-  { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)' },
-  { cmd: '/new', desc: 'Открыть новый чат' },
+  { cmd: '/compact', desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки', source: 'cockpit', run: 'local' },
+  { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента', source: 'cockpit', run: 'local' },
+  { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)', source: 'cockpit', run: 'local' },
+  { cmd: '/new', desc: 'Открыть новый чат', source: 'cockpit', run: 'local' },
 ];
+// Команды исполнителя текущей модели. Резолвер тот же, что у селекта модели: для
+// legacy-чатов без modelRef провайдер достаётся из сохранённого id модели.
+const providerInfo = computed(() => current.value.provider || null);
+const providerCommands = computed(() => {
+  const p = providerInfo.value;
+  return (Array.isArray(p?.commands) ? p.commands : [])
+    .map((c) => ({ ...c, source: p.id }));
+});
+// Объединённый список: команда кокпита глушит провайдерскую с тем же именем
+// (/compact уже есть у кокпита — дубль не показываем, поведение не меняется).
+const allCommands = computed(() => {
+  const merged = [...COMMANDS];
+  for (const c of providerCommands.value) {
+    if (!merged.some((x) => x.cmd === c.cmd)) merged.push(c);
+  }
+  return merged;
+});
 const cmdIndex = ref(0);
 const cmdMatches = computed(() => {
   const t = input.value.trimStart().toLowerCase();
   if (!t.startsWith('/') || /[\s\n]/.test(t)) return [];
-  return COMMANDS.filter((c) => c.cmd.startsWith(t));
+  return allCommands.value.filter((c) => c.cmd.startsWith(t));
 });
-watch(cmdMatches, (m) => { if (cmdIndex.value >= m.length) cmdIndex.value = 0; });
-function runCommand(cmd) {
+// Навигация идёт только по выбираемым пунктам: заголовки секций и пункты run:'none'
+// (команда живёт в TUI исполнителя) пропускаются стрелками и не выбираются Enter/кликом.
+const cmdNav = computed(() => cmdMatches.value.filter((c) => c.run !== 'none'));
+// Плоский список для рендера: заголовки секций + пункты с их индексом навигации.
+const cmdMenu = computed(() => {
+  const items = [];
+  let nav = 0;
+  const push = (c) => items.push({ ...c, key: `${c.source}:${c.cmd}`, nav: c.run === 'none' ? -1 : nav++ });
+  const cockpit = cmdMatches.value.filter((c) => c.source === 'cockpit');
+  const own = cmdMatches.value.filter((c) => c.source !== 'cockpit');
+  if (cockpit.length) items.push({ header: 'Cockpit', key: 'h:cockpit' });
+  cockpit.forEach(push);
+  if (own.length) items.push({ header: providerInfo.value?.name || 'Исполнитель', color: providerInfo.value?.color || '', key: 'h:provider' });
+  own.forEach(push);
+  return items;
+});
+watch(cmdNav, (m) => { if (cmdIndex.value >= m.length) cmdIndex.value = 0; });
+async function runCommand(command) {
+  const c = typeof command === 'string'
+    ? allCommands.value.find((x) => x.cmd === command)
+    : command;
+  if (!c || c.run === 'none') return;
+  if (c.source !== 'cockpit') {
+    // Провайдерская команда — служебный ход агента. Гард тот же, что у submit():
+    // пока чат заморожен (сжатие/reset), ничего не выполняем и ввод не трогаем.
+    if (!sess.value || frozen.value) return;
+    // Команда с обязательным аргументом не отправляется: подставляем в композер.
+    if (c.args) {
+      input.value = `${c.cmd} `;
+      cmdIndex.value = 0;
+      return;
+    }
+    input.value = '';
+    cmdIndex.value = 0;
+    clearTimeout(draftTimer);
+    chat.setDraft(props.sid, '');
+    const accepted = await chat.send(props.sid, c.cmd, [], { slashCommand: c.cmd });
+    // Как в submit(): отклонённая отправка не теряет набранное.
+    if (accepted === false) {
+      input.value = c.cmd;
+      chat.setDraft(props.sid, c.cmd);
+    }
+    return;
+  }
   input.value = '';
   cmdIndex.value = 0;
-  if (cmd === '/compact') {
+  if (c.cmd === '/compact') {
     // Тот же путь, что у кольца: подтверждение обязательно — сжатие тратит ход агента.
     onCtxClick({ altKey: false });
-  } else if (cmd === '/clear') {
+  } else if (c.cmd === '/clear') {
     pending.value = [];
     chat.clearChat(props.sid);
     // Историю только что вычистили — плашка о сбросе осталась бы единственной записью.
     chat.resetContext(props.sid, { note: false });
-  } else if (cmd === '/reset') {
+  } else if (c.cmd === '/reset') {
     chat.resetContext(props.sid);
-  } else if (cmd === '/new') {
+  } else if (c.cmd === '/new') {
     chat.newSession();
   }
 }
@@ -811,13 +875,20 @@ async function openDebug() {
           </div>
           <span v-if="attachBusy" class="muted"><span class="spin"></span></span>
         </div>
-        <!-- Меню слэш-команд над композером -->
-        <div v-if="cmdMatches.length" class="cmd-menu">
-          <button v-for="(c, i) in cmdMatches" :key="c.cmd" class="cmd" :class="{ on: i === cmdIndex }"
-                  @mouseenter="cmdIndex = i" @click="runCommand(c.cmd)">
-            <span class="c-cmd">{{ c.cmd }}</span>
-            <span class="c-desc">{{ c.desc }}</span>
-          </button>
+        <!-- Меню слэш-команд над композером: секция кокпита + секция исполнителя модели -->
+        <div v-if="cmdMenu.length" class="cmd-menu">
+          <template v-for="item in cmdMenu" :key="item.key">
+            <div v-if="item.header" class="cmd-head">
+              <span v-if="item.color" class="dot" :style="{ background: item.color }"></span>{{ item.header }}
+            </div>
+            <button v-else class="cmd" :class="{ on: item.nav >= 0 && item.nav === cmdIndex, off: item.run === 'none' }"
+                    :disabled="item.run === 'none'"
+                    @mouseenter="item.nav >= 0 && (cmdIndex = item.nav)" @click="runCommand(item)">
+              <span class="c-cmd">{{ item.cmd }}</span>
+              <span class="c-desc">{{ item.desc }}</span>
+              <span v-if="item.hint" class="c-hint">{{ item.hint }}</span>
+            </button>
+          </template>
         </div>
         <div class="composer">
           <button class="tool" title="Приложить файл (или перетащи/вставь из буфера)" @click="fileInput.click()">
@@ -1108,8 +1179,15 @@ async function openDebug() {
   border: none; cursor: pointer; text-align: left; }
 .cmd + .cmd { border-top: 1px solid var(--line); }
 .cmd.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cmd.off { cursor: default; opacity: .55; }
+.cmd.off .c-cmd { color: var(--ink-mid); }
+.cmd-head { display: flex; align-items: center; gap: 7px; padding: 7px 14px 4px; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink-mid); border-top: 1px solid var(--line); }
+.cmd-head:first-child { border-top: none; }
+.cmd-head .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .c-cmd { font-family: var(--mono, monospace); font-size: 13px; color: var(--accent); flex: none; }
 .c-desc { font-size: 12.5px; color: var(--ink-mid); }
+.c-hint { margin-left: auto; font-size: 11px; color: var(--ink-mid); flex: none; }
 
 /* Оверлей drag&drop поверх всего чата */
 .cs { position: relative; }

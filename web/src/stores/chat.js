@@ -1289,7 +1289,7 @@ export const useChatStore = defineStore('chat', {
       try { await api.post('/api/chat/stop', { chatKey: id }); } catch { /* ход мог уже кончиться */ }
     },
 
-    async send(id, text, attachments = []) {
+    async send(id, text, attachments = [], opts = {}) {
       const s = this._get(id); if (!s) return;
       if (!text.trim() && !attachments.length) return;
       const resetJob = sessionResetJobs.get(id);
@@ -1297,10 +1297,15 @@ export const useChatStore = defineStore('chat', {
       // После отклонённого reset нельзя молча продолжить старую Kimi session: UI уже
       // обещал чистый разговор. Текст остаётся в поле ввода (см. ChatSession.submit).
       if (s.sessionResetFailed) return false;
+      // Служебный ход провайдерской слэш-команды (меню «/»): исполняется CLI локально,
+      // автоназвание по её тексту не нужно — ни серверный хук, ни provisional-заголовок.
+      const slashCommand = typeof opts.slashCommand === 'string' && opts.slashCommand.startsWith('/')
+        ? opts.slashCommand
+        : '';
       // Cockpit просит семантическое имя только в первом ходе безымянного чата.
       // Пока агент работает, мгновенно показываем локальный запасной вариант.
-      const requestTitle = shouldRequestChatTitle(s);
-      const autoTitle = firstMessageTitle(s, text, attachments);
+      const requestTitle = slashCommand ? false : shouldRequestChatTitle(s);
+      const autoTitle = slashCommand ? '' : firstMessageTitle(s, text, attachments);
       if (autoTitle) s.title = autoTitle;
       // Писать во время хода МОЖНО: человек готовит следующее сообщение, пока агент работает.
       // Сервер выстроит ходы в очередь (см. modules/chat: два CLI на одну сессию не живут),
@@ -1361,6 +1366,7 @@ export const useChatStore = defineStore('chat', {
           model: resolvedModel.id, modelRef: s.modelRef,
           effort: requestEffort, mode: s.mode || '',
           sessionId: s.sessionId, context, chatKey: id, requestTitle, sentAt,
+          ...(slashCommand ? { slashCommand } : {}),
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
         // Сервер вырезал служебный маркер из ответа и вернул готовое трёхсловное имя.
@@ -1379,12 +1385,18 @@ export const useChatStore = defineStore('chat', {
         }
         // Лента хода переезжает в сообщение (серверная копия полнее: SSE мог что-то не донести),
         // actualModel/effort — чем CLI отработал на самом деле (алиасы он резолвит сам).
-        s.messages.push({
-          role: 'assistant', text: r.reply || '(пусто)', cost: r.cost,
-          steps: (r.steps?.length ? r.steps : s.steps) || [],
-          model: r.model || s.model, actualModel: r.actualModel || '',
-          effort: Object.hasOwn(r, 'effort') ? (r.effort || '') : requestEffort,
-        });
+        // Плашка note — подтверждение служебной команды без вывода: не ответ агента,
+        // ленту шагов и подпись модели ей не приклеиваем.
+        if (r.note) {
+          s.messages.push({ role: 'note', text: r.reply });
+        } else {
+          s.messages.push({
+            role: 'assistant', text: r.reply || '(пусто)', cost: r.cost,
+            steps: (r.steps?.length ? r.steps : s.steps) || [],
+            model: r.model || s.model, actualModel: r.actualModel || '',
+            effort: Object.hasOwn(r, 'effort') ? (r.effort || '') : requestEffort,
+          });
+        }
         // Сервер мог подменить эффорт (модель не тянет выбранный уровень) — подтягиваем
         // слайдер под реальность, чтобы UI не врал. Пишем в сессию напрямую, НЕ через
         // setEffort: вынужденный откат не должен становиться дефолтом для новых чатов.
