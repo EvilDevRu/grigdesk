@@ -83,7 +83,7 @@ assert_eq "$default_home/credentials" "$(readlink "$run_dir/kimi-home/credential
 assert_eq "$default_home/oauth" "$(readlink "$run_dir/kimi-home/oauth")" \
   "oauth state is symlinked to the default home"
 argv=$(cut -f2- "$CAPTURE_FILE")
-assert_contains "$argv" -- '-p' "prompt is passed as an argument"
+assert_contains "$argv" '-p' "prompt is passed as an argument"
 grep -Fxq -- '--effort' <<<"$argv"
 assert_rc 1 "$?" "no unsupported --effort flag is invented for argv"
 

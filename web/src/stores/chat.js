@@ -428,6 +428,8 @@ export const useChatStore = defineStore('chat', {
           s.messages.push({
             role: p.role || 'assistant', text: p.reply || '(пусто)', cost: p.cost ?? null, pid: p.id,
             steps: p.steps || [], model: p.model || '', actualModel: p.actualModel || '', effort: p.effort || '',
+            // Как и в send(): остановленный ход помечаем для серверного досье.
+            ...(p.stopped ? { stopped: true } : {}),
           });
           if (p.sessionReset) {
             clearSessionContext(s);
@@ -947,7 +949,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
     },
-    async answerPerm(pid, allow, remember = false) {
+    async answerPerm(pid, allow, remember = false, comment = '') {
       const p = this.pending[pid];
       if (!p) return;
       delete this.pending[pid];
@@ -955,20 +957,25 @@ export const useChatStore = defineStore('chat', {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
       }
       // План оставляем в переписке: всплывашка закроется, а решение принималось по нему —
-      // потом нужно видеть, что именно утвердили (или что ушло на доработку).
+      // потом нужно видеть, что именно утвердили (или что ушло на доработку и с каким пояснением).
       if (p.tool === 'ExitPlanMode' && p.input?.plan) {
         const s = this._get(p.chatKey);
         if (s) {
           s.messages.push({
             role: 'assistant',
-            text: `**План — ${allow ? 'утверждён' : 'на доработку'}**\n\n${p.input.plan}`,
+            text: `**План — ${allow ? 'утверждён' : 'на доработку'}**\n\n${p.input.plan}`
+              + (!allow && comment ? `\n\n**Пояснение:** ${comment}` : ''),
           });
           s.updatedAt = Date.now();
           this._persist();
         }
       }
-      try { await api.post(`/api/chat/permission/${p.pid}`, { allow }); }
+      let res = null;
+      try { res = await api.post(`/api/chat/permission/${p.pid}`, { allow, ...(comment ? { comment } : {}) }); }
       catch { /* запрос уже протух (таймаут/другое окно) */ }
+      // Kimi (ACP) не умеет текст в отказе: сервер отвечает commentDelivered:false,
+      // и пояснение едет обычным сообщением — встанет в очередь чата.
+      if (!allow && comment && res?.commentDelivered === false) await this.send(p.chatKey, comment);
     },
     // Ответ на вопрос агента: answers = [{ header, question, selected: [метки], text }].
     // Сервер превращает их в текст, который агент читает как результат своего вопроса.
@@ -1395,6 +1402,9 @@ export const useChatStore = defineStore('chat', {
             steps: (r.steps?.length ? r.steps : s.steps) || [],
             model: r.model || s.model, actualModel: r.actualModel || '',
             effort: Object.hasOwn(r, 'effort') ? (r.effort || '') : requestEffort,
+            // Метка остановленного хода: по ней сервер соберёт досье для новой
+            // Kimi-сессии, чтобы агент знал, что успел сделать оборванный ход.
+            ...(r.stopped ? { stopped: true } : {}),
           });
         }
         // Сервер мог подменить эффорт (модель не тянет выбранный уровень) — подтягиваем

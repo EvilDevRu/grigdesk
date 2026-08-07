@@ -18,7 +18,8 @@ import { ChatHistoryStore } from '../../lib/chat/history-store.js';
 import { ChatSessionBindingStore } from '../../lib/chat/session-binding-store.js';
 import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
-import { kimiAutoDecision } from '../../lib/chat/auto-approve.js';
+import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
+import { autoDecision } from '../../lib/chat/auto-approve.js';
 import { MAX_CHAT_STEPS } from '../../lib/chat/stream-steps.js';
 import {
   KIMI_AUTH_PROFILE_ID,
@@ -268,7 +269,11 @@ async function chatModule(fastify, opts) {
   });
 
   // ── Всплывашка разрешений и диалог с агентом: ожидающие ответа пользователя запросы ──
-  const pendingPerms = new Map(); // pid → { resolve, isQuestion, tool, input, chatKey, at }
+  // pid → { resolve, direct, isQuestion, tool, input, chatKey, at }
+  // `direct` — исполнитель ждёт ответа сам (kimi по ACP, ollama внутри цикла инструментов),
+  // без локального HTTP MCP-процесса Claude. От него зависит только ФОРМА ответа, поэтому
+  // вендорных веток здесь нет: новый исполнитель ничего не добавляет в ядро.
+  const pendingPerms = new Map();
   // Ждём ответ СКОЛЬКО НУЖНО: «не успел за 4 минуты» — не повод продолжать без человека.
   // Сутки — верхняя граница здравого смысла, столько же держит вызов сам CLI
   // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
@@ -279,28 +284,31 @@ async function chatModule(fastify, opts) {
     for (const [pid, p] of pendingPerms) {
       if (p.chatKey !== chatKey) continue;
       pendingPerms.delete(pid);
-      p.resolve(p.provider === 'kimi'
-        ? { outcome: { outcome: 'cancelled' }, message }
+      p.resolve(p.direct
+        ? { outcome: { outcome: 'cancelled' }, allow: false, message }
         : { behavior: 'deny', message });
       fastify.sse.broadcast('chat-permission-done', { pid });
     }
   }
 
-  /** ACP reverse-RPC Kimi использует ту же всплывашку, но ответ возвращается
-   * напрямую transport-у, без локального HTTP MCP-процесса Claude. */
-  function requestKimiInteraction(presentation, chatKey) {
+  /** Та же всплывашка, но ответ возвращается исполнителю напрямую: ACP reverse-RPC
+   * у Kimi, вызов внутри цикла инструментов у Ollama — локального HTTP MCP-процесса,
+   * как у Claude, в этом пути нет. */
+  function requestDirectInteraction(presentation, chatKey) {
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     const at = Date.now();
     const isQuestion = !!presentation?.isQuestion;
     const input = isQuestion
       ? { questions: presentation.questions || [] }
       : (presentation?.input || {});
+    const tool = presentation?.tool || 'Действие агента';
     return new Promise((resolve) => {
       pendingPerms.set(pid, {
         resolve,
-        provider: 'kimi',
+        direct: true,
+        acceptsComment: !!presentation?.acceptsComment,
         isQuestion,
-        tool: presentation?.tool || 'Действие Kimi',
+        tool,
         input,
         chatKey: chatKey || '',
         at,
@@ -311,8 +319,7 @@ async function chatModule(fastify, opts) {
         });
       } else {
         fastify.sse.broadcast('chat-permission', {
-          pid, tool: presentation?.tool || 'Действие Kimi', input,
-          chatKey: chatKey || '', at,
+          pid, tool, input, chatKey: chatKey || '', at,
         });
       }
     });
@@ -340,6 +347,18 @@ async function chatModule(fastify, opts) {
       .map((a) => `• ${a.header || a.question || 'ответ'}: ${[...(a.selected || []), a.text].filter(Boolean).join(', ')}`);
     if (!lines.length) return 'Пользователь не стал отвечать на вопрос. Действуй по своему усмотрению или спроси иначе.';
     return `Ответ пользователя из кокпита:\n${lines.join('\n')}\nПродолжай с учётом этого ответа, повторно спрашивать не нужно.`;
+  }
+
+  /**
+   * Текст отказа для агента. Пояснение из модалки прилагаем дословно — иначе агент
+   * получает голое «отклонил» и не знает, что менять (для плана это разница между
+   * доработкой по замечаниям и гаданием). Канал тот же, что у ответов на вопросы.
+   */
+  function denyText(tool, comment) {
+    if (!comment) return 'Пользователь отклонил действие в кокпите';
+    return tool === 'ExitPlanMode'
+      ? `Пользователь отправил план на доработку. Что изменить: ${comment}`
+      : `Пользователь отклонил действие в кокпите. Пояснение: ${comment}`;
   }
 
   // Сюда стучится permission-mcp.js (child-процесс claude). Держим запрос открытым,
@@ -386,20 +405,28 @@ async function chatModule(fastify, opts) {
     pendingPerms.delete(pid);
     fastify.sse.broadcast('chat-permission-done', { pid });
     const body = request.body || {};
-    if (p.provider === 'kimi' && p.isQuestion) {
+    // Пояснение к отказу из модалки. У claude едет агенту в deny-message (канал ответов
+    // на вопросы), у прямых исполнителей отдельного текстового канала нет — фронт по
+    // флагу commentDelivered отправит его отдельным сообщением в очередь чата.
+    const comment = String(body.comment || '').trim().slice(0, 4000);
+    if (p.direct && p.isQuestion) {
       const answers = Array.isArray(body.answers) ? body.answers : [];
       p.resolve({
         selected: answers.flatMap((answer) => answer?.selected || []).filter(Boolean),
         text: answers.map((answer) => answer?.text || '').find(Boolean) || '',
       });
-    } else if (p.provider === 'kimi') {
-      p.resolve({ allow: body.allow === true });
+    } else if (p.direct) {
+      p.resolve({ allow: body.allow === true, comment });
+      // Дойдёт ли пояснение до агента — свойство КАНАЛА, а не вендора: ACP-outcome Kimi
+      // текста не несёт, а результат инструмента Ollama несёт. Канал сам об этом и
+      // сообщает при создании запроса (presentation.acceptsComment).
+      return comment && !p.acceptsComment ? { ok: true, commentDelivered: false } : { ok: true };
     } else if (p.isQuestion) {
       p.resolve({ behavior: 'deny', message: answerText(body.answers) });
     } else {
       p.resolve(body.allow
         ? { behavior: 'allow', updatedInput: p.input }
-        : { behavior: 'deny', message: 'Пользователь отклонил действие в кокпите' });
+        : { behavior: 'deny', message: denyText(p.tool, comment) });
     }
     return { ok: true };
   });
@@ -486,8 +513,8 @@ async function chatModule(fastify, opts) {
       binding = await bindingStore.read(chatKey);
       // Клиентский sessionId никогда не участвует в Kimi resume. При живом binding
       // несовпадающее значение считаем forged/stale. Пустой binding — намеренная
-      // инвалидация после stop/reset: старый id из отставшего окна безопасно игнорируем,
-      // потому что executor всё равно получит null и создаст новую provider session.
+      // инвалидация после reset/пустого хода: старый id из отставшего окна безопасно
+      // игнорируем, потому что executor всё равно получит null и создаст новую session.
       if (opts.sessionId && (!binding || (binding.sessionId && opts.sessionId !== binding.sessionId))) {
         return { ok: false, error: 'forged_session', message: 'sessionId не принадлежит этому чату' };
       }
@@ -648,10 +675,19 @@ async function chatModule(fastify, opts) {
     const plan = compact ? (executor?.compaction || { kind: 'summary' }) : null;
     // Тикет выбранной задачи — только обычному ходу: служебному сжатию он не нужен.
     const ticket = plan ? '' : await taskTicketBlock(id);
+    // Досье прерванного хода — запасная память, когда resume невозможен: binding
+    // мёртв (sessionId нет — после empty-run инвалидации), а последний ход был
+    // остановлен. При живом binding следующий ход продолжит session резюмом, и
+    // полный контекст не нужно дублировать выжимкой. Только Kimi и только обычный
+    // ход: сжатию/слэш-команде ни досье, ни тикет не нужны.
+    const stoppedBrief = (!plan && !slash && target.provider === 'kimi' && !target.binding?.sessionId)
+      ? stoppedTurnBrief(target.record?.messages)
+      : '';
     const fullMessage = plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
-        contextPrefix(context, mode.hint) + ticket + attachBlock + (message || 'Посмотри вложения.'),
+        contextPrefix(context, mode.hint) + ticket + attachBlock
+        + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
         wantsTitle,
       );
     // Режим прав выбирает пользователь в чате; страница даёт лишь дефолт для своих
@@ -755,19 +791,20 @@ async function chatModule(fastify, opts) {
           sessionId = saved.sessionId;
           lastSession.set(chatKey, saved.sessionId);
         } : undefined,
-        onPermission: target.provider === 'kimi'
-          ? (presentation) => {
-            // Кокпит-режим «auto»: ACP остаётся в default (Kimi спрашивает), а на
-            // безопасные запросы отвечает классификатор. Деструктивные и неизвестные
-            // формы по-прежнему уходят человеку во всплывашку.
-            if (permissionMode === 'auto') {
-              const decision = kimiAutoDecision(presentation);
-              if (decision.verdict === 'allow') return { allow: true };
-              fastify.log.info({ chatKey, tool: presentation?.tool, reason: decision.reason }, 'Kimi auto: действие — на подтверждение человеку');
-            }
-            return requestKimiInteraction(presentation, chatKey);
+        // Мост всплывашки для исполнителей, которые спрашивают кокпит напрямую (kimi по
+        // ACP, ollama из своего цикла инструментов). Выдаётся всем: не поддерживающий
+        // его executor просто не вызовет колбэк, а вендорной ветки в ядре не остаётся.
+        onPermission: (presentation) => {
+          // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
+          // в default), а на безопасные запросы отвечает общий классификатор.
+          // Деструктивные и неизвестные формы по-прежнему уходят человеку во всплывашку.
+          if (permissionMode === 'auto') {
+            const decision = autoDecision(presentation);
+            if (decision.verdict === 'allow') return { allow: true };
+            fastify.log.info({ chatKey, tool: presentation?.tool, reason: decision.reason }, 'Авто-режим: действие — на подтверждение человеку');
           }
-          : undefined,
+          return requestDirectInteraction(presentation, chatKey);
+        },
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
         onProgress: chatKey ? (tokens) => {
           const a = activeRuns.get(chatKey);
@@ -805,9 +842,11 @@ async function chatModule(fastify, opts) {
       }
       // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt
       // повторять нельзя: модель могла выполнить действие, а ответ потеряться. Но и
-      // выдавать `(пусто)` как успешный ответ нельзя. Для pinned Kimi 0.31.1 это также
-      // наблюдалось после resume отменённого хода; инвалидируем только binding, чтобы
-      // следующий ЯВНЫЙ запрос пользователя начал чистую session без автоповтора.
+      // выдавать `(пусто)` как успешный ответ нельзя. На pinned Kimi 0.31.1 так ход
+      // завершался после resume отменённой сессии (на 0.33.0 не воспроизводится, см.
+      // tools/kimi-resume-smoke.mjs); ветка остаётся страховкой: инвалидируем только
+      // binding, чтобы следующий ЯВНЫЙ запрос пользователя начал чистую session без
+      // автоповтора, а досье (stopped-brief) передаст туда выжимку сделанного.
       // Служебный слэш-ход под эту ловушку не попадает: молчание команды — штатно.
       if (!slash && !plan && target.provider === 'kimi' && out?.emptyRun) {
         try {
@@ -868,51 +907,25 @@ async function chatModule(fastify, opts) {
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
       if (err.stopped) {
-        let sessionReset = false;
-        if (target.provider === 'kimi') {
-          try {
-            await invalidateKimiSession(chatKey, {
-              expectedSessionId: err.sessionId || sessionId || '',
-              reason: 'stopped',
-            });
-            sessionReset = true;
-          } catch (resetError) {
-            fastify.log.error({ chatKey, err: resetError.message }, 'Kimi binding после stop не сброшен');
-            const resetMessage = 'Kimi остановлен, но сессию сбросить не удалось. Выполни явный сброс памяти перед следующим сообщением.';
-            if (request.socket.destroyed && chatKey) {
-              await writeOrphan({
-                id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
-                chatKey,
-                role: 'error',
-                reply: resetMessage,
-                ...orphanUser,
-                sessionResetFailed: true,
-                at: Date.now(),
-              });
-              fastify.sse.broadcast('chat-orphan', { chatKey });
-              return reply;
-            }
-            return reply.code(500).send({
-              error: 'kimi_session_reset_failed',
-              message: resetMessage,
-              sessionResetFailed: true,
-            });
-          }
-        }
-        // Для Kimi оборванную session намеренно не возобновляем: pinned 0.31.1 после
-        // cancel способен принять следующий prompt без нового llm.request. Остальные
-        // исполнители сохраняют прежний контракт и возвращают заведённый ими id.
+        // Оборванную session СОХРАНЯЕМ: следующий ход сделает resume и агент продолжит
+        // с полным контекстом — не теряется ни работа, ни память. Баг pinned 0.31.1
+        // (после cancel CLI принимал prompt без нового llm.request) на 0.33.0 не
+        // воспроизводится — живой smoke 2026-08-06, tools/kimi-resume-smoke.mjs.
+        // Страховка на регресс: если resume всё же проглотит prompt, empty-run ветка
+        // выше инвалидирует binding, а повторное сообщение получит досье сделанного
+        // (stopped-brief.js) уже в новую session. Binding не трогаем и с точки зрения
+        // гонок: его единственный владелец — эта цепочка ходов чата (turnLocks).
         const stoppedOut = finishChatTitleHook({
           reply: '⏹ Ход остановлен.', steps: err.steps || [],
-          sessionId: sessionReset ? null : (err.sessionId || sessionId || null),
+          sessionId: err.sessionId || sessionId || null,
           // Размер контекста берём тот, что исполнитель успел увидеть в потоке: раньше здесь
           // стоял жёсткий 0, клиент его игнорировал (нули не пишем), и после «стопа» кольцо
           // врало — у новой сессии оставалось пустым, хотя контекст в ней уже набрался.
           contextTokens: err.contextTokens || 0, contextIsEstimate: !!err.contextIsEstimate,
-          cost: null, model: model || null, effort: runEffort || null, stopped: true, sessionReset,
+          cost: null, model: model || null, effort: runEffort || null, stopped: true, sessionReset: false,
         }, wantsTitle);
-        // У исполнителей без принудительного reset следующему ходу из очереди нужен
-        // фактический id оборванного разговора. Для Kimi здесь null и чистая session.
+        // Следующему ходу из очереди нужен фактический id оборванного разговора:
+        // именно с ним он сделает resume, а не заведёт пустую session.
         if (chatKey && stoppedOut.sessionId) lastSession.set(chatKey, stoppedOut.sessionId);
         if (request.socket.destroyed && chatKey) {
           await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,

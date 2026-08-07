@@ -317,6 +317,31 @@ assert_eq failed "$(_run_state_get "$exhausted_run_file" RESULT)" \
 route_v2_dispatch_next "$exhausted_task" "$exhausted_attempt" >/dev/null
 assert_rc 21 "$?" "stopped cursor reports terminal state on the next dispatch"
 
+# --- Продолжение после exhausted: бюджет повторов обнуляется доверенным возвратом ---
+# stop=human с исходом exhausted — внешний сбой (раннер не зафиксировал результат,
+# например лежал провайдер), а не исход агента: resume возвращает курсор на узел
+# сам, без отдельного goto, и новый заход заводит бюджет повторов заново.
+rewound=$(route_v2_rewind_exhausted_stop "$exhausted_task" "$exhausted_attempt")
+assert_rc 0 "$?" "resume rewind after exhausted stop is trusted"
+assert_eq build "$rewound" "cursor returns exactly to the exhausted node"
+resume_cursor=$(attempt_stage_state_read_v2 "$exhausted_task" "$exhausted_attempt")
+assert_eq ready "$(json_field "$resume_cursor" state)" \
+  "rewound cursor is runnable again"
+assert_eq build "$(json_field "$resume_cursor" currentNode)" \
+  "cursor lands on the exhausted node"
+# Эпоха фейка живёт в переменной, а dispatch уходит в сабшелл command
+# substitution: продолжение обязано начать строго больше закрытого fencing
+# рекорда, иначе run_state_begin откажет кодом 73 и заход снова сожжёт бюджет.
+FAKE_EPOCH=$(_run_state_get "$exhausted_run_file" EPOCH)
+SILENT_LEFT=0
+: >"$CALLS_LOG"
+advanced=$(route_v2_dispatch_next "$exhausted_task" "$exhausted_attempt")
+assert_rc 0 "$?" "replayed node runs with a fresh retry budget"
+assert_eq 1 "$(wc -l <"$CALLS_LOG")" \
+  "fresh budget spends exactly one attempt when the runner recovers"
+assert_eq review "$(json_field "$advanced" currentNode)" \
+  "route advances after the replayed node commits"
+
 # --- Общий предохранитель автономных rewind-петель ---
 # Published route разрешает REVIEW failed → BUILD, но движок обязан остановить
 # третью одинаковую дугу даже для уже закреплённого бандла без собственного лимита.
@@ -360,6 +385,10 @@ assert_eq review "$(json_field "$rewind_cursor" lastCommit node)" \
   "stop identifies the repeatedly failing source node"
 assert_eq failed "$(json_field "$rewind_cursor" lastCommit outcome)" \
   "stop preserves the product outcome that requested rewind"
+not_rewound=$(route_v2_rewind_exhausted_stop "$rewind_task" "$rewind_attempt")
+assert_rc 0 "$?" "resume rewind ignores an automation loop stop"
+assert_eq "" "$not_rewound" \
+  "rewind-limit still waits for an explicit human goto with a fresh hypothesis"
 
 # --- Host-side evidence hook может отклонить красивый done от runner'а ---
 EVIDENCE_HOOK_LOG="$TEST_ROOT/evidence-hook.log"

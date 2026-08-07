@@ -3,12 +3,13 @@
 // показывает готовый план на утверждение. Живёт над композером, поэтому компактная:
 // суть и кнопки — одной строкой, детали — под ней.
 import { ref, computed, watch } from 'vue';
+import { promptDialog } from '../../shared/ui/confirm.js';
 
 const props = defineProps({
   // Запрос из стора чата: { pid, tool, input, chatKey }
   req: { type: Object, required: true },
 });
-const emit = defineEmits(['answer']); // (allow: boolean, remember: boolean)
+const emit = defineEmits(['answer']); // (allow: boolean, remember: boolean, comment: string)
 
 // «Не спрашивать до конца сессии» — сбрасывается на каждый новый запрос.
 const remember = ref(false);
@@ -27,6 +28,18 @@ const preview = computed(() => {
 // План на утверждение — отдельный разговор: и подписи кнопок про план, и сам он
 // показывается целиком, а не строкой с многоточием.
 const isPlan = computed(() => props.req?.tool === 'ExitPlanMode');
+
+// Отказ — с пояснением: голый deny не говорит агенту, что поменять, а человеку
+// непонятно, куда писать замечания. Пустое пояснение разрешено — тогда как раньше.
+// Отмена модалки (Esc/фон) возвращает в карточку, не отклоняя.
+async function reject() {
+  const text = await promptDialog({
+    title: isPlan.value ? 'Что доработать в плане?' : 'Почему отклоняете?',
+    placeholder: 'можно оставить пустым',
+  });
+  if (text === null) return;
+  emit('answer', false, false, text.trim());
+}
 </script>
 
 <template>
@@ -40,7 +53,7 @@ const isPlan = computed(() => props.req?.tool === 'ExitPlanMode');
         </span>
         <span class="p-act">
           <button class="p-ok" @click="emit('answer', true, remember)">{{ isPlan ? 'Утвердить' : 'Разрешить' }}</button>
-          <button class="p-no" @click="emit('answer', false, false)">{{ isPlan ? 'Доработать' : 'Отклонить' }}</button>
+          <button class="p-no" @click="reject">{{ isPlan ? 'Доработать' : 'Отклонить' }}</button>
         </span>
       </div>
       <!-- Команда/файл/план — целиком, с переносами: решение принимают по тому, что видно -->

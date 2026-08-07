@@ -103,8 +103,12 @@ function selectPermissionOutcome(params, answer) {
 }
 
 function parseStatus(text, fallbackWindow) {
-  const match = String(text || '').match(/- Context:\s*([\d,]+)\s*\/\s*([\d,]+)/i);
-  const model = String(text || '').match(/- Model:\s*(.+)/i)?.[1]?.trim() || '';
+  // Формат 0.31: «- Context: 1,234 / 262,144 (0.5%)» строкой в /status.
+  // Формат 0.33+: «Context: 1,234 / 262,144 tokens (0%)» строкой в /usage.
+  const match = String(text || '').match(/-?\s*Context:\s*([\d,]+)\s*\/\s*([\d,]+)/i);
+  // 0.33+ убрал маркер «- » и добавляет суффикс «(thinking: on)».
+  const model = String(text || '').match(/-?\s*Model:\s*(.+)/i)?.[1]?.trim()
+    .replace(/\s*\(thinking:[^)]*\)\s*$/i, '') || '';
   if (!match) return {
     contextTokens: 0,
     contextWindow: fallbackWindow || 0,
@@ -409,14 +413,22 @@ export async function runContainedKimi({
     promptState = 'post_prompt';
     if (promptResult?.stopReason === 'cancelled' || signal?.aborted) stopped = true;
 
-    // Локальная ACP-команда: модель не вызывается, зато получаем точный размер
-    // контекста из уже открытой session.
-    captureStatus = true;
-    await client.request('session/prompt', {
-      sessionId: currentSession,
-      prompt: [{ type: 'text', text: '/status' }],
-    }, 15_000).catch(() => {});
-    captureStatus = false;
+    // Локальные ACP-команды: модель не вызывается, зато получаем точный размер
+    // контекста из уже открытой session. На 0.31 размер строкой «- Context:» даёт
+    // /status; с 0.33 его вынесли в /usage, а /status оставили без него.
+    const runLocalCommand = async (command) => {
+      captureStatus = true;
+      try {
+        await client.request('session/prompt', {
+          sessionId: currentSession,
+          prompt: [{ type: 'text', text: command }],
+        }, 15_000).catch(() => {});
+      } finally {
+        captureStatus = false;
+      }
+    };
+    await runLocalCommand('/status');
+    if (parseStatus(statusText, 0).contextMetric === 'unavailable') await runLocalCommand('/usage');
     client.close();
     const ended = await Promise.race([
       exit,

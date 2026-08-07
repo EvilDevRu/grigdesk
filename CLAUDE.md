@@ -107,7 +107,8 @@
   запроса — см. `docs/cockpit/gotchas.md`. Принимает `context` (UI-контекст страницы)
   и `attachments` (вложения). Вложения: `POST /api/chat/upload` (multipart → `chats/attachments/`),
   `GET /api/chat/attachment/:file` (превью). Диктовка: `POST /api/chat/transcribe` (аудио → whisper → текст).
-  Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка).
+  Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка;
+  отказ принимает `comment` — пояснение агенту, см. `docs/cockpit/chat-agents.md`).
   **Вопрос агента** (AskUserQuestion): SSE `chat-question` → тот же `POST /api/chat/permission/:pid`
   с `{answers}` (ответ доезжает до агента через `deny.message` — см. `docs/cockpit/chat-agents.md`).
   **Спрос висит до ответа** в пределах жизни процесса (технический потолок permission-call —
@@ -131,11 +132,20 @@
   `slashCommand` в `POST /api/chat` — см. `docs/cockpit/chat-agents.md`), `POST /api/providers/:id/update`
   обновляет CLI кнопкой из настроек, `POST /api/providers/check-updates` — проверка новых версий
   (она же идёт фоном раз в 6 часов → SSE `providers-update` → точка на иконке в топбаре).
-  Ollama (`ollama.js`) — локальный HTTP-исполнитель: простой чат без инструментов и режимов,
-  живой каталог моделей из `/api/tags` демона (`catalogLive`), адрес демона и `num_ctx` —
-  свои настройки исполнителя в prefs (`providerSettings.ollama`); `num_ctx` — ползунок,
-  чей потолок вычисляется от памяти машины (свободная VRAM + 60% ОЗУ − веса модели,
-  делённые на оценку KV-кэша из `model_info`), а `run()` клампит его по per-model оценке.
+  Ollama (`ollama.js` + `_ollama-tools.js`) — локальный HTTP-исполнитель, но ход
+  ПОЛНОЦЕННЫЙ: инструменты (чтение/поиск/правка/bash), режимы прав, эффорт и картинки
+  даёт сам кокпит — демон приносит только модель. Что модель умеет, решают её
+  `capabilities` из `/api/tags` (`tools`/`vision`/`thinking`), хардкода нет; эффорт
+  бинарный (`think: true|false`). Песочница путей — realpath внутрь cwd и доверенных
+  каталогов, у `bash` её нет по замыслу (держится подтверждением). Живой каталог моделей
+  (`catalogLive`), адрес демона, `num_ctx` и время жизни модели в памяти — свои настройки
+  исполнителя в prefs (`providerSettings.ollama`); `num_ctx` — ползунок, чей потолок
+  вычисляется от памяти машины (свободная VRAM + 60% ОЗУ + занятое уже загруженной
+  моделью − её веса, делённые на оценку KV-кэша из `model_info`), а `run()` клампит его
+  по per-model оценке, но не ниже рабочего минимума 8192.
+  Всплывашка в шапке показывает не лимиты (их нет), а память машины, загруженные модели
+  и кнопку их выгрузки. Узлы схем конвейера Ollama НЕ исполняет: раннерам движка нужен
+  агентский CLI, а `ollama run` — голый REPL (`docs/cockpit/chat-agents.md`).
   **Автообновления нет и не будет: кокпит только сообщает**
   (см. `docs/cockpit/chat-agents.md`).
   `GET /api/providers/usage` — полосы потребления лимитов во всплывашке шапки;

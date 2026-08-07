@@ -117,6 +117,34 @@ elif op == "cursor":
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
         fail()
     print(state, node, sequence, sep="\t")
+elif op == "cursor-stop":
+    cursor = value
+    required = {"state", "stop", "lastCommit"}
+    if not isinstance(cursor, dict) or not required.issubset(cursor):
+        fail()
+    state = cursor["state"]
+    if state not in {"ready", "paused", "stopped"}:
+        fail()
+    stop = cursor["stop"]
+    if stop is not None and stop not in {
+        "human", "failed", "done", "rewind-limit", "no-progress"
+    }:
+        fail()
+    last = cursor["lastCommit"]
+    last_node = ""
+    last_outcome = ""
+    if last is not None:
+        if not isinstance(last, dict):
+            fail()
+        last_node = last.get("node") or ""
+        last_outcome = last.get("outcome") or ""
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", last_node):
+            fail()
+        if last_outcome not in {
+            "done", "skipped", "failed", "exhausted", "approved", "rejected"
+        }:
+            fail()
+    print(state, stop or "", last_node, last_outcome, sep="\t")
 elif op == "node":
     node_id = args[0]
     machine = value.get("machine") if isinstance(value, dict) else None
@@ -1475,6 +1503,68 @@ route_v2_dispatch_until_pause() {
     esac
   done
   _route_v2_fail "maximum step count reached"
+}
+
+# Цепочка сброса для возврата курсора на узел: сам узел и всё, что идёт после
+# него по последовательности ЗАКРЕПЛЁННОГО маршрута, — результаты пройденного
+# хвоста обязаны сняться вместе с переигрываемым узлом.
+_route_v2_reset_chain() {
+  local node
+  node=$(_attempt_stage_state_node_id "${1:-}") || return
+  "$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" \
+    --profile "$ROUTE_V2_PROFILE" \
+    describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" \
+    --route "$ROUTE_V2_ROUTE" |
+  python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+target = sys.argv[1]
+chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
+if target not in chain:
+    raise SystemExit(2)
+print(",".join(chain[chain.index(target):]))
+' "$node"
+}
+
+# Продолжение после остановки «исчерпан бюджет повторов». Курсор стоит на
+# stop=human с последним коммитом exhausted: раннер результата не зафиксировал
+# (лежал провайдер или окружение), поэтому разбирать исход агента нечего, а
+# бюджет повторов локален заходу в узел и заводится заново самим диспетчером.
+# «Продолжить» в такой остановке — решение человека переиграть узел; фиксируем
+# его тем же доверенным событием human-rewind, что и goto: курсор возвращается
+# на узел, результаты хвоста маршрута сбрасываются, автоматические счётчики
+# возвратов начинают новую серию. Остановки rewind-limit/no-progress и исход
+# failed сюда не попадают: они по-прежнему ждут явного goto с новой гипотезой,
+# а терминальный stop=failed ledger отклонит сам.
+# Печатает узел, на который вернулся курсор; пустой вывод — возврат не нужен.
+route_v2_rewind_exhausted_stop() {
+  local task attempt cursor_tmp state stop last_node last_outcome reset rc
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _route_v2_load_attempt "$task" "$attempt" || return
+  cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
+  attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" || {
+    rc=$?
+    rm -f -- "$cursor_tmp"
+    return "$rc"
+  }
+  IFS=$'\t' read -r state stop last_node last_outcome \
+    < <(_route_v2_json cursor-stop "$cursor_tmp") || {
+      rm -f -- "$cursor_tmp"
+      return 78
+    }
+  rm -f -- "$cursor_tmp"
+  [[ "$state" == stopped && "$stop" == human && "$last_outcome" == exhausted ]] ||
+    return 0
+  reset=$(_route_v2_reset_chain "$last_node") || return
+  attempt_stage_state_human_rewind_v2 \
+    "$task" "$attempt" "$last_node" "$reset" \
+    "продолжение после исчерпанного бюджета повторов" >/dev/null || return
+  printf '%s\n' "$last_node"
 }
 
 route_v2_gate_decide() {

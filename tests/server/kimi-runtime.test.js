@@ -14,12 +14,14 @@ import {
 } from '../../server/src/lib/kimi/runtime.js';
 
 class FakeAcpProcess extends EventEmitter {
-  constructor() {
+  constructor({ localCommands } = {}) {
     super();
     this.stdout = new PassThrough();
     this.stderr = new PassThrough();
     this.messages = [];
     this.pendingPrompt = null;
+    // Подменённые ответы локальных команд вида { '/status': '...', '/usage': '...' }.
+    this.localCommands = localCommands || null;
     let input = '';
     this.stdin = new Writable({
       write: (chunk, _encoding, done) => {
@@ -82,10 +84,13 @@ class FakeAcpProcess extends EventEmitter {
     }
     if (message.method === 'session/prompt') {
       const text = message.params?.prompt?.[0]?.text || '';
-      if (text === '/status') {
+      const localReply = this.localCommands
+        ? this.localCommands[text]
+        : (text === '/status' ? 'Session status:\n- Model: kimi-code/k3\n- Context: 12,345 / 1,048,576 (1.2%)' : undefined);
+      if (localReply !== undefined) {
         this.send({ method: 'session/update', params: { sessionId: 'session-1', update: {
           sessionUpdate: 'agent_message_chunk',
-          content: { type: 'text', text: 'Session status:\n- Model: kimi-code/k3\n- Context: 12,345 / 1,048,576 (1.2%)' },
+          content: { type: 'text', text: localReply },
         } } });
         this.send({ id: message.id, result: { stopReason: 'end_turn' } });
       } else {
@@ -218,6 +223,61 @@ test('status parser не подменяет точное измерение оц
     actualModel: 'k3',
   });
   assert.equal(parseStatus('broken', 262144).contextIsEstimate, true);
+});
+
+test('status parser понимает формат 0.33+: /usage с размером, /status без маркеров', () => {
+  assert.deepEqual(parseStatus('Context: 0 / 1,048,576 tokens (0%)\nSession total: no LLM calls yet', 10), {
+    contextTokens: 0,
+    contextWindow: 1048576,
+    contextMetric: 'kimi-session-status',
+    contextIsEstimate: false,
+    actualModel: '',
+  });
+  // Реальный ход: склеенные ответы /status (модель с суффиксом thinking) и /usage.
+  const combined = 'Session: session-1\nModel: kimi-code/k3 (thinking: on)\nMode: default\nWorking directory: /tmp'
+    + 'Context: 45,678 / 262,144 tokens (17%)\nSession total: 50,000 input tokens';
+  assert.deepEqual(parseStatus(combined, 10), {
+    contextTokens: 45678,
+    contextWindow: 262144,
+    contextMetric: 'kimi-session-status',
+    contextIsEstimate: false,
+    actualModel: 'kimi-code/k3',
+  });
+});
+
+test('host runtime: CLI без Context в /status добирает размер через /usage', async (t) => {
+  const f = await fixture(t);
+  const process = new FakeAcpProcess({
+    localCommands: {
+      '/status': 'Session: session-1\nModel: kimi-code/k3 (thinking: on)\nMode: default\nWorking directory: /tmp',
+      '/usage': 'Context: 45,678 / 262,144 tokens (17%)\nSession total: 50,000 input tokens',
+    },
+  });
+  const out = await runContainedKimi({
+    config: { ...f.config, kimiLaunchMode: 'host' },
+    chatKey: 'chat-host-usage',
+    cwd: f.cwd,
+    env: {},
+    message: 'offline fake prompt',
+    model: 'kimi-code/k3',
+    permissionMode: 'default',
+    onPermission: async () => ({ allow: true }),
+    deps: {
+      assertVersion: async () => { throw new Error('host: версия не пинится'); },
+      buildHostLaunch: async () => ({ command: 'fake-host', args: ['acp'], env: {}, cwdReal: f.cwd, unit: null }),
+      spawn: () => process,
+      stopUnit: async () => {},
+    },
+  });
+  assert.equal(out.reply, 'Готово.');
+  assert.equal(out.contextTokens, 45_678);
+  assert.equal(out.contextWindow, 262_144);
+  assert.equal(out.contextIsEstimate, false);
+  assert.equal(out.actualModel, 'kimi-code/k3');
+  const prompts = process.messages
+    .filter((message) => message.method === 'session/prompt')
+    .map((message) => message.params.prompt[0].text);
+  assert.deepEqual(prompts.slice(1), ['/status', '/usage']);
 });
 
 test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-ход и permissions без изменений', async (t) => {

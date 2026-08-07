@@ -243,6 +243,44 @@ runner_codex_classify() {
 }
 
 runner_codex_fanout_count() {
+  local run_dir=$1 out
+  local events="$run_dir/events.jsonl"
+  # Делегирование codex публикует ПРЯМО В ПОТОК (в отличие от kimi, где работа
+  # субагентов не видна в stdout вовсе — KIMI.md): item типа `collab_tool_call`
+  # несёт sender_thread_id и receiver_thread_ids. Замер всей телеметрии машины
+  # (222 прогона, 19143 события, 0 битых строк, 2026-08-07): таких вызовов 296,
+  # получатели у ВСЕХ пустые, тредов ровно один на ход — то есть делегирований
+  # не было ни разу и прежняя константа `0` сегодня не врала. Но врать она
+  # начала бы молча, как только codex делегирует впервые, поэтому считаем:
+  # сколько РАЗНЫХ тредов-получателей встретилось за ход. Разбором JSON, а не
+  # грепом: имена инструментов встречаются и в аргументах, и в снимках.
+  if [[ -f "$events" ]] && command -v python3 >/dev/null 2>&1; then
+    out=$(python3 -c '
+import json
+import sys
+
+seen = set()
+with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
+            continue
+        for thread_id in item.get("receiver_thread_ids") or []:
+            if isinstance(thread_id, str) and thread_id:
+                seen.add(thread_id)
+print(len(seen))
+' "$events" 2>/dev/null) && [[ "$out" =~ ^[0-9]+$ ]] && {
+      printf '%s\n' "$out"
+      return 0
+    }
+  fi
   printf '0\n'
 }
 

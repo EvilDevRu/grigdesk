@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { kimiAutoDecision } from '../../server/src/lib/chat/auto-approve.js';
+import { autoDecision } from '../../server/src/lib/chat/auto-approve.js';
 
 function presentation({ kind = 'execute', title = '', description = '', isQuestion = false } = {}) {
   return {
@@ -55,14 +55,14 @@ const DESTRUCTIVE_EXECUTE = [
 
 test('Kimi auto: безопасные shell-команды разрешаются молча', () => {
   for (const command of SAFE_EXECUTE) {
-    const decision = kimiAutoDecision(presentation({ kind: 'execute', title: command }));
+    const decision = autoDecision(presentation({ kind: 'execute', title: command }));
     assert.equal(decision.verdict, 'allow', `ожидался allow для: ${command}`);
   }
 });
 
 test('Kimi auto: деструктивные shell-команды уходят человеку', () => {
   for (const command of DESTRUCTIVE_EXECUTE) {
-    const decision = kimiAutoDecision(presentation({ kind: 'execute', title: command }));
+    const decision = autoDecision(presentation({ kind: 'execute', title: command }));
     assert.equal(decision.verdict, 'ask', `ожидался ask для: ${command}`);
     assert.ok(decision.reason, `должна быть причина для: ${command}`);
   }
@@ -70,18 +70,18 @@ test('Kimi auto: деструктивные shell-команды уходят ч
 
 test('Kimi auto: чтение и правки в workspace разрешены, удаление — человеку', () => {
   for (const kind of ['read', 'search', 'think', 'fetch', 'edit', 'move']) {
-    assert.equal(kimiAutoDecision(presentation({ kind })).verdict, 'allow', `kind ${kind}`);
+    assert.equal(autoDecision(presentation({ kind })).verdict, 'allow', `kind ${kind}`);
   }
-  assert.equal(kimiAutoDecision(presentation({ kind: 'delete' })).verdict, 'ask');
+  assert.equal(autoDecision(presentation({ kind: 'delete' })).verdict, 'ask');
 });
 
 test('Kimi auto: вопросы агента всегда показываются человеку', () => {
-  assert.equal(kimiAutoDecision(presentation({ isQuestion: true })).verdict, 'ask');
-  assert.equal(kimiAutoDecision(null).verdict, 'ask');
+  assert.equal(autoDecision(presentation({ isQuestion: true })).verdict, 'ask');
+  assert.equal(autoDecision(null).verdict, 'ask');
 });
 
 test('Kimi auto: неизвестные и пустые формы fail-closed', () => {
-  assert.equal(kimiAutoDecision(presentation({ kind: 'switch_mode' })).verdict, 'ask');
-  assert.equal(kimiAutoDecision(presentation({ kind: '' })).verdict, 'ask');
-  assert.equal(kimiAutoDecision(presentation({ kind: 'execute', title: '  ' })).verdict, 'ask');
+  assert.equal(autoDecision(presentation({ kind: 'switch_mode' })).verdict, 'ask');
+  assert.equal(autoDecision(presentation({ kind: '' })).verdict, 'ask');
+  assert.equal(autoDecision(presentation({ kind: 'execute', title: '  ' })).verdict, 'ask');
 });

@@ -18,6 +18,9 @@ async function fixture(t) {
     factoryState: {},
     log: null,
   });
+  // Конструктор запускает _init() фоном: без ожидания t.after мог удалить tmp-каталог
+  // посреди readdir — unhandledRejection валил весь файл-тест под параллельной нагрузкой.
+  await analyzer._ready;
   t.after(async () => { await rm(dir, { recursive: true, force: true }); });
   return analyzer;
 }

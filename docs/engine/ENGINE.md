@@ -42,7 +42,8 @@
 | `lib/multi-runner.sh` | model policy, dispatcher, telemetry |
 | `lib/dispatcher.sh` | классификация попыток/failover/breaker |
 | `lib/executor.sh`, `lib/runner-launcher.sh` | запуск adapter-а и run capability |
-| `lib/runners/*.sh` | provider adapters/catalog/probe |
+| `lib/runners/*.sh` | provider adapters/catalog/probe (реестр грузит только `*.sh`, вспомогательные файлы рядом безопасны) |
+| `lib/runners/kimi-wire.py` | мост телеметрии kimi: субагентов нет в stream-json CLI ([KIMI.md](KIMI.md)) |
 | `lib/profile-config.sh` | schema, validation, revision CAS, atomic writer |
 | `lib/coverage.sh`, `lib/profile-preflight.sh` | readiness/capability artifacts |
 | `lib/pipeline-store.sh` | locked/atomic pipeline storage |
@@ -351,7 +352,14 @@ Committed `failed` повторяется только в пределах `prod
 бюджета — синтетический исход `exhausted`, его вырабатывает рантайм, агент
 сообщить его не может. Перед таким коммитом host закрывает оставшийся без результата
 run-state как `failed`: exact run id/epoch сохраняются для fencing, но этап больше не
-остаётся ложным `running` на доске. Agent-узел с `parallel/N` допустим только при
+остаётся ложным `running` на доске. Остановка `stop=human` с таким исходом не требует
+разбора: раннер результата не зафиксировал (лежал провайдер или окружение), а бюджет
+повторов локален заходу в узел — новый диспетчер заводит его заново. Поэтому `resume`
+из такой остановки сам возвращает курсор на узел доверенным `human-rewind`
+(«продолжение после исчерпанного бюджета повторов»), не требуя отдельного `goto`:
+нажатие «продолжить» и есть решение человека переиграть узел, и журнал фиксирует его
+тем же событием, что и возврат кнопкой. Остановки `rewind-limit`/`no-progress` и исход
+`failed` так не обнуляются — они по-прежнему ждут явного `goto` с новой гипотезой. Agent-узел с `parallel/N` допустим только при
 `filesystem=state-only`: native-capable runner получает требование поднять N независимых
 read-only ветвей, а `degrade=allow-single` разрешает runner-у без native fanout выполнить
 их последовательно в одном запуске. `degrade=forbid` в таком случае останавливает попытку

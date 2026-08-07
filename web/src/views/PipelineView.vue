@@ -116,8 +116,13 @@ const stalledTitles = computed(() => filteredTasks.value
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref(null);
 const stageBusy = ref(null);
-const stageComment = ref('');
-const stageInstruction = ref('');
+// Два РАЗНЫХ текста, а не один на обе кнопки: у ворот пояснение доезжает до агента только
+// при отклонении, у возврата — всегда. Общий ref переносил бы набранное из одного смысла
+// в другой и подсказывал, что при «Принять» текст тоже куда-то уйдёт (он не уходит).
+const gateComment = ref('');
+const gateRejecting = ref(false);
+const gateNoteEl = ref(null);
+const rewindComment = ref('');
 const stageActivity = ref(null);
 const stageDoc = ref('');       // документ этапа (план/разведнота/диагноз…) — рендерится в модалке
 const stageDocOpen = ref(true);
@@ -163,7 +168,8 @@ function openStage(t, node) {
     status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
   };
   loadFactoryRunners();
-  stageComment.value = ''; stageActivity.value = null; stageInstruction.value = '';
+  gateComment.value = ''; gateRejecting.value = false; rewindComment.value = '';
+  stageActivity.value = null;
   stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
   stageLogOpen.value = false;
   const doc = NODE_DOC[node.nid];
@@ -174,7 +180,6 @@ function openStage(t, node) {
       .catch(() => { /* документа нет — секция не показывается */ })
       .finally(() => { stageDocLoading.value = false; });
   }
-  api.get(`/api/tasks/${t.task}/instruction`).then((r) => { stageInstruction.value = r.text || ''; }).catch(() => {});
   clearInterval(actPoll);
   if (node.status === 'run' && t.graph.daemonAlive) {
     pollActivity(); actPoll = setInterval(pollActivity, 3000);
@@ -226,14 +231,42 @@ async function warnIfNotResumed(res) {
   if (!res || res.resumed !== false) return;
   await alertDialog(`Записано, но прогон не поехал: ${res.resumeError || 'причина — в журнале этапов задачи'}`);
 }
+// Ворота — состояние, в котором решение вообще принимают. Отдельным computed, потому что
+// на него смотрят и секция решения, и подпись комментария под шапкой.
+const gateDecidable = computed(() => Boolean(
+  stage.value && !stage.value.readOnly && stage.value.isGate
+  && ['wait', 'premature'].includes(stage.value.status),
+));
+// Пояснение — часть ОТКЛОНЕНИЯ, а не ворот вообще: при «Принять» движок его выбрасывает
+// (`route_v2_gate_decide`: reject_feedback обнуляется на любом исходе кроме rejected).
+// Пока поле висело всегда, интерфейс обещал доставку текста, которой при принятии нет.
+function startGateReject() {
+  gateRejecting.value = true;
+  nextTick(() => { gateNoteEl.value?.focus(); });
+}
+function cancelGateReject() {
+  gateRejecting.value = false;
+  gateComment.value = '';
+}
+// Движок отказывает, когда rejected-пояснение некому доставить: возврат ведёт в узел,
+// который исполняет не агент. Голое «Ошибка: …» тут ничего не подсказывает, а выход есть.
+function gateErrorText(e) {
+  const base = `Решение не принято: ${e.message}`;
+  return /нельзя доставить/.test(e.message || '')
+    ? `${base}\n\nОтклони без текста либо верни конвейер кнопкой «▶ Перейти сюда» на тот узел, чей агент должен прочитать указание.`
+    : base;
+}
 async function gateDecide(decision) {
   stageBusy.value = 'gate';
+  // При принятии комментарий не отправляем вовсе: пустое поле честнее, чем текст,
+  // который движок молча выбросит, а проекция реестра потом покажет как «Замечание».
+  const comment = decision === 'reject' ? gateComment.value : '';
   try {
-    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment: stageComment.value });
+    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, { comment });
     await load(); closeStage();
     await warnIfNotResumed(res);
   }
-  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  catch (e) { await alertDialog(gateErrorText(e)); } finally { stageBusy.value = null; }
 }
 async function forceStatus(status) {
   // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним.
@@ -245,7 +278,7 @@ async function forceStatus(status) {
   // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
   try {
     const res = await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
-      { comment: stageComment.value });
+      { comment: rewindComment.value });
     await load(); closeStage();
     await warnIfNotResumed(res);
   }
@@ -316,10 +349,16 @@ function onStageRunnerPick(event) {
   if (primary === (stage.value?.meta?.runner?.primary || '')) return;
   setStageRunner(primary);
 }
-async function saveInstruction() {
-  stageBusy.value = 'instr';
-  try { await api.post(`/api/tasks/${stage.value.task}/instruction`, { text: stageInstruction.value }); }
-  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+// Подпись у `meta.comment`: один и тот же ключ реестра (`<КЛЮЧ>_COMMENT`) значит разное.
+// У ворот это текст ЧЕЛОВЕКА, и его судьба зависит от решения: отклонение уезжает агенту
+// заданием, а комментарий при принятии движок выбрасывает — назвать его «Замечанием»
+// значит соврать про доставку (старые прогоны такие записи ещё содержат).
+function stageCommentLabel(s) {
+  if (['skip', 'skipbad'].includes(s.status)) return 'Почему пропущен';
+  if (!s.isGate) return 'Замечание';
+  return s.status === 'done'
+    ? 'Комментарий при принятии — агенту он не уходил'
+    : 'Отправлено агенту на доработку';
 }
 
 // Снос идёт до пары минут (docker + схемы БД) — на это время кнопка превращается
@@ -664,7 +703,7 @@ function cardState(g) {
              Для skipped это единственное, что отличает «нечего было проверять» от
              «агент сдался» — раньше оно оставалось в журнале прогона. -->
         <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
-          <span class="sclbl">{{ stage.status === 'skip' || stage.status === 'skipbad' ? 'Почему пропущен' : 'Замечание' }}</span>
+          <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
           {{ stage.meta.comment }}
         </div>
         <div v-if="stage.meta.stall" class="scomment bad">
@@ -739,14 +778,30 @@ function cardState(g) {
             </div>
           </div>
 
-          <!-- Ворота: принять/отклонить — первым делом, если ждёт решения -->
-          <div v-if="!stage.readOnly && stage.isGate && (stage.status === 'wait' || stage.status === 'premature')" class="sect gate-sect">
+          <!-- Ворота: принять/отклонить — первым делом, если ждёт решения.
+               Поле пояснения принадлежит ОТКЛОНЕНИЮ и раскрывается по кнопке: при принятии
+               текст никуда не уходит, и висящее поле обещало доставку, которой нет. -->
+          <div v-if="gateDecidable" class="sect gate-sect">
             <div class="secth">Ворота — твоё решение</div>
-            <textarea v-model="stageComment" rows="2" placeholder="Что доработать / замечание агенту (при отклонении)"></textarea>
-            <div class="gbtns">
-              <button class="btn good" :disabled="stageBusy === 'gate'" @click="gateDecide('approve')">✓ Принять</button>
-              <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">✗ Отклонить</button>
-            </div>
+            <template v-if="gateRejecting">
+              <label class="gate-lbl" for="gate-note">Что доработать</label>
+              <textarea id="gate-note" ref="gateNoteEl" v-model="gateComment" rows="3"
+                placeholder="Что не так и что сделать иначе"></textarea>
+              <p class="gate-hint">Текст станет заданием агенту на следующем заходе. Можно и без него — тогда узел вернётся без пояснения.</p>
+              <div class="gbtns">
+                <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">
+                  {{ stageBusy === 'gate' ? '…' : '✗ Отправить на доработку' }}
+                </button>
+                <button class="btn" :disabled="stageBusy === 'gate'" @click="cancelGateReject()">Отмена</button>
+              </div>
+            </template>
+            <template v-else>
+              <p class="gate-hint">Принять — маршрут пойдёт дальше. Отклонить — вернём агенту, там же напишешь, что доработать.</p>
+              <div class="gbtns">
+                <button class="btn good" :disabled="stageBusy === 'gate'" @click="gateDecide('approve')">✓ Принять</button>
+                <button class="btn bad" :disabled="stageBusy === 'gate'" @click="startGateReject()">✗ Отклонить</button>
+              </div>
+            </template>
           </div>
 
           <!-- Живая лента действий агента (для идущего этапа) -->
@@ -794,17 +849,23 @@ function cardState(g) {
             <div v-if="stageDocOpen" class="sdoc md" v-html="mdToHtml(stageDoc)"></div>
           </div>
 
-          <!-- Действия -->
-          <div class="sect sactions">
-            <!-- Указание уезжает тем же запросом, что и возврат: своей кнопки «отправить» нет.
-                 У ворот поле уже есть выше и принадлежит решению — второго не заводим. -->
-            <textarea v-if="!stage.readOnly && !stage.isGate" v-model="stageComment" rows="2"
-              placeholder="Указание агенту при возврате на этот узел — что сделать иначе (необязательно)"></textarea>
-            <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
-            <OpenDiffButton :task-id="stage.task" />
-            <button v-if="!stage.readOnly && !stage.isGate" class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')" title="Вернуть конвейер на этот этап">
+          <!-- Возврат на узел. Своя секция, а не поле в ряду кнопок: указание уезжает тем же
+               запросом, что и возврат (своей кнопки «отправить» у него нет), и стоять оно
+               должно рядом с кнопкой, которая его отправляет, а не рядом с чатом и диффом. -->
+          <div v-if="!stage.readOnly && !stage.isGate" class="sect rewind-sect">
+            <div class="secth">Вернуть конвейер сюда</div>
+            <textarea v-model="rewindComment" rows="2"
+              placeholder="Указание агенту — что сделать иначе (необязательно)"></textarea>
+            <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
+            <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')">
               {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
             </button>
+          </div>
+
+          <!-- Действия -->
+          <div class="sect sactions">
+            <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
+            <OpenDiffButton :task-id="stage.task" />
           </div>
         </div>
       </div>
@@ -1055,13 +1116,13 @@ function cardState(g) {
 .sdoc :deep(td), .sdoc :deep(th) { border: 1px solid var(--line); padding: 4px 8px; font-size: 12px; }
 .gate-sect { background: color-mix(in srgb, var(--warn) 6%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
   border-radius: 10px; padding: 12px; margin-bottom: 4px; }
+.rewind-sect { border-top: 1px solid var(--line); }
+.gate-lbl { font-size: 12.5px; color: var(--ink); }
+.gate-hint { margin: 0; font-size: 12px; line-height: 1.4; color: var(--ink-mid); }
 .sect textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 .sactions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
   border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
-/* Поле указания занимает свою строку целиком: в одном ряду с кнопками оно съёживается
-   до пары сантиметров, и в него никто не пишет. */
-.sactions textarea { flex: 1 0 100%; }
 .sect .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; align-self: flex-start; }
 .sect .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
 .sect .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }

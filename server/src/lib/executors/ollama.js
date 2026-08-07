@@ -1,36 +1,131 @@
-// Ollama — локальные модели (Qwen и др.) через HTTP API демона. Это ПРОСТОЙ ЧАТ без
-// инструментов: ни файловых действий, ни режимов прав, ни слэш-команд — модель только
-// отвечает текстом. Демон stateless, поэтому историю разговора восстанавливаем из
-// server-owned истории чата (opts.chatHistory) на каждый ход. Адрес демона и размер
-// контекста (num_ctx) — свои настройки исполнителя, редактируются из UI
-// («Настройки → Исполнители», prefs.providerSettings.ollama). num_ctx — ползунок
-// с потолком от памяти машины (см. _ollama-client.js), а run() дополнительно клампит
-// его по per-model оценке выбранной модели.
+// Ollama — локальные модели (Qwen и др.) через HTTP API демона.
+//
+// В отличие от агентских CLI (claude/codex/kimi) демон приносит только модель: он не
+// умеет ни ходить по файлам, ни спрашивать разрешения, ни держать сессию. Всё это даёт
+// кокпит — каталог инструментов и песочница путей лежат в `_ollama-tools.js`, цикл
+// «ответ → инструменты → ответ» крутится здесь, в `run()`. Демон stateless, поэтому
+// историю разговора восстанавливаем из server-owned истории чата (`opts.chatHistory`)
+// на каждый ход, а правила проекта (AGENTS.md/CLAUDE.md рабочего каталога) кладём
+// системным блоком — так модель ведёт себя как остальные исполнители, а не как чистый чат.
+//
+// Что модель умеет, решает она сама: `/api/tags` отдаёт `capabilities`, и от них зависят
+// эффорт (`thinking`), инструменты (`tools`) и вложения-картинки (`vision`). Хардкода
+// возможностей здесь нет — новая модель включает их фактом своей поддержки.
+//
+// Адрес демона, num_ctx и время жизни модели в памяти — свои настройки исполнителя
+// («Настройки → Исполнители», prefs.providerSettings.ollama).
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import { createStepSink, cut } from '../chat/stream-steps.js';
 import {
+  DEFAULT_KEEP_ALIVE_MIN,
   DEFAULT_NUM_CTX,
   FALLBACK_MAX_NUM_CTX,
+  MAX_KEEP_ALIVE_MIN,
   MIN_RANGE_NUM_CTX,
   asUnavailableError,
   estimateMaxNumCtx,
   estimateModelMaxNumCtx,
   fetchJson,
+  fetchLoadedModels,
   fetchModelInfo,
+  formatBytes,
+  kvBytesPerToken,
+  normalizeCapabilities,
   postChatStream,
   resolveBaseUrl,
+  resolveKeepAlive,
   resolveNumCtx,
+  savedSettings,
   systemMemory,
+  unloadModel,
 } from './_ollama-client.js';
+import {
+  MAX_TOOL_CALLS,
+  RESULT_LIMIT,
+  createToolbox,
+  toolDeclarations,
+  toolModes,
+} from './_ollama-tools.js';
 
-// Троттлинг text/think шагов ленты: стрим течёт токенами, спамить SSE на каждый нельзя.
-const STEP_THROTTLE_MS = 200;
-const STEP_THROTTLE_CHARS = 500;
+// Троттлинг счётчика «думает… · N ток.»: стрим течёт токенами, слать SSE на каждый нельзя.
+const PROGRESS_THROTTLE_MS = 400;
+// Грубая оценка токенов по символам, пока раунд не закончился и точного eval_count нет.
+const CHARS_PER_TOKEN = 3;
+// Правила проекта в системный блок — только эти файлы рабочего каталога. Их @-включения
+// НЕ раскрываем: весь docs/ проекта — порядка 75k токенов, то есть около двух минут
+// префилла на КАЖДЫЙ ход (замер). Нужный документ модель дочитает инструментом сама.
+const PROJECT_DOCS = ['AGENTS.md', 'CLAUDE.md'];
+const DOC_CHARS_LIMIT = 24000;
+// Потолок обменов с моделью за ход: MAX_TOOL_CALLS ограничивает вызовы инструментов,
+// этот — сами раунды, чтобы пустые ответы тоже не крутились бесконечно.
+const MAX_ROUNDS = MAX_TOOL_CALLS + 5;
+const MAX_IMAGES = 4;
+// Нижняя граница окна, до которой оценка памяти имеет право ужимать ход: меньше — и в
+// контекст не влезает даже системный блок с правилами проекта и объявлением инструментов.
+const MIN_AGENT_NUM_CTX = 8192;
 
 /** «14.8B» → 14.8, «7B» → 7 — ранг силы для сортировки каталога. Не число → 0. */
 function tierFromParameterSize(value) {
   const m = String(value || '').match(/([\d.]+)\s*B/i);
   const parsed = m ? Number(m[1]) : 0;
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Где лежит загруженная модель — VRAM против ОЗУ: это и объясняет её скорость. */
+function placementOf(m) {
+  if (!m.totalBytes) return 'размер неизвестен';
+  if (!m.ramBytes) return `${formatBytes(m.totalBytes)} целиком в видеопамяти`;
+  if (!m.vramBytes) return `${formatBytes(m.totalBytes)} целиком в ОЗУ`;
+  return `${formatBytes(m.vramBytes)} в видеопамяти + ${formatBytes(m.ramBytes)} в ОЗУ`;
+}
+
+/** Правила проекта из рабочего каталога: то, ради чего ход выглядит «как у остальных». */
+async function readProjectDocs(cwd) {
+  if (!cwd) return [];
+  const out = [];
+  for (const name of PROJECT_DOCS) {
+    try {
+      const raw = await fs.readFile(path.join(cwd, name), 'utf8');
+      if (!raw.trim()) continue;
+      out.push({
+        name,
+        text: raw.length > DOC_CHARS_LIMIT
+          ? `${raw.slice(0, DOC_CHARS_LIMIT)}\n… файл обрезан, дочитай его инструментом read_file`
+          : raw,
+      });
+    } catch { /* файла нет — обычное дело, не все каталоги проектные */ }
+  }
+  return out;
+}
+
+/** Системный блок хода: где мы, что доступно и по каким правилам работаем. */
+function buildSystemPrompt({ cwd, roots, docs, toolsOn, permissionMode }) {
+  const lines = [
+    'Ты — ИИ-исполнитель в кокпите. Отвечай по-русски.',
+    cwd ? `Рабочий каталог: ${cwd}` : null,
+    roots.length ? `Доступные каталоги: ${roots.join(', ')}` : null,
+  ];
+  if (toolsOn) {
+    lines.push(
+      'Инструменты: read_file, list_dir, grep, write_file, edit_file, bash.',
+      'Не угадывай содержимое файлов — читай их инструментами. Путь вне доступных каталогов будет отклонён.',
+      permissionMode === 'plan'
+        ? 'Режим «план»: доступно только чтение. Ничего не меняй — опиши, что нужно сделать.'
+        : 'Правка или команда может потребовать подтверждения человека; отказ придёт результатом инструмента.',
+    );
+  } else {
+    lines.push('Инструментов у этой модели нет: файлы читать нечем, отвечай по тексту разговора.');
+  }
+  if (docs.length) {
+    lines.push('', `Ниже — правила проекта (${docs.map((d) => d.name).join(', ')}). Соблюдай их.`);
+    if (toolsOn) {
+      lines.push('Ссылки вида @путь/файл.md — отдельные документы, они сюда не вложены: понадобятся — прочитай их read_file.');
+    }
+    for (const d of docs) lines.push('', `--- ${d.name} ---`, d.text);
+  }
+  return lines.filter((l) => l !== null).join('\n');
 }
 
 /**
@@ -41,8 +136,9 @@ function tierFromParameterSize(value) {
  * user-блоком истории — срезаем дубликат: последний user с непустым текстом,
  * который является суффиксом message (у message есть служебные префиксы).
  */
-function buildMessages({ message, sessionId, chatHistory }) {
+function buildMessages({ system, message, sessionId, chatHistory, images }) {
   const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
   if (sessionId && Array.isArray(chatHistory)) {
     const history = chatHistory
       .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && String(m?.text || '').trim())
@@ -55,8 +151,31 @@ function buildMessages({ message, sessionId, chatHistory }) {
     }
     for (const m of history) messages.push({ role: m.role, content: m.text });
   }
-  messages.push({ role: 'user', content: message });
+  const user = { role: 'user', content: message };
+  if (images?.length) user.images = images;
+  messages.push(user);
   return messages;
+}
+
+/** Вложения → base64 для поля images (только у моделей с capability vision). */
+async function readImages(paths) {
+  const out = [];
+  for (const p of (Array.isArray(paths) ? paths : []).slice(0, MAX_IMAGES)) {
+    try { out.push((await fs.readFile(p)).toString('base64')); } catch { /* файл пропал — пропускаем */ }
+  }
+  return out;
+}
+
+/** Аргументы вызова: Ollama отдаёт объектом, но принимаем и JSON-строку — на случай смены формата. */
+function parseToolArgs(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch { return {}; }
+  }
+  return {};
 }
 
 /** Жив ли демон: GET /api/version с коротким таймаутом. */
@@ -69,6 +188,32 @@ async function probeDaemon(config) {
   }
 }
 
+/**
+ * Возможности и потолок контекста ВЫБРАННОЙ модели одним заходом в /api/tags:
+ * этот запрос всё равно нужен для клампа num_ctx, а capabilities решают, слать ли
+ * tools/think/images. Демон старой версии список возможностей в /api/tags не кладёт —
+ * тогда добираем их из /api/show (тот же кэш по digest, лишнего запроса нет).
+ */
+async function resolveModelFacts(baseUrl, model) {
+  try {
+    const tags = await fetchJson(baseUrl, '/api/tags', { timeoutMs: 2000 });
+    const entry = (Array.isArray(tags?.models) ? tags.models : []).find((m) => m?.name === model);
+    if (!entry) return { capabilities: [], maxNumCtx: null };
+    let capabilities = normalizeCapabilities(entry.capabilities);
+    if (!capabilities.length) {
+      const record = await fetchModelInfo(baseUrl, { name: model, digest: entry.digest });
+      capabilities = record?.capabilities || [];
+    }
+    const maxNumCtx = await estimateModelMaxNumCtx(baseUrl, {
+      name: model, digest: entry.digest, sizeBytes: entry.size,
+    });
+    return { capabilities, maxNumCtx };
+  } catch {
+    // Демон моргнул на подготовке — дальше ход сам решит, жив ли он.
+    return { capabilities: [], maxNumCtx: null };
+  }
+}
+
 export default {
   id: 'ollama',
   name: 'Ollama',
@@ -77,22 +222,59 @@ export default {
   order: 4,
   install: 'curl -fsSL https://ollama.com/install.sh | sh',
 
-  // Свои настройки: адрес демона у всех разный (localhost, LAN, Tailscale), а дефолтный
-  // num_ctx у Ollama — 2048–4096, для разговора это ничто. Обе ручки редактируются из UI.
-  // settings — async-ФУНКЦИЯ (расширение контракта, см. executors/index.js): потолок
-  // ползунка numCtx вычисляется от памяти машины и весов моделей, поэтому декларацию
-  // собираем по живому опросу демона; молчит → дефолтный потолок FALLBACK_MAX_NUM_CTX.
+  /**
+   * Свои настройки исполнителя. settings — async-ФУНКЦИЯ (расширение контракта, см.
+   * executors/index.js): потолок ползунка num_ctx и справочные строки считаются по
+   * живому опросу демона и памяти машины. Демон молчит → дефолтный потолок и прочерки.
+   * Строки `kind: 'info'` фронт рисует подписью с пояснением — своего контрола у них нет.
+   */
   async settings(config) {
     const baseUrl = resolveBaseUrl(config);
+    const chosenNumCtx = resolveNumCtx(savedSettings(config));
     let max = FALLBACK_MAX_NUM_CTX;
+    let ctxCost = 'не удалось оценить — демон не ответил';
+
     try {
       const tags = await fetchJson(baseUrl, '/api/tags', { timeoutMs: 2000 });
       const models = (Array.isArray(tags?.models) ? tags.models : []).filter((m) => m?.name);
-      const estimates = await Promise.all(models.map((m) => estimateModelMaxNumCtx(baseUrl, {
-        name: m.name, digest: m.digest, sizeBytes: m.size,
-      })));
+      const estimates = [];
+      const costs = [];
+      for (const m of models) {
+        // estimateModelMaxNumCtx и fetchModelInfo делят один кэш по digest — второй
+        // вызов бесплатный, поэтому цену KV-кэша считаем тут же, а не отдельным обходом.
+        estimates.push(await estimateModelMaxNumCtx(baseUrl, {
+          name: m.name, digest: m.digest, sizeBytes: m.size,
+        }));
+        const record = await fetchModelInfo(baseUrl, { name: m.name, digest: m.digest });
+        costs.push(kvBytesPerToken(record?.modelInfo) * chosenNumCtx);
+      }
       if (estimates.length) max = Math.max(...estimates);
-    } catch { /* демон молчит — рисуем ползунок с дефолтным потолком */ }
+      if (costs.length) {
+        const lo = formatBytes(Math.min(...costs));
+        const hi = formatBytes(Math.max(...costs));
+        ctxCost = lo === hi
+          ? `${chosenNumCtx.toLocaleString('ru')} токенов ≈ ${lo} памяти под KV-кэш`
+          : `${chosenNumCtx.toLocaleString('ru')} токенов ≈ ${lo}–${hi} под KV-кэш (зависит от модели)`;
+      }
+    } catch { /* демон молчит — ползунок с дефолтным потолком, оценка прочерком */ }
+
+    const mem = await systemMemory();
+    const memNote = [
+      mem.totalVramBytes
+        ? `видеопамять: свободно ${formatBytes(mem.freeVramBytes)} из ${formatBytes(mem.totalVramBytes)}`
+        : 'видеопамять: не обнаружена (модель пойдёт целиком в ОЗУ)',
+      `ОЗУ: свободно ${formatBytes(mem.freeRamBytes)} из ${formatBytes(mem.totalRamBytes)}`,
+    ].join(' · ');
+
+    const loaded = await fetchLoadedModels(baseUrl);
+    const loadedNote = loaded.length
+      ? loaded.map((m) => [
+        `${m.name} — ${placementOf(m)}`,
+        m.contextLength ? `окно ${m.contextLength.toLocaleString('ru')}` : null,
+        m.expiresInSec != null ? `выгрузится через ${Math.max(1, Math.round(m.expiresInSec / 60))} мин` : null,
+      ].filter(Boolean).join(', ')).join(' · ')
+      : 'ничего не загружено — ближайший ход оплатит чтение весов модели с диска';
+
     return [
       {
         id: 'host', kind: 'text', label: 'Адрес демона Ollama', value: 'http://127.0.0.1:11434',
@@ -100,8 +282,29 @@ export default {
       },
       {
         id: 'numCtx', kind: 'range', label: 'Размер контекста (num_ctx)',
-        min: MIN_RANGE_NUM_CTX, step: 1024, max, value: 32768,
-        hint: 'Потолок — оценка по памяти машины (VRAM + ОЗУ при offload) и весам моделей; родное окно qwen3.6 — 256k, но в память влезает меньше.',
+        min: MIN_RANGE_NUM_CTX, step: 1024, max, value: DEFAULT_NUM_CTX,
+        hint: 'Сколько разговора модель держит перед глазами. Больше — дороже по памяти: '
+          + 'не влезло в видеопамять, значит поехало в ОЗУ и ход замедлился. Меньше — Ollama '
+          + 'молча срежет начало разговора. Потолок — оценка по памяти этой машины.',
+      },
+      {
+        id: 'keepAliveMin', kind: 'range', label: 'Держать модель в памяти, минут',
+        min: 0, step: 1, max: MAX_KEEP_ALIVE_MIN, value: DEFAULT_KEEP_ALIVE_MIN,
+        hint: 'После этой паузы демон выгружает модель, и следующий ход снова читает веса '
+          + 'с диска (для крупной модели — десятки секунд). 0 — выгружать сразу после хода: '
+          + 'память освобождается мгновенно, но каждый ход платит загрузкой.',
+      },
+      {
+        id: 'memInfo', kind: 'info', label: 'Память машины', note: memNote,
+        hint: 'Отсюда берётся потолок ползунка контекста. Ollama кладёт в видеопамять что влезло, остальное считает на процессоре.',
+      },
+      {
+        id: 'loadedInfo', kind: 'info', label: 'Сейчас в памяти демона', note: loadedNote,
+        hint: 'Это же объясняет, почему первый ход после перерыва идёт дольше остальных. Выгрузить вручную можно из всплывашки исполнителя в шапке.',
+      },
+      {
+        id: 'ctxCostInfo', kind: 'info', label: 'Цена выбранного контекста', note: ctxCost,
+        hint: 'Столько памяти займёт KV-кэш ПОВЕРХ весов модели при выбранном num_ctx.',
       },
     ];
   },
@@ -123,6 +326,10 @@ export default {
   seedModels() { return []; },
 
   catalogLive: true,
+
+  // Инструменты исполняет сам кокпит, поэтому и режимы прав объявляем свои —
+  // спрашивать о них нечего и некого (у claude их перечисляет CLI).
+  async modes() { return toolModes(); },
 
   /**
    * Подтянутые в демон модели (GET /api/tags) + родное окно из /api/show (кэш по digest).
@@ -147,6 +354,9 @@ export default {
       const record = await fetchModelInfo(baseUrl, { name: tag, digest: m?.digest });
       const context = record?.contextLength ?? DEFAULT_NUM_CTX;
       const spec = [details.parameter_size, details.quantization_level].filter(Boolean).join(', ');
+      const capabilities = normalizeCapabilities(m?.capabilities).length
+        ? normalizeCapabilities(m?.capabilities)
+        : (record?.capabilities || []);
       out.push({
         id: tag,
         name: spec ? `${tag} (${spec})` : tag,
@@ -158,7 +368,10 @@ export default {
           mem,
         }),
         tier: tierFromParameterSize(details.parameter_size),
-        efforts: [],
+        // Эффорт объявляем БИНАРНЫМ и только у думающих моделей: замер показал, что
+        // think: "low"|"medium"|"high" демон принимает, но длина рассуждения от уровня
+        // не зависит (360 / 751 / 354 символа). Три уровня были бы враньём слайдера.
+        efforts: capabilities.includes('thinking') ? ['low', 'high'] : [],
         family: String(details.family || tag.split(':')[0]),
       });
     }
@@ -166,92 +379,286 @@ export default {
   },
 
   /**
-   * Ход чата: POST /api/chat со стримом NDJSON. thinking-чанки → think-шаги ленты,
-   * content → накопление reply и троттленные text-шаги; финальная строка done:true
-   * несёт prompt_eval_count/eval_count — из них честный расход контекста.
+   * Ход чата: цикл «POST /api/chat → tool_calls → выполнить → снова POST», пока модель
+   * не ответит без вызовов. thinking-чанки и текст уходят в ленту шагов, действия — как
+   * tool/res, живость — счётчиком токенов через onProgress. Финальная строка done:true
+   * каждого раунда несёт prompt_eval_count/eval_count — из них честный расход контекста.
    */
-  async run({ config, chatKey, signal, message, model, sessionId, chatHistory, providerSettings, onStep }) {
+  async run({
+    config, chatKey, signal, message, model, effort, sessionId, chatHistory, providerSettings,
+    cwd, extraDirs = [], attachmentPaths = [], permissionMode, onPermission, onProgress, onStep,
+  }) {
     const baseUrl = resolveBaseUrl(config);
     const nextSessionId = sessionId || (chatKey ? `ollama:${chatKey}` : null);
     const sink = createStepSink(onStep);
     if (!model) throw new Error('Не выбрана модель Ollama — выбери её в селекте чата.');
 
-    const messages = buildMessages({ message: String(message || ''), sessionId, chatHistory });
-    sink.emit({ k: 'start', model, mode: '', cwd: '' });
+    // Пустой режим означает «дефолт исполнителя»; у нас он самый осторожный из рабочих.
+    const mode = permissionMode || 'manual';
+    sink.emit({ k: 'start', model, mode, cwd: cwd || '' });
+
+    const { capabilities, maxNumCtx } = await resolveModelFacts(baseUrl, model);
+    const supportsTools = capabilities.includes('tools');
+    const supportsVision = capabilities.includes('vision');
+    const supportsThinking = capabilities.includes('thinking');
 
     // Кламп num_ctx по per-model оценке памяти: больше потолка KV-кэш не влезет
-    // в VRAM+ОЗУ этой модели. Оценку не удалось получить — работаем с настройкой как есть.
+    // в VRAM+ОЗУ этой модели. Оценки нет — работаем с настройкой как есть.
+    // Ниже MIN_AGENT_NUM_CTX не опускаемся никогда: в такое окно не помещается даже
+    // системный блок с правилами проекта и объявлением инструментов, и ход выродился бы
+    // в пустой ответ (проверено живьём — модель отдавала только размышление). Оценка
+    // памяти — эвристика, а Ollama при нехватке доложит часть на CPU, а не упадёт;
+    // цена ошибки в меньшую сторону куда выше, чем в большую.
     let numCtx = resolveNumCtx(providerSettings);
-    try {
-      const tags = await fetchJson(baseUrl, '/api/tags', { timeoutMs: 2000 });
-      const entry = (Array.isArray(tags?.models) ? tags.models : []).find((m) => m?.name === model);
-      const maxNumCtx = entry
-        ? await estimateModelMaxNumCtx(baseUrl, { name: model, digest: entry.digest, sizeBytes: entry.size })
-        : null;
-      if (maxNumCtx && numCtx > maxNumCtx) {
-        numCtx = maxNumCtx;
-        sink.emit({ k: 'note', text: `num_ctx ограничен до ${maxNumCtx}: больше не влезет в память по оценке` });
-      }
-    } catch { /* демон моргнул на оценке — дальше ход сам решит, жив ли он */ }
+    const floor = Math.min(numCtx, MIN_AGENT_NUM_CTX);
+    if (maxNumCtx && numCtx > Math.max(maxNumCtx, floor)) {
+      numCtx = Math.max(maxNumCtx, floor);
+      sink.emit({ k: 'note', text: `num_ctx ограничен до ${numCtx}: больше не влезет в память по оценке` });
+    }
+    if (!supportsTools) {
+      sink.emit({ k: 'note', text: 'модель без поддержки инструментов — файлы и команды ей недоступны' });
+    }
+    if (attachmentPaths.length && !supportsVision) {
+      sink.emit({ k: 'note', text: 'модель не понимает картинки — вложения не отправлены' });
+    }
 
+    const toolbox = await createToolbox({
+      cwd, roots: extraDirs, permissionMode: mode, onPermission, sink, signal,
+    });
+    const docs = await readProjectDocs(cwd);
+    const messages = buildMessages({
+      system: buildSystemPrompt({
+        cwd, roots: toolbox.roots, docs, toolsOn: supportsTools, permissionMode: mode,
+      }),
+      message: String(message || ''),
+      sessionId,
+      chatHistory,
+      images: supportsVision ? await readImages(attachmentPaths) : [],
+    });
+
+    // Эффорт → think булевым: три уровня модель не отрабатывает (см. catalog).
+    // Эффорт не выбран — поле не шлём вовсе: у думающей модели дефолт демона — думать,
+    // и подставленный false молча отнял бы у неё рассуждения.
+    const think = effort === 'high' ? true : (effort === 'low' ? false : undefined);
+    const keepAlive = resolveKeepAlive(providerSettings);
+
+    let toolsAllowed = supportsTools;
     let reply = '';
-    let thinking = '';
-    let promptTokens = 0;
-    let evalTokens = 0;
-    let lastStepAt = 0;
-    let lastStepLen = 0;
-    const emitProgress = (force = false) => {
-      const total = thinking.length + reply.length;
+    let maxPromptTokens = 0;
+    let doneTokens = 0;
+    let roundChars = 0;
+    let lastProgressAt = 0;
+    const pushProgress = (force = false) => {
       const now = Date.now();
-      if (!force && now - lastStepAt < STEP_THROTTLE_MS && total - lastStepLen < STEP_THROTTLE_CHARS) return;
-      lastStepAt = now;
-      lastStepLen = total;
-      if (thinking) sink.emit({ k: 'think', text: cut(thinking) });
-      if (reply) sink.emit({ k: 'text', text: cut(reply, 4000) });
+      if (!force && now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+      lastProgressAt = now;
+      try { onProgress?.(doneTokens + Math.round(roundChars / CHARS_PER_TOKEN)); } catch { /* счётчик не роняет ход */ }
     };
 
     try {
-      await postChatStream(baseUrl, {
-        model,
-        messages,
-        stream: true,
-        options: { num_ctx: numCtx },
-      }, {
-        signal,
-        onLine(chunk) {
-          const piece = chunk?.message || {};
-          if (piece.thinking) thinking += String(piece.thinking);
-          if (piece.content) reply += String(piece.content);
-          if (piece.thinking || piece.content) emitProgress();
-          if (chunk?.done) {
-            promptTokens = Number(chunk.prompt_eval_count) || 0;
-            evalTokens = Number(chunk.eval_count) || 0;
-          }
-        },
-      });
+      for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+        let content = '';
+        let thinking = '';
+        let thinkShown = false;
+        const rawCalls = [];
+
+        const body = { model, messages, stream: true, keep_alive: keepAlive, options: { num_ctx: numCtx } };
+        if (toolsAllowed) body.tools = toolDeclarations();
+        if (supportsThinking && think !== undefined) body.think = think;
+
+        await postChatStream(baseUrl, body, {
+          signal,
+          onLine(chunk) {
+            const piece = chunk?.message || {};
+            if (piece.thinking) thinking += String(piece.thinking);
+            if (piece.content) {
+              // Рассуждение к этому моменту закончилось — показываем его одной строкой,
+              // не дожидаясь конца раунда: так человек видит ход мысли раньше ответа.
+              if (thinking && !thinkShown) {
+                thinkShown = true;
+                sink.emit({ k: 'think', text: cut(thinking) });
+              }
+              content += String(piece.content);
+            }
+            if (Array.isArray(piece.tool_calls)) rawCalls.push(...piece.tool_calls);
+            if (piece.thinking || piece.content) {
+              roundChars = thinking.length + content.length;
+              pushProgress();
+            }
+            if (chunk?.done) {
+              // prompt_eval_count умеет УМЕНЬШАТЬСЯ при попадании в кэш промпта, хотя
+              // сам промпт только растёт — поэтому берём максимум по раундам, а
+              // сгенерированное складываем.
+              maxPromptTokens = Math.max(maxPromptTokens, Number(chunk.prompt_eval_count) || 0);
+              doneTokens += Number(chunk.eval_count) || 0;
+              roundChars = 0;
+              pushProgress(true);
+            }
+          },
+        });
+        // Раунд закончился — показываем его целиком одной строкой. Именно целиком:
+        // стрим идёт токенами, а emit добавляет НОВУЮ строку ленты, поэтому кусками
+        // вышла бы стена растущих дублей. Живость даёт счётчик токенов (onProgress),
+        // как у остальных исполнителей. Текст последнего раунда — это и есть ответ,
+        // он остаётся в ленте так же, как у claude (там reply тоже дублируется шагом).
+        if (thinking && !thinkShown) sink.emit({ k: 'think', text: cut(thinking) });
+        if (content.trim()) sink.emit({ k: 'text', text: cut(content, 4000) });
+
+        if (!rawCalls.length || !toolsAllowed) {
+          reply = content;
+          break;
+        }
+
+        // Рассуждение обратно в контекст не возвращаем: моделям семейства qwen это
+        // прямо не рекомендовано, а места в локальном окне оно занимает много.
+        messages.push({ role: 'assistant', content, tool_calls: rawCalls });
+        for (const raw of rawCalls) {
+          const name = String(raw?.function?.name || '');
+          const out = await toolbox.call({ name, args: parseToolArgs(raw?.function?.arguments) });
+          messages.push({
+            role: 'tool',
+            tool_name: name,
+            content: String(out?.text ?? '').slice(0, RESULT_LIMIT) || '(пусто)',
+          });
+        }
+
+        if (toolbox.calls >= MAX_TOOL_CALLS) {
+          // Не обрываем ход на полуслове: снимаем инструменты и просим подвести итог —
+          // следующий раунд придёт без вызовов и станет ответом.
+          toolsAllowed = false;
+          sink.emit({ k: 'note', text: `предел вызовов инструментов за ход (${MAX_TOOL_CALLS}) — прошу подвести итог` });
+          messages.push({
+            role: 'user',
+            content: `Предел вызовов инструментов за ход исчерпан (${MAX_TOOL_CALLS}). `
+              + 'Инструменты больше недоступны: подведи итог сделанного и скажи, что осталось.',
+          });
+        }
+      }
     } catch (err) {
       // Кнопка «стоп»: ход оборван человеком, а не сломан — отдаём накопленное.
       if (signal?.aborted) {
         const stopped = new Error('Ход остановлен.');
         stopped.stopped = true;
         stopped.sessionId = nextSessionId;
-        stopped.contextTokens = promptTokens + evalTokens;
+        stopped.contextTokens = maxPromptTokens + doneTokens;
         stopped.steps = sink.steps;
         throw stopped;
       }
       throw asUnavailableError(err, baseUrl) || err;
     }
-    emitProgress(true); // финальный срез ленты, если стрим давал текст
 
     // Некоторые модели шлют размышления прямо в content — убираем их из ответа.
     const cleaned = reply.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     return {
       reply: cleaned || '(модель вернула пустой ответ)',
       sessionId: nextSessionId,
-      contextTokens: promptTokens + evalTokens,
+      contextTokens: maxPromptTokens + doneTokens,
       contextWindow: numCtx,
       cost: null,
       steps: sink.steps,
     };
+  },
+
+  /**
+   * Всплывашка исполнителя в шапке. Подписочных лимитов у локального демона нет и не
+   * будет, поэтому показываем то, что здесь действительно решает: занятость памяти
+   * машины, что демон держит загруженным (и когда выгрузит) и кнопку немедленной
+   * выгрузки — это единственный способ вернуть видеопамять другим задачам сразу.
+   */
+  async usage(config) {
+    const baseUrl = resolveBaseUrl(config);
+    const { ok, version } = await probeDaemon(config);
+    if (!ok) {
+      return {
+        state: 'unavailable',
+        message: `Демон Ollama не отвечает на ${baseUrl}.`,
+        bars: [],
+        resources: [],
+      };
+    }
+
+    const mem = await systemMemory();
+    const bars = [];
+    if (mem.totalVramBytes) {
+      const used = Math.max(0, mem.totalVramBytes - mem.freeVramBytes);
+      bars.push({
+        key: 'vram',
+        label: 'Видеопамять',
+        pct: Math.round((used / mem.totalVramBytes) * 100),
+        note: `занято ${formatBytes(used)} из ${formatBytes(mem.totalVramBytes)}`,
+      });
+    }
+    if (mem.totalRamBytes) {
+      const used = Math.max(0, mem.totalRamBytes - mem.freeRamBytes);
+      bars.push({
+        key: 'ram',
+        label: 'Оперативная память',
+        pct: Math.round((used / mem.totalRamBytes) * 100),
+        note: `занято ${formatBytes(used)} из ${formatBytes(mem.totalRamBytes)}`,
+      });
+    }
+
+    const loaded = await fetchLoadedModels(baseUrl);
+    const resources = [{
+      key: 'daemon',
+      label: 'Демон',
+      summary: version ? `версия ${version}` : 'отвечает',
+      note: baseUrl,
+      tone: 'ok',
+    }];
+    loaded.forEach((m, i) => {
+      resources.push({
+        // Имя модели («qwen3.6:latest») в ключ не годится: контракт ресурсов требует
+        // [a-z0-9_-], а двоеточие и точка его не проходят. Имя живёт в подписи.
+        key: `loaded-${i + 1}`,
+        label: m.name,
+        summary: placementOf(m),
+        // Доля весов в видеопамяти: чем она меньше, тем больше считает процессор.
+        ...(m.totalBytes && { percent: (m.vramBytes / m.totalBytes) * 100 }),
+        note: [
+          m.contextLength ? `окно ${m.contextLength.toLocaleString('ru')} токенов` : null,
+          m.expiresInSec != null
+            ? `выгрузится через ${Math.max(1, Math.round(m.expiresInSec / 60))} мин`
+            : null,
+        ].filter(Boolean).join(' · '),
+        tone: 'ok',
+        controls: [{
+          id: 'unload',
+          kind: 'button',
+          label: 'Выгрузить из памяти',
+          action: 'unload-model',
+          payload: { model: m.name },
+          confirm: {
+            text: `Выгрузить ${m.name} из памяти? Освободится ${formatBytes(m.totalBytes)}, `
+              + 'следующий ход снова прочитает веса с диска.',
+            label: 'Выгрузить',
+          },
+        }],
+      });
+    });
+    if (!loaded.length) {
+      resources.push({
+        key: 'idle',
+        label: 'Модели в памяти',
+        summary: 'ничего не загружено',
+        note: 'ближайший ход оплатит чтение весов с диска; сколько держать модель загруженной — в настройках исполнителя',
+        tone: 'muted',
+      });
+    }
+
+    return { state: 'ok', bars, resources };
+  },
+
+  usageActions: {
+    'unload-model': async ({ payload, config }) => {
+      const model = String(payload?.model || '').trim();
+      if (!model) return { ok: false, error: 'не указана модель для выгрузки' };
+      try {
+        await unloadModel(resolveBaseUrl(config), model);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err?.message || 'выгрузить модель не удалось' };
+      }
+    },
   },
 };

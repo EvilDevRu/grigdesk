@@ -311,7 +311,7 @@ test('сбой инвалидации Kimi binding блокирует дальн
   assert.equal(binding.sessionId, 'binding-session', 'несогласованный id не записан и не сброшен вслепую');
 });
 
-test('stop Kimi возвращает sessionReset и не оставляет отменённую session для resume', async (t) => {
+test('stop Kimi сохраняет отменённую session для resume (smoke 0.33.0: RESUME_OK)', async (t) => {
   const executor = {
     id: 'kimi',
     retryContract: KIMI_RETRY_CONTRACT,
@@ -340,8 +340,186 @@ test('stop Kimi возвращает sessionReset и не оставляет о�
 
   assert.equal(run.statusCode, 200);
   assert.equal(run.json().stopped, true);
-  assert.equal(run.json().sessionReset, true);
-  assert.equal(run.json().sessionId, null);
+  assert.equal(run.json().sessionReset, false);
+  assert.equal(run.json().sessionId, 'stopped-session');
   const binding = await new ChatSessionBindingStore({ dir: config.chatBindingsDir }).read('stopped-chat');
-  assert.equal(binding.sessionId, null);
+  assert.equal(binding.sessionId, 'stopped-session', 'binding переживает стоп: следующий ход делает resume');
+});
+
+test('resume после стопа; при проглатывании — инвалидация и досье в новой session', async (t) => {
+  const received = [];
+  const resumedWith = [];
+  let call = 0;
+  const executor = {
+    id: 'kimi',
+    retryContract: KIMI_RETRY_CONTRACT,
+    async run(options) {
+      call += 1;
+      received.push(String(options.message || ''));
+      resumedWith.push(options.sessionId || null);
+      if (call === 1) {
+        await options.onSessionCreated('session-1');
+        const error = new Error('Ход остановлен.');
+        error.stopped = true;
+        error.sessionId = 'session-1';
+        error.steps = [];
+        throw error;
+      }
+      if (call === 2) {
+        // Resume отменённой сессии «проглотил» prompt: end_turn без единого chunk/шага.
+        return { reply: '', sessionId: 'session-1', steps: [], emptyRun: true, retryState: 'post_prompt' };
+      }
+      await options.onSessionCreated(`session-${call}`);
+      return { reply: 'готово', sessionId: `session-${call}`, steps: [], cost: null };
+    },
+  };
+  const { app, config } = await apiFixture(t, { executor });
+  await saveKimiChat(app, 'brief-chat');
+
+  const stopped = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'brief-chat',
+      modelRef: { provider: 'kimi', model: 'kimi-test' },
+      model: 'kimi-test',
+      message: 'первый prompt',
+    },
+  });
+  assert.equal(stopped.json().stopped, true);
+  assert.equal(stopped.json().sessionReset, false);
+  assert.equal(stopped.json().sessionId, 'session-1');
+
+  // Клиент сохранил остановленный ход в историю: флаг stopped + лента шагов.
+  const historyPut = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'brief-chat',
+        modelRef: { provider: 'kimi', model: 'kimi-test' },
+        createdAt: Date.UTC(2026, 7, 1),
+        updatedAt: Date.now(),
+        revision: 1,
+        messages: [
+          { role: 'user', text: 'первый prompt' },
+          {
+            role: 'assistant', text: '⏹ Ход остановлен.', stopped: true,
+            steps: [
+              { k: 'start', model: 'kimi-test' },
+              { k: 'tool', name: 'Edit', title: 'chat.js' },
+              { k: 'res', ok: true, text: 'ok' },
+              { k: 'tool', name: 'Bash', title: 'npm test' },
+              { k: 'res', ok: false, text: '1 failing test' },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(historyPut.statusCode, 200);
+
+  // Следующий ход делает resume той же session, но prompt «проглатывается».
+  const swallowed = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'brief-chat',
+      modelRef: { provider: 'kimi', model: 'kimi-test' },
+      model: 'kimi-test',
+      message: 'продолжай',
+    },
+  });
+  assert.equal(swallowed.statusCode, 500);
+  assert.equal(swallowed.json().error, 'kimi_empty_response');
+  assert.equal(swallowed.json().sessionReset, true);
+  assert.equal(resumedWith[1], 'session-1', 'после стопа ход делает resume той же session');
+  assert.ok(!received[1].includes('[Досье прерванного хода]'), 'при живом binding досье не нужно');
+  const binding = await new ChatSessionBindingStore({ dir: config.chatBindingsDir }).read('brief-chat');
+  assert.equal(binding.sessionId, null, 'проглатывание инвалидирует binding');
+
+  // Клиент дописал ошибку проглатывания: assistant-последним остаётся остановленный ход.
+  const errorPut = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'brief-chat',
+        modelRef: { provider: 'kimi', model: 'kimi-test' },
+        createdAt: Date.UTC(2026, 7, 1),
+        updatedAt: Date.now(),
+        revision: 2,
+        messages: [
+          { role: 'user', text: 'первый prompt' },
+          {
+            role: 'assistant', text: '⏹ Ход остановлен.', stopped: true,
+            steps: [
+              { k: 'tool', name: 'Edit', title: 'chat.js' },
+              { k: 'res', ok: false, text: '1 failing test' },
+            ],
+          },
+          { role: 'user', text: 'продолжай' },
+          { role: 'error', text: 'Kimi завершил ход без ответа. Сессия сброшена; повтори сообщение явно.' },
+        ],
+      },
+    },
+  });
+  assert.equal(errorPut.statusCode, 200);
+
+  // Повторное сообщение: session новая → досье передаёт, что успел сделать остановленный ход.
+  const third = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'brief-chat',
+      modelRef: { provider: 'kimi', model: 'kimi-test' },
+      model: 'kimi-test',
+      message: 'продолжай',
+    },
+  });
+  assert.equal(third.statusCode, 200);
+  assert.equal(resumedWith[2], null, 'после инвалидации стартует новая session');
+  const briefed = received[2] || '';
+  assert.ok(briefed.includes('[Досье прерванного хода]'), 'досье подмешано в сообщение');
+  assert.ok(briefed.includes('- Edit: chat.js'));
+  assert.ok(briefed.includes('- Ошибка: 1 failing test'));
+  assert.ok(briefed.endsWith('продолжай'), 'сообщение пользователя остаётся последним');
+
+  // Клиент дописал обычный ответ: досье одноразовое и дальше не подмешивается.
+  const followupPut = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'brief-chat',
+        modelRef: { provider: 'kimi', model: 'kimi-test' },
+        createdAt: Date.UTC(2026, 7, 1),
+        updatedAt: Date.now(),
+        revision: 3,
+        messages: [
+          { role: 'user', text: 'первый prompt' },
+          {
+            role: 'assistant', text: '⏹ Ход остановлен.', stopped: true,
+            steps: [{ k: 'tool', name: 'Edit', title: 'chat.js' }],
+          },
+          { role: 'user', text: 'продолжай' },
+          { role: 'assistant', text: 'готово' },
+        ],
+      },
+    },
+  });
+  assert.equal(followupPut.statusCode, 200);
+
+  const fourth = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'brief-chat',
+      modelRef: { provider: 'kimi', model: 'kimi-test' },
+      model: 'kimi-test',
+      message: 'ещё вопрос',
+    },
+  });
+  assert.equal(fourth.statusCode, 200);
+  assert.ok(!(received[3] || '').includes('[Досье прерванного хода]'), 'досье одноразовое');
 });

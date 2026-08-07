@@ -94,8 +94,13 @@ test('настройка fastMode явно передаётся каждому h
 });
 
 test('настройки Ollama: numCtx приводится к числу, чужой ключ отклоняется', async () => {
+  // Демона в offline-тесте нет: справочные строки объявляются всё равно, просто с
+  // честным «демон не отвечает» внутри — иначе таб настроек пустел бы при выключенном демоне.
   const declared = (await ollama.settings()).map((s) => [s.id, s.kind]);
-  assert.deepEqual(declared, [['host', 'text'], ['numCtx', 'range']]);
+  assert.deepEqual(declared, [
+    ['host', 'text'], ['numCtx', 'range'], ['keepAliveMin', 'range'],
+    ['memInfo', 'info'], ['loadedInfo', 'info'], ['ctxCostInfo', 'info'],
+  ]);
 
   // UI шлёт значение ползунка строкой — в prefs оно обязано лечь числом.
   const applied = await applyProviderSetting(ollama, {}, { settingId: 'numCtx', value: '16384' });
@@ -113,7 +118,19 @@ test('настройки Ollama: numCtx приводится к числу, чу
   assert.equal(withHost.providerSettings.ollama.host, 'http://192.168.1.10:11434');
   assert.deepEqual(withHost.providerSettings.claude, { fastMode: true });
 
+  // Минуты keep_alive — тот же ползунок, значение обязано лечь числом.
+  const keepAlive = await applyProviderSetting(ollama, {}, { settingId: 'keepAliveMin', value: '30' });
+  assert.equal(keepAlive.providerSettings.ollama.keepAliveMin, 30);
+
   const rejected = await applyProviderSetting(ollama, {}, { settingId: 'temperature', value: 0.7 });
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'unknown_setting');
+
+  // Справка объявлена исполнителем, но записывать в неё нечего: ядро не даёт
+  // засорить prefs строкой, значение которой всё равно вычисляется каждый раз заново.
+  const readonly = await applyProviderSetting(ollama, {}, { settingId: 'memInfo', value: 'что угодно' });
+  assert.equal(readonly.ok, false);
+  assert.equal(readonly.error, 'readonly_setting');
+  const stale = await resolveProviderSettings(ollama, { memInfo: 'старьё из prefs' });
+  assert.notEqual(stale.find((s) => s.id === 'memInfo').value, 'старьё из prefs');
 });

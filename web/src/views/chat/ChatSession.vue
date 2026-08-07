@@ -861,7 +861,7 @@ async function openDebug() {
                   @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
 
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
-    <ChatPermission v-if="perm" :req="perm" @answer="(allow, remember) => chat.answerPerm(perm.pid, allow, remember)" />
+    <ChatPermission v-if="perm" :req="perm" @answer="(allow, remember, comment) => chat.answerPerm(perm.pid, allow, remember, comment)" />
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">

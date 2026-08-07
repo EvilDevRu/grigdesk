@@ -132,8 +132,24 @@ runner_kimi_run() {
   for add_dir in ${RUNNER_KIMI_ADD_DIRS:-}; do
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
+  # Поток CLI идёт в журнал через мост телеметрии: делегируя работу инструментом
+  # `Agent`, kimi перестаёт писать в stdout вообще — ни вызова, ни событий субагентов
+  # (доказано на t7783 BUILD 2026-08-07: в events.jsonl вызовов `Agent` ноль, в
+  # kimi-home/…/agents/main/wire.jsonl их два). Журнал замирал на десятки минут при
+  # здоровом ходе, а кокпит считает молчание по его свежести и звал человека зря.
+  # Мост — единственный писатель: строки CLI переливаются байт-в-байт, события
+  # субагентов вливаются между ними. Второй параллельный писатель в тот же fd
+  # недопустим — строки CLI доходят до 32 КБ, это много больше PIPE_BUF.
+  # Без python3 мост тихо пропускается: телеметрия субагентов не стоит отказа хода.
+  local bridge="${FACTORY_HOME:?}/lib/runners/kimi-wire.py"
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
+  if [[ -f "$bridge" ]] && command -v python3 >/dev/null 2>&1; then
+    KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" \
+      | python3 "$bridge" --merge "$run_home"
+    # Исход хода — только у CLI: сбой моста не имеет права стать отказом стадии.
+    return "${PIPESTATUS[0]}"
+  fi
   KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
 }
 
@@ -209,6 +225,15 @@ runner_kimi_classify() {
 }
 
 runner_kimi_fanout_count() {
+  local run_dir=$1
+  local bridge="${FACTORY_HOME:?}/lib/runners/kimi-wire.py"
+  # Считать по events.jsonl нечего: вызовов `Agent` там не бывает вовсе (см.
+  # runner_kimi_run). Источник — wire.jsonl per-run home, и разбирается он как
+  # JSON, а не грепом: `llm.tools_snapshot` несёт ОПИСАНИЕ инструмента Agent,
+  # поэтому греп по имени дал бы ненулевой fanout на ходе без делегирований.
+  if [[ -f "$bridge" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 "$bridge" --fanout "$run_dir/kimi-home" 2>/dev/null && return 0
+  fi
   printf '0\n'
 }
 

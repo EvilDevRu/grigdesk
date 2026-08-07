@@ -1,12 +1,18 @@
-// Кокпит-политика «авто» для Kimi: ACP-сессия остаётся в режиме `default` (Kimi
-// продолжает спрашивать через session/request_permission), а отвечает на запросы
-// этот классификатор. Безопасные действия разрешаются молча, деструктивные и
-// неизвестные уходят человеку во всплывашку.
+// Кокпит-политика «авто» для исполнителей, чьи разрешения проходят через кокпит:
+// Kimi (ACP-сессия остаётся в режиме `default` и продолжает спрашивать через
+// session/request_permission) и Ollama (инструменты исполняет сам кокпит). Отвечает
+// на запросы этот классификатор: безопасные действия разрешаются молча,
+// деструктивные и неизвестные уходят человеку во всплывашку.
 //
-// ВАЖНО: это UX-политика, а не security boundary. Настоящая граница — contained
-// runtime (bwrap + cgroup + egress allowlist): запись ограничена workspace, сети
-// нет, credentials недоступны. Обфусцированную команду классификатор может не
-// узнать — поэтому неизвестные формы fail-closed уходят на подтверждение.
+// Словарь действий один — ACP `toolCall.kind`; исполнитель обязан лишь назвать свой
+// вызов одним из этих типов, а не заводить вторую политику рядом.
+//
+// ВАЖНО: это UX-политика, а не security boundary. У Kimi настоящая граница —
+// contained runtime (bwrap + cgroup + egress allowlist): запись ограничена workspace,
+// сети нет, credentials недоступны. У Ollama — realpath-песочница путей (см.
+// executors/_ollama-tools.js), которая, однако, НЕ распространяется на `bash`.
+// Обфусцированную команду классификатор может не узнать — поэтому неизвестные формы
+// fail-closed уходят на подтверждение.
 
 // ACP toolCall.kind, которые не меняют состояние либо ограничены workspace.
 const SAFE_KINDS = new Set(['read', 'search', 'think', 'fetch', 'edit', 'move']);
@@ -44,11 +50,12 @@ function commandTextOf(presentation) {
 }
 
 /**
- * Решение авто-режима по presentation из permissionPresentation() (runtime.js).
+ * Решение авто-режима по presentation исполнителя (у Kimi её строит
+ * permissionPresentation() в runtime.js, у Ollama — каталог инструментов).
  * Возвращает { verdict: 'allow' } либо { verdict: 'ask', reason }.
  * Fail-closed: неизвестный kind/пустой запрос → 'ask'.
  */
-export function kimiAutoDecision(presentation) {
+export function autoDecision(presentation) {
   if (!presentation || presentation.isQuestion) return { verdict: 'ask', reason: 'вопрос агента' };
   const kind = String(presentation?.raw?.toolCall?.kind || '');
   if (ASK_KINDS.has(kind)) return { verdict: 'ask', reason: `удаление (${kind})` };

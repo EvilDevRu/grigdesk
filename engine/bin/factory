@@ -87,6 +87,12 @@ Goto — человеческий возврат курсора на ПРОЙД�
 kind=human-rewind с причиной. Вперёд по маршруту прыгать нельзя: исход узла
 получается только его исполнением. После goto продолжай обычным resume.
 
+Resume после остановки «исчерпан бюджет повторов» (stop=human, исход exhausted)
+делает такой же human-rewind сам, без goto: раннер результата не зафиксировал
+(лежал провайдер или окружение), разбирать исход агента нечего, а бюджет
+повторов заводится заново самим заходом в узел. Остановки rewind-limit/
+no-progress и исход failed по-прежнему требуют goto с новой гипотезой.
+
 Work-time — read-only сводка учтённого времени попытки: work_time_s (работа
 узлов без ворот), gate_wait_s (ожидание решений на воротах) и last_event_at
 (эпоха последнего события журнала). Журнал sealed (попытка терминальна) —
@@ -2110,7 +2116,7 @@ v2_on_exit() {
 v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
-  local gate_key pipeline_gate_key gate_node cursor stop stop_node
+  local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
   trap 'v2_on_signal TERM' TERM
@@ -2319,6 +2325,24 @@ v2_main() {
     v2_log "route cursor не инициализирован (код $rc)"
     return "$rc"
   }
+  if [[ "$MODE" == resume ]]; then
+    # Остановка «исчерпан бюджет повторов» (stop=human, исход exhausted): раннер
+    # результата не зафиксировал — чаще всего лежал провайдер — и разбирать исход
+    # агента нечего. Бюджет повторов локален заходу в узел, поэтому «продолжить»
+    # обнуляет его: доверенный human-rewind возвращает курсор на узел без отдельного
+    # goto. Остановки rewind-limit/no-progress и исход failed по-прежнему ждут
+    # явного решения человека с новой гипотезой.
+    rewind_node=$(route_v2_rewind_exhausted_stop "$TASK" "$attempt") || {
+      rc=$?
+      v2_log "resume: возврат после исчерпанного бюджета повторов не принят (код $rc)"
+      return "$rc"
+    }
+    if [[ -n "$rewind_node" ]]; then
+      [[ ! -f "$STATE_DIR/t${TASK}.pipeline" ]] ||
+        set_st "$TASK" RESULT human-rewind || return
+      v2_log "$rewind_node: продолжение после исчерпанного бюджета повторов — узел переигрывается"
+    fi
+  fi
   if [[ "$MODE" != start ]]; then
     # Если предыдущий процесс умер после ledger CAS, но до UI reset, immutable
     # последнее событие остаётся повторяемым источником проекции.
@@ -2476,20 +2500,7 @@ v2_admin_main() {
     local reset
     # Сбрасываем целевой узел и всё, что идёт после него по последовательности
     # маршрута: возврат назад обязан снять результаты пройденного хвоста.
-    reset=$("$FACTORY_HOME/bin/factory-route" \
-      --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
-      --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" |
-      python3 -c '
-import json
-import sys
-
-machine = json.load(sys.stdin)["machine"]
-target = sys.argv[1]
-chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
-if target not in chain:
-    raise SystemExit(2)
-print(",".join(chain[chain.index(target):]))
-' "$GATE_NODE") || {
+    reset=$(_route_v2_reset_chain "$GATE_NODE") || {
       v2_log "goto: узел $GATE_NODE отсутствует в маршруте"
       return 2
     }

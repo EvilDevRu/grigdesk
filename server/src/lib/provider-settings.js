@@ -17,12 +17,17 @@ async function declaredSettings(executor, config) {
   return Array.isArray(list) ? list : [];
 }
 
-/** Объявленные исполнителем настройки со значениями из prefs. */
+/**
+ * Объявленные исполнителем настройки со значениями из prefs.
+ * `kind: 'info'` — не ручка, а строка-справка (что сейчас в памяти, во что обходится
+ * выбранный размер контекста): её значение вычисляет сам исполнитель, и prefs его
+ * не подменяют, даже если ключ туда когда-то попал.
+ */
 export async function resolveProviderSettings(executor, savedForProvider, config) {
   const saved = savedForProvider || {};
   return (await declaredSettings(executor, config)).map((s) => ({
     ...s,
-    value: s.id in saved ? saved[s.id] : s.value,
+    value: s.kind !== 'info' && s.id in saved ? saved[s.id] : s.value,
   }));
 }
 
@@ -45,6 +50,13 @@ export async function applyProviderSetting(executor, allSaved, { settingId, valu
       ok: false,
       error: 'unknown_setting',
       message: `исполнитель ${executor?.name || '?'} не объявлял настройку ${settingId}`,
+    };
+  }
+  if (decl.kind === 'info') {
+    return {
+      ok: false,
+      error: 'readonly_setting',
+      message: `${settingId} — справка исполнителя ${executor?.name || '?'}, а не настройка`,
     };
   }
   const all = allSaved || {};
