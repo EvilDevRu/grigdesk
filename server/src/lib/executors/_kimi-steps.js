@@ -1,46 +1,110 @@
 import {
-  base, cut, cutMiddle, lineCount, STEP_TEXT_LIMIT,
+  base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/stream-steps.js';
 
-function textContent(content) {
-  if (!Array.isArray(content)) return '';
-  return content.map((entry) => {
-    if (entry?.type === 'content' && entry.content?.type === 'text') return entry.content.text || '';
-    if (entry?.type === 'diff') return entry.diff || '';
-    return '';
-  }).filter(Boolean).join('\n');
-}
-
-function inputText(update) {
-  if (update?.rawInput !== undefined) {
-    try { return JSON.stringify(update.rawInput); } catch { return String(update.rawInput); }
+/**
+ * Блоки content ACP: текст и структурный diff. Форма диффа — `{type:'diff', path,
+ * oldText, newText}`; поля `diff` у него нет, и чтение несуществующего поля
+ * оставляло правку файла в ленте пустой строкой.
+ */
+function splitContent(content) {
+  const list = Array.isArray(content) ? content : [];
+  const texts = [];
+  let diff = null;
+  for (const entry of list) {
+    if (entry?.type === 'diff') {
+      diff = {
+        path: String(entry.path || ''),
+        old: String(entry.oldText ?? ''),
+        new: String(entry.newText ?? ''),
+      };
+      continue;
+    }
+    if (entry?.type === 'content' && entry.content?.type === 'text') {
+      const text = String(entry.content.text || '');
+      if (text.trim()) texts.push(text);
+    }
   }
-  return textContent(update?.content);
+  return { text: texts.join('\n'), diff };
 }
 
+function firstString(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim()) || '';
+}
+
+/**
+ * Шаг ленты из tool_call/tool_call_update. Аргументы берём из `rawInput` — он
+ * приходит только на upgrade вызова (`in_progress`), поэтому строку ленты
+ * собираем именно тогда, а не на lazy-create первой дельты.
+ */
 function toolStep(update) {
-  const raw = inputText(update);
-  const title = String(update.title || update.kind || 'Действие');
+  const id = update.toolCallId;
   const kind = String(update.kind || 'other');
+  const raw = update.rawInput && typeof update.rawInput === 'object' ? update.rawInput : {};
+  const { text, diff } = splitContent(update.content);
+  const title = String(update.title || kind);
+
   if (kind === 'execute') {
-    return { k: 'tool', id: update.toolCallId, name: 'Bash', title: cut(title, 200), command: cutMiddle(raw, STEP_TEXT_LIMIT), lang: 'bash' };
+    // Заголовком идёт сама команда: «Bash Bash» ничего человеку не сообщает.
+    const command = firstString(raw.command, raw.cmd, raw.script) || text;
+    return {
+      k: 'tool', id, name: 'Bash', lang: 'bash',
+      title: cut((command || title).split('\n')[0], 200),
+      command: cutMiddle(command, STEP_TEXT_LIMIT),
+      preview: command ? '' : cut(title, 200),
+    };
   }
-  if (kind === 'edit') {
-    const file = update.locations?.[0]?.path || update.rawInput?.path || '';
-    return { k: 'tool', id: update.toolCallId, name: 'Edit', title: file ? base(file) : cut(title, 200), preview: cut(raw, 600) };
+
+  if (kind === 'edit' || diff) {
+    const file = firstString(diff?.path, update.locations?.[0]?.path, raw.path, raw.file_path);
+    return {
+      k: 'tool', id, name: 'Edit',
+      title: file ? base(file) : cut(title, 200),
+      sub: file,
+      ...(diff
+        ? { diff: { old: cut(diff.old, STEP_DIFF_LIMIT), new: cut(diff.new, STEP_DIFF_LIMIT) } }
+        : { preview: cut(text || JSON.stringify(raw), 600) }),
+    };
   }
+
+  if (kind === 'read') {
+    const file = firstString(update.locations?.[0]?.path, raw.path, raw.file_path);
+    return {
+      k: 'tool', id, name: 'Read', title: file ? base(file) : cut(title, 200), sub: file,
+    };
+  }
+
+  if (kind === 'search') {
+    return {
+      k: 'tool', id, name: 'Grep',
+      title: cut(firstString(raw.pattern, raw.query, raw.regex) || title, 200),
+      sub: firstString(raw.path, raw.glob),
+    };
+  }
+
+  const args = Object.keys(raw).length ? JSON.stringify(raw) : text;
   return {
-    k: 'tool', id: update.toolCallId, name: title, title: cut(title, 200),
-    preview: cut(raw, 600),
+    k: 'tool', id, name: title, title: cut(title, 200), preview: cut(args, 600),
   };
 }
 
 /** Stateful ACP → provider-neutral ChatStep normalizer. */
 export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual' } = {}) {
   let started = false;
+  let thought = '';
   const tools = new Map();
 
-  return function normalize(params) {
+  // Размышление приходит потоком мелких кусков: каждый отдельным шагом превратил бы
+  // ленту в лапшу из обрывков. Копим и отдаём одним шагом перед следующим действием
+  // агента (и в конце хода — flush()).
+  function flushThought(out) {
+    const text = thought.trim();
+    thought = '';
+    if (text) out.push({ k: 'think', text: cut(text, STEP_THINK_LIMIT) });
+    return out;
+  }
+
+  function normalize(params) {
     const update = params?.update;
     if (!update || typeof update !== 'object') return [];
     const out = [];
@@ -49,34 +113,43 @@ export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual'
       out.push({ k: 'start', model, cwd, mode });
     }
 
-    // agent_thought_chunk может содержать внутреннюю цепочку рассуждений. В ленту
-    // отдаём только факт работы, а не приватный reasoning text.
+    // Размышление Kimi — то же, что thinking у Claude: это опубликованный агентом
+    // текст, а не приватная цепочка. Пряча его за «Kimi анализирует задачу…»,
+    // кокпит терял единственное, ради чего ленту и раскрывают.
     if (update.sessionUpdate === 'agent_thought_chunk') {
-      if (!tools.has('__thinking__')) {
-        tools.set('__thinking__', true);
-        out.push({ k: 'note', text: 'Kimi анализирует задачу…' });
-      }
+      const text = update.content?.type === 'text' ? String(update.content.text || '') : '';
+      // Потолок вдвое выше лимита шага: хвост всё равно срежет cut, а копить
+      // мегабайты в памяти хода незачем.
+      if (text) thought = `${thought}${text}`.slice(0, STEP_THINK_LIMIT * 2);
       return out;
     }
 
-    if (update.sessionUpdate === 'tool_call') {
-      const step = toolStep(update);
-      tools.set(update.toolCallId, step);
-      out.push(step);
-      return out;
-    }
+    flushThought(out);
 
-    if (update.sessionUpdate === 'tool_call_update') {
-      if (!tools.has(update.toolCallId)) {
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const id = update.toolCallId;
+      const known = tools.get(id);
+      // Лента append-only: уже отданный шаг не исправить. Первый tool_call —
+      // это lazy-create по первой дельте аргументов (без rawInput, с обрезанным
+      // именем), поэтому ждём upgrade до in_progress или завершения вызова.
+      const ready = update.sessionUpdate === 'tool_call_update'
+        || (update.status && update.status !== 'pending');
+      if (!known && ready) {
         const step = toolStep(update);
-        tools.set(update.toolCallId, step);
+        tools.set(id, step);
         out.push(step);
       }
       if (['completed', 'failed'].includes(update.status)) {
-        const text = textContent(update.content);
+        if (!tools.has(id)) {
+          const step = toolStep(update);
+          tools.set(id, step);
+          out.push(step);
+        }
+        const { text, diff } = splitContent(update.content);
+        const result = text || (diff ? diff.path : '');
         out.push({
-          k: 'res', id: update.toolCallId, ok: update.status === 'completed',
-          text: cut(text, update.status === 'completed' ? 400 : 600), lines: lineCount(text),
+          k: 'res', id, ok: update.status === 'completed',
+          text: cut(result, update.status === 'completed' ? 400 : 600), lines: lineCount(result),
         });
       }
       return out;
@@ -84,10 +157,18 @@ export function createKimiStepNormalizer({ model = '', cwd = '', mode = 'manual'
 
     if (update.sessionUpdate === 'plan') {
       const entries = Array.isArray(update.entries) ? update.entries : [];
-      const text = entries.map((entry) => `${entry.status || 'pending'}: ${entry.content || entry.title || ''}`).join('\n');
+      const text = entries.map((entry) => {
+        const status = String(entry.status || 'pending');
+        const mark = status === 'completed' ? '✓' : status === 'in_progress' ? '▸' : '·';
+        return `${mark} ${entry.content || entry.title || ''}`;
+      }).join('\n');
       if (text) out.push({ k: 'note', text: cut(text) });
     }
     return out;
-  };
-}
+  }
 
+  // Хвост размышления, за которым не последовало действия (агент подумал и ответил
+  // текстом): без явного flush он пропадал бы вместе с нормализатором.
+  normalize.flush = () => flushThought([]);
+  return normalize;
+}

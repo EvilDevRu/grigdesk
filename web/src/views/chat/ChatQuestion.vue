@@ -19,6 +19,11 @@ const questions = computed(() => props.req?.questions || []);
 // Отвечать можно, когда есть хоть один выбор или свой текст.
 const ready = computed(() => state.value.some((s) => s.picked.length || s.text.trim()));
 
+// Свой текст принимает не всякий канал: ACP-мост Kimi несёт только выбранный
+// optionId. Показывать «свой ответ…» там, откуда он не доедет, — обман; поле
+// прячем, а вместо него канал объясняет своё ограничение строкой `hint`.
+function freeText(q) { return q?.allowFreeText !== false; }
+
 function pick(qi, label) {
   const s = state.value[qi];
   const multi = questions.value[qi]?.multiSelect;
@@ -49,6 +54,9 @@ function submit() {
           <span class="q-ico">?</span>{{ q.question }}
           <span v-if="q.multiSelect" class="q-multi">можно несколько</span>
         </div>
+        <!-- Ограничение канала (у Kimi — один вариант без своего текста): пишем прямо,
+             иначе человек ищет отсутствующие чекбоксы и поле ввода. -->
+        <div v-if="q.hint" class="q-hint">{{ q.hint }}</div>
         <div class="q-opts">
           <button v-for="o in q.options || []" :key="o.label" class="q-opt" :class="{ on: isPicked(qi, o.label) }"
                   @click="pick(qi, o.label)">
@@ -56,13 +64,14 @@ function submit() {
             <span class="q-name">{{ o.label }}</span>
             <span v-if="o.description" class="q-desc">{{ o.description }}</span>
           </button>
-          <button class="q-opt own" :class="{ on: state[qi].own }" @click="state[qi].own = !state[qi].own">
+          <button v-if="freeText(q)" class="q-opt own" :class="{ on: state[qi].own }"
+                  @click="state[qi].own = !state[qi].own">
             <span class="q-mark" :class="{ multi: q.multiSelect }"></span>
             <span class="q-name">свой ответ…</span>
           </button>
         </div>
-        <input v-if="state[qi].own" v-model="state[qi].text" class="q-own" placeholder="напиши своими словами"
-               @keydown.enter.prevent="ready && submit()" />
+        <input v-if="freeText(q) && state[qi].own" v-model="state[qi].text" class="q-own"
+               placeholder="напиши своими словами" @keydown.enter.prevent="ready && submit()" />
       </div>
       <div class="q-act">
         <button class="q-ok" :disabled="!ready" @click="submit">Ответить</button>
@@ -82,6 +91,7 @@ function submit() {
 .q-text { font-size: 13px; margin-bottom: 7px; display: flex; align-items: baseline; gap: 6px; }
 .q-ico { flex: none; color: var(--accent); font-weight: 700; }
 .q-multi { font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+.q-hint { font-size: 11px; color: var(--ink-mid); margin: -3px 0 7px 18px; line-height: 1.45; }
 /* Варианты — строки на всю ширину: отметка, название, справа пояснение от агента */
 .q-opts { display: flex; flex-direction: column; gap: 3px; }
 .q-opt { display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left; padding: 6px 10px;

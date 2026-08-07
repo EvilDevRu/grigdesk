@@ -2,7 +2,7 @@
 // Показываем только краткое reasoning-поле, которое отдал сам Codex; raw_content
 // намеренно игнорируем, чтобы не превращать ленту в раскрытие приватной цепочки мыслей.
 import {
-  base, cut, cutMiddle, lineCount, STEP_TEXT_LIMIT,
+  base, cut, cutMiddle, lineCount, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/stream-steps.js';
 
 function textOf(value) {
@@ -161,7 +161,7 @@ export function createCodexStepNormalizer({
       const item = event.item || {};
       if (item.type === 'reasoning' || item.type === 'agent_reasoning') {
         const text = reasoningSummary(item);
-        if (text.trim()) out.push({ k: 'think', text: cut(text) });
+        if (text.trim()) out.push({ k: 'think', text: cut(text, STEP_THINK_LIMIT) });
         return out;
       }
 

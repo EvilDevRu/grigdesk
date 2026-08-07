@@ -202,6 +202,48 @@ async function updateProvider(p) {
   } finally { updating.value = ''; }
 }
 
+// ── MCP-серверы исполнителя ──
+// Что за серверы подключены и живы ли они, знает только сам CLI, и опрос его стоит
+// секунд — поэтому блок грузится лениво (открыли вкладку) и обновляется кнопкой.
+// Секции — как в расширении: свои (файлы конфигов) отдельно от аккаунтных коннекторов,
+// у них разные места починки: первые правятся локально, вторые — на claude.ai.
+const MCP_SCOPES = [
+  { id: 'user', label: 'Свои' },
+  { id: 'project', label: 'Проект' },
+  {
+    id: 'account',
+    label: 'claude.ai',
+    hint: 'Коннекторы аккаунта: подключаются и авторизуются на claude.ai, локально их живость '
+      + 'не проверяется — CLI о них не отчитывается.',
+  },
+];
+// `remote` — аккаунтный коннектор, который локально не проверить ничем: его состояние
+// знает claude.ai. Жёлтый «состояние неизвестно» тут был бы ложной тревогой над рабочим
+// коннектором, поэтому у него своя нейтральная подпись и серая точка.
+const MCP_STATES = {
+  ok: { label: 'Подключён', cls: 'ok' },
+  failed: { label: 'Не подключился', cls: 'err' },
+  'needs-auth': { label: 'Нужна авторизация', cls: 'warn' },
+  remote: { label: 'Включён на claude.ai', cls: 'idle' },
+  unknown: { label: 'Состояние неизвестно', cls: 'warn' },
+};
+function mcpOf(p) { return prov.mcp[p.id] || null; }
+function mcpGroups(p) {
+  const servers = mcpOf(p)?.servers || [];
+  return MCP_SCOPES
+    .map((s) => ({ ...s, servers: servers.filter((x) => (x.scope || 'user') === s.id) }))
+    .filter((g) => g.servers.length);
+}
+function mcpState(server) { return MCP_STATES[server.state] || MCP_STATES.unknown; }
+function loadMcpFor(p, refresh = false) {
+  if (typeof p?.id !== 'string') return;
+  prov.loadMcp(p.id, refresh);
+}
+// Опрашиваем только тех, кто про MCP вообще сообщает (`mcp: true` в реестре).
+function loadAllMcp(refresh = false) {
+  for (const p of prov.providers) if (p.mcp && p.available) loadMcpFor(p, refresh);
+}
+
 // ── Запуски (правила перед стартом триажа/конвейера) ──
 const prefs = ref(null);
 const prefsMsg = ref(null);
@@ -634,6 +676,14 @@ async function rebuildWeb() {
   srvMsg.value = { type: 'err', text: 'Пересборка не завершилась за 12 минут — смотри лог сервера.' };
 }
 
+// Опрос MCP начинаем, только когда человек открыл вкладку исполнителей: он стоит
+// секунд живого health-check, и платить за него при открытии любой другой вкладки
+// (или в топбаре) незачем. Повторные заходы гасит минутный кэш сервера.
+watchEffect(() => {
+  if (tab.value !== 'providers' || !prov.loaded) return;
+  loadAllMcp(false);
+});
+
 onMounted(() => {
   revealTab(tab.value, false);
   loadCurrent();
@@ -803,11 +853,6 @@ onMounted(() => {
 
     <!-- Исполнители: реестр LLM-агентов (/api/providers) -->
     <section v-else-if="tab === 'providers'">
-      <p class="section-note">
-        Реестр агентов-исполнителей. Его же читают топбар (иконки) и в перспективе схемы —
-        исполнителем шага сможет быть не только Claude. Авторизация — на хосте через
-        login-команду выбранного CLI, кокпит только показывает статус.
-      </p>
       <!-- Плашка на исполнителя, плашки — горизонтальной линией: у каждого ИИ свои
            ручки, и мешать их в один список нельзя. -->
       <div v-if="!prov.loaded" class="card muted">Загрузка…</div>
@@ -880,6 +925,47 @@ onMounted(() => {
               </div>
             </template>
             <p v-else class="muted small">Своих настроек у этого исполнителя пока нет.</p>
+          </div>
+          <!-- MCP-серверы: чем агент этого CLI дополнен сверх своих инструментов.
+               Список и живость знает только сам CLI, поэтому блок грузится отдельным
+               запросом (см. loadMcpFor) и есть лишь у тех, кто объявил mcpStatus. -->
+          <div v-if="p.mcp && p.available" class="pvset">
+            <div class="pvsetttl">
+              MCP-серверы
+              <button class="mcpbtn" :disabled="mcpOf(p)?.loading" @click="loadMcpFor(p, true)">
+                {{ mcpOf(p)?.loading ? 'Проверка…' : 'Перепроверить' }}
+              </button>
+            </div>
+            <p v-if="!mcpOf(p) || (mcpOf(p).loading && !mcpOf(p).servers)" class="muted small">
+              Опрашиваем CLI — это несколько секунд…
+            </p>
+            <p v-else-if="mcpOf(p).state === 'error'" class="msg err">
+              Не удалось опросить: {{ mcpOf(p).error }}
+            </p>
+            <template v-else>
+              <div v-for="g in mcpGroups(p)" :key="g.id" class="mcpgrp">
+                <div class="mcpgrpttl muted">{{ g.label }} ({{ g.servers.length }})</div>
+                <div v-if="g.hint" class="mcpgrphint muted">{{ g.hint }}</div>
+                <div v-for="s in g.servers" :key="s.name" class="mcprow">
+                  <div class="mcpline">
+                    <span class="mcpdot" :class="mcpState(s).cls"></span>
+                    <span class="mcpname" :title="s.target || undefined">{{ s.name }}</span>
+                    <span class="mcpst" :class="mcpState(s).cls">{{ mcpState(s).label }}</span>
+                  </div>
+                  <!-- Причина отказа — то единственное, по чему сервер чинят -->
+                  <div v-if="s.state !== 'ok' && s.detail" class="mcpdetail muted">{{ s.detail }}</div>
+                  <div v-if="s.state === 'needs-auth'" class="mcpdetail muted">
+                    {{ s.scope === 'account'
+                      ? 'Авторизуется в настройках коннекторов на claude.ai — из кокпита ход этого не умеет.'
+                      : 'Нужен вход: `claude mcp login ' + s.name + '` в терминале.' }}
+                  </div>
+                </div>
+              </div>
+              <p v-if="!mcpGroups(p).length" class="muted small">Серверов не подключено.</p>
+              <p v-if="mcpOf(p).checkedAt" class="muted small">
+                проверено {{ new Date(mcpOf(p).checkedAt).toLocaleTimeString('ru') }}
+              </p>
+            </template>
           </div>
           <div class="pvfoot">
             <button v-if="p.installed && p.canUpdate" class="upd" :class="{ hot: p.updateAvailable }" :disabled="!!updating"
@@ -1719,7 +1805,8 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .msg.err { color: var(--bad); }
 
 /* Плашка исполнителя: у каждого ИИ своя карточка, карточки — горизонтальным рядом */
-.pvcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 14px; align-items: start; }
+/* Без align-items: start — плашки в ряду тянутся до общей высоты */
+.pvcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 14px; }
 .pvcard { gap: 10px; }
 .pvhead { display: flex; align-items: center; gap: 10px; }
 .pvtitle { flex: 1; min-width: 0; }
@@ -1745,7 +1832,36 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 /* Ручка объявлена исполнителем, но ещё не подключена к ходу */
 .pvsoon { font-size: 11px; border: 1px solid var(--line); border-radius: 999px;
   padding: 1px 8px; color: var(--mut, var(--ink-mid)); }
-.pvfoot { display: flex; justify-content: flex-end; }
+/* MCP-серверы исполнителя: заголовок с кнопкой проверки, затем секции по scope */
+.pvsetttl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mcpbtn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
+  border-radius: 8px; padding: 3px 9px; font-size: 11px; cursor: pointer;
+  text-transform: none; letter-spacing: 0; }
+.mcpbtn:disabled { opacity: .55; cursor: default; }
+.mcpgrp { display: grid; gap: 4px; }
+.mcpgrpttl { font-size: 11.5px; }
+.mcpgrphint { font-size: 11px; line-height: 1.4; opacity: .8; }
+.mcprow { display: grid; gap: 2px; padding: 3px 0; }
+.mcpline { display: flex; align-items: center; gap: 8px; }
+.mcpdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-mid); }
+.mcpdot.ok { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
+.mcpdot.err { background: var(--bad); }
+.mcpdot.warn { background: var(--warn, #e0a33a); }
+/* Аккаунтный коннектор: локальной проверки нет, поэтому и цвета тревоги нет */
+.mcpdot.idle { background: var(--ink-mid); }
+/* Имя может быть длинным (у коннекторов оно с префиксом) — режем его, а не колонку:
+   без min-width: 0 флекс-элемент не сжимается ниже своего содержимого и распирает плашку */
+.mcpname { flex: 1; min-width: 0; font-size: 13px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.mcpst { flex: none; font-size: 12px; }
+.mcpst.ok { color: var(--good); }
+.mcpst.err { color: var(--bad); }
+.mcpst.warn { color: var(--warn, #e0a33a); }
+.mcpst.idle { color: var(--ink-mid); }
+.mcpdetail { font-size: 11.5px; line-height: 1.45; padding-left: 16px;
+  overflow-wrap: anywhere; }
+/* Кнопка футера прижата к низу плашки: при равной высоте ряда кнопки в одну линию */
+.pvfoot { display: flex; justify-content: flex-end; margin-top: auto; }
 .upd { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
   padding: 5px 11px; font-size: 12px; cursor: pointer; }
 .upd:hover:not(:disabled) { border-color: var(--line-2); }

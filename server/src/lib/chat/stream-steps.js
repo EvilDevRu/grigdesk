@@ -14,6 +14,11 @@
 export const MAX_CHAT_STEPS = 400;
 export const STEP_TEXT_LIMIT = 1200;
 export const STEP_DIFF_LIMIT = 2000;
+// Размышление — единственный шаг, который человек читает целиком и ради которого
+// раскрывает ленту. Общий лимит строки (1200) резал его на полуслове: у Codex и Kimi
+// «размышления» выглядели обрывком фразы. Отдельный лимит больше, но не безграничен:
+// лента уезжает в SSE и в файл истории чата.
+export const STEP_THINK_LIMIT = 6000;
 
 export function cut(value, limit = STEP_TEXT_LIMIT) {
   const text = String(value ?? '');

@@ -23,6 +23,8 @@ import {
 } from './sandbox.js';
 
 const REQUIRED_KIMI_VERSION = '0.31.1';
+// Режим кокпита → режим ACP-сессии. Не перечисленное остаётся в `default`.
+const ACP_MODE_BY_PERMISSION = { plan: 'plan', yolo: 'yolo' };
 const MAX_REPLY_BYTES = 8 * 1024 * 1024;
 const MAX_STATUS_BYTES = 64 * 1024;
 
@@ -49,35 +51,106 @@ function textOfContent(content) {
   return '';
 }
 
-function permissionPresentation(params) {
-  const options = Array.isArray(params?.options) ? params.options : [];
-  const question = options.some((option) => /^q\d+_/.test(option?.optionId || ''));
-  const content = Array.isArray(params?.toolCall?.content)
-    ? params.toolCall.content.map((entry) => textOfContent(entry?.content)).filter(Boolean).join('\n')
-    : '';
-  if (question) {
-    return {
-      isQuestion: true,
-      questions: [{
-        header: 'Kimi',
-        question: content || 'Выберите ответ',
-        multiSelect: false,
-        options: options.filter((option) => option.kind !== 'reject_once').map((option) => ({
-          label: option.name,
-          description: '',
-        })),
-      }],
-    };
+// optionId ACP-запроса разрешения (сверено с бинарём 0.33.0): вопрос агента —
+// `q<N>_opt_<i>`/`q<N>_skip`, план — `plan_opt_<i>`/`plan_approve`/`plan_revise`/
+// `plan_reject_and_exit`, обычное действие — approve_once/approve_always/reject.
+const QUESTION_OPTION = /^q\d+_/;
+const QUESTION_CHOICE = /^q\d+_opt_/;
+const PLAN_OPTION = /^plan_/;
+
+/**
+ * Блоки content запроса разрешения. Kimi кладёт туда текст и структурный diff
+ * `{type:'diff', path, oldText, newText}`; раньше читался только текст, поэтому
+ * правка файла доезжала до всплывашки пустой, а всё остальное — служебным JSON.
+ */
+function permissionContent(toolCall) {
+  const list = Array.isArray(toolCall?.content) ? toolCall.content : [];
+  const texts = [];
+  let diff = null;
+  for (const entry of list) {
+    if (entry?.type === 'diff') {
+      diff = {
+        path: String(entry.path || ''),
+        old: String(entry.oldText ?? ''),
+        new: String(entry.newText ?? ''),
+      };
+      continue;
+    }
+    const text = textOfContent(entry?.content);
+    if (text.trim()) texts.push(text);
   }
+  return { texts, diff };
+}
+
+function firstString(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim()) || '';
+}
+
+/**
+ * Вопрос агента поверх ACP. Мост Kimi несёт только optionId, поэтому пояснений
+ * к вариантам нет, свой текст доехать не может, а мультивыбор сам мост сводит
+ * к одному варианту (его же телеметрия зовёт это question_degraded). Врать
+ * человеку чекбоксами нельзя — говорим об ограничении прямо.
+ */
+function questionPresentation(options, question) {
+  const choices = options.filter((option) => QUESTION_CHOICE.test(option?.optionId || ''));
+  return {
+    isQuestion: true,
+    acceptsText: false,
+    questions: [{
+      header: 'Kimi',
+      question: question || 'Выберите ответ',
+      multiSelect: false,
+      allowFreeText: false,
+      hint: 'ACP-мост Kimi принимает ровно один вариант: ни нескольких отметок, ни своего текста он не передаёт',
+      options: choices.map((option) => ({ label: String(option.name || ''), description: '' })),
+    }],
+  };
+}
+
+/**
+ * ACP-запрос разрешения → нейтральное представление всплывашки.
+ * `context` — то, что кокпит запомнил по этому же toolCallId из notification
+ * tool_call/tool_call_update: сам запрос разрешения не несёт ни `kind`, ни
+ * аргументов вызова (buildPermissionToolCallUpdate кладёт только title и content).
+ */
+function permissionPresentation(params, context = {}) {
+  const options = Array.isArray(params?.options) ? params.options : [];
+  const toolCall = params?.toolCall || {};
+  const { texts, diff } = permissionContent(toolCall);
+  if (options.some((option) => QUESTION_OPTION.test(option?.optionId || ''))) {
+    return questionPresentation(options, texts.join('\n\n'));
+  }
+
+  // Последний текстовый блок — всегда «Requesting approval to <действие>»,
+  // всё перед ним ACP отдаёт как человекочитаемую шапку (план, описание правки).
+  const action = texts.length ? texts[texts.length - 1] : '';
+  const headline = texts.slice(0, -1).join('\n\n');
+  const isPlan = options.some((option) => PLAN_OPTION.test(option?.optionId || ''));
+  const raw = context.rawInput && typeof context.rawInput === 'object' ? context.rawInput : {};
+  const command = firstString(raw.command, raw.cmd, raw.script);
+  const filePath = firstString(diff?.path, raw.path, raw.file_path, raw.filePath);
+  // Стандартную тройку allow/allow_always/reject рисует сама всплывашка кнопками;
+  // отдельным списком идут только специфические варианты — выбор по плану.
+  const choices = options
+    .filter((option) => PLAN_OPTION.test(option?.optionId || ''))
+    .map((option) => ({ id: option.optionId, label: String(option.name || ''), kind: option.kind }));
+
   return {
     isQuestion: false,
-    tool: params?.toolCall?.title || 'Действие Kimi',
+    // ACP-outcome текста не несёт: пояснение к отказу кокпит отправит отдельным
+    // сообщением (флаг commentDelivered в modules/chat).
+    acceptsComment: false,
+    tool: firstString(toolCall.title, context.title) || 'Действие Kimi',
     input: {
-      description: content,
-      toolCallId: params?.toolCall?.toolCallId || '',
-      options: options.map((option) => ({
-        id: option.optionId, label: option.name, kind: option.kind,
-      })),
+      kind: String(context.kind || ''),
+      description: action,
+      ...(isPlan ? { plan: headline || action } : {}),
+      ...(!isPlan && headline ? { details: headline } : {}),
+      ...(command ? { command } : {}),
+      ...(filePath ? { file_path: filePath } : {}),
+      ...(diff ? { diff: { old: diff.old, new: diff.new } } : {}),
+      ...(choices.length ? { choices } : {}),
     },
   };
 }
@@ -85,21 +158,29 @@ function permissionPresentation(params) {
 function selectPermissionOutcome(params, answer) {
   if (answer?.outcome?.outcome === 'selected' || answer?.outcome?.outcome === 'cancelled') return answer;
   const options = Array.isArray(params?.options) ? params.options : [];
-  const questionOptions = options.filter((option) => /^q\d+_opt_/.test(option.optionId || ''));
-  if (questionOptions.length) {
-    const selected = answer?.selected?.[0] || answer?.text || '';
-    const option = questionOptions.find((candidate) => candidate.name === selected);
-    const skip = options.find((candidate) => /_skip$/.test(candidate.optionId || ''));
-    return option || skip
-      ? { outcome: { outcome: 'selected', optionId: (option || skip).optionId } }
-      : { outcome: { outcome: 'cancelled' } };
-  }
-  const wantedKind = answer?.allow ? 'allow_once' : 'reject_once';
-  const option = options.find((candidate) => candidate.kind === wantedKind)
-    || (!answer?.allow ? options.find((candidate) => candidate.kind === 'reject_always') : null);
-  return option
+  const byId = (id) => options.find((candidate) => candidate.optionId === id);
+  const byKind = (kind) => options.find((candidate) => candidate.kind === kind);
+  const pick = (option) => (option
     ? { outcome: { outcome: 'selected', optionId: option.optionId } }
-    : { outcome: { outcome: 'cancelled' } };
+    : { outcome: { outcome: 'cancelled' } });
+
+  // Нажатая кнопка конкретного варианта (план) сильнее общего «разрешить/отклонить».
+  if (answer?.choice) return pick(byId(String(answer.choice)));
+
+  const questionOptions = options.filter((option) => QUESTION_CHOICE.test(option.optionId || ''));
+  if (questionOptions.length) {
+    const selected = answer?.selected?.[0] || '';
+    const option = questionOptions.find((candidate) => candidate.name === selected);
+    // Свой текст ACP не принимает. Подменять его «похожим» вариантом нельзя —
+    // отвечаем «пропустить», а текст кокпит отправит обычным сообщением.
+    return pick(option || options.find((candidate) => /_skip$/.test(candidate.optionId || '')));
+  }
+  if (answer?.allow) {
+    // «Не спрашивать до конца сессии» — это ровно allow_always у ACP: раньше галка
+    // жила только в памяти вкладки, и агент спрашивал снова из каждого окна.
+    return pick((answer.remember && byKind('allow_always')) || byKind('allow_once') || byKind('allow_always'));
+  }
+  return pick(byKind('reject_once') || byKind('reject_always'));
 }
 
 function parseStatus(text, fallbackWindow) {
@@ -304,10 +385,29 @@ export async function runContainedKimi({
     let statusText = '';
     let replyTruncated = false;
     let captureStatus = false;
+    // Запрос разрешения не несёт ни kind, ни аргументов вызова — их несёт
+    // notification того же toolCallId. Без этой памяти всплывашка показывала
+    // действие без команды, а кокпит-режим «Авто» fail-closed спрашивал человека
+    // про каждое чтение файла: классификатор решает как раз по kind.
+    const toolCalls = new Map();
+    const rememberToolCall = (update) => {
+      const id = String(update?.toolCallId || '');
+      if (!id) return;
+      const prev = toolCalls.get(id) || {};
+      toolCalls.set(id, {
+        kind: update.kind || prev.kind || '',
+        title: update.title || prev.title || '',
+        rawInput: update.rawInput ?? prev.rawInput,
+      });
+      if (toolCalls.size > 200) toolCalls.delete(toolCalls.keys().next().value);
+    };
     const client = createAcpClient(child, {
       onNotification(method, params) {
         if (method !== 'session/update') return;
         const update = params?.update;
+        if (update?.sessionUpdate === 'tool_call' || update?.sessionUpdate === 'tool_call_update') {
+          rememberToolCall(update);
+        }
         if (update?.sessionUpdate === 'agent_message_chunk') {
           const text = textOfContent(update.content);
           if (captureStatus) statusText = `${statusText}${text}`.slice(0, MAX_STATUS_BYTES);
@@ -326,7 +426,11 @@ export async function runContainedKimi({
       },
       async onReverseRequest(method, params) {
         if (method !== 'session/request_permission') throw new Error(`ACP reverse method не разрешён: ${method}`);
-        const presentation = permissionPresentation(params);
+        // Размышление, за которым последовал спрос, должно быть уже в ленте:
+        // человек решает по нему, а не по одной строке действия.
+        stepSink.emitAll(normalizeStep.flush());
+        const context = toolCalls.get(String(params?.toolCall?.toolCallId || '')) || {};
+        const presentation = permissionPresentation(params, context);
         const answer = onPermission
           ? await onPermission({ ...presentation, raw: params })
           : { allow: false };
@@ -386,10 +490,13 @@ export async function runContainedKimi({
       await setConfigOption('model', model);
       if (effort) await setConfigOption('thinking', effort);
     }
-    // ACP-режимов два: default и plan. Кокпит-режим «auto» сюда не маппится: это
-    // политика ответов на permission-запросы (auto-approve.js), сам ACP остаётся
-    // в default и продолжает спрашивать. ACP auto/yolo заблокированы security gate.
-    const acpMode = permissionMode === 'plan' ? 'plan' : 'default';
+    // ACP-режимы Kimi (сверено с бинарём 0.33.0, ACP_MODES): default | plan | auto | yolo.
+    // Кокпит-режим «Авто» сюда НЕ маппится намеренно: это политика ОТВЕТОВ на
+    // permission-запросы (auto-approve.js), и ACP обязан продолжать спрашивать —
+    // иначе классификатору кокпита нечего решать. А «yolo» — именно ACP-режим:
+    // агент не спрашивает вовсе, границу держит runtime (contained) либо доверие
+    // человека (host), поэтому в кокпите он отдельный пункт списка режимов.
+    const acpMode = ACP_MODE_BY_PERMISSION[permissionMode] || 'default';
     await client.request('session/set_config_option', {
       sessionId: currentSession, configId: 'mode', value: acpMode,
     }, 15_000);
@@ -411,6 +518,9 @@ export async function runContainedKimi({
       prompt: [{ type: 'text', text: safeMessage }],
     });
     promptState = 'post_prompt';
+    // Хвост размышления, за которым не последовало действия: агент подумал и
+    // ответил текстом. Без явного flush он пропал бы вместе с нормализатором.
+    stepSink.emitAll(normalizeStep.flush());
     if (promptResult?.stopReason === 'cancelled' || signal?.aborted) stopped = true;
 
     // Локальные ACP-команды: модель не вызывается, зато получаем точный размер
@@ -475,11 +585,16 @@ export async function runContainedKimi({
     };
   } catch (error) {
     error.retryState ||= promptState;
+    // Остановленный ход тоже показывает, до чего агент додумался: недособранное
+    // размышление отдаём в ленту, иначе «стоп» стирает последние минуты работы.
+    if (error.stopped || signal?.aborted) {
+      try { stepSink.emitAll(normalizeStep.flush()); } catch { /* лента не роняет ход */ }
+    }
     if (signal?.aborted && !error.stopped) {
       error.stopped = true;
-      error.steps = stepSink.steps;
       error.sessionId = sessionId || null;
     }
+    if (error.stopped) error.steps = stepSink.steps;
     throw error;
   } finally {
     if (child && !child.killed && child.exitCode === null) {

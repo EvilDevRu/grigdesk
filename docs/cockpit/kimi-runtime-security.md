@@ -29,8 +29,8 @@
   permission-система Kimi (промпты; в cockpit-режиме «Авто» — auto-approve.js).
   Проектный `.kimi-code/local.toml` читается нативно.
 
-Что остаётся: ACP contract (initialize/session/resume/prompt/cancel), ручные режимы
-`default`/`plan` (auto/yolo по-прежнему не выставлены), permission reverse RPC с
+Что остаётся: ACP contract (initialize/session/resume/prompt/cancel), режимы
+`default`/`plan`/`yolo` (см. «Режимы прав» ниже), permission reverse RPC с
 всплывашкой в UI, политика «Авто» поверх, CAS session bindings — с новым profile id
 `kimi-host-v1`: contained bindings несовместимы и ротируются одноразово при переключении
 (contained-сессии жили в per-chat runtime home, host-процессу недоступном). Проверка
@@ -98,10 +98,37 @@ credentials (`0600`, владелец) и исполняемости бинар�
   становятся read-only;
 - [ACP client](../../server/src/lib/kimi/acp-client.js) ограничивает размер входного frame и
   накопленного ответа; transport обрабатывает cancel и reverse requests без shell interpolation;
-- разрешены только ручные режимы `default` и `plan`; `auto` и `yolo` в продукт не выставлены.
-  Кокпит-режим «Авто» — не ACP-режим, а политика ответов на permission-запросы поверх
-  `default` ([`auto-approve.js`](../../server/src/lib/chat/auto-approve.js)): деструктивные и
-  неизвестные действия по-прежнему решает человек, security boundary остаётся на runtime.
+- ACP-режим сессии выставляется только из списка ниже; произвольная строка в
+  `session/set_config_option` не проходит.
+
+## Режимы прав: что даёт ACP, а что — кокпит
+
+Бинарь объявляет четыре режима (`ACP_MODES` в `0.33.0`): `default`, `plan`, `auto`, `yolo`.
+Кокпит показывает четыре пункта, но соответствие НЕ один-к-одному
+([`kimi.js modes()`](../../server/src/lib/executors/kimi.js),
+[`ACP_MODE_BY_PERMISSION`](../../server/src/lib/kimi/runtime.js)):
+
+| пункт кокпита | ACP-режим | кто решает |
+|---|---|---|
+| «Спрашивать» | `default` | человек на каждый запрос |
+| «Авто» | `default` | классификатор кокпита, остальное — человек |
+| «План» | `plan` | человек подтверждает план |
+| «Без подтверждений» | `yolo` | никто: Kimi не спрашивает вовсе |
+
+Два неочевидных места:
+
+- **«Авто» намеренно не мапится в ACP `auto`.** В родном `auto` решение принимает сам Kimi,
+  и permission reverse RPC до кокпита не доходит — классификатору
+  ([`auto-approve.js`](../../server/src/lib/chat/auto-approve.js)) нечего решать, а
+  всплывашка перестаёт появляться. Поэтому «Авто» — политика ОТВЕТОВ поверх `default`:
+  деструктивные и неизвестные действия по-прежнему уходят человеку (fail-closed).
+- **«Без подтверждений» — родной `yolo`, а не имитация кокпита.** Имитировать его нечем и
+  не нужно: авто-allow на каждый запрос стоил бы полного round-trip reverse RPC на каждое
+  действие. Это осознанный выбор человека в конкретном чате, ровно как `dontAsk`/
+  `bypassPermissions` у claude: в contained-профиле границу продолжает держать runtime
+  (bwrap + cgroup + egress allowlist), в host-профиле её не держит ничто, кроме прав
+  пользователя. Классификатор кокпита к этому режиму не применяется по определению —
+  спросов, которые он мог бы разобрать, не существует.
 
 ## Проверки
 
@@ -157,6 +184,8 @@ stop больше не инвалидирует binding — оборванная
   `/compact` и cancel во время tool ещё требуют отдельных явно разрешённых квотных smoke;
 - allowlist закреплён за Kimi Code `0.31.1`; новая версия или новые endpoints должны закрыто
   провалить compatibility/preflight до отдельного аудита;
-- `auto`/`yolo`, произвольные MCP/plugins/skills и host config остаются запрещены;
+- ACP-режим `auto` (решает сам Kimi) не выставлен: у кокпита «Авто» — своя политика поверх
+  `default`, см. раздел о режимах. Произвольные MCP/plugins/skills и host config в
+  contained-профиле остаются запрещены;
 - нужно сохранить дополнительные обезличенные fixtures usage/context и успешного event ordering,
   а live adversarial suite расширить detached-child и DNS-rebinding сценариями.

@@ -1,7 +1,7 @@
 // Нормализация Claude stream-json в нейтральную ленту хода Cockpit.
 // Файл начинается с _, поэтому загрузчик executors не считает его отдельным ИИ.
 import {
-  base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT,
+  base, cut, cutMiddle, lineCount, STEP_DIFF_LIMIT, STEP_TEXT_LIMIT, STEP_THINK_LIMIT,
 } from '../chat/stream-steps.js';
 
 /**
@@ -84,7 +84,7 @@ export function toClaudeSteps(event) {
     const sub = !!event.parent_tool_use_id;
     for (const content of event.message?.content || []) {
       if (content.type === 'thinking' && content.thinking) {
-        out.push({ k: 'think', text: cut(content.thinking), sub });
+        out.push({ k: 'think', text: cut(content.thinking, STEP_THINK_LIMIT), sub });
       } else if (content.type === 'text' && content.text?.trim()) {
         out.push({ k: 'text', text: cut(content.text, 4000), sub });
       } else if (content.type === 'tool_use') {

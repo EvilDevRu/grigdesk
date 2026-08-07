@@ -93,6 +93,9 @@ async function providersModule(fastify, opts) {
         // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
         setupCommand: ok ? (ex.login || ex.install || null) : (ex.install || null),
         canUpdate: !!ex.updateCmd,
+        // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
+        // его опрос — живой health-check, за ним UI ходит отдельным маршрутом.
+        mcp: typeof ex.mcpStatus === 'function',
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
         latest: updates.get(ex.id)?.latest || null,
@@ -178,6 +181,42 @@ async function providersModule(fastify, opts) {
 
   // Потребление лимитов исполнителей (прогрессбары в тултипе топбара).
   fastify.get('/api/providers/usage', async () => ({ usage: await usageCache.read() }));
+
+  /**
+   * Состояние MCP-серверов исполнителя — блок в его плашке «Настройки → Исполнители».
+   * Отдельный ленивый маршрут, а НЕ поле общего `/api/providers`: опрос делает живой
+   * health-check каждого сервера (замер на claude: 3–4 с, на зависшем — дольше), и
+   * реестр ждал бы эти секунды на каждый свой ответ. Кэш короткий, кнопка
+   * «Перепроверить» обходит его через `?refresh=1`.
+   */
+  const mcpCache = new Map(); // id исполнителя → { at, data }
+  const MCP_CACHE_MS = 60_000;
+
+  fastify.get('/api/providers/:id/mcp', async (request, reply) => {
+    const id = String(request.params.id);
+    const ex = (await getProviderAdapters()).get(id);
+    if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
+    if (typeof ex.mcpStatus !== 'function') {
+      return reply.code(400).send({ error: 'no_mcp', message: `исполнитель ${ex.name} не сообщает о MCP-серверах` });
+    }
+
+    const hit = mcpCache.get(id);
+    if (request.query?.refresh !== '1' && hit && Date.now() - hit.at < MCP_CACHE_MS) {
+      return { ...hit.data, cached: true };
+    }
+
+    let data;
+    try {
+      data = await ex.mcpStatus(config);
+    } catch (err) {
+      // Сбой опроса — это состояние панели, а не 500: остальные настройки живые.
+      fastify.log.warn({ provider: id, err: err?.message }, 'опрос MCP-серверов не удался');
+      data = { state: 'error', error: String(err?.message || err).slice(0, 300), servers: [] };
+    }
+    data = { ...data, checkedAt: Date.now() };
+    mcpCache.set(id, { at: Date.now(), data });
+    return data;
+  });
 
   /**
    * Generic provider-account action. The route knows neither billing semantics

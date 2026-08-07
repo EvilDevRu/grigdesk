@@ -212,6 +212,96 @@ test('permission mapper выбирает только allow_once/reject и ACP q
   assert.equal(permissionPresentation(question).isQuestion, true);
   assert.deepEqual(selectPermissionOutcome(question, { selected: ['A'] }), { outcome: { outcome: 'selected', optionId: 'q0_opt_0' } });
   assert.deepEqual(selectPermissionOutcome(question, { selected: [] }), { outcome: { outcome: 'selected', optionId: 'q0_skip' } });
+
+  // «Не спрашивать до конца сессии» — это allow_always самого ACP: без передачи
+  // галка жила только в памяти вкладки, и Kimi спрашивал снова.
+  assert.deepEqual(selectPermissionOutcome(approval, { allow: true, remember: true }),
+    { outcome: { outcome: 'selected', optionId: 'always' } });
+});
+
+// Запрос разрешения не несёт ни kind, ни аргументов вызова: buildPermissionToolCallUpdate
+// кладёт только title и content. Всё остальное кокпит восстанавливает по toolCallId —
+// без этого всплывашка показывала голый JSON, а «Авто» спрашивал на каждое действие.
+test('permission presentation: команда, путь и дифф разбираются в читаемые поля', () => {
+  const params = {
+    options: [
+      { optionId: 'approve_once', name: 'Approve once', kind: 'allow_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ],
+    toolCall: {
+      title: 'Bash',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Соберу проект и прогоню тесты' } },
+        { type: 'content', content: { type: 'text', text: 'Requesting approval to run a command' } },
+      ],
+    },
+  };
+  const out = permissionPresentation(params, { kind: 'execute', rawInput: { command: 'npm test' } });
+  assert.equal(out.isQuestion, false);
+  assert.equal(out.acceptsComment, false); // ACP-outcome текста не несёт
+  assert.equal(out.tool, 'Bash');
+  assert.equal(out.input.kind, 'execute');
+  assert.equal(out.input.command, 'npm test');
+  assert.equal(out.input.description, 'Requesting approval to run a command');
+  assert.equal(out.input.details, 'Соберу проект и прогоню тесты');
+  assert.equal(out.input.plan, undefined);
+
+  const edit = permissionPresentation({
+    options: params.options,
+    toolCall: {
+      title: 'Edit file',
+      content: [
+        { type: 'diff', path: 'server/src/app.js', oldText: 'a\n', newText: 'b\n' },
+        { type: 'content', content: { type: 'text', text: 'Requesting approval to edit a file' } },
+      ],
+    },
+  }, { kind: 'edit' });
+  assert.deepEqual(edit.input.diff, { old: 'a\n', new: 'b\n' });
+  assert.equal(edit.input.file_path, 'server/src/app.js');
+});
+
+test('permission presentation: план отдаётся текстом и своими вариантами ответа', () => {
+  const out = permissionPresentation({
+    options: [
+      { optionId: 'plan_approve', name: 'Approve plan', kind: 'allow_once' },
+      { optionId: 'plan_revise', name: 'Revise plan', kind: 'reject_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ],
+    toolCall: {
+      title: 'Plan',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Шаг 1. Изучить\nШаг 2. Починить' } },
+        { type: 'content', content: { type: 'text', text: 'Requesting approval to proceed' } },
+      ],
+    },
+  }, {});
+  assert.match(out.input.plan, /Шаг 2\. Починить/);
+  // Кнопками идут только специфические варианты плана: обычную тройку
+  // allow/allow_always/reject всплывашка рисует сама.
+  assert.deepEqual(out.input.choices, [
+    { id: 'plan_approve', label: 'Approve plan', kind: 'allow_once' },
+    { id: 'plan_revise', label: 'Revise plan', kind: 'reject_once' },
+  ]);
+});
+
+// Мост ACP сводит вопрос к одному варианту без пояснений и без своего текста.
+// Врать человеку чекбоксами и полем ввода нельзя — ограничение объявляется полями.
+test('question presentation честно объявляет ограничения ACP-моста', () => {
+  const out = permissionPresentation({
+    options: [
+      { optionId: 'q0_opt_0', name: 'Вариант А', kind: 'allow_once' },
+      { optionId: 'q0_opt_1', name: 'Вариант Б', kind: 'allow_once' },
+      { optionId: 'q0_skip', name: 'Skip', kind: 'reject_once' },
+    ],
+    toolCall: { title: 'AskUserQuestion', content: [{ type: 'content', content: { type: 'text', text: 'Что делаем?' } }] },
+  }, {});
+  assert.equal(out.isQuestion, true);
+  assert.equal(out.acceptsText, false);
+  const [question] = out.questions;
+  assert.equal(question.multiSelect, false);
+  assert.equal(question.allowFreeText, false);
+  assert.ok(question.hint, 'ограничение канала названо словами');
+  assert.deepEqual(question.options.map((option) => option.label), ['Вариант А', 'Вариант Б']);
 });
 
 test('status parser не подменяет точное измерение оценкой', () => {

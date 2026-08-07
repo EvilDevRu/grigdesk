@@ -512,6 +512,11 @@ export function buildCodexExecArgs({
   for (const dir of extraDirs) args.push('--add-dir', dir);
   if (model) args.push('-m', model);
   if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
+  // Дефолтное summary у Codex короткое: в ленту приезжал огрызок фразы, и человек
+  // видел «обрезанную информацию» вместо размышления. `detailed` просит CLI отдать
+  // развёрнутое резюме; приватную цепочку (`raw_content`) normalizer по-прежнему
+  // игнорирует. Ключ валидируется самим CLI (проверено: `bogus` → doctor fail).
+  args.push('-c', 'model_reasoning_summary="detailed"');
   const compactAt = Math.max(0, Math.round(Number(compactWindow) || 0));
   if (compactAt) args.push('-c', `model_auto_compact_token_limit=${compactAt}`);
   if (sessionId) args.push('resume', '--json', sessionId);

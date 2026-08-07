@@ -9,7 +9,8 @@ let usageAt = 0;
 export const useProvidersStore = defineStore('providers', {
   // showAllModels — настройка «показывать все модели, включая старые версии» (server prefs).
   // Держим её здесь же: список моделей приходит полным, тумблер только фильтрует показ.
-  state: () => ({ providers: [], usage: {}, loaded: false, showAllModels: false }),
+  // mcp: id исполнителя → { state, servers[], error?, checkedAt, loading } — грузится лениво.
+  state: () => ({ providers: [], usage: {}, mcp: {}, loaded: false, showAllModels: false }),
   getters: {
     /**
      * Модель по умолчанию: сильнейшая из видимых в кратком списке (не `extra`) у доступного
@@ -125,6 +126,24 @@ export const useProvidersStore = defineStore('providers', {
       } catch (e) {
         s.value = before;
         return { ok: false, error: e.data?.message || e.message };
+      }
+    },
+    /**
+     * MCP-серверы исполнителя (блок в его плашке настроек). Запрос отдельный и
+     * ленивый: опрос делает живой health-check и стоит секунд, поэтому дёргается
+     * по открытию вкладки и по кнопке «Перепроверить», а не вместе с реестром.
+     */
+    async loadMcp(providerId, refresh = false) {
+      const id = String(providerId);
+      this.mcp = { ...this.mcp, [id]: { ...(this.mcp[id] || {}), loading: true } };
+      try {
+        const r = await api.get(`/api/providers/${encodeURIComponent(id)}/mcp${refresh ? '?refresh=1' : ''}`);
+        this.mcp = { ...this.mcp, [id]: { ...r, loading: false } };
+        return r;
+      } catch (e) {
+        const data = { state: 'error', error: e.data?.message || e.message, servers: [], loading: false };
+        this.mcp = { ...this.mcp, [id]: data };
+        return data;
       }
     },
     /**

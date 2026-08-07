@@ -808,6 +808,135 @@ async function scanClaudeUserCommands() {
   return commands;
 }
 
+// ── MCP-серверы: что видит агент этого CLI ───────────────────────────────────
+// Список отдаёт только сам CLI (`claude mcp list`) и только текстом — машинного
+// формата у команды нет. Строка выглядит так:
+//   <имя>: <команда или URL> - ✔ Connected
+//   <имя>: <команда или URL> - ✘ Failed to connect — -32000: …
+// Статус отделяем ПО МАРКЕРУ, а не по последнему « - »: в команде запуска дефисов
+// хватает (`docker run -i --rm …`), а текст ошибки содержит что угодно.
+const MCP_STATUS_AT = /\s+-\s+(?=[✓✔✗✘⚠]|Connected\b|Failed\b|Disconnected\b|Needs\b|Authenticat)/u;
+const MCP_ICONS = /^[✓✔✗✘⚠\s]+/u;
+
+/**
+ * Разбор `claude mcp list` в записи { name, target, state, detail }.
+ * Незнакомый статус — 'unknown', а не выдуманный «ок»: строку CLI могут поменять,
+ * и лучше честный прочерк, чем зелёная галка над мёртвым сервером.
+ */
+export function parseClaudeMcpList(text) {
+  const servers = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^Checking MCP server health/i.test(line)) continue;
+
+    const at = line.search(MCP_STATUS_AT);
+    if (at < 0) continue;
+    const head = line.slice(0, at);
+    const status = line.slice(at).replace(/^\s+-\s+/, '').trim();
+
+    const sep = head.indexOf(':');
+    if (sep <= 0) continue;
+    const name = head.slice(0, sep).trim();
+    if (!name) continue;
+
+    let state = 'unknown';
+    if (/fail|error|disconnect|closed/i.test(status)) state = 'failed';
+    else if (/needs?\s+auth|authenticat|unauthor/i.test(status)) state = 'needs-auth';
+    else if (/connected/i.test(status)) state = 'ok';
+
+    servers.push({
+      name,
+      target: head.slice(sep + 1).trim(),
+      state,
+      detail: status.replace(MCP_ICONS, '').trim(),
+    });
+  }
+  return servers;
+}
+
+/**
+ * Откуда сервер взят. Определения аккаунтных коннекторов claude.ai локально НЕТ
+ * (в конфиге остаётся только имя), поэтому «не нашли в файлах» = аккаунтный:
+ * это единственный доступный признак, зато он не врёт про свои же файлы.
+ */
+export function classifyMcpScope(name, { userServers = [], projectServers = [] } = {}) {
+  if (projectServers.includes(name)) return 'project';
+  if (userServers.includes(name)) return 'user';
+  return 'account';
+}
+
+/**
+ * Аккаунтные коннекторы claude.ai. В `claude mcp list` их НЕТ — проверено живьём:
+ * команда печатает только серверы из файлов, а коннекторы аккаунта не упоминает вовсе.
+ * Значит без этого списка секция «claude.ai» в панели была бы пуста навсегда, хотя в
+ * расширении VS Code она есть. Единственный локальный след — имена в
+ * `claudeAiMcpEverConnected` конфига CLI; ни определения, ни живой проверки у нас нет,
+ * поэтому «подключён» здесь не пишем: достоверно известно только «нужна авторизация»
+ * из отдельного кэша CLI. Состояние остальных знает claude.ai, и мы честно так и говорим.
+ */
+export function claudeAiConnectors(userConfig, needsAuthNames = []) {
+  const names = Array.isArray(userConfig?.claudeAiMcpEverConnected)
+    ? userConfig.claudeAiMcpEverConnected
+    : [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of names) {
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const needsAuth = needsAuthNames.includes(name);
+    out.push({
+      name,
+      target: '',
+      scope: 'account',
+      state: needsAuth ? 'needs-auth' : 'remote',
+      detail: needsAuth ? 'Needs authentication' : '',
+    });
+  }
+  return out;
+}
+
+/**
+ * Итоговый список для панели: разобранный вывод CLI + коннекторы аккаунта из конфига.
+ * Вынесено отдельно от `mcpStatus`, потому что вся правка состояний здесь, а сам
+ * `mcpStatus` — это запуск CLI и чтение трёх файлов.
+ */
+export function composeMcpServers({
+  servers = [], userServers = [], projectServers = [], needsAuthNames = [], userConfig = null,
+} = {}) {
+  const listed = servers.map((s) => {
+    // Провал важнее: сервер, который не поднялся, авторизацией не лечится.
+    const needsAuth = s.state !== 'failed' && needsAuthNames.includes(s.name);
+    return {
+      ...s,
+      scope: classifyMcpScope(s.name, { userServers, projectServers }),
+      state: needsAuth ? 'needs-auth' : s.state,
+      // Такой коннектор список печатает как Connected — соединение и правда есть,
+      // инструментов у агента всё равно нет. Оставь текст CLI, и панель скажет
+      // «Нужна авторизация», а строкой ниже — «Connected».
+      detail: needsAuth ? 'Needs authentication' : s.detail,
+    };
+  });
+  const known = new Set(listed.map((s) => s.name));
+  return [
+    ...listed,
+    ...claudeAiConnectors(userConfig, needsAuthNames).filter((s) => !known.has(s.name)),
+  ];
+}
+
+// Имена без определения читаются из конфига CLI; кокпит его только ЧИТАЕТ.
+async function readJsonQuiet(file) {
+  try {
+    return JSON.parse(await fs.readFile(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function claudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+}
+
 export default {
   id: 'claude',
   name: 'Claude',
@@ -846,6 +975,47 @@ export default {
 
   async commands() {
     return [...CLAUDE_BUILTIN_COMMANDS, ...await scanClaudeUserCommands()];
+  },
+
+  /**
+   * Состояние MCP-серверов этого CLI для плашки исполнителя.
+   * Команда делает НАСТОЯЩИЙ health-check (замер: 3–4 с, на мёртвом сервере дольше),
+   * поэтому метод ленивый: он вызывается только своим эндпоинтом, а не общим
+   * реестром `/api/providers` — иначе каждый ответ реестра ждал бы эти секунды.
+   * «Нужна авторизация» из вывода списка НЕ ВИДНО (коннектор показан там как
+   * Connected), этот признак CLI держит отдельным кэшем — читаем и его, иначе
+   * панель молчала бы ровно о том сервере, которым агент воспользоваться не может.
+   */
+  async mcpStatus(config) {
+    const out = await exec(config.claudeBin, ['mcp', 'list'], { timeout: 60_000, anyExit: true });
+    const text = String(out || '');
+    const servers = parseClaudeMcpList(text);
+
+    // Пусто и без явного «серверов нет» — это сбой запуска CLI, а не пустой список.
+    if (!servers.length && !/no mcp servers/i.test(text)) {
+      const error = text.trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ').slice(0, 300);
+      return { state: 'error', error: error || 'CLI не ответил на `mcp list`', servers: [] };
+    }
+
+    const [userConfig, projectConfig, needsAuth] = await Promise.all([
+      readJsonQuiet(path.join(os.homedir(), '.claude.json')),
+      readJsonQuiet(path.join(config.rootDir || process.cwd(), '.mcp.json')),
+      readJsonQuiet(path.join(claudeConfigDir(), 'mcp-needs-auth-cache.json')),
+    ]);
+
+    const userServers = Object.keys(userConfig?.mcpServers || {});
+    const projectServers = [
+      ...Object.keys(projectConfig?.mcpServers || {}),
+      ...Object.keys(userConfig?.projects?.[config.rootDir]?.mcpServers || {}),
+    ];
+    const needsAuthNames = Object.keys(needsAuth || {});
+
+    return {
+      state: 'ok',
+      servers: composeMcpServers({
+        servers, userServers, projectServers, needsAuthNames, userConfig,
+      }),
+    };
   },
 
   async probe(config) {

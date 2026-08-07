@@ -43,9 +43,11 @@ let persistTimer = null;
 let retryTimer = null;
 let retryDelay = 0;
 let loadPromise = null;
+// Ждёт ли записи страховочный снимок (см. _persist): изменилась переписка, а не черновик.
+let needSnapshot = false;
 
 // ── Что уже лежит на сервере ──────────────────────────────────────────────────
-// id чата → его JSON на момент последней УСПЕШНОЙ записи. По этой карте шлём только
+// id чата → его отпечаток (fingerprintOf) на момент последней УСПЕШНОЙ записи. По этой карте шлём только
 // изменившееся: раньше каждое сохранение тащило весь стор одним телом, и когда история
 // доросла до лимита запроса, сервер стал отвечать 413 — переписка перестала сохраняться
 // совсем, а клиент молча ретраил. Теперь объём запроса не зависит от размера истории.
@@ -161,6 +163,35 @@ function slimOf(s) {
   };
 }
 
+// Лента шагов хода, переехавшая в сообщение (`msg.steps`), — это 90%+ объёма истории:
+// на реальной базе 245 чатов из 25.3 МБ на неё приходится 23 МБ. Всё, что сериализуется
+// на каждое сохранение, обязано считаться БЕЗ неё, иначе главный поток встаёт на сотни
+// миллисекунд — в том числе прямо во время набора текста (черновик сохраняется тем же
+// путём). На сервер шаги при этом едут как обычно: экономим на служебных копиях, не на
+// самих данных.
+function stripSteps(chat) {
+  const messages = (chat.messages || []).map((m) => {
+    if (!m?.steps) return m;
+    const { steps, ...rest } = m;
+    return rest;
+  });
+  return { ...chat, messages };
+}
+
+/**
+ * Отпечаток чата — ответ на единственный вопрос: «эта версия уже уехала на сервер?».
+ * Шаги заменены своим числом: они append-only и появляются вместе с сообщением, которому
+ * принадлежат, поэтому счётчика достаточно, а сериализовать мегабайты не нужно. Раньше
+ * тут был честный `JSON.stringify` всего чата, и 245 чатов стоили около 95 мс на КАЖДОЕ
+ * сохранение (плюс те же 25 МБ строк, которые карта `sentChats` держала в памяти).
+ */
+function fingerprintOf(chat) {
+  const messages = (chat.messages || []).map((m) => (m?.steps?.length
+    ? { ...m, steps: m.steps.length }
+    : m));
+  return JSON.stringify({ ...chat, messages });
+}
+
 function applySaveAck(session, response) {
   if (!session || !response) return;
   if (Number.isSafeInteger(response.revision)) session.revision = response.revision;
@@ -235,19 +266,35 @@ function archivedSlimOf(s) {
 // если в него попадает рестарт сервера, последний ответ пропадает. Снимок закрывает
 // именно это окно — при загрузке берём его, если он свежее серверного.
 const SNAP_KEY = 'cockpit-chat-snapshot';
+// Сколько последних чатов оставляем, когда снимок целиком не влез в квоту.
+const SNAP_FALLBACK_CHATS = 20;
+
+// Снимок страхует ПОСЛЕДНИЙ ОТВЕТ, а не архив лент шагов, поэтому шаги в него не идут:
+// без них он ужимается с 25 МБ до 0.6 МБ и наконец помещается в квоту localStorage (~5 МБ).
+// До этой правки обе попытки записи падали с QuotaExceededError — то есть страховки не
+// существовало вовсе, а платили за неё сотнями миллисекунд блокировки главного потока.
+function snapshotPayload(payload) {
+  return {
+    ...payload,
+    sessions: (payload.sessions || []).map(stripSteps),
+    archived: (payload.archived || []).map(stripSteps),
+  };
+}
 
 function writeSnapshot(payload) {
+  const slim = snapshotPayload(payload);
   try {
-    localStorage.setItem(SNAP_KEY, JSON.stringify(payload));
+    localStorage.setItem(SNAP_KEY, JSON.stringify(slim));
   } catch {
-    // Не влезло (квота ~5МБ) — кладём укороченную версию: свежие сообщения важнее старых.
+    // Не влезло — оставляем последние чаты целиком. По СООБЩЕНИЯМ резать бесполезно:
+    // замер на реальной базе показал в среднем десяток сообщений на чат, и прежний
+    // `slice(-30)` не убирал ни байта (14.8 МБ до и после), то есть вторая попытка
+    // падала ровно там же, где первая.
     try {
-      const cut = {
-        ...payload,
-        sessions: (payload.sessions || []).map((s) => ({ ...s, messages: (s.messages || []).slice(-30) })),
-        archived: [],
-      };
-      localStorage.setItem(SNAP_KEY, JSON.stringify(cut));
+      const recent = [...(slim.sessions || [])]
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, SNAP_FALLBACK_CHATS);
+      localStorage.setItem(SNAP_KEY, JSON.stringify({ ...slim, sessions: recent, archived: [] }));
     } catch { /* localStorage недоступен — работаем без страховки */ }
   }
 }
@@ -455,8 +502,13 @@ export const useChatStore = defineStore('chat', {
     // Сохранение на сервер с дебаунсом — вызовы дискретные, но склеиваем всплески.
     // flush=true — писать немедленно (критичные моменты: только что добавленное
     // сообщение пользователя не должно потеряться из-за гонки окон/перезагрузки).
-    _persist(flush = false) {
+    // snapshot=false — сохранение, ради которого страховочный снимок не нужен (черновик:
+    // он не ответ агента, терять при рестарте сервера там нечего). Флаг накапливается, а не
+    // берётся у последнего вызова: иначе правка черновика, пришедшая в те же 300 мс дебаунса,
+    // отменила бы снимок только что полученного ответа.
+    _persist(flush = false, { snapshot = true } = {}) {
       clearTimeout(persistTimer);
+      if (snapshot) needSnapshot = true;
       const write = () => {
         const slim = this.sessions.map(slimOf);
         const archivedSlim = (this.archived || []).map(archivedSlimOf);
@@ -468,22 +520,25 @@ export const useChatStore = defineStore('chat', {
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
         // на котором он бы сохранился, могло и не быть.
-        writeSnapshot(payload);
+        if (needSnapshot) {
+          writeSnapshot(payload);
+          needSnapshot = false;
+        }
         // Каждый чат — свой запрос, и только если он реально изменился.
         const jobs = [];
         const alive = new Set();
         const push = (c, archived) => {
           if (!c?.id) return;
           alive.add(c.id);
-          const json = JSON.stringify(c);
-          if (sentChats.get(c.id) === json) return;
+          const mark = fingerprintOf(c);
+          if (sentChats.get(c.id) === mark) return;
           jobs.push(api.put('/api/chat/store/chat', { chat: c, archived, origin: WINDOW_ID })
             .then((response) => {
               const live = this._get(c.id) || (this.archived || []).find((item) => item.id === c.id);
               applySaveAck(live, response);
               const acknowledged = { ...c };
               applySaveAck(acknowledged, response);
-              sentChats.set(c.id, JSON.stringify(acknowledged));
+              sentChats.set(c.id, fingerprintOf(acknowledged));
             }));
         };
         slim.forEach((c) => push(c, false));
@@ -552,7 +607,7 @@ export const useChatStore = defineStore('chat', {
         }
         const acknowledged = { ...snapshot };
         applySaveAck(acknowledged, response);
-        sentChats.set(session.id, JSON.stringify(acknowledged));
+        sentChats.set(session.id, fingerprintOf(acknowledged));
         return response;
       }
       throw chatRevisionConflict();
@@ -563,8 +618,8 @@ export const useChatStore = defineStore('chat', {
      */
     _markSent() {
       sentChats.clear();
-      this.sessions.forEach((s) => sentChats.set(s.id, JSON.stringify(slimOf(s))));
-      (this.archived || []).forEach((c) => sentChats.set(c.id, JSON.stringify(archivedSlimOf(c))));
+      this.sessions.forEach((s) => sentChats.set(s.id, fingerprintOf(slimOf(s))));
+      (this.archived || []).forEach((c) => sentChats.set(c.id, fingerprintOf(archivedSlimOf(c))));
       sentMeta = JSON.stringify({
         activeId: this.activeId, defModel: this.defModel, defModelRef: this.defModelRef,
         defEffort: this.defEffort, defMode: this.defMode,
@@ -842,7 +897,7 @@ export const useChatStore = defineStore('chat', {
      */
     _dirty(chat) {
       const archived = (this.archived || []).some((c) => c.id === chat.id);
-      return sentChats.get(chat.id) !== JSON.stringify(archived ? archivedSlimOf(chat) : slimOf(chat));
+      return sentChats.get(chat.id) !== fingerprintOf(archived ? archivedSlimOf(chat) : slimOf(chat));
     },
     /**
      * Чат изменили в другом окне (в т.ч. на другом устройстве) — забираем именно его.
@@ -900,7 +955,7 @@ export const useChatStore = defineStore('chat', {
         .filter(({ message, key }) => message.role === 'assistant' && !knownMessages.has(key))
         .at(-1);
       if (freshReply) this._notifyReply(applied, freshReply.message.text, freshReply.key);
-      sentChats.set(applied.id, JSON.stringify(archived ? archivedSlimOf(applied) : slimOf(applied)));
+      sentChats.set(applied.id, fingerprintOf(archived ? archivedSlimOf(applied) : slimOf(applied)));
     },
     /** Чат удалили в другом окне — убираем и здесь (удаление всегда осознанное действие). */
     _dropRemoteChat(id) {
@@ -935,7 +990,7 @@ export const useChatStore = defineStore('chat', {
           // Ровно это у нас и лежит — не трогаем объект, иначе каждое переподключение
           // подменяло бы массивы сообщений и перерисовывало открытый чат на ровном месте.
           const same = sentChats.get(chat.id)
-            === JSON.stringify(archived ? archivedSlimOf(next) : slimOf(next));
+            === fingerprintOf(archived ? archivedSlimOf(next) : slimOf(next));
           if (local && same) continue;
           this._applyRemoteChat(chat, archived);
         }
@@ -949,7 +1004,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
     },
-    async answerPerm(pid, allow, remember = false, comment = '') {
+    async answerPerm(pid, allow, remember = false, comment = '', choice = '') {
       const p = this.pending[pid];
       if (!p) return;
       delete this.pending[pid];
@@ -958,7 +1013,9 @@ export const useChatStore = defineStore('chat', {
       }
       // План оставляем в переписке: всплывашка закроется, а решение принималось по нему —
       // потом нужно видеть, что именно утвердили (или что ушло на доработку и с каким пояснением).
-      if (p.tool === 'ExitPlanMode' && p.input?.plan) {
+      // Признак — сам план в запросе, а не имя инструмента: у Claude это ExitPlanMode,
+      // у Kimi — обычный запрос разрешения с вариантами plan_*.
+      if (p.input?.plan) {
         const s = this._get(p.chatKey);
         if (s) {
           s.messages.push({
@@ -971,8 +1028,17 @@ export const useChatStore = defineStore('chat', {
         }
       }
       let res = null;
-      try { res = await api.post(`/api/chat/permission/${p.pid}`, { allow, ...(comment ? { comment } : {}) }); }
-      catch { /* запрос уже протух (таймаут/другое окно) */ }
+      try {
+        res = await api.post(`/api/chat/permission/${p.pid}`, {
+          allow,
+          // «до конца сессии» — не только политика вкладки: у ACP это отдельный
+          // вариант ответа (allow_always), и без передачи Kimi спрашивал снова.
+          ...(remember ? { remember: true } : {}),
+          // Кнопка плана: у Kimi вариантов ответа больше двух (доработать, выйти).
+          ...(choice ? { choice } : {}),
+          ...(comment ? { comment } : {}),
+        });
+      } catch { /* запрос уже протух (таймаут/другое окно) */ }
       // Kimi (ACP) не умеет текст в отказе: сервер отвечает commentDelivered:false,
       // и пояснение едет обычным сообщением — встанет в очередь чата.
       if (!allow && comment && res?.commentDelivered === false) await this.send(p.chatKey, comment);
@@ -980,10 +1046,17 @@ export const useChatStore = defineStore('chat', {
     // Ответ на вопрос агента: answers = [{ header, question, selected: [метки], text }].
     // Сервер превращает их в текст, который агент читает как результат своего вопроса.
     async answerQuestion(pid, answers) {
-      if (!this.pending[pid]) return;
+      const p = this.pending[pid];
+      if (!p) return;
       delete this.pending[pid];
-      try { await api.post(`/api/chat/permission/${pid}`, { answers }); }
+      let res = null;
+      try { res = await api.post(`/api/chat/permission/${pid}`, { answers }); }
       catch { /* запрос уже снят (стоп/конец хода/другое окно) */ }
+      // Свой текст доезжает не по всякому каналу (ACP-мост Kimi несёт только выбранный
+      // вариант). Сервер честно говорит textDelivered:false — досылаем обычным
+      // сообщением, как и пояснение к отказу.
+      const text = (answers || []).map((a) => a?.text || '').find(Boolean) || '';
+      if (text && res?.textDelivered === false) await this.send(p.chatKey, text);
     },
 
     async ensure() {
@@ -1147,7 +1220,10 @@ export const useChatStore = defineStore('chat', {
       const s = this._get(id);
       if (!s || (s.draft || '') === text) return;
       s.draft = text;
-      this._persist();
+      // Черновик сохраняется на каждую паузу в наборе, поэтому этот путь обязан быть
+      // дешёвым: снимок здесь не нужен (терять при рестарте сервера нечего — текст
+      // на экране и так перед глазами), а именно он и подвешивал ввод.
+      this._persist(false, { snapshot: false });
     },
     setEffort(id, e) { const s = this._get(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
     clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },

@@ -85,3 +85,19 @@ test('Kimi auto: неизвестные и пустые формы fail-closed',
   assert.equal(autoDecision(presentation({ kind: '' })).verdict, 'ask');
   assert.equal(autoDecision(presentation({ kind: 'execute', title: '  ' })).verdict, 'ask');
 });
+
+// Настоящий запрос разрешения Kimi ни kind, ни аргументов вызова НЕ несёт: их
+// восстанавливает по toolCallId сам runtime и кладёт в input. Читай классификатор
+// только raw.toolCall.kind — «Авто» с Kimi спрашивал бы на каждое действие.
+test('Kimi auto: тип и команда читаются из восстановленного input, а не только из raw', () => {
+  const acp = (input) => ({ isQuestion: false, tool: 'Bash', input, raw: { toolCall: { title: 'Bash' } } });
+  assert.equal(autoDecision(acp({ kind: 'read' })).verdict, 'allow');
+  assert.equal(autoDecision(acp({ kind: 'execute', command: 'npm test' })).verdict, 'allow');
+
+  const destructive = autoDecision(acp({ kind: 'execute', command: 'git push --force origin main' }));
+  assert.equal(destructive.verdict, 'ask');
+  assert.match(destructive.reason, /force/);
+
+  // Восстановить не удалось — по-прежнему fail-closed.
+  assert.equal(autoDecision(acp({})).verdict, 'ask');
+});

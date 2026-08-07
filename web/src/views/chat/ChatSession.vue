@@ -427,6 +427,13 @@ const cmdMenu = computed(() => {
   return items;
 });
 watch(cmdNav, (m) => { if (cmdIndex.value >= m.length) cmdIndex.value = 0; });
+// Меню ограничено по высоте и скроллится — при навигации стрелками подгоняем
+// выбранный пункт в видимую область.
+const cmdMenuEl = ref(null);
+watch(cmdIndex, async () => {
+  await nextTick();
+  cmdMenuEl.value?.querySelector('.cmd.on')?.scrollIntoView({ block: 'nearest' });
+});
 async function runCommand(command) {
   const c = typeof command === 'string'
     ? allCommands.value.find((x) => x.cmd === command)
@@ -861,7 +868,8 @@ async function openDebug() {
                   @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
 
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
-    <ChatPermission v-if="perm" :req="perm" @answer="(allow, remember, comment) => chat.answerPerm(perm.pid, allow, remember, comment)" />
+    <ChatPermission v-if="perm" :req="perm"
+                    @answer="(allow, remember, comment, choice) => chat.answerPerm(perm.pid, allow, remember, comment, choice)" />
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
@@ -876,7 +884,7 @@ async function openDebug() {
           <span v-if="attachBusy" class="muted"><span class="spin"></span></span>
         </div>
         <!-- Меню слэш-команд над композером: секция кокпита + секция исполнителя модели -->
-        <div v-if="cmdMenu.length" class="cmd-menu">
+        <div v-if="cmdMenu.length" ref="cmdMenuEl" class="cmd-menu">
           <template v-for="item in cmdMenu" :key="item.key">
             <div v-if="item.header" class="cmd-head">
               <span v-if="item.color" class="dot" :style="{ background: item.color }"></span>{{ item.header }}
@@ -1174,6 +1182,7 @@ async function openDebug() {
 .cs-input .col { position: relative; }
 .cmd-menu { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 6;
   background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden;
+  max-height: min(440px, 55vh); overflow-y: auto;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
 .cmd { display: flex; align-items: baseline; gap: 12px; width: 100%; padding: 9px 14px; background: transparent;
   border: none; cursor: pointer; text-align: left; }

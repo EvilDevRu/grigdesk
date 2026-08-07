@@ -43,10 +43,24 @@ const DESTRUCTIVE_COMMAND_RULES = [
 function commandTextOf(presentation) {
   const parts = [];
   if (typeof presentation?.tool === 'string') parts.push(presentation.tool);
+  // `command` — сама команда, восстановленная по rawInput вызова. Заголовок и
+  // описание оставляем рядом: у обфусцированной команды правило может сработать
+  // именно по человеческому тексту.
+  if (typeof presentation?.input?.command === 'string') parts.push(presentation.input.command);
   if (typeof presentation?.input?.description === 'string') parts.push(presentation.input.description);
   const raw = presentation?.raw?.toolCall;
   if (typeof raw?.title === 'string') parts.push(raw.title);
   return parts.filter(Boolean).join('\n');
+}
+
+/**
+ * Тип действия. У Kimi запрос разрешения `kind` не несёт вовсе
+ * (buildPermissionToolCallUpdate отдаёт только toolCallId/title/content) — его
+ * восстанавливает по toolCallId сам runtime и кладёт в `input.kind`. Читать
+ * только `raw.toolCall.kind` значило бы, что «Авто» с Kimi спрашивает ВСЕГДА.
+ */
+function kindOf(presentation) {
+  return String(presentation?.input?.kind || presentation?.raw?.toolCall?.kind || '');
 }
 
 /**
@@ -57,7 +71,7 @@ function commandTextOf(presentation) {
  */
 export function autoDecision(presentation) {
   if (!presentation || presentation.isQuestion) return { verdict: 'ask', reason: 'вопрос агента' };
-  const kind = String(presentation?.raw?.toolCall?.kind || '');
+  const kind = kindOf(presentation);
   if (ASK_KINDS.has(kind)) return { verdict: 'ask', reason: `удаление (${kind})` };
   if (kind === 'execute') {
     const command = commandTextOf(presentation);

@@ -23,6 +23,14 @@
 //                              Не объявлен → сверка для этого ИИ не проводится
 //   usage?()                 — состояние лимитов + provider-neutral account resources
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
+//   mcpStatus?(config)       — состояние MCP-серверов этого CLI для его плашки:
+//                              { state: 'ok'|'error', error?, servers: [{ name, target,
+//                              scope: 'user'|'project'|'account', state: 'ok'|'failed'|
+//                              'needs-auth'|'unknown', detail }] }. Метод ЛЕНИВЫЙ: его
+//                              зовёт только `GET /api/providers/:id/mcp`, потому что
+//                              health-check живых серверов стоит секунд. Не объявлен —
+//                              у исполнителя нет блока MCP (у него может не быть и
+//                              самого понятия MCP, как у HTTP-исполнителя)
 //   updateCmd?               — команда обновления CLI (кнопка «Обновить» в настройках)
 //   settings?                — СВОИ настройки исполнителя для его плашки в
 //                              «Настройках → Исполнители»: [{ id, kind, label, hint?,

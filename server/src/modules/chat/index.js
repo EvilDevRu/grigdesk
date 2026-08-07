@@ -307,6 +307,10 @@ async function chatModule(fastify, opts) {
         resolve,
         direct: true,
         acceptsComment: !!presentation?.acceptsComment,
+        // Свой текст в ответе на вопрос — тоже свойство канала: ACP-мост Kimi
+        // возвращает только выбранный optionId, поэтому текст туда не влезает.
+        // Умолчание «влезает» оставляет прежнее поведение остальным исполнителям.
+        acceptsText: presentation?.acceptsText !== false,
         isQuestion,
         tool,
         input,
@@ -411,12 +415,26 @@ async function chatModule(fastify, opts) {
     const comment = String(body.comment || '').trim().slice(0, 4000);
     if (p.direct && p.isQuestion) {
       const answers = Array.isArray(body.answers) ? body.answers : [];
+      const text = answers.map((answer) => answer?.text || '').find(Boolean) || '';
       p.resolve({
         selected: answers.flatMap((answer) => answer?.selected || []).filter(Boolean),
-        text: answers.map((answer) => answer?.text || '').find(Boolean) || '',
+        text,
       });
+      // Свой текст в ответе доезжает не всегда (см. acceptsText): молчаливая потеря
+      // выглядела бы как «агент проигнорировал ответ», поэтому говорим прямо — фронт
+      // отправит его обычным сообщением в очередь чата.
+      return text && !p.acceptsText ? { ok: true, textDelivered: false } : { ok: true };
     } else if (p.direct) {
-      p.resolve({ allow: body.allow === true, comment });
+      // `remember` («разрешать до конца сессии») и `choice` (кнопка плана) — часть
+      // ответа КАНАЛУ: у ACP это выбор конкретного optionId (allow_always, plan_*),
+      // а не отдельная политика кокпита. Исполнитель, который таких вариантов не
+      // предлагает, поля просто игнорирует.
+      p.resolve({
+        allow: body.allow === true,
+        comment,
+        remember: body.remember === true,
+        choice: typeof body.choice === 'string' ? body.choice.slice(0, 100) : '',
+      });
       // Дойдёт ли пояснение до агента — свойство КАНАЛА, а не вендора: ACP-outcome Kimi
       // текста не несёт, а результат инструмента Ollama несёт. Канал сам об этом и
       // сообщает при создании запроса (presentation.acceptsComment).
