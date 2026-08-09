@@ -68,14 +68,25 @@ function attachmentLabel(attachment) {
   return name ? `${label} ${name}` : label;
 }
 
-function lineOf(message) {
+function lineOf(message, number = null) {
   const author = String(message?.author?.name || '').trim() || 'неизвестно';
   const attachments = (message?.attachments || []).map(attachmentLabel);
   const body = [
     String(message?.text || '').trim(),
     attachments.length ? `(${attachments.join(', ')})` : '',
   ].filter(Boolean).join(' ');
-  return `[${stamp(message?.occurredAt)}] ${author}: ${body}`;
+  const prefix = number === null ? '' : `#${number} `;
+  return `${prefix}[${stamp(message?.occurredAt)}] ${author}: ${body}`;
+}
+
+/**
+ * Единственное правило «какие сообщения видны». Нумерованный transcript триажа и
+ * его же обратная раскладка «номер → messageRef» обязаны получать один и тот же
+ * список: разойдись эти два фильтра, и модель распределит сообщения по одним
+ * номерам, а решение уедет на другие.
+ */
+export function visibleInboxMessages(messages) {
+  return (Array.isArray(messages) ? messages : []).filter((message) => !message?.service);
 }
 
 function describe(lines, footer, limit) {
@@ -83,7 +94,9 @@ function describe(lines, footer, limit) {
   if (footer.length >= limit) fail('Footer не помещается в transcript limit.');
   const budget = limit - footer.length;
   const full = lines.join('\n');
-  if (full.length <= budget) return { text: full + footer, truncated: false };
+  if (full.length <= budget) {
+    return { text: full + footer, truncated: false, shown: lines.length };
+  }
 
   const note = (shown) => `\n[обрезано: показаны первые ${shown} из ${lines.length} сообщений]`;
   const out = [];
@@ -97,18 +110,29 @@ function describe(lines, footer, limit) {
   if (!out.length && lines.length) {
     out.push(trimText(lines[0], Math.max(1, budget - note(1).length)));
   }
-  return { text: out.join('\n') + note(out.length) + footer, truncated: true };
+  // `shown` — сколько строк реально попало в текст. Нумерованному transcript это
+  // граница: сослаться на сообщение, которого модель не видела, нельзя.
+  return { text: out.join('\n') + note(out.length) + footer, truncated: true, shown: out.length };
 }
 
-/** Transcript используется и карточкой, и model prompt. */
+/**
+ * Transcript используется и карточкой, и model prompt. `numbered` добавляет строкам
+ * сквозные номера: без них модель не может сказать, какие именно сообщения относятся
+ * к одному поводу, а какие — к соседнему.
+ */
 export function inboxTranscript(messages, {
   limit = INBOX_DRAFT_LIMITS.description,
   footer = '',
+  numbered = false,
 } = {}) {
   if (!Array.isArray(messages)) fail('messages должен быть массивом.');
   if (typeof footer !== 'string') fail('footer должен быть строкой.');
-  const visible = messages.filter((message) => !message.service);
-  return describe(visible.map(lineOf), footer, limit);
+  const visible = visibleInboxMessages(messages);
+  return describe(
+    visible.map((message, index) => lineOf(message, numbered ? index + 1 : null)),
+    footer,
+    limit,
+  );
 }
 
 function titleOf(messages, kind) {

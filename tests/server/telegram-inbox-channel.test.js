@@ -283,7 +283,7 @@ test('authorized native row становится strict batch с topic policy sc
   assert.equal(counters.release, 1);
 });
 
-test('включённое правило отвечает номером и ссылкой в exact чат и тему', async () => {
+test('включённое правило отвечает номером, названием и ссылкой в exact чат и тему', async () => {
   const calls = [];
   const { capability } = harness({
     channelRules: [defaultRule({ notifyTaskCreated: true })],
@@ -309,6 +309,9 @@ test('включённое правило отвечает номером и с�
       message,
       taskId: '5150',
       taskUrl: 'https://b24.example/company/personal/user/7/tasks/task/view/5150/',
+      // Название пришло из модели по недоверенному тексту: перенос строки увёл бы
+      // ссылку вниз, поэтому в ответ бота оно едет одной строкой.
+      title: 'Починить выгрузку\nостатков',
     }), { enabled: true, sent: true });
   } finally { await context.release(); }
 
@@ -319,6 +322,7 @@ test('включённое правило отвечает номером и с�
   assert.deepEqual(calls[0].body, {
     chat_id: CHAT,
     text: 'Задача #5150 поставлена в Битрикс24.\n'
+      + '«Починить выгрузку остатков»\n'
       + 'https://b24.example/company/personal/user/7/tasks/task/view/5150/',
     link_preview_options: { is_disabled: true },
     reply_parameters: { message_id: 100, allow_sending_without_reply: true },
@@ -400,6 +404,19 @@ test('безопасность ссылки проверяется повтор�
     });
     assert.equal(calls[0].text, 'Задача #5150 поставлена в Битрикс24.');
 
+    // Название — строка-опознаватель, а не пересказ постановки: длинное режется,
+    // номер задачи в ответе остаётся всегда.
+    await context.notifyTaskCreated({
+      source: batch.source,
+      message,
+      taskId: '5150',
+      taskUrl: '',
+      title: 'а'.repeat(4_000),
+    });
+    const [head, second] = calls[1].text.split('\n');
+    assert.equal(head, 'Задача #5150 поставлена в Битрикс24.');
+    assert.equal(second, `«${'а'.repeat(199)}…»`);
+
     enabled = false;
     assert.deepEqual(await context.notifyTaskCreated({
       source: batch.source,
@@ -408,7 +425,7 @@ test('безопасность ссылки проверяется повтор�
       taskUrl: 'https://b24.example/tasks/5151',
     }), { enabled: true, sent: false, reason: 'plugin_disabled' });
   } finally { await context.release(); }
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2, 'выключенный plugin в сеть не ходил');
 });
 
 test('пустой allowlist не читает ни archive positions, ни native text', async () => {

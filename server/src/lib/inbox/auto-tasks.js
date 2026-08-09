@@ -1,10 +1,12 @@
 // Один provider-neutral auto-worker общего Inbox. Он читает server-only snapshot,
 // но любые решения проводит через тот же InboxTaskService, что и HTTP-кнопки.
 
+import { safeInboxSourceUrl, visibleInboxMessages } from './draft.js';
 import {
   buildInboxAutoTask,
   countInboxAutoTasks,
   decideInboxAutoAction,
+  decideInboxAutoPlan,
   inboxAutoNote,
   normalizeInboxTriageModel,
   resolveInboxTriageTarget,
@@ -94,6 +96,9 @@ export class InboxAutoTasks {
   } = {}) {
     if (!coordinator || typeof coordinator.workerSnapshot !== 'function'
         || typeof coordinator.workerGate !== 'function'
+        // resolveItem нужен не только вложениям: разбитая карточка перечитывает
+        // revision и ссылку источника перед каждым решением плана.
+        || typeof coordinator.resolveItem !== 'function'
         || !taskService || typeof taskService.task !== 'function'
         || typeof taskService.dismiss !== 'function'
         || !b24 || typeof b24.isConfigured !== 'function'
@@ -101,9 +106,7 @@ export class InboxAutoTasks {
         || typeof triageReadiness !== 'function'
         || typeof modelRef !== 'function'
         || typeof isEnabled !== 'function'
-        || (attachmentAnalyzer !== null
-          && (typeof attachmentAnalyzer?.analyze !== 'function'
-            || typeof coordinator.resolveItem !== 'function'))
+        || (attachmentAnalyzer !== null && typeof attachmentAnalyzer?.analyze !== 'function')
         || !['object', 'function'].includes(typeof providerSettings)
         || typeof now !== 'function'
         || typeof onChanged !== 'function') {
@@ -490,6 +493,7 @@ export class InboxAutoTasks {
           providerSettings: await this._settings(),
           log: this.log,
           signal,
+          mode: 'plan',
         });
       } catch (error) {
         triaged = { ok: false, error: safeCode(error, 'triage_failed') };
@@ -538,18 +542,73 @@ export class InboxAutoTasks {
     gates = await this._liveGates(ref, signal);
     if (gates.reason) return { haltAll: gates.reason };
 
-    const verdict = triaged.verdict ?? null;
-    const decision = decideInboxAutoAction({ item, verdict, createdToday, nowMs });
+    const plan = triaged.plan ?? null;
+    const outcome = decideInboxAutoPlan({ item, plan, createdToday, nowMs });
     const model = triaged.model || `${ref.provider}/${ref.model}`;
-    const note = inboxAutoNote({ model, verdict, reason: decision.reason });
-    const body = {
-      revision: item.revision,
-      messageRefs: item.messages.map((message) => message.messageRef),
-    };
+    if (outcome.action !== 'run') {
+      this.log.info?.({ channel: channel.id, itemRef: item.ref, action: outcome.action },
+        'inbox: auto оставил обращение человеку');
+      return;
+    }
+
+    // Номера плана считаются по тому же списку, что видела модель в transcript.
+    const visible = visibleInboxMessages(item.messages);
+    for (const entry of outcome.statements) {
+      if (!['create', 'dismiss'].includes(entry.action)) continue;
+      const messageRefs = entry.statement.messages.map((index) => visible[index - 1]?.messageRef);
+      if (messageRefs.some((value) => typeof value !== 'string')) {
+        this.log.warn?.({ channel: channel.id, itemRef: item.ref },
+          'inbox: номер сообщения из плана не разрешился в messageRef');
+        continue;
+      }
+      const stop = await this._decideStatement({
+        channel,
+        item,
+        entry,
+        messageRefs,
+        whole: messageRefs.length === visible.length,
+        model,
+        made,
+        out,
+        scopeRef,
+      });
+      if (stop) return;
+    }
+  }
+
+  /**
+   * Одно решение плана. Возвращает `true`, когда карточку дальше трогать нельзя:
+   * оставшиеся поводы честно уходят человеку вместо попытки проехать по уже
+   * изменившемуся состоянию.
+   */
+  async _decideStatement({
+    channel, item, entry, messageRefs, whole, model, made, out, scopeRef,
+  }) {
+    const note = inboxAutoNote({ model, verdict: entry.statement, reason: entry.reason });
+    let revision = item.revision;
+    let sourceUrl = item.sourceUrl;
+    if (!whole) {
+      // Каждое решение меняет revision карточки, а ссылка задачи обязана вести на
+      // первое сообщение ИМЕННО этого повода. И то и другое известно только из
+      // свежего снимка, поэтому разбитая карточка перечитывается перед каждым шагом.
+      try {
+        const context = await this._statementContext(item, channel, messageRefs);
+        revision = context.revision;
+        sourceUrl = context.sourceUrl;
+      } catch (error) {
+        this.log.info?.({
+          channel: channel.id,
+          itemRef: item.ref,
+          code: safeCode(error, 'statement_context_failed'),
+        }, 'inbox: остаток обращения оставлен человеку — состояние изменилось');
+        return true;
+      }
+    }
+    const body = { revision, messageRefs };
 
     try {
-      if (decision.action === 'create') {
-        const draft = buildInboxAutoTask({ item, verdict });
+      if (entry.action === 'create') {
+        const draft = buildInboxAutoTask({ item, verdict: entry.statement, sourceUrl });
         const created = await this.taskService.task(item.ref, {
           ...body,
           title: draft.title,
@@ -562,7 +621,7 @@ export class InboxAutoTasks {
         made.set(scopeRef, (made.get(scopeRef) || 0) + 1);
         this.created += 1;
         out.created.push({ ref: item.ref, channel: channel.id, taskId: created?.taskId ?? null });
-      } else if (decision.action === 'dismiss') {
+      } else {
         await this.taskService.dismiss(item.ref, body, { by: 'auto', note });
         this.dismissed += 1;
         out.dismissed.push({ ref: item.ref, channel: channel.id });
@@ -572,7 +631,7 @@ export class InboxAutoTasks {
       if (QUIET_MUTATION_ERRORS.has(code)) {
         this.log.info?.({ channel: channel.id, itemRef: item.ref, code },
           'inbox: auto result became stale or unsafe');
-        return;
+        return true;
       }
       if (code === 'indeterminate_task_commit') {
         this.blockedChannels.add(channel.id);
@@ -588,6 +647,42 @@ export class InboxAutoTasks {
       }
       this.failed += 1;
       out.failed.push({ ref: item.ref, channel: channel.id, code });
+      return true;
+    }
+    return false;
+  }
+
+  /** Свежие revision и ссылка на источник для подмножества сообщений карточки. */
+  async _statementContext(item, channel, messageRefs) {
+    const resolved = await this.coordinator.resolveItem(item.ref, { nowMs: this.now() });
+    try {
+      if (resolved.generation !== channel.generation) {
+        throw Object.assign(new Error('Account generation изменилась.'), { code: 'account_changed' });
+      }
+      if (resolved.channelState.readOnly
+          || resolved.channelState.connection !== 'connected'
+          || resolved.channelState.participation !== 'active') {
+        throw Object.assign(new Error('Канал больше не участвует в разборе.'), {
+          code: 'channel_deactivated',
+        });
+      }
+      const byRef = new Map(resolved.item.messages.map((message) => [message.messageRef, message]));
+      const messages = messageRefs.map((messageRef) => byRef.get(messageRef));
+      if (messages.some((message) => !message || message.decision !== null)) {
+        throw Object.assign(new Error('Сообщения повода уже решены.'), { code: 'stale_item' });
+      }
+      const head = messages[0];
+      let sourceUrl = item.sourceUrl;
+      try {
+        sourceUrl = safeInboxSourceUrl(
+          await resolved.context.sourceUrl({ source: head.source, message: head }),
+        ) || item.sourceUrl;
+      } catch {
+        // Небезопасная или несобранная ссылка не отменяет задачу: остаётся ссылка карточки.
+      }
+      return { revision: resolved.item.revision, sourceUrl };
+    } finally {
+      await resolved.release();
     }
   }
 

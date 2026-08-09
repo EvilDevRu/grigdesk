@@ -26,6 +26,8 @@ const MAX_MATERIALIZED_ATTACHMENTS = 12;
 const MAX_MATERIALIZED_BYTES = 80 * 1024 * 1024;
 const TASK_REPLY_TIMEOUT_MS = 5_000;
 const TELEGRAM_TEXT_LIMIT = 4_096;
+// Название задачи в ответе бота — строка-опознаватель, а не пересказ постановки.
+const TASK_REPLY_TITLE_LIMIT = 200;
 const TOO_MANY_ATTACHMENTS_REASON = 'too_many_attachments';
 const ATTACHMENTS_TOO_LARGE_REASON = 'attachments_too_large';
 const POSITION_KEYS = [
@@ -111,16 +113,44 @@ function telegramNumber(value, where, options = {}) {
   return telegramId(Number(text), where, options);
 }
 
-function taskReplyText(taskId, taskUrl) {
+/**
+ * Название задачи собрал не человек, а модель по НЕДОВЕРЕННОМУ тексту чата.
+ * Уходит оно одной строкой без разметки (`parse_mode` мы не шлём вовсе):
+ * управляющие символы и переносы схлопываем, иначе заголовок в две строки
+ * превратил бы ответ бота в кашу и унёс ссылку вниз.
+ */
+function taskReplyTitle(value) {
+  const text = String(value ?? '')
+    .replace(/\p{Cc}/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (!text) return '';
+  return text.length <= TASK_REPLY_TITLE_LIMIT
+    ? text
+    : `${text.slice(0, TASK_REPLY_TITLE_LIMIT - 1).trimEnd()}…`;
+}
+
+function taskReplyText(taskId, taskUrl, taskTitle) {
   const id = String(taskId ?? '').trim();
   if (!id || Buffer.byteLength(id, 'utf8') > 512 || /[\u0000-\u001f\u007f]/u.test(id)) {
     fail('telegram_inbox_invalid_notification', 'Task confirmation получил неверный id задачи.');
   }
   let url = '';
   try { url = safeInboxSourceUrl(taskUrl) || ''; } catch { /* номер всё равно полезен */ }
+  const title = taskReplyTitle(taskTitle);
   const line = `Задача #${id} поставлена в Битрикс24.`;
-  const withUrl = url ? `${line}\n${url}` : line;
-  return withUrl.length <= TELEGRAM_TEXT_LIMIT ? withUrl : line;
+  // Лесенка отказа: при переполнении первой уходит ссылка, следом название.
+  // Номер задачи остаётся всегда — без него ответ бесполезен.
+  const variants = [
+    [line, title && `«${title}»`, url],
+    [line, title && `«${title}»`],
+    [line],
+  ];
+  for (const variant of variants) {
+    const text = variant.filter(Boolean).join('\n');
+    if (text.length <= TELEGRAM_TEXT_LIMIT) return text;
+  }
+  return line;
 }
 
 export {
@@ -670,7 +700,7 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
           return sourceUrls.get(key);
         },
 
-        async notifyTaskCreated({ source, message, taskId, taskUrl } = {}) {
+        async notifyTaskCreated({ source, message, taskId, taskUrl, title } = {}) {
           await assertCurrent();
           const key = cacheKey(source?.id, message?.id);
           const target = taskReplies.get(key);
@@ -701,7 +731,7 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
           });
           const body = {
             chat_id: chatId,
-            text: taskReplyText(taskId, taskUrl),
+            text: taskReplyText(taskId, taskUrl, title),
             link_preview_options: { is_disabled: true },
             reply_parameters: {
               message_id: messageId,

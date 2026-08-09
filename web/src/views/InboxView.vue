@@ -23,12 +23,17 @@ const channelsById = computed(() => new Map(
   payload.value.channels.map((channel) => [channel.id, channel]),
 ));
 
-const reviewItems = computed(() => payload.value.items.filter((item) => (
-  item.status === 'new' || item.status === 'mixed'
-)));
-const historyItems = computed(() => payload.value.items.filter((item) => (
-  item.status === 'skipped' || item.status === 'task'
-)));
+// Делит очередь и историю НЕРЕШЁННОЕ СООБЩЕНИЕ, а не статус карточки: разбитая на
+// несколько задач карточка полностью покрыта решениями, но остаётся `mixed`. По статусу
+// она висела бы в «К разбору» без единой доступной кнопки, а из «Истории» выпадала бы
+// вовсе. Правило то же, что у серверного счётчика очереди.
+const pendingMessages = (item) => (item.messages || []).filter((message) => !message.decision);
+const reviewItems = computed(() => payload.value.items.filter(
+  (item) => pendingMessages(item).length > 0,
+));
+const historyItems = computed(() => payload.value.items.filter(
+  (item) => pendingMessages(item).length === 0,
+));
 const visibleItems = computed(() => (
   activeSection.value === 'history' ? historyItems.value : reviewItems.value
 ));
@@ -346,6 +351,12 @@ function statusLabel(status) {
   })[status] || 'Разобрано';
 }
 
+/** «Частично» верно только пока есть что разбирать: разбитая карточка покрыта целиком. */
+function itemStatusLabel(item) {
+  if (item.status === 'mixed' && !pendingMessages(item).length) return 'Разобрано по частям';
+  return statusLabel(item.status);
+}
+
 function connectionLabel(connection) {
   return ({ connected: 'Подключён', disconnected: 'Не подключён', degraded: 'Ошибка канала' })[connection]
     || 'Состояние неизвестно';
@@ -590,7 +601,7 @@ onBeforeUnmount(() => {
               {{ item.source.title }}
             </a>
             <span v-else class="source">{{ item.source.title }}</span>
-            <span class="status" :class="item.status">{{ statusLabel(item.status) }}</span>
+            <span class="status" :class="item.status">{{ itemStatusLabel(item) }}</span>
           </header>
           <h2>{{ item.title }}</h2>
           <p v-if="item.description" class="description">{{ item.description }}</p>
@@ -599,8 +610,14 @@ onBeforeUnmount(() => {
             {{ autoTaskState(item).text }}
           </p>
           <p v-if="item.status === 'mixed'" class="mixed-note">
-            Часть сообщений уже разобрана. Выберите новые сообщения для задачи или ранее
-            пропущенные, чтобы вернуть их к разбору.
+            <template v-if="pendingMessages(item).length">
+              Часть сообщений уже разобрана. Выберите новые сообщения для задачи или ранее
+              пропущенные, чтобы вернуть их к разбору.
+            </template>
+            <template v-else>
+              Обращение разобрано по частям: у сообщений разные решения. Пропущенные можно
+              вернуть к разбору, выбрав их ниже.
+            </template>
           </p>
           <p v-if="itemReadOnly(item)" class="read-only item-read-only">
             Канал отключён: это обращение доступно только для чтения.

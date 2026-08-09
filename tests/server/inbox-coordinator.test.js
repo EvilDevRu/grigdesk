@@ -436,6 +436,46 @@ test('summary reviewCount совпадает с вкладкой «К разбо
   });
 });
 
+test('карточка, разобранная НЕСКОЛЬКИМИ решениями, уходит из очереди целиком', async (t) => {
+  const accountRef = 'acc_coord_split_done_01';
+  const state = await stateFixture(t, 'telegram', accountRef);
+  const first = message({ channel: 'telegram', accountRef, id: '1' });
+  const second = message({
+    channel: 'telegram', accountRef, id: '2', over: { occurredAt: T0 + 1 },
+  });
+  const decide = (id, status, target) => state.store.decide({
+    activationEpoch: 1,
+    originItemRef: state.refCodec.item('seed-split-done'),
+    messageRefs: [state.refCodec.message(target.source.id, target.id)],
+    scopeRef: state.refCodec.scope('scope:1'),
+    status,
+    taskId: status === 'task' ? id : null,
+    taskUrl: '',
+    by: 'auto',
+    note: '',
+    decidedAtMs: (T0 + 10) * 1000,
+  });
+  // Обычный исход разбиения: одно сообщение стало задачей, второе пропущено.
+  await decide('8300', 'task', first);
+  await decide(null, 'skipped', second);
+
+  const coordinator = new InboxCoordinator({ channels: [channelFixture({
+    id: 'telegram', label: 'Telegram', accountRef, ...state,
+    batches: [batch(first, { messages: [first, second] })],
+  })] });
+
+  const listed = await coordinator.list({ nowMs: (T0 + 700) * 1000 });
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].status, 'mixed', 'разные решения дают mixed при полном покрытии');
+  assert.ok(listed.items[0].messages.every((entry) => entry.decision));
+
+  // По статусу такая карточка висела бы в «К разбору» вечно, не предлагая ни одной кнопки.
+  const summary = await coordinator.summary({ nowMs: (T0 + 700) * 1000 });
+  assert.equal(summary.mixedCount, 1);
+  assert.equal(summary.reviewCount, 0, 'нерешённых сообщений не осталось — очередь пуста');
+  assert.equal(summary.newCount, 0);
+});
+
 test('исчерпанный channel scan становится degraded и не публикует partial items', async (t) => {
   const accountRef = 'acc_coord_scan_cap_0001';
   const state = await stateFixture(t, 'github', accountRef);

@@ -77,14 +77,19 @@ export function validateInboxGrouping(channel, raw = {}) {
 /**
  * Полный namespaced grouping key одного сообщения.
  * Возвращаем tuple, а не строку с разделителями: provider ids свободно содержат `:`/`#`.
+ *
+ * `parentResolved: false` означает, что родителя ответа в этой очереди нет (он старше
+ * activation, из закрытой темы или просто не читается). Тогда ветка `parent` пропускается:
+ * ключ `['parent', <чужой id>]` уникален у каждого такого сообщения, то есть НЕ склеивает
+ * ничего и при этом отменяет обычную склейку по теме и автору.
  */
-export function inboxBundleKeyOf(message, activationEpoch, { bundleKeyOf } = {}) {
+export function inboxBundleKeyOf(message, activationEpoch, { bundleKeyOf, parentResolved = true } = {}) {
   const epoch = assertEpoch(activationEpoch);
   const sourceId = assertNativeSegment(message?.source?.id, 'message.source.id');
   const custom = customKeyOf(bundleKeyOf, message);
   let local;
   if (custom) local = custom;
-  else if (message.parentId !== null) local = ['parent', message.parentId];
+  else if (message.parentId !== null && parentResolved) local = ['parent', message.parentId];
   else if (message.groupId !== null) local = ['group', message.groupId];
   else if (message.source.threadId !== null && message.author.id !== null) {
     local = ['thread-author', message.source.threadId, message.author.id];
@@ -192,18 +197,25 @@ export function bundleInboxMessages(entries, {
   const byMessage = new Map();
 
   for (const entry of normalized) {
-    const tuple = inboxBundleKeyOf(entry.message, entry.activationEpoch, contract);
+    const parentSlot = entry.message.parentId === null ? null : canonicalKey([
+      entry.message.source.id,
+      entry.activationEpoch,
+      entry.message.parentId,
+    ]);
+    // Родитель считается известным, только если он сам попал в эту очередь. Ответ на
+    // сообщение вне её общего bundle не имеет, поэтому и ключ по нему строить нельзя.
+    const parentResolved = parentSlot !== null && byMessage.has(parentSlot);
+    const tuple = inboxBundleKeyOf(entry.message, entry.activationEpoch, {
+      ...contract,
+      parentResolved,
+    });
     const groupingKey = canonicalKey(tuple);
     const at = activityAt(entry.message);
     let target = null;
 
     // Ответ на известное сообщение наследует его bundle, но только внутри той же epoch/source.
-    if (!contract.bundleKeyOf && entry.message.parentId !== null) {
-      target = byMessage.get(canonicalKey([
-        entry.message.source.id,
-        entry.activationEpoch,
-        entry.message.parentId,
-      ])) || null;
+    if (!contract.bundleKeyOf && parentResolved) {
+      target = byMessage.get(parentSlot) || null;
       if (target && at * 1000 - target.lastAt * 1000 >= contract.settleMs) target = null;
     }
     if (!target) {

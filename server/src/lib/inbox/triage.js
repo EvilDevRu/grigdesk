@@ -7,7 +7,7 @@ import path from 'node:path';
 import { resolveModelRef } from '../chat/model-ref.js';
 import { getExecutor } from '../executors/index.js';
 import { getModelsRegistry } from '../models-registry.js';
-import { inboxTranscript, INBOX_DRAFT_LIMITS } from './draft.js';
+import { inboxTranscript, visibleInboxMessages, INBOX_DRAFT_LIMITS } from './draft.js';
 
 export const INBOX_TRIAGE_KINDS = Object.freeze(['bug', 'wish', 'none']);
 export const INBOX_TRIAGE_LIMITS = Object.freeze({
@@ -19,10 +19,12 @@ export const INBOX_TRIAGE_LIMITS = Object.freeze({
   attachmentPaths: 24,
   attachmentBytes: 20 * 1024 * 1024,
   attachmentTotalBytes: 80 * 1024 * 1024,
+  statements: 10,
 });
 export const INBOX_AUTO_MAX_AGE_MS = 86_400_000;
 
 const VERDICT_KEYS = ['kind', 'confidence', 'title', 'description', 'reason'];
+const STATEMENT_KEYS = [...VERDICT_KEYS, 'messages'];
 const KIND_HINT = Object.freeze({
   bug: 'баги и поломки',
   wish: 'идеи и пожелания',
@@ -50,10 +52,10 @@ function clamp(value, limit) {
   return `${result.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-function exactVerdict(value) {
+function exactKeys(value, expectedKeys) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value).sort();
-  const expected = [...VERDICT_KEYS].sort();
+  const expected = [...expectedKeys].sort();
   return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
 }
 
@@ -161,24 +163,38 @@ export async function loadInboxVisualInputs(visualPaths, { config = {}, fsImpl =
   return { ok: true, images };
 }
 
-export function buildInboxTriagePrompt(item, { attachmentAnalysis = null } = {}) {
-  const label = text(item?.channelLabel) || text(item?.channel) || 'канал';
-  const source = text(item?.source?.title) || 'без названия';
-  const hint = KIND_HINT[item?.policy?.kind] || 'обращения пользователей';
-  const transcript = inboxTranscript(item?.messages || [], {
+function promptContext(item, attachmentAnalysis, { numbered = false } = {}) {
+  const messages = visibleInboxMessages(item?.messages || []);
+  const transcript = inboxTranscript(messages, {
     limit: INBOX_TRIAGE_LIMITS.transcript,
-  }).text;
+    numbered,
+  });
   const attachments = safeAttachmentAnalysis(attachmentAnalysis);
-  const attachmentBlock = attachments.text
-    ? ['', 'Содержимое вложений, подготовленное сервером:', attachments.text]
-    : [];
-  const visualBlock = attachments.visualPaths.length
-    ? [
-      '',
-      `Вместе с запросом переданы визуальные вложения и кадры видео: ${attachments.visualPaths.length}.`,
-      'Обязательно изучи сами изображения перед решением.',
-    ]
-    : [];
+  return {
+    label: text(item?.channelLabel) || text(item?.channel) || 'канал',
+    source: text(item?.source?.title) || 'без названия',
+    hint: KIND_HINT[item?.policy?.kind] || 'обращения пользователей',
+    transcript: transcript.text,
+    truncated: transcript.truncated,
+    total: messages.length,
+    // Номера существуют только у показанных строк: обрезанный хвост модель не читала,
+    // и приписать ему постановку она не имеет права.
+    messageCount: Number.isSafeInteger(transcript.shown) ? transcript.shown : messages.length,
+    attachmentBlock: attachments.text
+      ? ['', 'Содержимое вложений, подготовленное сервером:', attachments.text]
+      : [],
+    visualBlock: attachments.visualPaths.length
+      ? [
+        '',
+        `Вместе с запросом переданы визуальные вложения и кадры видео: ${attachments.visualPaths.length}.`,
+        'Обязательно изучи сами изображения перед решением.',
+      ]
+      : [],
+  };
+}
+
+export function buildInboxTriagePrompt(item, { attachmentAnalysis = null } = {}) {
+  const ctx = promptContext(item, attachmentAnalysis);
   return {
     system: [
       'Ты разбираешь обращение из рабочего канала и решаешь, нужна ли по нему задача.',
@@ -190,20 +206,59 @@ export function buildInboxTriagePrompt(item, { attachmentAnalysis = null } = {})
       'Если не уверен, снижай confidence: обращение останется человеку.',
     ].join('\n'),
     user: [
-      `Канал: ${label}. Источник: ${source}.`,
-      `По правилу сюда поступают: ${hint}. Это подсказка, а не готовый ответ.`,
+      `Канал: ${ctx.label}. Источник: ${ctx.source}.`,
+      `По правилу сюда поступают: ${ctx.hint}. Это подсказка, а не готовый ответ.`,
       '',
       'Обращение:',
-      transcript,
-      ...attachmentBlock,
-      ...visualBlock,
+      ctx.transcript,
+      ...ctx.attachmentBlock,
+      ...ctx.visualBlock,
     ].join('\n'),
   };
 }
 
-export function parseInboxTriageVerdict(reply) {
+/**
+ * Карточка — это разговор, а не одна просьба: в неё склеены все сообщения человека
+ * за окно тишины. Поэтому модель отвечает не одним вердиктом, а РАЗБИЕНИЕМ: список
+ * поводов, у каждого свои номера сообщений. Номера — единственный способ сказать,
+ * какая часть разговора относится к какой задаче, а какая является болтовнёй.
+ */
+export function buildInboxTriagePlanPrompt(item, { attachmentAnalysis = null } = {}) {
+  const ctx = promptContext(item, attachmentAnalysis, { numbered: true });
+  return {
+    messageCount: ctx.messageCount,
+    truncated: ctx.truncated,
+    system: [
+      'Ты разбираешь обращение из рабочего канала: подряд идущие сообщения одного разговора.',
+      'В нём может быть несколько независимых поводов, а может не быть ни одного.',
+      'Ответь одним JSON-объектом без markdown и любого другого текста.',
+      'Формат: {"statements": [ … ]} — по одному элементу на каждый отдельный повод.',
+      'Поля элемента: messages (массив номеров сообщений), kind ("bug"|"wish"|"none"),',
+      'confidence (число 0..1), title (одна строка), description (только подтверждённая суть),',
+      'reason (одно краткое предложение с причиной решения).',
+      'Сообщения пронумерованы (#1, #2 …). Каждый номер укажи ровно один раз и распредели все.',
+      'Сообщения одного повода объединяй в один элемент, даже если между ними есть посторонние.',
+      'Уточнение к соседнему сообщению — часть того же повода, а не новый.',
+      'Благодарности, разговор и вопросы без задачи собери в элемент с kind "none".',
+      'Ничего не додумывай. Если не уверен, снижай confidence: повод останется человеку.',
+    ].join('\n'),
+    user: [
+      `Канал: ${ctx.label}. Источник: ${ctx.source}.`,
+      `По правилу сюда поступают: ${ctx.hint}. Это подсказка, а не готовый ответ.`,
+      '',
+      ctx.truncated
+        ? `Показаны первые ${ctx.messageCount} сообщений из ${ctx.total}; остальные разберёт человек.`
+        : `Сообщений в обращении: ${ctx.messageCount}.`,
+      ctx.transcript,
+      ...ctx.attachmentBlock,
+      ...ctx.visualBlock,
+    ].join('\n'),
+  };
+}
+
+function jsonCandidates(reply) {
   const source = text(reply);
-  if (!source) return null;
+  if (!source) return [];
   const candidates = [];
   const fence = source.match(/```(?:json)?\s*([\s\S]*?)```/iu);
   if (fence) candidates.push(fence[1]);
@@ -211,22 +266,80 @@ export function parseInboxTriageVerdict(reply) {
   const close = source.lastIndexOf('}');
   if (open >= 0 && close > open) candidates.push(source.slice(open, close + 1));
   candidates.push(source);
+  return candidates;
+}
 
-  for (const candidate of candidates) {
+function verdictFields(raw) {
+  if (!INBOX_TRIAGE_KINDS.includes(raw.kind)) return null;
+  const title = bounded(raw.title, INBOX_DRAFT_LIMITS.title);
+  const description = bounded(raw.description, INBOX_TRIAGE_LIMITS.summary);
+  const reason = bounded(raw.reason, INBOX_TRIAGE_LIMITS.reason);
+  if (title === null || description === null || reason === null) return null;
+  const confidence = typeof raw.confidence === 'number'
+    && Number.isFinite(raw.confidence)
+    && raw.confidence >= 0
+    && raw.confidence <= 1
+    ? raw.confidence
+    : 0;
+  return { kind: raw.kind, confidence, title, description, reason };
+}
+
+export function parseInboxTriageVerdict(reply) {
+  for (const candidate of jsonCandidates(reply)) {
     let raw;
     try { raw = JSON.parse(candidate); } catch { continue; }
-    if (!exactVerdict(raw) || !INBOX_TRIAGE_KINDS.includes(raw.kind)) continue;
-    const title = bounded(raw.title, INBOX_DRAFT_LIMITS.title);
-    const description = bounded(raw.description, INBOX_TRIAGE_LIMITS.summary);
-    const reason = bounded(raw.reason, INBOX_TRIAGE_LIMITS.reason);
-    if (title === null || description === null || reason === null) continue;
-    const confidence = typeof raw.confidence === 'number'
-      && Number.isFinite(raw.confidence)
-      && raw.confidence >= 0
-      && raw.confidence <= 1
-      ? raw.confidence
-      : 0;
-    return { kind: raw.kind, confidence, title, description, reason };
+    if (!exactKeys(raw, VERDICT_KEYS)) continue;
+    const verdict = verdictFields(raw);
+    if (verdict) return verdict;
+  }
+  return null;
+}
+
+function statementFields(raw, messageCount, used) {
+  if (!exactKeys(raw, STATEMENT_KEYS)) return null;
+  const verdict = verdictFields(raw);
+  if (!verdict) return null;
+  if (!Array.isArray(raw.messages)
+      || raw.messages.length < 1
+      || raw.messages.length > messageCount) return null;
+  const messages = [];
+  for (const index of raw.messages) {
+    if (!Number.isSafeInteger(index) || index < 1 || index > messageCount) return null;
+    // Пересечение — отказ всему плану: два решения на одно сообщение запрещены
+    // контрактом decisions, и молча выбросить лишнее означало бы решить за модель.
+    if (used.has(index)) return null;
+    used.add(index);
+    messages.push(index);
+  }
+  return { ...verdict, messages: messages.sort((a, b) => a - b) };
+}
+
+/**
+ * План разбиения. Непокрытые номера — законный исход: их сообщения остаются человеку,
+ * карточка становится `mixed`. А вот пересечение или номер вне диапазона отвергают
+ * весь план: это уже не «модель не уверена», а ответ не по контракту.
+ */
+export function parseInboxTriagePlan(reply, { messageCount = 0 } = {}) {
+  if (!Number.isSafeInteger(messageCount) || messageCount < 1) return null;
+  for (const candidate of jsonCandidates(reply)) {
+    let raw;
+    try { raw = JSON.parse(candidate); } catch { continue; }
+    if (!exactKeys(raw, ['statements'])
+        || !Array.isArray(raw.statements)
+        || raw.statements.length < 1
+        || raw.statements.length > INBOX_TRIAGE_LIMITS.statements) continue;
+    const used = new Set();
+    const statements = [];
+    for (const entry of raw.statements) {
+      const statement = statementFields(entry, messageCount, used);
+      if (!statement) {
+        statements.length = 0;
+        break;
+      }
+      statements.push(statement);
+    }
+    if (!statements.length) continue;
+    return { statements, messageCount, covered: used.size };
   }
   return null;
 }
@@ -252,6 +365,33 @@ export function decideInboxAutoAction({ item, verdict, createdToday = 0, nowMs =
   return { action: 'create', reason: verdict.reason || 'model_task' };
 }
 
+/**
+ * Ворота карточки и ворота каждого повода — разные вещи. Возраст, cold, статус и
+ * участие проверяются один раз на карточку; уверенность и дневная квота — на каждый
+ * повод отдельно, и квота тикает по ЗАДАЧАМ, а не по обращениям. Неуверенный повод
+ * не отменяет соседние: его сообщения просто остаются человеку.
+ */
+export function decideInboxAutoPlan({ item, plan, createdToday = 0, nowMs = 0 } = {}) {
+  const card = decideInboxAutoAction({ item, createdToday, nowMs });
+  if (card.action !== 'judge') return { ...card, statements: [] };
+  if (plan === undefined) return { action: 'judge', reason: 'model_required', statements: [] };
+  if (!plan || !Array.isArray(plan.statements) || plan.statements.length < 1) {
+    return { action: 'unclear', reason: 'invalid_plan', statements: [] };
+  }
+  let made = 0;
+  const statements = plan.statements.map((statement) => {
+    const decision = decideInboxAutoAction({
+      item,
+      verdict: statement,
+      createdToday: createdToday + made,
+      nowMs,
+    });
+    if (decision.action === 'create') made += 1;
+    return { statement, action: decision.action, reason: decision.reason };
+  });
+  return { action: 'run', reason: 'model_plan', statements };
+}
+
 export function countInboxAutoTasks(decisions, { scopeRef, sinceMs = 0 } = {}) {
   if (typeof scopeRef !== 'string' || !Number.isSafeInteger(sinceMs) || sinceMs < 0) return 0;
   return (Array.isArray(decisions) ? decisions : []).filter((decision) => (
@@ -273,13 +413,15 @@ export function inboxAutoNote({ model = '', verdict = null, reason = '' } = {}) 
   return parts.join(' · ');
 }
 
-export function buildInboxAutoTask({ item, verdict } = {}) {
+export function buildInboxAutoTask({ item, verdict, sourceUrl: override = null } = {}) {
   const title = clamp(verdict?.title, INBOX_DRAFT_LIMITS.title)
     || clamp(item?.draft?.title, INBOX_DRAFT_LIMITS.title);
   const summary = clamp(verdict?.description, INBOX_TRIAGE_LIMITS.summary);
   const label = clamp(item?.channelLabel || item?.channel, 256) || 'канал';
+  // Ссылка ведёт на первое сообщение ИМЕННО этого повода: у разбитой карточки
+  // голова разговора и голова задачи — разные сообщения.
   const sourceUrl = clamp(
-    item?.sourceUrl || item?.draft?.source?.url,
+    override || item?.sourceUrl || item?.draft?.source?.url,
     INBOX_DRAFT_LIMITS.sourceUrlChars,
   );
   const source = sourceUrl ? `Источник · ${label}: ${sourceUrl}` : '';
@@ -346,7 +488,9 @@ export async function runInboxTriage({
   executorResolver = getExecutor,
   log = console,
   signal,
+  mode = 'verdict',
 } = {}) {
+  if (!['verdict', 'plan'].includes(mode)) return { ok: false, error: 'invalid_triage_mode' };
   const analysis = safeAttachmentAnalysis(attachmentAnalysis);
   if (analysis.visualInvalid) return { ok: false, error: 'invalid_attachment_path' };
   if (analysis.visualOverflow) return { ok: false, error: 'attachment_media_limit' };
@@ -372,7 +516,9 @@ export async function runInboxTriage({
   if (loaded.images.some((image) => !executor.untrustedInput.mediaTypes?.includes(image.mediaType))) {
     return { ok: false, error: 'unsupported_media' };
   }
-  const prompt = buildInboxTriagePrompt(item, { attachmentAnalysis: analysis });
+  const prompt = mode === 'plan'
+    ? buildInboxTriagePlanPrompt(item, { attachmentAnalysis: analysis })
+    : buildInboxTriagePrompt(item, { attachmentAnalysis: analysis });
   let output;
   try {
     output = await executor.runUntrusted({
@@ -393,9 +539,11 @@ export async function runInboxTriage({
   }
   const reply = text(output?.reply);
   if (!reply) return { ok: false, error: 'empty_reply' };
-  return {
-    ok: true,
-    verdict: parseInboxTriageVerdict(reply),
-    model: `${provider}/${model}`,
-  };
+  const result = { ok: true, model: `${provider}/${model}` };
+  if (mode === 'plan') {
+    result.plan = parseInboxTriagePlan(reply, { messageCount: prompt.messageCount });
+  } else {
+    result.verdict = parseInboxTriageVerdict(reply);
+  }
+  return result;
 }

@@ -104,6 +104,19 @@ function verdict(over = {}) {
   };
 }
 
+/**
+ * План разбора карточки. По умолчанию — один повод на всю карточку: ровно то,
+ * что делал прежний одиночный вердикт.
+ */
+function plan(...entries) {
+  const statements = entries.map((entry, index) => ({
+    ...(entry.statement || entry),
+    messages: entry.messages || [index + 1],
+  }));
+  const covered = new Set(statements.flatMap((statement) => statement.messages));
+  return { statements, messageCount: covered.size, covered: covered.size };
+}
+
 function coded(code, details) {
   return Object.assign(new Error(code), { code, details });
 }
@@ -127,6 +140,7 @@ function harness({
   task,
   dismiss,
   gate,
+  resolveItem,
   attachmentAnalyzer = null,
   enabled = true,
   configured = true,
@@ -134,7 +148,16 @@ function harness({
   idleMs = 60_000,
 } = {}) {
   const calls = {
-    snapshot: 0, gate: [], triage: [], readiness: [], task: [], dismiss: [], analysis: [], model: 0, changed: [],
+    snapshot: 0,
+    gate: [],
+    triage: [],
+    readiness: [],
+    task: [],
+    dismiss: [],
+    analysis: [],
+    resolve: [],
+    model: 0,
+    changed: [],
   };
   const live = { enabled, configured, model };
   const coordinator = {
@@ -147,8 +170,10 @@ function harness({
       if (gate) return gate(ref, options, calls.gate.length);
       return { channel: 'ok' };
     },
-    async resolveItem() {
-      throw new Error('Тестовый attachmentAnalyzer не должен materialize без явного сценария.');
+    async resolveItem(ref, options) {
+      calls.resolve.push({ ref, options });
+      if (resolveItem) return resolveItem(ref, options, calls.resolve.length);
+      throw new Error('Тестовый сценарий не ожидал resolveItem.');
     },
   };
   const taskService = {
@@ -175,7 +200,7 @@ function harness({
     } : null,
     triage: triage || (async (args) => {
       calls.triage.push(args);
-      return { ok: true, verdict: verdict(), model: 'claude/opus' };
+      return { ok: true, plan: plan(verdict()), model: 'claude/opus' };
     }),
     triageReadiness: triageReadiness || (async (args) => {
       calls.readiness.push(args);
@@ -303,9 +328,9 @@ test('create и none-dismiss идут через общий service с auto meta
       calls.triage.push(args);
       return {
         ok: true,
-        verdict: args.item.ref === dismiss.ref
+        plan: plan(args.item.ref === dismiss.ref
           ? verdict({ kind: 'none', reason: 'Это просто благодарность.' })
-          : verdict(),
+          : verdict()),
         model: 'claude/opus',
       };
     },
@@ -330,6 +355,105 @@ test('create и none-dismiss идут через общий service с auto meta
   assert.match(calls.dismiss[0].options.note, /благодарность/u);
   assert.equal(calls.gate.length, 4, 'каждый verdict окружён generation/activation gates');
   assert.ok(calls.gate.every((call) => call.options.generation === 'generation-1'));
+});
+
+/** Карточка-разговор: несколько сообщений одного человека подряд. */
+function conversation(channel, id, count) {
+  const base = inboxItem(channel, id);
+  const head = base.messages[0];
+  const accountRef = `acc_auto_${channel}_0001`;
+  const refs = new InboxRefCodec({ channel, accountRef });
+  return {
+    ...base,
+    messages: Array.from({ length: count }, (unused, index) => ({
+      ...head,
+      id: `message:${id}:${index + 1}`,
+      occurredAt: head.occurredAt + index * 10,
+      text: `Сообщение ${index + 1}`,
+      messageRef: refs.message(head.source.id, `message:${id}:${index + 1}`),
+    })),
+  };
+}
+
+test('одна карточка разбирается на несколько задач по номерам сообщений', async () => {
+  const card = conversation('telegram', 'split', 6);
+  const refOf = (index) => card.messages[index - 1].messageRef;
+  const revisions = [`v1_${'B'.repeat(43)}`, `v1_${'C'.repeat(43)}`, `v1_${'D'.repeat(43)}`];
+  const { worker, calls } = harness({
+    channels: [inboxChannel('telegram', [card])],
+    triage: async (args) => {
+      calls.triage.push(args);
+      return {
+        ok: true,
+        model: 'claude/opus',
+        plan: plan(
+          { statement: verdict({ description: 'Первая просьба.' }), messages: [1, 2, 3] },
+          { statement: verdict({ kind: 'none', reason: 'Просто болтовня.' }), messages: [4] },
+          { statement: verdict({ description: 'Вторая просьба.' }), messages: [5, 6] },
+        ),
+      };
+    },
+    // Каждое решение меняет revision карточки: следующая постановка обязана взять свежую.
+    resolveItem: async (ref, options, callNumber) => ({
+      generation: 'generation-1',
+      channelState: { readOnly: false, connection: 'connected', participation: 'active' },
+      item: { ...card, revision: revisions[callNumber - 1] },
+      context: {
+        sourceUrl: async ({ message }) => `https://t.me/c/1/${message.id}`,
+      },
+      release: async () => {},
+    }),
+  });
+
+  const result = await worker.tick({ nowMs: NOW });
+
+  assert.equal(result.judged, 1, 'разбиение стоит один вызов модели, а не по одному на задачу');
+  assert.equal(result.created.length, 2);
+  assert.equal(result.dismissed.length, 1);
+  assert.deepEqual(
+    calls.task.map((call) => call.body.messageRefs),
+    [[refOf(1), refOf(2), refOf(3)], [refOf(5), refOf(6)]],
+  );
+  assert.deepEqual(calls.dismiss[0].body.messageRefs, [refOf(4)]);
+  assert.deepEqual(
+    [...calls.task.map((call) => call.body.revision), calls.dismiss[0].body.revision],
+    [revisions[0], revisions[2], revisions[1]],
+  );
+  // Ссылка ведёт на первое сообщение своей задачи, а не на голову всего разговора.
+  assert.match(calls.task[0].body.description, /Первая просьба\.\n\nИсточник · Telegram: https:\/\/t\.me\/c\/1\/message:split:1$/u);
+  assert.match(calls.task[1].body.description, /Вторая просьба\.\n\nИсточник · Telegram: https:\/\/t\.me\/c\/1\/message:split:5$/u);
+});
+
+test('разбитая карточка останавливается на первом отказе, остаток остаётся человеку', async () => {
+  const card = conversation('telegram', 'partial', 4);
+  const { worker, calls } = harness({
+    channels: [inboxChannel('telegram', [card])],
+    triage: async () => ({
+      ok: true,
+      model: 'claude/opus',
+      plan: plan(
+        { statement: verdict(), messages: [1, 2] },
+        { statement: verdict(), messages: [3, 4] },
+      ),
+    }),
+    resolveItem: async () => ({
+      generation: 'generation-1',
+      channelState: { readOnly: false, connection: 'connected', participation: 'active' },
+      item: card,
+      context: { sourceUrl: async () => 'https://t.me/c/1/2' },
+      release: async () => {},
+    }),
+    task: async (ref, body, options, callNumber) => {
+      if (callNumber === 1) throw coded('stale_item');
+      return { taskId: 'T-2' };
+    },
+  });
+
+  const result = await worker.tick({ nowMs: NOW });
+
+  assert.deepEqual(result.created, []);
+  assert.deepEqual(result.failed, []);
+  assert.equal(calls.task.length, 1, 'после устаревшего состояния второй повод не досылается');
 });
 
 test('вложения обязательно разбираются до модели, а неполный разбор оставляет item человеку', async () => {
@@ -518,7 +642,7 @@ test('round-robin продолжает со следующего канала, �
     perTick: 1,
     triage: async (args) => {
       calls.triage.push(args);
-      return { ok: true, verdict: verdict({ confidence: 0.1 }), model: 'claude/opus' };
+      return { ok: true, plan: plan(verdict({ confidence: 0.1 })), model: 'claude/opus' };
     },
   });
 
@@ -539,12 +663,12 @@ test('fair cursor не даёт нерешаемой голове навсегд
     triage: async (args) => {
       fixture.calls.triage.push(args);
       if (args.item.ref === deep.ref) {
-        return { ok: true, verdict: verdict(), model: 'claude/opus' };
+        return { ok: true, plan: plan(verdict()), model: 'claude/opus' };
       }
       const index = blocked.findIndex((item) => item.ref === args.item.ref);
       return index < 2
         ? { ok: false, error: 'triage_failed' }
-        : { ok: true, verdict: verdict({ confidence: 0.1 }), model: 'claude/opus' };
+        : { ok: true, plan: plan(verdict({ confidence: 0.1 })), model: 'claude/opus' };
     },
   });
 
@@ -584,7 +708,7 @@ test('generation/activation/model recheck отбрасывает устарев�
     triage: async (args) => {
       second.calls.triage.push(args);
       second.live.model = { provider: 'codex', model: 'gpt' };
-      return { ok: true, verdict: verdict(), model: 'claude/opus' };
+      return { ok: true, plan: plan(verdict()), model: 'claude/opus' };
     },
   });
   const result = await second.worker.tick({ nowMs: NOW });
@@ -641,7 +765,7 @@ test('loop просыпается после enable без restart и stop от�
     triage: ({ signal }) => new Promise((resolve) => {
       modelStarted = true;
       signal.addEventListener('abort', () => resolve({
-        ok: true, verdict: verdict(), model: 'claude/opus',
+        ok: true, plan: plan(verdict()), model: 'claude/opus',
       }), { once: true });
     }),
   });

@@ -60,6 +60,35 @@ test('reply chain наследует bundle родителя, groupId явно �
   ]);
 });
 
+test('ответы на РАЗНЫЕ сообщения вне очереди склеиваются по теме и автору', () => {
+  // Живой случай: три подряд идущих сообщения одного человека, каждое — reply на своё
+  // сообщение старше activation. Родителей в очереди нет, поэтому ключ ['parent', …] был
+  // уникален у каждого: одна просьба разъезжалась на три карточки и три отдельные задачи.
+  const bundles = bundleInboxMessages([
+    entry({ id: '20442', parentId: '20300', occurredAt: 1000 }),
+    entry({ id: '20443', parentId: '20301', occurredAt: 1013 }),
+    entry({ id: '20444', parentId: '20302', occurredAt: 1020 }),
+  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_620_000 });
+
+  assert.equal(bundles.length, 1);
+  assert.deepEqual(bundles[0].messages.map((msg) => msg.id), ['20442', '20443', '20444']);
+});
+
+test('известный родитель по-прежнему сильнее темы и автора', () => {
+  // Обратная сторона: пока родитель в очереди, ответ обязан уехать в его связку даже от
+  // другого автора — иначе обсуждение одного повода распалось бы по участникам.
+  const bundles = bundleInboxMessages([
+    entry({ id: 'root', occurredAt: 1000, author: { id: 'a', name: 'A' } }),
+    entry({ id: 'other', occurredAt: 1005, author: { id: 'b', name: 'B' } }),
+    entry({ id: 'reply', parentId: 'root', occurredAt: 1010, author: { id: 'b', name: 'B' } }),
+  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_610_000 });
+
+  assert.deepEqual(bundles.map((bundle) => bundle.messages.map((msg) => msg.id)), [
+    ['root', 'reply'],
+    ['other'],
+  ]);
+});
+
 test('source.id и activationEpoch namespaced: одинаковые IDs не пересекаются', () => {
   const bundles = bundleInboxMessages([
     entry({ id: 'same', source: { id: 'a', title: '', threadId: null } }, 1),

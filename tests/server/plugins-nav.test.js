@@ -30,7 +30,17 @@ test('системные инструменты имеют явные group/orde
   const telegram = SYSTEM.find((plugin) => plugin.id === 'telegram');
   const github = SYSTEM.find((plugin) => plugin.id === 'github');
   assert.equal(inbox.defaultEnabled, true);
-  assert.deepEqual(inbox.settings.map((setting) => setting.key), ['triageModel']);
+  assert.deepEqual(
+    inbox.settings.map((setting) => setting.key),
+    ['triageModel', 'attachPhotos', 'attachVideos'],
+  );
+  // Умолчания загрузки — часть контракта: фотографии в задаче полезны, видео
+  // раздувает портал и уже пересказано транскриптом.
+  assert.deepEqual(
+    inbox.settings.filter((setting) => setting.type === 'checkbox')
+      .map((setting) => [setting.key, setting.default]),
+    [['attachPhotos', true], ['attachVideos', false]],
+  );
   assert.deepEqual(telegram.settings, []);
   assert.equal(github.defaultEnabled, false);
 
@@ -50,9 +60,10 @@ test('системные инструменты имеют явные group/orde
 test('Inbox не импортирует и не использует Telegram-owned модель как fallback', () => {
   const inbox = SYSTEM.find((plugin) => plugin.id === 'inbox');
   const oldModel = { provider: 'codex', model: 'old-model' };
+  const defaults = { attachPhotos: true, attachVideos: false };
   assert.deepEqual(settingsValues({
     pluginSettings: { telegram: { triageModel: oldModel } },
-  }, inbox), { triageModel: null });
+  }, inbox), { triageModel: null, ...defaults });
 
   const currentModel = { provider: 'codex', model: 'current-model' };
   assert.deepEqual(settingsValues({
@@ -60,7 +71,7 @@ test('Inbox не импортирует и не использует Telegram-ow
       telegram: { triageModel: oldModel },
       inbox: { triageModel: currentModel },
     },
-  }, inbox), { triageModel: currentModel });
+  }, inbox), { triageModel: currentModel, ...defaults });
 });
 
 test('user plugin scanner протаскивает nav.group/order и оставляет legacy manifest в rail', async () => {

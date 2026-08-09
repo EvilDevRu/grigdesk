@@ -6,12 +6,16 @@ import test from 'node:test';
 
 import {
   buildInboxAutoTask,
+  buildInboxTriagePlanPrompt,
   buildInboxTriagePrompt,
   countInboxAutoTasks,
   decideInboxAutoAction,
+  decideInboxAutoPlan,
   INBOX_TRIAGE_KINDS,
+  INBOX_TRIAGE_LIMITS,
   loadInboxVisualInputs,
   normalizeInboxTriageModel,
+  parseInboxTriagePlan,
   parseInboxTriageVerdict,
   resolveInboxTriageTarget,
   runInboxTriage,
@@ -139,6 +143,113 @@ test('model verdict требует exact bounded schema и fail-closed confidenc
   assert.equal(parseInboxTriageVerdict(JSON.stringify(verdict({ confidence: 95 }))).confidence, 0);
   assert.equal(parseInboxTriageVerdict(JSON.stringify(verdict({ confidence: '0.9' }))).confidence, 0);
   assert.deepEqual(INBOX_TRIAGE_KINDS, ['bug', 'wish', 'none']);
+});
+
+const conversation = (count) => item({
+  messages: Array.from({ length: count }, (unused, index) => message({
+    id: `native-message-${index + 1}`,
+    occurredAt: T0 + index * 10,
+    text: `Сообщение ${index + 1}`,
+    attachments: [],
+    messageRef: `typed-message-ref-${index + 1}`,
+  })),
+});
+
+const statement = (messages, over = {}) => ({ ...verdict(over), messages });
+
+test('план разбора нумерует сообщения и требует от модели распределить все номера', () => {
+  const prompt = buildInboxTriagePlanPrompt(conversation(3));
+  assert.equal(prompt.messageCount, 3);
+  assert.equal(prompt.truncated, false);
+  assert.match(prompt.system, /"statements"/u);
+  assert.match(prompt.system, /каждый номер укажи ровно один раз/iu);
+  assert.match(prompt.user, /Сообщений в обращении: 3/u);
+  for (const number of ['#1 ', '#2 ', '#3 ']) assert.ok(prompt.user.includes(number), number);
+  assert.doesNotMatch(JSON.stringify(prompt), /typed-message-ref|native-message/u);
+
+  // Обрезанный хвост номеров не получает вовсе: сослаться на непрочитанное нельзя.
+  const long = buildInboxTriagePlanPrompt(item({
+    messages: Array.from({ length: 400 }, (unused, index) => message({
+      id: `native-message-${index + 1}`,
+      text: 'Очень длинное сообщение. '.repeat(40),
+      attachments: [],
+    })),
+  }));
+  assert.equal(long.truncated, true);
+  assert.ok(long.messageCount < 400 && long.messageCount > 0);
+  assert.match(long.user, new RegExp(`Показаны первые ${long.messageCount} сообщений из 400`, 'u'));
+  assert.ok(long.user.includes(`#${long.messageCount} `));
+  assert.ok(!long.user.includes(`#${long.messageCount + 1} `));
+});
+
+test('план принимает разбиение, отвергает пересечение и терпит непокрытые номера', () => {
+  const parse = (statements, messageCount = 6) => parseInboxTriagePlan(
+    JSON.stringify({ statements }),
+    { messageCount },
+  );
+
+  // Ровно случай человека: 3 сообщения на одну задачу, болтовня, 2 на другую.
+  const split = parse([
+    statement([1, 2, 3]),
+    statement([4], { kind: 'none', title: 'Болтовня' }),
+    statement([5, 6], { title: 'Вторая задача' }),
+  ]);
+  assert.deepEqual(split.statements.map((entry) => entry.messages), [[1, 2, 3], [4], [5, 6]]);
+  assert.deepEqual(
+    { covered: split.covered, messageCount: split.messageCount },
+    { covered: 6, messageCount: 6 },
+  );
+  assert.equal(split.statements[1].kind, 'none');
+
+  // Номера возвращаются отсортированными: порядок сообщений задаёт карточка, не модель.
+  assert.deepEqual(parse([statement([3, 1, 2])]).statements[0].messages, [1, 2, 3]);
+
+  // Непокрытые номера законны — их сообщения останутся человеку.
+  assert.equal(parse([statement([1, 2])]).covered, 2);
+
+  // А вот пересечение и выход за диапазон отвергают ВЕСЬ план.
+  assert.equal(parse([statement([1, 2]), statement([2, 3])]), null);
+  assert.equal(parse([statement([0])]), null);
+  assert.equal(parse([statement([7])]), null);
+  assert.equal(parse([statement([1.5])]), null);
+  assert.equal(parse([statement([])]), null);
+  assert.equal(parse([{ ...verdict() }]), null, 'элемент без messages — не постановка');
+  assert.equal(parse([statement([1], { kind: 'question' })]), null);
+  assert.equal(parseInboxTriagePlan(JSON.stringify({ statements: [] }), { messageCount: 1 }), null);
+  assert.equal(parseInboxTriagePlan(JSON.stringify(verdict()), { messageCount: 1 }), null);
+  assert.equal(parse(
+    Array.from({ length: INBOX_TRIAGE_LIMITS.statements + 1 }, (u, i) => statement([i + 1])),
+    INBOX_TRIAGE_LIMITS.statements + 1,
+  ), null);
+});
+
+test('ворота карточки общие, а уверенность и квота считаются по каждой постановке', () => {
+  const card = conversation(4);
+  const plan = {
+    statements: [
+      statement([1, 2]),
+      statement([3], { confidence: 0.5 }),
+      statement([4], { kind: 'none' }),
+    ],
+  };
+  const outcome = decideInboxAutoPlan({ item: card, plan, nowMs: T0 * 1000 });
+  assert.equal(outcome.action, 'run');
+  assert.deepEqual(outcome.statements.map((entry) => entry.action), ['create', 'unsure', 'dismiss']);
+
+  // maxPerDay=2 у фикстуры: третья задача подряд упирается в квоту и остаётся человеку.
+  const three = { statements: [statement([1]), statement([2]), statement([3])] };
+  assert.deepEqual(
+    decideInboxAutoPlan({ item: card, plan: three, nowMs: T0 * 1000 })
+      .statements.map((entry) => entry.action),
+    ['create', 'create', 'limit'],
+  );
+
+  // Ворота карточки перекрывают план целиком и до перебора постановок.
+  assert.equal(decideInboxAutoPlan({
+    item: conversation(2), plan, nowMs: T0 * 1000 + 86_400_001,
+  }).action, 'old');
+  assert.equal(decideInboxAutoPlan({ item: card, plan: null, nowMs: T0 * 1000 }).action, 'unclear');
+  assert.equal(decideInboxAutoPlan({ item: card, nowMs: T0 * 1000 }).action, 'judge');
 });
 
 test('auto decision соблюдает new/cold/24h/quota/confidence границы', () => {

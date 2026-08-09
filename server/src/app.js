@@ -33,6 +33,7 @@ import { createGitHubAccountContextFactory } from './lib/github/account-context.
 import { GitHubConnection } from './lib/github/connection.js';
 import { GitHubCredentialsStore } from './lib/github/credentials-store.js';
 import { createGitHubInboxChannel } from './lib/github/inbox-channel.js';
+import { INBOX_REF_LIMITS } from './lib/inbox/identity.js';
 import { InboxCoordinator } from './lib/inbox/coordinator.js';
 import { InboxAttachmentAnalyzer } from './lib/inbox/attachment-analysis.js';
 import { InboxTaskService } from './lib/inbox/task-service.js';
@@ -114,6 +115,13 @@ async function build() {
     // и переписка перестала сохраняться совсем (терялась на F5 и «стопе»). Тело чатов
     // теперь режется на отдельные запросы (store/chat), а этот лимит — общая страховка.
     bodyLimit: 64 * 1024 ** 2,
+    // Дефолтные 100 символов на :param — это ровно вдвое меньше обычного Inbox ref
+    // (`/api/inbox/items/:ref/dismiss`, ~220 символов base64url). Роутер отвечал 414
+    // FST_ERR_MAX_PARAM_LENGTH раньше любого обработчика, поэтому ручные «Поставить
+    // задачу», «Пропустить» и «Вернуть на разбор» не работали вовсе, а автомат — работал
+    // (он ходит внутри процесса, мимо HTTP). Потолок берётся у кодека refs
+    // (`INBOX_REF_LIMITS.encodedChars`), чтобы предела правды не было два.
+    maxParamLength: INBOX_REF_LIMITS.encodedChars,
   });
 
   // CORS нужен только в dev (vite на другом порту). В проде фронт — тот же origin.
@@ -239,6 +247,12 @@ async function build() {
       return `${base}/company/personal/user/${identity.userId}/tasks/task/view/${taskId}/`;
     },
     attachmentAnalyzer: inboxAttachmentAnalyzer,
+    // Читается живьём перед каждой загрузкой: галка в настройках действует
+    // на следующую же задачу, без рестарта.
+    attachmentPolicy: () => ({
+      photos: fastify.pluginSettings('inbox')?.attachPhotos !== false,
+      videos: fastify.pluginSettings('inbox')?.attachVideos === true,
+    }),
     attachmentTriage: ({ item, attachmentAnalysis }) => runInboxTriage({
       item,
       attachmentAnalysis,

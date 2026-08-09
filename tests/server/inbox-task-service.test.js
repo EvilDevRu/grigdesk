@@ -123,7 +123,16 @@ function fixture(over = {}) {
       calls.materialize += 1;
       calls.materializedRefs.push(attachments.map((attachment) => attachment.ref));
       if (over.materialized) return structuredClone(over.materialized);
-      return { files: attachments.map(() => ({ buffer: Buffer.from('x'), name: 'x.png' })), skipped: [] };
+      // `kind` у подготовленного файла обязателен: по нему решается, уедет ли
+      // исходник на портал. Без него настройка загрузки не проверялась бы вовсе.
+      return {
+        files: attachments.map((attachment) => ({
+          buffer: Buffer.from('x'),
+          name: attachment.name || 'x.png',
+          kind: attachment.kind,
+        })),
+        skipped: [],
+      };
     },
     sourceUrl({ message: ownMessage }) {
       calls.sourceUrls.push(ownMessage.id);
@@ -229,6 +238,8 @@ function fixture(over = {}) {
         },
       });
     },
+    // Умолчание повторяет манифест плагина: фотографии грузим, видео нет.
+    attachmentPolicy: () => over.attachmentPolicy || {},
     taskUrlFor: async (id) => over.taskUrl ?? `https://b24.example/tasks/${id}`,
     onChanged: (event) => calls.changed.push(event),
     isEnabled: async () => {
@@ -369,6 +380,7 @@ test('неразобранное вложение блокирует задач�
 
   const bypassed = fixture({
     attachments: [attachment],
+    attachmentPolicy: { photos: true, videos: true },
     attachmentAnalysis: {
       ok: false, complete: false, error: 'speech_unavailable', text: '', visualPaths: [], entries: [],
     },
@@ -381,6 +393,65 @@ test('неразобранное вложение блокирует задач�
   assert.equal(bypassed.calls.analysis, 0, 'явный bypass не повторяет дорогой неудачный разбор');
   assert.equal(bypassed.calls.b24.length, 1);
   assert.equal(bypassed.calls.b24[0].images.length, 1);
+
+  // Обход разбора — это согласие ставить задачу без пересказа содержимого, а не
+  // согласие залить видео на портал: настройка загрузки решает отдельно.
+  const denied = fixture({
+    attachments: [attachment],
+    attachmentAnalysis: {
+      ok: false, complete: false, error: 'speech_unavailable', text: '', visualPaths: [], entries: [],
+    },
+  });
+  await denied.service.task(denied.itemRef, {
+    revision: REVISION,
+    messageRefs: [denied.messageRef],
+    allowUnanalyzedAttachments: true,
+  });
+  assert.deepEqual(denied.calls.b24[0].images, []);
+});
+
+test('настройка решает, что уезжает файлом на портал, а разбора вложений не касается', async () => {
+  const media = [
+    { ref: 'a', dedupeKey: 'photo-1', kind: 'photo', displayLabel: 'фото', name: 'shot.jpg', size: 1 },
+    { ref: 'b', dedupeKey: 'video-1', kind: 'video', displayLabel: 'видео', name: 'bug.mp4', size: 2 },
+    { ref: 'c', dedupeKey: 'doc-1', kind: 'document', displayLabel: 'файл', name: 'log.txt', size: 3 },
+    // Картинка, присланная файлом, остаётся картинкой — тот же признак по
+    // расширению использует и разбор вложений.
+    { ref: 'd', dedupeKey: 'doc-2', kind: 'document', displayLabel: 'файл', name: 'screen.PNG', size: 4 },
+  ];
+  const names = (calls) => calls.b24[0].images.map((file) => file.name).sort();
+
+  const byDefault = fixture({ attachments: media });
+  await byDefault.service.task(byDefault.itemRef, {
+    revision: REVISION,
+    messageRefs: [byDefault.messageRef],
+  });
+  assert.equal(byDefault.calls.analysis, 1, 'разбор вложений идёт независимо от загрузки');
+  assert.deepEqual(names(byDefault.calls), ['log.txt', 'screen.PNG', 'shot.jpg'],
+    'у человека настройка снимает только запрещённое — документ остаётся');
+
+  const noPhotos = fixture({ attachments: media, attachmentPolicy: { photos: false } });
+  await noPhotos.service.task(noPhotos.itemRef, {
+    revision: REVISION,
+    messageRefs: [noPhotos.messageRef],
+  });
+  assert.deepEqual(names(noPhotos.calls), ['log.txt']);
+
+  // Автомату выдаётся ТОЛЬКО разрешённое: человеческого суждения за ним нет,
+  // и документ он на портал не отправляет даже при включённых фотографиях.
+  const auto = fixture({ attachments: media });
+  await auto.service.task(auto.itemRef, {
+    revision: REVISION,
+    messageRefs: [auto.messageRef],
+  }, { by: 'auto', note: '', requireAllAttachments: true });
+  assert.deepEqual(names(auto.calls), ['screen.PNG', 'shot.jpg']);
+
+  const autoAll = fixture({ attachments: media, attachmentPolicy: { photos: true, videos: true } });
+  await autoAll.service.task(autoAll.itemRef, {
+    revision: REVISION,
+    messageRefs: [autoAll.messageRef],
+  }, { by: 'auto', note: '', requireAllAttachments: true });
+  assert.deepEqual(names(autoAll.calls), ['bug.mp4', 'screen.PNG', 'shot.jpg']);
 });
 
 test('визуальное вложение проходит model-разбор до ручного создания задачи', async () => {
@@ -573,6 +644,7 @@ test('channel confirmation идёт после durable decision и одинак�
     revision: REVISION,
     // Клиентский порядок не выбирает адрес ответа: якорь задаёт authoritative item.
     messageRefs: [manual.secondMessageRef, manual.messageRef],
+    title: 'Починить выгрузку остатков',
   });
   assert.equal(result.taskId, '5150');
   assert.deepEqual(manual.calls.events.slice(0, 3), ['b24', 'decision', 'notification']);
@@ -581,6 +653,9 @@ test('channel confirmation идёт после durable decision и одинак�
   assert.equal(manual.calls.notifications[0].source.id, '101');
   assert.equal(manual.calls.notifications[0].taskId, '5150');
   assert.equal(manual.calls.notifications[0].taskUrl, 'https://b24.example/tasks/5150');
+  // Номер задачи не говорит, что именно из разговора в неё уехало: у разбитой
+  // карточки название — единственный способ различить свои задачи.
+  assert.equal(manual.calls.notifications[0].title, 'Починить выгрузку остатков');
 
   const auto = fixture({ notifyTaskCreated: true });
   await auto.service.task(auto.itemRef, {

@@ -48,11 +48,13 @@ const itemOrder = (a, b) => (
   || lexical(a.ref, b.ref)
 );
 
-// Только new/mixed являются очередью, которую нужно продвигать. Полностью
-// skipped item остаётся resettable history, но не может навсегда вытеснить
-// более старый new. Итоговый ответ всё равно сохраняет документированный
-// lastAt/channel/ref order.
-const actionableItem = (item) => item.status === 'new' || item.status === 'mixed';
+// Очередь — это НЕРЕШЁННЫЕ СООБЩЕНИЯ, а не статус карточки. Полностью skipped item
+// остаётся resettable history, но не может навсегда вытеснить более старый new.
+// Статуса для этого мало: карточка, разобранная несколькими решениями (две задачи
+// плюс пропуск — обычный исход разбиения), получает `mixed` при ПОЛНОМ покрытии,
+// и по статусу висела бы в очереди вечно, ничего не предлагая сделать.
+// Итоговый ответ всё равно сохраняет документированный lastAt/channel/ref order.
+const actionableItem = (item) => item.messages.some((message) => !message.decision);
 
 function selectInboxItems(items, limit) {
   const actionable = [];

@@ -212,6 +212,39 @@ test('переключатель отделяет историю, reset пере
   assert.equal(reads(), before + 1);
 });
 
+test('разобранная по частям карточка уходит в историю, а не висит в очереди', async (t) => {
+  const taskDecision = {
+    decisionId: 'decision_0000000000000010', version: 1, status: 'task',
+    taskId: '8300', taskUrl: 'https://portal.test/task/8300', by: 'auto', note: null,
+    decidedAtMs: 1_786_172_400_000,
+  };
+  const skipDecision = {
+    ...taskDecision, decisionId: 'decision_0000000000000011', status: 'skipped',
+    taskId: null, taskUrl: '',
+  };
+  // Итог автоматического разбиения: одно сообщение стало задачей, другое пропущено.
+  const split = item({
+    status: 'mixed',
+    decision: null,
+    messages: [
+      message(MESSAGE_A, { decision: taskDecision }),
+      message(MESSAGE_B, { decision: skipDecision }),
+    ],
+  });
+  const api = { async get() { return response({ items: [split] }); } };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+
+  assert.match(wrapper.get('[data-section="review"]').text(), /К разбору\s+0/u);
+  assert.match(wrapper.get('[data-section="history"]').text(), /История\s+1/u);
+  assert.equal(wrapper.find('[data-status="mixed"]').exists(), false, 'очередь пуста');
+
+  await wrapper.get('[data-section="history"]').trigger('click');
+  const card = wrapper.get('[data-status="mixed"]');
+  assert.match(card.text(), /Разобрано по частям/);
+  assert.doesNotMatch(card.text(), /Частично разобрано/);
+  assert.doesNotMatch(card.text(), /Выберите новые сообщения/);
+});
+
 test('task в истории показывает ссылку и никогда не предлагает возврат', async (t) => {
   const decision = {
     decisionId: 'decision_0000000000000004', version: 1, status: 'task',

@@ -177,6 +177,57 @@ function ensureWritable(resolved) {
   }
 }
 
+/**
+ * Что из подготовленного уезжает НА ПОРТАЛ. Разбор вложений это не трогает:
+ * речь и кадры видео модель читает всегда, ограничивается только загрузка
+ * исходных байтов в B24.
+ *
+ * Настройка называет ровно две группы, и стороны у неё разные по смыслу:
+ * автомату выдаётся ТОЛЬКО разрешённое (человеческого суждения за ним нет),
+ * а у человека настройка снимает запрещённое — выбранные им документы и
+ * голосовые остаются как раньше. Сообщения выбирает человек, а не файлы:
+ * решение «поставить задачу по этим трём сообщениям» не означает согласия
+ * залить на портал сорокамегабайтное видео из них.
+ */
+const PHOTO_KINDS = new Set(['photo', 'image']);
+const VIDEO_KINDS = new Set(['video', 'video_note', 'animation']);
+const IMAGE_EXTENSIONS = new Set(['.bmp', '.gif', '.jpeg', '.jpg', '.png', '.webp']);
+const IMAGE_DOCUMENT_KINDS = new Set(['document', 'sticker']);
+
+function attachmentGroup(file) {
+  const kind = String(file?.kind || '').trim().toLowerCase();
+  if (PHOTO_KINDS.has(kind)) return 'photo';
+  if (VIDEO_KINDS.has(kind)) return 'video';
+  // Картинка, присланная файлом, остаётся картинкой: тот же признак по
+  // расширению использует и разбор вложений.
+  if (IMAGE_DOCUMENT_KINDS.has(kind)) {
+    const name = String(file?.name || '');
+    const dot = name.lastIndexOf('.');
+    if (dot >= 0 && IMAGE_EXTENSIONS.has(name.slice(dot).toLowerCase())) return 'photo';
+  }
+  return 'other';
+}
+
+export function inboxAttachmentPolicy(raw) {
+  const value = isPlainObject(raw) ? raw : {};
+  // Умолчания повторяют манифест плагина: фотографии полезны в задаче, видео
+  // раздувает портал и уже пересказано транскриптом.
+  return {
+    photos: value.photos !== false,
+    videos: value.videos === true,
+  };
+}
+
+export function selectAttachableFiles(files, policy, { by = 'human' } = {}) {
+  const rules = inboxAttachmentPolicy(policy);
+  return (Array.isArray(files) ? files : []).filter((file) => {
+    const group = attachmentGroup(file);
+    if (group === 'photo') return rules.photos;
+    if (group === 'video') return rules.videos;
+    return by === 'human';
+  });
+}
+
 function materialized(value) {
   if (!isPlainObject(value)
       || !Array.isArray(value.files)
@@ -255,6 +306,7 @@ export class InboxTaskService {
     isEnabled,
     attachmentAnalyzer = null,
     attachmentTriage = null,
+    attachmentPolicy = () => ({}),
     now = Date.now,
     log = console,
   } = {}) {
@@ -268,6 +320,7 @@ export class InboxTaskService {
         || typeof onChanged !== 'function' || typeof isEnabled !== 'function'
         || (attachmentAnalyzer !== null && typeof attachmentAnalyzer?.analyze !== 'function')
         || (attachmentTriage !== null && typeof attachmentTriage !== 'function')
+        || typeof attachmentPolicy !== 'function'
         || typeof now !== 'function') {
       fail('invalid_service_config', 'InboxTaskService получил неверные callbacks.', 500);
     }
@@ -279,6 +332,7 @@ export class InboxTaskService {
     this.isEnabled = isEnabled;
     this.attachmentAnalyzer = attachmentAnalyzer;
     this.attachmentTriage = attachmentTriage;
+    this.attachmentPolicy = attachmentPolicy;
     this.now = now;
     this.log = log;
     this.queue = Promise.resolve();
@@ -610,6 +664,26 @@ export class InboxTaskService {
         await this._assertInboxEnabled();
         if (!this.b24.isConfigured()) fail('no_b24', 'Битрикс24 больше не подключён.', 503);
 
+        // Настройка читается ЗДЕСЬ, а не в начале хода: между materialize и
+        // порталом прошли Whisper и model call, и человек мог за это время
+        // выключить загрузку. Из двух прочтений верно то, что ближе к side effect.
+        const attachable = selectAttachableFiles(
+          prepared.files,
+          this.attachmentPolicy(),
+          { by: action.by },
+        );
+        if (attachable.length !== prepared.files.length) {
+          this.log.info?.(
+            {
+              itemRef: second.item.ref,
+              by: action.by,
+              attached: attachable.length,
+              total: prepared.files.length,
+            },
+            'inbox: часть вложений не грузится на портал по настройке плагина',
+          );
+        }
+
         let created;
         try {
           created = await this.b24.createTask({
@@ -618,9 +692,9 @@ export class InboxTaskService {
             groupId: second.item.policy.b24.groupId,
             responsibleId: second.item.policy.b24.responsibleId,
             priority: second.item.policy.b24.priority,
-            // Автомат уже fail-closed разобрал содержимое. В B24 ему нужны
-            // сформулированная постановка и source URL, а не копия provider-файла.
-            images: action.by === 'human' ? prepared.files : [],
+            // Содержимое уже разобрано и пересказано в постановке; на портал
+            // едут только те исходники, которые разрешены настройкой плагина.
+            images: attachable,
           });
         } catch (err) {
           fail(
@@ -708,6 +782,9 @@ export class InboxTaskService {
             message: structuredClone(anchor),
             taskId,
             taskUrl,
+            // Номер задачи ничего не говорит о том, ЧТО из разговора в неё уехало.
+            // У разбитой карточки это единственный способ различить свои задачи.
+            title: finalTitle,
           };
           const resolved = second;
           notification = {

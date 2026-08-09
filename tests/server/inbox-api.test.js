@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
+import { readFile } from 'node:fs/promises';
+
 import inboxModule from '../../server/src/modules/inbox/index.js';
+import { encodeInboxRef, INBOX_REF_LIMITS } from '../../server/src/lib/inbox/identity.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -13,6 +16,7 @@ async function fixture(t, {
   taskServiceOver = {},
   sseBroadcast = null,
   workerOver = {},
+  fastifyOptions = {},
 } = {}) {
   const calls = {
     list: [],
@@ -65,7 +69,7 @@ async function fixture(t, {
     },
     ...taskServiceOver,
   };
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, ...fastifyOptions });
   app.decorate('pluginEnabled', (id) => id === 'inbox' && enabled);
   app.decorate('sse', {
     broadcast: sseBroadcast || ((name, payload) => events.push({ name, payload })),
@@ -309,4 +313,44 @@ test('HTTP error mapping не отражает provider secrets и фиксир�
 
   mode = 'unsafe-url';
   assert.equal((await request()).json().taskUrl, '');
+});
+
+test('настоящий item ref длиннее дефолтного :param — роутеру нужен свой maxParamLength', async (t) => {
+  // Живой ref обычной Telegram-карточки — 220 символов base64url, а дефолт fastify — 100.
+  // Роутер отвечал 414 раньше обработчика, поэтому автомат работал (он ходит внутри
+  // процесса), а все три ручные кнопки человека были мертвы.
+  const ref = encodeInboxRef('item', {
+    channel: 'telegram',
+    accountRef: 'acc_kxNyiLHMy2VvCFq-wxpWpuOxRCfrBQ4Z',
+    localBundleId: Buffer.from(JSON.stringify(
+      [1, 'bundle', '-1002263563987', 1, ['thread-author', '6781', '206307679'], '20451'],
+    ), 'utf8').toString('base64url'),
+  });
+  assert.ok(ref.length > 100, `ref должен быть длиннее дефолта fastify, получено ${ref.length}`);
+  assert.ok(ref.length <= INBOX_REF_LIMITS.encodedChars);
+
+  const payload = { revision: 'rev-1', messageRefs: ['m'] };
+  const defaults = await fixture(t);
+  const rejected = await defaults.app.inject({
+    method: 'POST', url: `/api/inbox/items/${ref}/dismiss`, payload,
+  });
+  assert.equal(rejected.statusCode, 414);
+  assert.equal(rejected.json().code, 'FST_ERR_MAX_PARAM_LENGTH');
+  assert.deepEqual(defaults.calls.dismiss, []);
+
+  const raised = await fixture(t, {
+    fastifyOptions: { maxParamLength: INBOX_REF_LIMITS.encodedChars },
+  });
+  const accepted = await raised.app.inject({
+    method: 'POST', url: `/api/inbox/items/${ref}/dismiss`, payload,
+  });
+  assert.notEqual(accepted.statusCode, 414);
+  assert.deepEqual(raised.calls.dismiss.map((call) => call.ref), [ref]);
+});
+
+test('боевой сервер поднимает maxParamLength до потолка кодека refs', async () => {
+  // Статическая сверка: фикстура выше доказывает, что опция нужна и достаточна, но она
+  // своя. Значение должно быть выражено той же константой, иначе пределов правды станет два.
+  const source = await readFile(new URL('../../server/src/app.js', import.meta.url), 'utf8');
+  assert.match(source, /maxParamLength:\s*INBOX_REF_LIMITS\.encodedChars/);
 });

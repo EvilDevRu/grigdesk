@@ -105,8 +105,12 @@ GitHub v1 даёт один item на `issues/opened`, `settleMs=0`
 и без attachments. GitHub ingress проверяет HMAC по raw body, exact repository/hook/generation
 и durable delivery+semantic dedupe; bounded REST reconciliation восстанавливает потерянные
 webhook deliveries. Общий `InboxAutoTasks` использует модель из плагина Inbox, а включение,
-порог и quota остаются policy конкретного allowlist scope. Любая неопределённость оставляет
-item человеку. SSE `inbox-changed` будит все окна; минутный poll summary нужен отдельно,
+порог и quota остаются policy конкретного allowlist scope. Модель отвечает планом разбиения
+карточки на поводы, поэтому одно обращение может дать несколько задач на непересекающихся
+подмножествах сообщений. Любая неопределённость оставляет соответствующие сообщения человеку.
+Загрузка исходных файлов в B24 — отдельная от разбора ось: галки `attachPhotos`/`attachVideos`
+плагина Inbox читаются перед самой отправкой, автомату выдаётся только разрешённое, у человека
+они снимают запрещённое. SSE `inbox-changed` будит все окна; минутный poll summary нужен отдельно,
 поскольку Telegram item может созреть без нового события. Полный lifecycle, identity,
 storage и operator gates описаны в [inbox.md](inbox.md).
 
