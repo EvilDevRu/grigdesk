@@ -1,13 +1,13 @@
 const PRIORITY = { info: 1, wait: 2, stall: 3 };
 
 /** Бейдж общей очереди живёт на rail-пункте Inbox, а не на странице канала. */
-export function inboxNavBadge({ newCount = 0 } = {}) {
-  const count = Math.max(0, Number(newCount) || 0);
+export function inboxNavBadge({ reviewCount = 0 } = {}) {
+  const count = Math.max(0, Number(reviewCount) || 0);
   return count ? {
     '/inbox': {
       n: count,
       kind: 'info',
-      title: `новых обращений: ${count}`,
+      title: `к разбору: ${count}`,
     },
   } : {};
 }

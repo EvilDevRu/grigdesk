@@ -705,19 +705,27 @@ export class InboxCoordinator {
     const results = await Promise.all(this.channels.map((meta) => (
       this._listChannel(meta, { nowMs, limit })
     )));
-    const counts = new Map(this.channels.map((meta) => [meta.id, { newCount: 0, mixedCount: 0 }]));
+    const counts = new Map(this.channels.map((meta) => [meta.id, {
+      newCount: 0,
+      mixedCount: 0,
+      reviewCount: 0,
+    }]));
     let itemCount = 0;
     for (const result of results) {
       itemCount += result.items.length;
       for (const item of result.items) {
         const own = counts.get(item.channel);
+        // newCount сохраняет смысл «созрело для автомата», а reviewCount повторяет
+        // вкладку человека «К разбору» и поэтому включает ещё hot new.
         if (item.status === 'new' && item.cold) own.newCount += 1;
         if (item.status === 'mixed') own.mixedCount += 1;
+        if (actionableItem(item)) own.reviewCount += 1;
       }
     }
     return {
       newCount: [...counts.values()].reduce((sum, count) => sum + count.newCount, 0),
       mixedCount: [...counts.values()].reduce((sum, count) => sum + count.mixedCount, 0),
+      reviewCount: [...counts.values()].reduce((sum, count) => sum + count.reviewCount, 0),
       truncated: results.some((result) => result.state.truncated) || itemCount > limit,
       channels: results.map((result) => ({
         id: result.state.id,

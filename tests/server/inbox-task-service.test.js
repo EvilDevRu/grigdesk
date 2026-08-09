@@ -606,6 +606,30 @@ test('auto action помечает автора и fail-closed оставляе�
   assert.equal(auto.calls.decide[0].by, 'auto');
   assert.equal(auto.calls.decide[0].note, 'разбор model/test · уверенность 0.9');
 
+  const analyzedAttachment = {
+    ref: 'opaque-auto', dedupeKey: 'video-auto', kind: 'video',
+    displayLabel: 'видео', name: 'bug.mp4', size: 10,
+  };
+  const analyzed = fixture({ attachments: [analyzedAttachment] });
+  const autoDescription = [
+    'После сохранения форма остаётся заблокированной.',
+    'Источник · Telegram: https://t.me/c/123456/789',
+  ].join('\n\n');
+  await analyzed.service.task(analyzed.itemRef, {
+    revision: REVISION,
+    messageRefs: [analyzed.messageRef],
+    title: 'Разблокировать форму после сохранения',
+    description: autoDescription,
+  }, {
+    by: 'auto',
+    note: 'разбор model/test · уверенность 0.9',
+    requireAllAttachments: true,
+  });
+  assert.equal(analyzed.calls.materialize, 1);
+  assert.equal(analyzed.calls.analysis, 1, 'auto остаётся fail-closed перед B24');
+  assert.deepEqual(analyzed.calls.b24[0].images, [], 'auto не загружает исходный файл в B24');
+  assert.equal(analyzed.calls.b24[0].description, autoDescription);
+
   const attachment = {
     ref: 'opaque', dedupeKey: 'image-1', kind: 'image', displayLabel: '', name: '', size: 1,
   };

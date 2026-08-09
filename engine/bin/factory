@@ -612,11 +612,11 @@ source "$FACTORY_HOME/lib/profile-preflight.sh"
 if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   _attempt_state_reason "$REASON" || exit $?
 fi
-# HTTP-слой уже сворачивает перевод строки в пробел; прямой CLI сохраняет ту же
-# совместимость. Остальные границы общие с reason, потому что rejected-комментарий
-# теперь становится доверенным указанием следующему агенту.
+# Границы общие с reason: rejected-комментарий ворот — доверенное указание следующему
+# агенту, а не подпись к решению. Схлопывание переводов строки убрано: замечание на
+# несколько абзацев склеивалось в одну простыню, и разметка (списки, таблица замеров)
+# переставала читаться ровно там, где она и нужна.
 if [[ "$MODE" == gate && -n "$GATE_COMMENT" ]]; then
-  GATE_COMMENT=${GATE_COMMENT//$'\n'/ }
   _attempt_state_reason "$GATE_COMMENT" || exit $?
 fi
 
@@ -2095,7 +2095,7 @@ route_v2_project_work_time() {
 # которой кокпит рисует ворота. Продолжение маршрута сюда не входит намеренно —
 # см. --commit-only в справке.
 v2_gate_commit() {
-  local attempt=$1 gate_key pipeline_gate_key rc
+  local attempt=$1 gate_key pipeline_gate_key rc digest
   gate_key=$(v2_gate_state_key "$GATE_NODE") ||
     die "неизвестный gate node для профиля: $GATE_NODE"
   pipeline_gate_key=$(v2_gate_pipeline_key "$GATE_NODE") ||
@@ -2106,11 +2106,35 @@ v2_gate_commit() {
     v2_log "gate CAS не принят (код $rc)"
     return "$rc"
   }
+  # В реестр едет ВЫЖИМКА, а не весь комментарий: формат реестра построчный
+  # (`KEY=value`, разбор awk), многострочный текст там всё равно схлопнется в
+  # простыню, а 20 КБ в одной строке раздуют файл, который перечитывается на каждый
+  # тик кокпита. Источник истины для агента — immutable-событие журнала, реестр же
+  # рисует человеку карточку ворот, и первых строк там достаточно.
+  digest=$(_gate_comment_digest "$GATE_COMMENT")
   set_st "$TASK" "$gate_key" "$GATE_DECISION" \
-    "${gate_key}_COMMENT" "$GATE_COMMENT" \
+    "${gate_key}_COMMENT" "$digest" \
     "$pipeline_gate_key" "$GATE_DECISION" \
-    "${pipeline_gate_key}_COMMENT" "$GATE_COMMENT"
+    "${pipeline_gate_key}_COMMENT" "$digest"
   v2_log "gate $GATE_NODE=$GATE_DECISION зафиксирован"
+}
+
+# Выжимка комментария ворот для витрины реестра: одна строка, до 300 символов,
+# с многоточием, если текст длиннее. Символы считает python3 — bash режет байтами
+# и рвёт кириллицу пополам.
+_gate_comment_digest() {
+  local value=${1-}
+  [[ -n "$value" ]] || return 0
+  python3 - "$value" <<'PY'
+import re
+import sys
+
+LIMIT = 300
+value = re.sub(r"\s+", " ", sys.argv[1]).strip()
+if len(value) > LIMIT:
+    value = value[: LIMIT - 1].rstrip() + "…"
+sys.stdout.write(value)
+PY
 }
 
 v2_on_signal() {
@@ -2538,7 +2562,15 @@ v2_admin_main() {
   fi
   local route_hash old_artifacts new_artifacts name new_catalog
   if [[ "$MODE" == goto ]]; then
-    local reset
+    local reset guard_message=""
+    # Отказ раньше работы: возврат в зону instrument→proof при закрытой транзакции
+    # оставил бы маршрут неисполнимым, а узнал бы об этом человек только по падению
+    # proof — после того, как промежуточные узлы отработали вхолостую.
+    _route_v2_goto_transaction_guard "$TASK" "$GATE_NODE" guard_message || {
+      v2_log "goto $GATE_NODE отклонён: $guard_message"
+      printf '%s\n' "$guard_message" >&2
+      return 75
+    }
     # Сбрасываем целевой узел и всё, что идёт после него по последовательности
     # маршрута: возврат назад обязан снять результаты пройденного хвоста.
     reset=$(_route_v2_reset_chain "$GATE_NODE") || {

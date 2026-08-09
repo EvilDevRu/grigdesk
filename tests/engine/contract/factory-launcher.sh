@@ -577,7 +577,7 @@ assert_eq approved "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixt
 # Отказ обязан прийти ДО локов и проекции, с названной границей: кокпит показывает
 # человеку именно этот текст движка (routeMessage в server/src/lib/factory-route-cli.js).
 plan_before=$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")
-long_reason=$(python3 -c 'print("щ" * 501, end="")')
+long_reason=$(python3 -c 'print("щ" * 20001, end="")')
 long_goto=$(FACTORY_FORBID_LIVE=0 \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" goto --profile "$profile_id" \
@@ -588,7 +588,7 @@ long_goto=$(FACTORY_FORBID_LIVE=0 \
     --state-dir "$shared_state" \
     --control-dir "$shared_control" 2>&1)
 assert_rc 2 "$?" "goto refuses a reason over the limit"
-assert_contains "$long_goto" 'допустимо 1..500' \
+assert_contains "$long_goto" 'допустимо 1..20000' \
   "the refusal names the violated rule instead of a bare exit code"
 assert_eq "$plan_before" \
   "$(awk -F= '$1=="PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \

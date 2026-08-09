@@ -302,3 +302,34 @@ test('/gate на припаркованных воротах передаёт р
   assert.match(calls, /--node gate_accept --decision rejected --commit-only/);
   assert.match(calls, /--comment вернуть на доработку/);
 });
+
+// Замечание человека — текст задания следующему агенту, а не подпись к клику. Пока
+// ручка резала его до 500 символов одной строкой, разбор на несколько абзацев доезжал
+// обрубком, причём молча: человек видел «отправлено», агент получал первый абзац.
+test('/gate доносит многострочное замечание до движка без обрезки', async (t) => {
+  const fx = await fixture(t, { cursor: { node: 'gate_accept', state: 'paused' } });
+  const app = await server(t, fx);
+  const comment = ['Первый абзац замечания.', '', '- пункт один', '- пункт два'].join('\n');
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/gate/GATE_ACCEPT/reject',
+    payload: { comment: `${comment}\r\n` },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const calls = await readFile(fx.callsLog, 'utf8');
+  assert.ok(calls.includes(comment), 'перевод строки и разметка сохранены целиком');
+  assert.ok(!calls.includes('\r'), 'CRLF браузерной textarea нормализован');
+});
+
+test('/gate отказывает замечанию свыше потолка и не зовёт движок', async (t) => {
+  const fx = await fixture(t, { cursor: { node: 'gate_accept', state: 'paused' } });
+  const app = await server(t, fx);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/gate/GATE_ACCEPT/reject',
+    payload: { comment: 'щ'.repeat(20001) },
+  });
+  assert.equal(response.statusCode, 400, response.body);
+  assert.equal(response.json().error, 'comment_too_long');
+  await assert.rejects(access(fx.callsLog), 'движок не вызван: отказ дан до команды');
+});

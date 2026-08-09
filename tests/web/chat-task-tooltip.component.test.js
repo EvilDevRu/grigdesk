@@ -296,7 +296,10 @@ test('ChatSession передаёт в тултип полное загружен
   assert.equal(tip.attributes('data-focusable'), 'false');
   assert.equal(wrapper.find('.sel.task option[value="42"]').text(), `#42 · ${title}`);
   const ringTitle = wrapper.find('.ctx-ring').attributes('title');
-  assert.match(ringTitle, /Контекст: 83[\s\u00a0]286 из 258[\s\u00a0]400 токенов \(32%\)/);
+  // Заполненность — доля практического потолка (здесь автосжатие выключено, значит 80%
+  // окна), а окно модели осталось справочной строкой: см. gotchas про кольцо.
+  assert.match(ringTitle, /Контекст: 83[\s ]286 из 206[\s ]720 до потолка окна \(40%\)/);
+  assert.match(ringTitle, /окно модели 258[\s ]400/);
   assert.match(ringTitle, /за сессию обработано 25[\s\u00a0]626[\s\u00a0]388 входных токенов/);
   assert.match(ringTitle, /25[\s\u00a0]025[\s\u00a0]792 из кэша/);
   const messageTime = wrapper.find('.msg.user .m-time');
@@ -440,4 +443,93 @@ test('ChatSession сохраняет выбранную модель после 
   assert.deepEqual(setModels, ['gpt-5.6-sol']);
   assert.deepEqual(session.modelRef, { provider: 'codex', model: 'gpt-5.6-sol' });
   assert.equal(select.element.value, 'gpt-5.6-sol');
+});
+
+// Сторож согласованности шкал кольца. Цвет считался от порога сжатия, а дуга и подсказка —
+// от окна модели: на 1M это расходилось впятеро (жёлтое кольцо, залитое на 17%), и человек
+// читал форму, а не оттенок — «места ещё дофига», пока CLI уже сжимал контекст по кругу.
+test('ChatSession рисует дугу и процент кольца по тому же порогу, что и его цвет', async (t) => {
+  const browser = await browserHarness(t);
+  const [{ mount, flushPromises }] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+  ]);
+  const CONTEXT_TOKENS = 168_158; // замер из живого чата, на котором кольцо и поймали
+  const COMPACT_WINDOW = 200_000; // «Настройки → Запуски → Сжимать контекст чата»
+  const MODEL_WINDOW = 1_000_000; // окно Opus 5 (1M) — впятеро больше порога
+  const session = {
+    id: 'ctx-ring-scale',
+    taskId: null,
+    title: 'HTTP парсер',
+    model: 'claude-opus-5[1m]',
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: 'claude-session',
+    contextTokens: CONTEXT_TOKENS,
+    sending: false,
+  };
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: COMPACT_WINDOW,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [],
+    load() {},
+    modelOf() {
+      return {
+        id: 'claude-opus-5[1m]',
+        model: { name: 'Opus 5 (1M)', context: MODEL_WINDOW, efforts: [] },
+        provider: { id: 'claude' },
+      };
+    },
+    visibleModels() { return []; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id, variant: 'page' },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const ring = wrapper.find('.ctx-ring');
+  // Порог сжатия ниже потолка окна (80% от 1M), значит считаем по нему и так и пишем.
+  assert.match(ring.attributes('title'), /Контекст: 168[\s ]158 из 200[\s ]000 до сжатия \(84%\)/);
+  assert.match(ring.attributes('title'), /разговор уже дорогой, пора сжать/);
+  // Окно модели остаётся справочным: как основная шкала оно и обещало запас, которого нет.
+  assert.match(ring.attributes('title'), /окно модели 1[\s ]000[\s ]000/);
+  assert.equal(ring.classes().includes('mid'), true);
+
+  // Форма обязана говорить то же, что цвет: дуга заполнена на те же 84%, а не на 17%.
+  const arc = wrapper.find('.ctx-ring .rfg');
+  const circumference = Number(arc.attributes('stroke-dasharray'));
+  const filled = 1 - Number(arc.attributes('stroke-dashoffset')) / circumference;
+  assert.ok(
+    Math.abs(filled - CONTEXT_TOKENS / COMPACT_WINDOW) < 0.01,
+    `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по порогу сжатия`,
+  );
+  assert.ok(filled > CONTEXT_TOKENS / MODEL_WINDOW * 2, 'дуга снова считается от окна модели');
 });

@@ -203,7 +203,6 @@ function onTaskChange(e) {
 // автокомпакт CLI срабатывает на границе хода, и без живого замера кольцо весь ход горело
 // бы красным по контексту, которого уже нет (замер: 448k показанных против 126k реальных).
 const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext) || sess.value?.contextTokens || 0);
-const ctxPct = computed(() => Math.min(100, Math.round((ctxTokens.value / ctxWindow.value) * 100)));
 // ── Порог «дорогого» разговора ────────────────────────────────────────────────
 // Цвет кольца НЕ по проценту окна и НЕ по вбитому числу: красное там, где кокпит и так
 // сожмёт («Настройки → Запуски → Сжимать контекст чата»), но не позже потолка окна модели.
@@ -220,6 +219,12 @@ const ctxLimit = computed(() => {
   const want = chat.compactWindow || 0; // 0 — автосжатие в настройках выключено
   return want > 0 ? Math.min(want, ceil) : ceil;
 });
+// Заполненность — доля ТОГО ЖЕ порога, по которому кольцо красится. Раньше цвет считался
+// от порога, а дуга и подсказка — от окна модели, и на 1M это расходилось втрое: 168k
+// давали жёлтый цвет (84% порога) при дуге, залитой на 17%. Человек читает форму, а не
+// оттенок, поэтому почти пустое кольцо перевешивало предупреждение — «места ещё дофига»,
+// пока CLI уже сжимал контекст по кругу.
+const ctxPct = computed(() => Math.min(100, Math.round((ctxTokens.value / Math.max(1, ctxLimit.value)) * 100)));
 const CODEX_CONTEXT_METRIC = 'active-input-v1';
 const ctxUnavailable = computed(() => current.value?.provider?.id === 'codex'
   && !!sess.value?.sessionId
@@ -248,12 +253,17 @@ const ctxTitle = computed(() => {
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
   if (ctxUnavailable.value) return `Точная заполненность Codex появится после следующего завершённого хода${spentHint.value} · ${hint}`;
   const warn = ctxTokens.value >= ctxLimit.value * CTX_WARN_RATIO ? ' · разговор уже дорогой, пора сжать' : '';
-  const window = fmtTokens(ctxWindow.value);
   const estimate = ctxIsEstimate.value ? 'примерно ' : '';
   // Пока ход идёт, цифра замерена ЭТИМ ходом — про это стоит сказать прямо: иначе
   // упавший на глазах контекст (автокомпакт CLI) выглядит сбоем кольца.
   const live = s?.sending && s?.liveContext ? ' (замер этого хода)' : '';
-  return `Контекст: ${estimate}${tokens} из ${window} токенов (${ctxPct.value}%)${live}${warn}${spentHint.value} · ${hint}`;
+  // Считаем от того же порога, что рисует дугу. Окно модели остаётся в подсказке
+  // справочно: на 1M оно вводило в заблуждение как основная шкала — «из 1 000 000»
+  // читается как огромный запас там, где до сжатия остались проценты.
+  const limit = fmtTokens(ctxLimit.value);
+  const limitWhat = chat.compactWindow > 0 && ctxLimit.value === chat.compactWindow ? 'до сжатия' : 'до потолка окна';
+  const window = ` · окно модели ${fmtTokens(ctxWindow.value)}`;
+  return `Контекст: ${estimate}${tokens} из ${limit} ${limitWhat} (${ctxPct.value}%)${live}${warn}${window}${spentHint.value} · ${hint}`;
 });
 // Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;

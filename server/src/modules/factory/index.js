@@ -41,6 +41,34 @@ import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
 
 const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]*$/;
 
+// Потолок человеческого текста, уезжающего в журнал попытки и в промпт агента. Тот же
+// предел стоит в движке (`_attempt_state_reason`): причина едет аргументом execFile и
+// переменной окружения, обе упираются в MAX_ARG_STRLEN 128 КБ, а 20 000 символов
+// кириллицы в UTF-8 — 40 КБ, то есть с троекратным запасом.
+const HUMAN_COMMENT_LIMIT = 20000;
+
+// Замечание человека — это ТЕКСТ ЗАДАНИЯ следующему агенту, а не подпись к клику.
+// Прежние `.replace(/\n/g,' ').slice(0,500)` резали разбор на первом же абзаце, причём
+// молча: человек видел «принято», а до узла доезжал обрубок. Теперь сохраняем разметку
+// (переводы строки), убираем только то, что действительно ломает журнал: CR из CRLF
+// браузерной textarea и прочие управляющие символы. Переполнение — отказ, а не тихая
+// обрезка: пусть человек сам решит, что сокращать.
+function humanComment(raw, { fallback = '' } = {}) {
+  const text = String(raw ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/g, ' ')
+    .replace(/[ \t]+$/gm, '')
+    .trim();
+  if (!text) return { ok: true, value: fallback };
+  if (text.length > HUMAN_COMMENT_LIMIT) {
+    return {
+      ok: false,
+      message: `комментарий ${text.length} символов, предел ${HUMAN_COMMENT_LIMIT}: развёрнутый разбор кладётся в файл, в комментарий идёт ссылка на него`,
+    };
+  }
+  return { ok: true, value: text };
+}
+
 // Проекция runner.actual хранит последнего исполнителя этапа и после stop, поэтому
 // сама по себе не означает живой процесс. Для live-switch нужны одновременно живой
 // оркестратор и активный именно этот этап; остановленному этапу разрешаем stage override,
@@ -866,7 +894,11 @@ async function factoryModule(fastify, opts) {
     }
     const attempt = trusted.attempt;
     const value = decision === 'approve' ? 'approved' : 'rejected';
-    const comment = ((request.body || {}).comment || '').replace(/\n/g, ' ').slice(0, 500);
+    const sanitized = humanComment((request.body || {}).comment);
+    if (!sanitized.ok) {
+      return reply.code(400).send({ error: 'comment_too_long', message: sanitized.message });
+    }
+    const comment = sanitized.value;
     const committed = await runRouteEngine(config, routeGateArgs(config, {
       task: id,
       profile: trusted.profile,
@@ -912,9 +944,11 @@ async function factoryModule(fastify, opts) {
     if (!node) {
       return reply.code(409).send({ error: 'node_unknown', message: `узел ${key} не найден в маршруте попытки` });
     }
-    const comment = String((request.body || {}).comment || '')
-      .replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
-      || 'возврат из кокпита';
+    const sanitized = humanComment((request.body || {}).comment, { fallback: 'возврат из кокпита' });
+    if (!sanitized.ok) {
+      return reply.code(400).send({ error: 'comment_too_long', message: sanitized.message });
+    }
+    const comment = sanitized.value;
     const rewound = await runRouteEngine(config, routeGotoArgs(config, {
       task: id, profile: trusted.profile, attempt: trusted.attempt, node, reason: comment,
     }));

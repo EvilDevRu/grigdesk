@@ -125,10 +125,18 @@ export function computeNodeStatuses({ pf, pos, keys, optional, mtimeMs }) {
   });
 
   // Линейность: активен ровно один узел (более поздний = реальный фронт).
+  // Сам фронт гасить нельзя — а ветка `i < keep ? 'done' : 'pending'` гасила: при
+  // i === keep условие ложно, и узел, ради которого правило и затевалось, уезжал
+  // в pending вместе с остальными. Наружу это выглядело как полностью остановившийся
+  // конвейер при живом работающем этапе (t8163, 09.08.2026: реестр держал running у
+  // прерванного chairman и у идущего tests, схема гасила оба).
   const active = chain.map((n, i) => (['run', 'wait'].includes(st[n]) ? i : -1)).filter((i) => i >= 0);
   if (active.length > 1) {
     const keep = active[active.length - 1];
-    chain.forEach((n, i) => { if (['run', 'wait'].includes(st[n])) st[n] = i < keep ? 'done' : 'pending'; });
+    chain.forEach((n, i) => {
+      if (!['run', 'wait'].includes(st[n]) || i === keep) return;
+      st[n] = i < keep ? 'done' : 'pending';
+    });
   }
 
   // Возврат после отклонённой приёмки: хвост снова pending, точка возврата активна.

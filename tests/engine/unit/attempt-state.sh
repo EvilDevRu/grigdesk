@@ -171,13 +171,13 @@ abandoned_dir="$task_root/attempts/$abandoned"
 attempt_state_select_route_v2 42 "$abandoned" debug >/dev/null
 assert_rc 0 "$?" "predecessor has its own route selection"
 
-# Причина ручного вмешательства ограничена одной строкой в 500 символов, и отказ
-# обязан называть нарушенное правило: молчащий код 2 неотличим от отказа ledger,
-# и человек ищет причину в состоянии попытки, а не в своём тексте.
-long_reason=$(python3 -c 'print("щ" * 501, end="")')
+# Причина ручного вмешательства ограничена 20 000 символов, и отказ обязан называть
+# нарушенное правило: молчащий код 2 неотличим от отказа ledger, и человек ищет
+# причину в состоянии попытки, а не в своём тексте.
+long_reason=$(python3 -c 'print("щ" * 20001, end="")')
 long_stderr=$(attempt_state_abandon_v2 42 "$abandoned" "$long_reason" 2>&1 >/dev/null)
 assert_rc 2 "$?" "abandon refuses a reason over the limit"
-assert_contains "$long_stderr" 'причина 501 символов, допустимо 1..500' \
+assert_contains "$long_stderr" 'причина 20001 символов, допустимо 1..20000' \
   "the refusal names the violated rule instead of a bare exit code"
 assert_contains "$long_stderr" 'файл этапа' \
   "the refusal says where a long explanation belongs"
@@ -185,16 +185,21 @@ empty_stderr=$(_attempt_state_reason '' 2>&1 >/dev/null)
 assert_rc 2 "$?" "an empty reason is refused"
 assert_contains "$empty_stderr" 'не может быть пустой' \
   "the empty reason refusal is named too"
-multiline_stderr=$(_attempt_state_reason 'первая строка
-вторая строка' 2>&1 >/dev/null)
-assert_rc 2 "$?" "a multi-line reason is refused"
-assert_contains "$multiline_stderr" 'перевод строки в позиции 14' \
+# Указание человека — это текст задания следующему агенту: перечень точек правки,
+# таблица замеров, запреты. Однострочный лимит резал его на первом абзаце, поэтому
+# многострочность разрешена, а из управляющих символов запрещено всё остальное.
+_attempt_state_reason 'первая строка
+вторая строка'
+assert_rc 0 "$?" "a multi-line reason is accepted"
+control_stderr=$(_attempt_state_reason "$(printf 'первая строка\rвторая')" 2>&1 >/dev/null)
+assert_rc 2 "$?" "a carriage return is still refused"
+assert_contains "$control_stderr" 'возврат каретки в позиции 14' \
   "the refusal points at the offending character"
-# Лимит считается в символах, а не в байтах: 500 кириллических — это 1000 байт,
-# и граница обязана пропускать их, иначе русская причина обрезается вдвое.
-boundary_reason=$(python3 -c 'print("щ" * 500, end="")')
+# Лимит считается в символах, а не в байтах: 20 000 кириллических — это 40 000 байт,
+# и граница обязана пропускать их, иначе русский текст обрезается вдвое.
+boundary_reason=$(python3 -c 'print("щ" * 20000, end="")')
 _attempt_state_reason "$boundary_reason"
-assert_rc 0 "$?" "a reason of exactly 500 characters is accepted"
+assert_rc 0 "$?" "a reason of exactly 20000 characters is accepted"
 assert_eq 0 \
   "$(find "$abandoned_dir" -maxdepth 1 -type f -name 'terminal.*.json' | wc -l | tr -d ' ')" \
   "a refused reason closes nothing"

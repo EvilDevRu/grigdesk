@@ -388,9 +388,51 @@ test('summary считает всю очередь, а не только selecte
   const summary = await coordinator.summary({ nowMs: (T0 + 700) * 1000 });
   assert.equal(summary.newCount, 3);
   assert.equal(summary.mixedCount, 0);
+  assert.equal(summary.reviewCount, 3);
   assert.equal(summary.truncated, true);
   assert.deepEqual(summary.channels[0], {
-    id: 'github', newCount: 3, mixedCount: 0, truncated: true,
+    id: 'github', newCount: 3, mixedCount: 0, reviewCount: 3, truncated: true,
+  });
+});
+
+test('summary reviewCount совпадает с вкладкой «К разбору» и включает hot new и mixed', async (t) => {
+  const accountRef = 'acc_coord_review_count1';
+  const state = await stateFixture(t, 'telegram', accountRef);
+  const decided = message({ channel: 'telegram', accountRef, id: '1' });
+  const fresh = message({
+    channel: 'telegram', accountRef, id: '2',
+    over: { occurredAt: T0 + 1 },
+  });
+  const hot = message({
+    channel: 'telegram', accountRef, sourceId: 'source:hot', id: '3',
+    over: { occurredAt: T0 + 699 },
+  });
+  await state.store.decide({
+    activationEpoch: 1,
+    originItemRef: state.refCodec.item('seed-review-count'),
+    messageRefs: [state.refCodec.message(decided.source.id, decided.id)],
+    scopeRef: state.refCodec.scope('scope:1'),
+    status: 'skipped',
+    taskId: null,
+    taskUrl: '',
+    by: 'human',
+    note: '',
+    decidedAtMs: (T0 + 10) * 1000,
+  });
+  const coordinator = new InboxCoordinator({ channels: [channelFixture({
+    id: 'telegram', label: 'Telegram', accountRef, ...state,
+    batches: [
+      batch(decided, { messages: [decided, fresh] }),
+      batch(hot),
+    ],
+  })] });
+
+  const summary = await coordinator.summary({ nowMs: (T0 + 700) * 1000 });
+  assert.equal(summary.newCount, 0, 'hot new ещё не готов автомату');
+  assert.equal(summary.mixedCount, 1);
+  assert.equal(summary.reviewCount, 2, 'обе карточки уже видны человеку в «К разбору»');
+  assert.deepEqual(summary.channels[0], {
+    id: 'telegram', newCount: 0, mixedCount: 1, reviewCount: 2, truncated: false,
   });
 });
 
@@ -462,6 +504,7 @@ test('disconnected channel сохраняет projection read-only; summary/stat
   const summary = await coordinator.summary({ nowMs: (T0 + 700) * 1000 });
   assert.equal(summary.newCount, 1);
   assert.equal(summary.mixedCount, 0);
+  assert.equal(summary.reviewCount, 1);
   const status = await coordinator.status();
   assert.equal(status.channels[0].connection, 'disconnected');
   assert.equal(status.channels[0].readOnly, true);

@@ -32,7 +32,9 @@ async function fixture(t, {
     },
     async summary(options) {
       calls.summary.push(options);
-      return { newCount: 0, mixedCount: 0, channels: [], errors: [], truncated: false };
+      return {
+        newCount: 0, mixedCount: 0, reviewCount: 0, channels: [], errors: [], truncated: false,
+      };
     },
     async status() {
       calls.status += 1;
@@ -120,6 +122,7 @@ test('read routes передают limit, добавляют worker status и з
   assert.deepEqual(listed.json().worker, { running: true, readiness: 'ready' });
   assert.deepEqual(calls.list, [{ limit: 17 }]);
   assert.deepEqual(calls.summary, [{ limit: 9 }]);
+  assert.equal(summary.json().reviewCount, 0);
   assert.equal(calls.status, 1);
   assert.deepEqual(status.json().worker, { running: true, readiness: 'ready' });
 });

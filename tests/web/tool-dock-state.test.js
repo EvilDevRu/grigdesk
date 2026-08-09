@@ -174,8 +174,11 @@ test('nav placement сортируется стабильно, invalid group о�
     'fallback не даёт пользовательскому manifest привилегий встроенного Code',
   );
 
-  const inbox = inboxNavBadge({ newCount: 4 });
-  assert.equal(inbox['/inbox'].kind, 'info');
+  const inbox = inboxNavBadge({ reviewCount: 4 });
+  assert.deepEqual(inbox, {
+    '/inbox': { n: 4, kind: 'info', title: 'к разбору: 4' },
+  });
+  assert.deepEqual(inboxNavBadge({ reviewCount: 0 }), {}, 'нулевой чип скрыт');
   const aggregate = aggregateNavBadges([
     { label: 'Видео', badge: { n: 2, kind: 'wait' } },
     { label: 'Входящие', badge: inbox['/inbox'] },

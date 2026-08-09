@@ -521,7 +521,9 @@ export class InboxTaskService {
 
           const derivedSections = [];
           if (attachmentAnalysis?.ok && attachmentAnalysis.complete) {
-            derivedSections.push({ title: 'Разбор вложений', text: attachmentAnalysis.text });
+            if (action.by === 'human') {
+              derivedSections.push({ title: 'Разбор вложений', text: attachmentAnalysis.text });
+            }
 
             // Речь и безопасный текст уже понятны без vision-модели. Изображения и
             // кадры видео считаются разобранными лишь после содержательного model call.
@@ -600,7 +602,9 @@ export class InboxTaskService {
             groupId: second.item.policy.b24.groupId,
             responsibleId: second.item.policy.b24.responsibleId,
             priority: second.item.policy.b24.priority,
-            images: prepared.files,
+            // Автомат уже fail-closed разобрал содержимое. В B24 ему нужны
+            // сформулированная постановка и source URL, а не копия provider-файла.
+            images: action.by === 'human' ? prepared.files : [],
           });
         } catch (err) {
           fail(

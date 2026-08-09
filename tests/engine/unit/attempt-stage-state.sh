@@ -709,6 +709,86 @@ assert_contains "$(json_field "$(cat "$fresh_event")" reason)" \
   'замкнутый набор замечаний расширен новыми id: only-second' \
   "журнал называет новый id, разомкнувший scope"
 
+# Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть «сценарий не
+# покрыт» нельзя, не написав файл. Замечание по такому файлу — первый проход по
+# новому коду, а не рост охвата, и человека для него звать незачем: раньше этого
+# замечания не могло быть, потому что артефакта не существовало.
+unseen_attempt=$(begin_selected 71 a_11223344556677881122334455667788)
+assert_rc 0 "$?" "попытка для первого прохода по новому артефакту подготовлена"
+attempt_stage_state_init_v2 71 "$unseen_attempt" debug >/dev/null
+unseen_first=$(run_state_verdict_encode failed build \
+  'scenario-not-covered=сценарий не покрыт ни одной проверкой' \
+  'anchor:scenario-not-covered=tests/first.spec.js' \
+  'reviewed:tests/first.spec.js')
+unseen_second=$(run_state_verdict_encode failed build \
+  'fresh-file-defect=дефект в файле, дописанном этим же ремонтом' \
+  'anchor:fresh-file-defect=tests/second.spec.js' \
+  'reviewed:tests/first.spec.js' 'reviewed:tests/second.spec.js')
+attempt_stage_state_commit_v2 71 "$unseen_attempt" instrument done >/dev/null
+unseen_run=$(attempt_stage_state_commit_v2 \
+  71 "$unseen_attempt" check failed 6 "$unseen_first" 2)
+assert_eq ready "$(json_field "$unseen_run" state)" \
+  "первый набор замечаний с объявленным охватом разрешает ремонт"
+attempt_stage_state_commit_v2 71 "$unseen_attempt" instrument done >/dev/null
+unseen_next=$(attempt_stage_state_commit_v2 \
+  71 "$unseen_attempt" check failed 6 "$unseen_second" 2)
+assert_eq ready "$(json_field "$unseen_next" state)" \
+  "замечание по не просмотренному раньше артефакту не останавливает маршрут"
+assert_eq check "$(json_field "$unseen_next" lastCommit node)" \
+  "возврат уходит обычным коммитом, а не остановкой"
+
+# Обратная сторона того же правила: артефакт объявлен просмотренным, значит новое
+# замечание по нему — либо круг, либо регрессия после ремонта. И то и другое решает
+# человек, поведение прежнее.
+seen_attempt=$(begin_selected 72 a_22334455667788992233445566778899)
+assert_rc 0 "$?" "попытка для повторной претензии подготовлена"
+seen_dir="$(attempt_state_v2_task_root 72)/attempts/$seen_attempt"
+attempt_stage_state_init_v2 72 "$seen_attempt" debug >/dev/null
+seen_first=$(run_state_verdict_encode failed build \
+  'first-defect=первое замечание по проверенному файлу' \
+  'anchor:first-defect=src/grid.js' 'reviewed:src/grid.js')
+seen_second=$(run_state_verdict_encode failed build \
+  'another-defect=ещё одно замечание по тому же файлу' \
+  'anchor:another-defect=src/grid.js' 'reviewed:src/grid.js')
+attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  72 "$seen_attempt" check failed 6 "$seen_first" 2 >/dev/null
+attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
+seen_stop=$(attempt_stage_state_commit_v2 \
+  72 "$seen_attempt" check failed 6 "$seen_second" 2)
+assert_eq stopped "$(json_field "$seen_stop" state)" \
+  "новая претензия к просмотренному артефакту останавливается у человека"
+assert_eq no-progress "$(json_field "$seen_stop" stop)" \
+  "остановка по просмотренному артефакту остаётся no-progress"
+seen_event=$(find "$seen_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_contains "$(json_field "$(cat "$seen_event")" reason)" \
+  'замкнутый набор замечаний расширен новыми id: another-defect' \
+  "журнал называет id, разомкнувший scope по проверенному файлу"
+
+# Якорь без объявленного охвата ничего не доказывает: «не видел раньше»
+# неотличимо от «не потрудился посмотреть». Без reviewed правило обязано молчать,
+# иначе один якорь отменял бы весь сторож расширения.
+noscope_attempt=$(begin_selected 73 a_33445566778899aa33445566778899aa)
+assert_rc 0 "$?" "попытка для якоря без охвата подготовлена"
+attempt_stage_state_init_v2 73 "$noscope_attempt" debug >/dev/null
+noscope_first=$(run_state_verdict_encode failed build \
+  'only-anchor-first=замечание первого прохода' \
+  'anchor:only-anchor-first=tests/first.spec.js')
+noscope_second=$(run_state_verdict_encode failed build \
+  'only-anchor-second=замечание по другому файлу' \
+  'anchor:only-anchor-second=tests/second.spec.js')
+attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  73 "$noscope_attempt" check failed 6 "$noscope_first" 2 >/dev/null
+attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
+noscope_stop=$(attempt_stage_state_commit_v2 \
+  73 "$noscope_attempt" check failed 6 "$noscope_second" 2)
+assert_eq stopped "$(json_field "$noscope_stop" state)" \
+  "без объявленного охвата якорь не разрешает автоматический возврат"
+assert_eq no-progress "$(json_field "$noscope_stop" stop)" \
+  "поведение без охвата остаётся прежним"
+
 # Суммарный бюджет возвратов в target тестируется отдельно, с выключенным
 # no-progress у примитива: в живом typed runtime свежие id раньше остановит scope guard.
 # Бюджет решением человека НЕ обнуляется — иначе «вернул курсор» выдавало бы новую порцию.

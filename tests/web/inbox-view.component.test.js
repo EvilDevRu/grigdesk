@@ -182,6 +182,8 @@ test('переключатель отделяет историю, reset пере
   };
   const { wrapper, emitSse, settle } = await mountChannelView(t, 'inbox', { api });
 
+  assert.match(wrapper.get('[data-section="review"]').text(), /К разбору\s+1/u);
+  assert.match(wrapper.get('[data-section="history"]').text(), /История\s+1/u);
   const mixed = wrapper.get('[data-status="mixed"]');
   assert.match(mixed.text(), /Частично разобрано/);
   assert.match(mixed.text(), /только для чтения/);
@@ -213,14 +215,19 @@ test('переключатель отделяет историю, reset пере
 test('task в истории показывает ссылку и никогда не предлагает возврат', async (t) => {
   const decision = {
     decisionId: 'decision_0000000000000004', version: 1, status: 'task',
-    taskId: '777', taskUrl: 'https://example.test/tasks/777', by: 'human', note: null,
+    taskId: '777', taskUrl: 'https://example.test/tasks/777', by: 'auto', note: null,
     decidedAtMs: 1_786_172_600_000,
   };
   const taskItem = item({
     ref: `${REF_NEW}-task`,
     status: 'task',
     decision,
-    messages: [message(MESSAGE_TASK, { decision })],
+    messages: [message(MESSAGE_TASK, {
+      decision,
+      attachments: [{
+        kind: 'video', displayLabel: 'видео', name: 'bug.mp4', size: 4096,
+      }],
+    })],
   });
   const api = {
     async get() { return response({ items: [taskItem] }); },
@@ -233,6 +240,8 @@ test('task в истории показывает ссылку и никогда
   const card = wrapper.get('[data-status="task"]');
   assert.match(card.text(), /Задача создана/);
   assert.equal(card.get('a.task-link').attributes('href'), decision.taskUrl);
+  assert.match(card.get('.attachment-chip').text(), /Содержимое разобрано/u);
+  assert.equal(card.get('.attachment-chip').attributes('data-analysis'), 'ready');
   assert.equal(card.text().includes('Вернуть на разбор'), false);
   assert.equal(card.find('input[type="checkbox"]').exists(), false);
 });

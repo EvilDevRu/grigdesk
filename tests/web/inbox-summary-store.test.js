@@ -26,7 +26,7 @@ test('Inbox summary использует один SSE, минутный poll и 
   const originalClearInterval = globalThis.clearInterval;
   let resolveInitial;
   const initial = new Promise((resolve) => { resolveInitial = resolve; });
-  const responses = [initial, { newCount: 5 }];
+  const responses = [initial, { newCount: 5, mixedCount: 2, reviewCount: 8 }];
   const calls = [];
   const intervals = [];
   const cleared = [];
@@ -71,17 +71,22 @@ test('Inbox summary использует один SSE, минутный poll и 
     // гарантирует одну повторную сверку после его завершения.
     subscribers[0]('inbox-changed');
     assert.equal(calls.length, 1);
-    resolveInitial({ newCount: 3 });
+    resolveInitial({ newCount: 3, mixedCount: 1, reviewCount: 6 });
     await flush();
-    assert.equal(store.newCount, 5);
+    assert.equal(store.reviewCount, 8, 'server учитывает ещё созревающие new');
     assert.equal(calls.length, 2);
+
+    responses.push({ newCount: 0, mixedCount: 3 });
+    intervals[0].callback();
+    await flush();
+    assert.equal(store.reviewCount, 3, 'до рестарта старого server сохраняется совместимый fallback');
 
     const disabled = new Error('disabled');
     disabled.data = { error: 'plugin_disabled' };
     responses.push(disabled);
     intervals[0].callback();
     await flush();
-    assert.equal(store.newCount, 0);
+    assert.equal(store.reviewCount, 0);
     assert.equal(store.loaded, false);
     assert.equal(store.started, false);
     assert.equal(unsubscribed, 1);

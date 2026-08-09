@@ -88,6 +88,29 @@ def exact(value, keys):
         fail()
 
 
+def shape(value, required, optional=()):
+    # Как exact, но с необязательными ключами: ими вводятся anchor/reviewed, и
+    # вердикты без них обязаны остаться валидными байт-в-байт.
+    if not isinstance(value, dict):
+        fail()
+    keys = set(value)
+    if not set(required) <= keys or not keys <= set(required) | set(optional):
+        fail()
+
+
+def artifact_path(value):
+    # Якорь замечания и объявленный охват — относительные пути рабочего дерева.
+    # Абсолютный путь и `..` отвергаются: путь используется только как метка для
+    # сравнения наборов, но метка, притворяющаяся путём наружу, вводит в заблуждение.
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 200
+        and not value.startswith("/")
+        and ".." not in value.split("/")
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
+
+
 def identifier(value, regexp=ID_RE):
     if not isinstance(value, str) or not regexp.fullmatch(value):
         fail()
@@ -120,10 +143,14 @@ def timestamp(value):
 
 
 def reason(value):
+    # Границы общие с lib/attempt-state.sh: многострочный текст до 20 000 символов,
+    # из управляющих допустим только перевод строки. Функция валидирует и ЧТЕНИЕ
+    # старых событий, поэтому ослабление обратносовместимо: однострочные причины
+    # прежних журналов проходят как проходили.
     if (
         not isinstance(value, str)
-        or not 1 <= len(value) <= 500
-        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or not 1 <= len(value) <= 20000
+        or any(char != "\n" and (ord(char) < 32 or ord(char) == 127) for char in value)
     ):
         fail()
     return value
@@ -167,7 +194,7 @@ def validate_verdict(value, outcome):
         return None
     if outcome != "failed":
         fail()
-    exact(value, {"owner", "findings"})
+    shape(value, {"owner", "findings"}, {"reviewed"})
     if value["owner"] not in FAILURE_OWNERS:
         fail()
     findings = value["findings"]
@@ -175,7 +202,7 @@ def validate_verdict(value, outcome):
         fail()
     seen = set()
     for finding in findings:
-        exact(finding, {"id", "summary"})
+        shape(finding, {"id", "summary"}, {"anchor"})
         finding_id = finding["id"]
         summary = finding["summary"]
         if (
@@ -187,7 +214,21 @@ def validate_verdict(value, outcome):
             or any(ord(char) < 32 or ord(char) == 127 for char in summary)
         ):
             fail()
+        if "anchor" in finding and not artifact_path(finding["anchor"]):
+            fail()
         seen.add(finding_id)
+    # Охват прохода: что проверяющий фактически просмотрел. Поле необязательное,
+    # но именно оно позволяет отличить первый проход по новому артефакту от
+    # претензии к уже просмотренному — см. scope_expansion_reason.
+    if "reviewed" in value:
+        reviewed = value["reviewed"]
+        if not isinstance(reviewed, list) or not 1 <= len(reviewed) <= 64:
+            fail()
+        if len(set(reviewed)) != len(reviewed):
+            fail()
+        for path in reviewed:
+            if not artifact_path(path):
+                fail()
     return value
 
 
@@ -438,11 +479,12 @@ def human_rewind_note(directory, node):
     return note
 
 
-def automatic_rewind_history(directory, node, target):
+def automatic_rewind_verdicts(directory, node, target):
     # Возвращаем историю ЗАФИКСИРОВАННЫХ возвратов той же автономной дуги после
-    # последнего решения человека. Для typed verdict сохраняем снимок owner +
-    # стабильных finding id: прогрессом считается закрытие замечаний, а расширение
-    # первого набора, повтор, A↔B-осцилляция и неснимаемое общее ядро — нет.
+    # последнего решения человека — целыми вердиктами. Снимок (owner + стабильные
+    # finding id) отвечает на вопрос «что не снялось», а объявленный охват и якоря
+    # замечаний — на вопрос «видел ли проверяющий этот артефакт раньше». Границы
+    # серии считаются здесь один раз, чтобы оба сторожа не разошлись в трактовке.
     identifier(node)
     identifier(target)
     try:
@@ -455,7 +497,7 @@ def automatic_rewind_history(directory, node, target):
         if match:
             events.append((int(match.group(1)), name))
     events.sort()
-    snapshots = []
+    verdicts = []
     for _, name in events:
         event = regular_json(os.path.join(directory, name))
         action = event.get("action")
@@ -476,7 +518,7 @@ def automatic_rewind_history(directory, node, target):
             # И явный goto, и rejected на human gate начинают новую автономную
             # серию: прежние findings не должны остановить исправление по новой
             # человеческой обратной связи.
-            snapshots = []
+            verdicts = []
             continue
         if (
             event.get("kind") == "commit"
@@ -486,8 +528,8 @@ def automatic_rewind_history(directory, node, target):
         ):
             verdict = event.get("verdict")
             validate_verdict(verdict, event.get("outcome"))
-            snapshots.append(verdict_snapshot(verdict))
-    return snapshots
+            verdicts.append(verdict)
+    return verdicts
 
 
 def automatic_rewind_count(directory, target):
@@ -564,15 +606,19 @@ def scope_expansion_reason(history, candidate):
     # не доказывает прогресс и требует решения человека.
     # Причинность нового дефекта ledger доказать не может, поэтому безопасный исход —
     # остановить автоматический rewind и отдать расширение человеку, не потеряв verdict.
+    # Единственное исключение — ниже: первый проход по артефакту, которого проверяющий
+    # раньше не видел. Аргументы — целые вердикты, а не снимки: снимок отвечает
+    # «что не снялось», а якоря и охват — «видел ли он этот артефакт».
     if candidate is None:
         return None
-    typed_history = [snapshot for snapshot in history if snapshot is not None]
+    typed_history = [verdict for verdict in history if verdict is not None]
     if not typed_history:
         return None
-    if candidate == typed_history[-1]:
+    candidate_snapshot = verdict_snapshot(candidate)
+    if candidate_snapshot == verdict_snapshot(typed_history[-1]):
         return "повторяется тот же набор открытых замечаний после одного ремонта"
-    closed_owner, closed_ids = typed_history[0]
-    owner, candidate_ids = candidate
+    closed_owner, closed_ids = verdict_snapshot(typed_history[0])
+    owner, candidate_ids = candidate_snapshot
     if owner != closed_owner:
         return (
             "замкнутый набор замечаний сменил владельца: "
@@ -581,6 +627,32 @@ def scope_expansion_reason(history, candidate):
     added = sorted(set(candidate_ids) - set(closed_ids))
     if not added:
         return None
+    # Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть замечание
+    # «сценарий не покрыт» нельзя, не написав файл. Замечание по такому файлу — первый
+    # проход по новому коду, а не рост охвата: раньше его не могло быть, потому что
+    # файла не существовало. Такой id не удерживает маршрут у человека — возврат
+    # уходит обычным автоматическим, списываясь из общего бюджета попытки.
+    # Отсев работает ТОЛЬКО когда прошлые вердикты серии объявили охват: без него
+    # «не видел раньше» неотличимо от «не потрудился посмотреть», и правило пропускало
+    # бы любой новый id, то есть отменяло бы само себя.
+    reviewed = set()
+    for verdict in typed_history:
+        reviewed.update(verdict.get("reviewed") or ())
+    if reviewed:
+        anchors = {
+            finding["id"]: finding.get("anchor")
+            for finding in candidate["findings"]
+        }
+        added = [
+            finding_id
+            for finding_id in added
+            if not (
+                anchors.get(finding_id)
+                and anchors[finding_id] not in reviewed
+            )
+        ]
+        if not added:
+            return None
     shown = ", ".join(added[:3])
     if len(added) > 3:
         shown += f" и ещё {len(added) - 3}"
@@ -1040,17 +1112,18 @@ elif OP == "prepare-commit":
         event_reason = RECOVERY_COMMIT_REASON if recovery_raw == "1" else None
     after = derive_commit_cursor(cursor, action, node, outcome, sequence)
     if action_mode == "rewind":
-        rewind_history = automatic_rewind_history(
+        rewind_verdicts = automatic_rewind_verdicts(
             results_dir,
             node,
             action["rewind"],
         )
+        rewind_history = [verdict_snapshot(item) for item in rewind_verdicts]
         candidate_snapshot = verdict_snapshot(verdict)
         progress_reason = None
         if no_progress_limit:
             progress_reason = scope_expansion_reason(
-                rewind_history,
-                candidate_snapshot,
+                rewind_verdicts,
+                verdict,
             )
         if progress_reason is None:
             progress_reason = no_progress_reason(

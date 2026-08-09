@@ -419,12 +419,20 @@ function attachmentAnalysis(attachment, item) {
   };
   const blocked = ['new', 'mixed'].includes(item?.status)
     && analysisBlocksByRef.value.has(item?.ref);
-  const fallbackStatus = blocked ? 'failed' : 'pending';
-  const fallbackLabel = blocked
-    ? 'Не удалось разобрать'
-    : item?.status === 'task' ? 'Приложено к задаче'
-      : item?.status === 'skipped' ? 'Не разбиралось'
-        : 'Будет проверено до задачи';
+  const autoTaskDone = item?.status === 'task' && item?.decision?.by === 'auto';
+  let fallbackStatus = 'pending';
+  let fallbackLabel = 'Будет проверено до задачи';
+  if (blocked) {
+    fallbackStatus = 'failed';
+    fallbackLabel = 'Не удалось разобрать';
+  } else if (autoTaskDone) {
+    fallbackStatus = 'ready';
+    fallbackLabel = 'Содержимое разобрано';
+  } else if (item?.status === 'task') {
+    fallbackLabel = 'Приложено к задаче';
+  } else if (item?.status === 'skipped') {
+    fallbackLabel = 'Не разбиралось';
+  }
   return {
     status: status || fallbackStatus,
     label: labels[status] || fallbackLabel,

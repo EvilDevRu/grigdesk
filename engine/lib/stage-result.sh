@@ -15,6 +15,10 @@ while [[ $# -gt 0 ]]; do
     --epoch) epoch=${2:-}; shift 2 ;;
     --failure-owner) failure_owner=${2:-}; shift 2 ;;
     --finding) findings+=("${2:-}"); shift 2 ;;
+    # Якорь замечания (id=путь) и объявленный охват прохода (путь) едут тем же
+    # списком под префиксом: разбирает их run_state_verdict_encode.
+    --finding-anchor) findings+=("anchor:${2:-}"); shift 2 ;;
+    --reviewed) findings+=("reviewed:${2:-}"); shift 2 ;;
     *)
       if [[ -z "$result" ]]; then result=$1; else comment="${comment:+$comment }$1"; fi
       shift ;;

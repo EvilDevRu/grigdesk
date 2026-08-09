@@ -785,9 +785,9 @@ function cardState(g) {
             <div class="secth">Ворота — твоё решение</div>
             <template v-if="gateRejecting">
               <label class="gate-lbl" for="gate-note">Что доработать</label>
-              <textarea id="gate-note" ref="gateNoteEl" v-model="gateComment" rows="3"
+              <textarea id="gate-note" ref="gateNoteEl" v-model="gateComment" rows="8"
                 placeholder="Что не так и что сделать иначе"></textarea>
-              <p class="gate-hint">Текст станет заданием агенту на следующем заходе. Можно и без него — тогда узел вернётся без пояснения.</p>
+              <p class="gate-hint">Текст станет заданием агенту на следующем заходе — целиком, вместе с разметкой и абзацами (до 20 000 символов). Можно и без него — тогда узел вернётся без пояснения.</p>
               <div class="gbtns">
                 <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">
                   {{ stageBusy === 'gate' ? '…' : '✗ Отправить на доработку' }}
@@ -854,7 +854,7 @@ function cardState(g) {
                должно рядом с кнопкой, которая его отправляет, а не рядом с чатом и диффом. -->
           <div v-if="!stage.readOnly && !stage.isGate" class="sect rewind-sect">
             <div class="secth">Вернуть конвейер сюда</div>
-            <textarea v-model="rewindComment" rows="2"
+            <textarea v-model="rewindComment" rows="6"
               placeholder="Указание агенту — что сделать иначе (необязательно)"></textarea>
             <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
             <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')">

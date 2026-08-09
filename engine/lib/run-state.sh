@@ -82,6 +82,13 @@ owners = {"build", "tests", "environment", "plan", "human"}
 finding_re = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 SUMMARY_LIMIT = 500
 FINDINGS_LIMIT = 32
+PATH_LIMIT = 200
+REVIEWED_LIMIT = 64
+# Метаданные вердикта едут тем же списком, что и замечания: у finding-id формат
+# kebab-case, двоеточия в нём нет, поэтому префикс однозначно отделяет их от
+# `id=summary` и не ломает уже написанные вызовы с одними замечаниями.
+ANCHOR_PREFIX = "anchor:"
+REVIEWED_PREFIX = "reviewed:"
 
 
 # Отказ обязан называть нарушенное правило. Молчащий код 2 стоил вердикта этапа: на t7802
@@ -94,9 +101,22 @@ def fail(reason="вердикт отклонён"):
     raise SystemExit(2)
 
 
+def artifact_path(value):
+    # Якорь замечания и объявленный охват — относительные пути рабочего дерева.
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= PATH_LIMIT
+        and not value.startswith("/")
+        and ".." not in value.split("/")
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
+
+
 def validate(value):
-    if not isinstance(value, dict) or set(value) != {"owner", "findings"}:
-        fail("вердикт должен состоять ровно из owner и findings")
+    if not isinstance(value, dict) or not {"owner", "findings"} <= set(value) or not set(
+        value
+    ) <= {"owner", "findings", "reviewed"}:
+        fail("вердикт состоит из owner, findings и необязательного reviewed")
     owner = value.get("owner")
     findings = value.get("findings")
     if owner not in owners:
@@ -106,8 +126,10 @@ def validate(value):
         fail(f"замечаний {count}, допустимо 1..{FINDINGS_LIMIT}")
     seen = set()
     for index, finding in enumerate(findings, start=1):
-        if not isinstance(finding, dict) or set(finding) != {"id", "summary"}:
-            fail(f"замечание {index}: допустимы ровно поля id и summary")
+        if not isinstance(finding, dict) or not {"id", "summary"} <= set(
+            finding
+        ) or not set(finding) <= {"id", "summary", "anchor"}:
+            fail(f"замечание {index}: поля id и summary, необязательно anchor")
         finding_id = finding.get("id")
         summary = finding.get("summary")
         if not isinstance(finding_id, str) or not finding_re.fullmatch(finding_id):
@@ -128,7 +150,25 @@ def validate(value):
                 f"замечание {index} (id={finding_id}): summary — одна строка, "
                 "переводы строки и управляющие символы запрещены"
             )
+        if "anchor" in finding and not artifact_path(finding["anchor"]):
+            fail(
+                f"замечание {index} (id={finding_id}): anchor — относительный путь "
+                f"файла до {PATH_LIMIT} символов, без ведущего / и без .."
+            )
         seen.add(finding_id)
+    reviewed = value.get("reviewed")
+    if reviewed is not None:
+        if not isinstance(reviewed, list) or not 1 <= len(reviewed) <= REVIEWED_LIMIT:
+            count = len(reviewed) if isinstance(reviewed, list) else "нет списка"
+            fail(f"reviewed: путей {count}, допустимо 1..{REVIEWED_LIMIT}")
+        if len(set(reviewed)) != len(reviewed):
+            fail("reviewed: пути не должны повторяться")
+        for path in reviewed:
+            if not artifact_path(path):
+                fail(
+                    "reviewed: каждый путь — относительный, до "
+                    f"{PATH_LIMIT} символов, без ведущего / и без .."
+                )
     return value
 
 
@@ -146,12 +186,37 @@ if operation == "encode":
         print("")
         raise SystemExit(0)
     parsed = []
+    anchors = {}
+    reviewed = []
     for index, raw in enumerate(findings_raw, start=1):
+        if raw.startswith(REVIEWED_PREFIX):
+            reviewed.append(raw[len(REVIEWED_PREFIX):])
+            continue
+        if raw.startswith(ANCHOR_PREFIX):
+            body = raw[len(ANCHOR_PREFIX):]
+            if "=" not in body:
+                fail("--finding-anchor: ожидается вид id=путь")
+            anchor_id, anchor_path_value = body.split("=", 1)
+            if anchor_id in anchors:
+                fail(f"--finding-anchor: якорь для id={anchor_id} задан дважды")
+            anchors[anchor_id] = anchor_path_value
+            continue
         if "=" not in raw:
             fail(f"--finding {index}: ожидается вид id=краткое замечание")
         finding_id, summary = raw.split("=", 1)
         parsed.append({"id": finding_id, "summary": summary})
-    value = validate({"owner": owner, "findings": parsed})
+    for finding in parsed:
+        if finding["id"] in anchors:
+            finding["anchor"] = anchors.pop(finding["id"])
+    if anchors:
+        fail(
+            "--finding-anchor ссылается на id, которых нет в вердикте: "
+            + ", ".join(sorted(anchors))
+        )
+    value = {"owner": owner, "findings": parsed}
+    if reviewed:
+        value["reviewed"] = reviewed
+    value = validate(value)
     payload = json.dumps(
         value,
         ensure_ascii=False,

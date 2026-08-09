@@ -273,34 +273,22 @@ export function inboxAutoNote({ model = '', verdict = null, reason = '' } = {}) 
   return parts.join(' · ');
 }
 
-export function buildInboxAutoTask({ item, verdict, model = '', attachmentAnalysis = null } = {}) {
+export function buildInboxAutoTask({ item, verdict } = {}) {
   const title = clamp(verdict?.title, INBOX_DRAFT_LIMITS.title)
     || clamp(item?.draft?.title, INBOX_DRAFT_LIMITS.title);
   const summary = clamp(verdict?.description, INBOX_TRIAGE_LIMITS.summary);
-  const reason = clamp(verdict?.reason, INBOX_TRIAGE_LIMITS.reason);
   const label = clamp(item?.channelLabel || item?.channel, 256) || 'канал';
-  const attachmentText = safeAttachmentAnalysis(attachmentAnalysis).text;
-  const header = [
-    summary,
-    reason ? `Почему сочтено задачей: ${reason}` : '',
-    `── Исходное обращение · ${label} ──`,
-  ].filter(Boolean).join('\n\n');
-  const attachmentSection = attachmentText
-    ? `── Разбор вложений ──\n${attachmentText}`
-    : '';
-  const footer = clamp(model, 512)
-    ? `Задачу завёл Inbox автоматически; разбор — ${clamp(model, 512)}. Сверьтесь с обращением выше.`
-    : 'Задачу завёл Inbox автоматически. Сверьтесь с обращением выше.';
-  const separators = attachmentSection ? 6 : 4;
-  const bodyBudget = Math.max(
-    0,
-    INBOX_DRAFT_LIMITS.description
-      - header.length - attachmentSection.length - footer.length - separators,
+  const sourceUrl = clamp(
+    item?.sourceUrl || item?.draft?.source?.url,
+    INBOX_DRAFT_LIMITS.sourceUrlChars,
   );
-  const original = clamp(item?.draft?.description, bodyBudget);
+  const source = sourceUrl ? `Источник · ${label}: ${sourceUrl}` : '';
+  // Обычно summary обязана сформулировать модель. Исходный transcript нужен
+  // лишь как fail-safe для некорректного, но принятого verdict без description.
+  const statement = summary || clamp(item?.draft?.description, INBOX_TRIAGE_LIMITS.summary);
   return {
     title,
-    description: [header, original, attachmentSection, footer].filter(Boolean).join('\n\n'),
+    description: [statement, source].filter(Boolean).join('\n\n'),
   };
 }
 

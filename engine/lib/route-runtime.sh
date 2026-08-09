@@ -956,6 +956,17 @@ def fail():
     raise SystemExit(78)
 
 
+def artifact_path(value):
+    # Относительный путь артефакта: те же правила, что в run-state и в ядре.
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 200
+        and not value.startswith("/")
+        and ".." not in value.split("/")
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
+
+
 try:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     info = os.fstat(fd)
@@ -966,14 +977,17 @@ try:
 except (OSError, UnicodeError, json.JSONDecodeError):
     fail()
 
-if not isinstance(value, dict) or set(value) != {
+if not isinstance(value, dict) or not {
     "schema", "outcome", "comment", "failureOwner", "findings"
+} <= set(value) or not set(value) <= {
+    "schema", "outcome", "comment", "failureOwner", "findings", "reviewed"
 }:
     fail()
 outcome = value["outcome"]
 comment = value["comment"]
 owner = value["failureOwner"]
 findings = value["findings"]
+reviewed_raw = value.get("reviewed")
 if (
     value["schema"] != 1
     or outcome not in {"done", "skipped", "failed"}
@@ -991,7 +1005,9 @@ if outcome == "failed":
     seen = set()
     normalized = []
     for finding in findings:
-        if not isinstance(finding, dict) or set(finding) != {"id", "summary"}:
+        if not isinstance(finding, dict) or not {"id", "summary"} <= set(
+            finding
+        ) or not set(finding) <= {"id", "summary", "anchor"}:
             fail()
         finding_id = finding["id"]
         summary = finding["summary"]
@@ -1005,8 +1021,25 @@ if outcome == "failed":
         ):
             fail()
         seen.add(finding_id)
-        normalized.append({"id": finding_id, "summary": summary})
+        item = {"id": finding_id, "summary": summary}
+        # Якорь замечания — тот же необязательный контракт, что и у агентских узлов:
+        # относительный путь артефакта, по которому ядро отличает первый проход по
+        # новому файлу от претензии к уже просмотренному.
+        if "anchor" in finding:
+            if not artifact_path(finding["anchor"]):
+                fail()
+            item["anchor"] = finding["anchor"]
+        normalized.append(item)
     verdict = {"owner": owner, "findings": normalized}
+    if reviewed_raw is not None:
+        if not isinstance(reviewed_raw, list) or not 1 <= len(reviewed_raw) <= 64:
+            fail()
+        if len(set(map(str, reviewed_raw))) != len(reviewed_raw):
+            fail()
+        for path in reviewed_raw:
+            if not artifact_path(path):
+                fail()
+        verdict["reviewed"] = list(reviewed_raw)
 elif owner is not None or findings:
     fail()
 
@@ -1534,6 +1567,60 @@ if target not in chain:
     raise SystemExit(2)
 print(",".join(chain[chain.index(target):]))
 ' "$node"
+}
+
+# Возврат курсора в зону instrument→proof при закрытой транзакции делает proof
+# НЕИСПОЛНИМЫМ. Топология такая: instrument открывает транзакцию инструментации и
+# намеренно её не закрывает (`_route_v2_transaction_after`), proof работает внутри
+# неё и закрывает за собой. Значит после первого прохода proof транзакции больше
+# нет, а переоткрыть её может только instrument — он остаётся `done` и в reset
+# возврата на промежуточный узел не попадает.
+#
+# Без этого гарда отказ приходил не в момент решения человека, а через 12 минут
+# работы промежуточных узлов вхолостую: диспетчер доходил до proof и валился
+# fail-closed кодом 78 без единого слова о причине. Так сгорели три захода подряд
+# (t8163, 09.08.2026). Гард переносит отказ на нажатие кнопки и называет оба
+# выхода — иначе человек видит только «прогон опять встал».
+#
+# Возвращает 0, если возврат безопасен; 1 — если цель лежит в зоне, а транзакции
+# нет. Третий аргумент (опционально) — имя переменной для текста отказа.
+_route_v2_goto_transaction_guard() {
+  local task=$1 node=$2 out_var=${3:-} zone chain_json
+  node=$(_attempt_stage_state_node_id "$node") || return 0
+  # Транзакция открыта — возврат куда угодно безопасен, proof её унаследует.
+  _route_v2_transaction_active_id "$task" >/dev/null 2>&1 && return 0
+  chain_json=$("$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" \
+    --profile "$ROUTE_V2_PROFILE" \
+    describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" \
+    --route "$ROUTE_V2_ROUTE") || return 0
+  zone=$(printf '%s' "$chain_json" | python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+target = sys.argv[1]
+chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
+# Маршрут без этой пары узлов транзакционной зоны не имеет — гард не применяется.
+if "instrument" not in chain or "proof" not in chain or target not in chain:
+    print("safe")
+    raise SystemExit(0)
+first = chain.index("instrument")
+last = chain.index("proof")
+index = chain.index(target)
+print("blocked" if first < index <= last else "safe")
+' "$node") || return 0
+  [[ "$zone" == blocked ]] || return 0
+  if [[ -n "$out_var" ]]; then
+    printf -v "$out_var" '%s' "возврат на «$node» невозможен: узел proof обязан исполняться внутри
+транзакции инструментации, а её открывает только instrument. Транзакцию закрыл
+предыдущий проход proof, поэтому маршрут дошёл бы до него и упал fail-closed.
+Выходы два: вернуть курсор на instrument (переиграется весь хвост за ним, включая
+консилиум) либо вернуть за proof — на translator или дальше, оставив прошлое
+доказательство в силе."
+  fi
+  return 1
 }
 
 # Продолжение после остановки «исчерпан бюджет повторов». Курсор стоит на

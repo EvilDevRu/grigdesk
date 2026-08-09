@@ -165,7 +165,7 @@ const pipelineBadgeStyle = computed(() => {
 });
 
 const badges = computed(() => {
-  const out = inboxNavBadge({ newCount: inboxStore.newCount });
+  const out = inboxNavBadge({ reviewCount: inboxStore.reviewCount });
   if (waitingChats.value || unreadChats.value) {
     out['/chats'] = {
       n: waitingChats.value || unreadChats.value,

@@ -170,22 +170,27 @@ test('rolling quota считает только auto task того же typed sc
   assert.equal(countInboxAutoTasks(decisions, { scopeRef: SCOPE, sinceMs }), 1);
 });
 
-test('auto task остаётся generic, bounded и сохраняет исходное обращение', () => {
+test('auto task содержит только постановку модели и несрезаемую ссылку на источник', () => {
+  const sourceUrl = 'https://t.me/c/123456/789';
   const built = buildInboxAutoTask({
-    item: item({ draft: { title: 'fallback', description: 'Оригинал '.repeat(4_000) } }),
+    item: item({
+      channel: 'telegram',
+      channelLabel: 'Telegram',
+      sourceUrl,
+      draft: {
+        title: 'fallback',
+        description: 'Оригинал '.repeat(4_000),
+        source: { url: sourceUrl },
+      },
+    }),
     verdict: verdict({ description: 'Выжимка модели' }),
-    model: 'claude/opus',
-    attachmentAnalysis: { text: 'Голос: после нажатия интерфейс зависает.' },
   });
   assert.equal(built.title, 'Не работает сохранение');
-  assert.ok(built.description.length <= 20_000);
-  assert.match(built.description, /Выжимка модели/u);
-  assert.match(built.description, /Оригинал/u);
-  assert.match(built.description, /GitHub Issues/u);
-  assert.match(built.description, /claude\/opus/u);
-  assert.match(built.description, /Разбор вложений/u);
-  assert.match(built.description, /интерфейс зависает/u);
-  assert.ok(!built.description.includes('Телеграм'));
+  assert.equal(
+    built.description,
+    `Выжимка модели\n\nИсточник · Telegram: ${sourceUrl}`,
+  );
+  assert.doesNotMatch(built.description, /Оригинал|claude|Inbox|Разбор вложений/u);
 });
 
 test('run triage использует только isolated transport и передаёт visual байтами', async (t) => {

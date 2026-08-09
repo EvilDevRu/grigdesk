@@ -317,7 +317,10 @@ test('create и none-dismiss идут через общий service с auto meta
   assert.deepEqual(result.dismissed.map((entry) => entry.ref), [dismiss.ref]);
   assert.deepEqual(calls.task[0].body.messageRefs, [create.messages[0].messageRef]);
   assert.equal(calls.task[0].body.revision, create.revision);
-  assert.match(calls.task[0].body.description, /Исходный текст create/u);
+  assert.equal(
+    calls.task[0].body.description,
+    `Подтверждённая проблема.\n\nИсточник · Telegram: ${create.sourceUrl}`,
+  );
   assert.deepEqual(
     { by: calls.task[0].options.by, requireAllAttachments: calls.task[0].options.requireAllAttachments },
     { by: 'auto', requireAllAttachments: true },
@@ -335,6 +338,7 @@ test('вложения обязательно разбираются до мод
     displayLabel: 'голосовое сообщение', name: 'voice.ogg', size: 100,
   };
   const mediaItem = inboxItem('telegram', 'media');
+  mediaItem.sourceUrl = 'https://t.me/c/123456/789';
   mediaItem.attachments = [attachment];
   mediaItem.messages[0].attachments = [attachment];
   mediaItem.draft.attachments = [attachment];
@@ -391,8 +395,11 @@ test('вложения обязательно разбираются до мод
   assert.equal(readyResult.created.length, 1);
   assert.equal(ready.calls.triage.length, 1);
   assert.match(ready.calls.triage[0].attachmentAnalysis.text, /кнопка сохранения/u);
-  assert.match(ready.calls.task[0].body.description, /Разбор вложений/u);
-  assert.match(ready.calls.task[0].body.description, /кнопка сохранения/u);
+  assert.equal(
+    ready.calls.task[0].body.description,
+    `Подтверждённая проблема.\n\nИсточник · Telegram: ${mediaItem.sourceUrl}`,
+  );
+  assert.doesNotMatch(ready.calls.task[0].body.description, /Разбор вложений|Inbox|claude/u);
   assert.equal(readyReleases, 1, 'успешный auto task освобождает analysis lease');
 
   let incompatibleReleases = 0;

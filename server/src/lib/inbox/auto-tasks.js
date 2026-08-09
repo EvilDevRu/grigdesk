@@ -549,7 +549,7 @@ export class InboxAutoTasks {
 
     try {
       if (decision.action === 'create') {
-        const draft = buildInboxAutoTask({ item, verdict, model, attachmentAnalysis });
+        const draft = buildInboxAutoTask({ item, verdict });
         const created = await this.taskService.task(item.ref, {
           ...body,
           title: draft.title,
