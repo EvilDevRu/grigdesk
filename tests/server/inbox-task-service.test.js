@@ -29,6 +29,9 @@ function fixture(over = {}) {
     reset: [],
     b24: [],
     changed: [],
+    notifications: [],
+    events: [],
+    warnings: [],
   };
   const decision = {
     decisionId: 'decision_0000000000000001',
@@ -104,6 +107,7 @@ function fixture(over = {}) {
   const state = {
     async decide(args) {
       calls.decide.push(args);
+      calls.events.push('decision');
       if (over.commitError) throw new Error(over.commitError);
       if (typeof over.onDecide === 'function') await over.onDecide(args, item);
       return over.decision || decision;
@@ -131,6 +135,16 @@ function fixture(over = {}) {
       return typeof over.current === 'function' ? over.current(calls.current) : (over.current ?? true);
     },
   };
+  if (over.notifyTaskCreated !== undefined) {
+    context.notifyTaskCreated = async (payload) => {
+      calls.notifications.push(structuredClone(payload));
+      calls.events.push('notification');
+      if (typeof over.notifyTaskCreated === 'function') {
+        return over.notifyTaskCreated(payload);
+      }
+      return { enabled: true, sent: true };
+    };
+  }
   const coordinator = {
     async resolveItem(ref) {
       calls.resolve += 1;
@@ -167,6 +181,7 @@ function fixture(over = {}) {
     isConfigured() { return this.configured; },
     async createTask(args) {
       calls.b24.push(args);
+      calls.events.push('b24');
       if (over.b24Error) throw new Error(over.b24Error);
       return over.created || { id: 5150 };
     },
@@ -223,7 +238,10 @@ function fixture(over = {}) {
         : (over.inboxEnabled ?? true);
     },
     now: () => 2_000,
-    log: { warn() {}, error() {} },
+    log: {
+      warn(details, message) { calls.warnings.push({ details, message }); },
+      error() {},
+    },
   });
   return {
     service,
@@ -547,6 +565,63 @@ test('B24 failure не пишет decision; post-B24 commit failure блокир
   }), (err) => err.code === 'indeterminate_task_commit', 'весь decisions channel становится degraded');
   assert.equal(uncertain.calls.b24.length, 1, 'automatic retry после B24 success запрещён');
   assert.equal(uncertain.calls.decide.length, 1, 'indeterminate message запрещено перезаписать skipped');
+});
+
+test('channel confirmation идёт после durable decision и одинаково работает для human/auto', async () => {
+  const manual = fixture({ twoMessages: true, notifyTaskCreated: true });
+  const result = await manual.service.task(manual.itemRef, {
+    revision: REVISION,
+    // Клиентский порядок не выбирает адрес ответа: якорь задаёт authoritative item.
+    messageRefs: [manual.secondMessageRef, manual.messageRef],
+  });
+  assert.equal(result.taskId, '5150');
+  assert.deepEqual(manual.calls.events.slice(0, 3), ['b24', 'decision', 'notification']);
+  assert.equal(manual.calls.notifications.length, 1);
+  assert.equal(manual.calls.notifications[0].message.id, '501');
+  assert.equal(manual.calls.notifications[0].source.id, '101');
+  assert.equal(manual.calls.notifications[0].taskId, '5150');
+  assert.equal(manual.calls.notifications[0].taskUrl, 'https://b24.example/tasks/5150');
+
+  const auto = fixture({ notifyTaskCreated: true });
+  await auto.service.task(auto.itemRef, {
+    revision: REVISION,
+    messageRefs: [auto.messageRef],
+  }, {
+    by: 'auto',
+    note: 'автоматический разбор',
+    requireAllAttachments: true,
+  });
+  assert.deepEqual(auto.calls.events.slice(0, 3), ['b24', 'decision', 'notification']);
+  assert.equal(auto.calls.notifications.length, 1);
+});
+
+test('отказ channel confirmation не отменяет задачу и не запускается до commit', async () => {
+  const failedDelivery = fixture({
+    notifyTaskCreated() {
+      throw Object.assign(new Error('telegram timeout with secret'), { code: 'telegram_unreachable' });
+    },
+  });
+  const result = await failedDelivery.service.task(failedDelivery.itemRef, {
+    revision: REVISION,
+    messageRefs: [failedDelivery.messageRef],
+  });
+  assert.equal(result.taskId, '5150');
+  assert.equal(failedDelivery.calls.b24.length, 1);
+  assert.equal(failedDelivery.calls.decide.length, 1);
+  assert.equal(failedDelivery.calls.notifications.length, 1);
+  assert.equal(failedDelivery.calls.warnings.length, 1);
+  assert.equal(JSON.stringify(failedDelivery.calls.warnings).includes('secret'), false);
+
+  for (const blocked of [
+    fixture({ b24Error: 'portal down', notifyTaskCreated: true }),
+    fixture({ commitError: 'disk full', notifyTaskCreated: true }),
+  ]) {
+    await assert.rejects(blocked.service.task(blocked.itemRef, {
+      revision: REVISION,
+      messageRefs: [blocked.messageRef],
+    }));
+    assert.equal(blocked.calls.notifications.length, 0);
+  }
 });
 
 test('provider skipped и task URL проходят public allowlist; refresh/release не отменяют commit', async () => {

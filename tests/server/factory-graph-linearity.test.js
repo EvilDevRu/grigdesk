@@ -39,6 +39,50 @@ test('единственный активный узел правило не т�
   assert.equal(st.tests, 'run');
 });
 
+test('курсор журнала гасит одиночного призрака, которого правило «более позднего» не ловит', () => {
+  // Активный узел в проекции ровно один — и он же мёртвый: маршрут ушёл вперёд, а
+  // `running` прерванного захода остался. Без опоры на курсор схема показывает,
+  // что конвейер «повис» на этом узле.
+  const st = computeNodeStatuses({
+    pf: {
+      CATALOG_PROTOCOL: 'route-v2',
+      CHAIRMAN: 'running', // прерванный заход
+      PROOF: 'done',
+      TRANSLATOR: 'done',
+      TESTS: 'done',
+      BUILD: 'done', // проекция прошлого круга; заход идёт заново
+    },
+    pos: POS, keys: {}, optional: [], mtimeMs: null, cursorNode: 'build',
+  });
+  assert.equal(st.chairman, 'done');
+  assert.equal(Object.values(st).filter((v) => v === 'run').length, 0);
+});
+
+test('курсор важнее «более позднего» при нескольких активных', () => {
+  const st = computeNodeStatuses({
+    pf: {
+      CATALOG_PROTOCOL: 'route-v2',
+      CHAIRMAN: 'running', PROOF: 'done', TRANSLATOR: 'running', TESTS: 'running', BUILD: 'pending',
+    },
+    pos: POS, keys: {}, optional: [], mtimeMs: null, cursorNode: 'translator',
+  });
+  assert.equal(st.translator, 'run');
+  assert.equal(st.chairman, 'done');
+  assert.equal(st.tests, 'pending');
+});
+
+test('неизвестный курсор возвращает прежнее правило «более позднего»', () => {
+  const st = computeNodeStatuses({
+    pf: {
+      CATALOG_PROTOCOL: 'route-v2',
+      CHAIRMAN: 'running', PROOF: 'done', TRANSLATOR: 'done', TESTS: 'running', BUILD: 'pending',
+    },
+    pos: POS, keys: {}, optional: [], mtimeMs: null, cursorNode: 'gate_nowhere',
+  });
+  assert.equal(st.tests, 'run');
+  assert.equal(st.chairman, 'done');
+});
+
 test('пауза ворот переживает соседний застрявший running', () => {
   // wait идёт по той же ветке, что и run: ворота — тоже «фронт», гасить их нельзя,
   // иначе человек не увидит, что маршрут ждёт лично его.

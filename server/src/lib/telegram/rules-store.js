@@ -13,6 +13,7 @@
 //   { project, chatId|null, username|null, title, threadId|null, kind: 'bug'|'wish',
 //     b24: { responsibleId, groupId, priority },
 //     draft: 'manual'|'auto',
+//     notifyTaskCreated: boolean,
 //     autoTask: { enabled, minConfidence, maxPerDay },
 //     autoLaunch: { enabled, route, minConfidence, maxPerDay, vetoMinutes } }
 //
@@ -189,6 +190,9 @@ export function normalizeRules(list, { projects = null } = {}) {
       kind,
       b24: normalizeB24(src.b24),
       draft,
+      // Ответ в исходный чат — явный opt-in каждого правила. Старые правила
+      // остаются молчащими, а настройка темы не расползается на соседние темы.
+      notifyTaskCreated: src.notifyTaskCreated === true,
       autoTask: normalizeAutoTask(src.autoTask),
       autoLaunch: normalizeAutoLaunch(src.autoLaunch, where),
     };

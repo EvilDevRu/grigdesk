@@ -462,6 +462,9 @@ export class FactoryStateAdapter {
     const runnerConfig = loadRunnerConfig(this.profilesDir, profile);
     const statuses = computeNodeStatuses({
       pf: registry, pos: def.pos, keys: def.keys, optional: def.optional, mtimeMs: mtime,
+      // Чем маршрут занят на самом деле, знает журнал, а не проекция: у прерванного
+      // захода `running` в реестре остаётся навсегда и в одиночку читается как «повис».
+      cursorNode: trusted?.cursor?.node || null,
     });
     let loops = { loops: {}, halted: null, haltMsg: '' };
     try {
@@ -474,6 +477,15 @@ export class FactoryStateAdapter {
     // Честный статус ромба песочницы: порты есть → готова; идёт сборка → running
     // (при живом демоне), демон умер посреди сборки → fail. Иначе — как посчитала цепочка.
     const alive = this.isDaemonAlive(registry.ORCH_PID, task);
+    // Узел под курсором журнала обязан гореть работой всё время, пока этап идёт. Реестр
+    // тут не помощник: свой статус узел переписывает по завершении, а на повторном заходе
+    // до тех пор несёт `done` от прошлого круга — схема показывала «нигде ничего не идёт»
+    // при живом агенте. Пауза на воротах — та же история со стороны ожидания.
+    const cursorNode = trusted?.cursor?.node || null;
+    if (cursorNode && cursorNode in def.pos) {
+      if (trusted.cursor.state === 'paused') statuses[cursorNode] = 'wait';
+      else if (trusted.cursor.state === 'ready' && alive) statuses[cursorNode] = 'run';
+    }
     const sandbox = env.FE_PORT ? null : await this.readSandboxStage(task);
     const detectedStall = detectStall({
       registry,

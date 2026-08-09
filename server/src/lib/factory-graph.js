@@ -69,8 +69,16 @@ export function graphForRoute(g, route) {
  * Статус каждого узла схемы (порт pipeline_statuses, dashboard.py:305).
  * Упрощения относительно оригинала: sandbox-статус выводим из прогресса цепочки
  * (без docker), browser-fe_dirty спецкейс и pipeline_stall опущены.
+ *
+ * `cursorNode` — узел из курсора trusted-журнала, если он известен. Реестр это лишь
+ * вторичная проекция, и `running` в ней переживает прерванный заход (TERM демону,
+ * убитый процесс, упавший хост): узел горит работой сколько угодно долго, хотя маршрут
+ * давно ушёл дальше. Журнал знает, чем маршрут занят на самом деле, поэтому при
+ * известном курсоре именно он расставляет фронт.
  */
-export function computeNodeStatuses({ pf, pos, keys, optional, mtimeMs }) {
+export function computeNodeStatuses({
+  pf, pos, keys, optional, mtimeMs, cursorNode = null,
+}) {
   const opt = new Set(optional);
   const chain = Object.keys(pos).filter((n) => n !== 'sandbox');
   const st = {};
@@ -124,15 +132,20 @@ export function computeNodeStatuses({ pf, pos, keys, optional, mtimeMs }) {
     }
   });
 
-  // Линейность: активен ровно один узел (более поздний = реальный фронт).
+  // Линейность: активен ровно один узел. Опорная точка — курсор журнала, если он
+  // известен; иначе (исторический реестр, нечитаемый ledger) более поздний из активных.
   // Сам фронт гасить нельзя — а ветка `i < keep ? 'done' : 'pending'` гасила: при
   // i === keep условие ложно, и узел, ради которого правило и затевалось, уезжал
   // в pending вместе с остальными. Наружу это выглядело как полностью остановившийся
   // конвейер при живом работающем этапе (t8163, 09.08.2026: реестр держал running у
   // прерванного chairman и у идущего tests, схема гасила оба).
   const active = chain.map((n, i) => (['run', 'wait'].includes(st[n]) ? i : -1)).filter((i) => i >= 0);
-  if (active.length > 1) {
-    const keep = active[active.length - 1];
+  const cursorIndex = cursorNode ? chain.indexOf(cursorNode) : -1;
+  // Курсор бьёт проекцию даже когда активный узел ровно один: застрявший `running`
+  // остаётся в реестре и после того, как маршрут ушёл вперёд, и в одиночку выглядит
+  // как «повис на этом этапе». Правило «более поздний» такой случай не ловит вовсе.
+  const keep = cursorIndex >= 0 ? cursorIndex : (active.length > 1 ? active[active.length - 1] : -1);
+  if (keep >= 0) {
     chain.forEach((n, i) => {
       if (!['run', 'wait'].includes(st[n]) || i === keep) return;
       st[n] = i < keep ? 'done' : 'pending';

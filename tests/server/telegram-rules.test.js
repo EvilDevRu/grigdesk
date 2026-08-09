@@ -57,12 +57,21 @@ test('правило темы не разрешает ни соседнюю те
 });
 
 test('тема сильнее общего правила чата, и порядок в файле на это не влияет', () => {
-  const forward = normalizeRules([rule({ project: 'общий' }), rule({ project: 'тема', threadId: 42 })]);
-  const backward = normalizeRules([rule({ project: 'тема', threadId: 42 }), rule({ project: 'общий' })]);
+  const forward = normalizeRules([
+    rule({ project: 'общий', notifyTaskCreated: false }),
+    rule({ project: 'тема', threadId: 42, notifyTaskCreated: true }),
+  ]);
+  const backward = normalizeRules([
+    rule({ project: 'тема', threadId: 42, notifyTaskCreated: true }),
+    rule({ project: 'общий', notifyTaskCreated: false }),
+  ]);
   assert.equal(matchRule(forward, { chatId: CHAT, threadId: 42 })?.project, 'тема');
   assert.equal(matchRule(backward, { chatId: CHAT, threadId: 42 })?.project, 'тема');
+  assert.equal(matchRule(forward, { chatId: CHAT, threadId: 42 })?.notifyTaskCreated, true);
+  assert.equal(matchRule(backward, { chatId: CHAT, threadId: 42 })?.notifyTaskCreated, true);
   // А сообщение вне темы всё так же ведёт общее правило.
   assert.equal(matchRule(forward, { chatId: CHAT, threadId: 7 })?.project, 'общий');
+  assert.equal(matchRule(forward, { chatId: CHAT, threadId: 7 })?.notifyTaskCreated, false);
 });
 
 // Ссылка на публичный чат приходит именем (`t.me/atprojects/20423`), а chatId в ней
@@ -101,6 +110,7 @@ test('дефолты проставляются целиком, чтобы по�
   assert.equal(r.kind, 'bug');
   assert.equal(r.draft, 'manual');
   assert.deepEqual(r.b24, { responsibleId: null, groupId: null, priority: 1 });
+  assert.equal(r.notifyTaskCreated, false, 'старое правило остаётся молчащим');
   assert.deepEqual(r.autoLaunch, {
     enabled: false, route: '', minConfidence: 0.8, maxPerDay: 3, vetoMinutes: 10,
   });
@@ -119,6 +129,15 @@ test('пороги автозадач зажимаются, а не приним
   // Маршрута автозадачам не нужно: они создают задачу в трекере, а не запускают
   // конвейер, — поэтому включённый тумблер сам по себе законен.
   assert.doesNotThrow(() => normalizeRules([rule({ autoTask: { enabled: true } })]));
+});
+
+test('подтверждение созданной задачи — отдельный opt-in каждого правила', () => {
+  const [enabled, disabled] = normalizeRules([
+    rule({ threadId: 41, notifyTaskCreated: true }),
+    rule({ threadId: 42, notifyTaskCreated: false }),
+  ]);
+  assert.equal(enabled.notifyTaskCreated, true);
+  assert.equal(disabled.notifyTaskCreated, false);
 });
 
 test('стёртое поле порога — это дефолт, а не «бери всё»', () => {
@@ -229,7 +248,11 @@ test('файла нет — пустой список, а не ошибка', as
 test('записанное читается обратно тем же', async () => {
   const dir = await tmpDir();
   const store = new TelegramRulesStore({ dir, log: logStub() });
-  const saved = await store.write([rule({ threadId: 42, kind: 'wish' })]);
+  const saved = await store.write([rule({
+    threadId: 42,
+    kind: 'wish',
+    notifyTaskCreated: true,
+  })]);
   assert.equal(saved.length, 1);
 
   const again = new TelegramRulesStore({ dir, log: logStub() });
@@ -237,6 +260,7 @@ test('записанное читается обратно тем же', async (
   assert.equal(r.project, 'demo');
   assert.equal(r.threadId, 42);
   assert.equal(r.kind, 'wish');
+  assert.equal(r.notifyTaskCreated, true);
   assert.equal((await again.ruleFor({ chatId: CHAT, threadId: 42 })).project, 'demo');
 });
 

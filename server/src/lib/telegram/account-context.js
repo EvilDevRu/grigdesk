@@ -289,13 +289,17 @@ export function createTelegramAccountContextFactory({
   }
   if (typeof now !== 'function'
       || typeof botApi?.getFile !== 'function'
-      || typeof botApi?.downloadFile !== 'function') {
+      || typeof botApi?.downloadFile !== 'function'
+      || typeof botApi?.callBotApi !== 'function') {
     throw new TypeError('Telegram account context: now/botApi имеют неверный контракт.');
   }
   const root = path.resolve(dir);
   const api = Object.freeze({
     getFile: botApi.getFile.bind(botApi),
     downloadFile: botApi.downloadFile.bind(botApi),
+    // Универсальный transport остаётся внутри account lease: наружу token не
+    // выходит, а channel adapter может безопасно отправить post-commit ответ.
+    callBotApi: botApi.callBotApi.bind(botApi),
   });
 
   return async function accountContextFor({

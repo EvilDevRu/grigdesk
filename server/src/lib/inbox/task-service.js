@@ -398,6 +398,22 @@ export class InboxTaskService {
     }
   }
 
+  async _deliverTaskNotification(receipt) {
+    if (!receipt) return;
+    try {
+      await receipt.resolved.context.notifyTaskCreated(receipt.payload);
+    } catch (err) {
+      // B24 и durable decision уже состоялись. Ошибка обратного сообщения не
+      // имеет права превратить успех в повтор создания задачи.
+      this.log.warn?.(
+        { channel: receipt.channel, taskId: receipt.payload.taskId, code: err?.code },
+        'inbox: задача создана, но channel confirmation не отправлен',
+      );
+    } finally {
+      await this._release(receipt.resolved);
+    }
+  }
+
   async task(ref, body, internalOptions) {
     // Самый ранний gate: без B24 не читаем даже channel archive и текст.
     await this._assertInboxEnabled();
@@ -418,7 +434,7 @@ export class InboxTaskService {
       fail('invalid_service_call', 'Автомат не может обходить разбор вложений.', 500);
     }
 
-    return this._serialize(async () => {
+    const committed = await this._serialize(async () => {
       await this._assertInboxEnabled();
       if (!this.b24.isConfigured()) fail('no_b24', 'Битрикс24 больше не подключён.', 503);
       const first = await this._resolve(ref);
@@ -674,7 +690,7 @@ export class InboxTaskService {
           status: 'task',
           taskId,
         });
-        return {
+        const result = {
           taskId,
           taskUrl,
           decision: {
@@ -684,11 +700,34 @@ export class InboxTaskService {
           skipped: publicSkipped(prepared.skipped),
           item: await this._publicItemSafe(ref),
         };
+        let notification = null;
+        if (typeof second.context.notifyTaskCreated === 'function') {
+          const anchor = verified.messages[0];
+          const payload = {
+            source: structuredClone(anchor.source),
+            message: structuredClone(anchor),
+            taskId,
+            taskUrl,
+          };
+          const resolved = second;
+          notification = {
+            channel: resolved.channel.id,
+            resolved,
+            payload,
+          };
+          second = null; // ownership переходит post-commit доставке ниже
+        }
+        return { result, notification };
       } finally {
         await this._release(second);
         if (!firstReleased) await this._release(first);
       }
     });
+    // Network confirmation не держит глобальную очередь Inbox: следующий
+    // decision может начаться, пока Telegram отвечает. Account lease остаётся
+    // жив до конца вызова и не даёт switch подменить bot/token на полпути.
+    await this._deliverTaskNotification(committed.notification);
+    return committed.result;
   }
 
   async dismiss(ref, body, internalOptions) {

@@ -3,9 +3,9 @@
 // личка и allowlist «чат/тема → проект». Общая очередь и её activation живут
 // отдельно на `/inbox`; Telegram не владеет её карточками, решениями и моделью.
 //
-// Бот в чат НЕ пишет ничего: в обеих темах закреплено «общение здесь не ведётся».
-// Значит ни уточняющих вопросов, ни ответа со ссылкой на задачу — обратная связь
-// живёт только в кокпите.
+// Бот не ведёт диалог и не задаёт уточняющих вопросов. Единственное исходящее
+// сообщение — явно включённое у конкретного правила подтверждение уже созданной
+// задачи с номером и ссылкой на Битрикс24.
 //
 // Почему нет кнопки «создать бота»: у Телеграма нет API создания ботов вовсе —
 // бот заводится только личной перепиской человека с @BotFather. Кокпит берёт
@@ -278,6 +278,7 @@ function payload() {
         minConfidence: toNum(autoOf(r).minConfidence, 0, 1, AUTO_TASK.minConfidence),
         maxPerDay: Math.round(toNum(autoOf(r).maxPerDay, 0, 100, AUTO_TASK.maxPerDay)),
       },
+      notifyTaskCreated: r.notifyTaskCreated === true,
     };
   });
 }
@@ -413,6 +414,8 @@ function addRule() {
     // «Идея» ставится осознанно. Приоритет 1 — средний, коды портала: 0/1/2.
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
+    // Ответы выключены: включение — осознанное решение для конкретного чата/темы.
+    notifyTaskCreated: false,
     // Автомат выключен у нового правила: сначала посмотри, что вообще прилетает
     // в этот чат, и только потом отдавай его роботу.
     autoTask: { ...AUTO_TASK },
@@ -582,7 +585,8 @@ async function disconnect() {
           <p class="muted lead">
             Здесь управляются подключение, архив и allowlist Telegram. Очередь и отдельный
             переключатель приёма новых обращений находятся в общем разделе «Входящие».
-            Бот не отвечает участникам и читает только явно разрешённые ниже чаты.
+            Бот читает только явно разрешённые ниже чаты и пишет туда лишь включённые
+            подтверждения уже созданных задач.
           </p>
         </div>
 
@@ -985,6 +989,17 @@ async function disconnect() {
                       Проект кокпита определяет, к какому коду относится переписка. Проект
                       Битрикс24 выбирает раздел, в котором появится задача на портале.
                     </p>
+
+                    <label class="task-reply-option">
+                      <input v-model="r.notifyTaskCreated" type="checkbox" />
+                      <span>
+                        <b>Сообщать в Telegram о создании задачи</b>
+                        <small>
+                          После ручной или автоматической постановки бот ответит в этот
+                          чат или тему номером задачи и ссылкой на Битрикс24.
+                        </small>
+                      </span>
+                    </label>
                   </section>
                 </div>
 
@@ -1397,6 +1412,16 @@ async function disconnect() {
 .manual-topic[open] summary { color: var(--ink); }
 .manual-topic-field { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
 .part-hint { margin-top: 10px; }
+.task-reply-option {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 11px; padding: 10px 11px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); cursor: pointer;
+}
+.task-reply-option input {
+  width: 15px; height: 15px; flex: none; margin-top: 2px; accent-color: var(--accent); cursor: pointer;
+}
+.task-reply-option span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.task-reply-option b { font-size: 12px; }
+.task-reply-option small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.4; }
 .rrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .auto-panel { padding: 12px 14px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .auto-panel.enabled { background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }

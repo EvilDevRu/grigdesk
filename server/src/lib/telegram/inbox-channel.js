@@ -12,6 +12,7 @@ import {
 } from './activation.js';
 import { telegramMessageLink } from './links.js';
 import { matchRule } from './rules-store.js';
+import { safeInboxSourceUrl } from '../inbox/draft.js';
 import { assertAccountRef, assertNativeSegment } from '../inbox/identity.js';
 import { validateInboxMessage } from '../inbox/message.js';
 
@@ -23,6 +24,8 @@ const MAX_LIMIT = MAX_SCAN_POSITIONS;
 const SCAN_PAGE_POSITIONS = 1000;
 const MAX_MATERIALIZED_ATTACHMENTS = 12;
 const MAX_MATERIALIZED_BYTES = 80 * 1024 * 1024;
+const TASK_REPLY_TIMEOUT_MS = 5_000;
+const TELEGRAM_TEXT_LIMIT = 4_096;
 const TOO_MANY_ATTACHMENTS_REASON = 'too_many_attachments';
 const ATTACHMENTS_TOO_LARGE_REASON = 'attachments_too_large';
 const POSITION_KEYS = [
@@ -97,6 +100,27 @@ function telegramId(value, where, { positiveOnly = false, nullable = false } = {
     fail('telegram_inbox_invalid_archive', `${where}: неверный Telegram id.`);
   }
   return value;
+}
+
+function telegramNumber(value, where, options = {}) {
+  if (options.nullable && value === null) return null;
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  if (!/^-?[1-9]\d*$/u.test(text)) {
+    fail('telegram_inbox_invalid_notification', `${where}: неверный Telegram id.`);
+  }
+  return telegramId(Number(text), where, options);
+}
+
+function taskReplyText(taskId, taskUrl) {
+  const id = String(taskId ?? '').trim();
+  if (!id || Buffer.byteLength(id, 'utf8') > 512 || /[\u0000-\u001f\u007f]/u.test(id)) {
+    fail('telegram_inbox_invalid_notification', 'Task confirmation получил неверный id задачи.');
+  }
+  let url = '';
+  try { url = safeInboxSourceUrl(taskUrl) || ''; } catch { /* номер всё равно полезен */ }
+  const line = `Задача #${id} поставлена в Битрикс24.`;
+  const withUrl = url ? `${line}\n${url}` : line;
+  return withUrl.length <= TELEGRAM_TEXT_LIMIT ? withUrl : line;
 }
 
 export {
@@ -276,8 +300,10 @@ function credentialsOf(value, botId) {
 
 function botApiOf(value) {
   if (!value || typeof value !== 'object'
-      || typeof value.getFile !== 'function' || typeof value.downloadFile !== 'function') {
-    fail('telegram_inbox_invalid_context', 'Telegram Inbox lease не выдал Bot API materializer.');
+      || typeof value.getFile !== 'function'
+      || typeof value.downloadFile !== 'function'
+      || typeof value.callBotApi !== 'function') {
+    fail('telegram_inbox_invalid_context', 'Telegram Inbox lease не выдал полный Bot API transport.');
   }
   return value;
 }
@@ -499,6 +525,7 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
         }
       };
       const sourceUrls = new Map();
+      const taskReplies = new Map();
       const attachmentCache = new Map();
 
       try { await assertCurrent(); } catch (err) {
@@ -525,6 +552,7 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
           await assertCurrent();
           const bounds = telegramActivationBounds(activationWindows);
           sourceUrls.clear();
+          taskReplies.clear();
           attachmentCache.clear();
           if (bounds === null) return [];
 
@@ -581,6 +609,12 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
               const message = toInboxMessage(snapshot, { accountRef: owner.accountRef });
               const urlKey = cacheKey(message.source.id, message.id);
               sourceUrls.set(urlKey, sourceUrlOf(snapshot));
+              taskReplies.set(urlKey, Object.freeze({
+                enabled: rule.notifyTaskCreated === true,
+                chatId: message.source.id,
+                messageId: message.id,
+                threadId: message.source.threadId,
+              }));
               for (const attachment of message.attachments) {
                 const draftShape = {
                   ...attachment,
@@ -634,6 +668,54 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
             fail('telegram_inbox_invalid_source', 'Telegram source URL запрошен вне authorized batch.');
           }
           return sourceUrls.get(key);
+        },
+
+        async notifyTaskCreated({ source, message, taskId, taskUrl } = {}) {
+          await assertCurrent();
+          const key = cacheKey(source?.id, message?.id);
+          const target = taskReplies.get(key);
+          if (!sourceUrls.has(key)
+              || !target
+              || source?.id !== target.chatId
+              || message?.id !== target.messageId
+              || source?.threadId !== target.threadId
+              || message?.source?.id !== source?.id
+              || message?.source?.threadId !== source?.threadId) {
+            fail(
+              'telegram_inbox_invalid_notification',
+              'Telegram confirmation запрошен вне exact authorized message.',
+            );
+          }
+          if (!target.enabled) return { enabled: false, sent: false };
+          if (!await enabledCallback()) return { enabled: true, sent: false, reason: 'plugin_disabled' };
+
+          const token = owner.credentials?.token || '';
+          if (!token) {
+            fail('telegram_inbox_notification_unavailable', 'Telegram bot не подключён для ответа.', 409);
+          }
+          const chatId = telegramNumber(target.chatId, 'notification.chatId');
+          const messageId = telegramNumber(target.messageId, 'notification.messageId', { positiveOnly: true });
+          const threadId = telegramNumber(target.threadId, 'notification.threadId', {
+            positiveOnly: true,
+            nullable: true,
+          });
+          const body = {
+            chat_id: chatId,
+            text: taskReplyText(taskId, taskUrl),
+            link_preview_options: { is_disabled: true },
+            reply_parameters: {
+              message_id: messageId,
+              allow_sending_without_reply: true,
+            },
+          };
+          if (threadId !== null) body.message_thread_id = threadId;
+
+          await assertCurrent();
+          await owner.botApi.callBotApi(token, 'sendMessage', body, {
+            timeoutMs: TASK_REPLY_TIMEOUT_MS,
+          });
+          await assertCurrent();
+          return { enabled: true, sent: true };
         },
 
         async materializeAttachments(attachments) {

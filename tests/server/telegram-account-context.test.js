@@ -41,7 +41,7 @@ async function fixture(t, { credentialLease = { botId: BOT_ID, token: TOKEN } } 
     dir,
     now() { nowMs += 1; return nowMs; },
     log: { warn() {}, error() {}, info() {} },
-    botApi: { async getFile() {}, async downloadFile() {} },
+    botApi: { async getFile() {}, async downloadFile() {}, async callBotApi() {} },
   });
   const context = await accountContextFor({ accountRef: ACCOUNT_REF, botId: BOT_ID, credentialLease });
   return { dir, accountDir: path.join(dir, 'accounts', ACCOUNT_REF), accountContextFor, context };
@@ -63,6 +63,7 @@ test('context использует только точный account namespace �
   assert.equal(context.inboxState.file, context.paths.inboxStateFile);
   assert.equal(context.rules.file, context.paths.rulesFile);
   assert.equal(context.archive.root, context.paths.archiveDir);
+  assert.equal(typeof context.botApi.callBotApi, 'function');
 });
 
 test('credential snapshot обязан принадлежать verified bot', async (t) => {

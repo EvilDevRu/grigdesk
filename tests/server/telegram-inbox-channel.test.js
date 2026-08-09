@@ -112,6 +112,7 @@ function harness({
   connection = 'connected',
   credentials = { botId: BOT_ID, token: TOKEN },
   current = () => true,
+  pluginEnabled = () => true,
   onRules = null,
   onPositions = null,
   onRead = null,
@@ -147,13 +148,16 @@ function harness({
       return structuredClone(channelRules);
     },
   };
-  const api = botApi || {
+  const api = {
+    async callBotApi() { return true; },
+    ...(botApi || {
     async getFile(_token, fileId) { return { fileId, filePath: `files/${fileId}`, size: 1 }; },
     async downloadFile() { return Buffer.from('x'); },
+    }),
   };
   const stateStore = inboxState();
   const capability = createTelegramInboxChannel({
-    enabled: async () => true,
+    enabled: async () => pluginEnabled(),
     state: async () => ({
       connection,
       participation: 'active',
@@ -277,6 +281,134 @@ test('authorized native row становится strict batch с topic policy sc
     await context.release();
   }
   assert.equal(counters.release, 1);
+});
+
+test('включённое правило отвечает номером и ссылкой в exact чат и тему', async () => {
+  const calls = [];
+  const { capability } = harness({
+    channelRules: [defaultRule({ notifyTaskCreated: true })],
+    botApi: {
+      async getFile() {},
+      async downloadFile() {},
+      async callBotApi(token, method, body, options) {
+        calls.push({ token, method, body, options });
+        return { message_id: 9_001 };
+      },
+    },
+  });
+  const context = await capability.acquireInboxContext();
+  try {
+    const [batch] = await context.listAuthorizedBatches({
+      nowMs: (T0 + 1000) * 1000,
+      limit: 10,
+      activationWindows: windows(),
+    });
+    const [message] = batch.messages;
+    assert.deepEqual(await context.notifyTaskCreated({
+      source: batch.source,
+      message,
+      taskId: '5150',
+      taskUrl: 'https://b24.example/company/personal/user/7/tasks/task/view/5150/',
+    }), { enabled: true, sent: true });
+  } finally { await context.release(); }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].token, TOKEN);
+  assert.equal(calls[0].method, 'sendMessage');
+  assert.deepEqual(calls[0].options, { timeoutMs: 5_000 });
+  assert.deepEqual(calls[0].body, {
+    chat_id: CHAT,
+    text: 'Задача #5150 поставлена в Битрикс24.\n'
+      + 'https://b24.example/company/personal/user/7/tasks/task/view/5150/',
+    link_preview_options: { is_disabled: true },
+    reply_parameters: { message_id: 100, allow_sending_without_reply: true },
+    message_thread_id: THREAD,
+  });
+  assert.equal(Object.hasOwn(calls[0].body, 'parse_mode'), false);
+});
+
+test('выключенное правило молчит, а forged target не превращается в адрес отправки', async () => {
+  const calls = [];
+  const { capability } = harness({
+    botApi: {
+      async getFile() {},
+      async downloadFile() {},
+      async callBotApi(...args) { calls.push(args); },
+    },
+  });
+  const context = await capability.acquireInboxContext();
+  try {
+    const [batch] = await context.listAuthorizedBatches({
+      nowMs: (T0 + 1000) * 1000,
+      limit: 10,
+      activationWindows: windows(),
+    });
+    const [message] = batch.messages;
+    assert.deepEqual(await context.notifyTaskCreated({
+      source: batch.source,
+      message,
+      taskId: '5150',
+      taskUrl: 'https://b24.example/tasks/5150',
+    }), { enabled: false, sent: false });
+    await assert.rejects(
+      () => context.notifyTaskCreated({
+        source: { ...batch.source, id: '-1009999999999' },
+        message,
+        taskId: '5150',
+        taskUrl: 'https://b24.example/tasks/5150',
+      }),
+      (error) => error.code === 'telegram_inbox_invalid_notification',
+    );
+    await assert.rejects(
+      () => context.notifyTaskCreated({
+        source: { ...batch.source, threadId: '999' },
+        message: { ...message, source: { ...message.source, threadId: '999' } },
+        taskId: '5150',
+        taskUrl: 'https://b24.example/tasks/5150',
+      }),
+      (error) => error.code === 'telegram_inbox_invalid_notification',
+    );
+  } finally { await context.release(); }
+  assert.equal(calls.length, 0);
+});
+
+test('безопасность ссылки проверяется повторно, а выключенный plugin не ходит в сеть', async () => {
+  const calls = [];
+  let enabled = true;
+  const { capability } = harness({
+    pluginEnabled: () => enabled,
+    channelRules: [defaultRule({ notifyTaskCreated: true })],
+    botApi: {
+      async getFile() {},
+      async downloadFile() {},
+      async callBotApi(_token, _method, body) { calls.push(body); },
+    },
+  });
+  const context = await capability.acquireInboxContext();
+  try {
+    const [batch] = await context.listAuthorizedBatches({
+      nowMs: (T0 + 1000) * 1000,
+      limit: 10,
+      activationWindows: windows(),
+    });
+    const [message] = batch.messages;
+    await context.notifyTaskCreated({
+      source: batch.source,
+      message,
+      taskId: '5150',
+      taskUrl: 'javascript:alert(1)',
+    });
+    assert.equal(calls[0].text, 'Задача #5150 поставлена в Битрикс24.');
+
+    enabled = false;
+    assert.deepEqual(await context.notifyTaskCreated({
+      source: batch.source,
+      message,
+      taskId: '5151',
+      taskUrl: 'https://b24.example/tasks/5151',
+    }), { enabled: true, sent: false, reason: 'plugin_disabled' });
+  } finally { await context.release(); }
+  assert.equal(calls.length, 1);
 });
 
 test('пустой allowlist не читает ни archive positions, ни native text', async () => {
