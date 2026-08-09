@@ -121,15 +121,34 @@ export function decideHttpRequest({ remoteAddress, routeUrl, httpsUp, upgrade = 
  * Фильтр по ИМЕНИ интерфейса, а не по диапазону: docker-мосты живут в тех же приватных
  * диапазонах (на этой машине рядом с настоящим адресом видны `192.168.48.1` и `192.168.16.1`),
  * а поля «scope global» в Node нет.
+ *
+ * Туннели (VPN) отсекаются наравне с мостами: по адресу внутри туннеля планшет до мозга не
+ * дойдёт, значит в сертификате такому адресу делать нечего. Имя ловится и префиксом, и
+ * суффиксом — sing-box зовёт свой интерфейс `singbox_tun`, и его `172.18.0.1` показывался
+ * в «Доступе» жёлтым «Адрес не в сертификате» при полностью правильном сертификате.
  */
+const SKIP_IFACE = /^(docker|br-|veth|virbr|vmnet|tailscale|zt)|(^|[-_])(tun|tap|wg|utun)\d*$/;
+
+/**
+ * Второй пояс — маска. Имена туннелей бывают любыми (`nordlynx`, `proton0`), но сеть у них
+ * точка-точка: в /30 и уже клиенту места нет, домашней сети такой маски не бывает.
+ */
+function isPointToPoint(item) {
+  const fromCidr = Number(String(item.cidr || '').split('/')[1]);
+  if (Number.isInteger(fromCidr)) return fromCidr >= 30;
+  return item.netmask === '255.255.255.252'
+    || item.netmask === '255.255.255.254'
+    || item.netmask === '255.255.255.255';
+}
+
 export function localAddresses() {
-  const skip = /^(docker|br-|veth|virbr|vmnet|tailscale|zt)/;
   const out = [];
   for (const [iface, list] of Object.entries(os.networkInterfaces())) {
-    if (skip.test(iface)) continue;
+    if (SKIP_IFACE.test(iface)) continue;
     for (const item of list || []) {
       if (item.internal) continue;
       if (item.family !== 'IPv4' && item.family !== 4) continue;
+      if (isPointToPoint(item)) continue;
       out.push({ address: item.address, iface });
     }
   }

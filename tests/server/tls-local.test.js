@@ -10,7 +10,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { X509Certificate } from 'node:crypto';
 
-import { LocalTls, TlsInputError, normalizeAddresses } from '../../server/src/lib/tls/local.js';
+import { LocalTls, TlsInputError, localAddresses, normalizeAddresses } from '../../server/src/lib/tls/local.js';
 
 async function tempTls(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-tls.'));
@@ -149,4 +149,29 @@ test('TLS-GEN-06: статус отделяет «лежит на диске» �
     source: 'state', up: true, port: 8143, httpPort: 8140, fingerprint: leaf.fingerprint,
   });
   assert.equal(stale.needsRestart, true);
+});
+
+test('TLS-GEN-07: туннель VPN не считается адресом машины (ложное «адрес не в сертификате»)', async (t) => {
+  const { tls } = await tempTls(t);
+  await tls.generate({ addresses: ['192.168.3.107'] });
+
+  // Живая раскладка мозга: wi-fi, полтора десятка docker-мостов и TUN sing-box. Последний
+  // не отсекался (имя `singbox_tun` — суффикс, а не префикс), и его 172.18.0.1 попадал в
+  // «адреса машины»: раздел «Доступ» показывал жёлтое «Адрес не в сертификате» при
+  // совершенно правильном сертификате.
+  t.mock.method(os, 'networkInterfaces', () => ({
+    lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', internal: true, cidr: '127.0.0.1/8' }],
+    wlp4s0: [{ address: '192.168.3.107', netmask: '255.255.255.0', family: 'IPv4', internal: false, cidr: '192.168.3.107/24' }],
+    docker0: [{ address: '172.17.0.1', netmask: '255.255.0.0', family: 'IPv4', internal: false, cidr: '172.17.0.1/16' }],
+    'br-371461e6182a': [{ address: '192.168.16.1', netmask: '255.255.240.0', family: 'IPv4', internal: false, cidr: '192.168.16.1/20' }],
+    singbox_tun: [{ address: '172.18.0.1', netmask: '255.255.255.252', family: 'IPv4', internal: false, cidr: '172.18.0.1/30' }],
+    // Имя туннеля бывает любым — тогда его ловит маска точки-точки.
+    nordlynx: [{ address: '10.5.0.2', netmask: '255.255.255.255', family: 'IPv4', internal: false, cidr: '10.5.0.2/32' }],
+    wg0: [{ address: '10.8.0.3', netmask: '255.255.255.0', family: 'IPv4', internal: false, cidr: '10.8.0.3/24' }],
+  }));
+
+  assert.deepEqual(localAddresses().map((a) => a.address), ['192.168.3.107']);
+
+  const status = await tls.status({ source: 'state', up: true, port: 8143, httpPort: 8140 });
+  assert.deepEqual(status.missingAddresses, [], 'сертификат покрывает всё, что показываем человеку');
 });
