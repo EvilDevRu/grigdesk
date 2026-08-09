@@ -40,6 +40,10 @@ async function compileTaskModal() {
       'const confirmDialog = async () => true;',
     )
     .replace(
+      "import { registerLayer } from '../shared/ui/layer-stack.js';",
+      'const registerLayer = () => () => {};',
+    )
+    .replace(
       "import HelpTip from '../shared/ui/HelpTip.vue';",
       'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
     )
@@ -62,6 +66,10 @@ async function compileTaskModal() {
     .replace(
       "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
       'const useTaskFavoritesStore = globalThis.__taskModalLaunchFavoriteStore;',
+    )
+    .replace(
+      "import { useTaskSeenStore } from '../stores/task-seen.js';",
+      'const useTaskSeenStore = globalThis.__taskModalLaunchSeenStore;',
     )
     .replace(
       "import { liveTimerSec, secToHMS } from '../shared/format.js';",
@@ -170,6 +178,15 @@ async function mountLaunchForm(t, { launchOptions }) {
     },
     actions: { async load() {}, async toggle() {} },
   });
+  // Открытая задача перестаёт быть новой; форме запуска отметка безразлична.
+  globalThis.__taskModalLaunchSeenStore = defineStore('task-modal-launch-seen', {
+    state: () => ({ taskIds: [], loaded: true, initialized: true, loading: false, error: null }),
+    getters: {
+      isSeen: () => () => false,
+      ready: () => true,
+    },
+    actions: { async load() {}, async markSeen() { return true; } },
+  });
 
   const wrapper = mount(await compileTaskModal(), {
     attachTo: browser.document.querySelector('#mount'),
@@ -186,6 +203,7 @@ async function mountLaunchForm(t, { launchOptions }) {
       '__taskModalLaunchBoardStore',
       '__taskModalLaunchAnalysisStore',
       '__taskModalLaunchFavoriteStore',
+      '__taskModalLaunchSeenStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
@@ -245,10 +263,10 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
           return {
             profile: 'rdesigner',
             profiles: ['rdesigner'],
-            routes: ['debug', 'feature'],
+            routes: ['consilium-debug', 'feature'],
             defaultRoute: 'feature',
             routeOptions: {
-              debug: { deliveryMode: 'publish', instrumentationRequired: true },
+              'consilium-debug': { deliveryMode: 'publish', instrumentationRequired: true },
               feature: { deliveryMode: 'publish', instrumentationRequired: false },
             },
             repositories: [{ name: 'rdesigner', targetBranch: 'master' }],
@@ -295,6 +313,15 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
     },
     actions: { async load() {}, async toggle() {} },
   });
+  // Открытая задача перестаёт быть новой; форме запуска отметка безразлична.
+  globalThis.__taskModalLaunchSeenStore = defineStore('task-modal-launch-seen', {
+    state: () => ({ taskIds: [], loaded: true, initialized: true, loading: false, error: null }),
+    getters: {
+      isSeen: () => () => false,
+      ready: () => true,
+    },
+    actions: { async load() {}, async markSeen() { return true; } },
+  });
 
   const wrapper = mount(await compileTaskModal(), {
     attachTo: browser.document.querySelector('#mount'),
@@ -311,6 +338,7 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
       '__taskModalLaunchBoardStore',
       '__taskModalLaunchAnalysisStore',
       '__taskModalLaunchFavoriteStore',
+      '__taskModalLaunchSeenStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
@@ -333,7 +361,7 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   assert.equal(wrapper.get('.ladvanced').attributes('open'), undefined);
   assert.match(wrapper.get('.ladvanced').text(), /Целевые ветки из конфигурации профиля/);
 
-  await wrapper.get('#launch-route').setValue('debug');
+  await wrapper.get('#launch-route').setValue('consilium-debug');
   await flushPromises();
   assert.equal(wrapper.get('#launch-instrumentation').element.value, 'rdesigner:webapp/pipeline.py');
   assert.equal(wrapper.get('#launch-diagnosis-kind').element.value, 'data');

@@ -14,6 +14,9 @@ const HELP_TIP_PATH = fileURLToPath(
 const VUE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
 )).href;
+const LAYER_STACK_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/src/shared/ui/layer-stack.js', import.meta.url),
+)).href;
 
 async function compileSfc(path, id) {
   const { parse, compileScript } = await import(
@@ -24,7 +27,8 @@ async function compileSfc(path, id) {
   assert.deepEqual(errors, []);
   return compileScript(descriptor, { id, inlineTemplate: true }).content
     .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`);
+    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
+    .replace("from './layer-stack.js'", `from "${LAYER_STACK_URL}"`);
 }
 
 async function compileHelpTip() {
@@ -45,6 +49,10 @@ async function compileChatSession() {
     .replace(
       "import { api } from '../../shared/api-client.js';",
       'const api = globalThis.__chatTaskTooltipApi;',
+    )
+    .replace(
+      "import { createSpeechStream } from '../../shared/speech-stream.js';",
+      'const createSpeechStream = async () => null;',
     )
     .replace(
       "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",

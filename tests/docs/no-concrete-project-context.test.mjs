@@ -51,7 +51,15 @@ test('общая документация не содержит конкретн
   const hits = [];
 
   for (const file of await commonDocs()) {
-    const source = await readFile(path.join(ROOT, file), 'utf8');
+    let source;
+    try {
+      source = await readFile(path.join(ROOT, file), 'utf8');
+    } catch (error) {
+      // `git ls-files --cached` видит staged-файл даже после его удаления из
+      // рабочей копии. Удалённый документ проверять уже нечего.
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
     for (const [label, pattern] of RULES) {
       for (const match of source.matchAll(pattern)) {
         hits.push(`${file}:${lineAt(source, match.index)}: ${label}: ${match[0]}`);

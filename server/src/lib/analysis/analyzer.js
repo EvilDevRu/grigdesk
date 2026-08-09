@@ -9,18 +9,24 @@ import path from 'node:path';
 import { loadTriageProfile } from './profile.js';
 import { buildTriagePrompt } from './prompt.js';
 import { refreshRepos } from '../git-refresh.js';
+import { stripDiscussionSection } from '../telegram/discussion.js';
 
 export class Analyzer {
   /**
    * @param {{config: object, claudeAuth: object|null, b24: object, factoryState: object, log: object}} opts
+   * @param {(text: string, opts: object) => Promise<{text: string}>} [opts.discussion]
+   *   разворот телеграм-ссылок. Ссылка ЛЕНИВАЯ: анализатор создаётся в `app.js`
+   *   раньше, чем регистрируется модуль telegram с его декоратором, — так что
+   *   функция обязана искать декоратор в момент вызова, а не при сборке.
    */
-  constructor({ config, claudeAuth, b24, factoryState, prefs, log }) {
+  constructor({ config, claudeAuth, b24, factoryState, prefs, log, discussion }) {
     this.config = config;
     this.claudeAuth = claudeAuth;
     this.b24 = b24;
     this.factoryState = factoryState;
     this.prefs = prefs;
     this.log = log;
+    this.discussion = discussion || null;
     this.dir = config.analysisDir;
     this._queue = [];
     this._jobs = new Map(); // id → 'queued' | 'running'
@@ -281,6 +287,7 @@ export class Analyzer {
         description: ticket.description,
         comments: ticket.comments,
         clarifications: await this.readClarifications(id),
+        discussion: await this._discussion(id, ticket),
         profile,
         jsonPath: p.json,
         notePath: p.note,
@@ -318,6 +325,53 @@ export class Analyzer {
       description: htmlToText(detail?.description || ''),
       comments,
     };
+  }
+
+  /**
+   * Переписка по телеграм-ссылкам из тикета — отдельным блоком промпта.
+   *
+   * Ради этого места разворот и затевался: в рубрике прямым текстом сказано
+   * «есть недоступные ссылки t.me — ставь confidence low», то есть задача, вся
+   * суть которой лежит в чате, приезжала оценщику заведомо мутной.
+   *
+   * Оценка задачи не зависит от исправности телеграма: любой отказ здесь — это
+   * триаж без переписки, а не упавший триаж.
+   */
+  async _discussion(id, ticket) {
+    if (typeof this.discussion !== 'function') return '';
+    const source = [
+      ticket.title,
+      // Снимаем уже вставленную секцию: цитаты в ней несут те же ссылки, и без
+      // этого разворот пережёвывал бы собственный вывод.
+      stripDiscussionSection(String(ticket.description || '')),
+      ...(ticket.comments || []).map((c) => String(c.text || '')),
+    ].filter(Boolean).join('\n');
+    if (!source.trim()) return '';
+    try {
+      const view = await this.discussion(source, { project: await this._taskProject(id) });
+      return view?.text || '';
+    } catch (e) {
+      this.log?.warn({ task: id, err: e.message }, 'триаж: разворот телеграм-ссылок не удался');
+      return '';
+    }
+  }
+
+  /**
+   * Проект задачи для allowlist — профиль её ПРОГОНА, как в чате и в тикете.
+   *
+   * В триаже реестра обычно ещё нет: задачу оценивают до запуска. Это значит
+   * «проект неизвестен» — остаётся голый allowlist, и чат обязан быть привязан
+   * хоть к чему-то. Брать сюда профиль триажа нельзя: он выводится из активных
+   * задач (`primaryProfile`), то есть граница безопасности зависела бы от того,
+   * что сейчас бежит на конвейере.
+   */
+  async _taskProject(id) {
+    try {
+      const { registry } = await this.factoryState.readRegistry(id);
+      return String(registry?.PROFILE || '').trim() || null;
+    } catch {
+      return null;
+    }
   }
 
   /** Allow/deny для агента: читать можно всё, писать — только в каталог анализа. */

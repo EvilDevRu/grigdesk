@@ -1,6 +1,6 @@
 // Предметный слой избранного: браузер не передаёт account scope, он выводится
 // из текущего B24-портала и пользователя и возвращается только как opaque hash.
-import { createHash } from 'node:crypto';
+import { b24AccountScope } from './b24-account-scope.js';
 
 export class TaskFavoritesIdentityError extends Error {
   constructor(message = 'Не удалось определить B24-пользователя', cause = null) {
@@ -10,20 +10,9 @@ export class TaskFavoritesIdentityError extends Error {
   }
 }
 
-function normalizedPortal(baseUrl) {
-  const url = new URL(String(baseUrl));
-  url.hash = '';
-  url.search = '';
-  url.pathname = url.pathname.replace(/\/+$/, '') || '/';
-  return url.toString().replace(/\/$/, '');
-}
-
 export function favoriteScopeFor(identity) {
   try {
-    const userId = String(identity?.userId ?? '').trim();
-    if (!/^[1-9]\d*$/.test(userId)) throw new Error('invalid user id');
-    const portal = normalizedPortal(identity?.baseUrl);
-    return createHash('sha256').update(`${portal}\0${userId}`).digest('hex');
+    return b24AccountScope(identity);
   } catch (error) {
     throw new TaskFavoritesIdentityError(undefined, error);
   }

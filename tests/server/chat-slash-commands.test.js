@@ -217,6 +217,42 @@ test('/api/providers отдаёт commands каждого исполнителя
   assert.ok(calls >= 2, '?refresh=1 пересобирает списки команд');
 });
 
+test('/api/providers берёт поддержку доверенных каталогов из контракта адаптера', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'providers-trusted-dirs-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const runtimeAdapter = (id, trustedDirectories) => ({
+    ...stubAdapter(id, null),
+    run: async () => ({ reply: 'ok' }),
+    trustedDirectories,
+  });
+  const adapters = new Map([
+    ['static', runtimeAdapter('static', true)],
+    ['dynamic', runtimeAdapter('dynamic', (config) => config.enableExtraDirs === true)],
+    ['broken', runtimeAdapter('broken', () => { throw new Error('capability failed'); })],
+    // Setup-only карточка не получает ходы и не должна обещать доступ, даже если
+    // ошибочно скопировала capability из полноценного адаптера.
+    ['setup', { ...stubAdapter('setup', null), trustedDirectories: true }],
+  ]);
+  const app = Fastify({ logger: false });
+  app.decorate('sse', { broadcast() {} });
+  await app.register(providersModule, {
+    config: { modelsPath: path.join(root, 'models.json'), enableExtraDirs: true },
+    claudeAuth: null,
+    prefs: { read: () => ({}) },
+    getProviderAdapters: async () => adapters,
+  });
+  t.after(() => app.close());
+
+  const response = await app.inject({ method: 'GET', url: '/api/providers' });
+  assert.equal(response.statusCode, 200);
+  const byId = new Map(response.json().providers.map((provider) => [provider.id, provider]));
+  assert.equal(byId.get('static')?.trustedDirectories, true);
+  assert.equal(byId.get('dynamic')?.trustedDirectories, true);
+  assert.equal(byId.get('broken')?.trustedDirectories, false, 'сбой capability не валит реестр');
+  assert.equal(byId.get('setup')?.trustedDirectories, false, 'setup-only не получает ход');
+});
+
 // ── POST /api/chat + slashCommand ────────────────────────────────────────────
 
 async function chatFixture(t, { executor }) {

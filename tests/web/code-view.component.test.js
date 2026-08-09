@@ -5,7 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/CodeView.vue', import.meta.url));
+// Маршрутный CodeView теперь только adapter. Состояние и Monaco живут в единственном
+// CodePanel, поэтому компонентные контракты проверяем непосредственно на нём.
+const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/code/CodePanel.vue', import.meta.url));
 const VUE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
 )).href;
@@ -48,23 +50,15 @@ async function compileCodeView() {
     .replaceAll('from "vue"', `from "${VUE_URL}"`)
     .replaceAll("from 'vue'", `from "${VUE_URL}"`)
     .replace(
-      "import { api } from '../shared/api-client.js';",
+      "import { api } from '../../shared/api-client.js';",
       'const api = globalThis.__codeViewApi;',
     )
     .replace(
-      "import { usePluginsStore } from '../stores/plugins.js';",
-      'const usePluginsStore = globalThis.__codeViewPluginsStore;',
-    )
-    .replace(
-      "import { monaco, langOf, READONLY_OPTS } from '../shared/monaco.js';",
+      "import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';",
       'const monaco = globalThis.__codeViewMonaco; const langOf = (path) => path.split(".").pop() || "plaintext"; const READONLY_OPTS = {};',
     )
     .replace(
-      "import TopbarActions from '../shared/layout/TopbarActions.vue';",
-      "const TopbarActions = { template: '<div class=\"topbar-stub\"><slot /></div>' };",
-    )
-    .replace(
-      "from '../shared/code-tree.js'",
+      "from '../../shared/code-tree.js'",
       `from "${CODE_TREE_URL}"`,
     );
   const nonce = compileNonce++;
@@ -103,14 +97,19 @@ function installBrowser(t, storage = {}) {
 
 function makeMonaco() {
   const state = { models: [], fileEditors: [], diffEditors: [] };
-  const makeEditor = (kind) => {
+  const makeEditor = (kind, options = {}) => {
     const editor = {
       kind,
+      options: { ...options },
+      optionCalls: [],
       model: undefined,
       setCalls: [],
       disposed: false,
       setModel(model) { this.model = model; this.setCalls.push(model); },
-      updateOptions() {},
+      updateOptions(value) {
+        this.options = { ...this.options, ...value };
+        this.optionCalls.push(value);
+      },
       dispose() { this.disposed = true; },
     };
     state[kind === 'file' ? 'fileEditors' : 'diffEditors'].push(editor);
@@ -118,8 +117,8 @@ function makeMonaco() {
   };
   const monaco = {
     editor: {
-      create: () => makeEditor('file'),
-      createDiffEditor: () => makeEditor('diff'),
+      create: (_host, options) => makeEditor('file', options),
+      createDiffEditor: (_host, options) => makeEditor('diff', options),
       createModel(content, language) {
         const model = {
           content,
@@ -147,22 +146,18 @@ async function waitFor(check, message) {
   assert.fail(message);
 }
 
-async function mountCodeView(t, { api, storage = {} }) {
+async function mountCodeView(t, { api, storage = {}, props = {} }) {
   const browser = await installBrowser(t, storage);
   const { monaco, state: monacoState } = makeMonaco();
   globalThis.__codeViewApi = api;
   globalThis.__codeViewMonaco = monaco;
-  globalThis.__codeViewPluginsStore = () => ({
-    loaded: true,
-    enabled: () => true,
-    async load() {},
-  });
   const [{ mount, flushPromises }, CodeView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileCodeView(),
   ]);
   const wrapper = mount(CodeView, {
     attachTo: browser.document.querySelector('#mount'),
+    props,
     global: {
       stubs: { RouterLink: { template: '<a href="/projects"><slot /></a>' } },
     },
@@ -171,11 +166,43 @@ async function mountCodeView(t, { api, storage = {} }) {
     wrapper.unmount();
     delete globalThis.__codeViewApi;
     delete globalThis.__codeViewMonaco;
-    delete globalThis.__codeViewPluginsStore;
   });
   await settle(flushPromises);
   return { browser, wrapper, flushPromises, monacoState };
 }
+
+test('холодный запуск Code сразу занимает финальную сетку без пустого loading-кадра', async (t) => {
+  const projectsRequest = deferred();
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return projectsRequest.promise;
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    props: { active: true, compact: true },
+  });
+
+  const loading = wrapper.get('.lay.code-loading');
+  assert.equal(wrapper.get('.code-panel').attributes('aria-busy'), 'true');
+  assert.equal(loading.attributes('role'), undefined);
+  assert.equal(loading.classes().includes('compact'), true);
+  assert.equal(loading.find('.rail').exists(), true);
+  assert.equal(loading.find('.panel').exists(), true);
+  assert.equal(loading.find('.code-split').exists(), true);
+  assert.equal(loading.find('.editorwrap').exists(), true);
+  assert.equal(wrapper.find('.empty').exists(), false);
+
+  projectsRequest.resolve({ projects: [{ id: 'demo', repos: ['/demo'] }] });
+  await settle(flushPromises);
+  assert.equal(wrapper.find('.code-loading').exists(), false);
+  assert.equal(wrapper.get('.lay').classes().includes('compact'), true);
+});
 
 test('CodeView показывает два подписанных уровня, хранит контекст по проекту и сообщает о недоступном repo', async (t) => {
   const calls = [];
@@ -310,9 +337,17 @@ test('Git по умолчанию показан деревом, доступн�
   assert.equal(wrapper.findAll('[data-path="foo"]').length, 2);
 
   const nested = wrapper.get('button.git-file[data-path="src/deep/b.js"]');
+  assert.equal(monacoState.diffEditors[0].options.renderSideBySide, true);
+  await wrapper.get('button.git-file[data-path="src/a.js"]').trigger('click');
+  await settle(flushPromises);
+  assert.match(wrapper.get('.ehead').text(), /src\/a\.js.*одна колонка/s);
+  assert.equal(monacoState.diffEditors[0].options.renderSideBySide, false,
+    'новый файл не оставляет пустую половину side-by-side diff');
+
   await nested.trigger('click');
   await settle(flushPromises);
   assert.match(wrapper.get('.ehead').text(), /src\/deep\/b\.js/);
+  assert.equal(monacoState.diffEditors[0].options.renderSideBySide, true);
   assert.match(nested.text(), /\+2.*−1/s);
   const diffSetCalls = monacoState.diffEditors[0].setCalls.length;
 
@@ -483,4 +518,304 @@ test('поздние repos и git не возвращают интерфейс �
   assert.equal(wrapper.find('button.git-file[data-path="main-current.js"]').exists(), true);
   assert.equal(wrapper.find('button.git-file[data-path="task-late.js"]').exists(), false);
   assert.match(wrapper.get('.ehead').text(), /main-current\.js/);
+});
+
+test('повторное открытие обновляет Code без пустого кадра и разрыва Monaco-модели', async (t) => {
+  const nextProjects = deferred();
+  const nextRepos = deferred();
+  const nextRoot = deferred();
+  const nextFile = deferred();
+  let projectsCalls = 0;
+  let reposCalls = 0;
+  let rootCalls = 0;
+  let fileCalls = 0;
+  const projectPayload = { projects: [{ id: 'demo', repos: ['/demo'] }] };
+  const reposPayload = {
+    repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        projectsCalls += 1;
+        return projectsCalls === 1 ? projectPayload : nextProjects.promise;
+      }
+      if (url === '/api/code/demo/repos') {
+        reposCalls += 1;
+        return reposCalls === 1 ? reposPayload : nextRepos.promise;
+      }
+      if (url.includes('/ls?')) {
+        rootCalls += 1;
+        return rootCalls === 1
+          ? { entries: [{ name: 'keep.js', dir: false }] }
+          : nextRoot.promise;
+      }
+      if (url.includes('/file?')) {
+        fileCalls += 1;
+        return fileCalls === 1
+          ? { content: 'before', binary: false, tooBig: false, size: 6 }
+          : nextFile.promise;
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, {
+    api,
+    props: { active: true },
+  });
+
+  await wrapper.get('button[data-file-path="keep.js"]').trigger('click');
+  await settle(flushPromises);
+  const layout = wrapper.get('.lay').element;
+  const editor = monacoState.fileEditors[0];
+  const originalModel = editor.model;
+  assert.equal(originalModel.content, 'before');
+
+  const assertSnapshotVisible = (stage) => {
+    assert.equal(wrapper.get('.lay').element, layout, `${stage}: layout заменён`);
+    assert.equal(wrapper.get('button[data-file-path="keep.js"]').exists(), true,
+      `${stage}: дерево очистилось`);
+    assert.equal(editor.model, originalModel, `${stage}: Monaco потерял исходную модель`);
+    assert.equal(editor.setCalls.includes(null), false, `${stage}: Monaco отвязали от модели`);
+    assert.equal(originalModel.disposed, false, `${stage}: модель преждевременно освобождена`);
+    assert.equal(wrapper.find('.context-loading').exists(), false,
+      `${stage}: фоновое обновление сдвинуло дерево индикатором`);
+    assert.doesNotMatch(wrapper.get('.ehead').text(), /читаю/,
+      `${stage}: фоновое обновление изменило заголовок`);
+  };
+
+  await wrapper.setProps({ active: false });
+  await wrapper.setProps({ active: true });
+  await waitFor(() => projectsCalls === 2, 'не стартовала повторная загрузка проектов');
+  assertSnapshotVisible('projects');
+
+  nextProjects.resolve(projectPayload);
+  await waitFor(() => reposCalls === 2, 'не стартовала повторная загрузка репозиториев');
+  assertSnapshotVisible('repos');
+
+  nextRepos.resolve(reposPayload);
+  await waitFor(() => rootCalls === 2, 'не стартовало повторное чтение корня');
+  assertSnapshotVisible('root');
+
+  nextRoot.resolve({ entries: [{ name: 'keep.js', dir: false }] });
+  await waitFor(() => fileCalls === 2, 'не стартовало повторное чтение файла');
+  assertSnapshotVisible('file');
+
+  nextFile.resolve({ content: 'after', binary: false, tooBig: false, size: 5 });
+  await settle(flushPromises);
+  assert.equal(wrapper.get('.lay').element, layout);
+  assert.equal(editor.model.content, 'after');
+  assert.notEqual(editor.model, originalModel);
+  assert.equal(editor.setCalls.includes(null), false);
+  assert.equal(originalModel.disposed, true);
+});
+
+test('интерактивное чтение того же файла побеждает тихую revalidation и снимает loading', async (t) => {
+  const backgroundFile = deferred();
+  const foregroundFile = deferred();
+  let fileCalls = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [{ name: 'keep.js', dir: false }] };
+      if (url.includes('/file?')) {
+        fileCalls += 1;
+        if (fileCalls === 1) return { content: 'initial', binary: false, tooBig: false, size: 7 };
+        if (fileCalls === 2) return backgroundFile.promise;
+        if (fileCalls === 3) return foregroundFile.promise;
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, {
+    api,
+    props: { active: true },
+  });
+  await wrapper.get('button[data-file-path="keep.js"]').trigger('click');
+  await settle(flushPromises);
+  const editor = monacoState.fileEditors[0];
+  const originalModel = editor.model;
+
+  await wrapper.setProps({ active: false });
+  await wrapper.setProps({ active: true });
+  await waitFor(() => fileCalls === 2, 'не стартовало тихое перечитывание файла');
+  await wrapper.get('button[data-file-path="keep.js"]').trigger('click');
+  await waitFor(() => fileCalls === 3, 'не стартовало интерактивное чтение файла');
+
+  backgroundFile.resolve({ content: 'background', binary: false, tooBig: false, size: 10 });
+  await settle(flushPromises);
+  assert.equal(editor.model, originalModel);
+  assert.equal(editor.setCalls.includes(null), false);
+  assert.match(wrapper.get('.ehead').text(), /читаю/);
+
+  foregroundFile.resolve({ content: 'foreground', binary: false, tooBig: false, size: 10 });
+  await settle(flushPromises);
+  assert.equal(editor.model.content, 'foreground');
+  assert.equal(originalModel.disposed, true);
+  assert.doesNotMatch(wrapper.get('.ehead').text(), /читаю/);
+  assert.equal(wrapper.get('button[title="Обновить"]').attributes('disabled'), undefined);
+});
+
+test('временная ошибка фонового чтения сохраняет прежний файл и Monaco-модель', async (t) => {
+  const backgroundFile = deferred();
+  let fileCalls = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [{ name: 'keep.js', dir: false }] };
+      if (url.includes('/file?')) {
+        fileCalls += 1;
+        return fileCalls === 1
+          ? { content: 'valid snapshot', binary: false, tooBig: false, size: 14 }
+          : backgroundFile.promise;
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, {
+    api,
+    props: { active: true },
+  });
+  await wrapper.get('button[data-file-path="keep.js"]').trigger('click');
+  await settle(flushPromises);
+  const editor = monacoState.fileEditors[0];
+  const originalModel = editor.model;
+
+  await wrapper.setProps({ active: false });
+  await wrapper.setProps({ active: true });
+  await waitFor(() => fileCalls === 2, 'не стартовало фоновое чтение файла');
+  const temporary = Object.assign(new Error('temporary failure'), { status: 500 });
+  backgroundFile.reject(temporary);
+  await settle(flushPromises);
+
+  assert.equal(editor.model, originalModel);
+  assert.equal(originalModel.disposed, false);
+  assert.equal(editor.setCalls.includes(null), false);
+  assert.equal(wrapper.get('button[data-file-path="keep.js"]').classes().includes('sel'), true);
+  assert.match(wrapper.get('.perr').text(), /temporary failure/);
+});
+
+test('ответ revalidation не откатывает проект, выбранный человеком во время запроса', async (t) => {
+  const nextProjects = deferred();
+  let projectCalls = 0;
+  const projects = [
+    { id: 'a', repos: ['/a'] },
+    { id: 'b', repos: ['/b'] },
+  ];
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        projectCalls += 1;
+        return projectCalls === 1 ? { projects } : nextProjects.promise;
+      }
+      const match = url.match(/^\/api\/code\/([^/]+)\/repos$/);
+      if (match) {
+        const id = match[1];
+        return { repos: [{ key: id, dir: `/${id}`, trees: [mainTree(`/${id}`)] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    props: { active: true },
+  });
+
+  await wrapper.setProps({ active: false });
+  await wrapper.setProps({ active: true });
+  await waitFor(() => projectCalls === 2, 'не стартовала revalidation проектов');
+  await wrapper.get('#code-project').setValue('b');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('#code-project').element.value, 'b');
+
+  nextProjects.resolve({ projects });
+  await settle(flushPromises);
+  assert.equal(wrapper.get('#code-project').element.value, 'b');
+  assert.equal(wrapper.get('.context-static').text(), 'Рабочая копия: b · Основная · main');
+});
+
+test('фоновое обновление дерева не отменяет сворачивание каталога человеком', async (t) => {
+  const nextRoot = deferred();
+  let rootCalls = 0;
+  let nestedCalls = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        if (query(url).get('dir') === 'src') {
+          nestedCalls += 1;
+          return { entries: [{ name: 'inside.js', dir: false }] };
+        }
+        rootCalls += 1;
+        return rootCalls === 1
+          ? { entries: [{ name: 'src', dir: true }] }
+          : nextRoot.promise;
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    props: { active: true },
+  });
+  await wrapper.get('button[data-dir-path="src"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button[data-dir-path="src"]').attributes('aria-expanded'), 'true');
+
+  await wrapper.setProps({ active: false });
+  await wrapper.setProps({ active: true });
+  await waitFor(() => rootCalls === 2, 'не стартовало фоновое чтение корня');
+  await wrapper.get('button[data-dir-path="src"]').trigger('click');
+  assert.equal(wrapper.get('button[data-dir-path="src"]').attributes('aria-expanded'), 'false');
+
+  nextRoot.resolve({ entries: [{ name: 'src', dir: true }] });
+  await waitFor(() => nestedCalls === 2, 'не перечитан раскрытый на старте каталог');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('button[data-dir-path="src"]').attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.find('button[data-file-path="src/inside.js"]').exists(), false);
+});
+
+test('compact Code оставляет дерево слева и хранит ширину вертикального разделителя', async (t) => {
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { browser, wrapper, flushPromises } = await mountCodeView(t, {
+    api,
+    props: { compact: true },
+  });
+
+  const separator = wrapper.get('.code-split');
+  assert.equal(separator.attributes('aria-orientation'), 'vertical');
+  assert.equal(separator.attributes('aria-valuenow'), '260');
+  assert.equal(wrapper.get('.panel').element.nextElementSibling, separator.element);
+  assert.equal(separator.element.nextElementSibling, wrapper.get('.editorwrap').element);
+
+  await separator.trigger('keydown', { key: 'End' });
+  await settle(flushPromises);
+  assert.equal(separator.attributes('aria-valuenow'), '420');
+
+  await separator.trigger('keydown', { key: 'ArrowLeft' });
+  await settle(flushPromises);
+  assert.equal(wrapper.get('.code-split').attributes('aria-valuenow'), '404');
+  assert.equal(browser.localStorage.getItem('cockpit-code-dock-nav-width'), '404');
+
+  await wrapper.get('.navigator-toggle').trigger('click');
+  assert.equal(wrapper.get('.lay').classes().includes('navigator-collapsed'), true);
+  assert.equal(wrapper.find('.code-split').exists(), false);
 });

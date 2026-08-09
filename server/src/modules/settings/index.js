@@ -6,20 +6,250 @@ import fp from 'fastify-plugin';
 import net from 'node:net';
 import qrcode from 'qrcode-generator';
 import { FactoryDebugInputError } from '../../lib/factory-debug.js';
+import { ModelJobError } from '../../lib/speech/model-jobs.js';
+import {
+  SpeechSettingsConflictError,
+  SpeechSettingsInputError,
+  SpeechSettingsStore,
+} from '../../lib/speech-settings.js';
 import {
   TrustedDirectoryInputError,
   validateTrustedDirectories,
 } from '../../lib/trusted-directories.js';
 import { TlsInputError, isPrivateAddress } from '../../lib/tls/local.js';
 
+const PROTECTED_PREFS = new Map([
+  ['speech', '/api/settings/speech'],
+  ['trustedDirectories', '/api/settings/trusted-directories'],
+  ['plugins', '/api/plugins/:id/toggle'],
+  ['pluginSettings', '/api/plugins/:id/settings'],
+  ['providerSettings', '/api/providers/:id/settings'],
+]);
+
+const UNAVAILABLE_SPEECH_CAPABILITIES = Object.freeze({
+  local: { ready: false, reason: 'speech_runtime_unavailable', checks: [] },
+  models: [],
+  cuda: { state: 'probe_failed' },
+  languages: ['ru', 'en', 'auto'],
+  lastDictionaryMeasure: null,
+  resident: {
+    supported: false,
+    loaded: false,
+    model: null,
+    device: null,
+    memMb: null,
+    unloadAtSec: null,
+  },
+});
+const UNAVAILABLE_SPEECH_BENCHMARK = Object.freeze({
+  available: false,
+  reason: 'Эталонная запись benchmark не настроена оператором.',
+});
+
 async function settingsModule(fastify, opts) {
   const {
-    credsStore, b24, prefs, factoryDebug, localTls, tlsRuntime,
+    credsStore, b24, prefs, factoryDebug, localTls, tlsRuntime, speechRuntime,
   } = opts;
+  const speechSettings = opts.speechSettings || new SpeechSettingsStore({ prefs });
+  const modelJobs = Object.hasOwn(opts, 'modelJobs') ? opts.modelJobs : (speechRuntime?.modelJobs || null);
+  let speechMutationTail = Promise.resolve();
+
+  function serializeSpeechMutation(operation) {
+    const result = speechMutationTail.then(operation, operation);
+    speechMutationTail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async function invalidateSpeechCapabilities() {
+    if (typeof speechRuntime?.invalidateCapabilities === 'function') {
+      return speechRuntime.invalidateCapabilities();
+    }
+    return speechRuntime?.refreshCapabilities?.();
+  }
+
+  async function speechSnapshot(current = speechSettings.read(), { lightweight = false } = {}) {
+    let runtimeCapabilities;
+    if (lightweight && (speechRuntime?.publicSnapshot || speechRuntime?.publicSnapshotAsync)) {
+      // Сохранение и privacy-consent находятся на критическом пути первого клика по
+      // микрофону. Отдаём последний readiness snapshot синхронно: новый probe уже
+      // запущен applyRuntimeSettings() в фоне и не задерживает consent/SSE. Async seam
+      // оставлен только для совместимых runtime без sync snapshot.
+      const publicSpeech = speechRuntime.publicSnapshot
+        ? speechRuntime.publicSnapshot(current.settings)
+        : await speechRuntime.publicSnapshotAsync(current.settings);
+      runtimeCapabilities = {
+        local: publicSpeech?.local || UNAVAILABLE_SPEECH_CAPABILITIES.local,
+        resident: publicSpeech?.resident || UNAVAILABLE_SPEECH_CAPABILITIES.resident,
+      };
+    } else {
+      // Detached download/copy продолжает работу без открытой вкладки. Подбираем
+      // terminal job перед capability probe, иначе старый cached:false жил бы до
+      // ручного refresh/save/restart.
+      if (modelJobs && modelJobs !== speechRuntime?.modelJobs) {
+        await modelJobs?.reconcileCompleted?.();
+      }
+      runtimeCapabilities = speechRuntime?.capabilities
+        ? await speechRuntime.capabilities()
+        : UNAVAILABLE_SPEECH_CAPABILITIES;
+    }
+    const benchmark = modelJobs?.benchmarkStatus?.()
+      || runtimeCapabilities?.benchmark
+      || UNAVAILABLE_SPEECH_BENCHMARK;
+    return {
+      ...current,
+      capabilities: { ...runtimeCapabilities, benchmark },
+    };
+  }
+
+  function broadcastSpeech(snapshot) {
+    fastify.sse?.broadcast?.('speech-settings', snapshot);
+  }
+
+  function speechModelJobsUnavailable(reply) {
+    return reply.code(503).send({
+      error: 'speech_model_jobs_unavailable',
+      message: 'Фоновые задачи моделей речи недоступны.',
+    });
+  }
+
+  function speechModelJobError(err, reply) {
+    if (err instanceof ModelJobError) {
+      return reply.code(err.statusCode).send({ error: err.code, message: err.message });
+    }
+    if (err instanceof TypeError) {
+      return reply.code(400).send({ error: 'bad_speech_job', message: err.message });
+    }
+    throw err;
+  }
 
   // Общие настройки кокпита (правила запусков и пр.).
   fastify.get('/api/settings/prefs', async () => prefs.read());
-  fastify.post('/api/settings/prefs', async (request) => prefs.write(request.body || {}));
+  fastify.post('/api/settings/prefs', async (request, reply) => {
+    const body = request.body || {};
+    if (typeof body !== 'object' || Array.isArray(body)) {
+      return reply.code(400).send({
+        error: 'bad_preference',
+        message: 'Настройки должны быть JSON-объектом.',
+      });
+    }
+    for (const [key, endpoint] of PROTECTED_PREFS) {
+      if (key in body) {
+        return reply.code(400).send({
+          error: 'protected_preference',
+          message: `Настройка ${key} меняется только через ${endpoint}.`,
+        });
+      }
+    }
+    return prefs.write(body);
+  });
+
+  fastify.get('/api/settings/speech', async (request) => {
+    if (request.query?.refresh === '1') await invalidateSpeechCapabilities();
+    return speechSnapshot();
+  });
+
+  fastify.post('/api/settings/speech', async (request, reply) => {
+    try {
+      return await serializeSpeechMutation(async () => {
+        // update() целиком синхронен; очередь дополнительно сохраняет порядок async
+        // apply/capabilities/SSE, чтобы медленный первый ответ не обогнал второй.
+        const current = speechSettings.update(request.body);
+        await speechRuntime?.applyRuntimeSettings?.(current.settings);
+        const snapshot = await speechSnapshot(current, { lightweight: true });
+        broadcastSpeech(snapshot);
+        return snapshot;
+      });
+    } catch (err) {
+      if (err instanceof SpeechSettingsInputError) {
+        return reply.code(400).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  fastify.post('/api/settings/speech/browser-consent', async (request, reply) => {
+    try {
+      return await serializeSpeechMutation(async () => {
+        const previousRevision = speechSettings.read().revision;
+        const current = speechSettings.grantBrowserConsent(request.body);
+        const changed = current.revision !== previousRevision;
+        if (changed) await speechRuntime?.applyRuntimeSettings?.(current.settings);
+        const snapshot = await speechSnapshot(current, { lightweight: true });
+        if (changed) broadcastSpeech(snapshot);
+        return snapshot;
+      });
+    } catch (err) {
+      if (err instanceof SpeechSettingsConflictError) {
+        return reply.code(409).send({ error: err.code, message: err.message });
+      }
+      if (err instanceof SpeechSettingsInputError) {
+        return reply.code(400).send({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  fastify.post('/api/settings/speech/models/:modelId/download', async (request, reply) => {
+    if (!modelJobs) return speechModelJobsUnavailable(reply);
+    try {
+      const started = await modelJobs.startDownload(request.params.modelId);
+      return reply.code(202).send(started);
+    } catch (err) {
+      return speechModelJobError(err, reply);
+    }
+  });
+
+  fastify.post('/api/settings/speech/models/:modelId/copy', async (request, reply) => {
+    if (!modelJobs) return speechModelJobsUnavailable(reply);
+    try {
+      const started = await modelJobs.startCopy(request.params.modelId);
+      return reply.code(202).send(started);
+    } catch (err) {
+      return speechModelJobError(err, reply);
+    }
+  });
+
+  fastify.post('/api/settings/speech/benchmark', async (request, reply) => {
+    if (!modelJobs) return speechModelJobsUnavailable(reply);
+    try {
+      const started = await modelJobs.startBenchmark(request.body || {});
+      return reply.code(202).send(started);
+    } catch (err) {
+      return speechModelJobError(err, reply);
+    }
+  });
+
+  fastify.get('/api/settings/speech/jobs/:jobId', async (request, reply) => {
+    if (!modelJobs) return speechModelJobsUnavailable(reply);
+    try {
+      const job = await modelJobs.readJob(request.params.jobId);
+      if (!job) {
+        return reply.code(404).send({
+          error: 'speech_job_not_found',
+          message: 'Задача модели речи не найдена.',
+        });
+      }
+      return job;
+    } catch (err) {
+      return speechModelJobError(err, reply);
+    }
+  });
+
+  fastify.delete('/api/settings/speech/jobs/:jobId', async (request, reply) => {
+    if (!modelJobs) return speechModelJobsUnavailable(reply);
+    try {
+      const job = await modelJobs.cancelJob(request.params.jobId);
+      if (!job) {
+        return reply.code(404).send({
+          error: 'speech_job_not_found',
+          message: 'Задача модели речи не найдена.',
+        });
+      }
+      return job;
+    } catch (err) {
+      return speechModelJobError(err, reply);
+    }
+  });
 
   // Единый список дополнительных деревьев для всех локальных ИИ. Мы не переписываем
   // ~/.claude и ~/.codex: проверенный список добавляется флагами к каждому новому ходу.

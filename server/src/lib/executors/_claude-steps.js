@@ -75,7 +75,12 @@ export function toClaudeSteps(event) {
     } else if (event.subtype === 'api_retry') {
       out.push({ k: 'note', level: 'warn', text: 'Повтор запроса к API (сеть)' });
     } else if (event.subtype === 'compact_boundary') {
-      out.push({ k: 'note', level: 'info', text: 'Контекст сжат (compact)' });
+      // Сжатие посреди хода делает САМ CLI по своему порогу (кокпит задаёт его через
+      // CLAUDE_CODE_AUTO_COMPACT_WINDOW). Со стороны это выглядит как «агент забыл
+      // разговор», поэтому в ленте оно называется вслух и с цифрой «было».
+      const pre = Number(event.compactMetadata?.preTokens) || 0;
+      const how = event.compactMetadata?.trigger === 'manual' ? 'по команде' : 'сам, по порогу';
+      out.push({ k: 'note', level: 'info', text: `Контекст сжат: CLI сжал его ${how}${pre ? ` (было ${pre.toLocaleString('ru')} ток.)` : ''}` });
     }
     return out;
   }

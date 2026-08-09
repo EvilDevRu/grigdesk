@@ -17,6 +17,9 @@ _dispatcher_chain() {
 
 dispatcher_run_chain() {
   local task=$1 stage=$2 primary=$3 failover=$4 now=$5 resolve_fn=$6 invoke_fn=$7
+  # Восьмой аргумент — исполнитель, НАЗВАННЫЙ ЧЕЛОВЕКОМ (назначение на задачу/этап
+  # либо нажатая кнопка переключения). Пусто = маршрут выбран политикой профиля.
+  local human_choice=${8:-}
   local provider family model family_fallback fingerprint result started requested_family
   local last_switch_reason="" scope skip_provider
   DISPATCH_RESULT_KIND=""
@@ -49,7 +52,14 @@ dispatcher_run_chain() {
       model=$DISPATCH_RESOLVED_MODEL
       family_fallback=${DISPATCH_FAMILY_FAILOVER:-}
       fingerprint=$DISPATCH_CREDENTIAL_FINGERPRINT
-      if breaker_match "$provider" "$fingerprint" "$family" "$model" "$now"; then
+      # Предохранитель — ДОГАДКА по прошлому отказу: он лишь предполагает, что
+      # провайдер всё ещё в лимите. Нажатая человеком кнопка — факт, и он сильнее:
+      # молчаливая подмена выглядела как сломанная кнопка («не могу переключить на
+      # клода»), а человек терял время, не понимая, почему этап уехал в резерв.
+      # Обход ИМЕННОЙ: холостой заход разрешён ровно одному названному исполнителю,
+      # резерв за ним остаётся под предохранителем и цепочка не дорожает целиком.
+      if [[ "$provider" != "$human_choice" ]] &&
+         breaker_match "$provider" "$fingerprint" "$family" "$model" "$now"; then
         scope=$BREAKER_MATCH_SCOPE
         if [[ "$scope" != provider && -n "$family_fallback" && \
               "$family" != "$family_fallback" ]]; then

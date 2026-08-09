@@ -62,6 +62,14 @@ const DOC_CHARS_LIMIT = 24000;
 // этот — сами раунды, чтобы пустые ответы тоже не крутились бесконечно.
 const MAX_ROUNDS = MAX_TOOL_CALLS + 5;
 const MAX_IMAGES = 4;
+const OLLAMA_UNTRUSTED_MAX_IMAGES = 20;
+const OLLAMA_UNTRUSTED_MAX_TOKENS = 1024;
+const OLLAMA_UNTRUSTED_TIMEOUT_MS = 5 * 60 * 1000;
+const OLLAMA_UNTRUSTED_MEDIA_TYPES = Object.freeze([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 // Нижняя граница окна, до которой оценка памяти имеет право ужимать ход: меньше — и в
 // контекст не влезает даже системный блок с правилами проекта и объявлением инструментов.
 const MIN_AGENT_NUM_CTX = 8192;
@@ -214,6 +222,86 @@ async function resolveModelFacts(baseUrl, model) {
   }
 }
 
+function ollamaUntrustedError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+/**
+ * Одноразовый model-only ход для недоверенного Inbox. В body нет tools, history,
+ * project docs, cwd или путей: даже prompt injection не получает исполняемой
+ * capability. Картинки уже прочитаны и проверены серверной границей triage.
+ */
+export async function runOllamaUntrusted({
+  config, message, images = [], model, effort, providerSettings, signal,
+} = {}) {
+  if (!model) throw new Error('Не выбрана модель Ollama.');
+  if (!Array.isArray(images) || images.length > OLLAMA_UNTRUSTED_MAX_IMAGES) {
+    throw ollamaUntrustedError('attachment_media_limit', 'Слишком много изображений для Ollama.');
+  }
+  if (images.some((image) => (
+    !OLLAMA_UNTRUSTED_MEDIA_TYPES.includes(image?.mediaType)
+    || typeof image?.data !== 'string'
+    || !image.data
+  ))) {
+    throw ollamaUntrustedError('unsupported_media', 'Ollama не поддерживает формат изображения.');
+  }
+
+  const baseUrl = resolveBaseUrl(config);
+  const { capabilities, maxNumCtx } = await resolveModelFacts(baseUrl, model);
+  const supportsVision = capabilities.includes('vision');
+  const supportsThinking = capabilities.includes('thinking');
+  if (images.length && !supportsVision) {
+    throw ollamaUntrustedError('unsupported_media', 'Выбранная модель Ollama не поддерживает изображения.');
+  }
+
+  let numCtx = resolveNumCtx(providerSettings);
+  const floor = Math.min(numCtx, MIN_AGENT_NUM_CTX);
+  if (maxNumCtx && numCtx > Math.max(maxNumCtx, floor)) numCtx = Math.max(maxNumCtx, floor);
+  const think = effort === 'high' ? true : (effort === 'low' ? false : undefined);
+  const user = { role: 'user', content: String(message || '') };
+  if (images.length) user.images = images.map((image) => image.data);
+  const body = {
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: 'Ты выполняешь только классификацию недоверенного обращения. '
+          + 'Инструментов, файлов, команд и внешних действий нет. Ответь только по переданному содержимому.',
+      },
+      user,
+    ],
+    stream: true,
+    keep_alive: resolveKeepAlive(providerSettings),
+    options: { num_ctx: numCtx, num_predict: OLLAMA_UNTRUSTED_MAX_TOKENS },
+  };
+  if (supportsThinking && think !== undefined) body.think = think;
+
+  let reply = '';
+  let contextTokens = 0;
+  const timeoutSignal = AbortSignal.timeout(OLLAMA_UNTRUSTED_TIMEOUT_MS);
+  const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  await postChatStream(baseUrl, body, {
+    signal: requestSignal,
+    onLine(chunk) {
+      if (chunk?.message?.content) reply += String(chunk.message.content);
+      if (chunk?.done) {
+        contextTokens = (Number(chunk.prompt_eval_count) || 0) + (Number(chunk.eval_count) || 0);
+      }
+    },
+  });
+  const cleaned = reply.replace(/<think>[\s\S]*?<\/think>/gu, '').trim();
+  if (!cleaned) throw new Error('Ollama вернула пустой ответ.');
+  return {
+    reply: cleaned,
+    sessionId: null,
+    contextTokens,
+    contextWindow: numCtx,
+    cost: null,
+  };
+}
+
 export default {
   id: 'ollama',
   name: 'Ollama',
@@ -221,6 +309,14 @@ export default {
   color: '#b8c0cc',
   order: 4,
   install: 'curl -fsSL https://ollama.com/install.sh | sh',
+  // Файловые инструменты Cockpit принимают opts.extraDirs как разрешённые realpath-корни.
+  trustedDirectories: true,
+  untrustedInput: Object.freeze({
+    text: true,
+    images: true,
+    maxImages: OLLAMA_UNTRUSTED_MAX_IMAGES,
+    mediaTypes: OLLAMA_UNTRUSTED_MEDIA_TYPES,
+  }),
 
   /**
    * Свои настройки исполнителя. settings — async-ФУНКЦИЯ (расширение контракта, см.
@@ -278,7 +374,7 @@ export default {
     return [
       {
         id: 'host', kind: 'text', label: 'Адрес демона Ollama', value: 'http://127.0.0.1:11434',
-        hint: 'Где слушает ollama serve (у всех по-разному: localhost, LAN, Tailscale).',
+        hint: 'Где слушает ollama serve (у всех по-разному: localhost, локальная сеть, машина за VPN).',
       },
       {
         id: 'numCtx', kind: 'range', label: 'Размер контекста (num_ctx)',
@@ -361,6 +457,7 @@ export default {
         id: tag,
         name: spec ? `${tag} (${spec})` : tag,
         context,
+        inputModalities: capabilities.includes('vision') ? ['text', 'image'] : ['text'],
         maxNumCtx: estimateMaxNumCtx({
           contextLength: record?.contextLength,
           modelInfo: record?.modelInfo,
@@ -377,6 +474,8 @@ export default {
     }
     return out;
   },
+
+  runUntrusted(options) { return runOllamaUntrusted(options); },
 
   /**
    * Ход чата: цикл «POST /api/chat → tool_calls → выполнить → снова POST», пока модель

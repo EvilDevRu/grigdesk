@@ -11,12 +11,16 @@ import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
 import { useTaskFavoritesStore } from './stores/task-favorites.js';
+import { useTaskSeenStore } from './stores/task-seen.js';
 
 const auth = useAuthStore();
 
 // Фоновые поллинги запускаем ТОЛЬКО после входа: иначе они молотят в закрытый API,
 // ловят 401 и засоряют консоль на экране логина.
 function startPolling() {
+  // Отметки просмотра нужны всему приложению, а не только доске: без них чип «Доска»
+  // в навигации не знает, какие задачи новые, на какой бы странице человек ни стоял.
+  useTaskSeenStore().load(true);
   useBoardStore().startPolling();
   useSystemStore().startPolling();
 }
@@ -35,6 +39,7 @@ watch(() => auth.authenticated, (on, was) => {
     useBoardStore().stopPolling();
     useSystemStore().stopPolling();
     useTaskFavoritesStore().clear();
+    useTaskSeenStore().clear();
   }
 });
 </script>

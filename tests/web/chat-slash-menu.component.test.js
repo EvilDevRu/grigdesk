@@ -36,6 +36,10 @@ async function compileChatSession() {
       'const api = globalThis.__slashMenuApi;',
     )
     .replace(
+      "import { createSpeechStream } from '../../shared/speech-stream.js';",
+      'const createSpeechStream = async () => null;',
+    )
+    .replace(
       "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
       'const CONTEXT_WINDOW = 200000; const useChatStore = globalThis.__slashMenuChatStore;',
     )

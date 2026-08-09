@@ -130,6 +130,11 @@ runner_codex_run() {
   fi
   [[ -z "$model" ]] || args+=(-m "$model")
   [[ -z "$effort" ]] || args+=(-c "model_reasoning_effort=\"$effort\"")
+  # Диалект автосжатия у codex — config override, а не переменная окружения
+  # (см. runners/claude.sh). `0`/пусто — не вмешиваться.
+  if [[ "${RUNNER_AUTO_COMPACT_WINDOW:-0}" =~ ^[1-9][0-9]*$ ]]; then
+    args+=(-c "model_auto_compact_token_limit=$RUNNER_AUTO_COMPACT_WINDOW")
+  fi
   local add_dir
   for add_dir in ${RUNNER_CODEX_ADD_DIRS:-}; do
     if [[ -d "$add_dir" ]]; then
@@ -218,9 +223,17 @@ runner_codex_classify() {
     printf 'context_overflow\n'
     return
   fi
+  # Формулировка лимита у CLI 0.145 — обычная фраза в `{"type":"error"}` и
+  # `turn.failed`, без кода 429 и без структурного `usage_limit_reached`:
+  # «You've hit your usage limit. Visit …/settings/usage to purchase more credits
+  # or try again at Aug 8th, 2026 2:32 PM.» (телеметрия t8264, эпохи 2–9). Прежние
+  # шаблоны её не ловили: класс выходил `unknown`, предохранитель не ставился, и
+  # диспетчер делал холостой заход в лимит на каждой эпохе.
   if grep -q '"type":"usage_limit_reached"' "$run_dir/events.jsonl" 2>/dev/null || \
-     grep -qiE '429.*(weekly|subscription|usage).*(limit|reached)|\
-(weekly|subscription|usage).*limit.*(reached|reset)' \
+     grep -qiE -e '429.*(weekly|subscription|usage).*(limit|reached)' \
+       -e '(weekly|subscription|usage).*limit.*(reached|reset)' \
+       -e "hit your (usage|weekly|monthly|rate) limit" \
+       -e 'purchase more credits' \
        "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
     printf 'limited\n'
     return
@@ -240,6 +253,26 @@ runner_codex_classify() {
     fi
   fi
   printf 'unknown\n'
+}
+
+runner_codex_limit_until() {
+  # Опциональный метод контракта: до какого времени провайдер отказывает.
+  # Машинного поля со сроком у codex 0.145 нет вовсе — он печатает его человеку
+  # той же фразой отказа: «… or try again at Aug 8th, 2026 2:32 PM.». Разбираем
+  # её, потому что альтернатива — общий cooldown, который держит живой провайдер
+  # выключенным дольше самого лимита.
+  local run_dir=$1 phrase stamp
+  phrase=$(grep -ohiE 'try again at [^".\\]+' \
+    "$run_dir/events.jsonl" "$run_dir/stderr.log" 2>/dev/null | tail -1)
+  phrase=${phrase#*[Aa]t }
+  # Порядковый суффикс («8th») и запятая ломают `date -d`: он разбирает такую
+  # строку либо неверно, либо не разбирает вовсе. Часовой пояс в тексте не
+  # указан — время локальное, тем же его читает и `date`.
+  phrase=$(printf '%s' "$phrase" | sed -E 's/([0-9]+)(st|nd|rd|th)/\1/g; s/,//g')
+  [[ -n "$phrase" && ${#phrase} -le 64 ]] || return 1
+  stamp=$(date -d "$phrase" +%s 2>/dev/null) || return 1
+  [[ "$stamp" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$stamp"
 }
 
 runner_codex_fanout_count() {

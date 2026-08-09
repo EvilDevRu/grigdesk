@@ -38,7 +38,11 @@ profile_delivery_targets() { printf 'rdesigner\\tmaster\\n'; }
   const factoryBin = path.join(root, 'factory');
   await writeFile(factoryBin, `#!/bin/sh
 if [ "$1" = check ]; then
-  echo "OK profile=rdesigner catalog=${'b'.repeat(64)} route=feature delivery=publish"
+  case "$*" in
+    *"--route consilium-debug"*) instrumentation=explicit; route=consilium-debug ;;
+    *) instrumentation=disabled; route=feature ;;
+  esac
+  echo "OK profile=rdesigner catalog=${'b'.repeat(64)} route=$route delivery=publish instrumentation=$instrumentation"
   exit 0
 fi
 exit 99
@@ -55,11 +59,15 @@ exit 99
       async catalog(profile) {
         return profile === 'rdesigner'
           ? {
-            routes: ['debug', 'feature'],
+            routes: ['consilium-debug', 'feature'],
             catalogHash: 'b'.repeat(64),
             routeOptions: {
-              debug: { deliveryMode: 'publish', instrumentationRequired: true },
-              feature: { deliveryMode: 'publish', instrumentationRequired: false },
+              'consilium-debug': {
+                deliveryMode: 'publish', instrumentationMode: 'explicit', instrumentationRequired: true,
+              },
+              feature: {
+                deliveryMode: 'publish', instrumentationMode: 'disabled', instrumentationRequired: false,
+              },
             },
           }
           : null;
@@ -84,7 +92,7 @@ exit 99
       async get() {
         return {
           analysis: {
-            route_guess: 'debug',
+            route_guess: 'consilium-debug',
             areas: ['data-migration'],
             files: ['app:webapp/pipeline.py'],
             title: 'Экспорт удваивает сущности',
@@ -122,16 +130,36 @@ test('launch-options отдаёт профили и fail-closed каталог �
   assert.equal(selected.json().profile, 'rdesigner');
   assert.deepEqual(selected.json().profiles, ['rdesigner']);
   assert.equal('generation' in selected.json(), false);
-  assert.deepEqual(selected.json().routes, ['debug', 'feature']);
-  assert.equal(selected.json().defaultRoute, 'debug');
+  assert.deepEqual(selected.json().routes, ['consilium-debug', 'feature']);
+  assert.equal(selected.json().defaultRoute, 'consilium-debug');
   assert.deepEqual(selected.json().repositories, [{ name: 'rdesigner', targetBranch: 'master' }]);
   assert.deepEqual(selected.json().instrumentationSuggestions, ['rdesigner:webapp/pipeline.py']);
   assert.deepEqual(selected.json().diagnosisSuggestion, {
     kind: 'data', signal: 'Экспорт удваивает сущности',
   });
-  assert.deepEqual(selected.json().routeOptions.debug, {
-    deliveryMode: 'publish', instrumentationRequired: true,
+  assert.deepEqual(selected.json().routeOptions['consilium-debug'], {
+    deliveryMode: 'publish', instrumentationMode: 'explicit', instrumentationRequired: true,
   });
+});
+
+test('переименованный explicit-маршрут требует scope до ticket и provisioning', async (t) => {
+  const app = await fixture(t);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/9123/launch',
+    payload: {
+      profile: 'rdesigner',
+      route: 'consilium-debug',
+      title: 'Проверка scope',
+      description: 'Имя маршрута не должно отключать контракт инструментации.',
+      sourceUrl: 'https://example.test/tasks/9123',
+      acceptanceCriteria: [],
+      instrumentationFiles: [],
+    },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error, 'bad_launch_contract');
+  assert.match(response.json().message, /хотя бы один instrumentation file/);
 });
 
 test('launch профиля без каталога отказывает до запуска factoryBin', async (t) => {

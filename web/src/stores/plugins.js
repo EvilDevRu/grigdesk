@@ -3,12 +3,56 @@
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 
+export const NAV_GROUPS = ['rail', 'tools', 'dock'];
+
+// Совместимость при поэтапной выкладке: production-бандл обновляется без рестарта,
+// а уже запущенный сервер до рестарта продолжает отдавать старые SYSTEM-манифесты
+// без group/order. Только для известных встроенных плагинов восстанавливаем их новое
+// положение; пользовательский legacy-manifest по-прежнему честно остаётся в rail.
+const LEGACY_SYSTEM_NAV = {
+  video: { group: 'tools', order: 10 },
+  code: { group: 'dock', order: 10 },
+  inbox: { group: 'rail', order: 30 },
+  telegram: { group: 'tools', order: 20 },
+  github: { group: 'tools', order: 30 },
+};
+
+export function normalizeNavItem(plugin) {
+  if (!plugin?.nav?.path) return null;
+  const legacy = plugin.system && plugin.nav.group == null
+    ? LEGACY_SYSTEM_NAV[plugin.id]
+    : null;
+  const requested = String(plugin.nav.group ?? legacy?.group ?? 'rail');
+  const group = NAV_GROUPS.includes(requested) ? requested : 'rail';
+  const rawOrder = plugin.nav.order ?? legacy?.order;
+  const order = typeof rawOrder === 'number' ? rawOrder : Number.NaN;
+  return {
+    id: plugin.id,
+    to: plugin.nav.path,
+    label: plugin.nav.label,
+    icon: plugin.nav.icon || 'plugin',
+    group,
+    order: Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER,
+  };
+}
+
+export function sortNavItems(items) {
+  return [...items].sort((a, b) => a.order - b.order
+    || String(a.label).localeCompare(String(b.label), 'ru')
+    || String(a.id).localeCompare(String(b.id), 'ru'));
+}
+
 export const usePluginsStore = defineStore('plugins', {
   state: () => ({ list: [], loaded: false }),
   getters: {
-    // Пункты сайдбара: только включённые плагины с навигацией.
+    // Размещение объявляет manifest, но Vue-страницу/панель он не загружает.
     navItems: (s) => s.list.filter((p) => p.enabled && p.nav)
-      .map((p) => ({ to: p.nav.path, label: p.nav.label, icon: p.nav.icon || 'plugin' })),
+      .map(normalizeNavItem).filter(Boolean).sort((a, b) => a.order - b.order
+        || String(a.label).localeCompare(String(b.label), 'ru')
+        || String(a.id).localeCompare(String(b.id), 'ru')),
+    railNav() { return this.navItems.filter((item) => item.group === 'rail'); },
+    toolsNav() { return this.navItems.filter((item) => item.group === 'tools'); },
+    dockNav() { return this.navItems.filter((item) => item.group === 'dock'); },
     byId: (s) => (id) => s.list.find((p) => p.id === id) || null,
     enabled: (s) => (id) => !!s.list.find((p) => p.id === id)?.enabled,
   },

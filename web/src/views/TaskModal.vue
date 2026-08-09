@@ -4,12 +4,14 @@ import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
+import { registerLayer } from '../shared/ui/layer-stack.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useAnalysisStore } from '../stores/analysis.js';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
+import { useTaskSeenStore } from '../stores/task-seen.js';
 import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import { providerLabel } from '../shared/runner-display.js';
@@ -22,6 +24,7 @@ const ui = useUiStore();
 const tasks = useTasksStore();
 const board = useBoardStore();
 const favorites = useTaskFavoritesStore();
+const seen = useTaskSeenStore();
 const { taskId } = storeToRefs(ui);
 
 const detail = ref(null);
@@ -32,6 +35,7 @@ const commentText = ref('');
 const now = ref(Date.now());
 
 let ticker = null;
+let unregisterTaskLayer = null;
 
 // Таймер задачи — из кеша доски (там timerRunning/elapsed/startedAt).
 const boardTask = computed(() => {
@@ -66,6 +70,30 @@ function linkify(s) {
     (u) => `<a href="${u.replace(/&amp;/g, '&')}" target="_blank" rel="noopener">${u}</a>`);
 }
 const descHtml = computed(() => linkify(cleanDesc.value));
+
+// ── Обсуждение в Telegram: что стоит за ссылками t.me из описания ──
+// Поле `telegram` приходит от GET /api/b24/task/:id (сервер уже применил
+// allowlist и лимиты). Тело задачи оно не трогает — это отдельный блок.
+// Текст цитат — из чужого чата, поэтому только интерполяция: никакого v-html,
+// как у описания. Отказ показываем ровно так, как прислал сервер: у него нет
+// ни цитат, ни имени чата, и придумывать их за него нельзя.
+const tgLinks = computed(() => detail.value?.telegram?.links || []);
+
+function tgTime(sec) {
+  if (!sec) return '';
+  return new Date(sec * 1000).toLocaleString('ru-RU',
+    { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+// «ещё 1 сообщение / 3 сообщения / 5 сообщений» — общего хелпера склонения
+// во фронте нет, а хвост без согласования читается как опечатка.
+function tgPlural(n) {
+  const teen = n % 100;
+  if (teen >= 11 && teen <= 14) return 'сообщений';
+  const one = n % 10;
+  if (one === 1) return 'сообщение';
+  if (one >= 2 && one <= 4) return 'сообщения';
+  return 'сообщений';
+}
 
 async function loadDetail(force = false) {
   if (!taskId.value) return;
@@ -357,7 +385,7 @@ const launchValidationError = computed(() => {
     if (missing.length) return `Профиль не настроил целевые ветки: ${missing.join(', ')}.`;
   }
   if (launchNeedsInstrumentation.value && !launchForm.value.instrumentationFiles.trim()) {
-    return 'Debug требует хотя бы один файл инструментации.';
+    return 'Маршрут требует хотя бы один файл инструментации.';
   }
   return null;
 });
@@ -418,6 +446,9 @@ watch(taskId, (id) => {
     loadClarifications();
     loadDetail();
     favorites.load(true);
+    // Задачу открыли — она больше не новая. Отметка серверная, поэтому метка гаснет
+    // и в других окнах; ошибка отметки на показ задачи не влияет.
+    seen.markSeen([id]);
     loadConveyor();
     loadTriage();
     if (!ticker) ticker = setInterval(() => { now.value = Date.now(); }, 1000);
@@ -434,13 +465,15 @@ watch(() => ui.launchRequested, (requested) => {
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
   if (triageTimer) clearInterval(triageTimer);
+  unregisterTaskLayer?.();
 });
 
-function onKey(e) { if (e.key === 'Escape') ui.close(); }
 watch(taskId, (id) => {
-  if (id) window.addEventListener('keydown', onKey);
-  else window.removeEventListener('keydown', onKey);
-});
+  unregisterTaskLayer?.();
+  unregisterTaskLayer = id
+    ? registerLayer('task-modal', { priority: 100, close: () => ui.close() })
+    : null;
+}, { immediate: true });
 </script>
 
 <template>
@@ -469,6 +502,37 @@ watch(taskId, (id) => {
         </div>
 
         <p v-if="cleanDesc" class="desc" v-html="descHtml"></p>
+
+        <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
+        <section v-if="tgLinks.length" class="tg">
+          <div class="tlbl">Обсуждение в Telegram</div>
+          <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
+            <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
+                 как «в чате пусто», а причина — как «сюда нет доступа». -->
+            <div v-if="!l.ok" class="tgfail">
+              <span class="tgurl">{{ l.url }}</span>
+              <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
+            </div>
+            <template v-else>
+              <div class="tghead">
+                <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
+                <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
+                <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
+                <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
+              </div>
+              <div v-for="q in l.quotes" :key="q.messageId" class="tgq" :class="{ tgtarget: q.target }">
+                <div class="tgmeta">
+                  <span class="tgauthor">{{ q.author }}</span>
+                  <span class="tgtime">{{ tgTime(q.at) }}</span>
+                  <span v-if="q.target" class="tgpin">← ссылка</span>
+                </div>
+                <div class="tgtext">{{ q.text }}<template v-if="q.trimmed">…</template></div>
+                <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
+              </div>
+              <div v-if="l.more" class="tgmore">ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке</div>
+            </template>
+          </div>
+        </section>
 
         <!-- Табы: Триаж | Комментарии -->
         <nav class="mtabs">
@@ -751,6 +815,35 @@ watch(taskId, (id) => {
   max-height: 300px; overflow-y: auto; }
 .desc :deep(a) { color: var(--accent); text-decoration: none; word-break: break-all; }
 .desc :deep(a:hover) { text-decoration: underline; }
+
+/* Обсуждение в Telegram. min-width: 0 обязателен: блок стоит во флекс-колонке,
+   а без него флекс-элемент не сжимается ниже своего содержимого — одна длинная
+   ссылка из чужого чата раздвинула бы модалку (та же грабля, что была в чате).
+   Ветка скроллится внутри себя: переписка не должна вытеснять описание. */
+.tg { min-width: 0; max-height: 320px; overflow-y: auto;
+  background: var(--ground); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.tgitem { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tgfail { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.tgfail .tgurl { color: var(--ink-mid); overflow-wrap: anywhere; }
+.tgwhy { color: var(--warn); }
+.tghead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 12px; min-width: 0; }
+.tgchat { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.tgat, .tgthread { color: var(--ink-mid); }
+.tghead .tgurl { color: var(--accent); text-decoration: none; margin-left: auto; }
+.tghead .tgurl:hover { text-decoration: underline; }
+.tgq { border-left: 2px solid var(--line); padding: 0 0 0 8px; display: flex;
+  flex-direction: column; gap: 2px; min-width: 0; }
+.tgq.tgtarget { border-left-color: var(--accent); }
+.tgmeta { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-size: 11px; color: var(--ink-mid); }
+.tgauthor { color: var(--ink); }
+.tgpin { color: var(--accent); }
+.tgtext { font-size: 13px; color: var(--ink); white-space: pre-wrap;
+  overflow-wrap: anywhere; line-height: 1.5; }
+.tgmedia { font-size: 11px; color: var(--ink-mid); overflow-wrap: anywhere; }
+.tgmore { font-size: 11px; color: var(--ink-mid); }
+
 .triage { background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px; }
 .thead2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

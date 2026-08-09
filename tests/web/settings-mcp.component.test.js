@@ -38,8 +38,16 @@ async function compileSettingsView() {
     .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
     .replace("import { useUiContextStore } from '../stores/ui-context.js';", stubStore('useUiContextStore'))
     .replace(
+      "import { useToolLauncher } from '../shared/tools/launcher.js';",
+      'const useToolLauncher = () => ({ openTerminal() {} });',
+    )
+    .replace(
       "import ProviderIcon from '../shared/ProviderIcon.vue';",
       "const ProviderIcon = { props: ['id'], template: '<i class=\"picon\"></i>' };",
+    )
+    .replace(
+      "import AccessOverview from './settings/AccessOverview.vue';",
+      "const AccessOverview = { template: '<div class=\"access-overview-stub\"></div>' };",
     )
     .replace(
       "import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';",
@@ -61,6 +69,10 @@ async function compileSettingsView() {
     .replace(
       "import { confirmDialog } from '../shared/ui/confirm.js';",
       'const confirmDialog = async () => true;',
+    )
+    .replace(
+      "import { useSse } from '../composables/useSse.js';",
+      'const useSse = () => ({ connected: { value: false } });',
     )
     .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`);
   const nonce = compileNonce++;
@@ -99,12 +111,27 @@ async function installBrowser(t, storage = {}) {
   return browser;
 }
 
-// Реестр из двух исполнителей: только один сообщает о MCP.
+// Реестр с разными возможностями: только один исполнитель сообщает о MCP.
 function providers() {
   return [
-    { id: 'claude', name: 'Claude', vendor: 'Anthropic', available: true, installed: true, mcp: true, models: [], settings: [] },
-    { id: 'codex', name: 'GPT (Codex)', vendor: 'OpenAI', available: true, installed: true, models: [], settings: [] },
-    { id: 'kimi', name: 'Kimi', vendor: 'Moonshot', available: false, installed: false, mcp: true, models: [], settings: [] },
+    {
+      id: 'claude', name: 'Claude', vendor: 'Anthropic', available: true, installed: true,
+      chatEnabled: true, trustedDirectories: true, mcp: true, models: [], settings: [],
+    },
+    {
+      id: 'codex', name: 'GPT (Codex)', vendor: 'OpenAI', available: true, installed: true,
+      chatEnabled: true, trustedDirectories: true, models: [], settings: [],
+    },
+    {
+      id: 'kimi', name: 'Kimi', vendor: 'Moonshot', available: false, installed: false,
+      chatEnabled: true, trustedDirectories: false, mcp: true, models: [], settings: [],
+    },
+    // Произвольный будущий адаптер доказывает, что строка собирается из реестра,
+    // а не из списка известных названий в SettingsView.
+    {
+      id: 'local-next', name: 'Локальный Next', vendor: 'Test', available: true, installed: true,
+      chatEnabled: true, trustedDirectories: true, models: [], settings: [],
+    },
   ];
 }
 
@@ -246,4 +273,14 @@ test('исполнителя без MCP блок не показывает во�
 
   const titles = wrapper.findAll('.pvsetttl').map((n) => n.text());
   assert.equal(titles.filter((t2) => t2.includes('MCP-серверы')).length, 1);
+});
+
+test('доверенные каталоги перечисляют исполнителей по capability из реестра', async (t) => {
+  const { wrapper } = await mountSettings(t);
+
+  const text = wrapper.get('[data-testid="trusted-directory-providers"]').text();
+  assert.match(text, /Claude/);
+  assert.match(text, /GPT \(Codex\)/);
+  assert.match(text, /Локальный Next/, 'новый адаптер появился без правки списка во Vue');
+  assert.doesNotMatch(text, /Kimi/, 'исполнитель без capability не обещает доступ');
 });

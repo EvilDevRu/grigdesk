@@ -56,11 +56,12 @@ capability "route-v2" в graph.json и реализовать route-хуки к�
   state:            ~/.factory/state
   trusted control:  ~/.factory/control
 
-Debug требует хотя бы один --instrumentation-file при start. В feature тесты
-замораживаются после TESTS, а доверенный VERIFY проверяет неизменность тестов,
-синтаксис и линтеры без отдельного модельного этапа. SHIP выполняет commit, push
-и PR после approved GATE_ACCEPT; --task-comment дополнительно разрешает
-комментарий во внешней задаче.
+Маршрут с транзакционным узлом instrument требует хотя бы один
+--instrumentation-file при start. Имя маршрута на этот контракт не влияет. В feature
+тесты замораживаются после TESTS, а доверенный VERIFY проверяет неизменность тестов,
+синтаксис и линтеры без отдельного модельного этапа. SHIP выполняет commit, push и PR
+после approved GATE_ACCEPT; --task-comment дополнительно разрешает комментарий во
+внешней задаче.
 
 --runner-primary фиксирует исполнителя на весь прогон задачи: выбор пишется
 task-level override в реестр и выигрывает у project policy профиля, а failover
@@ -178,6 +179,32 @@ if isinstance(value, (dict, list)):
 else:
     print(value)
 ' "$path"
+}
+
+# Производные launch-контракты принадлежат машине маршрута, а не её изменяемому id.
+# `instrument` открывает длинную явную транзакцию до `proof`; прочие исторические
+# transactional-write узлы получают scope из уже сделанного diff непосредственно
+# перед своим коротким transaction lifecycle.
+route_machine_contract() {
+  python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+nodes = machine["nodes"]
+delivery = "publish" if any(node.get("id") == "ship" for node in nodes) else "disabled"
+transactional = [
+    node for node in nodes
+    if (node.get("policy") or {}).get("filesystem") == "transactional-write"
+]
+if any(node.get("id") == "instrument" for node in transactional):
+    instrumentation = "explicit"
+elif transactional:
+    instrumentation = "derived"
+else:
+    instrumentation = "disabled"
+print(f"{delivery}\t{instrumentation}")
+'
 }
 
 # Из failover-цепочки профиля убирает выбранный primary: task override с цепочкой
@@ -444,6 +471,7 @@ profile_config_validate "$RUNNER_CONFIG_FILE" ||
 CURRENT_CATALOG=""
 CURRENT_ROUTE_JSON=""
 CURRENT_ROUTE_DELIVERY=""
+CURRENT_ROUTE_INSTRUMENTATION=""
 if [[ "$MODE" == check || "$MODE" == start ]]; then
   CURRENT_JSON=$(
     "$FACTORY_HOME/bin/factory-route" \
@@ -458,12 +486,13 @@ if [[ "$MODE" == check || "$MODE" == start ]]; then
         --catalog-hash "$CURRENT_CATALOG" --route "$ROUTE"
     ) ||
       die "route=$ROUTE отсутствует в current catalog"
-    CURRENT_ROUTE_DELIVERY=$(python3 -c '
-import json
-import sys
-machine = json.load(sys.stdin)["machine"]
-print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) else "disabled")
-' <<<"$CURRENT_ROUTE_JSON") || die "delivery topology route=$ROUTE не прочитана"
+    CURRENT_ROUTE_CONTRACT=$(route_machine_contract <<<"$CURRENT_ROUTE_JSON") ||
+      die "launch topology route=$ROUTE не прочитана"
+    IFS=$'\t' read -r CURRENT_ROUTE_DELIVERY CURRENT_ROUTE_INSTRUMENTATION \
+      <<<"$CURRENT_ROUTE_CONTRACT"
+    [[ "$CURRENT_ROUTE_DELIVERY" =~ ^(publish|disabled)$ &&
+       "$CURRENT_ROUTE_INSTRUMENTATION" =~ ^(explicit|derived|disabled)$ ]] ||
+      die "launch topology route=$ROUTE недопустима"
   fi
 fi
 
@@ -472,7 +501,8 @@ if [[ "$MODE" == check ]]; then
     die "check не принимает task, attempt или ticket"
   printf 'OK profile=%s catalog=%s' "$PROFILE" "$CURRENT_CATALOG"
   if [[ -n "$ROUTE" ]]; then
-    printf ' route=%s delivery=%s' "$ROUTE" "$CURRENT_ROUTE_DELIVERY"
+    printf ' route=%s delivery=%s instrumentation=%s' \
+      "$ROUTE" "$CURRENT_ROUTE_DELIVERY" "$CURRENT_ROUTE_INSTRUMENTATION"
   fi
   printf '\n'
   exit 0
@@ -493,11 +523,11 @@ if [[ "$MODE" == start ]]; then
   TICKET_JSON=$(canonical_file "$TICKET_JSON" ticket-json) || exit 78
   [[ -z "$EXPECTED_ATTEMPT" && -z "$GATE_NODE" && -z "$GATE_DECISION" ]] ||
     die "start не принимает attempt или gate decision"
-  if [[ "$ROUTE" == debug ]]; then
+  if [[ "$CURRENT_ROUTE_INSTRUMENTATION" == explicit ]]; then
     (( ${#INSTRUMENTATION_SPECS[@]} > 0 )) ||
-      die "debug start требует --instrumentation-file repo:path"
+      die "route=$ROUTE требует --instrumentation-file repo:path"
   elif (( ${#INSTRUMENTATION_SPECS[@]} > 0 )); then
-    die "--instrumentation-file нужен только маршруту debug"
+    die "route=$ROUTE не принимает явный --instrumentation-file"
   fi
   if [[ -n "$DIAGNOSIS_KIND" ]]; then
     [[ "$DIAGNOSIS_KIND" =~ ^(functional|performance|data|integration)$ ]] ||
@@ -836,6 +866,7 @@ V2_SCOPE_SPEC=""
 V2_DELIVERY_SPEC=""
 V2_HAS_SHIP=""
 V2_DELIVERY_MODE=""
+V2_INSTRUMENTATION_MODE=""
 V2_SCOPE_EXPECTED_HASH=""
 
 # Агент всегда получает workspace из точного route-контракта профиля.
@@ -1317,9 +1348,8 @@ v2_parse_scope_spec() {
 v2_install_scope_spec() {
   local destination tmp spec parsed
   destination="$(v2_attempt_artifacts)/instrumentation-scope.tsv"
-  # Артефакт создаётся только когда scope явно задан (--instrumentation-file, то
-  # есть для debug). Остальные маршруты не должны получать пустой или неуместный
-  # instrumentation scope.
+  # Артефакт создаётся только для топологии с явным scope. Остальные маршруты не
+  # должны получать пустой или неуместный instrumentation contract.
   if [[ "$MODE" == start && ${#INSTRUMENTATION_SPECS[@]} -gt 0 ]]; then
     tmp=$(mktemp "$(dirname "$destination")/.scope-spec.XXXXXX") || return 1
     for spec in "${INSTRUMENTATION_SPECS[@]}"; do
@@ -1340,13 +1370,18 @@ v2_install_scope_spec() {
     chmod 400 "$tmp" || return 1
     mv -- "$tmp" "$destination" || return 1
   fi
-  if [[ "$ROUTE" == debug ]]; then
-    [[ -f "$destination" && ! -L "$destination" &&
-       "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
-    V2_SCOPE_SPEC=$destination
-  elif [[ -e "$destination" || -L "$destination" ]]; then
-    return 78
-  fi
+  case "$V2_INSTRUMENTATION_MODE" in
+    explicit)
+      [[ -f "$destination" && ! -L "$destination" &&
+         "$(stat -c '%a:%h' "$destination" 2>/dev/null)" == 400:1 ]] || return 78
+      V2_SCOPE_SPEC=$destination
+      ;;
+    derived|disabled)
+      [[ ! -e "$destination" && ! -L "$destination" ]] || return 78
+      V2_SCOPE_SPEC=""
+      ;;
+    *) return 78 ;;
+  esac
 }
 
 v2_delivery_target_valid() {
@@ -1363,21 +1398,17 @@ v2_delivery_target_valid() {
 }
 
 # Источник истины — закреплённая машина попытки, а не имя маршрута. Так новый
-# read-only маршрут автоматически получает disabled, а старые feature/debug/trivial
-# продолжают publish без отдельного case в launcher.
+# read-only маршрут автоматически получает disabled, переименованный диагностический
+# маршрут сохраняет explicit scope, а исторический одиночный transactional-write —
+# derived scope без отдельных case в launcher.
 v2_detect_delivery_contract() {
-  local mode
-  mode=$("$FACTORY_HOME/bin/factory-route" \
+  local contract delivery instrumentation
+  contract=$("$FACTORY_HOME/bin/factory-route" \
     --routes-dir "$ROUTES_DIR" --profile "$PROFILE" describe-route \
     --catalog-hash "$ROUTE_V2_CATALOG" --route "$ROUTE_V2_ROUTE" |
-    python3 -c '
-import json
-import sys
-
-machine = json.load(sys.stdin)["machine"]
-print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) else "disabled")
-') || return 78
-  case "$mode" in
+    route_machine_contract) || return 78
+  IFS=$'\t' read -r delivery instrumentation <<<"$contract"
+  case "$delivery" in
     publish)
       V2_HAS_SHIP=1
       V2_DELIVERY_MODE=publish
@@ -1386,6 +1417,10 @@ print("publish" if any(node.get("id") == "ship" for node in machine["nodes"]) el
       V2_HAS_SHIP=0
       V2_DELIVERY_MODE=disabled
       ;;
+    *) return 78 ;;
+  esac
+  case "$instrumentation" in
+    explicit|derived|disabled) V2_INSTRUMENTATION_MODE=$instrumentation ;;
     *) return 78 ;;
   esac
 }
@@ -1749,9 +1784,9 @@ v2_scope_from_diff() {
 }
 
 v2_prepare_scope() {
-  case "$ROUTE" in
-    debug) v2_scope_from_spec ;;
-    feature) v2_scope_from_diff ;;
+  case "$V2_INSTRUMENTATION_MODE" in
+    explicit) v2_scope_from_spec ;;
+    derived) v2_scope_from_diff ;;
     *) return 78 ;;
   esac
 }
@@ -1874,7 +1909,7 @@ route_v2_context_for_node() {
     )
   done
   # Инструментация обязательна, когда контракт scope попытки непустой
-  # (debug start с --instrumentation-file); признак переживает resume вместе
+  # (explicit start с --instrumentation-file); признак переживает resume вместе
   # с immutable-артефактом scope.
   [[ ! -s "$V2_SCOPE_SPEC" ]] || args+=(--instrumentation-required)
   while IFS= read -r ledger_line; do
@@ -2207,6 +2242,10 @@ v2_main() {
       return "$rc"
     }
     V2_ATTEMPT=$attempt
+    # Черновики ходов принадлежат попытке: новая начинает с чистого листа, иначе первый же
+    # этап прочитал бы заметки прошлого, брошенного прогона как свои.
+    declare -F _stage_checkpoint_clear_task >/dev/null &&
+      _stage_checkpoint_clear_task "$TASK"
     v2_shared_lease_bind "$attempt" || {
       rc=$?
       v2_log "shared lease не закреплён за attempt (код $rc)"
@@ -2255,7 +2294,8 @@ v2_main() {
   # маршрута — кокпит терял «ждёт человека» и дорисовывал ложную паузу на воротах
   # (t8164: reject на gate_accept при курсоре на lint).
   if [[ "$MODE" == gate && "$GATE_COMMIT_ONLY" == 1 ]]; then
-    set_st "$TASK" ORCH_PID "$$" DELIVERY_MODE "$V2_DELIVERY_MODE"
+    set_st "$TASK" ORCH_PID "$$" DELIVERY_MODE "$V2_DELIVERY_MODE" \
+      INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
     set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
       ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
@@ -2271,7 +2311,8 @@ v2_main() {
     return 0
   fi
 
-  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 DELIVERY_MODE "$V2_DELIVERY_MODE"
+  set_st "$TASK" ORCH_PID "$$" STALLED_HUMAN 0 DELIVERY_MODE "$V2_DELIVERY_MODE" \
+    INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
     ROUTE "$ROUTE" ROUTE_HASH "$route_hash"

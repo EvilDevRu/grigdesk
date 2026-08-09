@@ -13,6 +13,7 @@ import { loadGraph, graphForRoute, computeNodeStatuses, parseLoops } from '../li
 import { buildRouteDef, routeStageKeys } from '../lib/route-graph.js';
 import { RoutesStore } from '../modules/routes/store.js';
 import { parseSandboxRepositories } from '../lib/sandbox-env.js';
+import { routeInstrumentationMode } from '../lib/factory-launch-contract.js';
 import {
   readFactoryAttemptLedger,
   verifyFactoryAttemptEnvironment,
@@ -156,9 +157,11 @@ export class FactoryStateAdapter {
           routeId,
           current.catalog.routes[routeId],
         );
+        const instrumentationMode = routeInstrumentationMode(route);
         return [routeId, {
           deliveryMode: route.nodes.some((node) => node.id === 'ship') ? 'publish' : 'disabled',
-          instrumentationRequired: routeId === 'debug',
+          instrumentationMode,
+          instrumentationRequired: instrumentationMode === 'explicit',
         }];
       }));
       return {

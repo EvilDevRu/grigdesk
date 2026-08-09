@@ -14,13 +14,36 @@ import { FactoryStateAdapter } from './adapters/factory-state.js';
 import { B24Adapter } from './adapters/b24.js';
 import { SystemAdapter } from './adapters/system.js';
 import { MediaAdapter } from './adapters/media.js';
+import { extractSceneFrames } from './lib/media/ingest.js';
 import { CredsStore } from './lib/b24/creds-store.js';
 import { ClaudeAuthStore } from './lib/claude-auth-store.js';
 import { PrefsStore } from './lib/prefs-store.js';
+import { SpeechRuntime } from './lib/speech/index.js';
+import { ModelJobManager } from './lib/speech/model-jobs.js';
+import { listProjects } from './lib/profiles.js';
+import * as telegramBotApi from './lib/telegram/api.js';
+import { TelegramAccountBindings } from './lib/telegram/account-bindings.js';
+import { createTelegramAccountContextFactory } from './lib/telegram/account-context.js';
+import { TelegramAccountPoller } from './lib/telegram/account-poller.js';
+import { TelegramConnection } from './lib/telegram/connection.js';
+import { TelegramCredentialsStore } from './lib/telegram/credentials-store.js';
+import { createTelegramInboxChannel } from './lib/telegram/inbox-channel.js';
+import { GitHubAccountBindings } from './lib/github/account-bindings.js';
+import { createGitHubAccountContextFactory } from './lib/github/account-context.js';
+import { GitHubConnection } from './lib/github/connection.js';
+import { GitHubCredentialsStore } from './lib/github/credentials-store.js';
+import { createGitHubInboxChannel } from './lib/github/inbox-channel.js';
+import { InboxCoordinator } from './lib/inbox/coordinator.js';
+import { InboxAttachmentAnalyzer } from './lib/inbox/attachment-analysis.js';
+import { InboxTaskService } from './lib/inbox/task-service.js';
+import { InboxAutoTasks } from './lib/inbox/auto-tasks.js';
+import { runInboxTriage } from './lib/inbox/triage.js';
 import { FactoryDebugSettings } from './lib/factory-debug.js';
 import { readRouteWorkTime } from './lib/factory-route-cli.js';
 import { TaskFavoritesStore } from './lib/task-favorites-store.js';
 import { TaskFavoritesService } from './lib/task-favorites-service.js';
+import { TaskSeenStore } from './lib/task-seen-store.js';
+import { TaskSeenService } from './lib/task-seen-service.js';
 
 import authPlugin from './plugins/auth.js';
 import httpScopePlugin from './plugins/http-scope.js';
@@ -34,6 +57,7 @@ import healthModule from './modules/health/index.js';
 import factoryModule from './modules/factory/index.js';
 import b24Module from './modules/b24/index.js';
 import taskFavoritesModule from './modules/task-favorites/index.js';
+import taskSeenModule from './modules/task-seen/index.js';
 import systemModule from './modules/system/index.js';
 import mediaModule from './modules/media/index.js';
 import chatModule from './modules/chat/index.js';
@@ -48,6 +72,9 @@ import gatewayModule from './modules/gateway/index.js';
 import pluginsModule from './modules/plugins/index.js';
 import projectsModule from './modules/projects/index.js';
 import codeModule from './modules/code/index.js';
+import telegramModule from './modules/telegram/index.js';
+import githubModule from './modules/github/index.js';
+import inboxModule from './modules/inbox/index.js';
 import documentsModule from './modules/documents/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 import { DocumentReader } from './lib/documents/reader.js';
@@ -109,19 +136,150 @@ async function build() {
     workTimeReader: (identity) => readRouteWorkTime(config, identity),
   });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
+  const telegramBindings = new TelegramAccountBindings({
+    file: path.join(config.telegramDir, 'account-bindings.json'),
+  });
+  const telegramCredentials = new TelegramCredentialsStore({
+    file: config.telegramAccountCredsPath,
+  });
+  const telegramAccountContextFor = createTelegramAccountContextFactory({
+    dir: config.telegramDir,
+    botApi: telegramBotApi,
+    log: fastify.log,
+  });
+  const githubBindings = new GitHubAccountBindings({
+    file: path.join(config.githubDir, 'account-bindings.json'),
+  });
+  const githubCredentials = new GitHubCredentialsStore({ file: config.githubCredsPath });
+  const githubAccountContextFor = createGitHubAccountContextFactory({ dir: config.githubDir });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
+  const speechRuntime = new SpeechRuntime({
+    mediaDir: config.mediaDir,
+    mediaHfDir: config.mediaHfDir,
+    pythonPath: config.mediaPython,
+  });
+  speechRuntime.attachModelJobs(new ModelJobManager({
+    jobsDir: path.join(config.mediaDir, 'model-jobs'),
+    mediaHfDir: config.mediaHfDir,
+    pythonPath: config.mediaPython,
+    benchmarkAudioPath: config.speechBenchmarkAudioPath,
+    onModelReady: () => speechRuntime.invalidateCapabilities(),
+  }));
+  speechRuntime.applyRuntimeSettings(prefs.read().speech);
+  const media = new MediaAdapter({ mediaDir: config.mediaDir, speechRuntime });
+  const inboxAttachmentAnalyzer = new InboxAttachmentAnalyzer({
+    cacheDir: path.join(config.mediaDir, 'inbox-attachment-analysis'),
+    // Расшифровка зависит от языка, модели и hotwords. При их изменении старый
+    // кэш нельзя повторно использовать для новой задачи.
+    revision: () => JSON.stringify(prefs.read().speech || {}),
+    transcribe: ({ filePath, signal }) => speechRuntime.transcribe({
+      filePath,
+      settings: prefs.read().speech,
+      signal,
+    }),
+    extractFrames: (options) => extractSceneFrames(options),
+  });
+  const notifyInboxChanged = (payload) => fastify.sse?.broadcast?.('inbox-changed', payload);
+  const telegramConnection = new TelegramConnection({
+    credentials: telegramCredentials,
+    bindings: telegramBindings,
+    accountContextFor: telegramAccountContextFor,
+    botApi: telegramBotApi,
+    enabled: () => fastify.pluginEnabled?.('telegram') === true,
+    onChanged: notifyInboxChanged,
+    log: fastify.log,
+  });
+  const telegramPoller = new TelegramAccountPoller({
+    acquireLease: () => telegramConnection.acquireLease(),
+    botApi: telegramBotApi,
+    isEnabled: () => fastify.pluginEnabled?.('telegram') === true,
+    onChanged: notifyInboxChanged,
+    log: fastify.log,
+  });
+  telegramConnection.attachPoller(telegramPoller);
+  const telegramInboxChannel = createTelegramInboxChannel({
+    enabled: () => fastify.pluginEnabled('telegram'),
+    state: async () => {
+      const provider = await telegramConnection.status();
+      return {
+        connection: provider.connection,
+        participation: undefined,
+        reason: provider.reason,
+      };
+    },
+    acquireInboxLease: () => telegramConnection.acquireLease(),
+  });
+  const githubConnection = new GitHubConnection({
+    credentials: githubCredentials,
+    bindings: githubBindings,
+    accountContextFor: githubAccountContextFor,
+    webhookBaseUrl: config.githubWebhookBaseUrl,
+    enabled: () => fastify.pluginEnabled?.('github') === true,
+    onChanged: notifyInboxChanged,
+    log: fastify.log,
+  });
+  const githubInboxChannel = createGitHubInboxChannel({
+    enabled: () => fastify.pluginEnabled('github'),
+    state: () => githubConnection.status(),
+    acquireInboxLease: () => githubConnection.acquireInboxLease(),
+  });
+  const inboxCoordinator = new InboxCoordinator({
+    channels: [telegramInboxChannel, githubInboxChannel],
+  });
+  const inboxTaskService = new InboxTaskService({
+    coordinator: inboxCoordinator,
+    b24,
+    isEnabled: () => fastify.pluginEnabled('inbox'),
+    listProjects: () => listProjects(config, prefs),
+    taskUrlFor: async (taskId) => {
+      const identity = await b24.accountIdentity();
+      if (!identity?.baseUrl || !identity?.userId) return '';
+      const base = String(identity.baseUrl).replace(/\/+$/u, '');
+      return `${base}/company/personal/user/${identity.userId}/tasks/task/view/${taskId}/`;
+    },
+    attachmentAnalyzer: inboxAttachmentAnalyzer,
+    attachmentTriage: ({ item, attachmentAnalysis }) => runInboxTriage({
+      item,
+      attachmentAnalysis,
+      modelRef: fastify.pluginSettings('inbox')?.triageModel ?? null,
+      config,
+      providerSettings: prefs.read().providerSettings || {},
+      log: fastify.log,
+    }),
+    onChanged: notifyInboxChanged,
+    log: fastify.log,
+  });
+  const inboxAutoTasks = new InboxAutoTasks({
+    coordinator: inboxCoordinator,
+    taskService: inboxTaskService,
+    b24,
+    attachmentAnalyzer: inboxAttachmentAnalyzer,
+    modelRef: () => fastify.pluginSettings('inbox')?.triageModel ?? null,
+    isEnabled: () => fastify.pluginEnabled('inbox'),
+    config,
+    providerSettings: () => prefs.read().providerSettings || {},
+    onChanged: notifyInboxChanged,
+    log: fastify.log,
+  });
   const system = new SystemAdapter();
-  const media = new MediaAdapter({ mediaDir: config.mediaDir });
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
   const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
+  const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
+  const taskSeen = new TaskSeenService({ store: taskSeenStore, b24 });
   const factoryDebug = new FactoryDebugSettings({
     factoryBin: config.factoryBin,
     stateDir: config.stateDir,
     configRoot: config.factoryConfigRoot,
     profilesDir: config.profilesDir,
   });
-  const analyzer = new Analyzer({ config, claudeAuth, b24, factoryState, prefs, log: fastify.log });
+  const analyzer = new Analyzer({
+    config, claudeAuth, b24, factoryState, prefs, log: fastify.log,
+    // Декоратор появится ниже, вместе с модулем telegram, — поэтому ищем его в
+    // момент вызова. Триаж случается много позже `ready()`, так что к тому
+    // времени он уже на месте; нет модуля — оценка просто идёт без переписки.
+    discussion: (text, opts) => fastify.telegramDiscussion?.(text, opts),
+  });
   const authStore = new AuthStore({
     accountPath: config.authAccountPath,
     sessionsPath: config.authSessionsPath,
@@ -167,23 +325,44 @@ async function build() {
 
   // Модули.
   await fastify.register(authModule, { authStore, config });
-  await fastify.register(gatewayModule, { config });
+  await fastify.register(gatewayModule, { config, prefs });
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register(factoryModule, { factoryState, config, prefs, b24, analyzer });
   await fastify.register(b24Module, { b24 });
   await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
+  await fastify.register(taskSeenModule, { seen: taskSeen });
   await fastify.register(systemModule, { system, config });
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, { config, prefs });
-  await fastify.register(mediaModule, { media });
+  await fastify.register(mediaModule, {
+    media,
+    speechRuntime,
+    speechSettings: () => prefs.read().speech,
+  });
   await fastify.register(codeModule, { config, prefs });
+  await fastify.register(githubModule, {
+    connection: githubConnection,
+    listProjects: () => listProjects(config, prefs),
+  });
+  await fastify.register(inboxModule, {
+    coordinator: inboxCoordinator,
+    taskService: inboxTaskService,
+    worker: inboxAutoTasks,
+  });
+  await fastify.register(telegramModule, {
+    connection: telegramConnection,
+    poller: telegramPoller,
+    botApi: telegramBotApi,
+    listProjects: () => listProjects(config, prefs),
+  });
   await fastify.register(documentsModule, { reader: documentReader });
   await fastify.register(projectsModule, { config, prefs });
   await fastify.register(chatModule, {
-    factoryState, config, claudeAuth, internalToken, prefs,
+    factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
   });
   await fastify.register(settingsModule, {
     credsStore, b24, claudeAuth, config, prefs, factoryDebug, localTls, tlsRuntime,
+    speechRuntime,
   });
   await fastify.register(terminalModule);
   await fastify.register(agentsModule, { config });
@@ -193,6 +372,27 @@ async function build() {
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });
+
+  // Опрос Телеграма поднимаем только при подключённом боте: без токена цикл всё
+  // равно ничего не делает, а с ним — начинает собирать сообщения сразу после
+  // старта, не дожидаясь, пока кто-то откроет раздел. Дальше его заводит и гасит
+  // сам модуль (connect/disconnect).
+  // Там же заводим автомат «жалоба → задача»: сам модуль его только собирает.
+  // Крутиться вхолостую ему нечем — выключенный плагин и невыбранная модель
+  // отсеиваются в первых строках захода.
+  fastify.addHook('onReady', async () => {
+    await githubConnection.initialize();
+    const telegramState = await telegramConnection.initialize();
+    githubConnection.start();
+    if (telegramState.connection === 'connected') telegramPoller.start();
+    inboxAutoTasks.start();
+  });
+  fastify.addHook('onClose', async () => {
+    githubConnection.stop();
+    await telegramPoller.stop();
+    inboxAutoTasks.stop();
+    await speechRuntime.shutdown();
+  });
 
   // Второй сокет закрываем вместе с сервером: иначе `bin/restart` поднимет новый процесс,
   // а тот упрётся в EADDRINUSE на порту, который скрипт даже не проверяет.

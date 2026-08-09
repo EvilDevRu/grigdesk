@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api-client.js';
@@ -12,13 +12,22 @@ import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { blockReasonLabel, useCockpitUpdateStore } from '../../stores/cockpit-update.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
+import { useInboxStore } from '../../stores/inbox.js';
+import { useDockStore } from '../../stores/dock.js';
 import { providerUsageView } from '../provider-usage.js';
+import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../ProviderUsageResources.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
 import HelpTip from '../ui/HelpTip.vue';
+import ToolHost from './ToolHost.vue';
+import ToolsGrid from './ToolsGrid.vue';
+import { TOOL_BY_ID } from '../tools/registry.js';
+import { useToolLauncher } from '../tools/launcher.js';
+import { registerLayer } from '../ui/layer-stack.js';
 
 const route = useRoute();
+const toolDock = useDockStore();
 const health = ref(null);
 const { data: sys } = storeToRefs(useSystemStore());
 const pwa = usePwaStore();
@@ -49,6 +58,12 @@ const prov = useProvidersStore();
 const runtimeProviders = computed(() => prov.providers.filter((p) => p.chatEnabled !== false));
 const plugins = usePluginsStore();
 plugins.load();
+const inboxStore = useInboxStore();
+watch(() => (plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
+  if (enabled) inboxStore.start();
+  else inboxStore.stop();
+}, { immediate: true });
+onUnmounted(() => inboxStore.stop());
 prov.load();
 prov.loadUsage();
 // Каталог Codex зависит не только от версии CLI, но и от rollout/доступа аккаунта.
@@ -64,6 +79,7 @@ function provTitle(p) {
 // Кнопка «Настройки исполнителей» во всплывашке — на вкладку «Исполнители» настроек
 // (таб настроек запоминается в localStorage, поэтому просто задаём его).
 const router = useRouter();
+const { openTerminal } = useToolLauncher();
 function toProviders() {
   localStorage.setItem('cockpit-settings-tab', 'providers');
   router.push('/settings');
@@ -71,8 +87,7 @@ function toProviders() {
 const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
 function runUsageAction(action) {
   if (action?.kind !== 'terminal' || !action.command) return;
-  sessionStorage.setItem('cockpit-term-insert', action.command);
-  router.push('/terminal');
+  openTerminal({ insert: action.command });
 }
 // «сброс через 2ч» из ISO-даты сброса лимита
 function resetIn(iso) {
@@ -150,7 +165,7 @@ const pipelineBadgeStyle = computed(() => {
 });
 
 const badges = computed(() => {
-  const out = {};
+  const out = inboxNavBadge({ newCount: inboxStore.newCount });
   if (waitingChats.value || unreadChats.value) {
     out['/chats'] = {
       n: waitingChats.value || unreadChats.value,
@@ -169,6 +184,11 @@ const badges = computed(() => {
       title: notifyWatch.attentionTitle,
     };
   }
+  const toolsBadge = aggregateNavBadges(toolsNav.value.map((item) => ({
+    label: item.label,
+    badge: out[item.to],
+  })));
+  if (toolsBadge) out['/tools'] = toolsBadge;
   return out;
 });
 
@@ -184,7 +204,13 @@ const ICONS = {
   projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z',
   code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
+  // Самолётик со складкой крыла: знак Телеграма узнаётся именно по ней, без неё
+  // получается обычная кнопка «отправить».
+  telegram: 'M20.4 5.2 4 11.6l5.3 2 1.7 5.2 2.5-3 4.1 3.1z M9.3 13.6 20.4 5.2 13.5 15.8',
+  inbox: 'M4 4h16v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4z M4 13h4l2 3h4l2-3h4',
+  github: 'M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
+  tools: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
   settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
@@ -201,11 +227,67 @@ const nav = [
 // Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У пользовательских
 // плагинов фронтовых страниц пока не бывает (только роуты /api/ext/…), а пункт с мёртвой
 // ссылкой хуже отсутствующего — такие скрываем, пока страница не появится в бандле.
-const pluginNav = computed(() => plugins.navItems.filter((i) => router.resolve(i.to).matched.length));
-// Служебные пункты — прижаты к низу сайдбара.
-const navBottom = [
-  { to: '/terminal', label: 'Терминал', icon: 'terminal' },
-];
+const routeExists = (item) => router.resolve(item.to).matched.length > 0;
+const pluginNav = computed(() => plugins.railNav.filter(routeExists));
+const toolsNav = computed(() => plugins.toolsNav.filter(routeExists));
+// До 900 px правой рейки нет, поэтому dock-инструменты становятся обычными
+// route-ссылками. Незарегистрированную Vue-панель скрываем fail-closed.
+const dockRouteNav = computed(() => [
+  ...plugins.dockNav.filter((item) => routeExists(item) && TOOL_BY_ID.has(item.id)),
+  { id: 'terminal', to: '/terminal', label: 'Терминал', icon: 'terminal', order: 20 },
+].sort((a, b) => (a.order || 0) - (b.order || 0) || a.label.localeCompare(b.label, 'ru')));
+
+const toolsOpen = ref(false);
+const toolsTrigger = ref(null);
+const toolsPopover = ref(null);
+const toolsPopoverStyle = ref({});
+let unregisterToolsLayer = null;
+const toolsActive = computed(() => route.path === '/tools' || toolsNav.value.some((item) => item.to === route.path));
+
+function placeToolsPopover() {
+  const rect = toolsTrigger.value?.getBoundingClientRect?.();
+  if (!rect) return;
+  const width = Math.min(360, window.innerWidth - 24);
+  const left = Math.min(rect.right + 8, window.innerWidth - width - 12);
+  toolsPopoverStyle.value = { left: `${Math.max(12, left)}px`, top: `${Math.max(62, rect.top)}px`, width: `${width}px` };
+}
+function closeTools({ focus = false } = {}) {
+  if (!toolsOpen.value) return;
+  toolsOpen.value = false;
+  if (focus) nextTick(() => toolsTrigger.value?.focus?.());
+}
+async function toggleTools() {
+  if (toolsOpen.value) { closeTools({ focus: true }); return; }
+  placeToolsPopover();
+  toolsOpen.value = true;
+  await nextTick();
+  toolsPopover.value?.querySelector?.('a')?.focus?.();
+}
+function toolsOutside(event) {
+  if (toolsTrigger.value?.contains(event.target) || toolsPopover.value?.contains(event.target)) return;
+  closeTools();
+}
+watch(toolsOpen, (open) => {
+  unregisterToolsLayer?.();
+  unregisterToolsLayer = null;
+  if (open) {
+    unregisterToolsLayer = registerLayer('tools-popover', {
+      priority: 70,
+      close: () => { closeTools({ focus: true }); },
+    });
+    document.addEventListener('pointerdown', toolsOutside, true);
+    window.addEventListener('resize', placeToolsPopover, { passive: true });
+  } else {
+    document.removeEventListener('pointerdown', toolsOutside, true);
+    window.removeEventListener('resize', placeToolsPopover);
+  }
+});
+watch(() => route.fullPath, () => closeTools());
+onUnmounted(() => {
+  unregisterToolsLayer?.();
+  document.removeEventListener('pointerdown', toolsOutside, true);
+  window.removeEventListener('resize', placeToolsPopover);
+});
 
 async function loadHealth() { try { health.value = await api.get('/api/health'); } catch { health.value = null; } }
 loadHealth();
@@ -258,13 +340,46 @@ const { connected } = useSse((name) => {
         <template v-if="pluginNav.length">
           <div class="navsep"></div>
           <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
+            <span class="icwrap">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
+              <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
+                    role="status" :aria-label="badges[item.to].title" :title="badges[item.to].title">
+                {{ badges[item.to].n > 99 ? '99+' : badges[item.to].n }}
+              </span>
+            </span>
             <span class="lbl">{{ item.label }}</span>
           </router-link>
         </template>
+        <template v-if="toolsNav.length">
+          <div class="navsep"></div>
+          <button ref="toolsTrigger" type="button" class="navitem tools-trigger"
+                  :class="{ active: toolsActive }" title="Инструменты"
+                  :aria-expanded="toolsOpen" aria-haspopup="true" @click="toggleTools">
+            <span class="icwrap">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
+                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
+                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
+              </span>
+            </span>
+            <span class="lbl">Инструменты</span>
+          </button>
+          <router-link to="/tools" class="navitem tools-mobile" active-class="active" title="Инструменты">
+            <span class="icwrap">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
+                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
+                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
+              </span>
+            </span>
+            <span class="lbl">Инструменты</span>
+          </router-link>
+        </template>
       </nav>
-      <nav class="nav nav-bottom">
-        <router-link v-for="item in navBottom" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+      <nav class="nav nav-bottom dock-route-nav">
+        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
           <span class="lbl">{{ item.label }}</span>
         </router-link>
@@ -322,7 +437,7 @@ const { connected } = useSse((name) => {
              свежие лимиты приезжали бы уже после раскрытия всплывашки -->
         <span v-if="runtimeProviders.length" class="provbox"
               @mouseenter="prov.loadUsage()" @pointerdown="prov.loadUsage()">
-          <HelpTip v-for="p in runtimeProviders" :key="p.id" class="prov-tip" toggle
+          <HelpTip v-for="p in runtimeProviders" :key="p.id" :class="['prov-tip', `prov-${p.id}`]" toggle
                    :tip-style="{ maxWidth: '320px' }">
             <!-- Клик раскрывает саму всплывашку (на планшете ховера нет), а в настройки
                  ведёт кнопка внутри неё: обновление CLI — только вручную, кнопкой -->
@@ -425,7 +540,20 @@ const { connected } = useSse((name) => {
       </router-link>
     </header>
 
-    <main class="content"><slot /></main>
+    <main class="content" :inert="toolDock.isExpanded"
+          :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
+    <ToolHost />
+
+    <Teleport to="body">
+      <section v-if="toolsOpen" ref="toolsPopover" class="tools-popover" :style="toolsPopoverStyle"
+               aria-label="Инструменты">
+        <header>
+          <strong>Инструменты</strong>
+          <router-link to="/tools" @click="closeTools()">Все на странице →</router-link>
+        </header>
+        <ToolsGrid :items="toolsNav" :badges="badges" @select="closeTools()" />
+      </section>
+    </Teleport>
 
     <!-- Баннер обновления живёт в App.vue: он нужен и на экране входа, куда оболочка
          не доходит (см. shared/ui/UpdateBanner.vue). -->
@@ -443,10 +571,11 @@ const { connected } = useSse((name) => {
 <style scoped>
 .shell {
   display: grid; height: 100%; min-width: 0; overflow: hidden;
-  grid-template-columns: 216px 1fr;
+  grid-template-columns: 216px minmax(0, 1fr) 44px;
   grid-template-rows: 54px 1fr;
+  transition: grid-template-columns .16s ease-out;
 }
-.shell.collapsed { grid-template-columns: 62px 1fr; }
+.shell.collapsed { grid-template-columns: 62px minmax(0, 1fr) 44px; }
 
 /* ── Сайдбар ── */
 .sidebar {
@@ -523,10 +652,13 @@ const { connected } = useSse((name) => {
   60% { box-shadow: 0 0 0 5px transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .shell { transition: none; }
   .boardtimer, .navbadge.wait, .navbadge.stall { animation: none; }
 }
 .nav-bottom { margin-top: auto; }
-.collapse-btn { margin-top: 4px; }
+.dock-route-nav { display: none; }
+.collapse-btn { margin-top: auto; }
+.tools-mobile { display: none; }
 
 /* Свёрнутый сайдбар: только иконки по центру, подписи скрыты */
 .collapsed .brand .name, .collapsed .lbl { display: none; }
@@ -535,7 +667,7 @@ const { connected } = useSse((name) => {
 
 /* ── Топбар ── */
 .topbar {
-  grid-row: 1; grid-column: 2;
+  grid-row: 1; grid-column: 2 / 4;
   display: flex; align-items: center; justify-content: flex-start; gap: 14px;
   padding: 0 22px; background: var(--topbar); border-bottom: 1px solid var(--line);
 }
@@ -581,6 +713,9 @@ const { connected } = useSse((name) => {
    убирает baseline-зазор SVG и ставит все три логотипа на одну оптическую ось. */
 .prov-tip { display: inline-flex; align-items: center; vertical-align: middle; }
 .prov-tip :deep(.ht-tr) { line-height: 0; }
+/* У Kimi широкий SVG-кадр: правое плечо «K» заканчивается раньше его блока. Без
+   поправки визуальный зазор до следующего знака на 4px больше, чем у Codex → Kimi. */
+.prov-kimi + .prov-ollama { margin-left: -4px; }
 .prov { display: inline-grid; place-items: center; position: relative; cursor: pointer; }
 /* OpenAI и Kimi в шапке нейтральные: цвет здесь означает состояние, а не бренд. */
 .prov.codex, .prov.kimi { color: var(--ink); }
@@ -642,19 +777,42 @@ const { connected } = useSse((name) => {
 .conn.off .dot { background: var(--bad); }
 .host { display: inline-flex; align-items: center; height: 32px; line-height: 1; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 
-.content { grid-row: 2; grid-column: 2; overflow-y: auto; padding: 22px; }
+/* scrollbar-gutter: stable — место под полосу прокрутки зарезервировано всегда,
+   иначе контент «скачет» по горизонтали, когда скролл появляется/исчезает при смене
+   раздела. Не overflow-y: scroll: на полноэкранных страницах (чаты) внешний скролл
+   не нужен, и принудительная полоса висела бы там мёртвой. */
+.content { grid-row: 2; grid-column: 2; overflow-y: auto; scrollbar-gutter: stable; padding: 22px; }
+
+.tools-popover {
+  position: fixed; z-index: 75; max-height: calc(100vh - 74px); overflow: auto;
+  padding: 12px; border: 1px solid var(--line-2); border-radius: 14px;
+  background: var(--surface); box-shadow: 0 18px 48px #000c;
+}
+.tools-popover header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 2px 2px 10px; }
+.tools-popover header strong { font-size: 13px; }
+.tools-popover header a { color: var(--accent); font-size: 11px; }
+.tools-popover :deep(.tools-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tools-popover :deep(.tool-tile) { min-height: 86px; }
 
 /* Планшет: полная рейка съедает четверть экрана и выталкивает рабочую область.
    Оставляем узнаваемые иконки и все пункты, но освобождаем 154 px контенту. */
 @media (min-width: 760px) and (max-width: 1099px) {
-  .shell, .shell.collapsed { grid-template-columns: 62px minmax(0, 1fr); }
   .brand .name, .lbl { display: none; }
   .brand { justify-content: center; padding: 8px 0 16px; }
   .navitem, .collapse-btn { justify-content: center; padding: 10px 0; gap: 0; }
   .content { padding: 18px; }
   .topbar { padding-inline: 18px; }
 }
+@media (min-width: 900px) and (max-width: 1099px) {
+  .shell, .shell.collapsed { grid-template-columns: 62px minmax(0, 1fr) 44px; }
+}
 @media (min-width: 760px) and (max-width: 899px) {
+  .shell, .shell.collapsed { grid-template-columns: 62px minmax(0, 1fr); }
+  .topbar { grid-column: 2; }
+  .dock-route-nav { display: flex; }
+  /* Здесь нижний блок Code/Terminal сам занимает свободное место над кнопкой. */
+  .collapse-btn { margin-top: 4px; }
   .metric, .netbox .ip { display: none; }
 }
 
@@ -685,6 +843,9 @@ const { connected } = useSse((name) => {
     padding-bottom: env(safe-area-inset-bottom, 0); scrollbar-width: none; }
   .sidebar::-webkit-scrollbar { display: none; }
   .brand, .collapse-btn { display: none; }
+  .tools-trigger { display: none; }
+  .tools-mobile { display: flex; }
+  .dock-route-nav { display: contents; }
   /* На мобиле обе навигации сливаются в один нижний ряд */
   .nav, .nav-bottom { display: contents; }
   .navitem { flex: 0 0 62px; min-width: 62px; flex-direction: column; gap: 3px; font-size: 10px; padding: 9px 2px; border-radius: 0; }

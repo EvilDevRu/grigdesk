@@ -1,7 +1,7 @@
 // Единый клиент к серверу кокпита.
 // base URL из VITE_BRAIN_URL (пусто = тот же origin — так работает и в проде, где фронт
 // отдаёт сам сервер, и в dev через vite-proxy). Задел «сменный мозг»: адрес — одна настройка.
-const BASE = (import.meta.env.VITE_BRAIN_URL || '').replace(/\/$/, '');
+const BASE = (import.meta.env?.VITE_BRAIN_URL || '').replace(/\/$/, '');
 // База для WebSocket (терминал): тот же хост, схема http→ws / https→wss.
 const WS_BASE = (BASE || (typeof location !== 'undefined' ? location.origin : '')).replace(/^http/, 'ws');
 
@@ -78,8 +78,18 @@ async function request(method, path, body) {
 }
 
 // Multipart-загрузка (файлы): Content-Type ставит сам браузер (boundary).
-async function upload(path, formData) {
-  const res = await fetch(url(path), { ...FETCH_OPTS, method: 'POST', body: formData });
+async function upload(path, formData, { timeoutMs = 0, signal = null } = {}) {
+  // У загрузок общий таймаут опасен: видео на гигабайты и короткая диктовка имеют
+  // разные бюджеты. Вызывающий включает его явно; переданный AbortSignal сильнее.
+  const timeoutSignal = !signal && timeoutMs > 0 && typeof AbortSignal?.timeout === 'function'
+    ? AbortSignal.timeout(timeoutMs)
+    : null;
+  const res = await fetch(url(path), {
+    ...FETCH_OPTS,
+    method: 'POST',
+    body: formData,
+    ...(signal || timeoutSignal ? { signal: signal || timeoutSignal } : {}),
+  });
   return handle(res, path);
 }
 

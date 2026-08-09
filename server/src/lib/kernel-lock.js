@@ -82,11 +82,44 @@ export async function acquireKernelFileLock({
     throw error;
   }
 
+  let heldIdentity;
+  try {
+    heldIdentity = await handle.stat();
+    if (!heldIdentity.isFile()) throw new Error('lock fd is not a regular file');
+  } catch (error) {
+    await handle.close().catch(() => {});
+    throw errorFactory(
+      lostCode,
+      `Kernel lock ${label} нельзя закрепить по inode: ${error?.message || error}`,
+    );
+  }
+
   let released = false;
   return Object.freeze({
     assertHeld() {
       if (released || handle.fd < 0) {
         throw errorFactory(lostCode, `Kernel lock ${label} уже освобождён`);
+      }
+    },
+    async assertPathIdentity() {
+      if (released || handle.fd < 0) {
+        throw errorFactory(lostCode, `Kernel lock ${label} уже освобождён`);
+      }
+      try {
+        const [heldNow, atPath] = await Promise.all([
+          handle.stat(),
+          fs.lstat(lockPath),
+        ]);
+        if (!heldNow.isFile() || !atPath.isFile() || atPath.isSymbolicLink()
+            || heldNow.dev !== heldIdentity.dev || heldNow.ino !== heldIdentity.ino
+            || atPath.dev !== heldIdentity.dev || atPath.ino !== heldIdentity.ino) {
+          throw new Error('lock path указывает на другой inode');
+        }
+      } catch (error) {
+        throw errorFactory(
+          lostCode,
+          `Kernel lock ${label} потерял path identity: ${error?.message || error}`,
+        );
       }
     },
     async release() {

@@ -8,8 +8,10 @@ import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
 import { alertDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
+import { useToolLauncher } from '../shared/tools/launcher.js';
 
 const router = useRouter();
+const { openCode } = useToolLauncher();
 const projects = ref([]);
 const loading = ref(true);
 const error = ref('');
@@ -81,8 +83,7 @@ function toRoutes(id) {
   router.push('/routes');
 }
 function toCode(id) {
-  localStorage.setItem('cockpit-project', id);
-  router.push('/code');
+  openCode({ project: id });
 }
 </script>
 

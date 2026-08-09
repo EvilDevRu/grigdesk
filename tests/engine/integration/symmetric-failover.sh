@@ -155,6 +155,48 @@ assert_eq claude "$DISPATCH_RESULT_RUNNER" "fresh family limit stays on Claude"
 assert_eq fable "$DISPATCH_RESULT_FAMILY" "fresh family fallback resolves Fable"
 assert_eq fallback_limit "$DISPATCH_REASON" "family fallback reason is visible"
 
+# Явный выбор человека сильнее предохранителя. Тот ставится по ПРОШЛОМУ отказу и
+# всего лишь предполагает, что провайдер всё ещё в лимите; нажатая человеком кнопка
+# «переключить на этого исполнителя» — факт. Молчаливая подмена выглядела как
+# сломанная кнопка: человек переключал на claude, а этап уезжал в резерв.
+reset_fixture
+breaker_record claude acct-claude provider "" "" 150 400 fixture-provider
+FIXTURE_RESULT[claude]=ok
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 9 PLAN claude codex 200 fixture_resolve fixture_invoke claude
+assert_rc 0 "$?" "human choice enters a provider under the breaker"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "human choice is not silently replaced"
+assert_eq primary "$DISPATCH_REASON" "bypassed breaker is not reported as a failover"
+
+# Предохранитель по семейству — такая же догадка: назначенный человеком провайдер
+# перепроверяет её сам, вместо того чтобы сразу уехать на запасное семейство.
+reset_fixture
+breaker_record claude acct-claude family opus "" 150 400 fixture-family
+FIXTURE_RESULT[claude:opus]=ok
+dispatcher_run_chain 10 PLAN claude codex 200 fixture_resolve fixture_invoke claude
+assert_rc 0 "$?" "human choice rechecks a family breaker instead of trusting it"
+assert_eq opus "$DISPATCH_RESULT_FAMILY" "requested family is not swapped behind the human"
+
+# Обход ИМЕННОЙ: он покрывает ровно того исполнителя, которого назвал человек.
+# Резерв остаётся под предохранителем — иначе холостой заход делала бы вся цепочка.
+reset_fixture
+breaker_record claude acct-claude provider "" "" 150 400 fixture-provider
+breaker_record codex acct-codex provider "" "" 150 400 fixture-provider
+FIXTURE_RESULT[claude]=limited
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 11 PLAN claude codex 200 fixture_resolve fixture_invoke claude
+assert_rc 2 "$?" "the bypass covers only the named provider"
+assert_eq 1 "$DISPATCH_STALLED_HUMAN" "still-limited chain requests human"
+
+# Без явного выбора всё остаётся как было: предохранитель экономит холостой заход.
+reset_fixture
+breaker_record claude acct-claude provider "" "" 150 400 fixture-provider
+FIXTURE_RESULT[claude]=ok
+FIXTURE_RESULT[codex]=ok
+dispatcher_run_chain 12 PLAN claude codex 200 fixture_resolve fixture_invoke
+assert_rc 0 "$?" "automatic routing still honours the breaker"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "automatic routing skips the limited provider"
+
 reset_fixture
 FIXTURE_RESULT[claude]=limited
 FIXTURE_RESULT[kimi]=ok

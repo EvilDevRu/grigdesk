@@ -13,6 +13,9 @@ const EVENT_NAMES = [
   'chat-permission', 'chat-question', 'chat-permission-done',
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan',
   'chat-store', 'chat-store-meta',
+  'speech-settings',
+  'inbox-changed', 'telegram-status',
+  'gateway-setup',
 ];
 
 const connected = ref(false);

@@ -554,24 +554,24 @@ assert_eq closed "$(json_field "$findings_closed" closed 0 status)" \
   "проекция явно маркирует закрытый finding"
 
 # Typed-цикл останавливается по наблюдаемому отсутствию прогресса раньше общего
-# hard ceiling: третий одинаковый fingerprint уже доказал, что BUILD↔CHECK застрял.
+# hard ceiling: после одного ремонта второй одинаковый fingerprint уже требует человека.
 no_progress_attempt=$(begin_selected 61 a_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
 assert_rc 0 "$?" "попытка для no-progress guard подготовлена"
 no_progress_dir="$(attempt_state_v2_task_root 61)/attempts/$no_progress_attempt"
 attempt_stage_state_init_v2 61 "$no_progress_attempt" debug >/dev/null
-for round in 1 2; do
-  attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
-  repeated=$(attempt_stage_state_commit_v2 \
-    61 "$no_progress_attempt" check failed 6 "$typed_verdict" 2)
-  assert_eq ready "$(json_field "$repeated" state)" \
-    "одинаковый typed rewind $round ещё допускает исправление"
-done
 attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
-no_progress=$(attempt_stage_state_commit_v2 \
+first_repair=$(attempt_stage_state_commit_v2 \
   61 "$no_progress_attempt" check failed 6 "$typed_verdict" 2)
-assert_rc 0 "$?" "третий одинаковый typed rewind фиксируется атомарно"
+assert_eq ready "$(json_field "$first_repair" state)" \
+  "первый typed verdict допускает один автоматический ремонт"
+attempt_stage_state_commit_v2 61 "$no_progress_attempt" instrument done >/dev/null
+reworded_verdict=$(run_state_verdict_encode failed build \
+  'check-contract=то же замечание с уточнённой формулировкой после ремонта')
+no_progress=$(attempt_stage_state_commit_v2 \
+  61 "$no_progress_attempt" check failed 6 "$reworded_verdict" 2)
+assert_rc 0 "$?" "повтор id после одного ремонта фиксируется атомарно"
 assert_eq stopped "$(json_field "$no_progress" state)" \
-  "повторяющиеся findings останавливают автоматический цикл"
+  "тот же набор findings не запускает второй автоматический ремонт"
 assert_eq no-progress "$(json_field "$no_progress" stop)" \
   "причина остановки — отсутствие прогресса, не hard ceiling"
 no_progress_event=$(find "$no_progress_dir/stage-results" -maxdepth 1 -type f \
@@ -594,31 +594,31 @@ attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/nul
 attempt_stage_state_commit_v2 62 "$gate_reset_attempt" check done >/dev/null
 attempt_stage_state_commit_v2 62 "$gate_reset_attempt" gate_plan rejected >/dev/null
 attempt_stage_state_commit_v2 62 "$gate_reset_attempt" instrument done >/dev/null
+after_feedback_verdict=$(run_state_verdict_encode failed build \
+  'after-human-feedback=новое замечание после решения человека')
 after_gate_feedback=$(attempt_stage_state_commit_v2 \
-  62 "$gate_reset_attempt" check failed 6 "$typed_verdict" 1)
+  62 "$gate_reset_attempt" check failed 6 "$after_feedback_verdict" 1)
 assert_rc 0 "$?" "typed failed после rejected ворот коммитится"
 assert_eq ready "$(json_field "$after_gate_feedback" state)" \
-  "rejected ворот начинает новую автономную серию findings"
+  "rejected ворот разрешает новый замкнутый набор findings"
 assert_eq instrument "$(json_field "$after_gate_feedback" currentNode)" \
   "после человеческой обратной связи исправление снова разрешено"
 
-# Набор замечаний меняется от захода к заходу, но одно и то же переживает каждый
-# ремонт. Полное совпадение отпечатка такое не ловит: смена одного finding из двух
-# читается прогрессом, и цикл ходит вокруг неснятой причины, пока сопутствующие
-# замечания тасуются. Останавливает именно ПЕРЕСЕЧЕНИЕ наборов.
+# Набор строго сужается, но одно и то же замечание переживает каждый ремонт.
+# Расширения scope тут нет; третий проход останавливает прежний guard устойчивого ядра.
 core_attempt=$(begin_selected 63 a_dddddddddddddddddddddddddddddddd)
 assert_rc 0 "$?" "попытка для устойчивого ядра подготовлена"
 core_dir="$(attempt_state_v2_task_root 63)/attempts/$core_attempt"
 attempt_stage_state_init_v2 63 "$core_attempt" debug >/dev/null
 core_first=$(run_state_verdict_encode failed build \
   'shared-cause=причина не отделена от места проявления' \
-  'first-side=побочное замечание первого захода')
+  'closed-second=побочное замечание, закрытое вторым' \
+  'closed-first=побочное замечание, закрытое первым')
 core_second=$(run_state_verdict_encode failed build \
   'shared-cause=причина не отделена от места проявления' \
-  'second-side=побочное замечание второго захода')
+  'closed-second=побочное замечание, закрытое вторым')
 core_third=$(run_state_verdict_encode failed build \
-  'shared-cause=причина не отделена от места проявления' \
-  'third-side=побочное замечание третьего захода')
+  'shared-cause=причина не отделена от места проявления')
 for verdict in "$core_first" "$core_second"; do
   attempt_stage_state_commit_v2 63 "$core_attempt" instrument done >/dev/null
   moving=$(attempt_stage_state_commit_v2 \
@@ -680,25 +680,38 @@ assert_file_exists "$shrink_event" \
 assert_contains "$(json_field "$(cat "$shrink_event")" reason)" 'kept-finding' \
   "журнал называет замечание, пережившее все ремонты серии"
 
-# Наборы вообще не пересекаются: каждый заход находит новое. Ядра нет, значит и
-# повода останавливать цикл раньше hard ceiling тоже нет.
+# Первый typed verdict замыкает блокирующий scope дуги. Полностью новый набор на
+# повторе раньше считался прогрессом и именно поэтому критик мог растить задачу до
+# hard ceiling; теперь verdict остаётся в ledger, но автоматический rewind прекращается.
 fresh_attempt=$(begin_selected 65 a_ffffffffffffffffffffffffffffffff)
 assert_rc 0 "$?" "попытка для непересекающихся наборов подготовлена"
+fresh_dir="$(attempt_state_v2_task_root 65)/attempts/$fresh_attempt"
 attempt_stage_state_init_v2 65 "$fresh_attempt" debug >/dev/null
-for finding in first second third; do
-  fresh_verdict=$(run_state_verdict_encode failed build \
-    "only-$finding=замечание, найденное только в этом заходе")
-  attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
-  fresh=$(attempt_stage_state_commit_v2 \
-    65 "$fresh_attempt" check failed 6 "$fresh_verdict" 2)
-  assert_eq ready "$(json_field "$fresh" state)" \
-    "полностью новый набор замечаний прогрессом и остаётся"
-done
+fresh_first=$(run_state_verdict_encode failed build \
+  'only-first=замечание первого прохода')
+fresh_second=$(run_state_verdict_encode failed build \
+  'only-second=новое замечание повторного прохода')
+attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+fresh=$(attempt_stage_state_commit_v2 \
+  65 "$fresh_attempt" check failed 6 "$fresh_first" 2)
+assert_eq ready "$(json_field "$fresh" state)" \
+  "первый набор замечаний разрешает исправление"
+attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+fresh_stop=$(attempt_stage_state_commit_v2 \
+  65 "$fresh_attempt" check failed 6 "$fresh_second" 2)
+assert_eq stopped "$(json_field "$fresh_stop" state)" \
+  "новый набор не запускает второй автоматический ремонт"
+assert_eq no-progress "$(json_field "$fresh_stop" stop)" \
+  "расширение scope останавливается у человека"
+fresh_event=$(find "$fresh_dir/stage-results" -maxdepth 1 -type f \
+  -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
+assert_contains "$(json_field "$(cat "$fresh_event")" reason)" \
+  'замкнутый набор замечаний расширен новыми id: only-second' \
+  "журнал называет новый id, разомкнувший scope"
 
-# Суммарный бюджет возвратов в target: ловит серию, где ни один per-arc сторож
-# не срабатывает (замечания каждый раз свежие, лимит дуги далеко), а круги
-# копятся. Бюджет решением человека НЕ обнуляется — иначе «вернул курсор»
-# выдавало бы новую порцию кругов.
+# Суммарный бюджет возвратов в target тестируется отдельно, с выключенным
+# no-progress у примитива: в живом typed runtime свежие id раньше остановит scope guard.
+# Бюджет решением человека НЕ обнуляется — иначе «вернул курсор» выдавало бы новую порцию.
 budget_attempt=$(begin_selected 67 a_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6)
 assert_rc 0 "$?" "попытка для суммарного бюджета подготовлена"
 budget_dir="$(attempt_state_v2_task_root 67)/attempts/$budget_attempt"
@@ -708,7 +721,7 @@ for round in 1 2 3; do
     "budget-finding-$round=свежее замечание круга $round")
   attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
   budget_run=$(attempt_stage_state_commit_v2 \
-    67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+    67 "$budget_attempt" check failed 6 "$budget_verdict" 0 0 3)
   assert_eq ready "$(json_field "$budget_run" state)" \
     "возврат $round укладывается в суммарный бюджет"
 done
@@ -716,7 +729,7 @@ budget_verdict=$(run_state_verdict_encode failed build \
   'budget-finding-4=свежее замечание четвёртого круга')
 attempt_stage_state_commit_v2 67 "$budget_attempt" instrument done >/dev/null
 budget_stop=$(attempt_stage_state_commit_v2 \
-  67 "$budget_attempt" check failed 6 "$budget_verdict" 2 0 3)
+  67 "$budget_attempt" check failed 6 "$budget_verdict" 0 0 3)
 assert_rc 0 "$?" "четвёртый возврат при бюджете трёх фиксируется атомарно"
 assert_eq stopped "$(json_field "$budget_stop" state)" \
   "исчерпанный суммарный бюджет останавливает курсор"

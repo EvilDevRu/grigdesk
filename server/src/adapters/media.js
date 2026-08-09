@@ -2,28 +2,66 @@
 // Node-обвязка + Python whisper (venv через COCKPIT_MEDIA_PYTHON). Async job-модель:
 // ingest сразу возвращает jobId, статус читается поллингом (файлы в mediaDir/jobs).
 import path from 'node:path';
-import { preflight } from '../lib/media/preflight.js';
-import { startIngestJob, readIngestJob, extractFramesAt } from '../lib/media/ingest.js';
+import { extractFramesAt } from '../lib/media/ingest.js';
+import { SpeechRuntime } from '../lib/speech/runtime.js';
 
 export class MediaAdapter {
-  /** @param {{ mediaDir: string }} opts */
-  constructor({ mediaDir }) {
-    this.mediaDir = mediaDir;
-    this.jobsDir = path.join(mediaDir, 'jobs');
+  /** @param {{ mediaDir?: string, speechRuntime?: SpeechRuntime, speech?: SpeechRuntime }} opts */
+  constructor({
+    mediaDir,
+    speechRuntime = null,
+    speech = null,
+    mediaHfDir = undefined,
+    pythonPath = undefined,
+    transcribePath = undefined,
+  }) {
+    this.speechRuntime = speechRuntime || speech || new SpeechRuntime({
+      mediaDir,
+      mediaHfDir,
+      pythonPath,
+      transcribePath,
+    });
+    this.mediaDir = mediaDir || this.speechRuntime.mediaDir;
+    this.jobsDir = this.speechRuntime.jobsDir || path.join(this.mediaDir, 'jobs');
   }
 
   /** Предполётная проверка окружения (ffmpeg/ffprobe/venv/faster-whisper). */
-  doctor() { return preflight(); }
+  doctor() { return this.speechRuntime.capabilities(); }
+
+  capabilities(options) { return this.speechRuntime.capabilities(options); }
+
+  /** Короткий one-shot путь диктовки через тот же runtime. */
+  transcribe(options) { return this.speechRuntime.transcribe(options); }
 
   /** Запуск распознавания в фоне → { jobId }. */
-  ingest({ filePath, model = 'medium', lang = 'ru', frames = 0 }) {
-    const workDir = path.join(this.mediaDir, `ingest-${Date.now()}`);
-    const jobId = startIngestJob({ filePath, workDir, model, lang, frames, jobsDir: this.jobsDir });
+  ingest({
+    filePath,
+    model = null,
+    videoModel = null,
+    lang = null,
+    language = null,
+    frames = 0,
+    settings = null,
+    speechSettings = null,
+    options = null,
+  }) {
+    const source = settings?.speech || settings || speechSettings || {};
+    const mergedSettings = {
+      ...source,
+      ...(model || videoModel ? { videoModel: videoModel || model } : {}),
+      ...(language || lang ? { language: language || lang } : {}),
+    };
+    const { jobId } = this.speechRuntime.startVideoJob({
+      filePath,
+      frames,
+      settings: mergedSettings,
+      options,
+    });
     return { jobId };
   }
 
   /** Статус/результат job по jobId. */
-  status(jobId) { return readIngestJob(jobId, this.jobsDir); }
+  status(jobId) { return this.speechRuntime.readVideoJob(jobId); }
 
   /** Извлечь кадры в указанные секунды. */
   extractFrames({ filePath, seconds, name }) {

@@ -441,8 +441,8 @@ def human_rewind_note(directory, node):
 def automatic_rewind_history(directory, node, target):
     # Возвращаем историю ЗАФИКСИРОВАННЫХ возвратов той же автономной дуги после
     # последнего решения человека. Для typed verdict сохраняем снимок owner +
-    # стабильных finding id: прогрессом считается закрытие замечаний, а повтор
-    # набора, A↔B-осцилляция и неснимаемое общее ядро — нет.
+    # стабильных finding id: прогрессом считается закрытие замечаний, а расширение
+    # первого набора, повтор, A↔B-осцилляция и неснимаемое общее ядро — нет.
     identifier(node)
     identifier(target)
     try:
@@ -553,6 +553,38 @@ def stable_core_reason(window, owner):
     if len(names) > 3:
         shown += f" и ещё {len(names) - 3}"
     return f"ремонт не снимает замечания: {shown}"
+
+
+def scope_expansion_reason(history, candidate):
+    # Первый typed verdict после решения человека замыкает блокирующий набор дуги.
+    # Иначе проверяющий может каждый раз приносить полностью новые id: точный
+    # no-progress fingerprint считает это прогрессом, хотя задача только растёт.
+    # Один ремонт замкнутого набора тоже является пределом автоматической автономии:
+    # если следующий verdict оставил тот же owner + ids, дальнейшее уточнение summary
+    # не доказывает прогресс и требует решения человека.
+    # Причинность нового дефекта ledger доказать не может, поэтому безопасный исход —
+    # остановить автоматический rewind и отдать расширение человеку, не потеряв verdict.
+    if candidate is None:
+        return None
+    typed_history = [snapshot for snapshot in history if snapshot is not None]
+    if not typed_history:
+        return None
+    if candidate == typed_history[-1]:
+        return "повторяется тот же набор открытых замечаний после одного ремонта"
+    closed_owner, closed_ids = typed_history[0]
+    owner, candidate_ids = candidate
+    if owner != closed_owner:
+        return (
+            "замкнутый набор замечаний сменил владельца: "
+            f"{closed_owner} → {owner}"
+        )
+    added = sorted(set(candidate_ids) - set(closed_ids))
+    if not added:
+        return None
+    shown = ", ".join(added[:3])
+    if len(added) > 3:
+        shown += f" и ещё {len(added) - 3}"
+    return f"замкнутый набор замечаний расширен новыми id: {shown}"
 
 
 def no_progress_reason(history, candidate, limit):
@@ -1013,11 +1045,19 @@ elif OP == "prepare-commit":
             node,
             action["rewind"],
         )
-        progress_reason = no_progress_reason(
-            rewind_history,
-            verdict_snapshot(verdict),
-            no_progress_limit,
-        )
+        candidate_snapshot = verdict_snapshot(verdict)
+        progress_reason = None
+        if no_progress_limit:
+            progress_reason = scope_expansion_reason(
+                rewind_history,
+                candidate_snapshot,
+            )
+        if progress_reason is None:
+            progress_reason = no_progress_reason(
+                rewind_history,
+                candidate_snapshot,
+                no_progress_limit,
+            )
         if progress_reason is not None:
             event_kind = "no-progress"
             event_reason = (

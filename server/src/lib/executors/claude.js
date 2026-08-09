@@ -746,6 +746,130 @@ export function claudeProviderSettingsArgs(settings = {}) {
   return ['--settings', JSON.stringify({ fastMode: settings.fastMode === true })];
 }
 
+const CLAUDE_UNTRUSTED_MEDIA_TYPES = Object.freeze([
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+const CLAUDE_UNTRUSTED_MAX_IMAGES = 20;
+
+function untrustedInputError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+/**
+ * Inbox-триаж нельзя запускать обычным coding-ходом. Этот argv полностью выключает
+ * built-in tools, project/user customizations, hooks, skills и MCP, не сохраняет
+ * сессию и не читает инструкции из cwd. Сеть остаётся только у самого CLI для model
+ * transport; у недоверенного prompt нет инструмента, способного ею воспользоваться.
+ */
+export function buildClaudeUntrustedArgs({ model, effort, providerSettings = {} } = {}) {
+  const args = [
+    '-p',
+    '--input-format', 'stream-json',
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--permission-mode', 'plan',
+    '--tools', '',
+    '--safe-mode',
+    '--strict-mcp-config',
+    '--disable-slash-commands',
+    '--setting-sources', '',
+    '--no-session-persistence',
+    ...claudeProviderSettingsArgs(providerSettings),
+  ];
+  if (model) args.push('--model', model);
+  if (effort) args.push('--effort', effort);
+  return args;
+}
+
+/** Изображения передаются байтами в user content, никогда файловыми путями. */
+export function buildClaudeUntrustedInput(message, images = []) {
+  if (!Array.isArray(images) || images.length > CLAUDE_UNTRUSTED_MAX_IMAGES) {
+    throw untrustedInputError('attachment_media_limit', 'Слишком много изображений для Claude.');
+  }
+  const content = [{ type: 'text', text: String(message || '') }];
+  for (const image of images) {
+    if (!CLAUDE_UNTRUSTED_MEDIA_TYPES.includes(image?.mediaType)
+        || typeof image?.data !== 'string'
+        || !image.data) {
+      throw untrustedInputError('unsupported_media', 'Claude не поддерживает формат изображения.');
+    }
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: image.mediaType, data: image.data },
+    });
+  }
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
+}
+
+function claudeUntrustedResult(stdout, stderr) {
+  let result = null;
+  for (const line of String(stdout || '').split(/\r?\n/u)) {
+    const candidate = line.trim();
+    if (!candidate.startsWith('{')) continue;
+    try {
+      const event = JSON.parse(candidate);
+      if (event?.type === 'result') result = event;
+    } catch { /* посторонняя строка CLI */ }
+  }
+  if (!result) {
+    const detail = String(stderr || '').trim().slice(-600);
+    throw new Error(detail || 'claude завершился без результата');
+  }
+  const reply = typeof result.result === 'string' ? result.result.trim() : '';
+  if (!reply) throw new Error('claude вернул пустой результат');
+  return {
+    reply,
+    sessionId: null,
+    cost: result.total_cost_usd ?? null,
+    actualModel: result.model || '',
+  };
+}
+
+export async function runClaudeUntrusted({
+  config, env, message, images = [], model, effort, providerSettings, signal,
+} = {}) {
+  const input = buildClaudeUntrustedInput(message, images);
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-inbox-model-'));
+  await fs.chmod(cwd, 0o500);
+  try {
+    return await new Promise((resolve, reject) => {
+      const child = execFile(config.claudeBin, buildClaudeUntrustedArgs({
+        model, effort, providerSettings,
+      }), {
+        cwd,
+        env: {
+          ...process.env,
+          ...(env || {}),
+          CLAUDE_CODE_SAFE_MODE: '1',
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+        },
+        // Inbox обрабатывает недоверенный ввод: ограничиваем не только capabilities,
+        // но и ресурсы зависшего/многословного model-only хода.
+        maxBuffer: 2 * 1024 * 1024,
+        timeout: 5 * 60 * 1000,
+        killSignal: 'SIGTERM',
+        signal,
+      }, (error, stdout, stderr) => {
+        if (error) {
+          const detail = String(stderr || '').trim().slice(-600);
+          reject(new Error(detail || error.message || 'claude не запустился'));
+          return;
+        }
+        try { resolve(claudeUntrustedResult(stdout, stderr)); } catch (parseError) { reject(parseError); }
+      });
+      child.stdin?.end(input);
+    });
+  } finally {
+    await fs.chmod(cwd, 0o700).catch(() => {});
+    await fs.rm(cwd, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // Слэш-команды Claude для меню чата. Print-режим (`-p --resume`) перехватывает их сам:
 // состав проверен гейтом исполняемости (2026-08-06, claude 2.1.220). /status, /vim и
 // прочие TUI-only отвечают «isn't available in this environment» — не берём; /clear
@@ -944,6 +1068,14 @@ export default {
   color: '#d97757',
   order: 1,
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
+  // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
+  trustedDirectories: true,
+  untrustedInput: Object.freeze({
+    text: true,
+    images: true,
+    maxImages: CLAUDE_UNTRUSTED_MAX_IMAGES,
+    mediaTypes: CLAUDE_UNTRUSTED_MEDIA_TYPES,
+  }),
 
   // Свои настройки Claude — плашка «Настройки → Исполнители». Список объявляет сам
   // исполнитель: у каждого ИИ ручки разные, UI про вендоров не знает и рисует по kind.
@@ -1163,11 +1295,13 @@ export default {
    */
   seedModels() {
     return [
-      { id: 'opus', family: 'opus', name: 'Opus — последняя', context: 200000, tier: 8995, efforts: null, alias: true },
-      { id: 'sonnet', family: 'sonnet', name: 'Sonnet — последняя', context: 200000, tier: 6995, efforts: null, alias: true },
-      { id: 'haiku', family: 'haiku', name: 'Haiku — последняя', context: 200000, tier: 3995, efforts: null, alias: true },
+      { id: 'opus', family: 'opus', name: 'Opus — последняя', context: 200000, tier: 8995, efforts: null, alias: true, inputModalities: ['text', 'image'] },
+      { id: 'sonnet', family: 'sonnet', name: 'Sonnet — последняя', context: 200000, tier: 6995, efforts: null, alias: true, inputModalities: ['text', 'image'] },
+      { id: 'haiku', family: 'haiku', name: 'Haiku — последняя', context: 200000, tier: 3995, efforts: null, alias: true, inputModalities: ['text', 'image'] },
     ];
   },
+
+  runUntrusted(options) { return runClaudeUntrusted(options); },
 
   /**
    * Запуск: claude -p с резюмом сессии, MCP-конфигом всплывашки разрешений и т.д.
@@ -1285,6 +1419,13 @@ export default {
           if (ev.session_id) streamSessionId = ev.session_id;
           if (ev.type === 'system' && ev.subtype === 'init' && ev.model) {
             actualModel = ev.model;
+          } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
+            // CLI сжал контекст сам (свой автокомпакт по CLAUDE_CODE_AUTO_COMPACT_WINDOW).
+            // Порог он проверяет НА ГРАНИЦЕ ХОДА, поэтому компакт случается в начале хода,
+            // а весь остаток хода идёт уже по сжатому контексту. Новый размер сообщит
+            // следующее же обращение к модели — lastTurnInput тут не трогаем, иначе между
+            // границей и этим обращением кольцо показывало бы пустоту.
+            log?.info({ meta: ev.compactMetadata || null }, 'чат: CLI сжал контекст сам');
           } else if (ev.type === 'assistant' && ev.message?.usage && ev.message.model !== SYNTHETIC_MODEL) {
             const mu = ev.message.usage;
             spentTokens += mu.output_tokens || 0;
@@ -1292,7 +1433,10 @@ export default {
             if (ev.message.model) actualModel = ev.message.model;
             // Входные токены последнего хода — реальная заполненность окна контекста.
             lastTurnInput = (mu.input_tokens || 0) + (mu.cache_read_input_tokens || 0) + (mu.cache_creation_input_tokens || 0);
-            try { onProgress?.(spentTokens); } catch { /* прогресс не критичен */ }
+            // Второй аргумент — ЖИВОЙ размер контекста. Ход бывает длиной в час, а цифра
+            // в кольце до этого менялась раз в ход: после автокомпакта CLI оно светилось
+            // красным по уже сжатому контексту до самого ответа.
+            try { onProgress?.(spentTokens, { contextTokens: lastTurnInput }); } catch { /* прогресс не критичен */ }
           } else if (ev.type === 'result') {
             resultEv = ev;
           }

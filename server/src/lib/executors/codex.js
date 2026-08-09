@@ -555,6 +555,8 @@ export default {
   color: '#10a37f',
   order: 2,
   install: 'npm i -g @openai/codex && codex login',
+  // Каждый путь из opts.extraDirs становится writable-root песочницы через --add-dir.
+  trustedDirectories: true,
 
   // Ручной компакт пока идёт универсальным путём: `codex exec` принимает prompt, а
   // app-server `thread/compact/start` потребовал бы другого transport. Автокомпакт при

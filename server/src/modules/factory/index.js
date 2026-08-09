@@ -10,6 +10,7 @@ import { readInstruction, readActivity, readAgentLive } from '../../lib/factory-
 import { taskDiff } from '../../lib/git.js';
 import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
+import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.js';
 import { reserveSlot, releaseSlot, slotsOverview, SlotsFullError } from '../../lib/sandbox-slots.js';
 import { PROFILE_RE } from '../../lib/profiles.js';
 import {
@@ -27,6 +28,7 @@ import {
   runRouteEngine, spawnRouteEngine, routeUnitActive,
   routeFailure, startRegistryIdentity, stopRouteOrchestrator,
   routeCheckArgs, routeStartArgs, routeResumeArgs, routeAbandonArgs, routeGateArgs, routeGotoArgs,
+  stageAutoCompactEnv,
 } from '../../lib/factory-route-cli.js';
 import {
   FactoryRunnerControl,
@@ -248,7 +250,7 @@ async function factoryModule(fastify, opts) {
   // Контекст, которого нет в описании задачи: локальные уточнения человека
   // (в трекер их НЕ публикуем — заказчик видит комментарии) и несистемные комментарии
   // из B24. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
-  async function ticketSections(id) {
+  async function ticketSections(id, { profile = null, title = '', description = '' } = {}) {
     const sections = [];
     const clarify = await analyzer.readClarifications(id);
     if (clarify) {
@@ -286,6 +288,26 @@ async function factoryModule(fastify, opts) {
         fastify.log.warn({ task: id, err: e.message }, 'комментарии для тикета не получены — конвейер стартует без них');
       }
     }
+
+    // Переписка по телеграм-ссылкам из постановки. Ищем её во ВСЁМ, что уже
+    // собрано (заголовок, описание, уточнения, комментарии): ссылку на обсуждение
+    // чаще вписывают комментарием в трекере, чем в описание. Дубли схлопывает
+    // разбор текста, поэтому одна ссылка в двух местах даст один блок.
+    //
+    // Проект = профиль прогона: чат, привязанный к соседнему проекту, агенту не
+    // показывается — иначе ссылка в описании вытягивала бы чужую переписку.
+    // Ссылка на декоратор ленивая: модуль telegram регистрируется позже нас,
+    // а выключенный плагин и любой сбой отдают пустоту (см. modules/telegram).
+    if (typeof fastify.telegramDiscussion === 'function') {
+      const source = [title, description, ...sections.map((s) => s.text)].filter(Boolean).join('\n');
+      // Объём ограничен ЗДЕСЬ, а не подрезкой при сборке тикета: секции идут
+      // в хвост описания, а `fitDescription` режет с конца — обсуждение
+      // обрезалось бы первым и молча.
+      const view = await fastify.telegramDiscussion(source, { project: profile });
+      if (view.text) {
+        sections.push({ title: DISCUSSION_SECTION_TITLE, text: view.text });
+      }
+    }
     return sections;
   }
 
@@ -307,6 +329,7 @@ async function factoryModule(fastify, opts) {
     const launch = await spawnRouteEngine(config, {
       task: id,
       args: routeResumeArgs(config, { task: id, profile, attempt }),
+      extraEnv: stageAutoCompactEnv(prefs?.read()),
     });
     if (!launch.ok) {
       fastify.log.warn({ task: id, err: launch.message }, `route resume ${why} не запустился — продолжить вручную`);
@@ -379,17 +402,21 @@ async function factoryModule(fastify, opts) {
       return { status: 409, body: { error: 'route_check_failed', message: check.message || 'профиль или маршрут не приняты движком' } };
     }
     const deliveryMode = /\bdelivery=(publish|disabled)\b/.exec(check.stdout)?.[1] || null;
-    if (!deliveryMode) {
+    const instrumentationMode = /\binstrumentation=(explicit|derived|disabled)\b/
+      .exec(check.stdout)?.[1] || null;
+    if (!deliveryMode || !instrumentationMode) {
       return {
         status: 409,
-        body: { error: 'route_check_failed', message: 'движок не подтвердил delivery contract маршрута' },
+        body: { error: 'route_check_failed', message: 'движок не подтвердил launch contract маршрута' },
       };
     }
     const catalogDelivery = catalog.routeOptions?.[wanted]?.deliveryMode;
-    if (catalogDelivery && catalogDelivery !== deliveryMode) {
+    const catalogInstrumentation = catalog.routeOptions?.[wanted]?.instrumentationMode;
+    if (!catalogDelivery || !catalogInstrumentation
+        || catalogDelivery !== deliveryMode || catalogInstrumentation !== instrumentationMode) {
       return {
         status: 409,
-        body: { error: 'route_check_failed', message: 'опубликованный маршрут и engine check расходятся по delivery contract' },
+        body: { error: 'route_check_failed', message: 'опубликованный маршрут и engine check расходятся по launch contract' },
       };
     }
 
@@ -408,8 +435,8 @@ async function factoryModule(fastify, opts) {
     let launchInputs;
     try {
       launchInputs = normalizeFactoryLaunchInputs({
-        route: wanted,
         deliveryMode,
+        instrumentationMode,
         repositories: launchProfile.repositories,
         deliveryTargets,
         instrumentationFiles,
@@ -445,7 +472,7 @@ async function factoryModule(fastify, opts) {
           description,
           acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
           sourceUrl: sourceUrl || (await taskSourceUrl(id)),
-          sections: await ticketSections(id),
+          sections: await ticketSections(id, { profile, title, description }),
         });
       } catch (e) {
         if (e instanceof TicketError) return { status: 400, body: { error: 'bad_ticket', message: e.message } };
@@ -484,7 +511,10 @@ async function factoryModule(fastify, opts) {
         runnerPrimary,
         ...launchInputs,
       }),
-      extraEnv: (slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {},
+      extraEnv: {
+        ...stageAutoCompactEnv(prefs?.read()),
+        ...((slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {}),
+      },
     });
     if (!launch.ok) {
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
@@ -753,7 +783,8 @@ async function factoryModule(fastify, opts) {
       catalogHash: catalog.catalogHash,
       routeOptions: Object.fromEntries(routes.map((routeId) => [routeId, {
         deliveryMode: catalog.routeOptions?.[routeId]?.deliveryMode || null,
-        instrumentationRequired: routeId === 'debug',
+        instrumentationMode: catalog.routeOptions?.[routeId]?.instrumentationMode || null,
+        instrumentationRequired: catalog.routeOptions?.[routeId]?.instrumentationRequired === true,
       }])),
       repositories,
       instrumentationSuggestions: instrumentationSuggestions(

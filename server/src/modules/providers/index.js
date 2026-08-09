@@ -58,6 +58,24 @@ async function providersModule(fastify, opts) {
     return resolveProviderSettings(ex, prefs?.read().providerSettings?.[ex.id], config);
   }
 
+  /**
+   * Поддержка доверенных каталогов — свойство адаптера, а не список известных
+   * вендоров в реестре/UI. Setup-only карточка физически не может получить ход,
+   * поэтому даже ошибочно объявленный ею признак наружу не выпускаем.
+   */
+  async function trustedDirectoriesOf(ex) {
+    if (typeof ex.run !== 'function') return false;
+    try {
+      const declared = typeof ex.trustedDirectories === 'function'
+        ? await ex.trustedDirectories(config)
+        : ex.trustedDirectories;
+      return declared === true;
+    } catch (err) {
+      fastify.log.warn({ provider: ex.id, err: err.message }, 'признак доверенных каталогов исполнителя не получен');
+      return false;
+    }
+  }
+
   async function buildRegistry() {
     const executors = await adaptersOf();
     const models = await getModelsRegistry(config);
@@ -87,6 +105,9 @@ async function providersModule(fastify, opts) {
         available: ok && auth.available,
         // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
         chatEnabled: typeof ex.run === 'function',
+        // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
+        // из контракта адаптера — без хардкода id/названий.
+        trustedDirectories: await trustedDirectoriesOf(ex),
         installed: ok,
         install: ex.install || null,
         // Установка и login могут быть разными сценариями. Старые адаптеры пока

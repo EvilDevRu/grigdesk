@@ -1,0 +1,88 @@
+import assert from 'node:assert/strict';
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import claude, {
+  buildClaudeUntrustedArgs,
+  buildClaudeUntrustedInput,
+} from '../../server/src/lib/executors/claude.js';
+
+test('Claude untrusted argv отключает инструменты, customizations, MCP и persistence', () => {
+  const args = buildClaudeUntrustedArgs({
+    model: 'opus',
+    effort: 'high',
+    providerSettings: { fastMode: true },
+  });
+  const valueAfter = (flag) => args[args.indexOf(flag) + 1];
+  assert.equal(valueAfter('--tools'), '');
+  assert.equal(valueAfter('--setting-sources'), '');
+  for (const flag of [
+    '--safe-mode',
+    '--strict-mcp-config',
+    '--disable-slash-commands',
+    '--no-session-persistence',
+  ]) assert.ok(args.includes(flag), flag);
+  for (const forbidden of ['--add-dir', '--resume', '--dangerously-skip-permissions']) {
+    assert.equal(args.includes(forbidden), false, forbidden);
+  }
+});
+
+test('Claude untrusted input передаёт изображения байтами, без файлового пути', () => {
+  const payload = buildClaudeUntrustedInput('разбери обращение', [{
+    mediaType: 'image/png',
+    data: 'iVBORw0KGgo=',
+  }]);
+  const parsed = JSON.parse(payload);
+  assert.equal(parsed.type, 'user');
+  assert.deepEqual(parsed.message.content, [
+    { type: 'text', text: 'разбери обращение' },
+    {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
+    },
+  ]);
+  assert.doesNotMatch(payload, /\/tmp|attachmentPaths|extraDirs/u);
+  assert.throws(() => buildClaudeUntrustedInput('x', [{
+    mediaType: 'application/octet-stream', data: 'AA==',
+  }]), (error) => error.code === 'unsupported_media');
+});
+
+test('Claude untrusted ход запускается в отдельном временном cwd и не сохраняет session', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-fake-claude-untrusted-'));
+  const bin = path.join(dir, 'fake-claude');
+  const capture = path.join(dir, 'capture');
+  await writeFile(bin, [
+    '#!/bin/sh',
+    'printf "%s\\n" "$@" > "${CAPTURE_PATH}.args"',
+    'pwd > "${CAPTURE_PATH}.cwd"',
+    'IFS= read -r payload',
+    'printf "%s" "$payload" > "${CAPTURE_PATH}.stdin"',
+    "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"{\\\"kind\\\":\\\"none\\\"}\",\"session_id\":\"must-not-leak\"}'",
+  ].join('\n'));
+  await chmod(bin, 0o755);
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const out = await claude.runUntrusted({
+    config: { claudeBin: bin },
+    env: { CAPTURE_PATH: capture },
+    message: 'недоверенный prompt',
+    images: [],
+    model: 'opus',
+    providerSettings: {},
+  });
+  assert.equal(out.reply, '{"kind":"none"}');
+  assert.equal(out.sessionId, null);
+
+  const cwd = (await readFile(`${capture}.cwd`, 'utf8')).trim();
+  assert.match(cwd, /^\/tmp\/cockpit-inbox-model-/u);
+  assert.notEqual(cwd, process.cwd());
+  await assert.rejects(access(cwd));
+
+  const args = (await readFile(`${capture}.args`, 'utf8')).split('\n');
+  assert.ok(args.includes('--safe-mode'));
+  assert.ok(args.includes('--no-session-persistence'));
+  assert.doesNotMatch(args.join('\n'), new RegExp(process.cwd().replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+  assert.equal(JSON.parse(await readFile(`${capture}.stdin`, 'utf8')).type, 'user');
+});

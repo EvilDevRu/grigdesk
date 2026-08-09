@@ -37,3 +37,27 @@ test('оставшийся activeTimer не выдаёт остановленн�
     unseenTaskIds: [],
   });
 });
+
+test('без базовой линии отметок новых задач не бывает вовсе', () => {
+  const dashboard = {
+    tasks: [
+      { id: 31, status: 2, statusKind: 'todo', timerRunning: true },
+      { id: 32, status: 2, statusKind: 'todo', timerRunning: false },
+    ],
+  };
+
+  // Пустой набор отметок означает «сервер ещё не ответил», а не «ничего не смотрели»:
+  // иначе первая же загрузка объявила бы новыми все давние задачи разом.
+  assert.deepEqual(boardActivity(dashboard, [], { ready: false }), {
+    activeTimerCount: 1,
+    unseenCount: 0,
+    unseenTaskIds: [],
+  });
+
+  // С базовой линией тот же пустой набор читается уже буквально.
+  assert.deepEqual(boardActivity(dashboard, [], { ready: true }), {
+    activeTimerCount: 1,
+    unseenCount: 2,
+    unseenTaskIds: ['31', '32'],
+  });
+});

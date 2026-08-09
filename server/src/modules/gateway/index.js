@@ -4,8 +4,10 @@
 //
 // Зачем это нужно. Стенды живут на динамических поддоменах (`p5191.<домен>`), заранее их
 // не перечислить, а блок `*.<домен>` в Caddy требует WILDCARD-сертификата — то есть DNS-01
-// и API DNS-провайдера. У нас зона на Yandex, плагина может не быть, поэтому идём другим путём:
-// сертификаты «по требованию» (on-demand TLS, HTTP-01 на каждое имя).
+// и постоянно лежащего на шлюзе токена от ВСЕЙ зоны. Поэтому идём другим путём:
+// сертификаты «по требованию» (on-demand TLS, HTTP-01 на каждое имя), и никакого DNS-API
+// на VPS нет вовсе. Токен провайдера нужен только кокпиту и только на время установки —
+// сверить и синхронизировать две A-записи (`lib/gateway/cloudflare.js`).
 //
 // Caddy обязан спрашивать разрешение перед выдачей (иначе кто угодно направит своё имя на наш
 // адрес и заставит выпускать сертификаты, пока не упрёмся в лимиты Let's Encrypt). Этот
@@ -13,7 +15,14 @@
 //
 // Публичный по необходимости — Caddy зовёт его до всякой авторизации. Данных не отдаёт,
 // только «да/нет» по имени хоста.
+//
+// Вторая задача — УСТАНОВКА шлюза из интерфейса (`/api/gateway/setup/*`). Руками это два
+// идемпотентных скрипта плюс две DNS-записи, которых ни один из них завести не может; визард
+// закрывает ровно эту дыру, а скрипты только запускает. Эндпоинты закрыты общим гардом
+// (публичен здесь ТОЛЬКО `tls-allow`): они ставят чужой ключ на чужой сервер и правят `.env`.
 import fp from 'fastify-plugin';
+
+import { createGatewayInstaller, GatewaySetupError, parseSetupInput } from '../../lib/gateway/installer.js';
 
 /**
  * Разрешённые диапазоны портов стендов. Ограничение сознательное: без него шлюз стал бы
@@ -47,8 +56,26 @@ export function isAllowedGatewayHost(host, publicDomain) {
   return !!m && SANDBOX_PORT_RE.test(m[1]);
 }
 
+/** Отказ визарда человеку: машинный код + текст словами. Всё, что не наш класс, — 500. */
+function replySetupError(fastify, reply, e) {
+  if (e instanceof GatewaySetupError || e?.code) {
+    const busy = e.code === 'setup_busy';
+    return reply.code(busy ? 409 : 400).send({ error: e.code, message: e.message });
+  }
+  fastify.log.error({ err: e }, 'Шлюз: установка сорвалась');
+  return reply.code(500).send({ error: 'setup_failed', message: e?.message || String(e) });
+}
+
 async function gatewayModule(fastify, opts) {
-  const { config } = opts;
+  const { config, prefs } = opts;
+
+  // Прогресс уезжает во ВСЕ окна: установку начали с компьютера, а смотреть на неё могут
+  // с планшета — как и всё остальное в кокпите. Событие одно на весь визард, тело — снимок.
+  const installer = createGatewayInstaller({
+    config,
+    onEvent: (job) => { if (job) fastify.sse?.broadcast?.('gateway-setup', job); },
+    log: fastify.log,
+  });
 
   // Проба авторизации для `forward_auth` шлюза перед стендами.
   //
@@ -69,6 +96,104 @@ async function gatewayModule(fastify, opts) {
       return reply.code(403).send('not allowed');
     }
     return reply.send('ok');
+  });
+
+  /* ───────────────────────────── установка шлюза из интерфейса ───────────────────────────── */
+
+  // Что показать в разделе при открытии: слепок прошлой установки, состояние идущей и то,
+  // подхватил ли процесс домен (`publicDomain` читается ОДИН раз при старте — пока не
+  // перезапустили, on-demand TLS и домен cookie ещё не работают, и это надо назвать).
+  fastify.get('/api/gateway/setup', async () => ({
+    setup: await installer.readSetup(),
+    job: installer.status(),
+    busy: installer.busy,
+    publicDomain: config.publicDomain || '',
+  }));
+
+  // Проба ДО пароля: жив ли сервер и с каким отпечатком ключа.
+  //
+  // Отдельным шагом, потому что доверять хосту «по первому подключению» и сразу слать ему
+  // пароль root — это отдать чужому посередине и то, и другое. Человек сверяет отпечаток
+  // с тем, что показала панель провайдера, и только потом вводит пароль.
+  fastify.post('/api/gateway/setup/probe', async (request, reply) => {
+    try {
+      return await installer.probe({
+        gateway: request.body?.gateway,
+        sshPort: Number(request.body?.sshPort || 22),
+        sshUser: String(request.body?.sshUser || 'root'),
+      });
+    } catch (e) {
+      return replySetupError(fastify, reply, e);
+    }
+  });
+
+  // Read-only сверка Cloudflare перед опасным подтверждением. Токен используется только
+  // в этом запросе и не попадает ни в job, ни в setup.json; перед самой установкой план
+  // строится заново, поэтому изменение зоны между модалкой и кликом не пройдёт незамеченным.
+  fastify.post('/api/gateway/setup/dns-plan', async (request, reply) => {
+    try {
+      const input = parseSetupInput(request.body || {});
+      return await installer.inspectDns(input);
+    } catch (e) {
+      return replySetupError(fastify, reply, e);
+    }
+  });
+
+  // Запуск. Отвечаем СРАЗУ (202), не дожидаясь конца: bootstrap VPS ставит пакеты, а ожидание
+  // DNS занимает до пяти минут — держать столько HTTP-запрос нельзя, окно оборвётся и человек
+  // решит, что установка провалилась. Дальше всё видно по SSE `gateway-setup`.
+  fastify.post('/api/gateway/setup/start', async (request, reply) => {
+    let input;
+    try {
+      input = parseSetupInput(request.body || {}, { requireCloudflarePlan: true });
+    } catch (e) {
+      return replySetupError(fastify, reply, e);
+    }
+    if (installer.busy) {
+      return reply.code(409).send({ error: 'setup_busy', message: 'Установка уже идёт.' });
+    }
+
+    installer.run(input).then((job) => {
+      // Старый UI раскрывал визард по этому prefs-маркеру. Сохраняем совместимость снимка,
+      // но runtime шлюза этим флагом не управляется: факт настройки UI берёт из setup/job.
+      if (job?.state === 'done' && prefs?.read().accessGateway !== true) {
+        try {
+          prefs.write({ accessGateway: true });
+        } catch (e) {
+          fastify.log.warn({ err: e }, 'Шлюз: не смогли включить режим доступа в настройках');
+        }
+      }
+    }).catch((e) => fastify.log.error({ err: e }, 'Шлюз: установка сорвалась'));
+
+    return reply.code(202).send({ job: installer.status() });
+  });
+
+  // Состояние идущей установки. Нужен помимо SSE: событие доставляется один раз, а окно могли
+  // открыть позже, перезагрузить или потерять связь.
+  fastify.get('/api/gateway/setup/status', async () => ({
+    job: installer.status(),
+    busy: installer.busy,
+  }));
+
+  // Проверка связи отдельной кнопкой. Она же — единственный способ проверить после ручного
+  // шага и после перезапуска сервера: до него `COCKPIT_PUBLIC_DOMAIN` в конфиг не попал,
+  // и проверка стенда честно пропускается.
+  fastify.post('/api/gateway/setup/verify', async (request, reply) => {
+    const saved = await installer.readSetup();
+    const src = { ...(saved || {}), ...(request.body || {}) };
+    if (!src.domain || !src.gateway) {
+      return reply.code(400).send({ error: 'no_setup', message: 'Шлюз ещё не настраивался — нечего проверять.' });
+    }
+    try {
+      return await installer.verify({
+        domain: String(src.domain),
+        gateway: String(src.gateway),
+        sshPort: Number(src.sshPort || 22),
+        sshUser: String(src.sshUser || 'root'),
+      });
+    } catch (e) {
+      return replySetupError(fastify, reply, e);
+    }
   });
 }
 

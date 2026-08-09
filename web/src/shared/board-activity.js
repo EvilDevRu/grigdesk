@@ -1,6 +1,7 @@
-// Сводка для чипа «Доска» в навигации.
-// Новыми считаются задачи из основного списка «Мои задачи», которых не было
-// в снимке при последнем просмотре доски.
+// Сводка для чипа «Доска» в навигации и для метки «новая» в списке задач.
+// Новой считается задача из основного списка «Мои задачи», которую ещё не открывали:
+// отметки просмотра приходят с сервера (`/api/b24/task-seen`), поэтому просмотр
+// на одном устройстве гасит метку на всех.
 
 function normalizedId(value) {
   if (value === null || value === undefined) return '';
@@ -13,7 +14,7 @@ export function boardTaskIds(tasks = []) {
     .filter(Boolean))];
 }
 
-export function boardActivity(dashboard, seenTaskIds = []) {
+export function boardActivity(dashboard, seenTaskIds = [], { ready = true } = {}) {
   const tasks = Array.isArray(dashboard?.tasks) ? dashboard.tasks : [];
   const seen = new Set((Array.isArray(seenTaskIds) ? seenTaskIds : [])
     .map(normalizedId)
@@ -24,7 +25,9 @@ export function boardActivity(dashboard, seenTaskIds = []) {
   // оставить старый activeTimer, поэтому источник истины — живой флаг задачи.
   const activeTimerCount = tasks.filter((task) => !!task?.timerRunning).length;
 
-  const unseenTaskIds = boardTaskIds(tasks).filter((id) => !seen.has(id));
+  // Без базовой линии отметок «новых» не бывает вовсе: пустой набор означает
+  // «ещё не знаем», а не «ни одной задачи не смотрели».
+  const unseenTaskIds = ready ? boardTaskIds(tasks).filter((id) => !seen.has(id)) : [];
 
   return {
     activeTimerCount,

@@ -2,6 +2,7 @@
 // Дефолты заданы здесь — отсутствующий файл означает «всё по умолчанию».
 import fs from 'node:fs';
 import path from 'node:path';
+import { SPEECH_DEFAULTS, normalizeSpeechSettings } from './speech-settings.js';
 import { normalizeStoredTrustedDirectories } from './trusted-directories.js';
 
 const DEFAULTS = {
@@ -24,17 +25,24 @@ const DEFAULTS = {
   // чтения по десятой доле. Поэтому дефолт заметно ниже потолка любого окна.
   // 0 — не вмешиваться, оставить дефолт CLI.
   chatAutoCompactWindow: 200000,
+  // Тот же порог, но для ЭТАПОВ конвейера — своей настройкой, а не переиспользованием
+  // чатовой: цена сжатия разная. В чате оно рвёт нить разговора с человеком, на этапе —
+  // просто ужимает рабочий контекст между вызовами инструментов, и трогать его можно
+  // смелее. Замер по прогонам: этап доходил до 506k, то есть весь хвост шёл в зоне, где
+  // кэш промпта уже не совпадает (×20 к цене раунда). Уезжает движку переменной
+  // FACTORY_STAGE_AUTO_COMPACT, дальше раннер переводит её на диалект своего CLI.
+  // 0 — не вмешиваться, оставить дефолт CLI (у него порог — доля ОКНА модели, то есть
+  // в дорогой зоне он не срабатывает никогда).
+  stageAutoCompactWindow: 200000,
   // Порог молчания хода конвейера (секунды): дольше — кокпит зовёт человека.
   // Замер по всем прогонам на машине: законное молчание упирается в 600 секунд
   // (десятиминутный Bash в сборке), а зависший вызов — в потолок MCP, 1800 секунд.
   // 15 минут проходят между ними с запасом в обе стороны. 0 — не оповещать.
   runSilenceWindow: 900,
-  // Режимы доступа к кокпиту снаружи мозга («Настройки → Доступ»). Флаг — НАМЕРЕНИЕ человека,
-  // а не факт: он открывает настройки режима в UI и решает, поднимать ли соответствующий сокет.
-  // Дефолт — выкл у обоих: чистая установка отвечает только на своей машине, и это правильная
-  // граница по умолчанию. Выключение НЕ стирает выпущенное (сертификат, корень): тумблер
-  // обратно возвращает режим перезапуском, без повторной установки корня на устройства.
-  // accessGateway пока только показывает раздел — сам шлюз ставится скриптами deploy/gateway/.
+  // Локальный HTTPS («Настройки → Доступ»): намерение загрузить state-сертификат и поднять
+  // :8143 при следующем старте. Выключение НЕ закрывает LAN (остаётся HTTP :8140) и не
+  // стирает сертификат/корень. accessGateway — прежний маркер раскрытого визарда, оставленный
+  // для совместимости сохранённых prefs; runtime шлюза им никогда не гейтится.
   accessLocalHttps: false,
   accessGateway: false,
   // Плагины: вкл/выкл по id (отсутствие ключа = дефолт: системный вкл, пользовательский выкл)
@@ -45,6 +53,9 @@ const DEFAULTS = {
   // { <providerId>: { <settingId>: value } }. Схему объявляет сам executor полем
   // `settings` (lib/executors/index.js) — здесь лежит только выбор человека.
   providerSettings: {},
+  // Настройки распознавания имеют собственный валидированный endpoint. Объект здесь
+  // обязателен: PrefsStore.write отбрасывает неизвестные ключи верхнего уровня.
+  speech: SPEECH_DEFAULTS,
   // Паспорта КОКПИТНЫХ проектов (раздел «Проекты»): { <id>: { repos: [{key, dir}] } }.
   // Пути локальны для машины-мозга, поэтому живут в .state, а не в гитуемой базе.
   // У проектов фабрики источник путей — их bash-профиль; сюда они не пишутся.
@@ -57,21 +68,36 @@ export class PrefsStore {
     this.prefsPath = prefsPath;
   }
 
-  read() {
+  /** Фактически записанный JSON без overlay DEFAULTS и скрытия внутренней revision. */
+  readStored() {
     try {
       const loaded = JSON.parse(fs.readFileSync(this.prefsPath, 'utf8'));
-      return {
-        ...DEFAULTS,
-        ...loaded,
-        trustedDirectories: normalizeStoredTrustedDirectories(loaded.trustedDirectories),
-      };
-    } catch {
-      return { ...DEFAULTS };
+      return loaded !== null && typeof loaded === 'object' && !Array.isArray(loaded)
+        ? loaded
+        : {};
+    } catch (err) {
+      if (err?.code === 'ENOENT') return {};
+      throw err;
     }
+  }
+
+  read() {
+    let loaded = {};
+    try { loaded = this.readStored(); } catch { /* прежний fail-soft контракт read() */ }
+    return {
+      ...DEFAULTS,
+      ...loaded,
+      trustedDirectories: normalizeStoredTrustedDirectories(loaded.trustedDirectories),
+      // Общий store мержит верхний уровень. Speech доклеиваем отдельно, иначе старый
+      // частичный объект затрёт новые поля defaults целиком.
+      speech: normalizeSpeechSettings(loaded.speech),
+    };
   }
 
   /** Частичное обновление: неизвестные ключи отбрасываются. */
   write(patch) {
+    let stored = {};
+    try { stored = this.readStored(); } catch { /* write сохраняет прежний fail-soft контракт */ }
     const next = { ...this.read() };
     for (const k of Object.keys(DEFAULTS)) {
       if (patch && k in patch) {
@@ -80,10 +106,15 @@ export class PrefsStore {
           : patch[k];
       }
     }
+    // Публичный read() намеренно скрывает внутреннюю speech revision. Обычная правка
+    // соседней настройки не должна её стирать и делать consent вкладки stale без причины.
+    if (!(patch && 'speech' in patch) && typeof stored.speech?._revision === 'string') {
+      next.speech = { ...next.speech, _revision: stored.speech._revision };
+    }
     fs.mkdirSync(path.dirname(this.prefsPath), { recursive: true });
     // Атомарно (tmp+rename): падение в момент записи не бьёт файл настроек.
     fs.writeFileSync(`${this.prefsPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
     fs.renameSync(`${this.prefsPath}.tmp`, this.prefsPath);
-    return next;
+    return { ...next, speech: normalizeSpeechSettings(next.speech) };
   }
 }

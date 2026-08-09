@@ -632,6 +632,100 @@ export class B24Client {
     }
 
     /**
+     * Нормализует элементы socialnetwork.api.workgroup.list. Метод отдаёт строки
+     * даже для числовых id; наружу кокпит держит единый числовой GROUP_ID.
+     *
+     * @param {Array<object>} items
+     * @returns {Array<{id:number,name:string,type:string}>}
+     */
+    static normalizeGroups(items) {
+        const groups = new Map();
+        for (const item of Array.isArray(items) ? items : []) {
+            if (!item || typeof item !== 'object') {
+                continue;
+            }
+            const id = Number(item.id ?? item.ID);
+            const name = String(item.name ?? item.NAME ?? '').trim();
+            const type = String(item.type ?? item.TYPE ?? 'group').trim().toLowerCase() || 'group';
+            if (Number.isSafeInteger(id) && id > 0 && name) {
+                groups.set(id, { id, name, type });
+            }
+        }
+        return [...groups.values()].sort((a, b) => (
+            a.name.localeCompare(b.name, 'ru', { numeric: true, sensitivity: 'base' }) || a.id - b.id
+        ));
+    }
+
+    /**
+     * Проекты/рабочие группы, доступные текущему пользователю для GROUP_ID задачи.
+     * REST-токена у установки нет, но штатный socialnetwork component action
+     * принимает браузерную сессию и sessid. Навигация у него своя: `nav=page-N-size-50`.
+     *
+     * @returns {Promise<Array<{id:number,name:string,type:string}>>}
+     */
+    async listGroups(force = false, retry = true) {
+        if (this._groups && !force) {
+            return this._groups;
+        }
+        await this.ensureAuth();
+        const sessid = await this.getSessid(force);
+        if (!sessid) {
+            throw new Error('Битрикс24 не вернул sessid для списка проектов');
+        }
+
+        const groups = new Map();
+        const pageSize = 50;
+        for (let page = 1; page <= 100; page += 1) {
+            const body = new URLSearchParams({
+                'filter[ACTIVE]': 'Y',
+                'filter[CLOSED]': 'N',
+                'select[0]': 'ID',
+                'select[1]': 'NAME',
+                'select[2]': 'TYPE',
+                'order[NAME]': 'ASC',
+                sessid,
+            });
+            const res = await this.raw(
+                `/bitrix/services/main/ajax.php?action=socialnetwork.api.workgroup.list&nav=page-${page}-size-${pageSize}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Bitrix-Csrf-Token': sessid,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: body.toString(),
+                },
+            );
+            const data = await res.json().catch(() => null);
+            if (data?.status !== 'success') {
+                const message = (data?.errors || []).map((error) => error.message).filter(Boolean).join('; ');
+                if (retry && (!data || /csrf|sessid|sign|авторизац/i.test(message))) {
+                    await this.getSessid(true);
+                    return this.listGroups(false, false);
+                }
+                throw new Error(message || 'Не удалось получить проекты Битрикс24');
+            }
+
+            const items = Array.isArray(data.data?.workgroups) ? data.data.workgroups : [];
+            const before = groups.size;
+            for (const group of B24Client.normalizeGroups(items)) {
+                groups.set(group.id, group);
+            }
+            // Короткая страница — последняя. Защита `before` не даёт зациклиться,
+            // если старая версия портала вдруг проигнорирует nav и повторит страницу.
+            if (items.length < pageSize || (page > 1 && groups.size === before)) {
+                break;
+            }
+        }
+
+        this._groups = [...groups.values()].sort((a, b) => (
+            a.name.localeCompare(b.name, 'ru', { numeric: true, sensitivity: 'base' }) || a.id - b.id
+        ));
+        return this._groups;
+    }
+
+    /**
      * Ростер пользователей портала (для выбора исполнителя). getAvailableUsers
      * отдаёт весь список (id, name, position, …); фильтрация по имени — на нашей стороне,
      * сервер параметр поиска игнорирует. Результат кешируется на время жизни процесса.
@@ -787,7 +881,7 @@ export class B24Client {
      * @param {object} opts
      * @param {string} opts.title         заголовок (обязателен)
      * @param {string} opts.description   описание (опционально)
-     * @param {number|null} opts.groupId  группа/проект (если null — определяется автоматически)
+     * @param {number|null} opts.groupId  группа/проект (если null — задача без группы)
      * @param {number|null} opts.responsibleId ответственный (если null — я)
      * @param {number|null} opts.createdById постановщик/автор задачи (если null — я)
      * @param {number|string|null} opts.priority приоритет 0/1/2 (или слово: низкий/средний/высокий);

@@ -2,6 +2,8 @@
 // НЕ составляя план реализации (план делает конвейер на живом master при взятии задачи).
 // Результат агент пишет сам в два файла каталога анализа — раннер только валидирует.
 
+import { DISCUSSION_SECTION_TITLE } from '../telegram/discussion.js';
+
 const CAP_DESC = 8000;    // описание тикета, символов
 const CAP_COMMENT = 1500; // один комментарий
 const MAX_COMMENTS = 15;  // последних комментариев
@@ -12,11 +14,12 @@ const MAX_COMMENTS = 15;  // последних комментариев
  * @param {string} p.title заголовок задачи (с префиксом проекта)
  * @param {string} p.description текст описания (уже без HTML)
  * @param {Array<{author:string,time:string,text:string}>} p.comments несистемные комментарии
+ * @param {string} [p.discussion] переписка по телеграм-ссылкам из задачи (уже с лимитами)
  * @param {{ctx:string, markers:string, repos:Array<{key:string,dir:string}>}} p.profile
  * @param {string} p.jsonPath куда писать analysis.json
  * @param {string} p.notePath куда писать разведноту
  */
-export function buildTriagePrompt({ task, title, description, comments, clarifications, profile, jsonPath, notePath }) {
+export function buildTriagePrompt({ task, title, description, comments, clarifications, discussion, profile, jsonPath, notePath }) {
   const comm = (comments || [])
     .slice(-MAX_COMMENTS)
     .map((c) => `- ${c.author}${c.time ? ` (${c.time})` : ''}: ${String(c.text || '').slice(0, CAP_COMMENT)}`)
@@ -41,7 +44,7 @@ ${String(description || '(пусто)').slice(0, CAP_DESC)}
 ${comm ? `\nКомментарии (последние, старые → новые):\n${comm}` : ''}
 ${clarifications ? `\n[Уточнения человека — внутренние, ответы на вопросы прошлого триажа; приоритетнее описания]\n${String(clarifications).slice(0, 6000)}` : ''}
 ${`${comm}${clarifications || ''}`.includes('[приложено фото:') ? '\nПометки «[приложено фото: /путь]» — скриншоты от человека, ОБЯЗАТЕЛЬНО открой каждый инструментом Read и учти содержимое в оценке.' : ''}
-
+${discussion ? `\n${DISCUSSION_SECTION_TITLE}\n${discussion}\nЭто уже раскрытая переписка — доступ к ней просить не нужно. Строки «Ссылка не раскрыта» — то, что осталось недоступным: их и учитывай в confidence.\n` : ''}
 [Что сделать]
 1. Разведай код: где живёт затронутый функционал, какие файлы/подсистемы придётся трогать (смотри ВСЕ репозитории из списка выше).
 2. Оцени задачу по рубрике ниже.
@@ -54,7 +57,7 @@ complexity (1–5): 1 = точечная правка одного файла/к
 risk (1–5): цена ошибки и необратимость последствий, НЕ трудоёмкость. 1 = косметика, откат тривиален; 3 = можно сломать заметный пользователю сценарий; 5 = порча/потеря данных, деньги, безопасность.${profile.markers ? `\nПроектные маркеры риска (каждый найденный поднимает оценку):\n${profile.markers}` : ''}
 diff_size: S (<50 строк), M (50–300), L (300–1000), XL (>1000) — прогноз итогового диффа.
 route_guess: feature (новое поведение) | debug (сломано существующее, надо сначала воспроизвести) | trivial (мелочь без плана).
-confidence: high | medium | low. Если тикет мутный, цель непонятна или есть недоступные ссылки (t.me/…, скрины без текста) — ставь low, заполняй questions[] и needs_clarification=true. НЕ фантазируй охват: честное «нужно уточнение» ценнее выдуманной оценки.
+confidence: high | medium | low. Если тикет мутный, цель непонятна или есть недоступные ссылки (нераскрытые t.me/…, скрины без текста) — ставь low, заполняй questions[] и needs_clarification=true. НЕ фантазируй охват: честное «нужно уточнение» ценнее выдуманной оценки.
 
 [Схема ${jsonPath}]
 {

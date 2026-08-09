@@ -3,28 +3,7 @@
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { boardActivity, boardTaskIds } from '../shared/board-activity.js';
-
-const SEEN_TASKS_KEY = 'cockpit-board-seen-tasks-v1';
-
-function readSeenSnapshot() {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    const value = JSON.parse(localStorage.getItem(SEEN_TASKS_KEY) || 'null');
-    if (!value || !Array.isArray(value.taskIds)) return null;
-    return {
-      userId: String(value.userId ?? ''),
-      taskIds: value.taskIds.map(String),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function saveSeenSnapshot(snapshot) {
-  if (typeof localStorage === 'undefined') return;
-  try { localStorage.setItem(SEEN_TASKS_KEY, JSON.stringify(snapshot)); }
-  catch { /* localStorage может быть закрыт политикой браузера — сессия всё равно работает */ }
-}
+import { useTaskSeenStore } from './task-seen.js';
 
 export const useBoardStore = defineStore('board', {
   state: () => ({
@@ -34,11 +13,15 @@ export const useBoardStore = defineStore('board', {
     loadedAt: 0,
     _polling: false,
     _timer: null,
-    seenSnapshot: readSeenSnapshot(),
   }),
   getters: {
     fresh: (s) => Date.now() - s.loadedAt < 20000,
-    activity: (s) => boardActivity(s.data, s.seenSnapshot?.taskIds),
+    // Отметки просмотра лежат на сервере (как избранное), поэтому у окна своей копии нет:
+    // открытая на компьютере задача перестаёт быть новой и на планшете.
+    activity: (s) => {
+      const seen = useTaskSeenStore();
+      return boardActivity(s.data, seen.taskIds, { ready: seen.ready });
+    },
   },
   actions: {
     async load(force = false) {
@@ -48,12 +31,7 @@ export const useBoardStore = defineStore('board', {
       try {
         const dashboard = await api.get('/api/b24/dashboard');
         this.data = dashboard;
-        // При первом запуске функции считаем текущий список базовым. Иначе после
-        // обновления интерфейса все давние задачи внезапно выглядели бы новыми.
-        if (!this.seenSnapshot
-          || this.seenSnapshot.userId !== String(dashboard?.userId ?? '')) {
-          this.markTasksSeen();
-        }
+        await this.markBaselineSeen();
         this.loadedAt = Date.now();
         this.error = null;
       } catch (e) {
@@ -62,14 +40,14 @@ export const useBoardStore = defineStore('board', {
         this.loading = false;
       }
     },
-    markTasksSeen() {
+    // При первом знакомстве с B24-аккаунтом считаем текущий список базовым. Иначе после
+    // обновления интерфейса все давние задачи внезапно выглядели бы новыми.
+    async markBaselineSeen() {
+      const seen = useTaskSeenStore();
+      await seen.load();
+      if (!seen.loaded || seen.initialized) return;
       if (!Array.isArray(this.data?.tasks)) return;
-      const snapshot = {
-        userId: String(this.data?.userId ?? ''),
-        taskIds: boardTaskIds(this.data.tasks),
-      };
-      this.seenSnapshot = snapshot;
-      saveSeenSnapshot(snapshot);
+      await seen.markSeen(boardTaskIds(this.data.tasks), { baseline: true });
     },
     // Фоновый поллинг — запускается один раз на всё приложение.
     startPolling(ms = 45000) {

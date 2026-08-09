@@ -150,6 +150,14 @@ runner_claude_run() {
     [[ -d "$add_dir" ]] && args+=(--add-dir "$add_dir")
   done
   args+=(--permission-mode acceptEdits)
+  # Порог автосжатия — диалект этого CLI. Движок отдаёт нейтральный
+  # RUNNER_AUTO_COMPACT_WINDOW, перевод в переменную окружения принадлежит раннеру.
+  # `0`/пусто — не вмешиваться: у CLI остаётся собственный порог от окна модели.
+  if [[ "${RUNNER_AUTO_COMPACT_WINDOW:-0}" =~ ^[1-9][0-9]*$ ]]; then
+    export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$RUNNER_AUTO_COMPACT_WINDOW"
+  else
+    unset CLAUDE_CODE_AUTO_COMPACT_WINDOW
+  fi
   # -k: голый timeout шлёт только TERM и уходит. Провайдер, застрявший в необрываемом
   # вызове, пережил бы его и остался висеть с занятым слотом; KILL через 30 с закрывает
   # эту дыру. Код возврата остаётся 124 (GNU timeout не меняет его из-за KILL), поэтому
@@ -225,9 +233,16 @@ runner_claude_classify() {
     printf 'context_overflow\n'
     return
   fi
+  # Отказ по лимиту подписки CLI объявляет машинным событием `rate_limit_event`
+  # со `status: rejected` — и это единственный прицельный признак: у пятичасового
+  # окна текст другой («You've hit your session limit · resets 9:30pm»), а
+  # словесные шаблоны ниже совпадали на нём случайно, за счёт соседнего блока
+  # `"usage":{…}` в той же строке результата. Тип окна (`five_hour`/`seven_day`)
+  # значения не имеет: отказ есть отказ, срок разбирает `limit_until`.
   if grep -qiE \
       -e '"type":"subscription_limit_reached"' \
-      -e '"type":"rate_limit_event".*"status":"rejected".*"rateLimitType":"seven_day"' \
+      -e '"type":"rate_limit_event".*"status":"rejected"' \
+      -e "hit your (session|weekly|monthly|usage) limit" \
       -e '429.*(weekly|subscription|usage).*(limit|reached)' \
       -e '(weekly|subscription|usage).*limit.*(reached|reset)' \
       "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
@@ -251,6 +266,21 @@ runner_claude_classify() {
     fi
   fi
   printf 'unknown\n'
+}
+
+runner_claude_limit_until() {
+  # Опциональный метод контракта: до какого времени провайдер отказывает.
+  # Claude называет срок машинным полем `resetsAt` (unix) внутри
+  # `rate_limit_event`; берём ПОСЛЕДНЕЕ событие со `status: rejected` — ранние
+  # `allowed_warning` того же окна описывают ещё разрешённые запросы.
+  local run_dir=$1 value
+  value=$(grep -o '"rate_limit_info":{[^}]*}' "$run_dir/events.jsonl" 2>/dev/null |
+    grep '"status":"rejected"' |
+    grep -o '"resetsAt":[0-9]\+' |
+    tail -1)
+  value=${value##*:}
+  [[ "$value" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$value"
 }
 
 runner_claude_fanout_count() {

@@ -6,6 +6,7 @@ import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
 import { useAnalysisStore } from '../stores/analysis.js';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
+import { useTaskSeenStore } from '../stores/task-seen.js';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
@@ -20,14 +21,6 @@ const board = useBoardStore();
 const { data, error, loading } = storeToRefs(board);
 const now = ref(Date.now());
 const period = ref('day');
-
-// Пока доска открыта, её актуальный список считается просмотренным. Снимок нужен
-// навигационному чипу, чтобы на других страницах заметить появившиеся задачи.
-watch(
-  () => (data.value?.tasks || []).map((task) => String(task.id)).join(','),
-  () => board.markTasksSeen(),
-  { immediate: true },
-);
 
 const STATUS_COLOR = {
   running: 'var(--accent)', overdue: 'var(--bad)', my_review: 'var(--warn)',
@@ -105,6 +98,11 @@ const q = ref('');
 const analysis = useAnalysisStore();
 const favorites = useTaskFavoritesStore();
 const favoriteOnly = ref(false);
+// Новая задача — та, которую ещё не открывали. Отметки серверные, поэтому до их
+// загрузки (и до базовой линии) новых не бывает: см. геттер ready.
+const seen = useTaskSeenStore();
+const newOnly = ref(false);
+const isNewTask = (task) => seen.ready && !seen.isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
 const saved = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
 const sortBy = ref(saved.sortBy || 'b24');   // b24 | risk | complexity | size | fresh
@@ -140,11 +138,19 @@ const myTasks = computed(() => {
     onlyNeedsInfo: onlyNeedsInfo.value,
     favoriteOnly: favoriteOnly.value,
     favoriteTaskIds: favorites.taskIds,
+    newOnly: newOnly.value && seen.ready,
+    seenTaskIds: seen.taskIds,
   });
 });
 const currentFavoriteCount = computed(() => {
   const ids = new Set(favorites.taskIds.map(String));
   return (data.value?.tasks || []).filter((task) => ids.has(String(task.id))).length;
+});
+// Счётчик на кнопке фильтра — по всему списку доски, а не по видимой выборке:
+// он отвечает на вопрос «сколько задач я ещё не смотрел», а не «сколько нашлось».
+const currentNewCount = computed(() => {
+  if (!seen.ready) return 0;
+  return (data.value?.tasks || []).filter((task) => !seen.isSeen(task.id)).length;
 });
 const hasFavoriteMatchesBeforeSearch = computed(() => selectBoardTasks({
   tasks: data.value?.tasks || [],
@@ -162,6 +168,7 @@ const listResetKey = computed(() => boardTaskListResetKey({
   onlyUnrated: onlyUnrated.value,
   onlyNeedsInfo: onlyNeedsInfo.value,
   favoriteOnly: favoriteOnly.value,
+  newOnly: newOnly.value,
   sortBy: sortBy.value,
   taskCount: data.value?.tasks?.length || 0,
 }));
@@ -178,6 +185,7 @@ let ticker = null;
 onMounted(() => {
   board.load();
   favorites.load(true);
+  seen.load(true);
   analysis.startPolling();
   loadConveyor();
   ticker = setInterval(() => { now.value = Date.now(); }, 1000);
@@ -252,6 +260,18 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
                 </svg>
                 избранные {{ currentFavoriteCount }}
               </button>
+              <!-- «Новых» не бывает без загруженной базовой линии отметок, поэтому кнопка
+                   ждёт сервер (seen.ready), а не гадает по пустому набору. -->
+              <button class="trif trif-ic newfilter" :class="{ on: newOnly }"
+                      :disabled="!seen.ready || seen.loading" :aria-pressed="String(newOnly)"
+                      :title="seen.ready ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
+                      @click="newOnly = !newOnly">
+                <svg viewBox="0 0 24 24" :fill="newOnly ? 'currentColor' : 'none'"
+                     stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3.4 14 9l5.6 2-5.6 2-2 5.6-2-5.6L4.4 11 10 9z" />
+                </svg>
+                новые {{ currentNewCount }}
+              </button>
               <button class="trif" :class="{ on: onlyUnrated }" title="Только неоценённые" @click="onlyUnrated = !onlyUnrated; if (onlyUnrated) onlyNeedsInfo = false;">без оценки</button>
               <button class="trif" :class="{ on: onlyNeedsInfo }" title="Триаж просит уточнений" @click="onlyNeedsInfo = !onlyNeedsInfo; if (onlyNeedsInfo) onlyUnrated = false;">уточнить</button>
               <button v-if="unrated.length" class="trif trif-ic" title="Оценить все неоценённые (очередь)" @click="analyzeAllUnrated">
@@ -271,6 +291,13 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
               {{ favorites.loading ? 'Повторяю…' : 'Повторить' }}
             </button>
           </div>
+          <!-- Отказ отметок обязан быть виден: молча он читается как «новых задач нет». -->
+          <div v-if="seen.error" class="faverror" role="alert">
+            <span>Отметки просмотра: {{ seen.error }}</span>
+            <button type="button" :disabled="seen.loading" @click="seen.load(true)">
+              {{ seen.loading ? 'Повторяю…' : 'Повторить' }}
+            </button>
+          </div>
           <ul class="tasks scroller" @scroll="onTasksScroll">
             <li v-for="t in visibleTasks" :key="t.id" class="trow">
               <span class="tstat" :class="{ conv: conveyor.has(String(t.id)) }"
@@ -282,6 +309,9 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
                     :aria-label="`Проект: ${projectName(t)}`"
                     :title="`Проект: ${projectName(t)}`">{{ projectInitial(t) }}</span>
               <button class="ttext" @click="ui.openTask(t.id)">{{ t.title }}</button>
+              <span v-if="isNewTask(t)" class="newbadge" role="img"
+                    aria-label="Новая задача — ещё не открывали"
+                    title="Новая задача — ещё не открывали">новая</span>
               <TriageBadge :row="triageOf(t)" />
               <span v-if="t.unread" class="badge" title="непрочитанные">{{ t.unread }}</span>
               <span class="ttime mono muted">{{ secToHMS(liveElapsed(t)) }}</span>
@@ -289,6 +319,8 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
             <li v-if="!myTasks.length" class="muted empty">
               <template v-if="favoriteOnly && !hasFavoriteMatchesBeforeSearch">В текущем списке избранных задач нет</template>
               <template v-else-if="favoriteOnly">Избранные задачи не подходят под поиск или фильтры</template>
+              <template v-else-if="newOnly && !currentNewCount">Новых задач нет — все просмотрены</template>
+              <template v-else-if="newOnly">Новые задачи не подходят под поиск или фильтры</template>
               <template v-else>Ничего не найдено</template>
             </li>
             <li v-else-if="visibleTasks.length < myTasks.length" class="more muted">
@@ -444,6 +476,13 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
   background: none; border: none; color: var(--ink); text-align: left; padding: 0; cursor: pointer; }
 .ttext:hover { color: var(--accent); }
 .badge { font-size: 11px; background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; flex: none; }
+/* Метка «новая» — того же синего, что и точка новых задач на чипе «Доска» в навигации:
+   человек приходит сюда именно с неё, и цвет должен совпасть. */
+.newbadge {
+  flex: none; font-size: 10.5px; font-weight: 700; line-height: 1.6; letter-spacing: .02em;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 0 7px;
+}
 .ttime { font-size: 12px; flex: none; }
 .empty { font-size: 13px; padding: 4px 0 8px; }
 

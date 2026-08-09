@@ -1,16 +1,25 @@
 <script setup>
-import { onMounted, onBeforeUnmount, watch } from 'vue';
+import { onBeforeUnmount, watch } from 'vue';
 import { useDiffStore } from '../stores/diff.js';
+import { registerLayer } from '../shared/ui/layer-stack.js';
 import DiffPanel from './diff/DiffPanel.vue';
 
 // Большой модал дифа поверх текущего экрана. Ядро — тот же DiffPanel, что на роуте /diff.
 const diff = useDiffStore();
-function onKey(e) { if (e.key === 'Escape' && diff.open) diff.close(); }
+let unregisterLayer = null;
 // Пока диф открыт — гасим blur нижних оверлеев (приёмка/задача остаются под дифом,
 // их перерисовка под тяжёлым Monaco мерцает). Класс на <html>, глобальное правило в styles.css.
-watch(() => diff.open, (v) => document.documentElement.classList.toggle('diff-modal-open', v));
-onMounted(() => window.addEventListener('keydown', onKey));
-onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); document.documentElement.classList.remove('diff-modal-open'); });
+watch(() => diff.open, (open) => {
+  document.documentElement.classList.toggle('diff-modal-open', open);
+  unregisterLayer?.();
+  unregisterLayer = open
+    ? registerLayer('diff-modal', { priority: 120, close: () => diff.close() })
+    : null;
+}, { immediate: true });
+onBeforeUnmount(() => {
+  unregisterLayer?.();
+  document.documentElement.classList.remove('diff-modal-open');
+});
 </script>
 
 <template>

@@ -36,7 +36,7 @@ assert_eq '[]' "$(jq -c '.free' <<<"$slots")" \
 "$NODE_BIN" "$publisher" "$routes" null >/dev/null
 assert_rc 0 "$?" "route source publishes for launcher contract"
 
-for route in debug feature trivial hunt; do
+for route in debug consilium-debug feature trivial hunt; do
   output=$("$tool" check --profile "$profile_id" --route "$route" --routes-dir "$routes")
   assert_rc 0 "$?" "launcher validates route=$route without a task launch"
   assert_contains "$output" "route=$route" \
@@ -48,6 +48,16 @@ for route in debug feature trivial hunt; do
     assert_contains "$output" 'delivery=publish' \
       "ship route advertises publish delivery"
   fi
+  case "$route" in
+    debug|consilium-debug)
+      assert_contains "$output" 'instrumentation=explicit' \
+        "transactional instrument advertises explicit scope independently of route id"
+      ;;
+    *)
+      assert_contains "$output" 'instrumentation=disabled' \
+        "route without transactional nodes advertises disabled instrumentation"
+      ;;
+  esac
 done
 
 source_text=$(cat "$tool")
@@ -134,6 +144,33 @@ assert_contains "$no_ship_error" 'не имеет ship' \
   "launcher explains why delivery arguments are invalid"
 assert_file_missing "$TEST_ROOT/live-state" \
   "invalid no-ship delivery leaves no partial state"
+
+renamed_scope_error=$(FACTORY_FORBID_LIVE=0 \
+  "$tool" "$fixture_task" start --profile "$profile_id" \
+  --route consilium-debug \
+  --ticket-json "$ticket" \
+  --routes-dir "$routes" \
+  --state-dir "$TEST_ROOT/live-state" \
+  --control-dir "$TEST_ROOT/live-control" 2>&1)
+assert_rc 78 "$?" "renamed diagnostic route requires explicit scope before lifecycle mutation"
+assert_contains "$renamed_scope_error" 'route=consilium-debug требует --instrumentation-file' \
+  "scope rejection names the semantic route instead of hard-coding debug"
+assert_file_missing "$TEST_ROOT/live-state" \
+  "missing explicit scope leaves no partial state"
+
+feature_scope_error=$(FACTORY_FORBID_LIVE=0 \
+  "$tool" "$fixture_task" start --profile "$profile_id" \
+  --route feature \
+  --ticket-json "$ticket" \
+  --instrumentation-file app:tracked.txt \
+  --routes-dir "$routes" \
+  --state-dir "$TEST_ROOT/live-state" \
+  --control-dir "$TEST_ROOT/live-control" 2>&1)
+assert_rc 78 "$?" "route without explicit instrumentation rejects browser scope"
+assert_contains "$feature_scope_error" 'route=feature не принимает явный --instrumentation-file' \
+  "disabled scope rejection is topology-based"
+assert_file_missing "$TEST_ROOT/live-state" \
+  "inapplicable explicit scope leaves no partial state"
 
 "$tool" "$fixture_task" start --profile "$profile_id" \
   --route feature \

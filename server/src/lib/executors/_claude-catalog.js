@@ -136,6 +136,7 @@ export async function claudeCatalog(config) {
           context: m.big ? 1000000 : 200000,
           tier: modelTier(m.family, m.major, m.minor, m.big),
           efforts: null,
+          inputModalities: ['text', 'image'],
           extra: vi >= KEEP_VERSIONS,
         });
       }

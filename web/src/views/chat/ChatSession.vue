@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../../shared/api-client.js';
+import { createSpeechStream } from '../../shared/speech-stream.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
@@ -197,7 +198,12 @@ function onTaskChange(e) {
 }
 
 // ── Контекст (окно — у каждой модели своё, из реестра) ──
-const ctxPct = computed(() => Math.min(100, Math.round(((sess.value?.contextTokens || 0) / ctxWindow.value) * 100)));
+// Пока ход идёт, кольцо показывает ЖИВОЙ размер (`liveContext` — вход каждого обращения
+// к модели, его сообщает claude), а не цифру с прошлого хода. Разница не косметическая:
+// автокомпакт CLI срабатывает на границе хода, и без живого замера кольцо весь ход горело
+// бы красным по контексту, которого уже нет (замер: 448k показанных против 126k реальных).
+const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext) || sess.value?.contextTokens || 0);
+const ctxPct = computed(() => Math.min(100, Math.round((ctxTokens.value / ctxWindow.value) * 100)));
 // ── Порог «дорогого» разговора ────────────────────────────────────────────────
 // Цвет кольца НЕ по проценту окна и НЕ по вбитому числу: красное там, где кокпит и так
 // сожмёт («Настройки → Запуски → Сжимать контекст чата»), но не позже потолка окна модели.
@@ -220,7 +226,7 @@ const ctxUnavailable = computed(() => current.value?.provider?.id === 'codex'
   && sess.value?.contextMetric !== CODEX_CONTEXT_METRIC);
 const ctxClass = computed(() => {
   if (ctxUnavailable.value) return '';
-  const tokens = sess.value?.contextTokens || 0;
+  const tokens = ctxTokens.value;
   if (tokens >= ctxLimit.value) return 'hi';
   if (tokens >= ctxLimit.value * CTX_WARN_RATIO) return 'mid';
   return '';
@@ -235,16 +241,19 @@ const spentHint = computed(() => {
 });
 const ctxTitle = computed(() => {
   const s = sess.value;
-  const tokens = fmtTokens(s?.contextTokens);
+  const tokens = fmtTokens(ctxTokens.value);
   if (s?.compacting) return 'Сжимаю контекст…';
   if (!s?.sessionId) return s?.pendingSeed ? 'Контекст сжат — выжимка уедет со следующим сообщением' : 'Контекст: пусто';
-  if (s?.compactedAt && !s.contextTokens) return 'Контекст сжат — размер покажется после следующего хода';
+  if (s?.compactedAt && !ctxTokens.value) return 'Контекст сжат — размер покажется после следующего хода';
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
   if (ctxUnavailable.value) return `Точная заполненность Codex появится после следующего завершённого хода${spentHint.value} · ${hint}`;
-  const warn = (s?.contextTokens || 0) >= ctxLimit.value * CTX_WARN_RATIO ? ' · разговор уже дорогой, пора сжать' : '';
+  const warn = ctxTokens.value >= ctxLimit.value * CTX_WARN_RATIO ? ' · разговор уже дорогой, пора сжать' : '';
   const window = fmtTokens(ctxWindow.value);
   const estimate = ctxIsEstimate.value ? 'примерно ' : '';
-  return `Контекст: ${estimate}${tokens} из ${window} токенов (${ctxPct.value}%)${warn}${spentHint.value} · ${hint}`;
+  // Пока ход идёт, цифра замерена ЭТИМ ходом — про это стоит сказать прямо: иначе
+  // упавший на глазах контекст (автокомпакт CLI) выглядит сбоем кольца.
+  const live = s?.sending && s?.liveContext ? ' (замер этого хода)' : '';
+  return `Контекст: ${estimate}${tokens} из ${window} токенов (${ctxPct.value}%)${live}${warn}${spentHint.value} · ${hint}`;
 });
 // Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;
@@ -272,7 +281,7 @@ async function onCtxClick(e) {
   }
   const contextNow = ctxUnavailable.value
     ? 'Точный размер текущего контекста пока недоступен.'
-    : `Сейчас в контексте ${fmtTokens(s.contextTokens)} токенов.`;
+    : `Сейчас в контексте ${fmtTokens(ctxTokens.value)} токенов.`;
   const ok = await confirmDialog(
     `${contextNow} Агент соберёт из разговора рабочую выжимку и продолжит с неё — что решили, чего касались, что осталось. Это полноценный ход: он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.`,
     { title: 'Сжать контекст чата?', okText: 'Сжать' },
@@ -344,6 +353,7 @@ function flushDraft() { clearTimeout(draftTimer); chat.setDraft(props.sid, input
 window.addEventListener('beforeunload', flushDraft);
 onUnmounted(() => { flushDraft(); window.removeEventListener('beforeunload', flushDraft); });
 async function submit() {
+  if (speechBusy.value || drainingRecognition) return;
   const t = input.value.trim();
   const atts = pending.value.slice();
   if ((!t && !atts.length) || !sess.value || frozen.value) return;
@@ -435,6 +445,7 @@ watch(cmdIndex, async () => {
   cmdMenuEl.value?.querySelector('.cmd.on')?.scrollIntoView({ block: 'nearest' });
 });
 async function runCommand(command) {
+  if (speechBusy.value || drainingRecognition) return;
   const c = typeof command === 'string'
     ? allCommands.value.find((x) => x.cmd === command)
     : command;
@@ -518,56 +529,1160 @@ function onDrop(e) {
   if (files.length) addFiles(files);
 }
 
-// ── Диктовка с микрофона: MediaRecorder → /api/chat/transcribe (whisper) → текст в поле ──
+// ── Диктовка: browser SpeechRecognition или локальный Whisper ──
+// Browser API сам управляет микрофоном. Whisper параллельно держит полный WebM
+// для безопасного batch fallback и отправляет PCM в live-сессию. Обоими путями
+// управляет одна generation-FSM: поздние события прежнего запуска не трогают ввод.
 const recording = ref(false);
 const transcribing = ref(false);
+const preparingSpeech = ref(false);
+const drainingSpeech = ref(false);
+const interimSpeech = ref('');
+const consentPending = ref(false);
+const browserInstallPending = ref(false);
+const browserInstalling = ref(false);
+const speechNotice = ref('');
 const inputErr = ref('');
-let recorder = null;
-async function toggleMic() {
-  inputErr.value = '';
-  if (recording.value) { recorder?.stop(); return; }
-  // getUserMedia доступен только в secure context (https/localhost).
-  if (!navigator.mediaDevices?.getUserMedia) {
+const speechBusy = computed(() => recording.value || preparingSpeech.value
+  || transcribing.value || drainingSpeech.value || consentPending.value
+  || browserInstallPending.value || browserInstalling.value);
+
+let speechGeneration = 0;
+let desiredSpeech = false;
+let activeRecognition = null;
+let drainingRecognition = null;
+let browserDrainTimer = null;
+let browserRecognitionCtor = null;
+let browserRestartTimer = null;
+let browserRetries = { network: 0, noSpeech: 0 };
+let phrasesDisabled = false;
+let pendingBrowserInstall = null;
+let localCapture = null;
+let localTranscription = null;
+let transcriptionAbort = null;
+let speechDestroyed = false;
+let speechSnapshotEpoch = 0;
+const BROWSER_DRAIN_TIMEOUT_MS = 1800;
+const LOCAL_STREAM_LAG_NOTICE_MS = 4000;
+const LOCAL_RECORDER_STOP_TIMEOUT_MS = 2000;
+
+function speechPrefs() {
+  return chat.speech && typeof chat.speech === 'object'
+    ? chat.speech
+    : {
+      engine: 'browser', browserProcessing: 'auto', browserAutoConsent: false,
+      language: 'auto', dictionary: '', local: { ready: false, reason: '' }, revision: '',
+    };
+}
+
+function browserSpeechCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function browserLanguage(language = speechPrefs().language) {
+  if (language === 'ru') return 'ru-RU';
+  if (language === 'en') return 'en-US';
+  const uiLanguage = document.documentElement.lang || navigator.language || 'ru-RU';
+  if (/^en(?:-|$)/i.test(uiLanguage)) return 'en-US';
+  if (/^ru(?:-|$)/i.test(uiLanguage)) return 'ru-RU';
+  return uiLanguage;
+}
+
+function dictionaryPhrases() {
+  return String(speechPrefs().dictionary || '')
+    .split(/\r?\n/)
+    .map((term) => term.trim())
+    .filter(Boolean)
+    .slice(0, 128)
+    .map((term) => term.slice(0, 100));
+}
+
+function appendDictationText(text) {
+  const piece = String(text || '').trim();
+  if (!piece) return;
+  const before = input.value;
+  input.value = before ? `${before}${/\s$/.test(before) ? '' : ' '}${piece}` : piece;
+}
+
+function applySpeechResponse(response) {
+  const raw = response?.speech || response?.settings || response;
+  if (!raw || typeof raw !== 'object') return speechPrefs();
+  const snapshot = (response?.settings || response?.speech)
+    ? {
+      ...raw,
+      revision: raw.revision ?? response.revision,
+      local: raw.local || response.capabilities?.local,
+    }
+    : raw;
+  if (typeof chat.setSpeechSnapshot === 'function') {
+    chat.setSpeechSnapshot((response?.settings || response?.speech)
+      ? { settings: snapshot, revision: snapshot.revision, capabilities: response.capabilities }
+      : snapshot);
+  }
+  else chat.speech = {
+    ...speechPrefs(), ...snapshot,
+    local: { ...(speechPrefs().local || {}), ...(snapshot.local || {}) },
+  };
+  return speechPrefs();
+}
+
+function previewSpeechResponse(response) {
+  const raw = response?.speech || response?.settings || response;
+  if (!raw || typeof raw !== 'object') return null;
+  return { ...raw, revision: raw.revision ?? response?.revision };
+}
+
+function captureSpeechRequestContext() {
+  const prefs = speechPrefs();
+  return {
+    epoch: speechSnapshotEpoch,
+    sid: props.sid,
+    revision: prefs.revision || '',
+    engine: prefs.engine,
+    browserProcessing: prefs.browserProcessing,
+    browserAutoConsent: prefs.browserAutoConsent === true,
+  };
+}
+
+function speechRequestContextMatchesCurrent(context) {
+  const current = speechPrefs();
+  return props.sid === context.sid
+    && speechSnapshotEpoch === context.epoch
+    && (current.revision || '') === context.revision
+    && current.engine === context.engine
+    && current.browserProcessing === context.browserProcessing
+    && (current.browserAutoConsent === true) === context.browserAutoConsent;
+}
+
+function speechResponseMatchesCurrent(response) {
+  const snapshot = previewSpeechResponse(response);
+  if (!snapshot || typeof snapshot.revision !== 'string' || !snapshot.revision) return false;
+  const current = speechPrefs();
+  if (current.revision !== snapshot.revision) return false;
+  if (snapshot.engine && current.engine !== snapshot.engine) return false;
+  if (snapshot.browserProcessing && current.browserProcessing !== snapshot.browserProcessing) return false;
+  if (typeof snapshot.browserAutoConsent === 'boolean'
+    && current.browserAutoConsent !== snapshot.browserAutoConsent) return false;
+  return true;
+}
+
+function speechResponseDisposition(context, response) {
+  if (speechRequestContextMatchesCurrent(context)) return 'apply';
+  // SSE собственного POST может доехать раньше HTTP response. Это не stale:
+  // snapshot уже применён, если совпадают opaque revision и режим исполнения.
+  if (speechResponseMatchesCurrent(response)) return 'current';
+  return 'stale';
+}
+
+function rejectStaleSpeechRequest() {
+  preparingSpeech.value = false;
+  inputErr.value = 'Настройки речи изменились в другом окне — запусти диктовку ещё раз';
+}
+
+// Нужен sync epoch: HTTP promise может разрешиться в том же microtask, раньше
+// обычного component watcher. Сравнение opaque revision не пытается упорядочить её.
+watch(() => [
+  speechPrefs().revision,
+  speechPrefs().engine,
+  speechPrefs().browserProcessing,
+  speechPrefs().browserAutoConsent,
+], () => {
+  speechSnapshotEpoch++;
+}, { flush: 'sync' });
+
+function clearBrowserRestart() {
+  if (browserRestartTimer) clearTimeout(browserRestartTimer);
+  browserRestartTimer = null;
+}
+
+function stopTracks(stream) {
+  for (const track of stream?.getTracks?.() || []) {
+    try { track.stop(); } catch { /* дорожка уже закрыта */ }
+  }
+}
+
+function releaseRecognition(recognition, method = 'abort') {
+  if (!recognition) return;
+  recognition.onstart = null;
+  recognition.onresult = null;
+  recognition.onerror = null;
+  recognition.onend = null;
+  try { recognition[method]?.(); } catch { /* API уже в idle */ }
+  if (drainingRecognition === recognition) {
+    drainingRecognition = null;
+    drainingSpeech.value = false;
+    if (browserDrainTimer) clearTimeout(browserDrainTimer);
+    browserDrainTimer = null;
+  }
+  if (activeRecognition === recognition) activeRecognition = null;
+}
+
+function beginBrowserDrain(recognition, generation) {
+  if (browserDrainTimer) clearTimeout(browserDrainTimer);
+  drainingRecognition = recognition;
+  drainingSpeech.value = true;
+  browserDrainTimer = setTimeout(() => {
+    browserDrainTimer = null;
+    if (generation !== speechGeneration || drainingRecognition !== recognition) return;
+    releaseRecognition(recognition, 'abort');
+    interimSpeech.value = '';
+  }, BROWSER_DRAIN_TIMEOUT_MS);
+}
+
+function finishBrowserDrain(recognition) {
+  if (drainingRecognition !== recognition) return;
+  drainingRecognition = null;
+  drainingSpeech.value = false;
+  if (browserDrainTimer) clearTimeout(browserDrainTimer);
+  browserDrainTimer = null;
+}
+
+function finishLocalCapture(state) {
+  if (!state || state.released) return;
+  state.released = true;
+  stopTracks(state.stream);
+  if (localCapture === state) localCapture = null;
+}
+
+function localStreamSessionId(generation) {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid || `dictation-${Date.now()}-${generation}`;
+}
+
+function markLocalStreamFailure(state, error) {
+  if (!state || state.liveError || state.cancelled) return;
+  state.liveError = error instanceof Error ? error : new Error(String(error || 'live stream failed'));
+  if (state.generation !== speechGeneration || speechDestroyed) return;
+  interimSpeech.value = '';
+  // При отсутствии AudioWorklet/WS серверный worker ещё не запускался — обычный
+  // warmup безопасен. После разрыва уже начатой live-сессии идём в one-shot:
+  // второй model process не должен пересечься с её bounded cleanup.
+  if (state.livePreflightUnsupported) startLocalWarmup(state);
+  speechNotice.value = 'Live-предпросмотр недоступен — итог распознаю после остановки.';
+}
+
+function onLocalStreamEvent(state, event) {
+  if (!state || state.cancelled || speechDestroyed || state.generation !== speechGeneration) return;
+  if (event?.type === 'ready') {
+    state.liveReady = true;
+    return;
+  }
+  if (event?.type !== 'partial' && event?.type !== 'final' && event?.type !== 'done') return;
+  if (event.type === 'partial' && state.stopRequested) return;
+  if (typeof event.text === 'string') state.liveFinalText = event.text;
+  // После Stop provisional-хвост больше не показываем, но final/done сохраняем:
+  // они завершат то же generation и ровно один раз попадут в textarea ниже.
+  if (event.type === 'partial') {
+    interimSpeech.value = event.text.trim();
+    const lagMs = Number(event.lagMs);
+    if (Number.isFinite(lagMs) && lagMs >= LOCAL_STREAM_LAG_NOTICE_MS) {
+      speechNotice.value = `Распознавание отстаёт примерно на ${Math.ceil(lagMs / 1000)} с.`;
+    } else if (speechNotice.value.startsWith('Распознавание отстаёт')) {
+      speechNotice.value = '';
+    }
+  }
+}
+
+function startLocalStream(state) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (typeof window.WebSocket !== 'function'
+    || typeof AudioContext !== 'function'
+    || typeof window.AudioWorkletNode !== 'function') {
+    state.livePreflightUnsupported = true;
+    const error = new Error('Браузер не поддерживает live AudioWorklet/WebSocket');
+    error.code = 'speech_stream_unsupported';
+    markLocalStreamFailure(state, error);
+    state.livePromise = Promise.resolve(null);
+    return;
+  }
+  const controller = new AbortController();
+  state.liveSessionId = localStreamSessionId(state.generation);
+  state.liveAbort = controller;
+  state.livePromise = createSpeechStream({
+    mediaStream: state.stream,
+    sessionId: state.liveSessionId,
+    revision: speechPrefs().revision,
+    // Исполняемые options берутся только из server-owned snapshot по revision.
+    signal: controller.signal,
+    onEvent: (event) => onLocalStreamEvent(state, event),
+    onError: (error) => markLocalStreamFailure(state, error),
+  }).then((stream) => {
+    state.liveController = stream;
+    if (state.cancelled || speechDestroyed || state.generation !== speechGeneration) {
+      void stream.cancel().catch(() => {});
+      return null;
+    }
+    return stream;
+  }).catch((error) => {
+    markLocalStreamFailure(state, error);
+    return null;
+  });
+}
+
+function cancelLocalStream(state) {
+  if (!state || state.cancelled) return;
+  state.cancelled = true;
+  try { state.liveAbort?.abort(); } catch { /* AbortController уже закрыт */ }
+  try { Promise.resolve(state.liveController?.cancel?.()).catch(() => {}); }
+  catch { /* WebSocket/AudioContext уже закрыты */ }
+}
+
+function stopLocalStream(state) {
+  if (!state || state.liveStopPromise || state.cancelled) return state?.liveStopPromise;
+  // Граница live должна совпадать с кликом Stop, а не с более поздним onstop
+  // MediaRecorder. Для cold start та же promise-chain остановит stream сразу после ready.
+  state.liveStopPromise = (async () => {
+    const stream = state.liveController || await state.livePromise;
+    if (!stream || state.cancelled || state.liveError) return null;
+    return stream.stop();
+  })();
+  // onstop/watchdog присоединит авторитетный await позже; до этого rejection хранится.
+  state.liveStopPromise.catch(() => {});
+  return state.liveStopPromise;
+}
+
+function cancelLocalWarmup(state) {
+  if (!state) return;
+  state.warmupCancelled = true;
+  if (state.warmupTimer) clearTimeout(state.warmupTimer);
+  state.warmupTimer = null;
+  if (state.resolveWarmup) {
+    const resolve = state.resolveWarmup;
+    state.resolveWarmup = null;
+    resolve(null);
+  }
+  const warmupId = state.warmupId;
+  if (!warmupId || state.warmupDeleteSent) return;
+  state.warmupDeleteSent = true;
+  // Warmup — оптимизация: его DELETE не должен мешать мгновенной отмене UI.
+  api.del?.(`/api/chat/transcribe/warmup/${encodeURIComponent(warmupId)}`).catch(() => {});
+}
+
+function startLocalWarmup(state) {
+  if (!state || state.warmupStarted || state.warmupCancelled) return state?.warmupPromise;
+  state.warmupStarted = true;
+  state.warmupPromise = new Promise((resolve) => {
+    state.resolveWarmup = resolve;
+    state.warmupTimer = setTimeout(() => {
+      // Warmup — только ускорение. Не держим готовый blob из-за медленного
+      // prewarm-запроса; поздний id освободим DELETE-ом.
+      state.warmupTimer = null;
+      state.warmupCancelled = true;
+      state.resolveWarmup = null;
+      resolve(null);
+    }, 1500);
+  });
+  Promise.resolve()
+    .then(() => api.post('/api/chat/transcribe/warmup', {}))
+    .then((result) => {
+      const warmupId = typeof result?.warmupId === 'string' ? result.warmupId : '';
+      state.warmupId = warmupId;
+      if (state.warmupCancelled) {
+        cancelLocalWarmup(state);
+        return;
+      }
+      if (state.warmupTimer) clearTimeout(state.warmupTimer);
+      state.warmupTimer = null;
+      const resolve = state.resolveWarmup;
+      state.resolveWarmup = null;
+      resolve?.(warmupId || null);
+    })
+    // Старый сервер или сбой warmup не отменяет one-shot транскрипцию.
+    .catch(() => {
+      if (state.warmupTimer) clearTimeout(state.warmupTimer);
+      state.warmupTimer = null;
+      const resolve = state.resolveWarmup;
+      state.resolveWarmup = null;
+      resolve?.(null);
+    });
+  return state.warmupPromise;
+}
+
+async function transcribeLocal(state) {
+  if (!state.commit || speechDestroyed || state.completionGeneration !== speechGeneration) return;
+  const generation = state.completionGeneration;
+  const controller = new AbortController();
+  transcriptionAbort?.abort();
+  transcriptionAbort = controller;
+  localTranscription = state;
+  transcribing.value = true;
+  try {
+    const warmupId = await state.warmupPromise;
+    if (speechDestroyed || controller.signal.aborted || generation !== speechGeneration) return;
+    const blob = new Blob(state.chunks, { type: state.recorder.mimeType || 'audio/webm' });
+    const fd = new FormData();
+    fd.append('file', blob, 'dictation.webm');
+    // Unknown/expired/used id сервер трактует как one-shot fallback; клиент
+    // не пытается угадать живость id и не ломает обычный upload.
+    if (warmupId) fd.append('warmupId', warmupId);
+    // Сервер по этому id завершает именно прежний live worker до one-shot:
+    // WebSocket close и multipart могут прийти в разных event-loop тиках.
+    if (state.liveSessionId) fd.append('streamSessionId', state.liveSessionId);
+    const result = await api.upload('/api/chat/transcribe', fd, { signal: controller.signal });
+    if (speechDestroyed || controller.signal.aborted || generation !== speechGeneration) return;
+    if (result?.text) {
+      appendDictationText(result.text);
+      speechNotice.value = '';
+    }
+    else inputErr.value = 'Речь не распознана — попробуй ещё раз';
+  } catch (error) {
+    if (!controller.signal.aborted && generation === speechGeneration && !speechDestroyed) {
+      inputErr.value = `Распознавание: ${error.message}`;
+    }
+  } finally {
+    if (transcriptionAbort === controller) {
+      transcriptionAbort = null;
+      transcribing.value = false;
+    }
+    if (localTranscription === state) localTranscription = null;
+  }
+}
+
+async function finishLocalTranscription(state) {
+  const generation = state.completionGeneration;
+  localTranscription = state;
+  try {
+    const stream = await state.livePromise;
+    if (state.cancelled || speechDestroyed || generation !== speechGeneration) return;
+    if (stream && !state.liveError) {
+      try {
+        const done = await (state.liveStopPromise || stream.stop());
+        if (state.cancelled || speechDestroyed || generation !== speechGeneration) return;
+        const text = typeof done?.text === 'string' ? done.text.trim() : state.liveFinalText.trim();
+        interimSpeech.value = '';
+        speechNotice.value = '';
+        if (text) {
+          appendDictationText(text);
+          return;
+        }
+        // Очень ранний Stop может застать AudioWorklet ещё до capture-ready. Полный
+        // MediaRecorder WebM при этом уже есть, поэтому пустой live-final — повод
+        // перепроверить запись batch-путём, а не молча потерять сказанное.
+        speechNotice.value = 'Live-результат пуст — перепроверяю полную запись.';
+      } catch (error) {
+        markLocalStreamFailure(state, error);
+      }
+    }
+    if (state.cancelled || speechDestroyed || generation !== speechGeneration) return;
+    interimSpeech.value = '';
+    // MediaRecorder писал с самого начала и не зависит от live-канала.
+    // Поэтому любой его terminal failure безопасно заканчивается одним batch upload.
+    await transcribeLocal(state);
+  } finally {
+    if (localTranscription === state) localTranscription = null;
+    if (generation === speechGeneration) drainingSpeech.value = false;
+  }
+}
+
+function localRecorderStopped(state) {
+  if (!state || state.stopped) return;
+  state.stopped = true;
+  if (state.recorderStopTimer) clearTimeout(state.recorderStopTimer);
+  state.recorderStopTimer = null;
+  finishLocalCapture(state);
+  recording.value = false;
+  if (state.commit) {
+    drainingSpeech.value = true;
+    void finishLocalTranscription(state);
+  } else if (state.completionGeneration === speechGeneration) {
+    drainingSpeech.value = false;
+  }
+}
+
+async function startWhisper(generation, fallbackReason = '') {
+  if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+  const local = speechPrefs().local || {};
+  if (!local.ready) {
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    recording.value = false;
+    const why = local.reason ? ` ${local.reason}` : '';
+    inputErr.value = `${fallbackReason ? `${fallbackReason} ` : ''}Локальный Whisper недоступен.${why}`.trim();
+    return;
+  }
+  if (window.isSecureContext === false || !navigator.mediaDevices?.getUserMedia) {
+    desiredSpeech = false;
+    preparingSpeech.value = false;
     inputErr.value = 'Микрофон требует https или localhost — открой кокпит по защищённому адресу';
     return;
   }
+  const Recorder = window.MediaRecorder;
+  if (!Recorder) {
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    inputErr.value = 'MediaRecorder не поддерживается этим браузером';
+    return;
+  }
+  preparingSpeech.value = true;
+  let stream = null;
+  let captureState = null;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mime = window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-    const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-    const chunks = [];
-    mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    mr.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      recording.value = false;
-      transcribing.value = true;
-      try {
-        const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
-        const fd = new FormData();
-        fd.append('file', blob, 'dictation.webm');
-        const r = await api.upload('/api/chat/transcribe', fd);
-        if (r.text) input.value = (input.value ? input.value.trimEnd() + ' ' : '') + r.text;
-        else inputErr.value = 'Речь не распознана — попробуй ещё раз';
-      } catch (e) {
-        inputErr.value = `Распознавание: ${e.message}`;
-      } finally { transcribing.value = false; }
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) {
+      stopTracks(stream);
+      return;
+    }
+    const mime = typeof Recorder.isTypeSupported === 'function' && Recorder.isTypeSupported('audio/webm')
+      ? 'audio/webm' : '';
+    const recorder = new Recorder(stream, mime ? { mimeType: mime } : undefined);
+    const state = {
+      recorder, stream, chunks: [], generation, completionGeneration: generation,
+      commit: false, stopped: false, released: false, warmupId: '', warmupPromise: Promise.resolve(null),
+      warmupStarted: false, warmupCancelled: false, warmupDeleteSent: false,
+      warmupTimer: null, resolveWarmup: null,
+      liveAbort: null, livePromise: Promise.resolve(null), liveController: null,
+      liveSessionId: '', liveStopPromise: null,
+      liveError: null, liveReady: false, liveFinalText: '', stopRequested: false, cancelled: false,
+      livePreflightUnsupported: false,
+      recorderStopTimer: null,
     };
-    recorder = mr;
-    mr.start();
+    captureState = state;
+    localCapture = state;
+    recorder.ondataavailable = (event) => { if (event.data?.size) state.chunks.push(event.data); };
+    recorder.onstop = () => localRecorderStopped(state);
+    recorder.onerror = (event) => {
+      state.commit = false;
+      desiredSpeech = false;
+      cancelLocalStream(state);
+      cancelLocalWarmup(state);
+      if (generation === speechGeneration) {
+        speechGeneration++;
+        inputErr.value = `Микрофон: ${event.error?.message || 'ошибка записи'}`;
+      }
+      localRecorderStopped(state);
+    };
+    recorder.start();
+    startLocalStream(state);
+    preparingSpeech.value = false;
     recording.value = true;
-  } catch (e) {
-    inputErr.value = `Микрофон: ${e.message}`;
+    if (fallbackReason) speechNotice.value = `${fallbackReason} Использую локальный Whisper.`;
+  } catch (error) {
+    if (captureState) finishLocalCapture(captureState);
+    else stopTracks(stream);
+    if (generation !== speechGeneration || speechDestroyed) return;
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    recording.value = false;
+    inputErr.value = `Микрофон: ${error.message}`;
   }
 }
-// Ctrl+D — старт/стоп записи (по физической клавише, работает в любой раскладке).
+
+function browserOptions() {
+  return { langs: [browserLanguage()], processLocally: true };
+}
+
+function browserErrorText(error) {
+  const texts = {
+    'not-allowed': 'Нет доступа к микрофону.',
+    'audio-capture': 'Браузер не нашёл доступный микрофон.',
+    'language-not-supported': 'Браузер не поддерживает выбранный язык.',
+    'service-not-allowed': 'Сервис распознавания браузера недоступен.',
+    network: 'Браузерное распознавание не доступно из-за сети.',
+  };
+  return texts[error] || `Браузерное распознавание завершилось с ошибкой: ${error}.`;
+}
+
+function fallbackToWhisper(generation, reason) {
+  if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+  clearBrowserRestart();
+  if (activeRecognition) releaseRecognition(activeRecognition);
+  recording.value = false;
+  interimSpeech.value = '';
+  startWhisper(generation, reason);
+}
+
+function scheduleBrowserRestart(generation, delay) {
+  if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+  clearBrowserRestart();
+  preparingSpeech.value = true;
+  browserRestartTimer = setTimeout(() => {
+    browserRestartTimer = null;
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+    startBrowserRecognitionGuarded(browserRecognitionCtor, generation);
+  }, delay);
+}
+
+function handleBrowserError(recognition, generation, error) {
+  if (generation !== speechGeneration || recognition !== activeRecognition || speechDestroyed) return;
+  releaseRecognition(recognition);
+  recording.value = false;
+  interimSpeech.value = '';
+
+  if (error === 'phrases-not-supported' && !phrasesDisabled) {
+    phrasesDisabled = true;
+    speechNotice.value = 'Этот браузер не применил словарь — продолжаю без подсказок.';
+    scheduleBrowserRestart(generation, 0);
+    return;
+  }
+  if (error === 'network') {
+    browserRetries.network++;
+    if (browserRetries.network <= 2) {
+      scheduleBrowserRestart(generation, browserRetries.network * 300);
+      return;
+    }
+    fallbackToWhisper(generation, browserErrorText(error));
+    return;
+  }
+  if (error === 'no-speech') {
+    browserRetries.noSpeech++;
+    if (browserRetries.noSpeech <= 2) {
+      speechNotice.value = 'Речь не услышана, пробую ещё раз…';
+      scheduleBrowserRestart(generation, browserRetries.noSpeech * 250);
+      return;
+    }
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    inputErr.value = 'Речь не услышана — попробуй ещё раз';
+    return;
+  }
+  if (error === 'service-not-allowed' || error === 'language-not-supported') {
+    fallbackToWhisper(generation, browserErrorText(error));
+    return;
+  }
+
+  desiredSpeech = false;
+  preparingSpeech.value = false;
+  if (error !== 'aborted') inputErr.value = browserErrorText(error);
+}
+
+function startBrowserRecognition(Ctor, generation) {
+  if (!Ctor || generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+  let recognition;
+  try {
+    recognition = new Ctor();
+    recognition.lang = browserLanguage();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    if (speechPrefs().browserProcessing === 'local') recognition.processLocally = true;
+
+    const terms = dictionaryPhrases();
+    if (terms.length && !phrasesDisabled) {
+      const Phrase = window.SpeechRecognitionPhrase;
+      if ('phrases' in recognition && typeof Phrase === 'function') {
+        try {
+          recognition.phrases = terms.map((term) => new Phrase(term, 5));
+        } catch {
+          phrasesDisabled = true;
+          speechNotice.value = 'Этот браузер не применил словарь; диктовка продолжается без него.';
+        }
+      } else {
+        phrasesDisabled = true;
+        speechNotice.value = 'Словарь не поддерживается этим браузером; диктовка продолжается без него.';
+      }
+    }
+  } catch (error) {
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    inputErr.value = `Не удалось подготовить диктовку: ${error.message}`;
+    return;
+  }
+
+  const finalResults = new Set();
+  activeRecognition = recognition;
+  recognition.onstart = () => {
+    if (generation !== speechGeneration || recognition !== activeRecognition || !desiredSpeech) return;
+    preparingSpeech.value = false;
+    recording.value = true;
+  };
+  recognition.onresult = (event) => {
+    const draining = recognition === drainingRecognition;
+    if (generation !== speechGeneration || recognition !== activeRecognition || (!desiredSpeech && !draining)) return;
+    let interim = '';
+    const start = Number.isInteger(event.resultIndex) ? event.resultIndex : 0;
+    for (let index = start; index < (event.results?.length || 0); index++) {
+      const result = event.results[index];
+      const transcript = result?.[0]?.transcript || result?.item?.(0)?.transcript || '';
+      if (result?.isFinal) {
+        if (!finalResults.has(index)) {
+          finalResults.add(index);
+          appendDictationText(transcript);
+        }
+      } else if (!draining) {
+        interim += `${interim ? ' ' : ''}${transcript.trim()}`;
+      }
+    }
+    interimSpeech.value = draining ? '' : interim;
+  };
+  recognition.onerror = (event) => handleBrowserError(recognition, generation, event.error || 'unknown');
+  recognition.onend = () => {
+    if (generation !== speechGeneration || recognition !== activeRecognition || speechDestroyed) return;
+    activeRecognition = null;
+    finishBrowserDrain(recognition);
+    recording.value = false;
+    preparingSpeech.value = false;
+    interimSpeech.value = '';
+    // Обычный onend не даёт права бесконечно захватывать микрофон.
+    desiredSpeech = false;
+  };
+  try {
+    recognition.start();
+    // Safari и некоторые test doubles не шлют onstart, но успешный
+    // синхронный start уже означает, что кнопка должна стать «Стоп».
+    preparingSpeech.value = false;
+    recording.value = true;
+  } catch (error) {
+    releaseRecognition(recognition);
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    recording.value = false;
+    inputErr.value = error?.name === 'InvalidStateError'
+      ? 'Диктовка уже запущена в этом браузере'
+      : `Не удалось запустить диктовку: ${error.message}`;
+  }
+}
+
+function failClosedBrowserAutoStart(generation, message) {
+  if (generation !== speechGeneration || speechDestroyed) return;
+  desiredSpeech = false;
+  preparingSpeech.value = false;
+  recording.value = false;
+  browserInstalling.value = false;
+  speechGeneration++;
+  inputErr.value = message;
+}
+
+async function validateBrowserAutoStart(generation) {
+  if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return false;
+  const requestContext = captureSpeechRequestContext();
+  if (requestContext.engine !== 'browser' || requestContext.browserProcessing !== 'auto'
+    || !requestContext.browserAutoConsent || !requestContext.revision) {
+    failClosedBrowserAutoStart(generation, 'Сервер не подтвердил актуальное согласие для браузерной диктовки');
+    return false;
+  }
+  try {
+    const response = await api.post('/api/settings/speech/browser-consent', {
+      confirm: true,
+      revision: requestContext.revision,
+    });
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return false;
+    const disposition = speechResponseDisposition(requestContext, response);
+    const candidate = previewSpeechResponse(response);
+    if (disposition === 'stale' || candidate?.engine !== 'browser'
+      || candidate.browserProcessing !== 'auto' || candidate.browserAutoConsent !== true) {
+      failClosedBrowserAutoStart(
+        generation,
+        'Настройки речи изменились в другом окне — браузерная диктовка не запущена',
+      );
+      return false;
+    }
+    if (disposition === 'apply') applySpeechResponse(response);
+    await nextTick();
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return false;
+    const current = speechPrefs();
+    if (current.engine !== 'browser' || current.browserProcessing !== 'auto'
+      || current.browserAutoConsent !== true || !speechResponseMatchesCurrent(response)) {
+      failClosedBrowserAutoStart(
+        generation,
+        'Настройки речи изменились в другом окне — браузерная диктовка не запущена',
+      );
+      return false;
+    }
+    return true;
+  } catch (error) {
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return false;
+    failClosedBrowserAutoStart(
+      generation,
+      error?.status === 409
+        ? 'Настройки речи изменились в другом окне — браузерная диктовка не запущена'
+        : 'Не удалось проверить согласие на обработку речи — браузерная диктовка не запущена',
+    );
+    return false;
+  }
+}
+
+async function startBrowserRecognitionGuarded(Ctor, generation, validatedRevision = '') {
+  if (!Ctor || generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+  const prefs = speechPrefs();
+  if (prefs.engine !== 'browser') return;
+  if (prefs.browserProcessing === 'auto') {
+    const alreadyValidated = !!validatedRevision
+      && prefs.revision === validatedRevision
+      && prefs.browserAutoConsent === true;
+    if (!alreadyValidated && !await validateBrowserAutoStart(generation)) return;
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+    const current = speechPrefs();
+    if (current.engine !== 'browser' || current.browserProcessing !== 'auto'
+      || current.browserAutoConsent !== true) {
+      failClosedBrowserAutoStart(
+        generation,
+        'Настройки речи изменились в другом окне — браузерная диктовка не запущена',
+      );
+      return;
+    }
+  } else if (prefs.browserProcessing !== 'local') {
+    return;
+  }
+  startBrowserRecognition(Ctor, generation);
+}
+
+async function startBrowser(generation, validatedRevision = '') {
+  if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+  if (window.isSecureContext === false) {
+    fallbackToWhisper(generation, 'Браузерная диктовка требует HTTPS.');
+    return;
+  }
+  const Ctor = browserSpeechCtor();
+  if (!Ctor) {
+    fallbackToWhisper(generation, 'Браузерная диктовка на этом устройстве недоступна.');
+    return;
+  }
+  if (speechPrefs().browserProcessing === 'auto' && !speechPrefs().browserAutoConsent) {
+    desiredSpeech = false;
+    preparingSpeech.value = false;
+    speechGeneration++;
+    consentPending.value = true;
+    return;
+  }
+
+  browserRecognitionCtor = Ctor;
+  if (speechPrefs().browserProcessing === 'local') {
+    const supportsLocal = 'processLocally' in (Ctor.prototype || {}) && typeof Ctor.available === 'function';
+    if (!supportsLocal) {
+      fallbackToWhisper(generation, 'Этот браузер не умеет распознавать речь на устройстве.');
+      return;
+    }
+    preparingSpeech.value = true;
+    try {
+      const availability = await Ctor.available(browserOptions());
+      if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+      if (availability === 'downloadable') {
+        if (typeof Ctor.install !== 'function') {
+          fallbackToWhisper(generation, 'Браузер не умеет устанавливать локальную языковую модель.');
+          return;
+        }
+        desiredSpeech = false;
+        preparingSpeech.value = false;
+        speechGeneration++;
+        pendingBrowserInstall = {
+          Ctor,
+          context: captureSpeechRequestContext(),
+          options: browserOptions(),
+        };
+        browserInstallPending.value = true;
+        return;
+      }
+      if (availability !== 'available' && availability !== true) {
+        fallbackToWhisper(generation, availability === 'downloading'
+          ? 'Браузер ещё скачивает языковую модель.'
+          : 'Локальная языковая модель браузера недоступна.');
+        return;
+      }
+    } catch {
+      if (generation === speechGeneration) {
+        fallbackToWhisper(generation, 'Не удалось проверить локальную модель браузера.');
+      }
+      return;
+    }
+  }
+  startBrowserRecognitionGuarded(Ctor, generation, validatedRevision);
+}
+
+function beginSpeech({ browserAutoValidationRevision = '' } = {}) {
+  // Новый запуск окончательно закрывает короткое окно, в котором предыдущий
+  // штатный Stop ещё мог прислать свой последний final result.
+  if (activeRecognition) releaseRecognition(activeRecognition);
+  consentPending.value = false;
+  browserInstallPending.value = false;
+  pendingBrowserInstall = null;
+  inputErr.value = '';
+  speechNotice.value = '';
+  interimSpeech.value = '';
+  browserRetries = { network: 0, noSpeech: 0 };
+  phrasesDisabled = false;
+  const generation = ++speechGeneration;
+  desiredSpeech = true;
+  preparingSpeech.value = true;
+  if (speechPrefs().engine === 'browser') startBrowser(generation, browserAutoValidationRevision);
+  else startWhisper(generation);
+}
+
+async function confirmBrowserConsent() {
+  if (!consentPending.value) return;
+  consentPending.value = false;
+  inputErr.value = '';
+  preparingSpeech.value = true;
+  const requestGeneration = ++speechGeneration;
+  const requestContext = captureSpeechRequestContext();
+  try {
+    const response = await api.post('/api/settings/speech/browser-consent', {
+      confirm: true,
+      revision: requestContext.revision,
+    });
+    if (requestGeneration !== speechGeneration || speechDestroyed) return;
+    const disposition = speechResponseDisposition(requestContext, response);
+    if (disposition === 'stale') { rejectStaleSpeechRequest(); return; }
+    const candidate = previewSpeechResponse(response);
+    if (candidate?.engine !== 'browser' || candidate.browserProcessing !== 'auto'
+      || candidate.browserAutoConsent !== true) {
+      throw new Error('сервер не подтвердил согласие');
+    }
+    preparingSpeech.value = false;
+    const snapshot = disposition === 'current' ? speechPrefs() : applySpeechResponse(response);
+    await nextTick();
+    if (snapshot.engine !== 'browser' || snapshot.browserProcessing !== 'auto' || snapshot.browserAutoConsent !== true) {
+      throw new Error('сервер не подтвердил согласие');
+    }
+    if (requestGeneration !== speechGeneration || speechDestroyed) return;
+    if (!speechResponseMatchesCurrent(response)) { rejectStaleSpeechRequest(); return; }
+    beginSpeech({ browserAutoValidationRevision: snapshot.revision });
+  } catch (error) {
+    if (requestGeneration !== speechGeneration || speechDestroyed) return;
+    preparingSpeech.value = false;
+    // Stale-окно не допускаем к микрофону: сначала восстанавливаем snapshot.
+    if (error.status === 409) {
+      const recoveryContext = captureSpeechRequestContext();
+      try {
+        const latest = await api.get('/api/settings/speech');
+        if (requestGeneration !== speechGeneration || speechDestroyed) return;
+        const disposition = speechResponseDisposition(recoveryContext, latest);
+        if (disposition === 'apply') applySpeechResponse(latest);
+      } catch { /* ниже будет fail-closed */ }
+      consentPending.value = speechPrefs().engine === 'browser'
+        && speechPrefs().browserProcessing === 'auto' && !speechPrefs().browserAutoConsent;
+      inputErr.value = 'Настройки речи изменились в другом окне — проверь выбор ещё раз';
+    } else {
+      inputErr.value = `Не удалось сохранить согласие: ${error.message}`;
+    }
+  }
+}
+
+async function useWhisperFromPrompt() {
+  consentPending.value = false;
+  browserInstallPending.value = false;
+  pendingBrowserInstall = null;
+  inputErr.value = '';
+  preparingSpeech.value = true;
+  const requestGeneration = ++speechGeneration;
+  const requestContext = captureSpeechRequestContext();
+  try {
+    const response = await api.post('/api/settings/speech', { engine: 'whisper' });
+    if (requestGeneration !== speechGeneration || speechDestroyed) return;
+    const disposition = speechResponseDisposition(requestContext, response);
+    if (disposition === 'stale') { rejectStaleSpeechRequest(); return; }
+    const candidate = previewSpeechResponse(response);
+    if (candidate?.engine !== 'whisper') throw new Error('движок не изменился');
+    // Изменение engine должно пройти через общий watcher, пока микрофон ещё
+    // не стартовал; иначе собственный server snapshot отменит только что
+    // запущенный Whisper как будто это правка из другого окна.
+    preparingSpeech.value = false;
+    const snapshot = disposition === 'current' ? speechPrefs() : applySpeechResponse(response);
+    await nextTick();
+    if (requestGeneration !== speechGeneration || speechDestroyed) return;
+    if (snapshot.engine !== 'whisper') throw new Error('движок не изменился');
+    if (!speechResponseMatchesCurrent(response)) { rejectStaleSpeechRequest(); return; }
+    beginSpeech();
+  } catch (error) {
+    if (requestGeneration !== speechGeneration || speechDestroyed) return;
+    preparingSpeech.value = false;
+    inputErr.value = `Не удалось выбрать Whisper: ${error.message}`;
+  }
+}
+
+async function installBrowserLanguage() {
+  const pendingInstall = pendingBrowserInstall;
+  if (!browserInstallPending.value || !pendingInstall?.Ctor || !pendingInstall.context) return;
+  browserInstallPending.value = false;
+  if (!speechRequestContextMatchesCurrent(pendingInstall.context)
+    || pendingInstall.context.engine !== 'browser'
+    || pendingInstall.context.browserProcessing !== 'local') {
+    pendingBrowserInstall = null;
+    inputErr.value = 'Настройки речи изменились — локальная модель не будет установлена';
+    return;
+  }
+  browserInstalling.value = true;
+  preparingSpeech.value = true;
+  inputErr.value = '';
+  const generation = ++speechGeneration;
+  desiredSpeech = true;
+  try {
+    const installed = await pendingInstall.Ctor.install(pendingInstall.options);
+    if (generation !== speechGeneration || !desiredSpeech || speechDestroyed) return;
+    if (!speechRequestContextMatchesCurrent(pendingInstall.context)
+      || speechPrefs().engine !== 'browser'
+      || speechPrefs().browserProcessing !== 'local'
+      || (speechPrefs().browserAutoConsent === true) !== pendingInstall.context.browserAutoConsent) {
+      failClosedBrowserAutoStart(
+        generation,
+        'Настройки речи изменились — установленная модель не будет запускать старый режим',
+      );
+      return;
+    }
+    if (installed !== true) {
+      fallbackToWhisper(generation, 'Браузер не смог установить языковую модель.');
+      return;
+    }
+    browserRecognitionCtor = pendingInstall.Ctor;
+    startBrowserRecognitionGuarded(pendingInstall.Ctor, generation);
+  } catch (error) {
+    if (generation === speechGeneration) fallbackToWhisper(generation, `Не удалось установить языковую модель: ${error.message}.`);
+  } finally {
+    if (generation === speechGeneration) {
+      browserInstalling.value = false;
+      if (!recording.value && !desiredSpeech) preparingSpeech.value = false;
+    }
+    if (pendingBrowserInstall === pendingInstall) pendingBrowserInstall = null;
+  }
+}
+
+function stopSpeech({ cancel = false } = {}) {
+  const wasActive = desiredSpeech || recording.value || preparingSpeech.value || transcribing.value
+    || consentPending.value || browserInstallPending.value || browserInstalling.value
+    || drainingSpeech.value || activeRecognition || localCapture || localTranscription;
+  const finishBrowserNormally = !cancel && !!activeRecognition;
+  const finishLocalNormally = !cancel && !!localCapture;
+  desiredSpeech = false;
+  // Оба движка отдают final после Stop. Штатный drain сохраняет generation;
+  // Esc/unmount/settings change инвалидируют запуск немедленно.
+  const completionGeneration = finishBrowserNormally || finishLocalNormally
+    ? speechGeneration : ++speechGeneration;
+  clearBrowserRestart();
+  consentPending.value = false;
+  browserInstallPending.value = false;
+  browserInstalling.value = false;
+  pendingBrowserInstall = null;
+  interimSpeech.value = '';
+  preparingSpeech.value = false;
+  recording.value = false;
+
+  // Обрываем только upload, который уже шёл до этого stop. Важно сделать
+  // это до recorder.stop(): onstop синхронно стартует новый штатный upload.
+  if (transcriptionAbort) {
+    if (cancel) {
+      cancelLocalStream(localTranscription);
+      cancelLocalWarmup(localTranscription);
+    }
+    transcriptionAbort.abort();
+    transcriptionAbort = null;
+    transcribing.value = false;
+  }
+  if (cancel && localTranscription) {
+    localTranscription.commit = false;
+    cancelLocalStream(localTranscription);
+    cancelLocalWarmup(localTranscription);
+  }
+  if (activeRecognition) {
+    const recognition = activeRecognition;
+    if (cancel) {
+      releaseRecognition(recognition, 'abort');
+    } else {
+      beginBrowserDrain(recognition, completionGeneration);
+      try { recognition.stop?.(); } catch { releaseRecognition(recognition); }
+    }
+  }
+  if (localCapture) {
+    const state = localCapture;
+    state.commit = !cancel;
+    state.stopRequested = true;
+    if (cancel) {
+      cancelLocalStream(state);
+      cancelLocalWarmup(state);
+    } else {
+      drainingSpeech.value = true;
+      stopLocalStream(state);
+    }
+    state.completionGeneration = completionGeneration;
+    try {
+      if (state.recorder.state && state.recorder.state !== 'inactive') {
+        if (!cancel) {
+          // requestData повышает шанс сохранить WebM даже у браузера/полифила,
+          // который зависнет и не пришлёт штатный onstop.
+          try { state.recorder.requestData?.(); } catch { /* stop всё равно обязателен */ }
+          state.recorderStopTimer = setTimeout(() => {
+            state.recorderStopTimer = null;
+            localRecorderStopped(state);
+          }, LOCAL_RECORDER_STOP_TIMEOUT_MS);
+        }
+        state.recorder.stop();
+      } else localRecorderStopped(state);
+    } catch {
+      state.commit = false;
+      cancelLocalStream(state);
+      cancelLocalWarmup(state);
+      localRecorderStopped(state);
+    }
+    // Esc/unmount обязаны освободить hardware даже у неполного
+    // MediaRecorder-полифила, который не присылает onstop.
+    if (cancel) finishLocalCapture(state);
+  }
+  // У штатного Stop drain сохраняет generation и снимается в finally. Esc,
+  // смена настроек и unmount generation инвалидируют, поэтому снимаем UI-lock
+  // здесь явно: поздний finally старой сессии уже не имеет права менять новый UI.
+  if (cancel) drainingSpeech.value = false;
+  if (cancel && wasActive) speechNotice.value = 'Диктовка отменена.';
+}
+
+function toggleMic() {
+  inputErr.value = '';
+  if (drainingSpeech.value || drainingRecognition) return;
+  if (recording.value || preparingSpeech.value || desiredSpeech) {
+    stopSpeech();
+    return;
+  }
+  if (transcribing.value) return;
+  if (consentPending.value || browserInstallPending.value) {
+    stopSpeech({ cancel: true });
+    return;
+  }
+  const prefs = speechPrefs();
+  if (prefs.engine === 'browser' && prefs.browserProcessing === 'auto' && !prefs.browserAutoConsent) {
+    consentPending.value = true;
+    speechNotice.value = '';
+    return;
+  }
+  beginSpeech();
+}
+
+// Ctrl+D — старт/стоп, Esc — отмена без отправки MediaRecorder-блоба.
 function onGlobalKey(e) {
+  if (e.key === 'Escape' && (recording.value || preparingSpeech.value || transcribing.value
+    || consentPending.value || browserInstallPending.value || browserInstalling.value
+    || drainingSpeech.value || desiredSpeech || activeRecognition)) {
+    e.preventDefault();
+    stopSpeech({ cancel: true });
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD' && !e.shiftKey && !e.altKey) {
     e.preventDefault();
     toggleMic();
   }
 }
+
+watch(() => [
+  speechPrefs().revision,
+  speechPrefs().engine,
+  speechPrefs().browserProcessing,
+  speechPrefs().browserAutoConsent,
+  speechPrefs().language,
+  speechPrefs().dictionary,
+  speechPrefs().quality,
+  speechPrefs().model,
+  speechPrefs().device,
+  speechPrefs().computeType,
+  speechPrefs().beamSize,
+  speechPrefs().vadSilenceMs,
+  speechPrefs().conditionOnPreviousText,
+],
+  (next, previous) => {
+    if (previous && next.some((value, index) => value !== previous[index])
+      && (desiredSpeech || recording.value || activeRecognition || localCapture || transcribing.value
+        || drainingSpeech.value || localTranscription
+        || consentPending.value || browserInstallPending.value || browserInstalling.value)) {
+      stopSpeech({ cancel: true });
+      speechNotice.value = 'Диктовка остановлена: настройки речи изменились.';
+    }
+  }, { flush: 'sync' });
+watch(() => props.sid, () => {
+  if (desiredSpeech || recording.value || preparingSpeech.value || transcribing.value
+    || drainingSpeech.value || activeRecognition || localCapture || localTranscription || consentPending.value
+    || browserInstallPending.value || browserInstalling.value) stopSpeech({ cancel: true });
+}, { flush: 'sync' });
 onMounted(() => window.addEventListener('keydown', onGlobalKey));
-onUnmounted(() => window.removeEventListener('keydown', onGlobalKey));
+onUnmounted(() => {
+  speechDestroyed = true;
+  stopSpeech({ cancel: true });
+  window.removeEventListener('keydown', onGlobalKey);
+});
 
 // ── Копирование сообщения (иконка при наведении) ──
 const copiedIdx = ref(-1);
@@ -898,6 +2013,30 @@ async function openDebug() {
             </button>
           </template>
         </div>
+        <div v-if="consentPending" class="speech-prompt" data-testid="speech-consent">
+          <div>
+            <b>Перед первой диктовкой</b>
+            <p>Браузер может обработать звук на этом устройстве или передать своему сервису.
+              До подтверждения микрофон не включается.</p>
+          </div>
+          <div class="speech-actions">
+            <button type="button" class="speech-primary" data-testid="speech-consent-browser" @click="confirmBrowserConsent">Продолжить в браузере</button>
+            <button type="button" data-testid="speech-consent-whisper" @click="useWhisperFromPrompt">Использовать Whisper</button>
+            <button type="button" @click="stopSpeech({ cancel: true })">Отмена</button>
+          </div>
+        </div>
+        <div v-else-if="browserInstallPending" class="speech-prompt" data-testid="speech-browser-install">
+          <div>
+            <b>Нужна локальная языковая модель</b>
+            <p>Браузер может скачать её и после этого распознавать речь только на этом устройстве.</p>
+          </div>
+          <div class="speech-actions">
+            <button type="button" class="speech-primary" data-testid="speech-install-browser" @click="installBrowserLanguage">Скачать и продолжить</button>
+            <button type="button" data-testid="speech-install-whisper" @click="useWhisperFromPrompt">Использовать Whisper</button>
+            <button type="button" @click="stopSpeech({ cancel: true })">Отмена</button>
+          </div>
+        </div>
+        <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">Слышу: {{ interimSpeech }}</div>
         <div class="composer">
           <button class="tool" title="Приложить файл (или перетащи/вставь из буфера)" @click="fileInput.click()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -906,13 +2045,14 @@ async function openDebug() {
           </button>
           <input ref="fileInput" type="file" multiple hidden @change="onPick" />
           <textarea v-model="input" rows="2"
-                    :placeholder="recording ? 'Говори… (клик по микрофону — стоп)' : 'Сообщение агенту…'"
+                    :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
                     @keydown="onKey" @paste="onPaste"></textarea>
-          <HelpTip align="right" :text="recording ? 'Остановить запись · Ctrl+D' : transcribing ? 'Расшифровываю запись…' : 'Надиктовать голосом · Ctrl+D'">
-          <button class="tool mic" :class="{ rec: recording, wait: transcribing }" :disabled="transcribing"
+          <HelpTip align="right" :text="recording ? 'Остановить · Ctrl+D; отменить · Esc' : drainingSpeech ? 'Завершаю распознавание… Esc — отмена' : transcribing ? 'Расшифровываю запись…' : preparingSpeech || browserInstalling ? 'Подготавливаю… Esc — отмена' : 'Надиктовать голосом · Ctrl+D'">
+          <button class="tool mic" :class="{ rec: recording, wait: transcribing || preparingSpeech || browserInstalling || drainingSpeech }" :disabled="transcribing || drainingSpeech"
+                  :aria-label="recording ? 'Остановить диктовку' : 'Начать диктовку'" :aria-pressed="recording"
                   @click="toggleMic">
             <!-- Расшифровка: крутящийся спиннер -->
-            <svg v-if="transcribing" class="spin-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <svg v-if="transcribing || preparingSpeech || browserInstalling || drainingSpeech" class="spin-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
               <path d="M21 12a9 9 0 1 1-6.2-8.56" />
             </svg>
             <!-- Запись: квадрат-стоп -->
@@ -935,11 +2075,13 @@ async function openDebug() {
                     : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'" @click="chat.stop(sid)">
             <span class="sq"></span>
           </button>
-          <button class="send" :disabled="frozen || (!input.trim() && !pending.length)"
-                  :title="frozen ? frozenHint
+          <button class="send" :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
+                  :title="speechBusy ? 'Сначала заверши диктовку'
+                    : frozen ? frozenHint
                     : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
                   @click="submit">↑</button>
         </div>
+        <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
         <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
       </div>
     </div>
@@ -1047,8 +2189,10 @@ async function openDebug() {
 
 /* Воздух сверху/снизу — margin'ом самого скролл-контейнера (не паддингом:
    нижний паддинг при прокрутке до конца ненадёжен). Правый паддинг меньше
-   на ширину скроллбара (11px, styles.css) — края совпадают с композером. */
-.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 11px 0 22px; margin: 26px 0; }
+   на ширину скроллбара (11px, styles.css) — края совпадают с композером.
+   scrollbar-gutter: stable — место под скролл зарезервировано всегда, сообщения
+   не «скачут» по горизонтали, когда полоса появляется/исчезает. */
+.cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 0 11px 0 22px; margin: 26px 0; }
 /* min-height 100% — пустое состояние центрируется */
 .flow { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
 
@@ -1171,12 +2315,34 @@ async function openDebug() {
   color: var(--ink-mid); display: grid; place-items: center; }
 .tool svg { width: 18px; height: 18px; }
 .tool:hover { background: var(--surface-2); color: var(--ink); }
-.tool.mic.rec { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); animation: mic-pulse 1.2s ease-in-out infinite; }
+.tool.mic { position: relative; isolation: isolate; overflow: visible; }
+.tool.mic > svg { position: relative; z-index: 1; }
+.tool.mic.rec { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.tool.mic.rec::before { content: ''; position: absolute; inset: 3px; z-index: -1; border-radius: 9px;
+  pointer-events: none; background: color-mix(in srgb, var(--bad) 48%, transparent);
+  animation: mic-pulse 1.35s ease-out infinite; }
 .tool.mic.wait { cursor: default; color: var(--accent); opacity: 1; }
-@keyframes mic-pulse { 50% { background: color-mix(in srgb, var(--bad) 38%, transparent); } }
+@keyframes mic-pulse {
+  0% { opacity: .72; transform: scale(.88); }
+  75%, 100% { opacity: 0; transform: scale(1.62); }
+}
 .spin-ico { animation: ico-rotate .9s linear infinite; }
 @keyframes ico-rotate { to { transform: rotate(360deg); } }
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
+.speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
+.speech-interim { margin-bottom: 6px; font-style: italic; }
+.speech-note { margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .tool.mic.rec::before { animation: none; opacity: .35; transform: scale(1.18); }
+}
+.speech-prompt { display: grid; gap: 9px; margin-bottom: 8px; padding: 11px 12px; border: 1px solid var(--line-2);
+  border-radius: 11px; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
+.speech-prompt p { margin: 3px 0 0; color: var(--ink-mid); line-height: 1.4; }
+.speech-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.speech-actions button { border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px;
+  background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }
+.speech-actions button:hover { border-color: var(--accent); }
+.speech-actions .speech-primary { border-color: transparent; background: var(--accent); color: white; }
 
 /* Меню слэш-команд: якорится над композером */
 .cs-input .col { position: relative; }

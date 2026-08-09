@@ -1,13 +1,16 @@
 // Модуль media — серверная часть плагина «Видео → задачи»: распознавание речи,
-// кадры, статусы job'ов. Диктовка чата сюда НЕ входит (/api/chat/transcribe зовёт
-// ingestRecording напрямую) — выключение плагина её не трогает.
+// кадры, статусы job'ов. Диктовка чата сюда НЕ входит — выключение плагина её не трогает.
 import fp from 'fastify-plugin';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 async function mediaModule(fastify, opts) {
-  const { media } = opts;
+  const { media, speechSettings = null } = opts;
+  const currentSpeechSettings = () => {
+    const value = typeof speechSettings === 'function' ? speechSettings() : speechSettings;
+    return value?.speech || value || {};
+  };
   const fail = (reply, err) => reply.code(500).send({ error: 'media_error', message: err.message });
   // Гейт плагина «video»: выключен — раздела нет. Проверка живая (по prefs),
   // тумблер в настройках действует без рестарта.
@@ -28,7 +31,7 @@ async function mediaModule(fastify, opts) {
     const filePath = path.join(dir, `${Date.now()}-${safe}`);
     try {
       await pipeline(data.file, fs.createWriteStream(filePath));
-      const { jobId } = media.ingest({ filePath });
+      const { jobId } = media.ingest({ filePath, settings: currentSpeechSettings() });
       return { jobId, filename: data.filename };
     } catch (err) { return fail(reply, err); }
   });
@@ -38,8 +41,16 @@ async function mediaModule(fastify, opts) {
     if (gate(reply)) return reply;
     const { filePath, model, lang, frames } = request.body || {};
     if (!filePath) return reply.code(400).send({ error: 'bad_input', message: 'filePath обязателен' });
-    // Модель по умолчанию — из настроек плагина (Настройки → Плагины → Видео).
-    try { return media.ingest({ filePath, model: model || fastify.pluginSettings('video').whisperModel, lang, frames }); }
+    const settings = currentSpeechSettings();
+    try {
+      return media.ingest({
+        filePath,
+        model,
+        lang,
+        frames,
+        settings,
+      });
+    }
     catch (err) { return fail(reply, err); }
   });
 

@@ -10,7 +10,8 @@
 //    Выключенный пользовательский плагин не регистрируется вовсе (вкл/выкл — рестарт).
 //
 // Состояние (вкл/выкл, значения настроек) — в prefs (server/.state/prefs.json):
-//   plugins:        { <id>: true|false }   — отсутствие ключа = дефолт (системный вкл, пользовательский выкл)
+//   plugins:        { <id>: true|false }   — отсутствие ключа = дефолт манифеста
+//                                            (defaultEnabled, иначе системный вкл / пользовательский выкл)
 //   pluginSettings: { <id>: {key: value} }
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -19,25 +20,90 @@ import path from 'node:path';
 export const SYSTEM = [
   {
     id: 'video',
+    system: true,
     name: 'Видео → задачи',
     version: '1.0.0',
     description: 'Разбор видеозаписи встречи: распознавание речи (whisper), выжимка по темам, черновики задач в Б24 со скриншотами.',
-    nav: { path: '/video', label: 'Видео', icon: 'video' },
-    settings: [
-      { key: 'whisperModel', label: 'Модель whisper', type: 'select', options: ['small', 'medium', 'large-v3'], default: 'medium' },
-    ],
+    nav: { path: '/video', label: 'Видео', icon: 'video', group: 'tools', order: 10 },
+    // Настройки распознавания диктовки и видео живут в едином speech-контракте.
+    settings: [],
   },
   {
     id: 'code',
+    system: true,
     name: 'Код',
     version: '1.0.0',
     description: 'Просмотр кода и гита проектов как в VS Code: дерево файлов и несохранённые изменения любого дерева — основного репозитория или worktree. Только чтение. Пути репозиториев — в разделе «Проекты».',
-    nav: { path: '/code', label: 'Код', icon: 'code' },
+    nav: { path: '/code', label: 'Код', icon: 'code', group: 'dock', order: 10 },
+    settings: [],
+  },
+  {
+    id: 'inbox',
+    system: true,
+    defaultEnabled: true,
+    name: 'Входящие',
+    version: '1.0.0',
+    description: 'Единая очередь новых обращений из подключённых каналов с ручным разбором и созданием задач в Б24.',
+    nav: { path: '/inbox', label: 'Входящие', icon: 'inbox', group: 'rail', order: 30 },
+    settings: [
+      {
+        key: 'triageModel',
+        label: 'Модель для разбора',
+        type: 'model',
+        hint: 'Одна модель разбирает обращения всех активных каналов. Нужен безопасный Inbox-режим и поддержка изображений; сейчас подходят Claude и vision-модели Ollama. Пока совместимая модель не выбрана, автоматические задачи не создаются.',
+        default: null,
+      },
+    ],
+  },
+  {
+    id: 'telegram',
+    system: true,
+    // Системный (нужны своя страница, адаптер трекера и запуск конвейера), но
+    // ВЫКЛЮЧЕН по умолчанию: раздел просит токен бота, и появляться сам, без
+    // спроса, у всех установок он не должен.
+    defaultEnabled: false,
+    name: 'Телеграм',
+    version: '0.1.0',
+    description: 'Подключение Telegram Bot API, нативный архив и allowlist чатов для общего раздела «Входящие».',
+    nav: { path: '/telegram', label: 'Телеграм', icon: 'telegram', group: 'tools', order: 20 },
+    settings: [],
+  },
+  {
+    id: 'github',
+    system: true,
+    defaultEnabled: false,
+    name: 'GitHub Issues',
+    version: '0.1.0',
+    description: 'Подключение одного GitHub repository: новые Issues поступают в общий раздел «Входящие» через подписанный webhook и REST-сверку.',
+    nav: { path: '/github', label: 'GitHub', icon: 'github', group: 'tools', order: 30 },
     settings: [],
   },
 ];
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+export const NAV_GROUPS = ['rail', 'tools', 'dock'];
+
+/**
+ * Положение ссылки — только декларация навигации. Оно не даёт пользовательскому
+ * плагину права загрузить Vue-код: клиентский runtime встроенных инструментов
+ * остаётся отдельным реестром во фронте.
+ */
+export function normalizePluginNav(raw, fallbackLabel, warn = null) {
+  if (!raw?.path) return null;
+  const requested = raw.group == null ? '' : String(raw.group).trim();
+  const group = NAV_GROUPS.includes(requested) ? requested : 'rail';
+  if (!requested || group !== requested) {
+    warn?.(`nav.group «${requested || 'не задан'}» не поддерживается — ссылка помещена в rail`);
+  }
+  const order = typeof raw.order === 'number' ? raw.order : Number.NaN;
+  return {
+    path: String(raw.path),
+    label: String(raw.label || fallbackLabel),
+    icon: String(raw.icon || 'plugin'),
+    group,
+    ...(Number.isFinite(order) ? { order } : {}),
+  };
+}
 
 /**
  * Скан пользовательских плагинов: plugins/<id>/plugin.json.
@@ -55,11 +121,14 @@ export async function scanUserPlugins(userPluginsDir, log) {
       if (!m.id || m.id !== e.name) throw new Error(`id в манифесте («${m.id}») не совпадает с папкой «${e.name}»`);
       out.push({
         id: m.id,
+        system: false,
         name: String(m.name || m.id),
         api: Number(m.api || 1),
         version: String(m.version || '0.0.0'),
         description: String(m.description || ''),
-        nav: m.nav && m.nav.path ? { path: String(m.nav.path), label: String(m.nav.label || m.name || m.id), icon: String(m.nav.icon || 'plugin') } : null,
+        nav: normalizePluginNav(m.nav, m.name || m.id, (message) => {
+          log?.warn({ plugin: e.name }, message);
+        }),
         settings: Array.isArray(m.settings) ? m.settings : [],
         dir,
         hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
@@ -71,11 +140,17 @@ export async function scanUserPlugins(userPluginsDir, log) {
   return out;
 }
 
-/** Включён ли плагин по prefs: системные включены по умолчанию, пользовательские — нет. */
-export function isEnabled(prefsData, id, isSystem) {
+/**
+ * Включён ли плагин по prefs. Явный выбор человека сильнее любого умолчания;
+ * умолчание объявляет сам манифест (`defaultEnabled`), иначе действует общее
+ * правило «системный — включён, пользовательский — нет».
+ * @param {object} prefsData
+ * @param {{id: string, system?: boolean, defaultEnabled?: boolean}} manifest
+ */
+export function isEnabled(prefsData, manifest) {
   const map = prefsData.plugins || {};
-  if (id in map) return !!map[id];
-  return !!isSystem;
+  if (manifest.id in map) return !!map[manifest.id];
+  return manifest.defaultEnabled ?? !!manifest.system;
 }
 
 /** Значения настроек плагина: дефолты схемы, перекрытые сохранёнными. */

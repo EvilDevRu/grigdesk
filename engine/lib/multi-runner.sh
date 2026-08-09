@@ -363,6 +363,14 @@ tests — дефект/неполнота теста; environment —
   DISPATCH_INVOKE_STARTED=1
   DISPATCH_LIMIT_SCOPE=provider
   DISPATCH_LIMIT_UNTIL=""
+  # Срок сброса спрашиваем только у отказа по лимиту и только у того раннера,
+  # который умеет его назвать: метод ОПЦИОНАЛЬНЫЙ, и его отсутствие оставляет
+  # предохранителю общий cooldown, а не ломает контракт (docs/engine/ADDING-RUNNER.md).
+  if [[ "$result" == limited ]] && declare -F "runner_${provider}_limit_until" >/dev/null 2>&1; then
+    local limit_until
+    limit_until=$(runner_call "$provider" limit_until "$run_dir" 2>/dev/null) || limit_until=""
+    [[ "$limit_until" =~ ^[0-9]+$ ]] && DISPATCH_LIMIT_UNTIL=$limit_until
+  fi
   return 0
 }
 
@@ -402,12 +410,21 @@ multi_runner_run() {
   declare -gA MULTI_PLAN_LEVEL=()
   declare -gA MULTI_PLAN_DEGRADED=()
   MULTI_CATALOG_ROOT=$(mktemp -d "${STATE_DIR:?}/.catalog-invoke.XXXXXX")
+  # Исполнитель, назначенный ЧЕЛОВЕКОМ, а не политикой профиля: назначение на задачу
+  # (`task`) или на этап (`task-stage`). Такой заход предохранитель не отменяет —
+  # см. комментарий в lib/dispatcher.sh.
+  local human_choice=""
+  case "$MULTI_ROUTE_SOURCE" in
+    task-stage|task) human_choice=$primary ;;
+  esac
   while (( manual_count < 2 )); do
     dispatcher_run_chain "$task" "$stage" "$primary" "$failover" "$(date +%s)" \
-      _multi_resolve _multi_invoke
+      _multi_resolve _multi_invoke "$human_choice"
     rc=$?
     if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
       primary=$MULTI_MANUAL_TARGET
+      # Кнопка переключения нажата прямо во время хода — это тот же явный выбор.
+      human_choice=$primary
       failover=""
       MULTI_PRIMARY=$primary
       MULTI_FAILOVER=$failover

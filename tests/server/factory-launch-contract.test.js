@@ -10,6 +10,7 @@ import {
   instrumentationSuggestions,
   loadFactoryLaunchProfile,
   normalizeFactoryLaunchInputs,
+  routeInstrumentationMode,
 } from '../../server/src/lib/factory-launch-contract.js';
 
 async function fixture(t, { deliveryActions = 'task-comment' } = {}) {
@@ -66,11 +67,23 @@ test('delivery actions принимаются только из словаря �
     /profile_delivery_actions: неизвестное или повторное действие task-comment/);
 });
 
-test('publish/debug launch берёт delivery contract из профиля и требует exact instrumentation scope', async (t) => {
+test('режим instrumentation выводится из topology, а не из имени маршрута', () => {
+  const node = (id, filesystem = 'state-only') => ({ id, policy: { filesystem } });
+  assert.equal(routeInstrumentationMode({ nodes: [node('ship')] }), 'disabled');
+  assert.equal(routeInstrumentationMode({
+    id: 'consilium-debug',
+    nodes: [node('instrument', 'transactional-write'), node('proof', 'transactional-write')],
+  }), 'explicit');
+  assert.equal(routeInstrumentationMode({
+    id: 'anything', nodes: [node('trace', 'transactional-write')],
+  }), 'derived');
+});
+
+test('publish/explicit launch берёт delivery contract из профиля и требует exact instrumentation scope', async (t) => {
   const profile = await fixture(t);
   assert.deepEqual(normalizeFactoryLaunchInputs({
-    route: 'debug',
     deliveryMode: 'publish',
+    instrumentationMode: 'explicit',
     repositories: profile.repositories,
     instrumentationFiles: ['backend:app/Restore.php'],
     diagnosisKind: 'data',
@@ -86,15 +99,15 @@ test('publish/debug launch берёт delivery contract из профиля и �
 
   // Профиль без хука task-comment: publish доставляет код, но комментарий не разрешён.
   assert.equal(normalizeFactoryLaunchInputs({
-    route: 'feature',
     deliveryMode: 'publish',
+    instrumentationMode: 'disabled',
     repositories: profile.repositories,
   }).taskComment, false);
 
   // Маршрут без ship не получает ни targets, ни комментарий во внешней задаче.
   assert.deepEqual(normalizeFactoryLaunchInputs({
-    route: 'hunt',
     deliveryMode: 'disabled',
+    instrumentationMode: 'disabled',
     repositories: profile.repositories,
   }), {
     deliveryTargets: [],
@@ -106,24 +119,24 @@ test('publish/debug launch берёт delivery contract из профиля и �
 
   for (const input of [
     {
-      route: 'feature', deliveryMode: 'publish', repositories: profile.repositories,
+      deliveryMode: 'publish', instrumentationMode: 'disabled', repositories: profile.repositories,
       deliveryTargets: ['backend=master'],
     },
     {
-      route: 'feature', deliveryMode: 'publish', repositories: profile.repositories,
+      deliveryMode: 'publish', instrumentationMode: 'disabled', repositories: profile.repositories,
       deliveryTargets: ['backend=release', 'frontend=main'],
     },
     {
-      route: 'debug', deliveryMode: 'publish', repositories: profile.repositories,
+      deliveryMode: 'publish', instrumentationMode: 'explicit', repositories: profile.repositories,
       deliveryTargets: ['backend=master', 'frontend=main'], instrumentationFiles: [],
     },
     {
-      route: 'debug', deliveryMode: 'publish', repositories: profile.repositories,
+      deliveryMode: 'publish', instrumentationMode: 'explicit', repositories: profile.repositories,
       deliveryTargets: ['backend=master', 'frontend=main'],
       instrumentationFiles: ['backend:../.env'],
     },
     {
-      route: 'hunt', deliveryMode: 'disabled', repositories: profile.repositories,
+      deliveryMode: 'disabled', instrumentationMode: 'disabled', repositories: profile.repositories,
       deliveryTargets: ['backend=master'],
     },
   ]) {
@@ -131,8 +144,8 @@ test('publish/debug launch берёт delivery contract из профиля и �
   }
 
   assert.throws(() => normalizeFactoryLaunchInputs({
-    route: 'feature',
     deliveryMode: 'publish',
+    instrumentationMode: 'disabled',
     repositories: profile.repositories.map((repo) => (
       repo.name === 'frontend' ? { ...repo, targetBranch: '' } : repo
     )),

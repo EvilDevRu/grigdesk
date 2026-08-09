@@ -13,6 +13,8 @@ UNIT="cockpit-server.service"
 # Сообщения после установки должны показывать те же порты, что прочитает сервер.
 # .env разбирает Node: его содержимое не исполняется shell'ом.
 source "$COCKPIT_DIR/bin/lib/runtime-env.sh"
+source "$COCKPIT_DIR/bin/lib/media-runtime.sh"
+cockpit_install_media "$COCKPIT_DIR" "$@"
 cockpit_load_runtime_env "$COCKPIT_DIR"
 PORT="$COCKPIT_EFFECTIVE_PORT"
 TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"

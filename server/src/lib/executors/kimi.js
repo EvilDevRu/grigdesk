@@ -95,6 +95,9 @@ export default {
   securityProfile: KIMI_SECURITY_PROFILE,
   retryContract: KIMI_RETRY_CONTRACT,
   compaction: { kind: 'native', message: '/compact' },
+  // В host-режиме ACP не умеет принять extraDirs; contained объявляет их через
+  // server-owned local.toml и монтирует в sandbox. UI получает фактический режим.
+  trustedDirectories(config) { return config.kimiLaunchMode === 'contained'; },
 
   bin(config) { return config.kimiBin; },
 

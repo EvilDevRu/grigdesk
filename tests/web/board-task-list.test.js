@@ -44,6 +44,8 @@ function select(overrides = {}) {
     onlyNeedsInfo: false,
     favoriteOnly: false,
     favoriteTaskIds: [],
+    newOnly: false,
+    seenTaskIds: [],
     ...overrides,
   });
 }
@@ -108,6 +110,7 @@ test('LIST-08: ключ сброса пагинации меняется от п
     onlyUnrated: false,
     onlyNeedsInfo: false,
     favoriteOnly: false,
+    newOnly: false,
     sortBy: 'b24',
     taskCount: 77,
   });
@@ -116,6 +119,7 @@ test('LIST-08: ключ сброса пагинации меняется от п
     { onlyUnrated: true },
     { onlyNeedsInfo: true },
     { favoriteOnly: true },
+    { newOnly: true },
     { sortBy: 'risk' },
     { taskCount: 78 },
   ]) {
@@ -124,9 +128,50 @@ test('LIST-08: ключ сброса пагинации меняется от п
       onlyUnrated: false,
       onlyNeedsInfo: false,
       favoriteOnly: false,
+      newOnly: false,
       sortBy: 'b24',
       taskCount: 77,
       ...patch,
     }), base);
   }
+});
+
+test('LIST-09: newOnly оставляет только непросмотренные задачи', () => {
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11', 33],
+  }).map((task) => task.id), [22, 44]);
+
+  // Отметка несуществующей задачи никого не выбрасывает, а полный список отметок
+  // честно оставляет пустой результат: «новых нет» — это состояние, а не сбой.
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['999'],
+  }).map((task) => task.id), [11, 22, 33, 44]);
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11', '22', '33', '44'],
+  }), []);
+});
+
+test('LIST-10: «новые» складываются с поиском, избранным и триажем через AND', () => {
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11'],
+    query: 'обновить',
+  }).map((task) => task.id), [33]);
+
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['11'],
+    favoriteOnly: true,
+    favoriteTaskIds: ['11', '33'],
+  }).map((task) => task.id), [33]);
+
+  // Просмотренная задача не возвращается через триаж-фильтр.
+  assert.deepEqual(select({
+    newOnly: true,
+    seenTaskIds: ['33'],
+    onlyUnrated: true,
+  }), []);
 });

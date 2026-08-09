@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { registerLayer } from './layer-stack.js';
 
 // Иконка-подсказка «?» с тултипом для человека: что делает настройка.
 // Показывается по ховеру и по фокусу (клавиатура/тач).
@@ -45,6 +46,7 @@ const on = ref(false);
 // Закреплена кликом (режим toggle): ховер и потеря фокуса её не закрывают.
 const pinned = ref(false);
 let hideT = null;
+let unregisterPinnedLayer = null;
 function show() { clearTimeout(hideT); place(); on.value = true; }
 function hide() {
   if (pinned.value) return;
@@ -76,6 +78,10 @@ function onDocDown(e) {
   close();
 }
 watch(pinned, (v) => {
+  unregisterPinnedLayer?.();
+  unregisterPinnedLayer = v
+    ? registerLayer('help-tip', { priority: 300, close })
+    : null;
   if (v) document.addEventListener('pointerdown', onDocDown, true);
   else document.removeEventListener('pointerdown', onDocDown, true);
 });
@@ -128,6 +134,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   clearTimeout(hideT);
+  unregisterPinnedLayer?.();
   document.removeEventListener('pointerdown', onDocDown, true);
   window.removeEventListener('scroll', onMove, { capture: true });
   window.removeEventListener('resize', onMove);

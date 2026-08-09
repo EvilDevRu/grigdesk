@@ -198,10 +198,24 @@ function parseInstrumentationFile(value, repositoryNames) {
   return `${name}:${relative}`;
 }
 
+/**
+ * Scope-контракт выводится из опубликованной машины, а не из route id.
+ * `instrument` держит одну явную транзакцию до `proof`; прочие исторические
+ * transactional-write узлы используют scope, полученный движком из текущего diff.
+ */
+export function routeInstrumentationMode(route) {
+  if (!route || !Array.isArray(route.nodes)) fail('route instrumentation topology недоступна');
+  const transactional = route.nodes.filter(
+    (node) => node?.policy?.filesystem === 'transactional-write',
+  );
+  if (transactional.some((node) => node.id === 'instrument')) return 'explicit';
+  return transactional.length ? 'derived' : 'disabled';
+}
+
 /** Проверка request body до ticket, git refresh, slot reservation и provisioning. */
 export function normalizeFactoryLaunchInputs({
-  route,
   deliveryMode,
+  instrumentationMode,
   repositories,
   deliveryTargets = [],
   instrumentationFiles = [],
@@ -210,6 +224,9 @@ export function normalizeFactoryLaunchInputs({
   profileDeliveryActions = [],
 }) {
   if (!['publish', 'disabled'].includes(deliveryMode)) fail('маршрут не объявил delivery mode');
+  if (!['explicit', 'derived', 'disabled'].includes(instrumentationMode)) {
+    fail('маршрут не объявил instrumentation mode');
+  }
   const repoList = Array.isArray(repositories) ? repositories : [];
   const repositoryNames = new Set(repoList.map((repo) => repo?.name));
   if (repositoryNames.has(undefined) || repositoryNames.size !== repoList.length || !repoList.length) {
@@ -246,11 +263,11 @@ export function normalizeFactoryLaunchInputs({
   if (new Set(instrumentation).size !== instrumentation.length) {
     fail('instrumentation file: повтор пути');
   }
-  if (route === 'debug' && !instrumentation.length) {
-    fail('debug требует хотя бы один instrumentation file');
+  if (instrumentationMode === 'explicit' && !instrumentation.length) {
+    fail('маршрут требует хотя бы один instrumentation file');
   }
-  if (route !== 'debug' && instrumentation.length) {
-    fail('instrumentation files разрешены только маршруту debug');
+  if (instrumentationMode !== 'explicit' && instrumentation.length) {
+    fail('маршрут не принимает явные instrumentation files');
   }
 
   diagnosisKind = String(diagnosisKind || '');

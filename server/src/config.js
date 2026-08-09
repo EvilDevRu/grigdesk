@@ -9,7 +9,10 @@ const home = os.homedir();
 const rootDir = path.join(__dirname, '..', '..');
 const factoryHome = process.env.FACTORY_HOME || path.join(rootDir, 'engine');
 const chatsDir = process.env.COCKPIT_CHATS_DIR || path.join(rootDir, 'chats');
+const telegramDir = process.env.COCKPIT_TELEGRAM_DIR || path.join(rootDir, 'telegram');
+const githubDir = process.env.COCKPIT_GITHUB_DIR || path.join(rootDir, 'github');
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
+const publicDomain = process.env.COCKPIT_PUBLIC_DOMAIN || '';
 
 // Запуск kimi-чатов: host — прямой дочерний процесс сервера (parity с claude: host
 // fs/config/credentials, без namespace/cgroup/egress allowlist), contained — прежний
@@ -20,7 +23,7 @@ if (!['host', 'contained'].includes(kimiLaunchMode)) {
 }
 
 export const config = {
-  // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось через Tailscale.
+  // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось по локальной сети и через шлюз.
   port: Number(process.env.COCKPIT_PORT) || 8140,
   host: process.env.COCKPIT_HOST || '0.0.0.0',
 
@@ -90,6 +93,25 @@ export const config = {
   // Старое хранилище одним файлом — только для одноразовой миграции.
   chatStoreLegacyPath: process.env.COCKPIT_CHAT_STORE || path.join(__dirname, '..', '.state', 'chats.json'),
 
+  // Архив входящих из Telegram — папка в корне проекта (внутри свой .gitignore,
+  // как chats/): NDJSON по месяцам плюс индекс. В дереве проекта, чтобы дамп
+  // делался одной командой, а не собирался по системе.
+  telegramDir,
+  // Токен бота — в strict account-aware .state файле (0600), а НЕ в prefs:
+  // prefs целиком уезжают в браузер ответом /api/settings/prefs.
+  telegramAccountCredsPath: process.env.COCKPIT_TELEGRAM_ACCOUNT_CREDS_PATH
+    || path.join(__dirname, '..', '.state', 'telegram-account-creds.json'),
+
+  // GitHub Issues — второй channel общего Inbox. Нативный archive/rules/account binding
+  // лежат отдельно от Telegram, а PAT и webhook secret — только в private .state.
+  githubDir,
+  githubCredsPath: process.env.COCKPIT_GITHUB_CREDS_PATH
+    || path.join(__dirname, '..', '.state', 'github-creds.json'),
+  // База callback-а принадлежит оператору. В request body адрес не принимается: иначе
+  // connect превратился бы в SSRF/создание webhook на произвольный endpoint.
+  githubWebhookBaseUrl: process.env.COCKPIT_GITHUB_WEBHOOK_BASE_URL
+    || (publicDomain ? `https://${publicDomain}/hooks/github` : ''),
+
   // База агентов (стадий конвейера) — папка в корне проекта (внутри свой .gitignore,
   // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
   agentsDir: process.env.COCKPIT_AGENTS_DIR || path.join(__dirname, '..', '..', 'agents'),
@@ -124,6 +146,10 @@ export const config = {
   // а не настройки интерфейса.
   taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH
     || path.join(__dirname, '..', '.state', 'task-favorites.json'),
+  // Просмотренные B24-задачи: набор серверный, чтобы метка «новая» снималась на всех
+  // устройствах сразу.
+  taskSeenPath: process.env.COCKPIT_TASK_SEEN_PATH
+    || path.join(__dirname, '..', '.state', 'task-seen.json'),
 
   // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
   // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.
@@ -141,6 +167,12 @@ export const config = {
   // COCKPIT_MEDIA_PYTHON; читается в media/preflight.js. Хранилище job'ов/медиа.
   mediaDir: process.env.COCKPIT_MEDIA_DIR || path.join(__dirname, '..', '.state', 'media'),
   mediaPython: process.env.COCKPIT_MEDIA_PYTHON || '',
+  // Собственный кэш моделей речи: обычный transcribe работает fail-closed и никогда
+  // не скачивает веса в общий ~/.cache. Все Python-spawn получают этот HF_HOME.
+  mediaHfDir: process.env.COCKPIT_MEDIA_HF_DIR || path.join(__dirname, '..', '.state', 'hf'),
+  // Эталон для воспроизводимого speed benchmark задаёт оператор: голосовой бинарный
+  // asset не тащим в исходники и не подменяем речь бессмысленным тоном/тишиной.
+  speechBenchmarkAudioPath: process.env.COCKPIT_SPEECH_BENCHMARK_AUDIO || '',
 
   // Вход в кокпит: учётка (логин + scrypt-хеш пароля) и сессии. Оба файла в .state (0600).
   // Один пользователь — пульт личный. Пароль задаётся при первом открытии или в install.sh,
@@ -201,7 +233,18 @@ export const config = {
   // Нужен валидатору имён для сертификатов по требованию: разрешаем сам домен и `p<порт>.<домен>`
   // с портом из диапазонов стендов, остальное — отказ (иначе нас заставят выпускать сертификаты
   // на чужие имена, пока не упрёмся в лимиты Let's Encrypt).
-  publicDomain: process.env.COCKPIT_PUBLIC_DOMAIN || '',
+  publicDomain,
+
+  // Установка шлюза из «Настроек»: свой ключ доступа к VPS, свой known_hosts и слепок установки.
+  // Отдельный каталог, а не `tlsDir`: у ключа доступа к чужой машине и у сертификата разная цена
+  // ошибки, и складывать их в одну кучу нельзя. Секретов человека (пароль root, токен DNS) здесь
+  // НЕТ вовсе — они живут только в памяти процесса на время установки.
+  gatewayDir: process.env.COCKPIT_GATEWAY_DIR || path.join(__dirname, '..', '.state', 'gateway'),
+
+  // Машинные переменные кокпита. Установщик шлюза дописывает сюда `COCKPIT_TRUST_PROXY`
+  // и `COCKPIT_PUBLIC_DOMAIN` — их читают ВСЕ три способа запуска (юнит systemd, bin/cockpit,
+  // bin/restart), поэтому другого места у них нет (см. docs/cockpit/gotchas.md).
+  envPath: process.env.COCKPIT_ENV_FILE || path.join(rootDir, '.env'),
 
   // Режим.
   isDev: process.env.NODE_ENV === 'development',

@@ -110,6 +110,44 @@ test('send со slashCommand шлёт признак на сервер и не �
   assert.equal(last.text, 'Session status: ok');
 });
 
+test('поздний speech GET не откатывает снимок, уже обновлённый через SSE', async () => {
+  const chat = await fixture([freshSession('speech-race')]);
+  chat.setSpeechSnapshot({
+    settings: { engine: 'browser', revision: 'rev-before' },
+  });
+
+  let resolveGet;
+  apiHarness.get = (url) => {
+    assert.equal(url, '/api/settings/speech');
+    return new Promise((resolve) => { resolveGet = resolve; });
+  };
+  const pending = chat._resyncSpeech();
+
+  chat.setSpeechSnapshot({
+    settings: { engine: 'whisper', revision: 'rev-after' },
+  });
+  resolveGet({ settings: { engine: 'browser', revision: 'rev-before' } });
+  await pending;
+
+  assert.equal(chat.speech.engine, 'whisper');
+  assert.equal(chat.speech.revision, 'rev-after');
+});
+
+test('initial ensure сверяет speech без зависимости от уже прошедшего hello', async () => {
+  const chat = await fixture([freshSession('initial-speech')]);
+  let resyncs = 0;
+  chat._load = async () => { chat.loaded = true; };
+  chat.initPerms = () => {};
+  chat._resyncSpeech = () => {
+    resyncs += 1;
+    return Promise.resolve();
+  };
+
+  await chat.ensure();
+
+  assert.equal(resyncs, 1);
+});
+
 test('пустой вывод слэш-команды складывается плашкой role: note', async () => {
   const chat = await fixture([freshSession('s2')]);
   apiHarness.post = async () => ({ reply: '✓ Команда /status выполнена локально — вывода нет.', note: true, sessionId: 'k1' });

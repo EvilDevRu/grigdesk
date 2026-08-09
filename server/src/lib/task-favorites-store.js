@@ -3,8 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { parseB24TaskId } from './b24-task-id.js';
+
 const SCHEMA_VERSION = 1;
-const MAX_TASK_ID_DIGITS = 20;
 
 export class TaskFavoritesStoreError extends Error {
   constructor(code, message, cause = null) {
@@ -15,31 +16,14 @@ export class TaskFavoritesStoreError extends Error {
 }
 
 export function normalizeFavoriteTaskId(value) {
-  let raw;
-  if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) raw = '';
-    else raw = String(value);
-  } else if (typeof value === 'string') {
-    raw = value.trim();
-  } else {
-    raw = '';
-  }
-
-  if (!/^\d+$/.test(raw) || raw.length > MAX_TASK_ID_DIGITS) {
+  const normalized = parseB24TaskId(value);
+  if (!normalized) {
     throw new TaskFavoritesStoreError(
       'BAD_FAVORITE_TASK_ID',
       'taskId должен быть положительным целым числом',
     );
   }
-
-  const normalized = BigInt(raw);
-  if (normalized <= 0n) {
-    throw new TaskFavoritesStoreError(
-      'BAD_FAVORITE_TASK_ID',
-      'taskId должен быть положительным целым числом',
-    );
-  }
-  return normalized.toString();
+  return normalized;
 }
 
 function emptyDocument() {

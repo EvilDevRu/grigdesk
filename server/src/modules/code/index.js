@@ -19,6 +19,32 @@ import { taskDiff } from '../../lib/git.js';
 const exec = promisify(execFile);
 const MAX_BYTES = 1_500_000; // как в lib/git.js: гигантские блобы в браузер не тащим
 
+// Сегменты, закрытые в ЛЮБОМ дереве: внутренности гита (в .git/config лежат токены
+// remote-ов) и конвенция `.state` — в проекте она гитигнорится целиком (`**/.state/`)
+// и означает «секреты и рантайм» (server/.state: креды B24, cli-token, хеш пароля входа).
+const HIDDEN_SEGMENTS = new Set(['.git', '.state']);
+
+/**
+ * Каталоги данных САМОГО кокпита (chats/, telegram/, github/): они лежат внутри его дерева,
+ * гитигнорятся — и потому в дифе не видны, а в `ls`/`file` были бы видны целиком.
+ *
+ * Закрываются по фактическому пути из config, а НЕ по имени: имена настраиваются
+ * переменными окружения, а одноимённый каталог в чужом репозитории — чужой код,
+ * прятать его нельзя (сравни с `git`: там путь от клиента не приходит вовсе).
+ */
+function hiddenDirs(config) {
+  return [config.chatsDir, config.telegramDir, config.githubDir]
+    .filter(Boolean)
+    .map((d) => path.resolve(d));
+}
+
+/** Закрыт ли путь: по сегменту в любом месте дерева либо по каталогу кокпита. */
+export function isHiddenPath(abs, dirs = []) {
+  const p = path.resolve(abs);
+  if (p.split(path.sep).some((seg) => HIDDEN_SEGMENTS.has(seg))) return true;
+  return dirs.some((dir) => p === dir || p.startsWith(dir + path.sep));
+}
+
 /** Деревья репозитория: основное + worktree. Первым git всегда отдаёт основное. */
 async function worktrees(dir) {
   const { stdout } = await exec('git', ['-C', dir, 'worktree', 'list', '--porcelain'], { maxBuffer: 4 * 1024 * 1024 });
@@ -44,6 +70,7 @@ async function worktrees(dir) {
 
 async function codeModule(fastify, opts) {
   const { config, prefs } = opts;
+  const hidden = hiddenDirs(config);
 
   // Живой гейт (как у video): тумблер в настройках действует без рестарта.
   const gate = (reply) => (fastify.pluginEnabled('code') ? null
@@ -95,12 +122,15 @@ async function codeModule(fastify, opts) {
     if (!ctx) return reply;
     const abs = inside(ctx.tree.path, req.query.dir, reply);
     if (!abs) return reply;
+    if (isHiddenPath(abs, hidden)) {
+      return reply.code(404).send({ error: 'no_dir', message: 'служебный каталог закрыт для просмотра' });
+    }
     let entries = [];
     try { entries = await fs.readdir(abs, { withFileTypes: true }); }
     catch (e) { return reply.code(404).send({ error: 'no_dir', message: e.message }); }
     return {
       entries: entries
-        .filter((e) => e.name !== '.git')
+        .filter((e) => !isHiddenPath(path.join(abs, e.name), hidden))
         .map((e) => ({ name: e.name, dir: e.isDirectory() }))
         .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : (a.dir ? -1 : 1))),
     };
@@ -113,6 +143,9 @@ async function codeModule(fastify, opts) {
     if (!ctx) return reply;
     const abs = inside(ctx.tree.path, req.query.path, reply);
     if (!abs) return reply;
+    if (isHiddenPath(abs, hidden)) {
+      return reply.code(404).send({ error: 'no_file', message: 'служебный каталог закрыт для просмотра' });
+    }
     let buf;
     try { buf = await fs.readFile(abs); }
     catch (e) { return reply.code(404).send({ error: 'no_file', message: e.message }); }

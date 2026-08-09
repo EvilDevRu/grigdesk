@@ -1,10 +1,11 @@
 <script setup>
-import { computed, nextTick, ref, onMounted, onUnmounted, watchEffect } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, nextTick, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue';
 import { api } from '../shared/api-client.js';
 import { useProvidersStore } from '../stores/providers.js';
 import { useUiContextStore } from '../stores/ui-context.js';
+import { useToolLauncher } from '../shared/tools/launcher.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
+import AccessOverview from './settings/AccessOverview.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
 import NumberField from '../shared/ui/NumberField.vue';
 import { useAuthStore } from '../stores/auth.js';
@@ -17,6 +18,7 @@ import {
   useCockpitUpdateStore,
 } from '../stores/cockpit-update.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
+import { useSse } from '../composables/useSse.js';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.
@@ -25,6 +27,11 @@ const TABS = [
     id: 'app', label: 'Приложение', group: 'Основное', short: 'Экран и PWA',
     description: 'Поведение Cockpit на этом устройстве: экран, установка и локальные возможности браузера.',
     icon: 'M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M9 21h6 M12 17v4',
+  },
+  {
+    id: 'speech', label: 'Речь', group: 'Основное', short: 'Диктовка и приватность',
+    description: 'Движок диктовки, место обработки голоса, язык и термины проекта.',
+    icon: 'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v3 M8 22h8',
   },
   {
     id: 'b24', label: 'Битрикс24', group: 'Основное', short: 'Портал и сессия',
@@ -92,6 +99,492 @@ const pwa = usePwaStore();
 const wakeLockNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;
 const notificationNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;
 
+// ── Речь (server-owned выбор + фактическая возможность этого браузера) ──
+const chatStore = useChatStore();
+const speechLoading = ref(true);
+const speechSaving = ref(false);
+const speechRefreshing = ref(false);
+const speechMsg = ref(null);
+const speech = ref({
+  engine: 'browser', browserProcessing: 'auto', browserAutoConsent: false,
+  language: 'auto', dictionary: '', local: { ready: false, reason: '' }, revision: '',
+  quality: 'balanced', videoQuality: 'balanced', model: null, videoModel: null,
+  device: 'auto', computeType: null, beamSize: null, vadSilenceMs: 500,
+  conditionOnPreviousText: true,
+});
+const speechCapabilities = ref({
+  local: { ready: false, reason: '', checks: [] },
+  models: [], cuda: { state: 'probe_failed', reason: '' }, languages: ['ru', 'en', 'auto'],
+  lastDictionaryMeasure: null, resident: null, benchmark: null,
+});
+const browserLocalStatus = ref('unknown');
+const browserLocalBusy = ref(false);
+const speechAdvanced = ref(false);
+const speechJobs = ref({});
+const speechStarting = ref({});
+const benchmarkResult = ref(null);
+const speechJobTimers = new Map();
+let speechJobsDestroyed = false;
+let speechBaseline = null;
+let speechSnapshotEpoch = 0;
+
+const SPEECH_QUALITIES = [
+  { id: 'fast', label: 'Быстро', model: 'small', beam: 1, hint: 'Черновик; термины может путать.' },
+  { id: 'balanced', label: 'Обычно', model: 'medium', beam: 5, hint: 'Баланс скорости и точности.' },
+  { id: 'accurate', label: 'Точно', model: 'large-v3-turbo', beam: 5, hint: 'Точнее; скорость зависит от CPU/GPU и проверяется замером.' },
+];
+const SPEECH_MODELS = [
+  { id: 'small', label: 'Small' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'large-v3', label: 'Large v3' },
+  { id: 'large-v3-turbo', label: 'Large v3 Turbo' },
+];
+const QUALITY_MODELS = { fast: 'small', balanced: 'medium', accurate: 'large-v3-turbo' };
+const COCKPIT_DICTIONARY = 'кокпит\nконвейер\nworktree\nпесочница\nворота\nБитрикс24\nFastify\nPinia\nSSE\nCodex\nKimi\nOllama';
+const TERMINAL_SPEECH_JOBS = new Set(['done', 'failed', 'cancelled', 'interrupted']);
+const SPEECH_EDITABLE_FIELDS = [
+  'engine', 'browserProcessing', 'language', 'dictionary', 'quality', 'videoQuality',
+  'model', 'videoModel', 'device', 'computeType', 'beamSize', 'vadSilenceMs',
+  'conditionOnPreviousText',
+];
+
+function validNullable(value, allowed, fallback = null) {
+  return value === null || allowed.includes(value) ? value : fallback;
+}
+
+function normalizeSpeechCapabilities(value, fallback = speechCapabilities.value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const localRaw = raw.local && typeof raw.local === 'object' ? raw.local : (fallback.local || {});
+  const cudaRaw = raw.cuda && typeof raw.cuda === 'object' ? raw.cuda : (fallback.cuda || {});
+  return {
+    local: {
+      ready: localRaw.ready === true,
+      reason: typeof localRaw.reason === 'string' ? localRaw.reason : '',
+      checks: Array.isArray(localRaw.checks) ? localRaw.checks : [],
+    },
+    models: Array.isArray(raw.models) ? raw.models
+      .filter((model) => model && typeof model === 'object' && typeof model.modelId === 'string')
+      .map((model) => ({
+        ...model,
+        cached: model.cached === true,
+        sizeMb: Number.isFinite(Number(model.sizeMb)) ? Number(model.sizeMb) : 0,
+      })) : (fallback.models || []),
+    cuda: {
+      ...cudaRaw,
+      state: typeof cudaRaw.state === 'string' ? cudaRaw.state : 'probe_failed',
+      reason: typeof cudaRaw.reason === 'string' ? cudaRaw.reason : '',
+    },
+    languages: Array.isArray(raw.languages) ? raw.languages : (fallback.languages || ['ru', 'en', 'auto']),
+    lastDictionaryMeasure: raw.lastDictionaryMeasure ?? fallback.lastDictionaryMeasure ?? null,
+    resident: raw.resident ?? fallback.resident ?? null,
+    benchmark: raw.benchmark && typeof raw.benchmark === 'object'
+      ? { ...raw.benchmark }
+      : (fallback.benchmark && typeof fallback.benchmark === 'object' ? { ...fallback.benchmark } : null),
+  };
+}
+
+function speechCtor() {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+function speechLanguageTag() {
+  if (speech.value.language === 'ru') return 'ru-RU';
+  if (speech.value.language === 'en') return 'en-US';
+  return document.documentElement.lang || navigator.language || 'ru-RU';
+}
+const browserSpeechReady = computed(() => window.isSecureContext !== false && !!speechCtor());
+const browserSpeechReason = computed(() => {
+  if (window.isSecureContext === false) return 'Web Speech требует HTTPS или localhost.';
+  if (!speechCtor()) return 'Этот браузер не предоставляет SpeechRecognition.';
+  if (speech.value.browserProcessing === 'local' && browserLocalStatus.value === 'unavailable') {
+    return 'Локальная модель выбранного языка в этом браузере недоступна.';
+  }
+  return '';
+});
+const speechEffective = computed(() => {
+  if (speech.value.engine === 'whisper') {
+    return speech.value.local.ready
+      ? 'Whisper на сервере Cockpit'
+      : `Недоступно${speech.value.local.reason ? `: ${speech.value.local.reason}` : ''}`;
+  }
+  if (!browserSpeechReady.value
+      || (speech.value.browserProcessing === 'local' && browserLocalStatus.value === 'unavailable')) {
+    return speech.value.local.ready
+      ? `Whisper (fallback: ${browserSpeechReason.value})`
+      : `Недоступно: ${browserSpeechReason.value || speech.value.local.reason || 'нет рабочего движка'}`;
+  }
+  if (speech.value.browserProcessing === 'local') {
+    if (browserLocalStatus.value === 'downloadable') return 'Браузер локально — модель скачается по первому запуску';
+    if (browserLocalStatus.value === 'downloading') return 'Браузер локально — модель скачивается';
+    return 'Браузер локально на этом устройстве';
+  }
+  return 'Браузер — способ обработки выбирает сам браузер';
+});
+
+function speechSnapshotRevision(payload) {
+  const raw = payload?.speech || payload?.settings || payload || {};
+  const revision = raw.revision ?? payload?.revision;
+  return typeof revision === 'string' ? revision : '';
+}
+
+function captureSpeechSnapshotContext() {
+  return {
+    epoch: speechSnapshotEpoch,
+    revision: speechBaseline?.revision || '',
+  };
+}
+
+function speechSnapshotMatchesCurrent(payload) {
+  const revision = speechSnapshotRevision(payload);
+  return !!revision && revision === (speechBaseline?.revision || '');
+}
+
+function speechSnapshotDisposition(context, payload) {
+  if (speechSnapshotEpoch === context.epoch
+    && (speechBaseline?.revision || '') === context.revision) return 'apply';
+  if (speechSnapshotMatchesCurrent(payload)) return 'current';
+  return 'stale';
+}
+
+function speechPatch() {
+  if (!speechBaseline) return {};
+  return Object.fromEntries(SPEECH_EDITABLE_FIELDS
+    .filter((field) => !Object.is(speech.value[field], speechBaseline[field]))
+    .map((field) => [field, speech.value[field]]));
+}
+
+function applySpeechSnapshot(payload, { preserveDirty = true } = {}) {
+  const raw = payload?.speech || payload?.settings || payload || {};
+  const capabilities = normalizeSpeechCapabilities(payload?.capabilities || raw.capabilities);
+  const previous = speechBaseline || speech.value;
+  const local = raw.local || capabilities.local || previous.local || {};
+  const revision = raw.revision ?? payload?.revision;
+  const dirty = new Map();
+  if (preserveDirty && speechBaseline) {
+    for (const field of SPEECH_EDITABLE_FIELDS) {
+      if (!Object.is(speech.value[field], speechBaseline[field])) dirty.set(field, speech.value[field]);
+    }
+  }
+  const serverSnapshot = {
+    engine: ['browser', 'whisper'].includes(raw.engine) ? raw.engine : previous.engine,
+    browserProcessing: ['auto', 'local'].includes(raw.browserProcessing)
+      ? raw.browserProcessing : previous.browserProcessing,
+    browserAutoConsent: typeof raw.browserAutoConsent === 'boolean'
+      ? raw.browserAutoConsent : previous.browserAutoConsent,
+    language: ['ru', 'en', 'auto'].includes(raw.language) ? raw.language : previous.language,
+    dictionary: typeof raw.dictionary === 'string' ? raw.dictionary : previous.dictionary,
+    quality: ['fast', 'balanced', 'accurate'].includes(raw.quality) ? raw.quality : previous.quality,
+    videoQuality: ['fast', 'balanced', 'accurate'].includes(raw.videoQuality) ? raw.videoQuality : previous.videoQuality,
+    model: validNullable(raw.model, SPEECH_MODELS.map((model) => model.id), previous.model),
+    videoModel: validNullable(raw.videoModel, SPEECH_MODELS.map((model) => model.id), previous.videoModel),
+    device: ['auto', 'cpu', 'cuda'].includes(raw.device) ? raw.device : previous.device,
+    computeType: validNullable(raw.computeType, ['int8', 'int8_float16', 'float16', 'float32'], previous.computeType),
+    beamSize: raw.beamSize === null || (Number.isInteger(raw.beamSize) && raw.beamSize >= 1 && raw.beamSize <= 10)
+      ? raw.beamSize : previous.beamSize,
+    vadSilenceMs: Number.isInteger(raw.vadSilenceMs) && raw.vadSilenceMs >= 100 && raw.vadSilenceMs <= 5000
+      ? raw.vadSilenceMs : previous.vadSilenceMs,
+    conditionOnPreviousText: typeof raw.conditionOnPreviousText === 'boolean'
+      ? raw.conditionOnPreviousText : previous.conditionOnPreviousText,
+    local: { ready: local.ready === true, reason: typeof local.reason === 'string' ? local.reason : '' },
+    revision: typeof revision === 'string' && revision ? revision : (previous.revision || ''),
+  };
+  const previousFingerprint = speechBaseline && JSON.stringify(speechBaseline);
+  speechBaseline = { ...serverSnapshot, local: { ...serverSnapshot.local } };
+  if (!previousFingerprint || previousFingerprint !== JSON.stringify(speechBaseline)) speechSnapshotEpoch++;
+  const formSnapshot = { ...serverSnapshot, local: { ...serverSnapshot.local } };
+  for (const [field, value] of dirty) formSnapshot[field] = value;
+  speech.value = formSnapshot;
+  speechCapabilities.value = capabilities;
+  const storeSnapshot = { settings: serverSnapshot, revision: serverSnapshot.revision, capabilities };
+  if (typeof chatStore.setSpeechSnapshot === 'function') chatStore.setSpeechSnapshot(storeSnapshot);
+  else chatStore.speech = serverSnapshot;
+  return serverSnapshot;
+}
+
+watch(() => chatStore.speech, (next) => {
+  if (!next || next.revision === speechBaseline?.revision) return;
+  applySpeechSnapshot({ settings: next, revision: next.revision, capabilities: next.capabilities });
+}, { flush: 'sync', immediate: true });
+
+async function probeBrowserSpeech() {
+  const Ctor = speechCtor();
+  if (!browserSpeechReady.value || !Ctor) { browserLocalStatus.value = 'unavailable'; return; }
+  if (!(typeof Ctor.available === 'function' && 'processLocally' in Ctor.prototype)) {
+    browserLocalStatus.value = 'unavailable';
+    return;
+  }
+  browserLocalBusy.value = true;
+  try {
+    browserLocalStatus.value = await Ctor.available({
+      langs: [speechLanguageTag()], processLocally: true,
+    });
+  } catch {
+    browserLocalStatus.value = 'unavailable';
+  } finally {
+    browserLocalBusy.value = false;
+  }
+}
+
+async function loadSpeech() {
+  speechLoading.value = true;
+  speechMsg.value = null;
+  const context = captureSpeechSnapshotContext();
+  try {
+    const response = await api.get('/api/settings/speech');
+    const disposition = speechSnapshotDisposition(context, response);
+    if (disposition === 'apply') applySpeechSnapshot(response);
+    await probeBrowserSpeech();
+  } catch (e) {
+    speechMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally {
+    speechLoading.value = false;
+  }
+}
+
+async function refreshSpeechCapabilities() {
+  if (speechRefreshing.value) return;
+  speechRefreshing.value = true;
+  speechMsg.value = null;
+  const context = captureSpeechSnapshotContext();
+  try {
+    const response = await api.get('/api/settings/speech?refresh=1');
+    const disposition = speechSnapshotDisposition(context, response);
+    if (disposition === 'apply') applySpeechSnapshot(response);
+    await probeBrowserSpeech();
+    speechMsg.value = disposition === 'stale'
+      ? { type: 'err', text: 'Настройки речи изменились во время проверки — показан актуальный снимок.' }
+      : { type: 'ok', text: 'Окружение и кэши моделей перепроверены.' };
+  } catch (error) {
+    speechMsg.value = { type: 'err', text: error.data?.message || error.message };
+  } finally {
+    speechRefreshing.value = false;
+  }
+}
+
+async function saveSpeech() {
+  const patch = speechPatch();
+  if (!Object.keys(patch).length) {
+    speechMsg.value = { type: 'ok', text: 'Изменений нет.' };
+    return;
+  }
+  speechSaving.value = true;
+  speechMsg.value = null;
+  const context = captureSpeechSnapshotContext();
+  try {
+    const response = await api.post('/api/settings/speech', patch);
+    const disposition = speechSnapshotDisposition(context, response);
+    if (disposition === 'apply') applySpeechSnapshot(response);
+    await probeBrowserSpeech();
+    speechMsg.value = disposition === 'stale'
+      ? { type: 'err', text: 'Настройки речи изменились в другом окне — проверь правки и сохрани ещё раз.' }
+      : { type: 'ok', text: 'Настройки диктовки сохранены.' };
+  } catch (e) {
+    speechMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally {
+    speechSaving.value = false;
+  }
+}
+
+const cudaReady = computed(() => speechCapabilities.value.cuda?.state === 'ready');
+// Отсутствие поля означает старый сервер: оставляем кнопку рабочей. Новый сервер
+// явно присылает available=false, когда эталонная запись не настроена.
+const benchmarkAvailable = computed(() => speechCapabilities.value.benchmark?.available !== false);
+const benchmarkReason = computed(() => {
+  const capability = speechCapabilities.value.benchmark;
+  if (!capability || capability.available !== false) return '';
+  return capability.reason || 'Эталонная запись для замера не настроена.';
+});
+const cudaReason = computed(() => {
+  const state = speechCapabilities.value.cuda?.state;
+  if (state === 'ready') return 'Готово к инференсу на CUDA.';
+  if (state === 'no_device') return 'NVIDIA GPU не обнаружен.';
+  if (state === 'missing_library') return 'В media-venv нет CUDA-библиотек.';
+  return speechCapabilities.value.cuda?.reason || 'Не удалось проверить CUDA.';
+});
+const benchmarkDevice = computed(() => {
+  if (speech.value.device !== 'auto') return speech.value.device;
+  return cudaReady.value ? 'cuda' : 'cpu';
+});
+const benchmarkComputeType = computed(() => speech.value.computeType
+  || (benchmarkDevice.value === 'cuda' ? 'float16' : 'int8'));
+const effectiveDictationModel = computed(() => speech.value.model || QUALITY_MODELS[speech.value.quality] || 'medium');
+const effectiveVideoModel = computed(() => speech.value.videoModel || QUALITY_MODELS[speech.value.videoQuality] || 'medium');
+
+function setNullableInteger(field, value, min, max) {
+  if (value === '') { speech.value[field] = null; return; }
+  const number = Number(value);
+  if (Number.isInteger(number)) speech.value[field] = Math.max(min, Math.min(max, number));
+}
+function fillCockpitDictionary() { speech.value.dictionary = COCKPIT_DICTIONARY; }
+function speechModelLabel(modelId) {
+  return SPEECH_MODELS.find((model) => model.id === modelId)?.label || modelId;
+}
+function formatModelSize(sizeMb) {
+  const value = Number(sizeMb);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  return value >= 1024 ? `${(value / 1024).toFixed(1)} ГБ` : `${value.toFixed(value >= 100 ? 0 : 1)} МБ`;
+}
+
+function normalizeSpeechJob(value, fallback = {}) {
+  const raw = value && typeof value === 'object' ? value : {};
+  return {
+    ...fallback,
+    ...raw,
+    jobId: typeof raw.jobId === 'string' ? raw.jobId : fallback.jobId,
+    kind: typeof raw.kind === 'string' ? raw.kind : fallback.kind,
+    modelId: typeof raw.modelId === 'string' ? raw.modelId : fallback.modelId,
+    status: typeof raw.status === 'string' ? raw.status : (fallback.status || 'queued'),
+    progress: raw.progress && typeof raw.progress === 'object' ? raw.progress : (fallback.progress || null),
+    result: raw.result ?? fallback.result ?? null,
+    error: raw.error ?? fallback.error ?? null,
+  };
+}
+function rememberSpeechJob(value, fallback = {}) {
+  const job = normalizeSpeechJob(value, fallback);
+  if (!job.jobId) return null;
+  speechJobs.value = { ...speechJobs.value, [job.jobId]: job };
+  if (job.kind === 'benchmark' && job.status === 'done') benchmarkResult.value = job.result || {};
+  return job;
+}
+function modelJob(modelId) {
+  return Object.values(speechJobs.value).filter((job) => job.modelId === modelId && job.kind !== 'benchmark').at(-1) || null;
+}
+function benchmarkJob() {
+  return Object.values(speechJobs.value).filter((job) => job.kind === 'benchmark').at(-1) || null;
+}
+function speechJobActive(job) { return !!job && !TERMINAL_SPEECH_JOBS.has(job.status); }
+function speechJobPercent(job) {
+  const progress = job?.progress;
+  if (!progress) return null;
+  if (Number.isFinite(Number(progress.percent))) return Math.max(0, Math.min(100, Number(progress.percent)));
+  const done = Number(progress.done ?? progress.current);
+  const total = Number(progress.total);
+  return Number.isFinite(done) && Number.isFinite(total) && total > 0
+    ? Math.max(0, Math.min(100, (done / total) * 100)) : null;
+}
+function speechJobLabel(job) {
+  if (!job) return '';
+  const labels = {
+    queued: 'в очереди', running: 'выполняется', done: 'готово',
+    failed: 'ошибка', cancelled: 'отменено', interrupted: 'прервано перезапуском',
+  };
+  const percent = speechJobPercent(job);
+  return `${labels[job.status] || job.status}${percent === null ? '' : ` · ${Math.round(percent)}%`}`;
+}
+function clearSpeechJobTimer(jobId) {
+  const timer = speechJobTimers.get(jobId);
+  if (timer) clearTimeout(timer);
+  speechJobTimers.delete(jobId);
+}
+function scheduleSpeechJobPoll(jobId, delay = 900) {
+  if (speechJobsDestroyed) return;
+  clearSpeechJobTimer(jobId);
+  speechJobTimers.set(jobId, setTimeout(() => pollSpeechJob(jobId), delay));
+}
+async function refreshSpeechSnapshot() {
+  const context = captureSpeechSnapshotContext();
+  try {
+    const snapshot = await api.get('/api/settings/speech');
+    if (speechJobsDestroyed) return;
+    if (speechSnapshotDisposition(context, snapshot) === 'apply') applySpeechSnapshot(snapshot);
+    await probeBrowserSpeech();
+  } catch { /* job уже завершён; следующий GET восстановит capabilities */ }
+}
+async function pollSpeechJob(jobId) {
+  clearSpeechJobTimer(jobId);
+  if (speechJobsDestroyed) return;
+  const previous = speechJobs.value[jobId];
+  if (!previous) return;
+  try {
+    const response = await api.get(`/api/settings/speech/jobs/${encodeURIComponent(jobId)}`);
+    if (speechJobsDestroyed) return;
+    const job = rememberSpeechJob(response, previous);
+    if (!job) return;
+    if (TERMINAL_SPEECH_JOBS.has(job.status)) {
+      if (job.status === 'done' && job.kind !== 'benchmark') await refreshSpeechSnapshot();
+      return;
+    }
+    scheduleSpeechJobPoll(jobId);
+  } catch (error) {
+    if (speechJobsDestroyed) return;
+    rememberSpeechJob({
+      ...previous,
+      error: { code: 'job_poll_failed', message: error.message },
+    }, previous);
+    scheduleSpeechJobPoll(jobId, 1600);
+  }
+}
+async function startSpeechJob(kind, modelId) {
+  const key = `${kind}:${modelId || ''}`;
+  if (speechStarting.value[key]) return;
+  speechStarting.value = { ...speechStarting.value, [key]: true };
+  speechMsg.value = null;
+  try {
+    const path = kind === 'benchmark'
+      ? '/api/settings/speech/benchmark'
+      : `/api/settings/speech/models/${encodeURIComponent(modelId)}/${kind}`;
+    const body = kind === 'benchmark' ? {
+      modelId: effectiveDictationModel.value,
+      language: speech.value.language,
+      device: benchmarkDevice.value,
+      computeType: benchmarkComputeType.value,
+    } : {};
+    const started = await api.post(path, body);
+    if (speechJobsDestroyed) return;
+    const job = rememberSpeechJob(started, {
+      kind,
+      modelId: kind === 'benchmark' ? effectiveDictationModel.value : modelId,
+      status: 'queued',
+    });
+    if (!job) throw new Error('Сервер не вернул jobId.');
+    await pollSpeechJob(job.jobId);
+  } catch (error) {
+    if (speechJobsDestroyed) return;
+    speechMsg.value = { type: 'err', text: error.data?.message || error.message };
+  } finally {
+    const next = { ...speechStarting.value };
+    delete next[key];
+    speechStarting.value = next;
+  }
+}
+async function cancelSpeechJob(job) {
+  if (!job?.jobId) return;
+  clearSpeechJobTimer(job.jobId);
+  try {
+    rememberSpeechJob(
+      await api.del(`/api/settings/speech/jobs/${encodeURIComponent(job.jobId)}`),
+      job,
+    );
+  } catch (error) {
+    speechMsg.value = { type: 'err', text: error.data?.message || error.message };
+    if (speechJobActive(job)) scheduleSpeechJobPoll(job.jobId);
+  }
+}
+function startBenchmark() {
+  if (!benchmarkAvailable.value || (speech.value.device === 'cuda' && !cudaReady.value)) return;
+  benchmarkResult.value = null;
+  startSpeechJob('benchmark', effectiveDictationModel.value);
+}
+function benchmarkText(result) {
+  if (!result || typeof result !== 'object') return '';
+  const durationMs = Number(result.durationMs ?? result.duration);
+  const elapsedSeconds = Number(result.elapsedSec);
+  const audioSeconds = Number(result.audioSec ?? result.audioSeconds);
+  const factor = Number(result.realtimeFactor);
+  const parts = [];
+  if (Number.isFinite(audioSeconds)) parts.push(`${audioSeconds.toFixed(1)} с речи`);
+  if (Number.isFinite(elapsedSeconds)) parts.push(`${elapsedSeconds.toFixed(2)} с обработки`);
+  else if (Number.isFinite(durationMs)) parts.push(`${(durationMs / 1000).toFixed(2)} с обработки`);
+  if (Number.isFinite(factor)) parts.push(`RTF ${factor.toFixed(2)}`);
+  return parts.join(' · ') || 'Замер завершён.';
+}
+
+onUnmounted(() => {
+  speechJobsDestroyed = true;
+  for (const timer of speechJobTimers.values()) clearTimeout(timer);
+  speechJobTimers.clear();
+});
+
 // ── Битрикс24 ──
 const form = ref({ baseUrl: '', login: '', password: '' });
 const configured = ref(false);
@@ -127,6 +620,13 @@ async function testAuth() {
 
 // ── Исполнители (реестр LLM-агентов) ──
 const prov = useProvidersStore();
+// Кто применяет доверенные каталоги, объявляют сами адаптеры в /api/providers.
+// Здесь нет ни id, ни названий конкретных ИИ: новый исполнитель появится в строке
+// автоматически, как только включит capability в своём контракте.
+const trustedDirectoryProviders = computed(() =>
+  prov.providers.filter((provider) => provider.trustedDirectories === true));
+const trustedDirectoryProviderNames = computed(() =>
+  trustedDirectoryProviders.value.map((provider) => provider.name).join(', '));
 const refreshing = ref(false);
 async function refreshProv() {
   refreshing.value = true;
@@ -135,10 +635,9 @@ async function refreshProv() {
 }
 // Команда установки или авторизации недоступного исполнителя — клик открывает терминал
 // с уже введённой командой (выполнение — Enter'ом пользователя).
-const router = useRouter();
+const { openTerminal } = useToolLauncher();
 function installInTerminal(p) {
-  sessionStorage.setItem('cockpit-term-insert', p.setupCommand || p.install);
-  router.push('/terminal');
+  openTerminal({ insert: p.setupCommand || p.install });
 }
 
 // Свои настройки исполнителя (тумблеры в его плашке): что за ключ — знает сам исполнитель,
@@ -255,6 +754,7 @@ async function loadPrefs() {
   try {
     prefs.value = await api.get('/api/settings/prefs');
     trustedDirectories.value = [...(prefs.value.trustedDirectories || [])];
+    syncInitialAccessDetails();
   } catch {
     prefs.value = null;
     trustedDirectories.value = [];
@@ -291,7 +791,7 @@ async function applyTrustedDirectories() {
     if (prefs.value) prefs.value.trustedDirectories = [...result.directories];
     trustedDirectoriesMsg.value = {
       type: 'ok',
-      text: 'Применено. Новые ходы всех ИИ получат доступ к этим каталогам.',
+      text: 'Сохранено. Изменение действует со следующего хода.',
     };
   } catch (e) {
     trustedDirectoriesMsg.value = { type: 'err', text: e.data?.message || e.message };
@@ -325,6 +825,24 @@ async function saveCompactWindow() {
       text: value
         ? `Чаты будут сжиматься при ${value.toLocaleString('ru')} токенах контекста. Применится к новым ходам.`
         : 'Порог снят: у каждого CLI останется свой (у Claude — почти у самого потолка окна модели).',
+    };
+  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
+}
+// Тот же порог для этапов конвейера. Своя настройка, а не общая с чатом: сжатие на
+// этапе стоит дешевле (нить разговора с человеком там рвать нечего), поэтому значения
+// у них расходятся осознанно.
+const stageCompactWindow = ref(0);
+watchEffect(() => { stageCompactWindow.value = Number(prefs.value?.stageAutoCompactWindow) || 0; });
+async function saveStageCompactWindow() {
+  prefsMsg.value = null;
+  const value = Math.max(0, Math.round(Number(stageCompactWindow.value) || 0));
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { stageAutoCompactWindow: value });
+    prefsMsg.value = {
+      type: 'ok',
+      text: value
+        ? `Этапы конвейера будут сжиматься при ${value.toLocaleString('ru')} токенах контекста. Применится к новым заходам.`
+        : 'Порог снят: у CLI на этапах останется свой (он срабатывает почти у потолка окна модели).',
     };
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
@@ -444,36 +962,76 @@ async function logoutAll() {
   auth.authenticated = false;
 }
 
-// ── Режимы доступа ──
-// Тумблер — намерение человека: он и открывает настройки режима, и решает, поднимать ли сокет.
-// Выключенный режим ничего не стирает (сертификат, корень на устройствах остаются) — обратно
-// включается тем же тумблером и перезапуском.
+// ── Способы доступа ──
+// У LAN и шлюза разная семантика: локальный флаг управляет HTTPS-сокетом на следующем
+// старте, а установленный VPS-шлюз отдельным prefs-флагом не выключается вовсе. Поэтому
+// одинаковых тумблеров здесь больше нет: один переключатель отвечает только за защиту LAN,
+// а панели подробностей раскрываются локально и всегда по одной.
 const accessBusy = ref('');
+const accessMsg = ref(null);
+const activeAccessDetails = ref('');
+let accessDetailsTouched = false;
 
-async function setAccessMode(key, on) {
-  if (key === 'accessLocalHttps' && !on) {
+async function toggleAccessDetails(kind) {
+  accessDetailsTouched = true;
+  activeAccessDetails.value = activeAccessDetails.value === kind ? '' : kind;
+  if (kind === 'gateway' && gatewaySetupState.value === 'error') loadGatewaySetup();
+  if (!activeAccessDetails.value) return;
+  await nextTick();
+  // Подробности — единая область после сводки и защиты входа. Переводим к ней фокус
+  // и прокрутку: на телефоне иначе клик выглядит безрезультатным, а screen reader не
+  // получает явного перехода от disclosure-кнопки к управляемому region.
+  const region = document.getElementById(`${kind === 'local' ? 'local-https' : 'gateway'}-settings`);
+  region?.focus?.({ preventScroll: true });
+  region?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+}
+
+async function setLocalHttpsMode(on) {
+  if (tls.value?.source === 'env') {
+    accessMsg.value = {
+      type: 'warn',
+      text: 'HTTPS задан переменными окружения сервера. Изменить его можно только в конфигурации системы.',
+    };
+    return;
+  }
+  if (!on) {
     const ok = await confirmDialog(
       'Выключить локальный HTTPS? После перезапуска сервера кокпит перестанет слушать порт '
-      + `${tls.value?.https?.port || 8143}, и с планшета откроется только по http — PWA ставиться не будет. `
-      + 'Сертификат и корень остаются на месте: обратно включается тем же тумблером.',
+      + `${tls.value?.https?.port || 8143}. В домашней сети останется HTTP на порту `
+      + `${tls.value?.httpPort || 8140}: пароль пойдёт без шифрования, PWA ставиться не будет. `
+      + 'Localhost и доступ через VPS-шлюз не изменятся; сертификат и корень останутся на месте.',
       { danger: true, okText: 'Выключить' },
     );
     if (!ok) return;
   }
-  accessBusy.value = key;
+  accessDetailsTouched = true;
+  accessBusy.value = 'accessLocalHttps';
+  accessMsg.value = null;
   try {
-    prefs.value = await api.post('/api/settings/prefs', { [key]: on });
-    if (key === 'accessLocalHttps') {
-      tlsMsg.value = {
-        type: 'ok',
-        text: on
-          ? 'Режим включён. Сокет https поднимется при следующем перезапуске сервера.'
-          : 'Режим выключен. Сокет https погаснет при следующем перезапуске сервера.',
+    prefs.value = await api.post('/api/settings/prefs', { accessLocalHttps: on });
+    await loadTls();
+    if (on) activeAccessDetails.value = 'local';
+    else if (activeAccessDetails.value === 'local') activeAccessDetails.value = '';
+    if (!tls.value) {
+      accessMsg.value = {
+        type: 'err',
+        text: `Настройка сохранена, но состояние HTTPS не удалось перечитать: ${tlsMsg.value?.text || 'нет ответа сервера'}`,
       };
-      await loadTls({ keepMessage: true });
+      return;
     }
+    const managedByEnv = tls.value?.source === 'env';
+    accessMsg.value = {
+      type: 'ok',
+      text: managedByEnv
+        ? 'Локальная настройка сохранена, но действующий HTTPS задан переменными окружения и этим переключателем не управляется.'
+        : (on
+          ? (tls.value?.leaf?.exists
+            ? 'Локальный HTTPS включён. Сокет поднимется при следующем перезапуске сервера.'
+            : 'Локальный HTTPS включён. Теперь выпусти сертификат для адреса домашней сети.')
+          : 'Локальный HTTPS выключен. После перезапуска дома останется HTTP; localhost и VPS-шлюз не изменятся.'),
+    };
   } catch (e) {
-    accMsg.value = { type: 'err', text: e.data?.message || e.message };
+    accessMsg.value = { type: 'err', text: e.data?.message || e.message };
   } finally { accessBusy.value = ''; }
 }
 
@@ -481,12 +1039,16 @@ async function setAccessMode(key, on) {
 // Без него на планшете нет PWA: `navigator.serviceWorker` существует только в secure context,
 // а публичный сертификат на домашний адрес не выпишет никто.
 const tls = ref(null);          // ответ /api/settings/tls
+const tlsState = ref('loading'); // loading | ready | error — null сам по себе не различает их
+const tlsLoadError = ref('');
 const tlsPicked = ref([]);      // адреса, отмеченные галками
 const tlsBusy = ref(false);
 const tlsMsg = ref(null);
 
 async function loadTls({ keepMessage = false } = {}) {
   if (!keepMessage) tlsMsg.value = null;
+  tlsState.value = 'loading';
+  tlsLoadError.value = '';
   try {
     tls.value = await api.get('/api/settings/tls');
     // По умолчанию отмечаем то, что уже в сертификате, иначе — все адреса машины:
@@ -495,9 +1057,13 @@ async function loadTls({ keepMessage = false } = {}) {
     const all = (tls.value.addresses || []).map((a) => a.address);
     tlsPicked.value = covered.length ? all.filter((a) => covered.includes(a)) : all;
     if (!tlsPicked.value.length) tlsPicked.value = all;
+    tlsState.value = 'ready';
+    syncInitialAccessDetails();
   } catch (e) {
     tls.value = null;
-    tlsMsg.value = { type: 'err', text: e.data?.message || e.message };
+    tlsState.value = 'error';
+    tlsLoadError.value = e.data?.message || e.message;
+    tlsMsg.value = { type: 'err', text: tlsLoadError.value };
   }
 }
 
@@ -508,14 +1074,24 @@ function toggleTlsAddress(addr, on) {
 }
 
 async function generateTls() {
+  if (tls.value?.source === 'env') {
+    tlsMsg.value = {
+      type: 'warn',
+      text: 'Системный HTTPS нельзя перевыпустить из Cockpit: измени сертификат в конфигурации сервера.',
+    };
+    return;
+  }
   tlsBusy.value = true; tlsMsg.value = null;
   try {
     const r = await api.post('/api/settings/tls/generate', { addresses: tlsPicked.value });
     tls.value = r.status;
+    tlsState.value = 'ready';
     tlsMsg.value = {
       type: 'ok',
       text: `Сертификат выпущен до ${new Date(r.notAfter).toLocaleDateString('ru-RU')}. `
-        + 'Поставь корень на устройства (QR ниже) и перезапусти сервер — HTTPS включается только при старте.',
+        + (prefs.value?.accessLocalHttps
+          ? 'Поставь корень на устройства (QR ниже) и перезапусти сервер — HTTPS включается только при старте.'
+          : 'Поставь корень на устройства (QR ниже), затем включи HTTPS в карточке домашней сети и перезапусти сервер.'),
     };
   } catch (e) {
     tlsMsg.value = { type: 'err', text: e.data?.message || e.message };
@@ -525,6 +1101,13 @@ async function generateTls() {
 // Отдельно от тумблера режима: тот просто не поднимает сокет, а это — стереть выпущенное.
 // Нужно редко (сменилась сеть, хочется чистого листа), поэтому и кнопка вторичная.
 async function dropTlsCertificate() {
+  if (tls.value?.source === 'env') {
+    tlsMsg.value = {
+      type: 'warn',
+      text: 'Системный HTTPS нельзя удалить из Cockpit: им управляет конфигурация сервера.',
+    };
+    return;
+  }
   const ok = await confirmDialog(
     'Удалить выпущенный сертификат? Кокпит с планшета снова откроется только по http, и PWA '
     + 'перестанет ставиться. Корень на устройствах останется — после нового выпуска '
@@ -536,6 +1119,7 @@ async function dropTlsCertificate() {
   try {
     const r = await api.post('/api/settings/tls/disable', { confirm: true });
     tls.value = r.status;
+    tlsState.value = 'ready';
     tlsMsg.value = { type: 'ok', text: 'Сертификат удалён. HTTPS погаснет после перезапуска сервера.' };
   } catch (e) {
     tlsMsg.value = { type: 'err', text: e.data?.message || e.message };
@@ -547,6 +1131,226 @@ const tlsAddress = () => tls.value?.leaf?.addresses?.[0] || '';
 const tlsUrl = () => (tlsAddress() && tls.value?.https?.port
   ? `https://${tlsAddress()}:${tls.value.https.port}` : '');
 
+// ── Шлюз наружу: установка формой ──
+//
+// Секреты живут ТОЛЬКО в памяти вкладки и в теле одного запроса: ни в prefs (те целиком
+// уезжают в браузер), ни в слепке установки их нет. После успеха гасим и в памяти —
+// держать пароль root во вкладке до конца дня незачем.
+const gw = ref({
+  domain: '',
+  gateway: '',
+  sshPort: 22,
+  sshUser: 'root',
+  sshPassword: '',
+  sudoPassword: '',
+  useCloudflare: false,
+  cloudflareToken: '',
+  acmeEmail: '',
+  acmeStaging: false,
+});
+const gwSaved = ref(null); // слепок прошлой установки (без секретов)
+const gwJob = ref(null); // снимок идущей или последней установки
+const gwPublicDomain = ref(''); // домен, который процесс подхватил при СТАРТЕ
+const gwBusy = ref(false);
+const gwMsg = ref(null);
+const gwProbe = ref(null); // отпечаток ключа хоста + нужен ли пароль
+const gwHostOk = ref(false); // человек сверил отпечаток с панелью хостера
+const gwChecks = ref(null); // результат кнопки «Проверить связь»
+const gatewaySetupState = ref('loading'); // loading | ready | error — не выдаём неизвестность за «не настроен»
+const gatewayLoadError = ref('');
+let gatewaySetupLoaded = false;
+
+// На первом открытии ведём сразу к незавершённой работе, но после первого клика выбор
+// человека не перехватываем поздно приехавшими параллельными GET-запросами.
+function syncInitialAccessDetails() {
+  if (accessDetailsTouched || !prefs.value || !tls.value || !gatewaySetupLoaded) return;
+  if (gwJob.value && ['running', 'failed'].includes(gwJob.value.state)) {
+    activeAccessDetails.value = 'gateway';
+  } else if (tls.value.source !== 'env' && prefs.value.accessLocalHttps === true
+      && (!tls.value.https?.up || tls.value.needsRestart)) {
+    activeAccessDetails.value = 'local';
+  }
+}
+
+const GW_MARK = { wait: '·', run: '…', ok: '✓', fail: '✗', skip: '—' };
+const gwRunning = computed(() => gwJob.value?.state === 'running');
+const gwJobVerifyState = computed(() => gwJob.value?.steps
+  ?.find((step) => step.key === 'verify')?.state || '');
+const gwJobConfirmed = computed(() => gwJob.value?.state === 'done'
+  && gwJobVerifyState.value === 'ok'
+  && !gwJob.value?.needsRestart);
+// Пароль требуем, только если сервер и правда не пускает по ключу (повторная установка — пускает).
+const gwNeedsPassword = computed(() => gwProbe.value?.passwordNeeded !== false);
+const gwCanStart = computed(() => !!gw.value.domain.trim()
+  && !!gw.value.gateway.trim()
+  && gwHostOk.value
+  && (!gw.value.useCloudflare || !!gw.value.cloudflareToken.trim())
+  && (!gwNeedsPassword.value || !!gw.value.sshPassword)
+  && !gwRunning.value && !gwBusy.value);
+
+/** Успех — единственный момент, когда секреты в памяти вкладки больше не нужны. */
+function gwApplyJob(job) {
+  const wasDone = gwJob.value?.state === 'done';
+  gwJob.value = job || null;
+  if (job?.state === 'running' && !accessDetailsTouched) {
+    activeAccessDetails.value = 'gateway';
+  }
+  if (job?.state === 'done' && !wasDone) {
+    gw.value.sshPassword = '';
+    gw.value.sudoPassword = '';
+    gw.value.cloudflareToken = '';
+    loadGatewaySetup({ keepJob: true });
+  }
+}
+// Прогресс идёт по общему SSE вкладки: установку начали с компьютера — видно и с планшета.
+useSse((name, data) => { if (name === 'gateway-setup') gwApplyJob(data); });
+
+async function loadGatewaySetup({ keepJob = false } = {}) {
+  gatewaySetupState.value = 'loading';
+  gatewayLoadError.value = '';
+  try {
+    const r = await api.get('/api/gateway/setup');
+    gwSaved.value = r.setup || null;
+    gwPublicDomain.value = r.publicDomain || '';
+    if (!keepJob) gwJob.value = r.job || null;
+    // Поля формы дозаполняем прошлой установкой, но НЕ затираем набранное руками.
+    const s = r.setup;
+    if (s) {
+      if (!gw.value.domain) gw.value.domain = s.domain || '';
+      if (!gw.value.gateway) gw.value.gateway = s.gateway || '';
+      if (s.sshPort) gw.value.sshPort = s.sshPort;
+      if (s.sshUser) gw.value.sshUser = s.sshUser;
+      if (s.dns === 'cloudflare') gw.value.useCloudflare = true;
+    }
+    gatewaySetupState.value = 'ready';
+    gatewaySetupLoaded = true;
+    syncInitialAccessDetails();
+  } catch (e) {
+    gatewaySetupState.value = 'error';
+    gatewayLoadError.value = e.data?.message || e.message;
+    gatewaySetupLoaded = true;
+    gwMsg.value = { type: 'err', text: gatewayLoadError.value };
+    syncInitialAccessDetails();
+  }
+}
+
+/** Проба ДО пароля: жив ли сервер и тот ли это сервер. */
+async function gwProbeHost() {
+  gwBusy.value = true;
+  gwMsg.value = null;
+  gwProbe.value = null;
+  gwHostOk.value = false;
+  try {
+    gwProbe.value = await api.post('/api/gateway/setup/probe', {
+      gateway: gw.value.gateway.trim(),
+      sshPort: Number(gw.value.sshPort) || 22,
+      sshUser: gw.value.sshUser.trim() || 'root',
+    });
+    if (!gwProbe.value.passwordNeeded) gw.value.sshPassword = '';
+  } catch (e) {
+    gwMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally { gwBusy.value = false; }
+}
+
+async function gwStart() {
+  let dnsPlan = null;
+  if (gw.value.useCloudflare) {
+    gwBusy.value = true;
+    gwMsg.value = null;
+    try {
+      dnsPlan = await api.post('/api/gateway/setup/dns-plan', {
+        domain: gw.value.domain.trim(),
+        gateway: gw.value.gateway.trim(),
+        useCloudflare: true,
+        cloudflareToken: gw.value.cloudflareToken.trim(),
+      });
+    } catch (e) {
+      gwMsg.value = { type: 'err', text: e.data?.message || e.message };
+      return;
+    } finally {
+      gwBusy.value = false;
+    }
+  }
+
+  const dnsChanges = dnsPlan?.records?.filter((r) => r.action !== 'unchanged') || [];
+  const removed = dnsPlan?.removed || [];
+  const removedText = removed.length
+    ? ` Будут удалены ${removed.length} лишних адресных записей: ${removed.slice(0, 6)
+      .map((r) => `${r.type} ${r.name} → ${r.content || 'пусто'}`).join('; ')}${removed.length > 6 ? '; …' : ''}.`
+    : '';
+  const dnsText = dnsPlan
+    ? ` Cloudflare: зона ${dnsPlan.zone.name}; Cockpit управляет только ${dnsPlan.domain} и `
+      + `*.${dnsPlan.domain}. Обе записи будут указывать только на ${dnsPlan.ip} `
+      + `(DNS-only, TTL 60).${removedText} Остальные имена и служебные записи не меняются.`
+    : '';
+  const ok = await confirmDialog(
+    `Настроить шлюз на ${gw.value.gateway.trim()} и открыть кокпит по адресу `
+    + `https://${gw.value.domain.trim()}?\n\n`
+    + 'На VPS встанет Caddy и пользователь туннеля, на мозге — юниты обратных туннелей, '
+    + 'в .env кокпита допишутся домен и режим за прокси. Пароль уйдёт на сервер один раз '
+    + '(положить туда наш ключ) и нигде не сохранится.'
+    + dnsText,
+    {
+      title: 'Установить VPS-шлюз',
+      okText: dnsPlan ? 'Синхронизировать и установить' : 'Установить',
+      danger: removed.length > 0 || dnsChanges.length > 0,
+    },
+  );
+  if (!ok) return;
+  gwBusy.value = true;
+  gwMsg.value = null;
+  gwChecks.value = null;
+  try {
+    const r = await api.post('/api/gateway/setup/start', {
+      domain: gw.value.domain.trim(),
+      gateway: gw.value.gateway.trim(),
+      sshPort: Number(gw.value.sshPort) || 22,
+      sshUser: gw.value.sshUser.trim() || 'root',
+      sshPassword: gw.value.sshPassword,
+      sudoPassword: gw.value.sudoPassword,
+      useCloudflare: gw.value.useCloudflare,
+      cloudflareToken: gw.value.useCloudflare ? gw.value.cloudflareToken.trim() : '',
+      cloudflarePlanFingerprint: dnsPlan?.fingerprint || '',
+      acmeEmail: gw.value.acmeEmail.trim(),
+      acmeStaging: gw.value.acmeStaging,
+      hostKeyFingerprint: gwProbe.value?.fingerprint || '',
+    });
+    gwJob.value = r.job || null;
+  } catch (e) {
+    gwMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally { gwBusy.value = false; }
+}
+
+async function gwVerify() {
+  gwBusy.value = true;
+  gwMsg.value = null;
+  try {
+    const body = {};
+    if (gw.value.domain.trim() && gw.value.gateway.trim()) {
+      body.domain = gw.value.domain.trim();
+      body.gateway = gw.value.gateway.trim();
+      body.sshPort = Number(gw.value.sshPort) || 22;
+      body.sshUser = gw.value.sshUser.trim() || 'root';
+    }
+    const result = await api.post('/api/gateway/setup/verify', body);
+    // Ответ проверки не хранится на сервере. Привязываем его к точной цели в памяти
+    // вкладки, чтобы последующая правка формы не красила зелёным другой домен.
+    gwChecks.value = {
+      ...result,
+      domain: body.domain || gwSaved.value?.domain || '',
+      gateway: body.gateway || gwSaved.value?.gateway || '',
+    };
+  } catch (e) {
+    gwChecks.value = null;
+    gwMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally { gwBusy.value = false; }
+}
+
+/** Ручной шаг с командой — в терминал кокпита, без Enter: запуск остаётся за человеком. */
+function gwManualToTerminal(entry) {
+  if (entry?.command) openTerminal({ insert: entry.command });
+}
+
 // ── Плагины ──
 const pluginsStore = usePluginsStore();
 const plugMsg = ref(null);
@@ -554,6 +1358,39 @@ async function savePlugin(p) {
   await pluginsStore.saveSettings(p.id, p.values);
   plugMsg.value = p.id;
   setTimeout(() => { if (plugMsg.value === p.id) plugMsg.value = null; }, 2000);
+}
+
+// Настройка типа `model` — тот же выбор, что в чате: исполнители группами, внутри их
+// модели. Правило видимости общее (`visibleModels`): в кратком списке только свежие
+// версии, остальные — под настройкой «показывать все модели».
+const modelGroups = computed(() => prov.providers
+  .map((p) => ({ ...p, models: prov.visibleModels(p) }))
+  .filter((p) => p.models.length));
+
+/** Сохранённая пара → значение опции «исполнитель:модель»; пусто — не выбрана. */
+function pluginModelValue(p, key) {
+  const saved = p.values?.[key];
+  if (!saved || typeof saved !== 'object') return '';
+  const provider = String(saved.provider || '');
+  const model = String(saved.model || '');
+  return provider && model ? `${provider}:${model}` : '';
+}
+
+/** Выбор есть, а такой модели в реестре нет — вернём его подписью, иначе `null`. */
+function pluginModelLost(p, key) {
+  const value = pluginModelValue(p, key);
+  if (!value) return null;
+  const { provider, model } = prov.modelOf(p.values[key]);
+  return provider && model ? null : value;
+}
+
+function setPluginModel(p, key, value) {
+  // id исполнителя двоеточий не содержит, а id модели содержит сплошь и рядом
+  // (`qwen3.6:latest`) — режем по первому.
+  const at = String(value || '').indexOf(':');
+  p.values[key] = at > 0
+    ? { provider: value.slice(0, at), model: value.slice(at + 1) }
+    : null;
 }
 
 // ── Сервер (режим запуска и перезапуск) ──
@@ -687,6 +1524,7 @@ watchEffect(() => {
 onMounted(() => {
   revealTab(tab.value, false);
   loadCurrent();
+  loadSpeech();
   prov.load();
   loadPrefs();
   loadFactoryDebug();
@@ -694,6 +1532,7 @@ onMounted(() => {
   loadServer();
   cockpitUpdate.load();
   loadTls();
+  loadGatewaySetup();
   acc.value.login = auth.login || '';
 });
 </script>
@@ -821,6 +1660,279 @@ onMounted(() => {
           </p>
         </div>
       </div>
+    </section>
+
+    <!-- Речь: настройка общая для окон, возможности браузера — фактические для этого устройства -->
+    <section v-else-if="tab === 'speech'" data-testid="speech-settings">
+      <div v-if="speechLoading" class="card muted">Загрузка настроек речи…</div>
+      <template v-else>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Движок диктовки</h3>
+              <p class="muted small">Выбор хранится на сервере и действует во всех окнах Cockpit.</p>
+            </div>
+            <span class="scope-pill">Все устройства</span>
+          </div>
+          <div class="speech-choice-grid">
+            <label class="speech-choice" :class="{ active: speech.engine === 'browser' }">
+              <input v-model="speech.engine" type="radio" value="browser" />
+              <span><b>Браузер</b><small>Текст приходит по мере распознавания, если браузер отдаёт промежуточные результаты.</small></span>
+            </label>
+            <label class="speech-choice" :class="{ active: speech.engine === 'whisper' }">
+              <input v-model="speech.engine" type="radio" value="whisper" />
+              <span><b>Whisper</b><small>Запись уходит только на сервер Cockpit и распознаётся локальной моделью.</small></span>
+            </label>
+          </div>
+
+          <template v-if="speech.engine === 'browser'">
+            <div class="speech-subhead">Обработка браузером</div>
+            <div class="speech-choice-grid">
+              <label class="speech-choice" :class="{ active: speech.browserProcessing === 'auto' }">
+                <input v-model="speech.browserProcessing" type="radio" value="auto" />
+                <span><b>На усмотрение браузера</b><small>Может выполняться на устройстве или удалённым сервисом браузера.</small></span>
+              </label>
+              <label class="speech-choice" :class="{ active: speech.browserProcessing === 'local' }">
+                <input v-model="speech.browserProcessing" type="radio" value="local" />
+                <span><b>Только на устройстве</b><small>Ставит <code>processLocally=true</code>; в облако молча не переключается.</small></span>
+              </label>
+            </div>
+            <p v-if="speech.browserProcessing === 'auto'" class="msg warn" data-testid="speech-cloud-warning">
+              До первой записи Cockpit отдельно попросит согласие: браузер может передать звук своему сервису.
+              {{ speech.browserAutoConsent ? 'Согласие уже дано.' : 'Согласие ещё не дано.' }}
+            </p>
+            <p v-else-if="browserLocalBusy" class="muted small">Проверяю локальную модель этого браузера…</p>
+          </template>
+        </div>
+
+        <div class="card" data-testid="speech-quality">
+          <div class="card-head">
+            <div>
+              <h3>Качество Whisper</h3>
+              <p class="muted small">Пресет задаёт модель и ширину поиска; ручные override имеют приоритет.</p>
+            </div>
+          </div>
+          <div class="speech-quality-block">
+            <b>Короткая диктовка</b>
+            <div class="speech-quality-grid">
+              <label v-for="preset in SPEECH_QUALITIES" :key="`dictation:${preset.id}`"
+                     class="speech-quality" :class="{ active: speech.quality === preset.id }">
+                <input v-model="speech.quality" type="radio" :value="preset.id" />
+                <span><b>{{ preset.label }}</b><small>{{ preset.model }} · beam {{ preset.beam }}</small><small>{{ preset.hint }}</small></span>
+              </label>
+            </div>
+            <p v-if="speech.model" class="msg info">Пресет {{ SPEECH_QUALITIES.find((item) => item.id === speech.quality)?.label }},
+              но модель переопределена вручну: {{ speechModelLabel(speech.model) }}.</p>
+          </div>
+          <div class="speech-quality-block">
+            <b>Разбор видео</b>
+            <div class="speech-quality-grid">
+              <label v-for="preset in SPEECH_QUALITIES" :key="`video:${preset.id}`"
+                     class="speech-quality" :class="{ active: speech.videoQuality === preset.id }">
+                <input v-model="speech.videoQuality" type="radio" :value="preset.id" />
+                <span><b>{{ preset.label }}</b><small>{{ preset.model }}</small><small>{{ preset.hint }}</small></span>
+              </label>
+            </div>
+            <p v-if="speech.videoModel" class="msg info">Модель видео переопределена: {{ speechModelLabel(speech.videoModel) }}.</p>
+          </div>
+          <button type="button" class="speech-advanced-toggle" data-testid="speech-advanced-toggle"
+                  :aria-expanded="speechAdvanced" @click="speechAdvanced = !speechAdvanced">
+            {{ speechAdvanced ? 'Скрыть продвинутые' : 'Показать продвинутые' }}
+          </button>
+          <div v-if="speechAdvanced" class="speech-advanced" data-testid="speech-advanced">
+            <label>Модель диктовки
+              <select class="speech-select" :value="speech.model || ''" @change="speech.model = $event.target.value || null">
+                <option value="">Как в пресете ({{ speechModelLabel(QUALITY_MODELS[speech.quality]) }})</option>
+                <option v-for="model in SPEECH_MODELS" :key="model.id" :value="model.id">{{ model.label }}</option>
+              </select>
+            </label>
+            <label>Модель видео
+              <select class="speech-select" :value="speech.videoModel || ''" @change="speech.videoModel = $event.target.value || null">
+                <option value="">Как в пресете ({{ speechModelLabel(QUALITY_MODELS[speech.videoQuality]) }})</option>
+                <option v-for="model in SPEECH_MODELS" :key="model.id" :value="model.id">{{ model.label }}</option>
+              </select>
+            </label>
+            <label>Устройство для обоих сценариев
+              <select v-model="speech.device" class="speech-select" data-testid="speech-device">
+                <option value="auto">Авто — GPU с CPU-fallback</option>
+                <option value="cpu">CPU</option>
+                <option value="cuda" :disabled="!cudaReady">CUDA / NVIDIA GPU{{ cudaReady ? '' : ' — недоступно' }}</option>
+              </select>
+            </label>
+            <label>Compute type
+              <select class="speech-select" :value="speech.computeType || ''" @change="speech.computeType = $event.target.value || null">
+                <option value="">По устройству (CPU int8 / CUDA float16)</option>
+                <option value="int8">int8</option>
+                <option value="int8_float16">int8_float16</option>
+                <option value="float16">float16</option>
+                <option value="float32">float32</option>
+              </select>
+            </label>
+            <label>Beam size диктовки
+              <input type="number" min="1" max="10" :value="speech.beamSize ?? ''" placeholder="Как в пресете"
+                     @input="setNullableInteger('beamSize', $event.target.value, 1, 10)" />
+            </label>
+            <label>Пауза VAD, мс
+              <input v-model.number="speech.vadSilenceMs" type="number" min="100" max="5000" step="100" />
+            </label>
+            <label class="speech-check">
+              <input v-model="speech.conditionOnPreviousText" type="checkbox" />
+              <span><b>Учитывать предыдущий текст</b><small>Помогает связности, но может повторять ошибку из прежнего фрагмента.</small></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Язык и термины</h3>
+              <p class="muted small">Один словарь используется Whisper и браузером, когда тот поддерживает contextual biasing.</p>
+            </div>
+          </div>
+          <label class="speech-field">Язык
+            <select v-model="speech.language" class="speech-select">
+              <option value="auto">Как язык интерфейса / авто для Whisper</option>
+              <option value="ru">Русский</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label class="speech-field">Термины проекта
+            <textarea v-model="speech.dictionary" rows="6" maxlength="800"
+                      placeholder="По одному термину или фразе на строку&#10;Fastify&#10;worktree&#10;Битрикс24"></textarea>
+          </label>
+          <div class="speech-field-actions">
+            <button type="button" data-testid="speech-dictionary-template" @click="fillCockpitDictionary">Подставить термины кокпита</button>
+            <span class="muted small">{{ [...speech.dictionary].length }} / 800 символов</span>
+          </div>
+          <p class="muted small">
+            В браузере список применяется только при наличии <code>SpeechRecognitionPhrase</code>;
+            неподдерживаемый словарь не ломает диктовку — запуск повторяется без него.
+          </p>
+          <p v-if="speechCapabilities.lastDictionaryMeasure" class="msg info">
+            Последний замер словаря:
+            {{ speechCapabilities.lastDictionaryMeasure.hotwordsTokens ?? speechCapabilities.lastDictionaryMeasure.tokens ?? 'токены не сообщены' }}
+            <template v-if="speechCapabilities.lastDictionaryMeasure.hotwordsTruncated || speechCapabilities.lastDictionaryMeasure.truncated"> · обрезан моделью</template>
+          </p>
+        </div>
+
+        <div class="card" data-testid="speech-models">
+          <div class="card-head">
+            <div>
+              <h3>Локальные модели</h3>
+              <p class="muted small">Первая диктовка ничего не скачивает: веса появляются только по явной кнопке.</p>
+            </div>
+          </div>
+          <p v-if="!speechCapabilities.models.length" class="muted small">Сервер пока не сообщил каталог моделей.</p>
+          <div v-else class="speech-model-list">
+            <div v-for="model in speechCapabilities.models" :key="model.modelId" class="speech-model-row">
+              <div class="speech-model-main">
+                <b>{{ speechModelLabel(model.modelId) }}</b>
+                <span class="muted small">{{ model.repo || model.modelId }}</span>
+                <span class="speech-model-state" :class="model.cached ? 'ready' : 'missing'">
+                  {{ model.cached ? `в кэше${formatModelSize(model.sizeMb) ? ` · ${formatModelSize(model.sizeMb)}` : ''}` : 'не скачана' }}
+                </span>
+              </div>
+              <div class="speech-model-actions">
+                <button type="button" :data-testid="`speech-download-${model.modelId}`"
+                        :disabled="model.cached || speechJobActive(modelJob(model.modelId)) || speechStarting[`download:${model.modelId}`]"
+                        @click="startSpeechJob('download', model.modelId)">
+                  {{ model.cached ? 'Скачана' : 'Скачать' }}
+                </button>
+                <button v-if="!model.cached" type="button" :data-testid="`speech-copy-${model.modelId}`"
+                        :disabled="speechJobActive(modelJob(model.modelId)) || speechStarting[`copy:${model.modelId}`]"
+                        @click="startSpeechJob('copy', model.modelId)">Скопировать из общего кэша</button>
+              </div>
+              <div v-if="modelJob(model.modelId)" class="speech-job" :class="modelJob(model.modelId).status">
+                <div>
+                  <span>{{ modelJob(model.modelId).kind === 'copy' ? 'Копирование' : 'Скачивание' }}: {{ speechJobLabel(modelJob(model.modelId)) }}</span>
+                  <button v-if="speechJobActive(modelJob(model.modelId))" type="button" class="speech-cancel"
+                          :data-testid="`speech-cancel-${model.modelId}`" @click="cancelSpeechJob(modelJob(model.modelId))">Отменить</button>
+                </div>
+                <progress v-if="speechJobPercent(modelJob(model.modelId)) !== null" max="100" :value="speechJobPercent(modelJob(model.modelId))"></progress>
+                <small v-if="modelJob(model.modelId).progress?.file" class="muted">{{ modelJob(model.modelId).progress.file }}</small>
+                <p v-if="modelJob(model.modelId).error" class="msg err">{{ modelJob(model.modelId).error.message }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" data-testid="speech-environment">
+          <div class="card-head">
+            <div>
+              <h3>Окружение и замер</h3>
+              <p class="muted small">Проверка идёт в том же media-venv и HF-кэше, которые использует транскрипция.</p>
+            </div>
+            <button type="button" data-testid="speech-refresh" :disabled="speechRefreshing" @click="refreshSpeechCapabilities">
+              {{ speechRefreshing ? 'Проверяю…' : 'Перепроверить' }}
+            </button>
+          </div>
+          <div class="speech-env-grid">
+            <div>
+              <b>Whisper</b>
+              <p :class="speechCapabilities.local.ready ? 'msg ok' : 'msg warn'">
+                {{ speechCapabilities.local.ready ? 'Готов' : (speechCapabilities.local.reason || 'Не готов') }}
+              </p>
+              <ul v-if="speechCapabilities.local.checks.length" class="speech-checks">
+                <li v-for="check in speechCapabilities.local.checks" :key="check.name || check.id" :class="check.ok ? 'ok' : 'err'">
+                  {{ check.name || check.id }}<span v-if="!check.ok && check.fix" class="muted"> — {{ check.fix }}</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <b>CUDA</b>
+              <p :class="cudaReady ? 'msg ok' : 'msg warn'">{{ cudaReason }}</p>
+              <p v-if="!cudaReady" class="muted small">Доустановить воспроизводимым способом: <code data-testid="speech-cuda-command">deploy/install.sh --with-cuda</code>
+              </p>
+            </div>
+          </div>
+          <div class="speech-benchmark">
+            <div>
+              <b>Замер на эталонной записи</b>
+              <p class="muted small">Модель {{ speechModelLabel(effectiveDictationModel) }} ·
+                {{ speech.device === 'auto' ? `auto → ${benchmarkDevice}` : benchmarkDevice }} · {{ benchmarkComputeType }}.</p>
+            </div>
+            <button type="button" data-testid="speech-benchmark"
+                    :disabled="speechJobActive(benchmarkJob()) || !benchmarkAvailable || (speech.device === 'cuda' && !cudaReady)"
+                    @click="startBenchmark">Замерить</button>
+          </div>
+          <p v-if="!benchmarkAvailable" class="msg warn" data-testid="speech-benchmark-unavailable">
+            {{ benchmarkReason }} Укажи эталонный WAV через <code>COCKPIT_SPEECH_BENCHMARK_AUDIO</code>.
+          </p>
+          <div v-if="benchmarkJob()" class="speech-job" :class="benchmarkJob().status">
+            <div>
+              <span>Замер: {{ speechJobLabel(benchmarkJob()) }}</span>
+              <button v-if="speechJobActive(benchmarkJob())" type="button" class="speech-cancel" data-testid="speech-benchmark-cancel"
+                      @click="cancelSpeechJob(benchmarkJob())">Отменить</button>
+            </div>
+            <progress v-if="speechJobPercent(benchmarkJob()) !== null" max="100" :value="speechJobPercent(benchmarkJob())"></progress>
+            <p v-if="benchmarkJob().error" class="msg err">{{ benchmarkJob().error.message }}</p>
+          </div>
+          <p v-if="benchmarkResult" class="msg ok" data-testid="speech-benchmark-result">{{ benchmarkText(benchmarkResult) }}</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Фактический путь</h3>
+              <p class="muted small">Серверный выбор может быть недоступен в конкретном браузере.</p>
+            </div>
+            <span class="status-pill" :class="speechEffective.startsWith('Недоступно') ? 'danger' : 'ok'">
+              <span class="dot"></span>{{ speechEffective.startsWith('Недоступно') ? 'Недоступно' : 'Готово' }}
+            </span>
+          </div>
+          <p data-testid="speech-effective"><b>Выбрано:</b> {{ speech.engine === 'browser' ? 'браузер' : 'Whisper' }}</p>
+          <p><b>На этом устройстве:</b> {{ speechEffective }}</p>
+          <p v-if="speech.engine === 'browser' && browserSpeechReason" class="msg warn">{{ browserSpeechReason }}</p>
+          <p v-if="!speech.local.ready && speech.local.reason" class="muted small">Whisper: {{ speech.local.reason }}</p>
+          <p class="muted small">Диктовка: {{ speechModelLabel(effectiveDictationModel) }} · видео: {{ speechModelLabel(effectiveVideoModel) }}.</p>
+          <div class="row">
+            <button class="primary" type="button" :disabled="speechSaving" data-testid="speech-save" @click="saveSpeech">
+              {{ speechSaving ? 'Сохраняю…' : 'Сохранить' }}
+            </button>
+          </div>
+          <p v-if="speechMsg" class="msg" :class="speechMsg.type">{{ speechMsg.text }}</p>
+        </div>
+      </template>
     </section>
 
     <!-- Битрикс24 -->
@@ -1002,9 +2114,18 @@ onMounted(() => {
         <div>
           <b>Доверенные каталоги</b>
           <p class="muted small trusted-copy">
-            Дополнительные деревья, которые Cockpit открывает каждому новому ходу Claude,
-            Codex и будущих локальных исполнителей. Текущий каталог проекта доступен и без
-            этого списка; корень <code>/</code> добавить нельзя.
+            Дополнительные деревья, которые Cockpit открывает новым ходам исполнителей,
+            поддерживающих эту настройку. Текущий каталог проекта доступен и без этого
+            списка; корень <code>/</code> добавить нельзя.
+          </p>
+          <p v-if="!prov.loaded" class="muted small" data-testid="trusted-directory-providers">
+            Определяю исполнителей по реестру…
+          </p>
+          <p v-else-if="trustedDirectoryProviderNames" class="muted small" data-testid="trusted-directory-providers">
+            <b>Настройку применяют:</b> {{ trustedDirectoryProviderNames }}.
+          </p>
+          <p v-else class="muted small" data-testid="trusted-directory-providers">
+            Сейчас ни один чат-исполнитель не применяет эту настройку.
           </p>
         </div>
         <div v-if="trustedDirectories.length" class="trusted-list">
@@ -1030,7 +2151,7 @@ onMounted(() => {
         </div>
         <div class="row">
           <button class="primary" type="button" :disabled="trustedDirectoriesBusy" @click="applyTrustedDirectories">
-            {{ trustedDirectoriesBusy ? 'Применяю…' : 'Применить ко всем ИИ' }}
+            {{ trustedDirectoriesBusy ? 'Сохраняю…' : 'Сохранить каталоги' }}
           </button>
         </div>
         <p class="muted small">
@@ -1085,6 +2206,22 @@ onMounted(() => {
             переменную окружения, Codex — через <code>model_auto_compact_token_limit</code>.
             По этому же порогу краснеет кольцо контекста в чате — у моделей с маленьким
             окном оно не ждёт порога, а срабатывает на 80% окна, что бы здесь ни стояло.
+          </p>
+          <div class="compact-setting">
+            <label>
+              Сжимать контекст этапа конвейера при
+              <NumberField v-model="stageCompactWindow" :min="0" :step="10000" placeholder="0 — не вмешиваться" />
+              <span class="unit">токенах</span>
+            </label>
+            <button class="btn" @click="saveStageCompactWindow">Сохранить</button>
+          </div>
+          <p class="muted small">
+            То же самое, но для агентов на узлах схемы, и порог отдельный: в чате сжатие
+            рвёт нить разговора с тобой, а на этапе просто ужимает рабочий контекст между
+            вызовами инструментов. Замер по прогонам: этап доходил до 506 000 токенов, то
+            есть весь хвост шёл в дорогой зоне — каждый вызов инструмента там оплачивается
+            как первый. <b>0</b> — не вмешиваться. Применится к новым заходам; уже идущий
+            этап доработает как есть.
           </p>
           <div class="compact-setting">
             <label>
@@ -1165,14 +2302,38 @@ onMounted(() => {
           <p class="muted small">{{ p.description }}</p>
           <p v-if="p.needsRestart" class="muted small">Серверная часть подключается на старте — вкл/выкл подействует после рестарта кокпита.</p>
           <div v-if="p.enabled && p.settings.length" class="plugset">
-            <div v-for="s in p.settings" :key="s.key" class="plugrow">
-              <label>{{ s.label }}</label>
-              <select v-if="s.type === 'select'" v-model="p.values[s.key]" class="inp">
-                <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
-              </select>
-              <input v-else-if="s.type === 'checkbox'" v-model="p.values[s.key]" type="checkbox" />
-              <input v-else v-model="p.values[s.key]" class="inp" type="text" />
-            </div>
+            <template v-for="s in p.settings" :key="s.key">
+              <div class="plugrow" :class="{ wide: s.type === 'model' }">
+                <label>{{ s.label }}</label>
+                <select v-if="s.type === 'select'" v-model="p.values[s.key]" class="inp">
+                  <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
+                </select>
+                <!-- Модель берётся из общего реестра исполнителей — того же, что рисует
+                     селект в чате. Значение хранится парой «исполнитель + модель»:
+                     склеенной строкой её не разобрать, у локальных исполнителей id
+                     модели сам бывает со слэшами и двоеточиями (`hf.co/user/repo:tag`). -->
+                <select v-else-if="s.type === 'model'" class="inp"
+                        :value="pluginModelValue(p, s.key)"
+                        @change="setPluginModel(p, s.key, $event.target.value)">
+                  <option value="">— не выбрана —</option>
+                  <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит).
+                       Молча показать «не выбрана» нельзя: в настройках он остался,
+                       и сервер всё ещё ходит именно этой моделью. -->
+                  <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
+                    {{ pluginModelLost(p, s.key) }} — нет в реестре
+                  </option>
+                  <optgroup v-for="g in modelGroups" :key="g.id"
+                            :label="g.name + (g.available ? '' : ' — недоступен')">
+                    <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
+                      {{ m.name }}
+                    </option>
+                  </optgroup>
+                </select>
+                <input v-else-if="s.type === 'checkbox'" v-model="p.values[s.key]" type="checkbox" />
+                <input v-else v-model="p.values[s.key]" class="inp" type="text" />
+              </div>
+              <p v-if="s.hint" class="muted small plughint">{{ s.hint }}</p>
+            </template>
             <button class="btn" @click="savePlugin(p)">Сохранить</button>
             <span v-if="plugMsg === p.id" class="msg ok">Сохранено</span>
           </div>
@@ -1321,86 +2482,89 @@ onMounted(() => {
 
     <!-- Доступ: вход в сам кокпит (один пользователь) -->
     <section v-else-if="tab === 'access'">
-      <p class="section-note">
-        Вход в кокпит. Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер
-        не попадает — клиент получает только сессионную cookie.
-      </p>
-
       <!-- Предупреждение только когда оно по делу: на localhost соединение и так не выходит
            за пределы машины, а за шлюзом браузер идёт по https. -->
       <p v-if="!auth.secure && !auth.isLocal" class="msg err">
-        Соединение без HTTPS — пароль передаётся открытым текстом. Включи режим доступа ниже.
+        Текущее соединение без HTTPS — пароль передаётся открытым текстом. В карточке
+        «В домашней сети» включи локальный HTTPS.
       </p>
 
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Учётная запись</h3>
-            <p class="muted small">Один пользователь Cockpit и его активные сессии.</p>
+      <!-- Сводка строится по фактическим путям, а не по двум неравноценным prefs-флагам:
+           LAN без локального TLS остаётся доступен по HTTP, а шлюз вообще живёт отдельно. -->
+      <div v-if="!prefs" class="card"><span class="muted">Загрузка способов подключения…</span></div>
+      <AccessOverview
+        v-else
+        :local-https-enabled="prefs.accessLocalHttps === true"
+        :local-https-busy="accessBusy === 'accessLocalHttps'"
+        :local-message="accessMsg"
+        :tls="tls"
+        :tls-state="tlsState"
+        :tls-error="tlsLoadError"
+        :gateway-setup="gwSaved"
+        :gateway-job="gwJob"
+        :gateway-public-domain="gwPublicDomain"
+        :gateway-checks="gwChecks"
+        :gateway-state="gatewaySetupState"
+        :gateway-error="gatewayLoadError"
+        :active-details="activeAccessDetails"
+        @set-local-https="setLocalHttpsMode"
+        @reload-tls="loadTls"
+        @toggle-details="toggleAccessDetails"
+      />
+
+      <!-- Учётная запись остаётся доступной независимо от того, раскрыт ли длинный мастер шлюза. -->
+      <section class="access-account" aria-labelledby="access-account-title">
+        <h3 id="access-account-title" class="sechead">Защита входа</h3>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Учётная запись</h3>
+              <p class="muted small">Один пользователь Cockpit и его активные сессии.</p>
+            </div>
+            <span class="scope-pill">Сервер</span>
           </div>
-          <span class="scope-pill">Сервер</span>
-        </div>
-        <div class="form-grid">
-          <label class="full">Логин<input v-model="acc.login" autocomplete="username" placeholder="необязательно" /></label>
-          <label class="full">Текущий пароль
-            <input v-model="acc.currentPassword" type="password" autocomplete="current-password" />
-          </label>
-          <label>Новый пароль
-            <input v-model="acc.password" type="password" autocomplete="new-password" placeholder="минимум 8 символов" />
-          </label>
-          <label>Новый пароль ещё раз
-            <input v-model="acc.password2" type="password" autocomplete="new-password" />
-          </label>
-        </div>
-        <p class="muted small">
-          Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
-          Текущее устройство останется в системе.
-        </p>
-        <div class="row">
-          <button class="primary" :disabled="accBusy || !acc.currentPassword || !acc.password" @click="saveAccount">
-            {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
-          </button>
-          <button @click="auth.doLogout()">Выйти</button>
-          <button class="danger-ghost" @click="logoutAll">Выйти со всех устройств</button>
-        </div>
-        <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
-      </div>
-
-      <!-- Режимы доступа. Тумблер не только прячет настройки, но и гасит сам режим:
-           при выключенном сокет не поднимается вовсе (решается один раз при старте). -->
-      <h3 class="sechead">Как открывать кокпит</h3>
-      <p class="muted">
-        По умолчанию кокпит отвечает только на самом мозге. Режимы ниже добавляют способы зайти
-        снаружи — каждый включается отдельно, и настройки режима видны, только пока он включён.
-      </p>
-      <div v-if="!prefs" class="card"><span class="muted">Загрузка…</span></div>
-      <div v-else class="card">
-        <div class="mode">
-          <ToggleSwitch
-            :model-value="prefs.accessLocalHttps === true" :disabled="accessBusy === 'accessLocalHttps'"
-            label="Из домашней сети — локальный HTTPS"
-            @update:model-value="setAccessMode('accessLocalHttps', $event)"
-          />
           <p class="muted small">
-            Планшет и рабочий комп заходят по адресу мозга. Свой корневой сертификат, замок
-            без предупреждений, PWA ставится.
+            Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер не
+            попадает — клиент получает только сессионную cookie.
           </p>
-        </div>
-        <div class="mode">
-          <ToggleSwitch
-            :model-value="prefs.accessGateway === true" :disabled="accessBusy === 'accessGateway'"
-            label="Снаружи — через VPS-шлюз"
-            @update:model-value="setAccessMode('accessGateway', $event)"
-          />
+          <div class="form-grid">
+            <label class="full">Логин<input v-model="acc.login" autocomplete="username" placeholder="необязательно" /></label>
+            <label class="full">Текущий пароль
+              <input v-model="acc.currentPassword" type="password" autocomplete="current-password" />
+            </label>
+            <label>Новый пароль
+              <input v-model="acc.password" type="password" autocomplete="new-password" placeholder="минимум 8 символов" />
+            </label>
+            <label>Новый пароль ещё раз
+              <input v-model="acc.password2" type="password" autocomplete="new-password" />
+            </label>
+          </div>
           <p class="muted small">
-            Публичный домен и обратные SSH-туннели с мозга. Пока раздел только описывает настройку.
+            Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
+            Текущее устройство останется в системе.
           </p>
+          <div class="row">
+            <button class="primary" :disabled="accBusy || !acc.currentPassword || !acc.password" @click="saveAccount">
+              {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
+            </button>
+            <button @click="auth.doLogout()">Выйти</button>
+            <button class="danger-ghost" @click="logoutAll">Выйти со всех устройств</button>
+          </div>
+          <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
         </div>
-      </div>
+      </section>
 
       <!-- Локальный HTTPS: свой корень + сертификат на адрес мозга -->
-      <template v-if="prefs?.accessLocalHttps">
-      <h3 class="sechead">Локальный HTTPS</h3>
+      <template v-if="tls?.source !== 'env' && activeAccessDetails === 'local'">
+      <section
+        id="local-https-settings"
+        class="access-detail-region"
+        role="region"
+        aria-labelledby="local-https-settings-title"
+        tabindex="-1"
+      >
+      <div class="access-detail-head">
+      <h3 id="local-https-settings-title" class="sechead">Локальный HTTPS</h3>
       <p class="muted">
         Дома PWA не ставится без HTTPS: <code>navigator.serviceWorker</code> существует только
         в защищённом контексте, а сертификат на домашний адрес публичный центр не выпишет.
@@ -1408,6 +2572,7 @@ onMounted(() => {
         Порт <code>{{ tls?.httpPort || 8140 }}</code> остаётся как был — по нему кокпит ходит
         сам с собой (фабрика, <code>bin/b24</code>, терминал с мозга).
       </p>
+      </div>
 
       <!-- Ошибку показываем прямо здесь: до перезапуска сервера этих эндпоинтов ещё нет,
            и «Загрузка…» навсегда выглядела бы как зависший запрос. -->
@@ -1430,7 +2595,10 @@ onMounted(() => {
         <div class="card">
           <p class="tlsline">
             Состояние:
-            <b v-if="tls.https.up" class="ok">работает на порту {{ tls.https.port }}</b>
+            <b v-if="tls.https.up && tls.needsRestart" class="warn">
+              работает с прежней конфигурацией на порту {{ tls.https.port }}
+            </b>
+            <b v-else-if="tls.https.up" class="ok">работает на порту {{ tls.https.port }}</b>
             <b v-else-if="tls.enabled" class="warn">выпущен, но не поднят</b>
             <b v-else class="off">выключен</b>
             <span v-if="tls.source === 'env'" class="muted"> · сертификат задан переменными окружения</span>
@@ -1502,31 +2670,294 @@ onMounted(() => {
           </p>
         </div>
       </template>
+      </section>
       </template>
 
-      <!-- Шлюз: пока заглушка. Настройка живёт в скриптах deploy/gateway/ и .env —
-           врать тумблером, что отсюда что-то настраивается, нельзя. -->
-      <template v-if="prefs?.accessGateway">
-      <h3 class="sechead">Доступ снаружи (VPS-шлюз)</h3>
+      <!-- Шлюз: установка формой. Руками это два идемпотентных скрипта плюс reconciliation
+           двух точных DNS-имён, которых ни один скрипт сделать не может. -->
+      <template v-if="activeAccessDetails === 'gateway'">
+      <section
+        id="gateway-settings"
+        class="access-detail-region"
+        role="region"
+        aria-labelledby="gateway-settings-title"
+        tabindex="-1"
+      >
+      <div class="access-detail-head">
+      <h3 id="gateway-settings-title" class="sechead">Доступ снаружи (VPS-шлюз)</h3>
       <p class="muted">
         Кокпит виден по публичному домену, а домашний адрес наружу не выставлен: с мозга на VPS
         идут два исходящих SSH-туннеля (один — кокпит, второй — стенды, чтобы трафик стендов не
         придавливал SSE и терминал). Схема не зависит ни от CGNAT, ни от смены сети.
       </p>
+      <p class="section-note">
+        Эта панель только настраивает и проверяет шлюз. Если её скрыть, уже установленные
+        туннели, публичный домен и внешний доступ продолжат работать.
+      </p>
+      </div>
+
       <div class="card">
-        <p class="msg warn">Отсюда шлюз пока не настраивается — раздел показывает, что нужно сделать руками.</p>
-        <ol class="tlssteps small">
-          <li>На VPS: <code>deploy/gateway/bootstrap.sh</code> (Caddy, сертификаты, forward_auth).</li>
-          <li>На мозге: <code>deploy/gateway/brain-setup.sh</code> — юниты обратных туннелей.</li>
-          <li>В <code>.env</code>: <code>COCKPIT_PUBLIC_DOMAIN</code> и
-            <code>COCKPIT_TRUST_PROXY=127.0.0.1</code> (именно адрес соседа, не <code>true</code>),
-            затем перезапуск сервера.</li>
-        </ol>
+        <div class="card-head">
+          <div>
+            <h3>Что настраиваем</h3>
+            <p class="muted small">Выделенный поддомен и временный VPS, через который кокпит виден снаружи.</p>
+          </div>
+          <span v-if="gwSaved" class="status-pill ok"><i class="dot"></i>{{ gwSaved.domain }}</span>
+        </div>
+        <div class="form-grid">
+          <label>Выделенный поддомен шлюза
+            <input v-model="gw.domain" placeholder="cockpit.example.com" :disabled="gwRunning" />
+          </label>
+          <label>Адрес VPS (IPv4)
+            <input v-model="gw.gateway" placeholder="203.0.113.10" :disabled="gwRunning" />
+          </label>
+          <label>Пользователь SSH
+            <input v-model="gw.sshUser" placeholder="root" :disabled="gwRunning" />
+          </label>
+          <label>Порт SSH
+            <input v-model.number="gw.sshPort" type="number" min="1" max="65535" :disabled="gwRunning" />
+          </label>
+        </div>
         <p class="muted small">
-          Оба скрипта идемпотентные — повторный прогон безопасен. Что появится здесь потом:
-          состояние туннелей, домен и диапазоны портов стендов.
+          Стенды поедут на поддомены <code>p&lt;порт&gt;.{{ gw.domain || 'домен' }}</code>, поэтому
+          Cockpit резервирует два точных имени: этот поддомен и <code>*</code>. При каждой
+          установке они заново сверяются с адресом текущего VPS.
         </p>
       </div>
+
+      <!-- Cloudflare опционален: у другого провайдера DNS записи заводятся руками, и шаг
+           честно превращается в подсказку, а не в отказ установки. -->
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>DNS-записи</h3>
+            <p class="muted small">Единственный шаг, который ни один скрипт не сделает сам.</p>
+          </div>
+        </div>
+        <ToggleSwitch
+          :model-value="gw.useCloudflare" :disabled="gwRunning"
+          label="Домен на Cloudflare — синхронизировать записи автоматически"
+          @update:model-value="gw.useCloudflare = $event"
+        />
+        <template v-if="gw.useCloudflare">
+          <div class="form-grid">
+            <label class="full">API-токен Cloudflare
+              <input
+                v-model="gw.cloudflareToken" type="password" autocomplete="off"
+                placeholder="токен с Zone:Read и DNS:Edit" :disabled="gwRunning"
+              />
+            </label>
+          </div>
+          <p class="muted small">
+            Логин и пароль аккаунта тут не годятся: API Cloudflare ими не управляется вовсе
+            (а с двухфакторной — тем более). Нужен токен: кабинет → My&nbsp;Profile →
+            API&nbsp;Tokens → Create&nbsp;Token → шаблон «Edit zone DNS», затем добавь разрешение
+            Zone → Zone → Read. В Zone&nbsp;Resources выбери Include → Specific&nbsp;zone →
+            родительскую зону (для <code>cockpit.example.com</code> обычно
+            <code>example.com</code>). Токен уходит на сервер только для сверки и установки,
+            нигде не сохраняется.
+          </p>
+          <p class="muted small">
+            Облако у записей будет <b>серым</b> (proxied выключен). Оранжевое — это уже прокси
+            Cloudflare, а с ним возвращаются 100 секунд на ответ (рвёт долгий ход агента),
+            100&nbsp;МБ на тело (рубит загрузку видео) и чужая терминация TLS.
+          </p>
+          <p class="muted small">
+            Перед подтверждением Cockpit прочитает текущие записи и покажет изменения. У двух
+            управляемых имён останется ровно по одной A-записи на текущий VPS; старые A,
+            AAAA и CNAME удалятся. TXT, MX, CAA и вся остальная зона не затрагиваются.
+          </p>
+        </template>
+        <p v-else class="muted small">
+          Записи заведёшь сам в панели своего провайдера — установка их дождётся и назовёт,
+          что именно нужно создать.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Доступ к VPS</h3>
+            <p class="muted small">Пароль уйдёт один раз — положить туда наш ключ. Нигде не сохраняется.</p>
+          </div>
+        </div>
+        <div class="row">
+          <button :disabled="gwBusy || gwRunning || !gw.gateway.trim()" @click="gwProbeHost">
+            Проверить сервер
+          </button>
+          <span v-if="gwBusy && !gwProbe" class="muted small">стучимся…</span>
+        </div>
+        <template v-if="gwProbe">
+          <p class="tlsline">Отпечаток ключа: <code class="fp">{{ gwProbe.fingerprint }}</code>
+            <span class="muted small"> ({{ gwProbe.fingerprintType }})</span></p>
+          <label class="tlsaddr">
+            <input v-model="gwHostOk" type="checkbox" :disabled="gwRunning" />
+            <span>Отпечаток совпал с тем, что показала панель хостера</span>
+          </label>
+          <p class="muted small">
+            Сверить обязательно: без этого «первое подключение» — это доверие кому угодно
+            посередине, а следом мы отдаём ему пароль root. Отпечаток запомнится, и если
+            в другой раз он изменится — установка остановится сама.
+          </p>
+          <div v-if="gwNeedsPassword" class="form-grid">
+            <label class="full">Пароль {{ gw.sshUser || 'root' }} на VPS
+              <input
+                v-model="gw.sshPassword" type="password" autocomplete="off"
+                placeholder="пароль из письма хостера" :disabled="gwRunning"
+              />
+            </label>
+          </div>
+          <p v-else class="msg ok">Сервер уже пускает по нашему ключу — пароль не нужен.</p>
+          <p v-if="gwNeedsPassword" class="muted small">
+            Нужен ровно один раз: положить на сервер наш ключ туннеля. Дальше вход только по
+            ключу, пароль никуда не сохраняется.
+          </p>
+        </template>
+        <p v-else class="muted small">
+          Сначала проверяем сервер — жив ли он и тот ли это сервер. Пароль спросим после.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Мозг и сертификаты</h3>
+            <p class="muted small">Всё необязательное: без этих полей установка тоже проходит.</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label class="full">Пароль sudo на мозге (необязательно)
+            <input
+              v-model="gw.sudoPassword" type="password" autocomplete="off"
+              placeholder="оставь пустым — дадим команду для терминала" :disabled="gwRunning"
+            />
+          </label>
+          <label class="full">Почта для Let’s Encrypt (необязательно)
+            <input v-model="gw.acmeEmail" placeholder="для писем об истечении сертификата" :disabled="gwRunning" />
+          </label>
+        </div>
+        <ToggleSwitch
+          :model-value="gw.acmeStaging" :disabled="gwRunning"
+          label="Тестовые сертификаты Let’s Encrypt (для проверки схемы)"
+          @update:model-value="gw.acmeStaging = $event"
+        />
+        <p class="muted small">
+          У Let’s Encrypt пять неудач на имя в час. Тестовый режим выдаёт недоверенный
+          сертификат (браузер ругнётся), зато лимит не тратит — включай, если гоняешь установку
+          повторно.
+        </p>
+      </div>
+
+      <div class="row">
+        <button class="primary" :disabled="!gwCanStart" @click="gwStart">Установить</button>
+        <button :disabled="gwBusy || gwRunning || (!gwSaved && !gw.domain.trim())" @click="gwVerify">
+          Проверить связь
+        </button>
+      </div>
+      <p v-if="gwMsg" class="msg" :class="gwMsg.type">{{ gwMsg.text }}</p>
+      <p v-if="!gwCanStart && !gwRunning" class="muted small">
+        Кнопка ждёт: домен, адрес VPS, сверенный отпечаток<span v-if="gw.useCloudflare">,
+        токен Cloudflare</span><span v-if="gwNeedsPassword">, пароль VPS</span>.
+      </p>
+      <p v-if="gw.useCloudflare" class="muted small">
+        Выключение или удаление VPS само по себе DNS не очищает: токен не хранится, поэтому
+        Cockpit не может изменить Cloudflare после установки. Следующий запуск снова заменит
+        старый адрес текущим; перед окончательным освобождением IP запись пока нужно удалить вручную.
+      </p>
+
+      <!-- Ход установки. Живёт на сервере и уезжает по SSE: начали с компьютера — видно
+           и с планшета, F5 картину не теряет. -->
+      <div v-if="gwJob" class="card">
+        <div class="card-head">
+          <div>
+            <h3>Установка</h3>
+            <p class="muted small">Восемь шагов; сорвавшийся называет причину и не идёт дальше.</p>
+          </div>
+          <span
+            class="status-pill"
+            :class="gwJobConfirmed ? 'ok' : (gwJob.state === 'failed' ? 'danger' : 'warn')"
+          ><i class="dot"></i>{{ gwJob.state === 'done' ? (gwJobConfirmed ? 'готово и проверено' : 'шаги завершены')
+            : (gwJob.state === 'failed' ? 'сорвалась' : 'идёт') }}</span>
+        </div>
+        <ul class="gwsteps small">
+          <li v-for="s in gwJob.steps" :key="s.key">
+            <b :class="{ ok: s.state === 'ok', warn: s.state === 'run', off: s.state === 'skip' }">
+              {{ GW_MARK[s.state] || '·' }}
+            </b>
+            <span>{{ s.title }}<span v-if="s.detail" class="muted"> — {{ s.detail }}</span></span>
+          </li>
+        </ul>
+        <p v-if="gwJob.error" class="msg err">{{ gwJob.error.message }}</p>
+        <p v-if="gwJob.state === 'done'" class="msg" :class="gwJobConfirmed ? 'ok' : 'warn'">
+          <template v-if="gwJobConfirmed">
+            Автоматические шаги завершены, внешний адрес проверен:
+            <code>https://{{ gwJob.domain }}</code>.
+          </template>
+          <template v-else>
+            Автоматические шаги завершены, но это ещё не подтверждает внешний доступ.
+            Выполни оставшиеся действия, перезапуск, если он указан, затем нажми «Проверить связь».
+          </template>
+        </p>
+        <!-- Не «осталось сделать», а чего ждать: трогать VPN визард не просит и не будет. -->
+        <p v-if="gwJob.state === 'done'" class="muted small">
+          Туннель ходит через VPN — так задумано, менять в нём ничего не нужно. Отсюда две
+          особенности: до планшета крюк через выходной узел VPN, а вместе с VPN туннель падает
+          и поднимается. Юниты туннеля этого и ждут, поэтому «activating» при опущенном
+          sing-box — ожидание, а не поломка.
+        </p>
+        <p v-if="gwJob.needsRestart" class="msg warn">
+          Нужен перезапуск сервера: домен и режим за прокси читаются один раз при старте.
+          Кнопка — во вкладке «Сервер». Из чата агенту перезапускать нельзя: он сам дочерний
+          процесс этого сервера.
+        </p>
+        <details v-if="gwJob.log?.length" class="gwlog">
+          <summary class="muted small">Журнал ({{ gwJob.log.length }})</summary>
+          <pre>{{ gwJob.log.join('\n') }}</pre>
+        </details>
+      </div>
+
+      <!-- Что установка сделать не может: чужая панель DNS, root на мозге. Правила для VPN
+           здесь нет намеренно — туннель ходит через него, и настройки VPN мы не трогаем. -->
+      <div v-if="gwJob?.manual?.length" class="card">
+        <div class="card-head">
+          <div>
+            <h3>Осталось сделать руками</h3>
+            <p class="muted small">Шаги, которые кокпит за человека делать не имеет права.</p>
+          </div>
+        </div>
+        <div v-for="m in gwJob.manual" :key="m.key" class="gwman">
+          <p class="tlsline"><b>{{ m.title }}</b></p>
+          <p class="muted small">{{ m.text }}</p>
+          <template v-if="m.command">
+            <pre class="gwcmd">{{ m.command }}</pre>
+            <div class="row">
+              <button @click="gwManualToTerminal(m)">Открыть в терминале</button>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="gwChecks" class="card">
+        <div class="card-head">
+          <div>
+            <h3>Проверка связи</h3>
+            <p class="muted small">Живые запросы снаружи: туннели, кокпит и стенд под входом.</p>
+          </div>
+          <span class="status-pill" :class="gwChecks.ok ? 'ok' : 'warn'">
+            <i class="dot"></i>{{ gwChecks.ok ? 'всё сходится' : 'есть замечания' }}
+          </span>
+        </div>
+        <ul class="gwsteps small">
+          <li v-for="c in gwChecks.checks" :key="c.key">
+            <b :class="c.ok ? 'ok' : 'warn'">{{ c.ok ? '✓' : '✗' }}</b>
+            <span>{{ c.title }}<span v-if="c.detail" class="muted"> — {{ c.detail }}</span></span>
+          </li>
+        </ul>
+        <p v-if="gwSaved && !gwPublicDomain" class="muted small">
+          Стенды проверятся после перезапуска сервера — до него домен в конфиг не попал.
+        </p>
+      </div>
+      </section>
       </template>
         </section>
       </div>
@@ -1735,6 +3166,75 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .status-pill.danger .dot { background: var(--bad); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .form-grid .full { grid-column: 1 / -1; }
+.speech-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.speech-choice {
+  display: flex; flex-direction: row; align-items: flex-start; gap: 10px; min-width: 0;
+  padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--ground);
+  cursor: pointer;
+}
+.speech-choice.active { border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--ground)); }
+.speech-choice input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
+.speech-choice span { min-width: 0; display: grid; gap: 4px; color: var(--ink); }
+.speech-choice small { color: var(--ink-mid); font-size: 12px; line-height: 1.45; }
+.speech-choice code { font-size: 11px; }
+.speech-subhead { margin-top: 3px; color: var(--ink-mid); font-size: 11px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; }
+.speech-field { gap: 7px; }
+.speech-field textarea, .speech-select {
+  width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--ground); color: var(--ink); padding: 10px 11px; font: inherit; font-size: 14px;
+}
+.speech-field textarea { resize: vertical; min-height: 116px; line-height: 1.45; }
+.speech-field textarea:focus, .speech-select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.speech-select option { background: var(--surface); color: var(--ink); }
+.speech-quality-block { display: grid; gap: 9px; }
+.speech-quality-block + .speech-quality-block { padding-top: 13px; border-top: 1px solid var(--line); }
+.speech-quality-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.speech-quality { display: flex; flex-direction: row; align-items: flex-start; gap: 9px; min-width: 0;
+  padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); cursor: pointer; }
+.speech-quality.active { border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--ground)); }
+.speech-quality input { flex: none; width: 15px; height: 15px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
+.speech-quality span { display: grid; gap: 3px; min-width: 0; color: var(--ink); }
+.speech-quality small { color: var(--ink-mid); font-size: 11.5px; line-height: 1.4; }
+.speech-advanced-toggle { justify-self: start; }
+.speech-advanced { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px;
+  padding-top: 13px; border-top: 1px dashed var(--line); }
+.speech-check { grid-column: 1 / -1; display: flex; flex-direction: row; align-items: flex-start; gap: 9px;
+  padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); }
+.speech-check input { flex: none; width: 16px; height: 16px; padding: 0; margin-top: 2px; accent-color: var(--accent); }
+.speech-check span { display: grid; gap: 3px; }
+.speech-check small { color: var(--ink-mid); line-height: 1.4; }
+.speech-field-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.speech-field-actions button { padding: 7px 10px; font-size: 12px; }
+.speech-model-list { display: grid; gap: 9px; }
+.speech-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px;
+  padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); }
+.speech-model-main { display: grid; gap: 2px; min-width: 0; }
+.speech-model-main > .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.speech-model-state { width: fit-content; margin-top: 3px; border-radius: 999px; padding: 2px 7px; font-size: 10.5px; }
+.speech-model-state.ready { background: color-mix(in srgb, var(--good) 12%, transparent); color: var(--good); }
+.speech-model-state.missing { background: var(--surface-2); color: var(--ink-mid); }
+.speech-model-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.speech-model-actions button { padding: 7px 10px; font-size: 12px; }
+.speech-job { grid-column: 1 / -1; display: grid; gap: 5px; padding-top: 7px; border-top: 1px dashed var(--line);
+  color: var(--ink-mid); font-size: 12px; }
+.speech-job > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.speech-job progress { width: 100%; height: 7px; accent-color: var(--accent); }
+.speech-job.done { color: var(--good); }
+.speech-job.failed, .speech-job.interrupted { color: var(--bad); }
+.speech-cancel { padding: 4px 8px; font-size: 11px; }
+.speech-env-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.speech-env-grid > div { display: grid; align-content: start; gap: 6px; padding: 11px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--ground); }
+.speech-env-grid p { margin: 0; }
+.speech-checks { display: grid; gap: 3px; margin: 2px 0 0; padding-left: 18px; font-size: 11.5px; }
+.speech-checks .ok { color: var(--good); }
+.speech-checks .err { color: var(--bad); }
+.speech-benchmark { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: 12px; border-top: 1px solid var(--line); }
+.speech-benchmark p { margin: 3px 0 0; }
 /* Карточки плагинов — горизонтальной линией, с переносом на узких экранах. */
 .plugcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; align-items: start; }
 .plugcard { gap: 8px; }
@@ -1757,6 +3257,14 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 }
 .plugrow select.inp:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .plugrow select.inp:focus { outline: none; border-color: var(--accent); }
+/* Раскрытый список рисует система, и фон от самого селекта он не наследует:
+   без этого правила на тёмной теме он нечитаем (та же грабля, что в чате). */
+.plugrow select.inp option, .plugrow select.inp optgroup { background: var(--surface); color: var(--ink); }
+/* Выбор модели: подпись сверху, селект во всю карточку — названия моделей вместе
+   с именем исполнителя в 220 px не помещаются. */
+.plugrow.wide { flex-direction: column; align-items: stretch; gap: 5px; }
+.plugrow.wide label, .plugrow.wide .inp { min-width: 0; max-width: none; }
+.plughint { margin: -3px 0 2px; }
 label { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
 input { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -1903,6 +3411,21 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 
 /* Локальный HTTPS */
 .sechead { margin: 12px 0 0; font-size: 14px; font-weight: 640; }
+.access-account { display: grid; gap: 8px; }
+.access-account > .sechead { margin: 0; }
+.access-detail-region {
+  display: grid;
+  gap: 12px;
+  scroll-margin-top: 18px;
+}
+.access-detail-region:focus { outline: none; }
+.access-detail-region:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+.access-detail-head { display: grid; gap: 8px; padding-top: 4px; }
+.access-detail-head .sechead, .access-detail-head > p { margin: 0; }
 
 /* Режим доступа: тумблер + пояснение под ним, выровненное по подписи тумблера. */
 .mode { display: grid; gap: 2px; }
@@ -1931,6 +3454,31 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   color: var(--ink-mid); }
 .tlssteps code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 .fp { font-size: 11px; }
+
+/* Шлюз наружу: ход установки, ручные шаги и журнал.
+   Свой список, а не .tlssteps: там <ol> с номерами, а у шага уже есть своя метка
+   состояния — номер рядом с «✓» читается как второй значок. */
+.gwsteps { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; color: var(--ink-mid); }
+.gwsteps li { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.gwsteps li > span { min-width: 0; overflow-wrap: anywhere; }
+.gwsteps b { flex: none; width: 12px; text-align: center; font-weight: 700; color: var(--ink-mid); }
+.gwsteps b.ok { color: var(--good); }
+.gwsteps b.warn { color: var(--warn, #e0a33a); }
+.gwsteps b.off { color: var(--ink-dim, var(--ink-mid)); }
+
+.gwman { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--ground); }
+.gwman + .gwman { margin-top: 8px; }
+.gwman p { margin: 0; }
+/* Команда показывается ЦЕЛИКОМ с переносом: по ней принимают решение, многоточие тут вредно.
+   Без overflow-wrap длинный путь распирал бы всю колонку настроек (см. грабли про min-width). */
+.gwcmd { margin: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-2); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.gwlog summary { cursor: pointer; }
+.gwlog pre { margin: 8px 0 0; max-height: 260px; overflow: auto; padding: 9px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
+  font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Планшет: вертикальная рейка превращается в липкую горизонтальную навигацию. */
 @media (max-width: 1099px) {
@@ -1988,6 +3536,11 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .card-head { flex-wrap: wrap; gap: 10px; }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .form-grid .full { grid-column: auto; }
+  .speech-choice-grid { grid-template-columns: minmax(0, 1fr); }
+  .speech-quality-grid, .speech-advanced, .speech-env-grid { grid-template-columns: minmax(0, 1fr); }
+  .speech-model-row { grid-template-columns: minmax(0, 1fr); }
+  .speech-model-actions { justify-content: flex-start; }
+  .speech-benchmark { align-items: stretch; flex-direction: column; }
   .pvcards, .plugcards { grid-template-columns: minmax(0, 1fr); }
   .pvhead { align-items: flex-start; flex-wrap: wrap; }
   .pvstate { margin-left: 44px; }

@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { api } from '../shared/api-client.js';
+import { registerLayer } from '../shared/ui/layer-stack.js';
 import { useDocumentPreviewStore } from '../stores/document-preview.js';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
 import { documentLinkFromClick, parseDocumentRouteHref } from '../features/documents/links.js';
@@ -69,20 +70,16 @@ function onDocumentClick(event) {
   preview.show(href);
 }
 
-function onKey(event) {
-  if (event.key === 'Escape' && preview.visible) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    preview.close();
-  }
-}
-
+let unregisterLayer = null;
 watch(() => preview.visible, (visible) => {
   document.documentElement.classList.toggle('document-modal-open', visible);
-});
-onMounted(() => window.addEventListener('keydown', onKey, true));
+  unregisterLayer?.();
+  unregisterLayer = visible
+    ? registerLayer('document-modal', { priority: 180, close: () => preview.close() })
+    : null;
+}, { immediate: true });
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKey, true);
+  unregisterLayer?.();
   document.documentElement.classList.remove('document-modal-open');
 });
 </script>

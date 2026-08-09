@@ -20,6 +20,116 @@ import {
 
 // Оценочное окно контекста модели — для индикатора заполнения.
 export const CONTEXT_WINDOW = 200000;
+export const DEFAULT_SPEECH = Object.freeze({
+  engine: 'browser',
+  browserProcessing: 'auto',
+  browserAutoConsent: false,
+  language: 'auto',
+  dictionary: '',
+  quality: 'balanced',
+  videoQuality: 'balanced',
+  model: null,
+  videoModel: null,
+  device: 'auto',
+  computeType: null,
+  beamSize: null,
+  vadSilenceMs: 500,
+  conditionOnPreviousText: true,
+  resident: false,
+  keepAliveMin: 5,
+  local: Object.freeze({ ready: false, reason: 'Локальный движок не настроен.' }),
+  capabilities: Object.freeze({
+    models: Object.freeze([]),
+    cuda: Object.freeze({ state: 'probe_failed', reason: '' }),
+    languages: Object.freeze(['ru', 'en', 'auto']),
+    lastDictionaryMeasure: null,
+    resident: null,
+    benchmark: null,
+  }),
+  revision: '',
+});
+
+/**
+ * Речь приезжает и внутри chat-store snapshot, и отдельным settings/SSE-ответом.
+ * Нормализуем в одном месте: старый/частичный сервер не должен включить облачный путь
+ * невалидным значением или уронить композер отсутствующим `local`.
+ */
+export function normalizeSpeechSnapshot(payload, previous = DEFAULT_SPEECH) {
+  const raw = payload?.speech || payload?.settings || payload || {};
+  const givenPrevious = previous || {};
+  const prev = {
+    ...DEFAULT_SPEECH,
+    ...givenPrevious,
+    local: { ...DEFAULT_SPEECH.local, ...(givenPrevious.local || {}) },
+    capabilities: { ...DEFAULT_SPEECH.capabilities, ...(givenPrevious.capabilities || {}) },
+  };
+  const engine = raw.engine === 'browser' || raw.engine === 'whisper'
+    ? raw.engine
+    : prev.engine;
+  const browserProcessing = raw.browserProcessing === 'local' || raw.browserProcessing === 'auto'
+    ? raw.browserProcessing
+    : prev.browserProcessing;
+  const language = ['ru', 'en', 'auto'].includes(raw.language) ? raw.language : prev.language;
+  const capabilitiesRaw = payload?.capabilities || raw.capabilities || prev.capabilities || {};
+  const capabilityLocal = capabilitiesRaw.local;
+  const local = raw.local && typeof raw.local === 'object'
+    ? raw.local
+    : (capabilityLocal && typeof capabilityLocal === 'object' ? capabilityLocal : prev.local);
+  const capabilityLocalDetails = capabilityLocal && typeof capabilityLocal === 'object'
+    ? capabilityLocal : local;
+  const revision = raw.revision ?? payload?.revision;
+  const nullableEnum = (value, allowed, fallback) => (value === null || allowed.includes(value) ? value : fallback);
+  const nullableInt = (value, min, max, fallback) => (
+    value === null || (Number.isInteger(value) && value >= min && value <= max) ? value : fallback
+  );
+  return {
+    engine,
+    browserProcessing,
+    browserAutoConsent: raw.browserAutoConsent === undefined
+      ? !!prev.browserAutoConsent
+      : raw.browserAutoConsent === true,
+    language,
+    dictionary: typeof raw.dictionary === 'string' ? raw.dictionary : (prev.dictionary || ''),
+    quality: ['fast', 'balanced', 'accurate'].includes(raw.quality) ? raw.quality : prev.quality,
+    videoQuality: ['fast', 'balanced', 'accurate'].includes(raw.videoQuality)
+      ? raw.videoQuality : prev.videoQuality,
+    model: nullableEnum(raw.model, ['small', 'medium', 'large-v3', 'large-v3-turbo'], prev.model),
+    videoModel: nullableEnum(raw.videoModel, ['small', 'medium', 'large-v3', 'large-v3-turbo'], prev.videoModel),
+    device: ['auto', 'cpu', 'cuda'].includes(raw.device) ? raw.device : prev.device,
+    computeType: nullableEnum(raw.computeType, ['int8', 'int8_float16', 'float16', 'float32'], prev.computeType),
+    beamSize: nullableInt(raw.beamSize, 1, 10, prev.beamSize),
+    vadSilenceMs: Number.isInteger(raw.vadSilenceMs) && raw.vadSilenceMs >= 100 && raw.vadSilenceMs <= 5000
+      ? raw.vadSilenceMs : prev.vadSilenceMs,
+    conditionOnPreviousText: typeof raw.conditionOnPreviousText === 'boolean'
+      ? raw.conditionOnPreviousText : prev.conditionOnPreviousText,
+    resident: typeof raw.resident === 'boolean' ? raw.resident : prev.resident,
+    keepAliveMin: Number.isInteger(raw.keepAliveMin) && raw.keepAliveMin >= 0 && raw.keepAliveMin <= 60
+      ? raw.keepAliveMin : prev.keepAliveMin,
+    local: {
+      ready: local?.ready === true,
+      reason: typeof local?.reason === 'string' ? local.reason : '',
+    },
+    capabilities: {
+      models: Array.isArray(capabilitiesRaw.models) ? capabilitiesRaw.models : (prev.capabilities?.models || []),
+      cuda: capabilitiesRaw.cuda && typeof capabilitiesRaw.cuda === 'object'
+        ? capabilitiesRaw.cuda : (prev.capabilities?.cuda || { state: 'probe_failed', reason: '' }),
+      languages: Array.isArray(capabilitiesRaw.languages)
+        ? capabilitiesRaw.languages : (prev.capabilities?.languages || ['ru', 'en', 'auto']),
+      lastDictionaryMeasure: capabilitiesRaw.lastDictionaryMeasure ?? prev.capabilities?.lastDictionaryMeasure ?? null,
+      resident: capabilitiesRaw.resident ?? prev.capabilities?.resident ?? null,
+      benchmark: capabilitiesRaw.benchmark && typeof capabilitiesRaw.benchmark === 'object'
+        ? capabilitiesRaw.benchmark : (prev.capabilities?.benchmark || null),
+      local: {
+        ready: capabilityLocalDetails?.ready === true,
+        reason: typeof capabilityLocalDetails?.reason === 'string' ? capabilityLocalDetails.reason : '',
+        checks: Array.isArray(capabilityLocalDetails?.checks) ? capabilityLocalDetails.checks : [],
+      },
+    },
+    // CAS revision выдаётся как opaque-токен: его нельзя
+    // приводить к числу или получится fail-open consent из stale-окна.
+    revision: typeof revision === 'string' && revision ? revision : (prev.revision || ''),
+  };
+}
 // Старое браузерное хранилище — остаётся только как источник одноразовой миграции.
 const LS_KEY = 'cockpit-chat-v2';
 
@@ -99,6 +209,12 @@ function messageNoticeKey(chatId, message, index) {
 // Когда историю последний раз сверяли с сервером целиком. Нужно, чтобы первое `hello`
 // (оно приходит сразу после загрузки) не тянуло всю историю по второму разу.
 let storeSyncedAt = 0;
+// EventSource может прислать несколько hello подряд. Пропущенный за время
+// разрыва speech-settings восстанавливаем одним shared GET, а не по запросу на hello.
+let speechSyncPromise = null;
+// GET сверки и SSE идут по разным соединениям. Если за время GET уже применился
+// новый снимок (SSE, save или consent), поздний HTTP-ответ не имеет права откатить его.
+let speechSnapshotEpoch = 0;
 
 // Чаты, по которым прямо из ЭТОГО окна висит незакрытый запрос сжатия. Нужны, чтобы
 // сверка активных ходов (_loadActive) не сняла заморозку под своим же запросом: у сжатия
@@ -124,7 +240,7 @@ const MAX_STEPS = 400;
 // «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
 const RUNTIME_KEYS = [
   'sending', 'compacting', 'stopping', 'progressTokens', 'steps', 'error', 'inflight', 'offline',
-  'sessionResetting', 'sessionResetFailed',
+  'sessionResetting', 'sessionResetFailed', 'liveContext',
 ];
 function runtimeOf(s) {
   const out = {};
@@ -327,7 +443,7 @@ export const useChatStore = defineStore('chat', {
   // Держим в сторе, а не в компоненте: по нему кольцо контекста красится в каждом чате.
   state: () => ({
     ...pickStore(null), loaded: false, open: false, conveyorIds: [], pending: {}, saveError: null,
-    compactWindow: 0,
+    compactWindow: 0, speech: normalizeSpeechSnapshot(null),
   }),
   getters: {
     active: (s) => s.sessions.find((x) => x.id === s.activeId) || null,
@@ -414,6 +530,9 @@ export const useChatStore = defineStore('chat', {
           // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
           // снимок в браузере хранит только историю, настроек в нём нет.
           this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
+          // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
+          // содержит только историю и не вправе подменять приватностный выбор движка.
+          const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
           // Снимок свежее серверной копии — значит сервер не успел записать последнее
           // (например, его перезапустили сразу после ответа агента): восстанавливаем из него.
           const snap = readSnapshot();
@@ -432,6 +551,7 @@ export const useChatStore = defineStore('chat', {
           this._normalize(picked.sessions);
           this._normalize(picked.archived);
           Object.assign(this, picked);
+          this.speech = speech;
           this.loaded = true;
           storeSyncedAt = Date.now();
           // Снимок оказался свежее серверной копии — немедленно возвращаем расхождение
@@ -760,6 +880,7 @@ export const useChatStore = defineStore('chat', {
           if (this.loaded) {
             this._loadWaiting();
             this._loadActive();
+            this._resyncSpeech();
             if (Date.now() - storeSyncedAt > 2000) this._resyncStore();
           }
         } else if (name === 'chat-store') {
@@ -777,6 +898,10 @@ export const useChatStore = defineStore('chat', {
           if (m.defModelRef !== undefined) this.defModelRef = m.defModelRef || null;
           if (m.defEffort !== undefined) this.defEffort = m.defEffort || '';
           if (m.defMode !== undefined) this.defMode = m.defMode || '';
+        } else if (name === 'speech-settings') {
+          // Настройка общая для всех окон/устройств. Revision позволяет компоненту
+          // отличить реальную смену от собственного SSE-эха, но snapshot применяем весь.
+          this.setSpeechSnapshot(d);
         } else if (name === 'chat-step') {
           // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
           const s = this._get(d.chatKey);
@@ -793,7 +918,13 @@ export const useChatStore = defineStore('chat', {
           // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
           // Кроме сжатия: там работу показывает кольцо, а «думает…» только спорило бы с ним.
           const s = this._get(d.chatKey);
-          if (s && !s.compacting) { s.sending = true; s.progressTokens = d.tokens; }
+          if (s && !s.compacting) {
+            s.sending = true; s.progressTokens = d.tokens;
+            // Заполненность контекста ПРЯМО СЕЙЧАС (её сообщает не каждый исполнитель).
+            // В историю не пишем: это рантайм-поле, а иначе каждое обращение к модели
+            // стоило бы записи всего чата на сервер (см. slimOf и дебаунс _persist).
+            if (d.contextTokens) s.liveContext = d.contextTokens;
+          }
         } else if (name === 'chat-turn-start') {
           // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
           // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
@@ -807,7 +938,7 @@ export const useChatStore = defineStore('chat', {
           // а не «думает…». Раньше признак жил только в затеявшем окне, и на втором
           // устройстве сжатие не отображалось ничем.
           if (d.compact) { s.compacting = true; s.sending = false; s.progressTokens = 0; }
-          else { s.sending = true; s.steps = []; s.progressTokens = 0; }
+          else { s.sending = true; s.steps = []; s.progressTokens = 0; s.liveContext = 0; }
         } else if (name === 'chat-done') {
           // Ход завершён — снять «думает…»/кольцо во всех окнах (ответ доставляется
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
@@ -876,6 +1007,9 @@ export const useChatStore = defineStore('chat', {
           s.compacting = true; s.sending = false; s.progressTokens = 0;
         } else if (a) {
           s.compacting = false; s.sending = true; s.progressTokens = a.tokens || 0;
+          // Ход идёт час, а сохранённая цифра контекста — с прошлого хода (у claude она
+          // бывает ещё и ДО автокомпакта CLI). Поэтому живой размер тоже восстанавливаем.
+          s.liveContext = a.contextTokens || 0;
           // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
           // Серверную копию берём, если она полнее ИЛИ свежее нашей: обе стороны держат
           // скользящее окно одного размера, поэтому у отставшего окна (связь рвалась,
@@ -887,6 +1021,7 @@ export const useChatStore = defineStore('chat', {
           if (theirs > mine || theirLast > myLast) s.steps = a.steps;
         } else if (!s.inflight && !compactInflight.has(s.id)) {
           s.sending = false; s.stopping = false; s.compacting = false; s.progressTokens = 0;
+          s.liveContext = 0;
         }
       }
     },
@@ -966,6 +1101,23 @@ export const useChatStore = defineStore('chat', {
       }
       sentChats.delete(id);
       if (this.activeId === id) this.activeId = this.sessions[0]?.id || null;
+    },
+    /**
+     * Speech SSE не имеет replay-буфера: после reconnect всегда сверяем
+     * полный server-owned snapshot. Ошибка не ломает остальной reconnect.
+     */
+    _resyncSpeech() {
+      if (speechSyncPromise) return speechSyncPromise;
+      const requestedAtEpoch = speechSnapshotEpoch;
+      speechSyncPromise = api.get('/api/settings/speech')
+        .then((snapshot) => (
+          requestedAtEpoch === speechSnapshotEpoch
+            ? this.setSpeechSnapshot(snapshot)
+            : this.speech
+        ))
+        .catch(() => null)
+        .finally(() => { speechSyncPromise = null; });
+      return speechSyncPromise;
     },
     /**
      * Полная сверка истории с сервером — на восстановление связи. Точечные `chat-store`
@@ -1062,6 +1214,10 @@ export const useChatStore = defineStore('chat', {
     async ensure() {
       await this._load();
       this.initPerms();
+      // AppShell мог открыть общий EventSource и получить initial hello, пока _load()
+      // ещё читал историю. Не полагаемся на повторный hello: сразу сверяем cold
+      // publicSnapshot с полной runtime readiness, не задерживая показ чатов.
+      void this._resyncSpeech();
       // sending/error не персистятся — восстанавливаем поля.
       this.sessions.forEach((s) => { if (s.sending === undefined) s.sending = false; if (s.error === undefined) s.error = null; });
       // Миграция: алиаса «fable» в CLI нет — только полный ID.
@@ -1069,6 +1225,11 @@ export const useChatStore = defineStore('chat', {
       if (this.defModel === 'fable') this.defModel = 'claude-fable-5';
       if (!this.sessions.length) this.newSession();
       else if (!this._get(this.activeId)) this.activeId = this.sessions[0].id;
+    },
+    setSpeechSnapshot(payload) {
+      this.speech = normalizeSpeechSnapshot(payload, this.speech);
+      speechSnapshotEpoch += 1;
+      return this.speech;
     },
     /**
      * Унести активный чат в архив. keepEmpty=true используется явным действием
@@ -1408,7 +1569,10 @@ export const useChatStore = defineStore('chat', {
       // иначе ответ первого хода снимал бы индикатор у ещё работающего второго.
       s.inflight = (s.inflight || 0) + 1;
       s.sending = true; s.error = null; s.offline = false;
-      if (!queued) { s.progressTokens = 0; s.steps = []; } // лента предыдущего хода уже уехала в своё сообщение
+      // лента предыдущего хода уже уехала в своё сообщение, а живой размер контекста
+      // прошлого хода к новому отношения не имеет: до первого замера кольцо показывает
+      // сохранённую цифру.
+      if (!queued) { s.progressTokens = 0; s.steps = []; s.liveContext = 0; }
       s.updatedAt = sentAt;
       // После сжатия «выжимкой» сессии ещё нет: агент увидит состояние работы первым
       // блоком этого сообщения. В переписку на экране блок не попадает — там уже есть и

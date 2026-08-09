@@ -40,6 +40,15 @@ export class B24Adapter {
     this._identity = null;
   }
 
+  /**
+   * Дешёвый readiness gate без сети и без создания client-а.
+   * Inbox проверяет его до чтения channel stores/model/materialize, чтобы при пустых
+   * credentials вообще не касаться потенциально чувствительного текста обращений.
+   */
+  isConfigured() {
+    return this.credsStore.read() !== null;
+  }
+
   /** Текущая область пользовательских B24-данных; кеш сбрасывается вместе с credentials. */
   async accountIdentity() {
     return this._run(async () => {
@@ -119,6 +128,7 @@ export class B24Adapter {
   async completeTask(taskId) { return this._run(() => this.client().completeTask(taskId)); }
   async renewTask(taskId) { return this._run(() => this.client().renewTask(taskId)); }
   async findUsers(query) { return this._run(() => this.client().findUsers(query)); }
+  async listGroups() { return this._run(() => this.client().listGroups()); }
 
   /**
    * Извлекает chartDataByPeriod (сбалансированный JSON-объект) из HTML /salary/.

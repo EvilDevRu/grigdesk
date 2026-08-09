@@ -37,6 +37,19 @@ breaker_record() {
   esac
   [[ "$detected_at" =~ ^[0-9]+$ ]] || return 2
   [[ -z "$limited_until" || "$limited_until" =~ ^[0-9]+$ ]] || return 2
+  # Срок приходит из чужого вывода (машинное поле claude, разобранная фраза
+  # codex), поэтому он ограничивается ЗДЕСЬ, в единственном месте записи, а не
+  # в каждом раннере. Промах разбора на год выключил бы живой ИИ насовсем:
+  # чинится такое только удалением файла руками. Срок в прошлом — тот же промах,
+  # а не «лимит уже кончился»: отказ провайдера случился только что.
+  if [[ -n "$limited_until" ]]; then
+    local ceiling
+    ceiling=$(_breaker_max_until "$detected_at")
+    (( limited_until > detected_at )) || limited_until=""
+    if [[ -n "$limited_until" ]] && (( limited_until > ceiling )); then
+      limited_until=$ceiling
+    fi
+  fi
   evidence=${evidence//$'\n'/ }
   local dir file lock_fd tmp
   dir=$(_breaker_account_dir "$provider" "$fingerprint")
@@ -66,6 +79,14 @@ _breaker_default_cooldown() {
   local value=${FACTORY_BREAKER_COOLDOWN_S:-900}
   [[ "$value" =~ ^[0-9]+$ ]] || value=900
   printf '%s\n' "$value"
+}
+
+# Потолок срока: сутки от обнаружения. Дольше не бывает ни одно окно лимита
+# подписки, а всё, что дальше, — это ошибка разбора чужого текста.
+_breaker_max_until() {
+  local detected=$1 span=${FACTORY_BREAKER_MAX_S:-86400}
+  [[ "$span" =~ ^[0-9]+$ ]] || span=86400
+  printf '%s\n' "$(( detected + span ))"
 }
 
 _breaker_entry_active() {

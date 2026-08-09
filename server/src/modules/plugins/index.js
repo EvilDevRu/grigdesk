@@ -6,23 +6,31 @@
 import fp from 'fastify-plugin';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { SYSTEM, scanUserPlugins, isEnabled, settingsValues } from '../../lib/plugins-registry.js';
+import {
+  SYSTEM,
+  scanUserPlugins,
+  isEnabled,
+  settingsValues,
+} from '../../lib/plugins-registry.js';
 
 async function pluginsModule(fastify, opts) {
   const { config, prefs } = opts;
 
   const userPlugins = await scanUserPlugins(config.userPluginsDir, fastify.log);
-  const all = [...SYSTEM.map((m) => ({ ...m, system: true })), ...userPlugins.map((m) => ({ ...m, system: false }))];
+  // Признак `system` объявляет сам манифест (в SYSTEM и в скане) — здесь его не
+  // дописываем: умолчание вкл/выкл считается по манифесту целиком, и вторая
+  // копия правды разошлась бы с первой.
+  const all = [...SYSTEM, ...userPlugins];
   const byId = new Map(all.map((m) => [m.id, m]));
 
   // Живой гейт для системных модулей: читает prefs при каждом вызове.
   fastify.decorate('pluginEnabled', (id) => {
     const m = byId.get(id);
     if (!m) return false;
-    return isEnabled(prefs.read(), id, m.system);
+    return isEnabled(prefs.read(), m);
   });
 
-  // Значения настроек плагина для серверного кода (модуль медиа читает whisperModel).
+  // Значения настроек плагина для серверного кода (например, общая модель Inbox).
   fastify.decorate('pluginSettings', (id) => {
     const m = byId.get(id);
     return m ? settingsValues(prefs.read(), m) : {};
@@ -34,7 +42,7 @@ async function pluginsModule(fastify, opts) {
   // манифеста версионирован полем api — несовместимый плагин не поднимаем, а честно жалуемся.
   const PLUGIN_API = 1;
   for (const m of userPlugins) {
-    if (!m.hasServer || !isEnabled(prefs.read(), m.id, false)) continue;
+    if (!m.hasServer || !isEnabled(prefs.read(), m)) continue;
     if ((m.api || 1) !== PLUGIN_API) {
       fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, кокпит даёт api=${PLUGIN_API} — пропущен`);
       continue;
@@ -58,7 +66,7 @@ async function pluginsModule(fastify, opts) {
         description: m.description,
         system: m.system,
         nav: m.nav || null,
-        enabled: isEnabled(p, m.id, m.system),
+        enabled: isEnabled(p, m),
         settings: m.settings || [],
         values: settingsValues(p, m),
         // Пользовательский серверный код подключается на старте — тумблер подействует после рестарта.

@@ -728,8 +728,8 @@ _route_v2_transaction_after() {
     _route_v2_log_transaction_stall "$task" "$txid"
     return "$rc"
   }
-  # В debug-маршруте одна транзакция остаётся открытой от INSTRUMENT до PROOF. Любой другой
-  # транзакционный узел владеет отдельной полной транзакцией.
+  # Топология instrument → proof держит одну транзакцию между двумя узлами. Любой другой
+  # транзакционный узел владеет отдельной полной транзакцией; route id здесь не участвует.
   if [[ "$node" != instrument ]]; then
     instrumentation_tx_cleanup "$task" "$txid" || {
       rc=$?
@@ -1304,9 +1304,11 @@ route_v2_dispatch_bootstrap() {
   _route_v2_bootstrap_record validate \
     "$artifact" "$task" "$attempt" "$ROUTE_V2_PROFILE" "$ROUTE_V2_CATALOG" \
     "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || return
-  # Узел закрыт: черновик хода относился к нему и живым больше не является.
-  declare -F _stage_checkpoint_clear >/dev/null &&
-    _stage_checkpoint_clear "$task" SCOUT
+  # Узел закрыт — черновик подписываем исходом, а не стираем (см. `_stage_checkpoint_seal`):
+  # заход сюда бывает и вторым, и тогда его заметки о том, что уже осмотрено, дешевле
+  # любого повторного обхода дерева.
+  declare -F _stage_checkpoint_seal >/dev/null &&
+    _stage_checkpoint_seal "$task" SCOUT done
   cat -- "$artifact"
 }
 
@@ -1455,8 +1457,9 @@ route_v2_dispatch_next() {
     (( rc == 0 || rc == 3 )) || return "$rc"
   fi
   # Legacy failed без typed verdict сохраняет прежний бюджет двух возвратов. Typed
-  # verdict получает широкий hard ceiling, но останавливается раньше на третьем
-  # одинаковом наборе finding id или на A↔B-осцилляции.
+  # verdict получает широкий hard ceiling, но останавливается раньше при расширении
+  # замкнутого набора finding id, при первом повторе того же набора после ремонта
+  # или A↔B-осцилляции.
   if [[ -n "$verdict_b64" ]]; then
     hard_rewind_limit=6
     no_progress_limit=2
@@ -1475,17 +1478,20 @@ route_v2_dispatch_next() {
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
     "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" || return
-  # Черновик хода снимаем ТОЛЬКО после УСПЕШНОГО терминального коммита: между заходами он
-  # нужен после обрыва, а после закрытого узла становится чужими заметками для того,
-  # кто вернётся сюда по человеческому goto.
-  # failed/exhausted — не «закрыто», а «остановлено и передано человеку»: узел ещё будут
-  # переигрывать, и черновик — единственная запись о том, где именно застряли. Если TESTS
-  # отчитается «детали и остаток — t<TASK>.tests.checkpoint.md», а движок сразу сотрёт файл,
-  # человек у остановленного маршрута останется с одним
+  # Черновик хода после терминального коммита НЕ стирается, а подписывается исходом
+  # (`_stage_checkpoint_seal`): узел, закрытый `done`, критик отклоняет штатно, и второй
+  # заход обязан начать с того, что уже сделано, — иначе он получает промпт, побайтово
+  # равный первому, и заново выводит ту же разведку (замер: 4.85 M токенов на один этап).
+  # failed/exhausted — тем более не «закрыто», а «остановлено и передано человеку»: узел
+  # ещё будут переигрывать, и черновик — единственная запись о том, где именно застряли.
+  # Если TESTS отчитается «детали и остаток — t<TASK>.tests.checkpoint.md», а движок сотрёт
+  # файл следующей строкой, человек у остановленного маршрута останется с одним
   # предложением комментария вместо разбора (что доказано, что нет, что осталось сделать).
+  # Такой заход подписи не получает: он ничем не закончился, и блок промпта обязан назвать
+  # это обрывом, а не завёрнутой работой.
   if [[ "$outcome" != failed && "$outcome" != exhausted ]]; then
-    declare -F _stage_checkpoint_clear >/dev/null &&
-      _stage_checkpoint_clear "$task" "$run_key"
+    declare -F _stage_checkpoint_seal >/dev/null &&
+      _stage_checkpoint_seal "$task" "$run_key" "$outcome"
   fi
   return 0
 }

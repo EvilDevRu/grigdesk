@@ -9,7 +9,7 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :814
    (chat, tasks, providers,          ├─ engine/bin/factory* ────▶ engine + CLI runners
     plugins, auth, system…)          ├─ adapters/b24 ────────────▶ B24Client (портал)
                                      ├─ adapters/system ───────▶ /proc/meminfo, os.cpus
-                                     └─ adapters/media ────────▶ ffmpeg + python whisper
+                                     └─ SpeechRuntime/media ───▶ ffmpeg + local python whisper
 ```
 
 `*` — встроенный путь по умолчанию; внешний engine возможен только через явный config/env.
@@ -18,25 +18,39 @@ web (Vue SPA / PWA)  ──HTTP/SSE──▶  server (Fastify, :8140 http + :814
 на сервер по `VITE_BRAIN_URL`
 (пусто = тот же origin). Реалтайм — SSE (`/api/events`), `fs.watch` на `~/.factory/state`.
 
+Речь имеет один серверный lifecycle: `app.js` создаёт `SpeechRuntime` и инъецирует его в
+chat/media/settings. Runtime разрешает валидированный preset в полный immutable job,
+задаёт каждому Python-процессу собственный `HF_HOME`, проверяет pinned snapshot без сети
+и закрывается вместе с Fastify. Тот же runtime владеет model-job coordinator и при каждом
+capability read подбирает завершившиеся detached jobs, поэтому chat, settings и media doctor
+видят один cache state. Настройки лежат в prefs, но model-job progress — в отдельных
+атомарных status-файлах 0600 внутри каталога 0700: частые обновления загрузки не
+переписывают prefs. Restart recovery удерживает dedupe до подтверждённой смерти прежнего
+worker по полной process identity.
+
 ## Модули сервера (`server/src/modules/`)
 
 | Модуль | Эндпоинты | Источник |
 |--------|-----------|----------|
 | `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд | `~/.factory/state` + `<factoryHome>/bin/factory` |
-| `b24` | `/api/b24/{dashboard,task/:id,users}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
+| `b24` | `/api/b24/{dashboard,task/:id,users,groups}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
+| `task-favorites`, `task-seen` | `GET /api/b24/task-favorites` + `PUT/DELETE .../:taskId`, `GET/POST /api/b24/task-seen` | личные метки человека (избранное, «просмотрено») — `server/.state/task-{favorites,seen}.json` по opaque-scope аккаунта портала ([детали](b24.md#личные-метки-задач-избранное-и-просмотренное)) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
-| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | ffmpeg + whisper |
-| `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls}` | prefs, engine debug CLI, `CredsStore`, `LocalTls` |
-| `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission | выбранный executor + `chats/` ([детали](chat-agents.md)) |
+| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | общий `SpeechRuntime`, ffmpeg + локальный whisper |
+| `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls,speech*}` | prefs, speech capabilities/model jobs, engine debug CLI, `CredsStore`, `LocalTls` |
+| `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission, `/api/chat/transcribe*` | выбранный executor + `chats/`; browser/локальная диктовка использует тот же speech-контракт ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
 | `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_DIR`); проекты кокпита — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
 | `projects`, `code` | `/api/projects*`, read-only `/api/code/:project/*` | профили/prefs + git/worktree |
 | `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](documents.md)) |
+| `inbox` | `GET /api/inbox[/{summary,status}]`, `POST /api/inbox/channels/:channel/{activate,deactivate}`, решения `POST /api/inbox/items/:ref/{task,dismiss,reset}` | общий merge Telegram/GitHub, account-owned `inbox-state.json`, единый draft/triage/worker и B24 task service; provider credentials здесь отсутствуют |
+| `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,inbox-state.json}` — `config.telegramDir` |
+| `github` | `GET /api/github/status`, `GET/PUT /api/github/rules`, `POST /api/github/{connect,recheck,disconnect,force-forget}`, public HMAC ingress `POST /hooks/github/:ingressRef` | GitHub REST + repository webhook `issues/opened`; PAT/secret в private state, bindings и `accounts/<accountRef>/{archive/,ingress-state.json,rules.json,inbox-state.json}` — `config.githubDir` |
 | `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
-| `terminal` | `/api/terminal` (WebSocket) | PTY |
+| `terminal` | `/api/terminal` (WebSocket: `in`, `resize`) | stdlib Python helper: `pty.fork()`, `TIOCSWINSZ`/`SIGWINCH`, cleanup process group |
 | `health` | `/api/health` | — |
 
 Fastify-плагины: `sse` (fs.watch → broadcast), `http-scope` (область http-сокета, когда поднят
@@ -53,6 +67,48 @@ index=no-cache, assets=immutable). Порядок важен: `http-scope` ид�
 (prefs `accessLocalHttps`, читается в `app.js` до сборки: сокет создаётся один раз при старте).
 Почему http остаётся полнофункциональным для loopback и чем это грозит,
 если переставить — [gotchas](gotchas.md#локальный-https-два-сокета-в-одном-процессе-а-не-переезд-на-8143).
+
+**Общий Inbox (`lib/inbox/`): immutable account context вместо mutable current.**
+`app.js` явно композирует Telegram и GitHub capabilities. Каждый list/action захватывает
+lease конкретных `accountRef + generation + stores`, а перед ответом или commit повторно
+проверяет generation. Switch переводит старую generation в draining, запрещает новые
+leases и ждёт уже начатые account-scoped операции. Ошибка одного канала попадает в partial
+result и не скрывает второй.
+
+Provider connect/disconnect, plugin toggle и Inbox activate/deactivate — три разные оси.
+Activate атомарно открывает account-owned epoch по server-side marker; deactivate закрывает
+её. История до activation и gaps намеренной паузы backlog не становятся. Закрытые epochs
+продолжают показывать уже принятые unresolved items; после provider disconnect они read-only.
+Reconnect той же immutable provider identity возвращает тот же namespace, но требует новой
+явной activation; новый bot/repository ID получает новый случайный `accountRef`, пустые rules
+и inactive Inbox.
+
+Refs кодируют schema, kind, channel и account owner. Decisions назначают точные sorted unique
+sets message refs без пересечений; split/merge проецируется coverage и частичное решение даёт
+`mixed`. Task/dismiss принимают только непустой exact subset текущих `new` сообщений. Reset
+возможен только для skipped по CAS; task reset запрещён. Перед B24 side effect task service
+повторно проверяет B24 readiness, plugin/channel gates, generation, revision, contents,
+assignments, project и policy. Решение пишется после B24 success; неоднозначный провал durable
+commit блокирует автоматический retry до operator reconciliation.
+
+**Каналы.** Telegram группирует reply/topic/author с окном тишины 600 секунд и умеет
+лениво materialize Bot API attachments. Общий `InboxAttachmentAnalyzer` до model triage/B24
+локально транскрибирует речь, извлекает bounded кадры видео, готовит raster visual inputs и
+читает bounded UTF-8 документы; неподдерживаемый или неполный разбор fail-closed оставляет
+item человеку. Недоверенный Inbox не запускается через coding executor: отдельный
+`runUntrusted` не имеет tools/workspace/MCP/session, а visual realpath проверяется внутри
+server-owned media cache и превращается в media type + base64 до границы provider-а.
+Provider/модель без такого transport или image capability остаются fail-closed и не дают
+worker readiness `ready`. Cache анализа bounded по TTL/quota; visual artifacts защищены
+consumer lease до чтения моделью, а неуспешный item получает видимый шестичасовой cooldown.
+GitHub v1 даёт один item на `issues/opened`, `settleMs=0`
+и без attachments. GitHub ingress проверяет HMAC по raw body, exact repository/hook/generation
+и durable delivery+semantic dedupe; bounded REST reconciliation восстанавливает потерянные
+webhook deliveries. Общий `InboxAutoTasks` использует модель из плагина Inbox, а включение,
+порог и quota остаются policy конкретного allowlist scope. Любая неопределённость оставляет
+item человеку. SSE `inbox-changed` будит все окна; минутный poll summary нужен отдельно,
+поскольку Telegram item может созреть без нового события. Полный lifecycle, identity,
+storage и operator gates описаны в [inbox.md](inbox.md).
 
 **Триаж (lib/analysis/analyzer.js), устойчивость:** очередь оценок при старте сервера
 ВОССТАНАВЛИВАЕТСЯ из статус-файлов (`queued` → снова в очередь; `running` → interrupted,
@@ -82,6 +138,16 @@ git-refresh перед оценкой — не чаще раза в 10 мин (�
 вручную; общий shell extractor удалён.
 У стадий-статусов профиля проекта (skeptic/validate/tcritic/simplify) промпт пуст ЗАКОННО — их ведут
 промпты соседних стадий (plan/tests/build).
+
+**Раздел «Карта задачи» в промпте разведки — контракт с движком, а не стиль.** Шаблон
+`server/seed/agents/scout.md` (и соответствующие сайдкары профилей) требует от SCOUT раздел
+ровно с этим заголовком: движок достаёт его из `recon.md` и вклеивает в промпт каждого
+следующего этапа, чтобы те не выясняли поиском, где что лежит (около пятой части всех
+раундов маршрута). Правки семени **не догоняют уже установленное**: `installAgents` пишет
+create-only, а сайдкар маршрута — инстанцированная копия, и до прогонов текст доезжает
+только публикацией нового каталога (`routes/publish.mjs`) и только на НОВОЙ попытке
+(ни `resume`, ни `goto` каталог не перечитывают). Формат и потолок 16 КБ описаны в
+[ENGINE.md](../engine/ENGINE.md).
 
 **Прогоны в UI:** адаптер читает единственный runtime root `config.stateDir`.
 Полностью закреплённая route-attempt identity делает реестр исполняемым; исторические
@@ -170,16 +236,56 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 - `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
   Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
   Projects, Code (read-only дерево/файл/git), Documents (скрытый route просмотра MD/TXT),
-  Diff (Monaco), Video, Terminal,
+  Diff (Monaco), Tools (агрегатор), Video, Terminal,
   Settings (Приложение / Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ), Login,
   TaskModal и ChatPanel.
+- **Code и Terminal монтирует только постоянный `shared/layout/ToolHost.vue`.** Route-компоненты
+  `/code` и `/terminal` — пустые адаптеры; `page`, `dock` и `hidden` меняют CSS одного render-site.
+  Поэтому во вкладке бывает максимум один Monaco и один terminal WebSocket. Компоненты загружаются
+  независимо через `shared/tools/registry.js`, а `stores/dock.js` держит динамические mounted-флаги,
+  runtime и exact-once intent-очереди. Правая рейка и overlay-док существуют с 900 px; на
+  760–899 px остаются компактный sidebar и route-страницы, до 759 px — нижняя навигация.
+  Переключатель desktop-sidebar закреплён снизу, а изменение его ширины анимируется без
+  резкого layout-скачка (с отключением через `prefers-reduced-motion`).
+  У overlay-дока нет отдельной дублирующей шапки: expand/close встроены поверх строки
+  панели. «Во весь экран» не меняет route/history, а растягивает тот же dock
+  render-site на всю ширину content-колонки; повторный клик возвращает сохранённую обычную
+  ширину. Выбор геометрии хранится в `cockpit-dock-expanded` и восстанавливается после
+  скрытия/повторного открытия и при первом явном открытии после reload; сам док после
+  загрузки не показывается. У скрытого дока активный `isExpanded` остаётся
+  выключен, поэтому основной контент не блокируется. Перекрытый `<main>` на это время
+  получает `inert`/`aria-hidden`, а переход в
+  другой раздел сворачивает expanded до обычного дока, чтобы новая страница сразу была
+  видна. В compact Code дерево остаётся слева от Monaco и меняет ширину вертикальным
+  разделителем; его фактический viewport-max (42%, 140–420 px) совпадает с JS/ARIA.
+  Повторная активация Code перечитывает project/repo/tree/file по схеме
+  stale-while-revalidate: прежние дерево и Monaco-модель остаются видимыми до атомарной
+  подмены свежим снимком, а очищаются только после подтверждения, что выбор исчез.
+  До загрузки lazy chunk и первого API-снимка показывается лёгкий `CodePanelLoading` той
+  же геометрии; он не импортирует и не создаёт Monaco.
+  Односторонний diff добавленного/удалённого файла автоматически занимает одну колонку,
+  не оставляя заведомо пустую половину редактора.
+  Переход 900→899 закрывает док и размонтирует непоказанные панели, чтобы возврат на широкий
+  экран сам не создал PTY.
+- **Escape координирует `shared/ui/layer-stack.js`.** Dock, tools-popover, модалки, confirm
+  и закреплённые HelpTip регистрируют приоритет; одно нажатие закрывает только верхний слой.
+  Monaco/xterm помечают собственного владельца Escape и не отдают локальную клавишу стеку.
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
   (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
   (модалка задачи), `pwa` (обновление/установка и Screen Wake Lock текущего устройства),
   `chat` (мультисессии, история на сервере),
-  `analysis`, `auth`, `diff`, `plugins`, `providers` (реестр исполнителей),
+  `analysis`, `auth`, `diff`, `dock`, `plugins`, `providers` (реестр исполнителей),
+  `inbox` (общий счётчик новых обращений: initial read + SSE + минутный poll),
+  `task-favorites` и `task-seen` (личные метки задач B24, снимок с сервера),
   `ui-context` (что открыто — для чата), `notify-watch` (что на конвейере встало на человеке).
+- **Метки задач B24 живут на сервере, а не в браузере** (`task-favorites`, `task-seen`;
+  контракт и инвариант базовой линии — [b24.md](b24.md#личные-метки-задач-избранное-и-просмотренное)).
+  Оба стора хранят снимок аккаунта (`scope`/`revision`) и применяют ответ, только если
+  он свежее: у поздних ответов и у смены аккаунта портала иначе получалось воскрешение
+  чужих отметок. Базовую линию просмотра ставит ровно одно место — `board.load()` после
+  первого ответа портала; открытие карточки (`TaskModal`) гасит метку «новая» у одной
+  задачи, `App.vue` грузит оба стора при входе и чистит их при потере сессии.
 - **Screen Wake Lock** — локальная настройка `cockpit-screen-wake-lock` во вкладке
   «Настройки → Приложение». Она не хранится в серверных prefs, чтобы планшет не менял
   энергоповедение остальных окон. `stores/pwa.js` держит блокировку на уровне всего SPA,
@@ -189,12 +295,14 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   (вопрос агента в чате, ворота конвейера); красный (`stall`) — конвейер упёрся или оборвался,
   своей кнопки там нет, надо разбираться; синий — просто непрочитанное. Видны и в свёрнутом
   сайдбаре, и в нижней навигации на мобиле; подсказка перечисляет задачи поимённо.
+  При агрегации нескольких источников приоритет фиксирован: `stall > wait > info`.
   Источники: чаты — `chat.waitingCount`/`unreadCount`
   (см. [чат с агентами](chat-agents.md)), конвейер —
   `notify-watch` (он и так обходит `/api/tasks` + `/api/tasks/:id/graph` ради оповещений —
   второго обхода ради цифры не заводим; обновляется по SSE `state-change` + 120-секундная
-  страховка). Цифра конвейера — ЗАДАЧИ, а не поводы: задача, которая и ждёт у ворот, и числится
-  вставшей, считается один раз.
+  страховка), Inbox — `GET /api/inbox/summary` + singleton SSE `inbox-changed` + минутный
+  poll для созревания Telegram-связок после окна тишины. Цифра конвейера — ЗАДАЧИ,
+  а не поводы: задача, которая и ждёт у ворот, и числится вставшей, считается один раз.
 - `shared/pipeline-wait.js` — единственный ответ на «чего конвейер ждёт от человека»
   (`waitingReason` + расшифровки ворот `GATE_REASON`). Общий для страницы конвейера, вотчера
   оповещений и чипа: цифра чипа обязана сходиться с «⏳ ждут тебя» на странице. Копий этой
@@ -218,18 +326,45 @@ cookie jar, чтобы два процесса не перезаписывали
 
 ## Плагины кокпита
 
-Плагин = отключаемый блок: пункт в сайдбаре (под разделителем после основного nav), плашка
-в «Настройки → Плагины», свои API/настройки. Реестр: `lib/plugins-registry.js` (SYSTEM =
-video, code) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+Плагин = отключаемый блок: ссылка в одной из групп навигации, плашка
+в «Настройки → Плагины», свои API/настройки. `nav.group` принимает `rail`, `tools` или
+`dock`, отсутствующее/невалидное значение нормализуется в `rail`; `nav.order` задаёт
+порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
+старых серверных manifest только для известных встроенных `system: true` плагинов;
+пользовательский legacy-manifest остаётся в `rail`. Реестр: `lib/plugins-registry.js` (SYSTEM =
+video, code, inbox, telegram, github) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
 в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
-системные модули (media, code) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
+системные модули (media, code, inbox, telegram, github) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
 plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ входит в плагин video — не гейтится.
-Фронт: `stores/plugins.js`, VideoView/CodeView показывают заглушку при выключенном плагине.
+
+**Умолчание вкл/выкл объявляет манифест, а не сорт плагина.** `isEnabled(prefsData, manifest)`
+берёт явный выбор человека из prefs, иначе — `manifest.defaultEnabled ?? !!manifest.system`.
+Признак `system` тоже живёт в манифесте (в `SYSTEM` и в скане), `modules/plugins` его больше
+не дописывает: вторая копия правды разошлась бы с первой. Inbox включён по умолчанию;
+Telegram и GitHub системные, но выключены: их страницы просят provider credentials и не
+должны появляться сами у каждой установки.
+
+Серверный manifest отвечает только за размещение ссылки. Встроить Vue-компонент в правый
+док может лишь явная запись клиентского `shared/tools/registry.js`: произвольный user plugin
+не получает frontend runtime одним JSON-полем. Фронт: `stores/plugins.js`, VideoView,
+InboxView, TelegramView, GitHubView и `ToolHost` для Code показывают заглушку при выключенном плагине
+(по `plugins.loaded && !plugins.enabled(id)`, а `404 plugin_disabled` от сервера в этом
+случае НЕ показывается красной плашкой — это состояние, а не поломка). Выключение Code
+размонтирует Monaco и закрывает его dock-mode; прямой `/code` остаётся под непрозрачной
+понятной заглушкой.
 Вкладка «Настройки → Плагины»: карточки горизонтальной сеткой (auto-fill 340px), селекты
 настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
 действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.
+
+**Настройка типа `model`** (сейчас одна — общий `triageModel` плагина Inbox) хранит пару
+«исполнитель/модель» строкой `<provider>:<model>`, а варианты берёт из живого реестра
+`/api/providers` — `optgroup` по исполнителям, как в чате. Вендор в манифест не зашивается:
+модель у каждого своя, а зовётся она общим путём (`resolveModelRef` → адаптер → `run`).
+Выбор, пропавший из реестра (сняли CLI, переименовали модель), показывается отдельным
+пунктом «— нет в реестре»: молча показать «не выбрана» нельзя — в настройках он остался,
+и сервер всё ещё ходит именно ей.
 
 ## Демо: удалено целиком
 

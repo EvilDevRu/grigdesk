@@ -55,7 +55,7 @@ profile_repositories() { printf 'demo\\t${root}/src\\t${root}/work\\n'; }
   await writeFile(factoryBin, `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "${factoryCalls}"
 case "$1" in
-  check) echo "OK profile=demo catalog=${'b'.repeat(64)} route=feature delivery=disabled"; exit 0 ;;
+  check) echo "OK profile=demo catalog=${'b'.repeat(64)} route=feature delivery=disabled instrumentation=disabled"; exit 0 ;;
   slots) echo '{"supported":false,"reason":"тест без слотов"}'; exit 0 ;;
 esac
 exit 0
@@ -129,7 +129,11 @@ exit 0
           ? {
             routes: ['feature'],
             catalogHash: 'b'.repeat(64),
-            routeOptions: { feature: { deliveryMode: 'disabled' } },
+            routeOptions: {
+              feature: {
+                deliveryMode: 'disabled', instrumentationMode: 'disabled', instrumentationRequired: false,
+              },
+            },
           }
           : null;
       },

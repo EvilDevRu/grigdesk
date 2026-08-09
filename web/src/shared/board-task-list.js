@@ -25,6 +25,8 @@ export function selectBoardTasks({
   onlyNeedsInfo = false,
   favoriteOnly = false,
   favoriteTaskIds = [],
+  newOnly = false,
+  seenTaskIds = [],
 } = {}) {
   let list = Array.isArray(tasks) ? tasks : [];
   const search = String(query).trim().toLowerCase();
@@ -37,6 +39,12 @@ export function selectBoardTasks({
   if (favoriteOnly) {
     const favorites = new Set((favoriteTaskIds || []).map(String));
     list = list.filter((task) => favorites.has(String(task.id)));
+  }
+  // Новая — та, которую ещё не открывали. Отметки приходят с сервера, поэтому
+  // фильтр включается только с их загруженной базовой линией (см. BoardView).
+  if (newOnly) {
+    const seen = new Set((seenTaskIds || []).map(String));
+    list = list.filter((task) => !seen.has(String(task.id)));
   }
   if (onlyUnrated) {
     list = list.filter((task) => !triageRow(analysisByTask, task)?.analysis);
@@ -61,6 +69,7 @@ export function boardTaskListResetKey({
   onlyUnrated = false,
   onlyNeedsInfo = false,
   favoriteOnly = false,
+  newOnly = false,
   sortBy = 'b24',
   taskCount = 0,
 } = {}) {
@@ -69,6 +78,7 @@ export function boardTaskListResetKey({
     !!onlyUnrated,
     !!onlyNeedsInfo,
     !!favoriteOnly,
+    !!newOnly,
     String(sortBy),
     Number(taskCount) || 0,
   ]);

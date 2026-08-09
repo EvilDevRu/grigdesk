@@ -41,6 +41,10 @@ async function compileTaskModal() {
       'const confirmDialog = async () => true;',
     )
     .replace(
+      "import { registerLayer } from '../shared/ui/layer-stack.js';",
+      'const registerLayer = () => () => {};',
+    )
+    .replace(
       "import HelpTip from '../shared/ui/HelpTip.vue';",
       'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
     )
@@ -63,6 +67,10 @@ async function compileTaskModal() {
     .replace(
       "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
       'const useTaskFavoritesStore = globalThis.__taskModalFavoriteStore;',
+    )
+    .replace(
+      "import { useTaskSeenStore } from '../stores/task-seen.js';",
+      'const useTaskSeenStore = globalThis.__taskModalFavoriteSeenStore;',
     )
     .replace(
       "import { liveTimerSec, secToHMS } from '../shared/format.js';",
@@ -119,6 +127,7 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const toggled = [];
+  const markedSeen = [];
   globalThis.__taskModalFavoriteApi = {
     async get(url) {
       if (url.endsWith('/clarifications')) return { text: '' };
@@ -175,6 +184,20 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
     },
   });
 
+  // Отметка просмотра: открытая задача перестаёт быть новой. Отказ отметки не имеет
+  // права мешать показу задачи, поэтому действие возвращает false и ничего не бросает.
+  globalThis.__taskModalFavoriteSeenStore = defineStore('task-modal-favorite-seen', {
+    state: () => ({ taskIds: [], loaded: true, initialized: true, loading: false, error: null }),
+    getters: {
+      isSeen: (state) => (id) => state.taskIds.includes(String(id)),
+      ready: (state) => state.loaded && state.initialized,
+    },
+    actions: {
+      async load() {},
+      async markSeen(ids) { markedSeen.push(ids.map(String)); return false; },
+    },
+  });
+
   const pinia = createPinia();
   globalThis.__taskModalFavoriteRunnerDisplay = await import('../../web/src/shared/runner-display.js');
   const TaskModal = await compileTaskModal();
@@ -193,9 +216,14 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
       '__taskModalFavoriteBoardStore',
       '__taskModalFavoriteAnalysisStore',
       '__taskModalFavoriteStore',
+      '__taskModalFavoriteSeenStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
+
+  // Метка «новая» снимается именно открытием задачи — это единственное место,
+  // где кокпит узнаёт, что человек её прочитал.
+  assert.deepEqual(markedSeen, [['42']]);
 
   const button = wrapper.get('button.stub-modal-fav');
   assert.equal(button.attributes('aria-pressed'), 'false');

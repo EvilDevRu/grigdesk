@@ -13,6 +13,9 @@ const HELP_TIP_PATH = fileURLToPath(
 const VUE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
 )).href;
+const LAYER_STACK_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/src/shared/ui/layer-stack.js', import.meta.url),
+)).href;
 
 async function compileHelpTip() {
   const { parse, compileScript } = await import(
@@ -23,7 +26,8 @@ async function compileHelpTip() {
   assert.deepEqual(errors, []);
   const code = compileScript(descriptor, { id: 'data-v-help-tip-toggle', inlineTemplate: true }).content
     .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`);
+    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
+    .replace("from './layer-stack.js'", `from "${LAYER_STACK_URL}"`);
   return (await import(
     `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
   )).default;

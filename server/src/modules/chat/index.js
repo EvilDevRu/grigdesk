@@ -10,7 +10,6 @@ import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ingestRecording } from '../../lib/media/ingest.js';
 import { getExecutor } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { resolveRequestedEffort } from '../../lib/model-effort.js';
@@ -21,6 +20,7 @@ import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
 import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
 import { autoDecision } from '../../lib/chat/auto-approve.js';
 import { MAX_CHAT_STEPS } from '../../lib/chat/stream-steps.js';
+import { DISCUSSION_SECTION_TITLE, stripDiscussionSection } from '../../lib/telegram/discussion.js';
 import {
   KIMI_AUTH_PROFILE_ID,
   kimiSecurityProfile,
@@ -37,8 +37,86 @@ import {
   withChatTitleHook,
 } from '../../lib/chat/title-hook.js';
 import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
+import { normalizeSpeechSettings, speechSettingsRevision } from '../../lib/speech-settings.js';
+import {
+  SPEECH_STREAM_AUDIO,
+  SPEECH_STREAM_PROTOCOL_VERSION,
+} from '../../lib/speech/stream-process.js';
 
 const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', import.meta.url));
+const SPEECH_STREAM_START_MAX_BYTES = 4 * 1024;
+const SPEECH_STREAM_START_TIMEOUT_MS = 10_000;
+const SPEECH_STREAM_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SPEECH_STREAM_PUBLIC_ERRORS = Object.freeze({
+  speech_model_missing: 'Локальная модель речи не установлена.',
+  speech_unavailable: 'Локальное распознавание сейчас недоступно.',
+  speech_stream_busy: 'Сейчас уже выполняется слишком много локальных диктовок.',
+  speech_stream_protocol: 'Поток речи нарушил протокол.',
+  speech_stream_too_long: 'Достигнут предел длительности диктовки.',
+  speech_stream_backpressure: 'Распознавание не успевает за диктовкой.',
+  speech_stream_timeout: 'Не удалось завершить распознавание вовремя.',
+  stale_speech_settings: 'Настройки речи изменились — начни диктовку заново.',
+});
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactKeys(value, expected) {
+  if (!isPlainObject(value)) return false;
+  const actual = Object.keys(value).sort();
+  const keys = [...expected].sort();
+  return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
+}
+
+function sameSpeechStreamAudio(value) {
+  return hasExactKeys(value, ['encoding', 'sampleRate', 'channels', 'frameSamples'])
+    && value.encoding === SPEECH_STREAM_AUDIO.encoding
+    && value.sampleRate === SPEECH_STREAM_AUDIO.sampleRate
+    && value.channels === SPEECH_STREAM_AUDIO.channels
+    && value.frameSamples === SPEECH_STREAM_AUDIO.frameSamples;
+}
+
+/** WebSocket с cookie принимаем только со строгого origin самого Cockpit. */
+export function speechStreamOriginMatches(request) {
+  const rawOrigin = request?.headers?.origin;
+  const host = request?.host || request?.headers?.host;
+  if (typeof rawOrigin !== 'string' || !rawOrigin || typeof host !== 'string' || !host) return false;
+  try {
+    const origin = new URL(rawOrigin);
+    const expected = new URL(`${request.protocol}://${host}`);
+    // Header Origin не содержит path/query/credentials. Сравнение только `.origin`
+    // приняло бы искусственный `https://cockpit/evil`, что уже не является exact form.
+    return rawOrigin === origin.origin && origin.origin === expected.origin;
+  } catch {
+    return false;
+  }
+}
+
+function parseSpeechStreamStart(raw) {
+  if (raw.length > SPEECH_STREAM_START_MAX_BYTES) return null;
+  let message;
+  try { message = JSON.parse(raw.toString('utf8')); } catch { return null; }
+  if (!hasExactKeys(message, ['type', 'protocolVersion', 'sessionId', 'revision', 'audio'])) return null;
+  if (message.type !== 'start' || message.protocolVersion !== SPEECH_STREAM_PROTOCOL_VERSION) return null;
+  if (typeof message.sessionId !== 'string' || !SPEECH_STREAM_SESSION_RE.test(message.sessionId)) return null;
+  if (typeof message.revision !== 'string' || !message.revision || message.revision.length > 128) return null;
+  if (!sameSpeechStreamAudio(message.audio)) return null;
+  return message;
+}
+
+function parseSpeechStreamControl(raw) {
+  if (raw.length > SPEECH_STREAM_START_MAX_BYTES) return null;
+  let message;
+  try { message = JSON.parse(raw.toString('utf8')); } catch { return null; }
+  if (hasExactKeys(message, ['type']) && message.type === 'cancel') return message;
+  if (hasExactKeys(message, ['type', 'seq'])
+    && message.type === 'stop'
+    && Number.isSafeInteger(message.seq)
+    && message.seq >= 0
+    && message.seq <= 0xffffffff) return message;
+  return null;
+}
 
 // Заказ выжимки для исполнителей без родного компакта (см. compaction в lib/executors).
 // Просим ИМЕННО рабочее состояние, а не пересказ реплик: выжимка станет первым сообщением
@@ -53,8 +131,12 @@ const SUMMARY_PROMPT = `Сожми наш разговор в рабочую в�
 
 async function chatModule(fastify, opts) {
   const {
-    factoryState, config, claudeAuth, internalToken, prefs,
+    factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
   } = opts;
+  const speechStreamStartTimeoutMs = Number.isInteger(opts.speechStreamStartTimeoutMs)
+    && opts.speechStreamStartTimeoutMs > 0
+    ? opts.speechStreamStartTimeoutMs
+    : SPEECH_STREAM_START_TIMEOUT_MS;
   const modelsRegistry = opts.modelsRegistry || ((cfg) => getModelsRegistry(cfg));
   const executorResolver = opts.executorResolver || getExecutor;
 
@@ -114,6 +196,22 @@ async function chatModule(fastify, opts) {
   const TICKET_DESCRIPTION_MAX = 6000;
 
   /**
+   * Проект задачи — он же профиль её прогона: по нему allowlist телеграма решает,
+   * показывать ли переписку. Реестра может не быть вовсе (задача ещё не
+   * запускалась, ручная, историческая) — тогда проект неизвестен, и это не повод
+   * ни закрыть привязанный чат, ни открыть непривязанный: сверка проекта
+   * пропускается, сам allowlist остаётся (lib/telegram/link-scope.js).
+   */
+  async function taskProject(task) {
+    try {
+      const { registry } = await factoryState.readRegistry(task);
+      return String(registry?.PROFILE || '').trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Контекст выбранной в чате задачи: тикет лежит в server-owned хранилище
    * (config.ticketsDir, lib/factory-ticket.js) и до сих пор агенту не передавался —
    * выбор задачи влиял только на cwd. Чтение лучшее усилие: задача без тикета
@@ -127,7 +225,11 @@ async function chatModule(fastify, opts) {
       const ticket = JSON.parse(await fs.readFile(file, 'utf8'));
       const title = String(ticket?.title || '').trim();
       const lines = [`В чате выбрана задача #${task}${title ? `: «${title}»` : ''}.`];
-      let description = String(ticket?.description || '').trim();
+      // Секцию обсуждения, вклеенную в описание при запуске, выбрасываем: тикет —
+      // замороженный снимок постановки, а разговор в чате продолжается. Свежую
+      // версию соберём ниже сами.
+      let description = stripDiscussionSection(String(ticket?.description || '')).trim();
+      const source = [title, description].filter(Boolean).join('\n');
       if (description) {
         if (description.length > TICKET_DESCRIPTION_MAX) {
           description = `${description.slice(0, TICKET_DESCRIPTION_MAX)}\n[описание обрезано; полный текст: ${file}]`;
@@ -142,6 +244,19 @@ async function chatModule(fastify, opts) {
       }
       const sourceUrl = String(ticket?.sourceUrl || '').trim();
       if (sourceUrl) lines.push(`Источник: ${sourceUrl}`);
+
+      // Переписка по телеграм-ссылкам — ПОСЛЕ подрезки описания и своей секцией,
+      // а не внутри него: потолок выше режет с конца, и обсуждение, стоящее в
+      // хвосте, срезалось бы первым и молча. Свой лимит у разворота есть
+      // (DISCUSSION_LIMITS). Ищем по очищенному описанию: ссылки, попавшие в
+      // прошлый разворот, охват не расширяют.
+      // Ссылка на декоратор ленивая — модуль telegram регистрируется позже нас,
+      // а выключенный плагин и любой сбой отдают пустоту (см. modules/telegram).
+      if (source && typeof fastify.telegramDiscussion === 'function') {
+        const view = await fastify.telegramDiscussion(source, { project: await taskProject(task) });
+        if (view.text) lines.push(`${DISCUSSION_SECTION_TITLE}\n${view.text}`);
+      }
+
       lines.push('Используй контекст задачи, только если просьба к нему относится. На отвлечённые вопросы отвечай как обычно, без упоминания задачи.');
       return `[Задача чата]\n${lines.join('\n')}\n[/Задача чата]\n\n`;
     } catch {
@@ -215,7 +330,14 @@ async function chatModule(fastify, opts) {
   fastify.get('/api/chat/active', async () => ({
     // `ac` наружу не отдаём: это AbortController хода, не данные для UI.
     active: [...activeRuns.entries()].map(([chatKey, v]) => ({
-      chatKey, startedAt: v.startedAt, tokens: v.tokens, steps: v.steps, compact: !!v.compact,
+      chatKey,
+      startedAt: v.startedAt,
+      tokens: v.tokens,
+      steps: v.steps,
+      compact: !!v.compact,
+      // Живой размер контекста идущего хода — чтобы F5 посреди часового хода не
+      // возвращал кольцо к цифре с прошлого хода (у claude она бывает ДО автокомпакта).
+      contextTokens: v.contextTokens || 0,
     })),
   }));
 
@@ -824,10 +946,17 @@ async function chatModule(fastify, opts) {
           return requestDirectInteraction(presentation, chatKey);
         },
         // Живой счётчик потраченных токенов → SSE → «думает… · N ток.» в чате.
-        onProgress: chatKey ? (tokens) => {
+        // Второе (необязательное) поле — ЗАПОЛНЕННОСТЬ контекста прямо сейчас: её знает
+        // тот исполнитель, чей поток сообщает вход каждого обращения к модели (claude).
+        // Не сообщил — кольцо живёт как раньше, цифрой с прошлого хода.
+        onProgress: chatKey ? (tokens, info) => {
+          const contextTokens = Number(info?.contextTokens) || 0;
           const a = activeRuns.get(chatKey);
-          if (a) a.tokens = tokens;
-          fastify.sse.broadcast('chat-progress', { chatKey, tokens });
+          if (a) {
+            a.tokens = tokens;
+            if (contextTokens) a.contextTokens = contextTokens;
+          }
+          fastify.sse.broadcast('chat-progress', { chatKey, tokens, contextTokens });
         } : undefined,
         // Лента хода (размышления, инструменты, их результаты) — живьём в окно.
         // Копия в activeRuns: перезагрузка страницы посреди хода не теряет показанное.
@@ -1025,20 +1154,372 @@ async function chatModule(fastify, opts) {
 
   // Диктовка с микрофона: multipart-аудио (webm/ogg) → whisper → { text }.
   // Синхронно: записи короткие, ответ нужен сразу в поле ввода.
+  fastify.post('/api/chat/transcribe/warmup', async (request, reply) => {
+    if (!speechRuntime?.warmup) {
+      return reply.code(503).send({
+        error: 'speech_unavailable',
+        message: 'Прогрев локального распознавания недоступен.',
+      });
+    }
+    try {
+      const settings = prefs.read().speech;
+      const storedRevision = prefs.readStored?.().speech?._revision || null;
+      const result = await speechRuntime.warmup({
+        settings,
+        optionsRevision: speechSettingsRevision(settings, storedRevision),
+      });
+      return reply.code(202).send(result);
+    } catch (err) {
+      const status = err.code === 'speech_warmup_busy' ? 429
+        : err.code === 'speech_model_missing' ? 409
+          : err.code === 'speech_unavailable' ? 503
+          : 500;
+      return reply.code(status).send({
+        error: err.code || 'speech_warmup_failed',
+        message: err.message,
+      });
+    }
+  });
+
+  fastify.delete('/api/chat/transcribe/warmup/:warmupId', async (request, reply) => {
+    if (!speechRuntime?.cancelWarmup) {
+      return reply.code(503).send({
+        error: 'speech_unavailable',
+        message: 'Прогрев локального распознавания недоступен.',
+      });
+    }
+    try {
+      const cancelled = await speechRuntime.cancelWarmup(request.params.warmupId);
+      return { warmupId: request.params.warmupId, cancelled };
+    } catch (err) {
+      return reply.code(500).send({
+        error: err.code || 'speech_warmup_cancel_failed',
+        message: err.message,
+      });
+    }
+  });
+
+  // Live Whisper: PCM16 идёт по авторизованному same-origin WebSocket, а модель и
+  // все исполняемые options берутся только из server-owned snapshot по opaque revision.
+  fastify.get('/api/chat/transcribe/stream', {
+    websocket: true,
+    async preValidation(request, reply) {
+      if (speechStreamOriginMatches(request)) return;
+      return reply.code(403).send({
+        error: 'speech_stream_origin_forbidden',
+        message: 'Origin live-распознавания не совпадает с Cockpit.',
+      });
+    },
+  }, (socket, request) => {
+    let state = 'awaiting-start';
+    let clientSessionId = '';
+    let acceptedRevision = '';
+    let stream = null;
+    let pendingReady = null;
+    let terminalEventSent = false;
+    let socketClosed = false;
+    const startAbort = new AbortController();
+    let startTimer = setTimeout(() => {
+      startTimer = null;
+      if (state === 'awaiting-start') publicError('speech_stream_timeout', 1008);
+    }, speechStreamStartTimeoutMs);
+    startTimer?.unref?.();
+
+    const clearStartTimer = () => {
+      if (startTimer) clearTimeout(startTimer);
+      startTimer = null;
+    };
+
+    const sendJson = (payload) => {
+      if (socketClosed || socket.readyState !== 1) return false;
+      try {
+        socket.send(JSON.stringify(payload));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const closeSocket = (code, reason) => {
+      if (socketClosed) return;
+      try { socket.close(code, reason); } catch { /* сокет уже закрыт */ }
+    };
+    const cancelRuntime = () => {
+      startAbort.abort();
+      try { Promise.resolve(stream?.cancel?.()).catch(() => {}); }
+      catch { /* runtime уже завершил cleanup */ }
+    };
+    const publicError = (rawCode, closeCode = 1011) => {
+      if (terminalEventSent || state === 'cancelled' || state === 'done') return;
+      clearStartTimer();
+      const code = Object.hasOwn(SPEECH_STREAM_PUBLIC_ERRORS, rawCode)
+        ? rawCode : 'speech_unavailable';
+      terminalEventSent = true;
+      state = 'failed';
+      sendJson({
+        type: 'error',
+        sessionId: clientSessionId || undefined,
+        optionsRevision: acceptedRevision || undefined,
+        code,
+        message: SPEECH_STREAM_PUBLIC_ERRORS[code],
+      });
+      cancelRuntime();
+      closeSocket(closeCode, code);
+    };
+    const protocolFailure = () => publicError('speech_stream_protocol', 1008);
+
+    // Поля публичного события перечислены явно: traceback, argv и локальные пути
+    // не могут случайно попасть в браузер даже при ошибке нижнего слоя.
+    const forwardRuntimeEvent = (event) => {
+      if (!isPlainObject(event) || typeof event.type !== 'string') {
+        protocolFailure();
+        return;
+      }
+      if (event.type === 'ready') {
+        if (state !== 'starting') { protocolFailure(); return; }
+        if (!stream) {
+          pendingReady = event;
+          return;
+        }
+        sendJson({
+          type: 'ready',
+          sessionId: clientSessionId,
+          optionsRevision: acceptedRevision,
+          protocolVersion: SPEECH_STREAM_PROTOCOL_VERSION,
+          audio: SPEECH_STREAM_AUDIO,
+        });
+        return;
+      }
+      if (event.type === 'error') {
+        publicError(event.code);
+        return;
+      }
+      if (event.type === 'ack') {
+        sendJson({
+          type: 'ack', sessionId: clientSessionId, optionsRevision: acceptedRevision,
+          seq: event.seq, ackSeq: event.ackSeq, receivedUntilMs: event.receivedUntilMs,
+        });
+        return;
+      }
+      if (event.type === 'partial' || event.type === 'final' || event.type === 'done') {
+        const payload = {
+          type: event.type,
+          sessionId: clientSessionId,
+          optionsRevision: acceptedRevision,
+          text: typeof event.text === 'string' ? event.text : '',
+          committed: typeof event.committed === 'string' ? event.committed : '',
+          partial: typeof event.partial === 'string' ? event.partial : '',
+          ackSeq: event.ackSeq,
+          processedUntilMs: event.processedUntilMs,
+          receivedUntilMs: event.receivedUntilMs,
+          lagMs: event.lagMs,
+        };
+        sendJson(payload);
+        if (event.type === 'done') {
+          terminalEventSent = true;
+          state = 'done';
+          closeSocket(1000, 'done');
+        }
+        return;
+      }
+      protocolFailure();
+    };
+
+    const beginStream = async (message) => {
+      clearStartTimer();
+      clientSessionId = message.sessionId;
+      let settings;
+      let storedRevision = null;
+      try {
+        if (typeof prefs.readStored === 'function') {
+          // Один синхронный снимок: settings A нельзя склеить с revision B даже
+          // при внешней атомарной замене prefs.json между двумя чтениями.
+          const stored = prefs.readStored();
+          settings = normalizeSpeechSettings(stored?.speech);
+          storedRevision = stored?.speech?._revision || null;
+        } else {
+          settings = normalizeSpeechSettings(prefs.read().speech);
+        }
+      }
+      catch { publicError('speech_unavailable'); return; }
+      acceptedRevision = speechSettingsRevision(settings, storedRevision);
+      if (message.revision !== acceptedRevision) {
+        publicError('stale_speech_settings', 1008);
+        return;
+      }
+      if (settings.engine !== 'whisper' || typeof speechRuntime?.startStream !== 'function') {
+        publicError('speech_unavailable');
+        return;
+      }
+      state = 'starting';
+      try {
+        const started = await speechRuntime.startStream({
+          settings,
+          optionsRevision: acceptedRevision,
+          clientSessionId,
+          signal: startAbort.signal,
+          onEvent: forwardRuntimeEvent,
+        });
+        if (socketClosed || state === 'cancelled' || startAbort.signal.aborted) {
+          try { await started.cancel?.(); } catch { /* cleanup best-effort */ }
+          return;
+        }
+        stream = started;
+        state = 'recording';
+        if (pendingReady) {
+          const ready = pendingReady;
+          pendingReady = null;
+          // ready должен уйти только после публикации stream: клиент сразу следом
+          // сбрасывает накопленные за cold start PCM frames.
+          state = 'starting';
+          forwardRuntimeEvent(ready);
+          if (state === 'starting') state = 'recording';
+        }
+      } catch (error) {
+        if (socketClosed || state === 'cancelled' || startAbort.signal.aborted) return;
+        request.log.warn({ err: error }, 'speech stream: session start failed');
+        // Session сама присылает санитизированный error. Если сбой случился раньше
+        // её создания (busy/readiness), здесь формируем единственное публичное событие.
+        if (!terminalEventSent) {
+          publicError(error?.code, error?.code === 'speech_stream_busy' ? 1013 : 1011);
+        }
+      }
+    };
+
+    const handleBinary = (raw) => {
+      if (state !== 'recording' || !stream) { protocolFailure(); return; }
+      const packet = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+      if (packet.length < 6 || packet.length > 4 + 64 * 1024 || (packet.length - 4) % 2 !== 0) {
+        protocolFailure();
+        return;
+      }
+      const seq = packet.readUInt32LE(0);
+      try {
+        stream.pushFrame(seq, packet.subarray(4));
+      } catch (error) {
+        state = 'failed';
+        request.log.warn({ err: error }, 'speech stream: rejected PCM frame');
+        // pushFrame запускает собственный fail/cleanup и пришлёт ровно один
+        // санитизированный event; подробности исключения остаются только в логе.
+      }
+    };
+
+    const handleText = (raw) => {
+      if (state === 'awaiting-start') {
+        const message = parseSpeechStreamStart(raw);
+        if (!message) { protocolFailure(); return; }
+        void beginStream(message);
+        return;
+      }
+      const message = parseSpeechStreamControl(raw);
+      if (!message) { protocolFailure(); return; }
+      if (message.type === 'cancel') {
+        clearStartTimer();
+        state = 'cancelled';
+        cancelRuntime();
+        closeSocket(1000, 'cancelled');
+        return;
+      }
+      if (state !== 'recording' || !stream || message.seq !== stream.snapshot().lastSeq) {
+        protocolFailure();
+        return;
+      }
+      state = 'stopping';
+      Promise.resolve(stream.stop()).catch((error) => {
+        if (state === 'cancelled' || state === 'done' || terminalEventSent) return;
+        request.log.warn({ err: error }, 'speech stream: final drain failed');
+        publicError(error?.code);
+      });
+    };
+
+    socket.on('message', (raw, isBinary) => {
+      if (socketClosed || state === 'done' || state === 'failed' || state === 'cancelled') return;
+      if (isBinary) handleBinary(raw);
+      else handleText(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+    });
+    socket.on('close', () => {
+      clearStartTimer();
+      socketClosed = true;
+      if (state !== 'done') {
+        state = 'cancelled';
+        cancelRuntime();
+      }
+    });
+    socket.on('error', () => {
+      clearStartTimer();
+      if (state === 'done' || state === 'cancelled') return;
+      state = 'cancelled';
+      cancelRuntime();
+    });
+  });
+
   fastify.post('/api/chat/transcribe', async (request, reply) => {
+    if (!speechRuntime?.transcribe) {
+      return reply.code(503).send({
+        error: 'speech_unavailable',
+        message: 'Локальное распознавание речи недоступно.',
+      });
+    }
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: 'no_file' });
-    const workDir = path.join(os.tmpdir(), `cockpit-dictate-${Date.now()}`);
-    await fs.mkdir(workDir, { recursive: true });
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-dictate-'));
     const audioPath = path.join(workDir, safeName(data.filename || 'dictation.webm'));
+    const abort = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      abort.abort();
+    }, 120_000);
+    const abortRequest = () => abort.abort();
+    const abortResponse = () => {
+      // После полного multipart request уже complete и событие `aborted` не приходит.
+      // Закрытая клиентом response-сторона — единственный сигнал Esc/unmount в этот момент.
+      if (!reply.raw.writableEnded) abort.abort();
+    };
+    request.raw.once('aborted', abortRequest);
+    reply.raw.once('close', abortResponse);
     try {
       await pipeline(data.file, createWriteStream(audioPath));
-      const { transcript } = await ingestRecording({ filePath: audioPath, workDir, model: 'medium', lang: 'ru' });
+      const streamSessionId = data.fields?.streamSessionId?.value || null;
+      if (streamSessionId != null
+        && (typeof streamSessionId !== 'string' || !SPEECH_STREAM_SESSION_RE.test(streamSessionId))) {
+        return reply.code(400).send({
+          error: 'bad_stream_session',
+          message: 'Некорректный идентификатор live-сессии речи.',
+        });
+      }
+      const result = await speechRuntime.transcribe({
+        filePath: audioPath,
+        workDir,
+        settings: prefs.read().speech,
+        warmupId: data.fields?.warmupId?.value || null,
+        streamSessionId,
+        signal: abort.signal,
+      });
+      const { transcript } = result;
       const text = (transcript.segments || []).map((s) => s.text).join(' ').trim();
-      return { text, duration: transcript.duration ?? null };
+      return {
+        text,
+        duration: transcript.duration ?? result.duration ?? null,
+        diagnostics: result.diagnostics || {
+          hotwordsTokens: transcript.hotwordsTokens ?? null,
+          hotwordsTruncated: transcript.hotwordsTruncated ?? false,
+        },
+        execution: result.execution || { engine: 'whisper', mode: 'one-shot' },
+      };
     } catch (err) {
-      return reply.code(500).send({ error: 'transcribe_failed', message: err.message });
+      const code = timedOut ? 'speech_timeout' : err.code;
+      const status = code === 'speech_model_missing' ? 409
+        : code === 'speech_unavailable' || code === 'speech_stream_busy' ? 503
+          : code === 'speech_timeout' ? 504
+            : 500;
+      return reply.code(status).send({
+        error: code || 'transcribe_failed',
+        message: timedOut ? 'Распознавание речи превысило лимит времени.' : err.message,
+      });
     } finally {
+      clearTimeout(timeout);
+      request.raw.off('aborted', abortRequest);
+      reply.raw.off('close', abortResponse);
       try { rmSync(workDir, { recursive: true, force: true }); } catch { /* мусор в tmp не критичен */ }
     }
   });
@@ -1092,10 +1573,24 @@ async function chatModule(fastify, opts) {
   // Вместе с историей отдаём порог сжатия из настроек: по нему кольцо контекста решает,
   // где желтеть и краснеть. Своего эндпоинта порогу не завели — клиент чата этот и так
   // тянет при загрузке, а меняется порог только в «Настройках» (оттуда же обновляется стор).
-  fastify.get('/api/chat/store', async () => ({
-    ...(await history.read()),
-    compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
-  }));
+  fastify.get('/api/chat/store', async () => {
+    const settings = prefs.read().speech;
+    const storedRevision = prefs.readStored?.().speech?._revision || null;
+    // История чата не должна ждать Python/CUDA diagnostics на cold start. Sync
+    // snapshot содержит последний известный readiness; async оставлен только для
+    // совместимых runtime, у которых нового шва ещё нет.
+    const publicSpeech = speechRuntime?.publicSnapshot
+      ? speechRuntime.publicSnapshot(settings)
+      : await speechRuntime?.publicSnapshotAsync?.(settings);
+    return {
+      ...(await history.read()),
+      compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
+      speech: {
+        ...publicSpeech,
+        revision: speechSettingsRevision(settings, storedRevision),
+      },
+    };
+  });
 
   // Полная запись стора. Осталась для миграции со старой схемы и восстановления
   // из браузерного снимка; в обычной работе клиент ею НЕ пользуется — с ростом истории

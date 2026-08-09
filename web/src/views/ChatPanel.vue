@@ -2,6 +2,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
+import { registerLayer } from '../shared/ui/layer-stack.js';
 import { useChatStore } from '../stores/chat.js';
 import ChatTabs from './chat/ChatTabs.vue';
 import ChatSession from './chat/ChatSession.vue';
@@ -11,6 +12,7 @@ const router = useRouter();
 const route = useRoute();
 const { open, activeId } = storeToRefs(chat);
 const panel = ref(null);
+let unregisterChatLayer = null;
 
 // На странице «Агенты» плавающий чат не нужен — там своя большая рабочая область.
 const onChats = computed(() => route.name === 'chats');
@@ -29,15 +31,21 @@ function onDocDown(e) {
   if (panel.value && !panel.value.contains(e.target)) chat.close();
 }
 watch(open, (v) => {
+  unregisterChatLayer?.();
+  unregisterChatLayer = null;
   if (v) {
     chat.ensure();
+    unregisterChatLayer = registerLayer('chat-panel', { priority: 95, close: () => chat.close() });
     // Вешаем на следующий тик, чтобы клик-открытие само себя не закрыло.
     setTimeout(() => document.addEventListener('mousedown', onDocDown), 0);
   } else {
     document.removeEventListener('mousedown', onDocDown);
   }
+}, { immediate: true });
+onBeforeUnmount(() => {
+  unregisterChatLayer?.();
+  document.removeEventListener('mousedown', onDocDown);
 });
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocDown));
 
 function openFull() { chat.close(); router.push('/chats'); }
 </script>
@@ -99,6 +107,12 @@ function openFull() { chat.close(); router.push('/chats'); }
 .mini:hover { color: var(--ink); border-color: var(--line-2); }
 .pbody { flex: 1; min-height: 0; display: flex; }
 .pbody :deep(.cs) { flex: 1; }
+
+/* Правая рейка — отдельная колонка. FAB и панель не перекрывают её, при этом
+   ChatPanel с z-index 95 по-прежнему может лежать поверх открытого tool-dock. */
+@media (min-width: 900px) {
+  .fab, .panel { right: 62px; }
+}
 
 /* Анимации */
 .pop-enter-active, .pop-leave-active { transition: transform .2s cubic-bezier(.2,.7,.3,1), opacity .18s; }

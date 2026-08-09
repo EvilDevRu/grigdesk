@@ -9,7 +9,7 @@ import { X509Certificate } from 'node:crypto';
  * @param {object} opts
  * @param {string} opts.keyPath   COCKPIT_TLS_KEY (пусто — не задан)
  * @param {string} opts.certPath  COCKPIT_TLS_CERT
- * @param {boolean} opts.modeEnabled  тумблер «Доступ → Локальный HTTPS» (prefs.accessLocalHttps)
+ * @param {boolean} opts.modeEnabled  HTTPS в карточке «Доступ → В домашней сети» (prefs.accessLocalHttps)
  * @param {{load: () => object}} opts.localTls
  * @returns {{source: 'env'|'state'|'none', key?: Buffer, cert?: Buffer, fingerprint?: string, error?: string}}
  *

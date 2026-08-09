@@ -79,7 +79,15 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5180,
       proxy: {
-        '/api': { target: proxyTarget, changeOrigin: true, ws: false },
+        // Чатовая live-диктовка использует WebSocket под /api; HTTP-маршруты
+        // продолжают проксироваться тем же правилом. Сервер сверяет Origin с
+        // Host fail-closed, поэтому dev-proxy переписывает оба к :8140.
+        '/api': {
+          target: proxyTarget,
+          changeOrigin: true,
+          ws: true,
+          rewriteWsOrigin: true,
+        },
         '/vscode': { target: proxyTarget, changeOrigin: true, ws: true },
         '/shots': proxyTarget,
       },

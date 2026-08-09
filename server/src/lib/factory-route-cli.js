@@ -143,6 +143,19 @@ export function routeLaunchEnv(config, extra = {}) {
   };
 }
 
+/**
+ * Порог автосжатия контекста ЭТАПА для движка (prefs `stageAutoCompactWindow`).
+ *
+ * Передаётся ЯВНО и всегда, включая `0`: пустое значение движок читает как «спроси
+ * профиль» (`AUTO_COMPACT_WINDOW` в его `runners.env`), и осознанный ноль человека молча
+ * проигрывал бы настройке проекта. Дальше движок отдаёт разрешённое значение раннеру
+ * своим `RUNNER_AUTO_COMPACT_WINDOW` — диалект CLI знает уже раннер, не кокпит.
+ */
+export function stageAutoCompactEnv(prefsData) {
+  const n = Math.max(0, Math.round(Number(prefsData?.stageAutoCompactWindow) || 0));
+  return { FACTORY_STAGE_AUTO_COMPACT: String(n) };
+}
+
 /** Синхронный вызов route-движка (check, gate --commit-only, abandon, goto). */
 export function runRouteEngine(config, args, { timeout = 30000 } = {}) {
   return new Promise((resolve) => {

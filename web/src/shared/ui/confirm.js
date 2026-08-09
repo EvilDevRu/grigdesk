@@ -3,6 +3,8 @@
 // Esc / клик по фону / «Отмена» → false; Enter / «Ок» → true. Без Vue-обвязки —
 // чистый DOM, чтобы звать из любого места одной функцией.
 
+import { registerLayer } from './layer-stack.js';
+
 let cssDone = false;
 
 function injectCss() {
@@ -53,14 +55,18 @@ export function confirmDialog(text, { title = 'Подтверди действи
     box.append(t, x, a);
     wrap.append(box);
 
+    let settled = false;
+    let unregisterLayer = null;
     const done = (v) => {
+      if (settled) return;
+      settled = true;
+      unregisterLayer?.();
       document.removeEventListener('keydown', onKey, true);
       wrap.remove();
       resolve(v);
     };
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(false); }
-      else if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); done(true); }
+      if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); done(true); }
     };
     document.addEventListener('keydown', onKey, true);
     ok.addEventListener('click', () => done(true));
@@ -68,6 +74,7 @@ export function confirmDialog(text, { title = 'Подтверди действи
     wrap.addEventListener('click', (e) => { if (e.target === wrap) done(false); });
 
     document.body.appendChild(wrap);
+    unregisterLayer = registerLayer('confirm-dialog', { priority: 400, close: () => done(false) });
     no.focus();
   });
 }
@@ -103,14 +110,18 @@ export function promptDialog({ title = 'Пояснение', text = '', placehol
     box.append(ta, a);
     wrap.append(box);
 
+    let settled = false;
+    let unregisterLayer = null;
     const done = (v) => {
+      if (settled) return;
+      settled = true;
+      unregisterLayer?.();
       document.removeEventListener('keydown', onKey, true);
       wrap.remove();
       resolve(v);
     };
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(null); }
-      else if (e.key === 'Enter' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); done(ta.value); }
+      if (e.key === 'Enter' && !e.shiftKey) { e.stopPropagation(); e.preventDefault(); done(ta.value); }
     };
     document.addEventListener('keydown', onKey, true);
     ok.addEventListener('click', () => done(ta.value));
@@ -118,6 +129,7 @@ export function promptDialog({ title = 'Пояснение', text = '', placehol
     wrap.addEventListener('click', (e) => { if (e.target === wrap) done(null); });
 
     document.body.appendChild(wrap);
+    unregisterLayer = registerLayer('prompt-dialog', { priority: 400, close: () => done(null) });
     ta.focus();
   });
 }
@@ -143,19 +155,25 @@ export function alertDialog(text, { title = 'Кокпит', okText = 'Понят
     box.append(t, x, a);
     wrap.append(box);
 
+    let settled = false;
+    let unregisterLayer = null;
     const done = () => {
+      if (settled) return;
+      settled = true;
+      unregisterLayer?.();
       document.removeEventListener('keydown', onKey, true);
       wrap.remove();
       resolve();
     };
     const onKey = (e) => {
-      if (e.key === 'Escape' || e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); done(); }
+      if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); done(); }
     };
     document.addEventListener('keydown', onKey, true);
     ok.addEventListener('click', done);
     wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
 
     document.body.appendChild(wrap);
+    unregisterLayer = registerLayer('alert-dialog', { priority: 400, close: done });
     ok.focus();
   });
 }

@@ -1,5 +1,5 @@
 export const PROFILE_ID = 'demo-profile';
-export const ROUTE_IDS = ['debug', 'feature', 'trivial', 'hunt', 'command'];
+export const ROUTE_IDS = ['debug', 'consilium-debug', 'feature', 'trivial', 'hunt', 'command'];
 
 const stop = (target = 'human') => ({ stop: target });
 const next = (target) => ({ next: target });
@@ -509,6 +509,31 @@ const commandRoute = {
 export const ROUTE_DEFINITIONS = {
   debug: {
     route: debugRoute,
+    prompts: promptsFor([
+      'repro',
+      'instrument',
+      'diagnose',
+      'hyposkeptic',
+      'proof',
+      'translator',
+      'tests',
+      'build',
+      'review',
+      'measure',
+      'phpcheck',
+      'lint',
+      'ship',
+      'retro',
+    ], { publish: true }),
+  },
+  'consilium-debug': {
+    // Та же машина под другим id — regression fixture для контрактов, которые
+    // обязаны выводиться из topology, а не из исторического имени `debug`.
+    route: {
+      ...debugRoute,
+      id: 'consilium-debug',
+      title: 'Fixture renamed debug v2',
+    },
     prompts: promptsFor([
       'repro',
       'instrument',
