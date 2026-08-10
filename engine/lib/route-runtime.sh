@@ -999,15 +999,22 @@ if (
     fail()
 
 verdict = None
-if outcome == "failed":
-    if owner not in owners or not 1 <= len(findings) <= 32:
+# `done` со списком замечаний означает приёмку с хвостом: все находки объявлены
+# отложенными (severity=deferred), возврата в сборку они не вызывают. Такой исход
+# профильный скрипт отдаёт сам — раньше непустой список при done валил узел кодом 78.
+if outcome == "failed" or (outcome == "done" and findings):
+    if outcome == "failed" and owner not in owners:
+        fail()
+    if outcome == "done" and owner is not None and owner not in owners:
+        fail()
+    if not 1 <= len(findings) <= 32:
         fail()
     seen = set()
     normalized = []
     for finding in findings:
         if not isinstance(finding, dict) or not {"id", "summary"} <= set(
             finding
-        ) or not set(finding) <= {"id", "summary", "anchor"}:
+        ) or not set(finding) <= {"id", "summary", "anchor", "severity"}:
             fail()
         finding_id = finding["id"]
         summary = finding["summary"]
@@ -1029,8 +1036,26 @@ if outcome == "failed":
             if not artifact_path(finding["anchor"]):
                 fail()
             item["anchor"] = finding["anchor"]
+        # Вес замечания. Дефолт `blocking` в payload не пишем: канонический JSON
+        # вердикта без отложенных находок остаётся прежним байт-в-байт.
+        severity = finding.get("severity", "blocking")
+        if severity not in {"blocking", "deferred"}:
+            fail()
+        if severity != "blocking":
+            item["severity"] = severity
         normalized.append(item)
-    verdict = {"owner": owner, "findings": normalized}
+    blocking = [
+        item for item in normalized if item.get("severity", "blocking") == "blocking"
+    ]
+    if outcome == "done" and blocking:
+        fail()
+    if outcome == "failed" and not blocking:
+        # Отказ, в котором не осталось ни одного блокирующего замечания, — не отказ:
+        # проверяющий сам объявил всё найденное отложенным. Разворачивать сборку не
+        # за что, иначе маршрут упрётся в no-progress по замечаниям, которые никто
+        # не просил чинить.
+        outcome = "done"
+    verdict = {"owner": owner or "build", "findings": normalized}
     if reviewed_raw is not None:
         if not isinstance(reviewed_raw, list) or not 1 <= len(reviewed_raw) <= 64:
             fail()
@@ -1055,6 +1080,19 @@ if verdict is not None:
     verdict_b64 = base64.b64encode(payload).decode("ascii")
 print(outcome, comment_b64, verdict_b64 or "-", sep="\t")
 PY
+}
+
+# Отвергнутый вердикт command-узла — единственный след причины отказа, а лежал он
+# во временном файле и удалялся вместе с ним. Наружу шёл голый код 78: скрипт
+# отработал, stderr пуст, артефакты свежие — и ни слова о том, чем не понравился
+# JSON. Так 10.08.2026 встал verify задачи 8278, причину пришлось искать вручную.
+# Копия отвергнутого вердикта живёт до следующего отказа этой же задачи.
+_route_v2_command_verdict_spill() {
+  local task=$1 node=$2 result_file=$3 reason=$4 target
+  target="$STATE_DIR/logs/t${task}.command-verdict-rejected.json"
+  cp -f -- "$result_file" "$target" 2>/dev/null || true
+  printf 'command %s: вердикт отвергнут (%s), копия: %s\n' \
+    "$node" "$reason" "$target" >>"$STATE_DIR/logs/t${task}.route-v2.log"
 }
 
 # Детерминированный узел исполняется trusted profile hook-ом без model call. Hook
@@ -1117,15 +1155,18 @@ _route_v2_run_command_node() {
   fi
   IFS=$'\t' read -r outcome comment_b64 verdict_b64 \
     < <(_route_v2_command_result "$result_file") || {
+      _route_v2_command_verdict_spill "$task" "$node" "$result_file" "форма JSON"
       rm -f -- "$context_file" "$result_file"
       return 78
     }
   [[ "$verdict_b64" != - ]] || verdict_b64=""
   comment=$(printf '%s' "$comment_b64" | base64 -d 2>/dev/null) || {
+    _route_v2_command_verdict_spill "$task" "$node" "$result_file" "comment не декодируется"
     rm -f -- "$context_file" "$result_file"
     return 78
   }
   run_state_verdict_validate "$outcome" "$verdict_b64" || {
+    _route_v2_command_verdict_spill "$task" "$node" "$result_file" "verdict не прошёл валидацию"
     rm -f -- "$context_file" "$result_file"
     return 78
   }
@@ -1133,6 +1174,8 @@ _route_v2_run_command_node() {
   if [[ "$policy" == state-only ]]; then
     guard_after=$(_route_v2_guard_snapshot \
       "$task" "$attempt" "$node" "$sequence" after) || {
+        _route_v2_command_verdict_spill "$task" "$node" "$result_file" \
+          "снимок workspace guard «после» не снялся"
         rm -f -- "$context_file" "$result_file"
         return 78
       }

@@ -11,9 +11,10 @@ import {
   safeInboxSourceUrl,
 } from './draft.js';
 import { toPublicInboxItem } from './coordinator.js';
+import { skipReasonText } from './skip-reason.js';
 
 const TASK_KEYS = new Set([
-  'revision', 'messageRefs', 'title', 'description', 'allowUnanalyzedAttachments',
+  'revision', 'messageRefs', 'title', 'description', 'operatorNote',
 ]);
 const DECIDE_KEYS = new Set(['revision', 'messageRefs']);
 const RESET_KEYS = new Set([
@@ -24,6 +25,8 @@ const MAX_TASK_ID_BYTES = 512;
 const MAX_PUBLIC_ATTACHMENT_TEXT = 4096;
 const MAX_DECISION_NOTE_BYTES = 32 * 1024;
 const MAX_DERIVED_DESCRIPTION = 8_000;
+const MAX_OPERATOR_NOTE = 4_000;
+const MAX_UNANALYZED_LINES = 12;
 const SAFE_REASON_RE = /^[a-z0-9_]{1,80}$/u;
 const ACTION_OPTION_KEYS = new Set(['by', 'note', 'requireAllAttachments']);
 const lexical = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -66,12 +69,63 @@ function boundedText(value, where, limit, { optional = false } = {}) {
   return text;
 }
 
-function allowUnanalyzed(value) {
-  if (value === undefined) return false;
-  if (typeof value !== 'boolean') {
-    fail('invalid_request', 'allowUnanalyzedAttachments должен быть boolean.');
-  }
-  return value;
+/**
+ * Пояснение человека к тому, чего машина не прочитала.
+ *
+ * Это единственный ключ, разрешающий создать задачу при неполном разборе:
+ * прежний булев bypass ставил задачу из голого текста сообщений, и обращение
+ * вида «на видео предложение по доработке» превращалось в задачу без сути.
+ * Пустая строка ничего не объясняет и потому не считается пояснением.
+ */
+function operatorNoteText(value) {
+  const text = boundedText(value, 'operatorNote', MAX_OPERATOR_NOTE, { optional: true });
+  return text;
+}
+
+/**
+ * Что именно осталось неразобранным и почему.
+ *
+ * Один список на два адресата: человек читает его в модалке пояснения (иначе он
+ * не знает, ЧТО описывать своими словами), исполнитель задачи — в описании, где
+ * тот же список честно говорит, что видео не расшифровано и пересказ человека —
+ * единственный источник его содержимого.
+ *
+ * Анализатор точнее списка `skipped`: он видит и нескачанные файлы, и те, что
+ * скачались, но не поддались разбору. Пустой анализ бывает только когда он не
+ * запускался вовсе — тогда причины берутся у канала.
+ */
+function unanalyzedEntries(attachmentAnalysis, skipped) {
+  const entries = Array.isArray(attachmentAnalysis?.entries) ? attachmentAnalysis.entries : [];
+  const source = entries.length
+    ? entries.filter((value) => value?.complete !== true).map((value) => ({
+      label: [value?.displayLabel, value?.name],
+      reason: value?.reason,
+    }))
+    : (Array.isArray(skipped) ? skipped : []).map((value) => {
+      const attachment = isPlainObject(value?.attachment) ? value.attachment : (value || {});
+      return {
+        label: [attachment.displayLabel, attachment.name],
+        // Канал прислал код; фразу собирает кокпит — та же, что и в разборе.
+        reason: skipReasonText(value?.reason, {
+          sizeBytes: value?.sizeBytes ?? null,
+          limitBytes: value?.limitBytes ?? null,
+        }),
+      };
+    });
+  return source.slice(0, MAX_UNANALYZED_LINES).map((value) => ({
+    label: truncateText(
+      value.label.map((part) => String(part || '').trim()).filter(Boolean).join(' · '),
+      200,
+    ) || 'вложение',
+    reason: truncateText(String(value.reason || '').replace(/\s+/gu, ' '), 240),
+  }));
+}
+
+function unanalyzedList(entries) {
+  if (!entries.length) return 'Содержимое вложений не удалось разобрать полностью.';
+  return entries
+    .map((value) => (value.reason ? `${value.label} — ${value.reason}` : value.label))
+    .join('\n');
 }
 
 function truncateText(value, limit) {
@@ -482,10 +536,10 @@ export class InboxTaskService {
       INBOX_DRAFT_LIMITS.description,
       { optional: true },
     );
-    const allowWithoutAnalysis = allowUnanalyzed(body.allowUnanalyzedAttachments);
+    const operatorNote = operatorNoteText(body.operatorNote);
     const action = actionOptions(internalOptions, { attachments: true });
-    if (action.by === 'auto' && allowWithoutAnalysis) {
-      fail('invalid_service_call', 'Автомат не может обходить разбор вложений.', 500);
+    if (action.by === 'auto' && operatorNote) {
+      fail('invalid_service_call', 'Автомат не может пояснять содержимое за человека.', 500);
     }
 
     const committed = await this._serialize(async () => {
@@ -534,11 +588,16 @@ export class InboxTaskService {
         const prepared = rawAttachments.length
           ? materialized(await first.context.materializeAttachments(rawAttachments))
           : { files: [], skipped: [] };
-        if ((action.requireAllAttachments || !allowWithoutAnalysis) && prepared.skipped.length) {
+        // Файл, который канал не смог забрать (потолок Bot API в 20 МБ, отвалившаяся
+        // сеть), разбирать нечем. Человеку это не тупик: он поясняет содержимое сам,
+        // и обращение всё равно доходит до модели. Автомату — тупик по определению.
+        if ((action.requireAllAttachments || !operatorNote) && prepared.skipped.length) {
           fail(
             'attachments_skipped',
             'Не все вложения удалось подготовить и разобрать.',
             409,
+            null,
+            { attachments: unanalyzedEntries(null, prepared.skipped) },
           );
         }
 
@@ -555,10 +614,14 @@ export class InboxTaskService {
           draft: selectedDraft,
         };
         let attachmentAnalysis = null;
+        let analysisComplete = true;
         let finalTitle = titleOverride || selectedDraft.title;
         let finalDescription = descriptionOverride || selectedDraft.description;
         try {
-          if (rawAttachments.length && !allowWithoutAnalysis) {
+          if (rawAttachments.length) {
+            // Разбор идёт ДАЖЕ с пояснением человека: неподъёмный файл в обращении
+            // обычно не один, и терять распознанную речь или прочитанный документ
+            // из-за соседнего видео незачем — модель получит всё, что удалось.
             if (this.attachmentAnalyzer) {
               try {
                 attachmentAnalysis = await this.attachmentAnalyzer.analyze({
@@ -580,57 +643,88 @@ export class InboxTaskService {
                 error: 'attachment_analysis_unavailable',
               };
             }
-            if (!attachmentAnalysis?.ok || !attachmentAnalysis?.complete) {
+            analysisComplete = Boolean(attachmentAnalysis?.ok && attachmentAnalysis?.complete);
+            if (!analysisComplete && !operatorNote) {
               fail(
                 'attachment_analysis_required',
                 'Содержимое вложений не удалось полностью разобрать.',
                 409,
+                null,
+                { attachments: unanalyzedEntries(attachmentAnalysis, prepared.skipped) },
               );
             }
           }
 
           const derivedSections = [];
-          if (attachmentAnalysis?.ok && attachmentAnalysis.complete) {
-            if (action.by === 'human') {
-              derivedSections.push({ title: 'Разбор вложений', text: attachmentAnalysis.text });
-            }
+          // Пояснение человека — первичный источник смысла там, где содержимое
+          // недоступно машине, поэтому стоит выше любой производной выжимки.
+          if (operatorNote) {
+            derivedSections.push({ title: 'Пояснение оператора', text: operatorNote });
+          }
+          if (!analysisComplete) {
+            derivedSections.push({
+              title: 'Вложения без разбора',
+              text: unanalyzedList(unanalyzedEntries(attachmentAnalysis, prepared.skipped)),
+            });
+          }
+          if (attachmentAnalysis?.text && action.by === 'human') {
+            derivedSections.push({
+              title: analysisComplete ? 'Разбор вложений' : 'Разбор вложений (частичный)',
+              text: attachmentAnalysis.text,
+            });
+          }
 
-            // Речь и безопасный текст уже понятны без vision-модели. Изображения и
-            // кадры видео считаются разобранными лишь после содержательного model call.
-            if (action.by === 'human' && attachmentAnalysis.visualPaths?.length) {
-              let triaged = null;
-              try {
-                triaged = this.attachmentTriage
-                  ? await this.attachmentTriage({
-                    item: analysisItem,
-                    attachmentAnalysis,
-                  })
-                  : null;
-              } catch (error) {
-                this.log.warn?.({ code: error?.code }, 'inbox: vision-разбор вложений завершился ошибкой');
+          // Речь и безопасный текст уже понятны без vision-модели. Изображения и
+          // кадры видео считаются разобранными лишь после содержательного model call;
+          // пояснение человека тоже уходит на разбор — иначе оно осталось бы
+          // припиской к постановке, собранной из голого текста сообщений.
+          const hasVisuals = Boolean(attachmentAnalysis?.visualPaths?.length);
+          if (action.by === 'human' && (hasVisuals || operatorNote)) {
+            let triaged = null;
+            try {
+              triaged = this.attachmentTriage
+                ? await this.attachmentTriage({
+                  item: analysisItem,
+                  attachmentAnalysis,
+                  operatorNote,
+                })
+                : null;
+            } catch (error) {
+              this.log.warn?.({ code: error?.code }, 'inbox: vision-разбор вложений завершился ошибкой');
+            }
+            // Без пояснения инвариант прежний: визуальное вложение, которое модель
+            // не прочитала, задачей не становится. С пояснением человек уже сказал
+            // суть своими словами, поэтому отказ модели не запирает создание.
+            if ((!triaged?.ok || !triaged.verdict) && !operatorNote) {
+              fail(
+                'attachment_analysis_required',
+                'Визуальные вложения не удалось разобрать выбранной моделью.',
+                409,
+                null,
+                { attachments: [] },
+              );
+            }
+            if (!triaged?.ok || !triaged.verdict) {
+              this.log.warn?.({ code: triaged?.error || 'triage_unavailable' },
+                'inbox: пояснение оператора не удалось разобрать моделью; задача из текста и пояснения');
+            }
+            if (triaged?.ok && triaged.verdict) {
+              const verdict = triaged.verdict;
+              if (!titleOverride && verdict.kind !== 'none' && verdict.title) {
+                finalTitle = boundedText(
+                  verdict.title,
+                  'analysis title',
+                  INBOX_DRAFT_LIMITS.title,
+                ) || finalTitle;
               }
-              if ((!triaged?.ok || !triaged.verdict) && !allowWithoutAnalysis) {
-                fail(
-                  'attachment_analysis_required',
-                  'Визуальные вложения не удалось разобрать выбранной моделью.',
-                  409,
-                );
-              }
-              if (triaged?.ok && triaged.verdict) {
-                const verdict = triaged.verdict;
-                if (!titleOverride && verdict.kind !== 'none' && verdict.title) {
-                  finalTitle = boundedText(
-                    verdict.title,
-                    'analysis title',
-                    INBOX_DRAFT_LIMITS.title,
-                  ) || finalTitle;
-                }
-                const summary = [verdict.description, verdict.reason]
-                  .map((part) => String(part || '').trim())
-                  .filter(Boolean)
-                  .join('\n\n');
-                derivedSections.push({ title: 'Выжимка визуального разбора', text: summary });
-              }
+              const summary = [verdict.description, verdict.reason]
+                .map((part) => String(part || '').trim())
+                .filter(Boolean)
+                .join('\n\n');
+              derivedSections.push({
+                title: operatorNote ? 'Выжимка разбора' : 'Выжимка визуального разбора',
+                text: summary,
+              });
             }
           }
           finalDescription = appendBoundedSections(finalDescription, derivedSections);
@@ -732,7 +826,16 @@ export class InboxTaskService {
             taskId,
             taskUrl,
             by: action.by,
-            note: action.note,
+            // В audit остаётся факт: содержимое разобрано не полностью, а
+            // недостающее пересказал человек. Иначе потом не объяснить, почему
+            // в задаче нет расшифровки приложенного видео.
+            note: operatorNote
+              ? truncateText(
+                [action.note, `Пояснение оператора при неполном разборе: ${operatorNote}`]
+                  .filter(Boolean).join('\n'),
+                MAX_DECISION_NOTE_BYTES / 4,
+              )
+              : action.note,
             decidedAtMs: this.now(),
           });
           if (!validDecisionResult(decision)) {

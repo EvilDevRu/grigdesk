@@ -78,7 +78,7 @@ async function compilePipelineView() {
     )
     .replace(
       /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel, runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
+      'const { attemptCostLabel, attemptCostTitle, attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel, runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
       + ' = globalThis.__pipelineRunnerDisplay;',
     )
     .replace(
@@ -144,7 +144,9 @@ function makeFixture({
 }
 
 // Стенд страницы конвейера: happy-dom + заглушки сторов, api — перехватчик.
-async function mountPipeline(t, { factoryTask, graph, runners = ['claude', 'codex'] }) {
+async function mountPipeline(t, {
+  factoryTask, graph, runners = ['claude', 'codex'], applyOverride = false,
+}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://cockpit.test/#/pipeline' });
   for (const [key, value] of Object.entries({
@@ -200,6 +202,10 @@ async function mountPipeline(t, { factoryTask, graph, runners = ['claude', 'code
       title() { return null; },
       async setStageRunner(id, stage, primary) {
         runnerCalls.push([id, stage, primary]);
+        // Сервер применил override: следующий /graph отдаст новый primary и источник.
+        if (applyOverride && primary) {
+          Object.assign(graph.nodeMeta.plan.runner, { primary, source: 'task-stage' });
+        }
         return { ok: true };
       },
     },
@@ -240,25 +246,57 @@ async function mountPipeline(t, { factoryTask, graph, runners = ['claude', 'code
   return { wrapper, flushPromises, getCalls, runnerCalls, openStage, openPlanStage };
 }
 
-test('небегущий этап: блок выбора исполнителя с текущим значением и источником, выбор шлёт override', async (t) => {
+test('небегущий этап: карточки всех исполнителей, текущий подсвечен, клик шлёт override', async (t) => {
   const { wrapper, getCalls, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
   await openPlanStage('wait');
 
   const block = wrapper.get('.runner-override');
   assert.match(block.text(), /Исполнитель этапа/);
+  // Все установленные исполнители — карточками, а не пунктами скрытого списка.
+  const picks = wrapper.findAll('.runner-pick');
+  assert.deepEqual(picks.map((pick) => pick.get('b').text()), ['Claude', 'Codex']);
   // Текущее эффективное значение — runner.primary, источник виден рядом (RUNNER_SOURCE).
-  const select = wrapper.get('#stage-runner');
-  assert.equal(select.element.value, 'claude');
   assert.deepEqual(
-    select.findAll('option').map((option) => option.text()),
-    ['Claude', 'Codex'],
+    picks.map((pick) => pick.attributes('aria-pressed')),
+    ['true', 'false'],
   );
+  assert.ok(picks[0].classes('on'));
   assert.match(wrapper.get('.runner-sect').text(), /политика этапа/);
   // Список исполнителей приехал из /api/factory/runners.
   assert.ok(getCalls.includes('/api/factory/runners'));
 
-  await select.setValue('codex');
+  await picks[1].trigger('click');
   assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
+});
+
+// Модалка живёт дольше одного решения: человек сравнивает исполнителей и перебирает их.
+// Закрытие после каждого клика заставляло заново искать узел на графе.
+test('выбор исполнителя не закрывает модалку, а обновляет её на месте', async (t) => {
+  const { wrapper, flushPromises, runnerCalls, openPlanStage } = await mountPipeline(
+    t, { ...makeFixture(), applyOverride: true },
+  );
+  await openPlanStage('wait');
+
+  await wrapper.findAll('.runner-pick')[1].trigger('click');
+  assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
+  assert.ok(wrapper.find('.smodal').exists(), 'модалка этапа осталась открытой');
+
+  await flushPromises();
+  assert.ok(wrapper.find('.smodal').exists(), 'модалка не закрылась и после ответа сервера');
+  // Новое состояние узла приезжает обычным путём: load() → watch(stageLive) → stage.meta.
+  const picks = wrapper.findAll('.runner-pick');
+  assert.equal(picks[0].classes('on'), false);
+  assert.ok(picks[1].classes('on'));
+  assert.match(wrapper.get('.runner-sect').text(), /переопределение этапа задачи/);
+  assert.ok(wrapper.find('.runner-reset').exists(), 'появилась кнопка сброса override');
+});
+
+test('карточка текущего исполнителя запроса не шлёт', async (t) => {
+  const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
+  await openPlanStage('wait');
+
+  await wrapper.findAll('.runner-pick')[0].trigger('click');
+  assert.deepEqual(runnerCalls, []);
 });
 
 test('модалка показывает policy effort до запуска и фактический effort в попытке', async (t) => {
@@ -335,7 +373,7 @@ test('остановленный run: вместо live-switch показыва�
   assert.match(block.text(), /Прогон остановлен/);
   assert.match(block.text(), /Продолжить прогон/);
 
-  await wrapper.get('#stage-runner').setValue('codex');
+  await wrapper.findAll('.runner-pick')[1].trigger('click');
   assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
 });
 

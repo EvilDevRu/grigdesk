@@ -40,6 +40,13 @@ async function compileView(view) {
       "import { confirmDialog } from '../shared/ui/confirm.js';",
       'const confirmDialog = (...args) => globalThis.__channelConfirm(...args);',
     )
+    // У data:-модуля нет базового пути, поэтому КАЖДЫЙ импорт вью обязан иметь
+    // здесь свою замену: пропущенная роняет весь файл целиком, а не один тест.
+    .replace(
+      "import { confirmDialog, promptDialog } from '../shared/ui/confirm.js';",
+      'const confirmDialog = (...args) => globalThis.__channelConfirm(...args);'
+      + '\nconst promptDialog = (...args) => globalThis.__channelPrompt(...args);',
+    )
     .replace(
       "import { useSse } from '../composables/useSse.js';",
       'const useSse = (fn) => { globalThis.__channelSse.push(fn); return { connected: { value: true } }; };',
@@ -88,10 +95,14 @@ export async function settle(flushPromises, cycles = 8) {
 export async function mountChannelView(t, view, {
   api,
   confirm = async () => true,
+  // По умолчанию — отмена: тест, который не ждал модалку с полем, не должен
+  // случайно «ответить» за человека и создать задачу.
+  prompt = async () => null,
 } = {}) {
   const browser = await installBrowser(t, view);
   globalThis.__channelApi = api;
   globalThis.__channelConfirm = confirm;
+  globalThis.__channelPrompt = prompt;
   globalThis.__channelSse = [];
   const [{ mount, flushPromises }, component] = await Promise.all([
     import(TEST_UTILS),
@@ -102,6 +113,7 @@ export async function mountChannelView(t, view, {
     wrapper.unmount();
     delete globalThis.__channelApi;
     delete globalThis.__channelConfirm;
+    delete globalThis.__channelPrompt;
     delete globalThis.__channelSse;
   });
   await settle(flushPromises);

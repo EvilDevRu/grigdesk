@@ -1838,7 +1838,7 @@ route_v2_context_for_node() {
   # findings. Все узлы закреплённого маршрута получают проекцию только после полной
   # проверки уже инициализированного hash-chain.
   if [[ "$context_node" == scout ]]; then
-    findings_ledger='{"schema":1,"open":[],"closed":[]}'
+    findings_ledger='{"schema":1,"open":[],"closed":[],"deferred":[]}'
   else
     findings_ledger=$(attempt_stage_state_findings_v2 \
       "$context_task" "$context_attempt") || return 78
@@ -1879,6 +1879,9 @@ route_v2_context_for_node() {
     --ticket-json "$V2_TRUSTED_TICKET"
     --project-context-json "$V2_PROJECT_CONTEXT_JSON"
     --state-dir "$STATE_DIR"
+    # Куда RETRO кладёт урок внутри рабочей копии. Слово профиля: у одного проекта
+    # это docs/, у другого — .claude/ рядом со знаниями агентов.
+    --lessons-dir "${LESSONS_DIR:-docs/lessons}"
     --workspace-mode "$V2_WORKSPACE_MODE"
     --container-name "$V2_CONTAINER"
     --frontend-port "$V2_FE_PORT"
@@ -1976,6 +1979,49 @@ v2_gate_pipeline_key() {
     gate_accept) printf 'GATE_ACCEPT\n' ;;
     *) return 2 ;;
   esac
+}
+
+# Отложенные находки на ворота. Смысл отложенной находки в том, что маршрут её не
+# чинит, — значит единственный, кто о ней узнает, это человек на воротах. Без этой
+# выгрузки хвост оставался бы только в immutable ledger, то есть был бы потерян:
+# для человека это хуже, чем прежний блокирующий вердикт, который хотя бы кричал.
+# Пишем человекочитаемый файл рядом с прочими артефактами задачи и возвращаем
+# число находок, чтобы вызывающий назвал его в журнале.
+v2_write_deferred_tail() {
+  local task=$1 attempt=$2 target=$3 ledger
+  ledger=$(attempt_stage_state_findings_v2 "$task" "$attempt") || return 1
+  printf '%s' "$ledger" | python3 - "$target" "$task" <<'PY'
+import json
+import sys
+
+target, task = sys.argv[1], sys.argv[2]
+try:
+    ledger = json.load(sys.stdin)
+except (ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+items = ledger.get("deferred") or []
+if not items:
+    raise SystemExit(9)
+lines = [
+    f"# Отложенные находки задачи {task}",
+    "",
+    "Проверяющие узлы нашли это по пути, но признали вне цели задачи: маршрут их",
+    "не чинил и не проверял. Решение — за человеком: принять как есть, завести",
+    "отдельными задачами или вернуть маршрут с явным требованием починить.",
+    "",
+    "Строка находки — ярлык, а не разбор: развёрнутое доказательство лежит в отчёте",
+    "узла-источника (он назван в скобках) среди артефактов задачи. Возвращая маршрут",
+    "на доработку, назовите нужный id дословно — по нему узел-автор поймёт, какая",
+    "именно находка стала работой этого захода.",
+    "",
+]
+for item in items:
+    lines.append(f"- **{item['id']}** ({item['sourceNode']} → {item['owner']}): {item['summary']}")
+lines.append("")
+with open(target, "w", encoding="utf-8") as handle:
+    handle.write("\n".join(lines))
+print(len(items))
+PY
 }
 
 # Переводит exact reset из закреплённого route ledger в вторичный реестр Cockpit.
@@ -2176,6 +2222,7 @@ v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
   local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node
+  local stop_reason deferred_file deferred_count
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
   trap 'v2_on_signal TERM' TERM
@@ -2439,6 +2486,10 @@ v2_main() {
       }
       set_st "$TASK" "$pipeline_gate_key" waiting STALLED_HUMAN 1
       v2_log "пауза на human gate $gate_node"
+      deferred_file="$STATE_DIR/t${TASK}.deferred.md"
+      deferred_count=$(v2_write_deferred_tail "$TASK" "$attempt" "$deferred_file") &&
+        [[ "$deferred_count" =~ ^[1-9][0-9]*$ ]] &&
+        v2_log "$gate_node: отложено находок: $deferred_count — список в t${TASK}.deferred.md"
       return 0
       ;;
     21)
@@ -2454,13 +2505,28 @@ v2_main() {
         }
         set_st "$TASK" STALLED_HUMAN 0 RESULT completed
         v2_log "маршрут завершён; SHIP и RETRO подтверждены"
+        deferred_file="$STATE_DIR/t${TASK}.deferred.md"
+        deferred_count=$(v2_write_deferred_tail "$TASK" "$attempt" "$deferred_file") &&
+          [[ "$deferred_count" =~ ^[1-9][0-9]*$ ]] &&
+          v2_log "отложено находок: $deferred_count — список в t${TASK}.deferred.md"
         return 0
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
       if [[ "$stop" == no-progress || "$stop" == rewind-limit ]]; then
         stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
         [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78
-        v2_log "${stop_node^^}: маршрут остановлен: $stop"
+        # Движок уже вычислил, ЧЕМ именно кончился автоматический цикл (повтор
+        # набора, осцилляция, расширение области), и положил это в reason события.
+        # Без протяжки в журнал причина оставалась только в immutable ledger, а
+        # человек читал generic «маршрут остановлен» и шёл раскапывать руками.
+        stop_reason=$(attempt_stage_state_latest_event_v2 "$TASK" "$attempt" |
+          json_value reason 2>/dev/null) || stop_reason=""
+        stop_reason=${stop_reason//$'\n'/ }
+        if [[ -n "$stop_reason" ]]; then
+          v2_log "${stop_node^^}: маршрут остановлен: $stop — $stop_reason"
+        else
+          v2_log "${stop_node^^}: маршрут остановлен: $stop"
+        fi
       else
         v2_log "маршрут остановлен: $stop"
       fi

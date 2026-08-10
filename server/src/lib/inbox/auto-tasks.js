@@ -50,6 +50,40 @@ const safeCode = (error, fallback = 'worker_failed') => (
     : fallback
 );
 
+const MAX_BLOCKED_ATTACHMENTS = 12;
+const MAX_BLOCKED_TEXT = 240;
+const publicLine = (value, limit = MAX_BLOCKED_TEXT) => String(value ?? '')
+  .replace(/[\u0000-\u001f\u007f]/gu, ' ')
+  .replace(/\s+/gu, ' ')
+  .trim()
+  .slice(0, limit);
+
+/**
+ * Какие именно вложения остались неразобранными и почему.
+ *
+ * Без этого списка человек видел «не удалось полностью разобрать» и не мог
+ * отличить потолок Telegram (файл больше 20 МБ бот не скачает никогда) от
+ * временной поломки — то есть не знал, ждать ли повтора или разбираться руками.
+ * Наружу идут только те подписи, которые и так есть в карточке обращения:
+ * тип, имя файла и наша же строка причины.
+ */
+function blockedAttachments(attachmentAnalysis) {
+  const entries = Array.isArray(attachmentAnalysis?.entries) ? attachmentAnalysis.entries : [];
+  return entries
+    .filter((value) => value?.complete !== true)
+    .slice(0, MAX_BLOCKED_ATTACHMENTS)
+    // Формат тот же, что у отказа ручного создания: карточка рисует оба списка
+    // одним компонентом, и второй формы для той же мысли заводить незачем.
+    .map((value) => ({
+      label: publicLine(
+        [value?.displayLabel, value?.name].map((part) => String(part || '').trim())
+          .filter(Boolean).join(' · '),
+        200,
+      ) || 'вложение',
+      reason: publicLine(value?.reason),
+    }));
+}
+
 async function releaseAttachmentAnalysis(analysis, log) {
   try {
     await analysis?.release?.();
@@ -460,16 +494,24 @@ export class InboxAutoTasks {
           { code: attachmentAnalysis.error },
           'attachment_analysis_required',
         );
+        const attachments = blockedAttachments(attachmentAnalysis);
         out.analysisRequired.push({ ref: item.ref, channel: channel.id, code });
         this.analysisBlocks.set(item.ref, {
           revision: item.revision,
           code,
+          attachments,
           checkedAtMs: nowMs,
           retryAtMs: nowMs + this.attachmentRetryMs,
         });
         this._notifyStatusChanged('attachment-analysis-required');
-        this.log.info?.({ channel: channel.id, itemRef: item.ref, code },
-          'inbox: attachment analysis left item for human');
+        this.log.info?.({
+          channel: channel.id,
+          itemRef: item.ref,
+          code,
+          // Причина каждого вложения — первое, что спросят при разборе жалобы
+          // «висит и не объясняет»; без неё в журнале остаётся один общий код.
+          attachments: attachments.map((value) => `${value.label}: ${value.reason}`),
+        }, 'inbox: attachment analysis left item for human');
         return { advance: true };
       }
       if (attachmentAnalysis) {
@@ -512,6 +554,8 @@ export class InboxAutoTasks {
         this.analysisBlocks.set(item.ref, {
           revision: item.revision,
           code,
+          // Разбор прошёл, не потянула модель: перечислять нечего, объясняет код.
+          attachments: [],
           checkedAtMs: nowMs,
           retryAtMs: nowMs + this.attachmentRetryMs,
         });

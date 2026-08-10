@@ -77,7 +77,8 @@ async function compilePipelineView() {
     )
     .replace(
       /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel,'
+      'const { attemptCostLabel, attemptCostTitle, attemptResultLabel, providerLabel,'
+      + ' runnerAttemptModelLabel, runnerChainLabel,'
       + ' runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
       + ' = globalThis.__pipelineGateDisplay;',
     )

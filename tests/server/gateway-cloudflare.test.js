@@ -261,6 +261,22 @@ test('CF-DNS-10: ошибка провайдера и её поля не рас�
   );
 });
 
+test('CF-DNS-10a: отказ в правах называет отличие DNS:Edit от похожего Zone:Edit', async () => {
+  await assert.rejects(
+    () => findZone(TOKEN, DOMAIN, {
+      fetchImpl: async () => jsonResponse(null, { status: 403 }),
+    }),
+    (error) => {
+      assert.ok(error instanceof CloudflareError);
+      assert.equal(error.code, 'cloudflare_forbidden');
+      assert.match(error.message, /Zone → DNS → Edit/);
+      assert.match(error.message, /Zone → Zone → Edit/);
+      assert.match(error.message, /среднюю колонку/);
+      return true;
+    },
+  );
+});
+
 test('CF-DNS-11: неожиданный ответ поиска зоны останавливает установку', async () => {
   await assert.rejects(
     () => findZone(TOKEN, DOMAIN, {

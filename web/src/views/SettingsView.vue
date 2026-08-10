@@ -2751,11 +2751,14 @@ onMounted(() => {
           <p class="muted small">
             Логин и пароль аккаунта тут не годятся: API Cloudflare ими не управляется вовсе
             (а с двухфакторной — тем более). Нужен токен: кабинет → My&nbsp;Profile →
-            API&nbsp;Tokens → Create&nbsp;Token → шаблон «Edit zone DNS», затем добавь разрешение
-            Zone → Zone → Read. В Zone&nbsp;Resources выбери Include → Specific&nbsp;zone →
-            родительскую зону (для <code>cockpit.example.com</code> обычно
-            <code>example.com</code>). Токен уходит на сервер только для сверки и установки,
-            нигде не сохраняется.
+            API&nbsp;Tokens → Create&nbsp;Token → шаблон «Edit zone DNS». В Permissions должны
+            получиться ровно две строки: <code>Zone → Zone → Read</code> и
+            <code>Zone → DNS → Edit</code>. Во второй строке средняя колонка — именно
+            <b>DNS</b>, не Zone: похожее разрешение <code>Zone → Zone → Edit</code> не даёт
+            права менять DNS и закончится отказом. В Zone&nbsp;Resources выбери Include →
+            Specific&nbsp;zone → родительскую зону (для <code>cockpit.example.com</code>
+            обычно <code>example.com</code>). Токен уходит на сервер только для сверки и
+            установки, нигде не сохраняется.
           </p>
           <p class="muted small">
             Облако у записей будет <b>серым</b> (proxied выключен). Оранжевое — это уже прокси
@@ -2792,12 +2795,18 @@ onMounted(() => {
             <span class="muted small"> ({{ gwProbe.fingerprintType }})</span></p>
           <label class="tlsaddr">
             <input v-model="gwHostOk" type="checkbox" :disabled="gwRunning" />
-            <span>Отпечаток совпал с тем, что показала панель хостера</span>
+            <span>Тип и SHA256-отпечаток SSH-ключа совпали с данными хостера</span>
           </label>
           <p class="muted small">
-            Сверить обязательно: без этого «первое подключение» — это доверие кому угодно
-            посередине, а следом мы отдаём ему пароль root. Отпечаток запомнится, и если
-            в другой раз он изменится — установка остановится сама.
+            Это отпечаток ключа самого VPS (SSH host key), а не твоего ключа для входа.
+            Ищи в панели хостера поле SSH host key/fingerprint. Если его там нет, открой
+            встроенную веб-консоль/VNC хостера — не подключение по SSH — и выполни
+            <code>for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done</code>.
+            Найди строку того же типа и сравни всё значение <code>SHA256:…</code> посимвольно.
+            При несовпадении не ставь галку: сначала проверь IP и не закончилась ли
+            переустановка VPS. Без сверки пароль root может уйти чужому серверу посередине.
+            Подтверждённый отпечаток запомнится, и при следующем изменении установка
+            остановится сама.
           </p>
           <div v-if="gwNeedsPassword" class="form-grid">
             <label class="full">Пароль {{ gw.sshUser || 'root' }} на VPS

@@ -486,9 +486,25 @@ function fileNameOf(attachment, filePath = '') {
 }
 
 const megabytes = (bytes) => Math.round(bytes / 1024 / 1024);
-const oversizeReason = (bytes) => (
-  `файл ${megabytes(bytes)} МБ — бот не может скачать больше ${megabytes(FILE_LIMIT)} МБ`
-);
+/**
+ * Причина пропуска — МАШИННЫЙ КОД, а не фраза.
+ *
+ * Текст ошибки провайдера свободный: в него попадает и URL с токеном, и чужие
+ * подробности, поэтому потребители (`publicSkipped`, разбор вложений) обязаны
+ * были бы его санировать угадыванием. Кокпит вместо этого переводит код в
+ * человеческую фразу сам — см. `lib/inbox/skip-reason.js`. Размер уезжает
+ * отдельным числом: число подделать нечем.
+ */
+const FILE_TOO_LARGE_REASON = 'file_too_large';
+const NOT_CONNECTED_REASON = 'not_connected';
+const DOWNLOAD_FAILED_REASON = 'download_failed';
+const oversizeSkip = (index, attachment, bytes) => ({
+  index,
+  attachment,
+  reason: FILE_TOO_LARGE_REASON,
+  sizeBytes: Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null,
+  limitBytes: FILE_LIMIT,
+});
 
 function validateDraftAttachment(raw, cache) {
   exact(raw, DRAFT_ATTACHMENT_KEYS, 'Telegram draft attachment', 'telegram_inbox_invalid_attachments');
@@ -508,7 +524,14 @@ function validateDraftAttachment(raw, cache) {
  *   botId,archive,rules,inboxState,credentials:{botId,token}|null,botApi
  * }}.
  */
-export function createTelegramInboxChannel({ enabled, state, acquireInboxLease } = {}) {
+export function createTelegramInboxChannel({
+  enabled,
+  state,
+  acquireInboxLease,
+  // Свободный текст ошибки провайдера наружу не идёт (в нём бывает токен), но и
+  // пропадать не должен: разбирать «почему не скачалось» больше негде.
+  log = console,
+} = {}) {
   const enabledCallback = callable(enabled, 'enabled');
   const stateCallback = callable(state, 'state');
   const acquireCallback = callable(acquireInboxLease, 'acquireInboxLease');
@@ -768,11 +791,11 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
               continue;
             }
             if (!token) {
-              skipped.push({ index, attachment, reason: 'бот не подключён — файл не забрать' });
+              skipped.push({ index, attachment, reason: NOT_CONNECTED_REASON });
               continue;
             }
             if (attachment.size !== null && attachment.size > FILE_LIMIT) {
-              skipped.push({ index, attachment, reason: oversizeReason(attachment.size) });
+              skipped.push(oversizeSkip(index, attachment, attachment.size));
               continue;
             }
             if (materializedBytes >= MAX_MATERIALIZED_BYTES
@@ -790,7 +813,10 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
                 throw new Error('Bot API вернул неверное описание файла');
               }
               if (found.size !== null && found.size !== undefined && found.size > FILE_LIMIT) {
-                throw new Error(oversizeReason(found.size));
+                throw Object.assign(new Error('файл больше предела Bot API'), {
+                  skipReason: FILE_TOO_LARGE_REASON,
+                  skipSizeBytes: found.size,
+                });
               }
               const expectedSize = Math.max(attachment.size ?? 0, found.size ?? 0);
               if (expectedSize > MAX_MATERIALIZED_BYTES - materializedBytes) {
@@ -802,9 +828,12 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
               });
               await assertCurrent();
               if (!(bytes instanceof Uint8Array) || bytes.byteLength > FILE_LIMIT) {
-                throw new Error(bytes?.byteLength > FILE_LIMIT
-                  ? oversizeReason(bytes.byteLength)
-                  : 'Bot API вернул неверные байты файла');
+                throw bytes?.byteLength > FILE_LIMIT
+                  ? Object.assign(new Error('файл больше предела Bot API'), {
+                    skipReason: FILE_TOO_LARGE_REASON,
+                    skipSizeBytes: bytes.byteLength,
+                  })
+                  : new Error('Bot API вернул неверные байты файла');
               }
               const accountedSize = Math.max(expectedSize, bytes.byteLength);
               if (accountedSize > MAX_MATERIALIZED_BYTES - materializedBytes) {
@@ -824,11 +853,16 @@ export function createTelegramInboxChannel({ enabled, state, acquireInboxLease }
             } catch (err) {
               // Generation switch не превращается в partial attachment failure.
               await assertCurrent();
-              skipped.push({
-                index,
-                attachment,
-                reason: scrubToken(err?.message || 'причина неизвестна', token),
-              });
+              // Наружу — код, в журнал — подробности: свободный текст ошибки
+              // провайдера нужен при разборе, но не в задаче и не в браузере.
+              log?.warn?.({
+                channel: 'telegram',
+                reason: err?.skipReason || DOWNLOAD_FAILED_REASON,
+                detail: scrubToken(err?.message || 'причина неизвестна', token),
+              }, 'inbox: вложение Telegram не удалось подготовить');
+              skipped.push(err?.skipReason === FILE_TOO_LARGE_REASON
+                ? oversizeSkip(index, attachment, err.skipSizeBytes)
+                : { index, attachment, reason: DOWNLOAD_FAILED_REASON });
             }
           }
           await assertCurrent();

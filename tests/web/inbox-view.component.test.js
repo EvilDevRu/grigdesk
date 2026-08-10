@@ -374,7 +374,7 @@ test('незавершённый авторазбор вложений виде�
   assert.match(card.get('.attachment-chip').text(), /Не удалось разобрать/u);
 });
 
-test('неполный разбор вложений допускает только подтверждённый явный обход', async (t) => {
+test('неполный разбор вложений просит у человека пояснение и отправляет его задачей', async (t) => {
   for (const failureCode of ['attachment_analysis_required', 'attachments_skipped']) {
     await t.test(failureCode, async (subtest) => {
       const posts = [];
@@ -386,7 +386,10 @@ test('неполный разбор вложений допускает толь
           if (posts.length === 1) {
             throw apiError(409, {
               error: failureCode,
-              message: 'Не удалось полностью разобрать содержимое вложений.',
+              message: 'Содержимое вложений разобрано не полностью.',
+              attachments: [
+                { label: 'видео · bug.mp4', reason: 'файл 53 МБ — бот не может скачать больше 20 МБ' },
+              ],
             });
           }
           return { ok: true };
@@ -394,35 +397,104 @@ test('неполный разбор вложений допускает толь
       };
       const { wrapper, settle } = await mountChannelView(subtest, 'inbox', {
         api,
-        confirm: async (text, options) => {
-          prompts.push([text, options]);
-          return true;
+        prompt: async (options) => {
+          prompts.push(options);
+          return 'На видео чекбокс появляется через две секунды.';
         },
       });
       const card = wrapper.get('[data-status="new"]');
 
       await button(card, 'Создать задачу').trigger('click');
       await settle();
-      assert.equal(posts.length, 1);
-      assert.equal(Object.hasOwn(posts[0][1], 'allowUnanalyzedAttachments'), false);
-      assert.match(card.get('.item-alert').text(), /Не удалось полностью разобрать/);
 
-      await button(card, 'Создать без разбора').trigger('click');
-      await settle();
+      // Отдельной кнопки «Создать без разбора» больше нет: отказ сервера сразу
+      // открывает поле пояснения — решение о постановке человек уже принял.
       assert.equal(prompts.length, 1);
-      assert.match(prompts[0][0], /Неразобранное содержимое не попадёт в постановку/);
-      assert.equal(prompts[0][1].okText, 'Создать без разбора');
+      assert.match(prompts[0].text, /Содержимое вложений разобрано не полностью/u);
+      // Человек обязан видеть, ЧТО описывать и лечится ли это ожиданием.
+      assert.match(prompts[0].text, /видео · bug\.mp4/u);
+      assert.match(prompts[0].text, /больше 20 МБ/u);
       assert.equal(posts.length, 2);
       assert.deepEqual(posts[1], [
         `/api/inbox/items/${encodeURIComponent(REF_NEW)}/task`,
         {
           revision: `v1_${'a'.repeat(43)}`,
           messageRefs: [MESSAGE_A, MESSAGE_B],
-          allowUnanalyzedAttachments: true,
+          operatorNote: 'На видео чекбокс появляется через две секунды.',
         },
       ]);
     });
   }
+});
+
+test('пустое пояснение задачу не создаёт, а отмена модалки ничего не отправляет', async (t) => {
+  const failing = (posts) => ({
+    async get() { return response(); },
+    async post(url, body) {
+      posts.push([url, body]);
+      throw apiError(409, {
+        error: 'attachment_analysis_required',
+        message: 'Содержимое вложений разобрано не полностью.',
+        attachments: [],
+      });
+    },
+  });
+
+  await t.test('пустая строка', async (subtest) => {
+    const posts = [];
+    const { wrapper, settle } = await mountChannelView(subtest, 'inbox', {
+      api: failing(posts),
+      prompt: async () => '   ',
+    });
+    const card = wrapper.get('[data-status="new"]');
+    await button(card, 'Создать задачу').trigger('click');
+    await settle();
+    assert.equal(posts.length, 1, 'пустое пояснение не уходит на сервер');
+    assert.match(card.get('.item-alert').text(), /Без пояснения задача потеряет суть/u);
+  });
+
+  await t.test('отмена', async (subtest) => {
+    const posts = [];
+    const { wrapper, settle } = await mountChannelView(subtest, 'inbox', {
+      api: failing(posts),
+      prompt: async () => null,
+    });
+    const card = wrapper.get('[data-status="new"]');
+    await button(card, 'Создать задачу').trigger('click');
+    await settle();
+    assert.equal(posts.length, 1);
+  });
+});
+
+test('карточка называет неразобранные вложения автоматического блока поимённо', async (t) => {
+  const { wrapper } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        return response({
+          worker: {
+            running: true,
+            readiness: 'ready',
+            lastReason: '',
+            lastError: null,
+            analysisRequired: [{
+              ref: REF_NEW,
+              code: 'attachment_analysis_required',
+              attachments: [
+                { label: 'видео · bug.mp4', reason: 'файл 53 МБ — бот не может скачать больше 20 МБ' },
+              ],
+              checkedAtMs: 1_786_172_400_000,
+              retryAtMs: 1_786_194_000_000,
+            }],
+          },
+        });
+      },
+      async post() { return { ok: true }; },
+    },
+  });
+  const card = wrapper.get('[data-status="new"]');
+  const blocked = card.get('.blocked-attachments');
+  assert.match(blocked.text(), /видео · bug\.mp4/u);
+  assert.match(blocked.text(), /больше 20 МБ/u);
 });
 
 test('activation CAS передаёт только version, deactivate явно предупреждает о gap', async (t) => {

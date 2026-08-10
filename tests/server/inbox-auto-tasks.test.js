@@ -492,6 +492,8 @@ test('вложения обязательно разбираются до мод
     ref: mediaItem.ref,
     revision: mediaItem.revision,
     code: 'speech_unavailable',
+    // Разбор не вернул ни одной записи — перечислять нечего, объясняет код.
+    attachments: [],
     checkedAtMs: NOW,
     retryAtMs: NOW + INBOX_AUTO_TICK.attachmentRetryMs,
   }]);

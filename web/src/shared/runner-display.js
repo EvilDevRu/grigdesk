@@ -59,6 +59,52 @@ export function runnerAttemptModelLabel(attempt) {
   return [model, effort ? `effort ${effort}` : ''].filter(Boolean).join(' · ');
 }
 
+function compactTokens(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1e6) return `${(value / 1e6).toFixed(value >= 1e7 ? 0 : 1)}М`;
+  if (value >= 1e3) return `${(value / 1e3).toFixed(value >= 1e4 ? 0 : 1)}к`;
+  return String(value);
+}
+
+/**
+ * Цена одного запуска этапа. Расход публикует раннер (метод `usage`), и знает
+ * его не каждый CLI: у kimi ACP-мост молчит. Поэтому отсутствие данных даёт
+ * пустую метку, а не ноль — «бесплатно» и «неизвестно» разные утверждения.
+ *
+ * В строке показывается ОДНО число, иначе ряд попыток разъезжается. Доллары
+ * сильнее токенов: этапы сравнивают по цене, а не по объёму. Кэш-чтение при
+ * этом остаётся в подсказке — миллион прочитанных из кэша токенов и миллион
+ * записанных стоят по-разному в десять раз.
+ */
+export function attemptCostLabel(attempt) {
+  const tokens = attempt?.tokens;
+  if (!tokens) return '';
+  if (Number.isFinite(tokens.costUsd) && tokens.costUsd > 0) {
+    return `$${tokens.costUsd < 0.01 ? tokens.costUsd.toFixed(4) : tokens.costUsd.toFixed(2)}`;
+  }
+  const total = ['in', 'out', 'cacheRead', 'cacheWrite']
+    .map((key) => (Number.isFinite(tokens[key]) ? tokens[key] : 0))
+    .reduce((sum, value) => sum + value, 0);
+  return total > 0 ? `${compactTokens(total)} ток.` : '';
+}
+
+export function attemptCostTitle(attempt) {
+  const tokens = attempt?.tokens;
+  if (!tokens) return '';
+  const parts = [
+    ['вход', tokens.in],
+    ['выход', tokens.out],
+    ['из кэша', tokens.cacheRead],
+    ['в кэш', tokens.cacheWrite],
+  ]
+    .filter(([, value]) => Number.isFinite(value))
+    .map(([label, value]) => `${label} ${value.toLocaleString('ru-RU')}`);
+  if (Number.isFinite(tokens.costUsd) && tokens.costUsd > 0) {
+    parts.push(`стоимость $${tokens.costUsd.toFixed(4)}`);
+  }
+  return parts.join(' · ');
+}
+
 const REASONS = {
   primary: 'основной исполнитель',
   fallback_limit: 'закончился лимит',

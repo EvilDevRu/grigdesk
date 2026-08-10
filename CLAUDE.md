@@ -308,9 +308,13 @@
   Вложения materialize лениво перед автоматическим model triage или ручным task. Общий
   `InboxAttachmentAnalyzer` через `SpeechRuntime` разбирает voice/audio, для video добавляет
   bounded кадры, передаёт raster images модели и читает только bounded strict UTF-8
-  документы. Лимиты — 12 файлов, 80 МБ суммарно и для Telegram 20 МБ на файл. Неполный
-  разбор оставляет item человеку; bypass возможен только после отдельного ручного
-  подтверждения и автомату запрещён. Недоверенный Inbox никогда не идёт через coding
+  документы. Лимиты — 12 файлов, 80 МБ суммарно и для Telegram 20 МБ на файл (потолок
+  Bot API: файл больше бот не скачает никаким способом). Неполный разбор оставляет item
+  человеку, причём ИМЕНОВАННО: канал отдаёт машинный код пропуска, фразу собирает кокпит
+  (`lib/inbox/skip-reason.js`), а список неразобранных вложений уезжает и в отказ HTTP,
+  и в `worker.analysisRequired`. Ручная постановка при неполном разборе идёт через
+  `operatorNote` — пояснение человека, которое уходит в триаж вместе с обращением и
+  попадает в описание задачи; пустое не принимается, автомату запрещено. Недоверенный Inbox никогда не идёт через coding
   `executor.run`: только capability-gated `runUntrusted` без tools/workspace/MCP/session;
   visual path сервер проверяет внутри media cache и заменяет на bytes до provider boundary.
   Нет безопасного transport или image modality — fail-closed и worker не `ready`.

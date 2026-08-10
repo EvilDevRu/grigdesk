@@ -68,6 +68,11 @@ TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 EVENT_RE = re.compile(r"^event\.([0-9]{20})\.([a-f0-9]{64})\.json$")
 DECLARED_STOP_TARGETS = {"human", "failed", "done"}
 FAILURE_OWNERS = {"build", "tests", "environment", "plan", "human"}
+# Вес замечания. Отсутствие поля читается как `blocking`: события, записанные до
+# появления веса, остаются валидными и читаются одинаково — ledger immutable,
+# мигрировать его нельзя.
+SEVERITIES = {"blocking", "deferred"}
+DEFAULT_SEVERITY = "blocking"
 # rewind-limit — не исход опубликованного маршрута, а доверенная остановка движка:
 # схема просила ещё один автоматический rewind, но этот же переход уже дважды не помог.
 CURSOR_STOP_TARGETS = DECLARED_STOP_TARGETS | {"rewind-limit", "no-progress"}
@@ -189,10 +194,53 @@ def event_at_sequence(directory, sequence):
     return event
 
 
+def finding_severity(finding):
+    return finding.get("severity", DEFAULT_SEVERITY)
+
+
+def blocking_findings(value):
+    # Только блокирующие замечания возвращают работу автору и участвуют в сторожах
+    # топтания. Отложенные едут хвостом до ворот приёмки и на маршрут не влияют.
+    if value is None:
+        return []
+    return [
+        finding
+        for finding in value["findings"]
+        if finding_severity(finding) == "blocking"
+    ]
+
+
+def record_finding(findings, node, sequence, verdict, finding, status):
+    # Проекция ledger: одна запись на (узел, id). Повторное появление того же id
+    # обновляет текст и статус, но сохраняет openedSequence — по нему видно, с
+    # какого хода замечание живёт.
+    key = (node, finding["id"])
+    previous = findings.get(key)
+    if previous is None or previous["status"] == "closed":
+        findings[key] = {
+            "id": finding["id"],
+            "sourceNode": node,
+            "owner": verdict["owner"],
+            "summary": finding["summary"],
+            "openedSequence": sequence,
+            "lastSeenSequence": sequence,
+            "status": status,
+            "closedSequence": None,
+        }
+        return
+    previous["owner"] = verdict["owner"]
+    previous["summary"] = finding["summary"]
+    previous["lastSeenSequence"] = sequence
+    previous["status"] = status
+
+
 def validate_verdict(value, outcome):
     if value is None:
         return None
-    if outcome != "failed":
+    # `done` несёт вердикт только с отложенными находками: проверяющий принял работу
+    # и приложил список того, что нашёл вне цели задачи. Блокирующее замечание при
+    # `done` — противоречие, его отвергаем.
+    if outcome not in {"failed", "done"}:
         fail()
     shape(value, {"owner", "findings"}, {"reviewed"})
     if value["owner"] not in FAILURE_OWNERS:
@@ -202,9 +250,11 @@ def validate_verdict(value, outcome):
         fail()
     seen = set()
     for finding in findings:
-        shape(finding, {"id", "summary"}, {"anchor"})
+        shape(finding, {"id", "summary"}, {"anchor", "severity"})
         finding_id = finding["id"]
         summary = finding["summary"]
+        if "severity" in finding and finding["severity"] not in SEVERITIES:
+            fail()
         if (
             not isinstance(finding_id, str)
             or not FINDING_RE.fullmatch(finding_id)
@@ -217,6 +267,8 @@ def validate_verdict(value, outcome):
         if "anchor" in finding and not artifact_path(finding["anchor"]):
             fail()
         seen.add(finding_id)
+    if outcome == "done" and blocking_findings(value):
+        fail()
     # Охват прохода: что проверяющий фактически просмотрел. Поле необязательное,
     # но именно оно позволяет отличить первый проход по новому артефакту от
     # претензии к уже просмотренному — см. scope_expansion_reason.
@@ -266,7 +318,7 @@ def verdict_snapshot(value):
         return None
     return (
         value["owner"],
-        tuple(sorted(finding["id"] for finding in value["findings"])),
+        tuple(sorted(finding["id"] for finding in blocking_findings(value))),
     )
 
 
@@ -1084,7 +1136,11 @@ elif OP == "prepare-commit":
     if cursor.get("state") not in {"ready", "paused"} or cursor.get("currentNode") != node:
         fail(75)
     verdict = decode_verdict(verdict_b64, outcome)
-    failure_owner = verdict["owner"] if verdict is not None else None
+    # Тот же инвариант, что и на стороне bash: владелец участвует в выборе перехода
+    # только у отказа. Вердикт приёмки с отложенным хвостом ветку не меняет.
+    failure_owner = (
+        verdict["owner"] if verdict is not None and outcome == "failed" else None
+    )
     transition = regular_json(transition_path, immutable=False)
     action = validate_transition(
         transition,
@@ -1264,40 +1320,38 @@ elif OP == "findings-ledger":
             for key, finding in findings.items()
             if finding["sourceNode"] == node and finding["status"] == "open"
         }
+        def record(finding, status):
+            record_finding(findings, node, sequence, verdict, finding, status)
+
         if outcome == "done":
             for key in open_for_node:
                 findings[key]["status"] = "closed"
                 findings[key]["closedSequence"] = sequence
+            # Приёмка с хвостом: работа принята, но проверяющий приложил список
+            # находок вне цели задачи. Их нельзя ни закрывать (никто не чинил),
+            # ни держать открытыми (возврат по ним запрещён) — отдельный статус.
+            if verdict is not None:
+                for finding in verdict["findings"]:
+                    record(finding, "deferred")
             continue
         if outcome != "failed" or verdict is None:
             # Legacy failed не несёт полного набора замечаний: по нему нельзя
             # доказать ни открытие, ни закрытие finding.
             continue
+        # Закрытие по исчезновению из набора считаем только по блокирующим: они
+        # и есть предмет ремонта. Отложенная находка из набора не «пропадает».
         current_keys = {
             (node, finding["id"])
-            for finding in verdict["findings"]
+            for finding in blocking_findings(verdict)
         }
         for key in open_for_node - current_keys:
             findings[key]["status"] = "closed"
             findings[key]["closedSequence"] = sequence
         for finding in verdict["findings"]:
-            key = (node, finding["id"])
-            previous = findings.get(key)
-            if previous is None or previous["status"] == "closed":
-                findings[key] = {
-                    "id": finding["id"],
-                    "sourceNode": node,
-                    "owner": verdict["owner"],
-                    "summary": finding["summary"],
-                    "openedSequence": sequence,
-                    "lastSeenSequence": sequence,
-                    "status": "open",
-                    "closedSequence": None,
-                }
-            else:
-                previous["owner"] = verdict["owner"]
-                previous["summary"] = finding["summary"]
-                previous["lastSeenSequence"] = sequence
+            record(
+                finding,
+                "open" if finding_severity(finding) == "blocking" else "deferred",
+            )
     ordered = sorted(
         findings.values(),
         key=lambda item: (item["sourceNode"], item["id"]),
@@ -1307,6 +1361,7 @@ elif OP == "findings-ledger":
             "schema": 1,
             "open": [item for item in ordered if item["status"] == "open"],
             "closed": [item for item in ordered if item["status"] == "closed"],
+            "deferred": [item for item in ordered if item["status"] == "deferred"],
         }
     )
 
@@ -2006,7 +2061,13 @@ attempt_stage_state_commit_v2() {
   [[ "$recovery" == 0 || "$recovery" == 1 ]] || return 2
   [[ -z "$reject_feedback" ]] || _attempt_state_reason "$reject_feedback" || return
   run_state_verdict_validate "$outcome" "$verdict_b64" || return
-  failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
+  # Владелец выбирает ВЕТКУ ВОЗВРАТА, поэтому нужен только отказу. У приёмки с
+  # отложенным хвостом вердикт есть, а возврата нет: переход берётся по одному
+  # исходу, и owner в запрос перехода не идёт (factory-route его там запрещает).
+  failure_owner=""
+  if [[ "$outcome" == failed ]]; then
+    failure_owner=$(run_state_verdict_owner "$outcome" "$verdict_b64") || return
+  fi
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
   _attempt_stage_state_load_locked "$task" "$attempt" ""

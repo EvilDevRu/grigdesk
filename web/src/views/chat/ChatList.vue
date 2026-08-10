@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import { useChatStore } from '../../stores/chat.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -29,6 +29,16 @@ const rows = computed(() => chat.list(q.value, showArchived.value).map((r) => {
   const { model, provider } = prov.modelOf(r.modelRef || r.model);
   return { ...r, provider, modelName: model?.name || '' };
 }));
+
+// Отправка из архивного разговора сама возвращает его в активные. В этот момент
+// переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает
+// показывать архив, из которого его строка только что исчезла.
+watch(
+  () => chat.archived.some((session) => session.id === chat.activeId),
+  (archived, wasArchived) => {
+    if (showArchived.value && wasArchived && !archived) showArchived.value = false;
+  },
+);
 
 // Буква — фоллбэк, пока реестр исполнителей не загрузился (иначе аватар пустой).
 function letter(r) { return r.taskId ? '#' : (r.title[0] || '?').toUpperCase(); }
@@ -70,8 +80,6 @@ function newChat() {
 
 function select(r) {
   chat.selectChat(r.id);
-  // Выбор архивного чата восстанавливает его, поэтому возвращаемся к активному списку.
-  if (r.archived) showArchived.value = false;
   emit('open');
 }
 
@@ -107,7 +115,7 @@ async function del(r) {
     </div>
     <div class="rows">
       <div v-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
-      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId && !r.archived, wait: r.waiting }"
+      <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId, wait: r.waiting }"
            @click="select(r)" @dblclick="startEdit(r)">
         <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
              Во время работы цвет меняется целиком, а вращается только внешнее кольцо. -->
@@ -140,8 +148,8 @@ async function del(r) {
         </div>
         <span v-if="editId !== r.id" class="acts">
           <button v-if="r.archived" class="restore"
-                  title="Восстановить из архива"
-                  aria-label="Восстановить чат из архива"
+                  title="Достать из архива"
+                  aria-label="Достать чат из архива"
                   @click.stop="restore(r)">↩</button>
           <button title="Переименовать" @click.stop="startEdit(r)">✎</button>
           <button :class="{ danger: r.archived }"

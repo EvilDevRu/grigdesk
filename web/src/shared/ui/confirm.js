@@ -84,8 +84,11 @@ export function confirmDialog(text, { title = 'Подтверди действи
  * Возвращает Promise<string|null>: null — отмена (Esc/фон/«Отмена»),
  * строка — введённый текст (может быть пустой, если разрешить пустой ответ).
  * Enter — отправить, Shift+Enter — новая строка.
+ *
+ * `value` — начальный текст: вызывающий может вернуть человеку уже набранный
+ * абзац, если отправка не прошла. Терять написанное на ошибке нельзя.
  */
-export function promptDialog({ title = 'Пояснение', text = '', placeholder = '', okText = 'Отправить', cancelText = 'Отмена' } = {}) {
+export function promptDialog({ title = 'Пояснение', text = '', placeholder = '', okText = 'Отправить', cancelText = 'Отмена', value = '' } = {}) {
   injectCss();
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
@@ -103,6 +106,7 @@ export function promptDialog({ title = 'Пояснение', text = '', placehol
     const ta = document.createElement('textarea');
     ta.className = 'cfm-ta';
     ta.placeholder = placeholder;
+    ta.value = typeof value === 'string' ? value : '';
     const a = document.createElement('div'); a.className = 'cfm-a';
     const no = document.createElement('button'); no.textContent = cancelText;
     const ok = document.createElement('button'); ok.className = 'cfm-ok'; ok.textContent = okText;

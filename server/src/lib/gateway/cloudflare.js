@@ -93,7 +93,9 @@ async function cfRequest(token, pathname, { method = 'GET', body, fetchImpl = fe
     throw new CloudflareError(
       'cloudflare_forbidden',
       'Cloudflare отказал в доступе: токен неверен или у него нет прав на эту зону. '
-        + 'Нужны «Zone → Zone → Read» и «Zone → DNS → Edit» на родительскую зону.',
+        + 'Нужны две строки на родительскую зону: «Zone → Zone → Read» и '
+        + '«Zone → DNS → Edit». Проверь среднюю колонку второй строки: '
+        + '«Zone → Zone → Edit» выглядит похоже, но права на DNS не даёт.',
       { status: res.status },
     );
   }

@@ -217,6 +217,7 @@ async function build() {
       };
     },
     acquireInboxLease: () => telegramConnection.acquireLease(),
+    log: fastify.log,
   });
   const githubConnection = new GitHubConnection({
     credentials: githubCredentials,
@@ -253,9 +254,10 @@ async function build() {
       photos: fastify.pluginSettings('inbox')?.attachPhotos !== false,
       videos: fastify.pluginSettings('inbox')?.attachVideos === true,
     }),
-    attachmentTriage: ({ item, attachmentAnalysis }) => runInboxTriage({
+    attachmentTriage: ({ item, attachmentAnalysis, operatorNote }) => runInboxTriage({
       item,
       attachmentAnalysis,
+      operatorNote,
       modelRef: fastify.pluginSettings('inbox')?.triageModel ?? null,
       config,
       providerSettings: prefs.read().providerSettings || {},

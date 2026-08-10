@@ -30,6 +30,25 @@ const SENTINEL_SPEECH = Object.freeze({
   conditionOnPreviousText: false,
 });
 
+/** Мок ffmpeg/ffprobe: сцены отдаёт по счётчику, seek-кадры и длительность — по запросу. */
+function frameRunner({ scenes = 0, duration = 0, calls = [] } = {}) {
+  return async function runProcess(cmd, args, options) {
+    calls.push({ cmd, args, options });
+    if (cmd === 'ffprobe') {
+      return { out: JSON.stringify({ format: { duration }, streams: [] }), err: '' };
+    }
+    const target = String(args.at(-1));
+    if (args.some((arg) => String(arg).includes('gt(scene,'))) {
+      for (let i = 0; i < scenes; i += 1) {
+        writeFileSync(target.replace('%03d', String(i + 1).padStart(3, '0')), 'scene');
+      }
+      return { out: '', err: '' };
+    }
+    writeFileSync(target, 'frame');
+    return { out: '', err: '' };
+  };
+}
+
 test('extractSceneFrames даёт локальному Inbox bounded набор кадров и передаёт abort signal', async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-scene-frames-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -44,15 +63,11 @@ test('extractSceneFrames даёт локальному Inbox bounded набор 
     destDir,
     maxFrames: 3,
     signal: abort.signal,
-  }, {
-    async runProcess(cmd, args, options) {
-      calls.push({ cmd, args, options });
-      writeFileSync(path.join(destDir, 'frame-001.jpg'), 'frame');
-      return { out: '', err: '' };
-    },
-  });
+  }, { runProcess: frameRunner({ scenes: 3, calls }) });
 
-  assert.deepEqual(frames, [path.join(destDir, 'frame-001.jpg')]);
+  assert.deepEqual(frames, [1, 2, 3].map((n) => path.join(destDir, `frame-00${n}.jpg`)));
+  // Сцен хватило — добор не запускается, ffprobe не зовётся.
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].cmd, 'ffmpeg');
   assert.ok(calls[0].args.includes('3'));
   assert.equal(calls[0].options.signal, abort.signal);
@@ -62,7 +77,7 @@ test('extractSceneFrames даёт локальному Inbox bounded набор 
   );
 });
 
-test('extractSceneFrames берёт первый кадр у видео без смен сцен', async (t) => {
+test('extractSceneFrames берёт кадры по всей длительности у записи экрана без смен сцен', async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-static-video-frame-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'input.mp4');
@@ -70,18 +85,59 @@ test('extractSceneFrames берёт первый кадр у видео без �
   writeFileSync(filePath, 'video');
   const calls = [];
 
-  const frames = await extractSceneFrames({ filePath, destDir, maxFrames: 2 }, {
-    async runProcess(cmd, args) {
-      calls.push({ cmd, args });
-      if (calls.length === 2) writeFileSync(args.at(-1), 'fallback-frame');
-      return { out: '', err: '' };
+  const frames = await extractSceneFrames({ filePath, destDir, maxFrames: 4 }, {
+    runProcess: frameRunner({ scenes: 0, duration: 40, calls }),
+  });
+
+  // Скринкаст обязан дать ВСЕ maxFrames кадров, а не единственный первый.
+  assert.deepEqual(frames, [1, 2, 3, 4].map((n) => path.join(destDir, `span-00${n}.jpg`)));
+  assert.ok(calls[0].args.some((arg) => String(arg).includes('gt(scene,0.4)')));
+  assert.equal(calls[1].cmd, 'ffprobe');
+  // Середины интервалов: нулевая секунда — это ещё не начатое действие.
+  assert.deepEqual(
+    calls.slice(2).map((call) => call.args[call.args.indexOf('-ss') + 1]),
+    ['5.000', '15.000', '25.000', '35.000'],
+  );
+});
+
+test('extractSceneFrames дополняет недобор сцен равномерными кадрами', async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-mixed-video-frame-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'input.mp4');
+  const destDir = path.join(root, 'frames');
+  writeFileSync(filePath, 'video');
+  const calls = [];
+
+  const frames = await extractSceneFrames({ filePath, destDir, maxFrames: 4 }, {
+    runProcess: frameRunner({ scenes: 1, duration: 20, calls }),
+  });
+
+  // Одна найденная смена сцены больше не оставляет ролик с единственным кадром.
+  assert.deepEqual(frames, [
+    path.join(destDir, 'frame-001.jpg'),
+    path.join(destDir, 'span-001.jpg'),
+    path.join(destDir, 'span-002.jpg'),
+    path.join(destDir, 'span-003.jpg'),
+  ]);
+});
+
+test('extractSceneFrames откатывается к первому кадру, когда длительность неизвестна', async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-unknown-duration-frame-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'input.mp4');
+  const destDir = path.join(root, 'frames');
+  writeFileSync(filePath, 'video');
+  const calls = [];
+
+  const frames = await extractSceneFrames({ filePath, destDir, maxFrames: 4 }, {
+    async runProcess(cmd, args, options) {
+      if (cmd === 'ffprobe') throw new Error('ffprobe недоступен');
+      return frameRunner({ scenes: 0, calls })(cmd, args, options);
     },
   });
 
-  assert.equal(calls.length, 2);
-  assert.ok(calls[0].args.some((arg) => String(arg).includes('gt(scene,0.4)')));
-  assert.equal(calls[1].args.includes('1'), true);
   assert.deepEqual(frames, [path.join(destDir, 'frame-001.jpg')]);
+  assert.equal(calls.at(-1).args.includes('1'), true);
 });
 
 test('buildTranscribeArgv передаёт все настройки и не добавляет ложные флаги', () => {

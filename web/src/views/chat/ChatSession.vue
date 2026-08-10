@@ -66,7 +66,11 @@ function onAttachmentClick(event, attachment) {
   });
 }
 
-const sess = computed(() => chat.sessions.find((s) => s.id === props.sid) || null);
+// Архивный разговор открывается для чтения прямо из архива. Отправка сообщения
+// сама перенесёт тот же объект в активные (stores/chat.js), отдельной копии нет.
+const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
+  || (chat.archived || []).find((s) => s.id === props.sid)
+  || null);
 
 // ── Название чата (шапка на странице «Чаты» — в панели своё, вкладками, см. ChatTabs) ──
 const editingTitle = ref(false);

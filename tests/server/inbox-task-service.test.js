@@ -21,6 +21,7 @@ function fixture(over = {}) {
     analysis: 0,
     analysisRelease: 0,
     attachmentTriage: 0,
+    attachmentTriageArgs: [],
     sourceUrls: [],
     current: 0,
     inboxGate: 0,
@@ -229,6 +230,7 @@ function fixture(over = {}) {
     },
     attachmentTriage: async (args) => {
       calls.attachmentTriage += 1;
+      calls.attachmentTriageArgs.push({ operatorNote: args.operatorNote });
       if (over.attachmentTriageError) throw new Error(over.attachmentTriageError);
       return structuredClone(over.attachmentTriage || {
         ok: true,
@@ -362,52 +364,159 @@ test('текст пользователя не может подменить с�
   );
 });
 
-test('неразобранное вложение блокирует задачу, а явный ручной обход только прикладывает файл', async () => {
+test('неразобранное вложение блокирует задачу, пока человек не пояснит содержимое', async () => {
   const attachment = {
     ref: 'opaque', dedupeKey: 'video-1', kind: 'video', displayLabel: 'видео', name: 'bug.mp4', size: 10,
   };
-  const blocked = fixture({
-    attachments: [attachment],
-    attachmentAnalysis: {
-      ok: false, complete: false, error: 'speech_unavailable', text: '', visualPaths: [], entries: [],
-    },
-  });
+  const failedAnalysis = {
+    ok: false,
+    complete: false,
+    error: 'speech_unavailable',
+    text: '',
+    visualPaths: [],
+    entries: [{
+      index: 0,
+      kind: 'video',
+      displayLabel: 'видео',
+      name: 'bug.mp4',
+      status: 'skipped',
+      complete: false,
+      text: '',
+      visualPaths: [],
+      reason: 'файл 53 МБ — бот не может скачать больше 20 МБ',
+    }],
+  };
+  const blocked = fixture({ attachments: [attachment], attachmentAnalysis: failedAnalysis });
   await assert.rejects(blocked.service.task(blocked.itemRef, {
     revision: REVISION,
     messageRefs: [blocked.messageRef],
-  }), (error) => error.code === 'attachment_analysis_required');
+  }), (error) => {
+    assert.equal(error.code, 'attachment_analysis_required');
+    // Отказ обязан назвать причину: без неё человек не знает, что описывать и
+    // лечится ли это ожиданием. Потолок Bot API ожиданием не лечится.
+    assert.deepEqual(error.details.attachments, [{
+      label: 'видео · bug.mp4',
+      reason: 'файл 53 МБ — бот не может скачать больше 20 МБ',
+    }]);
+    return true;
+  });
   assert.equal(blocked.calls.b24.length, 0);
 
-  const bypassed = fixture({
+  // Пустая строка ничего не объясняет и пояснением не считается.
+  const empty = fixture({ attachments: [attachment], attachmentAnalysis: failedAnalysis });
+  await assert.rejects(empty.service.task(empty.itemRef, {
+    revision: REVISION,
+    messageRefs: [empty.messageRef],
+    operatorNote: '   ',
+  }), (error) => error.code === 'attachment_analysis_required');
+
+  const explained = fixture({
     attachments: [attachment],
     attachmentPolicy: { photos: true, videos: true },
-    attachmentAnalysis: {
-      ok: false, complete: false, error: 'speech_unavailable', text: '', visualPaths: [], entries: [],
+    attachmentAnalysis: failedAnalysis,
+    attachmentTriage: {
+      ok: true,
+      verdict: {
+        kind: 'wish',
+        confidence: 0.9,
+        title: 'Ускорить появление чекбокса',
+        description: 'После клика чекбокс появляется с задержкой.',
+        reason: 'Пояснение оператора описывает конкретный дефект.',
+      },
     },
   });
-  await bypassed.service.task(bypassed.itemRef, {
+  const created = await explained.service.task(explained.itemRef, {
     revision: REVISION,
-    messageRefs: [bypassed.messageRef],
-    allowUnanalyzedAttachments: true,
+    messageRefs: [explained.messageRef],
+    operatorNote: 'На видео чекбокс появляется через две секунды после клика.',
   });
-  assert.equal(bypassed.calls.analysis, 0, 'явный bypass не повторяет дорогой неудачный разбор');
-  assert.equal(bypassed.calls.b24.length, 1);
-  assert.equal(bypassed.calls.b24[0].images.length, 1);
 
-  // Обход разбора — это согласие ставить задачу без пересказа содержимого, а не
+  assert.equal(explained.calls.analysis, 1, 'разбор идёт и с пояснением: частичный результат тоже полезен');
+  assert.equal(explained.calls.attachmentTriage, 1, 'пояснение уходит на разбор модели');
+  assert.equal(explained.calls.b24.length, 1);
+  assert.equal(created.taskId, '5150');
+  const task = explained.calls.b24[0];
+  assert.equal(task.title, 'Ускорить появление чекбокса', 'постановку формулирует модель');
+  assert.match(task.description, /Пояснение оператора/u);
+  assert.match(task.description, /чекбокс появляется через две секунды/u);
+  // Исполнитель обязан видеть, что видео не расшифровано: иначе он примет
+  // пересказ человека за полный перечень фактов.
+  assert.match(task.description, /Вложения без разбора/u);
+  assert.match(task.description, /бот не может скачать больше 20 МБ/u);
+  assert.equal(task.images.length, 1, 'разрешённый настройкой исходник по-прежнему едет на портал');
+  // Факт остаётся в audit: потом видно, почему в задаче нет расшифровки.
+  assert.match(explained.calls.decide[0].note, /Пояснение оператора при неполном разборе/u);
+
+  // Пояснение — это согласие поставить задачу без машинного пересказа, а не
   // согласие залить видео на портал: настройка загрузки решает отдельно.
-  const denied = fixture({
-    attachments: [attachment],
-    attachmentAnalysis: {
-      ok: false, complete: false, error: 'speech_unavailable', text: '', visualPaths: [], entries: [],
-    },
-  });
+  const denied = fixture({ attachments: [attachment], attachmentAnalysis: failedAnalysis });
   await denied.service.task(denied.itemRef, {
     revision: REVISION,
     messageRefs: [denied.messageRef],
-    allowUnanalyzedAttachments: true,
+    operatorNote: 'На видео чекбокс появляется с задержкой.',
   });
   assert.deepEqual(denied.calls.b24[0].images, []);
+});
+
+test('модель получает пояснение оператора, а её отказ не запирает ручную постановку', async () => {
+  const attachment = {
+    ref: 'opaque', dedupeKey: 'video-1', kind: 'video', displayLabel: 'видео', name: 'bug.mp4', size: 10,
+  };
+  const failedAnalysis = {
+    ok: false, complete: false, error: 'speech_unavailable', text: '', visualPaths: [], entries: [],
+  };
+  const passed = fixture({ attachments: [attachment], attachmentAnalysis: failedAnalysis });
+  await passed.service.task(passed.itemRef, {
+    revision: REVISION,
+    messageRefs: [passed.messageRef],
+    operatorNote: 'На видео пропадает колонка «Группа».',
+  });
+  assert.equal(passed.calls.attachmentTriageArgs.length, 1);
+  assert.equal(
+    passed.calls.attachmentTriageArgs[0].operatorNote,
+    'На видео пропадает колонка «Группа».',
+    'пояснение доезжает до триажа отдельным полем, а не подмешивается в текст обращения',
+  );
+
+  // Нет модели или она упала — человек уже сказал суть словами, и задача
+  // создаётся из текста обращения и пояснения.
+  const noModel = fixture({
+    attachments: [attachment],
+    attachmentAnalysis: failedAnalysis,
+    attachmentTriage: { ok: false, error: 'no_model' },
+  });
+  await noModel.service.task(noModel.itemRef, {
+    revision: REVISION,
+    messageRefs: [noModel.messageRef],
+    operatorNote: 'На видео пропадает колонка «Группа».',
+  });
+  assert.equal(noModel.calls.b24.length, 1);
+  assert.match(noModel.calls.b24[0].description, /пропадает колонка/u);
+
+  // Без пояснения инвариант прежний: визуальное вложение, которое модель не
+  // прочитала, задачей не становится.
+  const visual = fixture({
+    attachments: [attachment],
+    attachmentAnalysis: {
+      ok: true, complete: true, key: 'k', text: 'кадры', visualPaths: ['/frames/a.jpg'], entries: [],
+    },
+    attachmentTriage: { ok: false, error: 'run_failed' },
+  });
+  await assert.rejects(visual.service.task(visual.itemRef, {
+    revision: REVISION,
+    messageRefs: [visual.messageRef],
+  }), (error) => error.code === 'attachment_analysis_required');
+});
+
+test('автомат не может пояснять содержимое за человека', async () => {
+  const auto = fixture();
+  await assert.rejects(auto.service.task(auto.itemRef, {
+    revision: REVISION,
+    messageRefs: [auto.messageRef],
+    operatorNote: 'выдумка автомата',
+  }, { by: 'auto', note: 'auto', requireAllAttachments: true }),
+  (error) => error.code === 'invalid_service_call');
+  assert.equal(auto.calls.b24.length, 0);
 });
 
 test('настройка решает, что уезжает файлом на портал, а разбора вложений не касается', async () => {
@@ -725,7 +834,7 @@ test('provider skipped и task URL проходят public allowlist; refresh/re
   const result = await own.service.task(own.itemRef, {
     revision: REVISION,
     messageRefs: [own.messageRef],
-    allowUnanalyzedAttachments: true,
+    operatorNote: 'На скриншоте пустая таблица вместо списка проектов.',
   });
 
   assert.equal(own.calls.b24.length, 1);

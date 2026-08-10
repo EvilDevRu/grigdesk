@@ -15,6 +15,9 @@ while [[ $# -gt 0 ]]; do
     --epoch) epoch=${2:-}; shift 2 ;;
     --failure-owner) failure_owner=${2:-}; shift 2 ;;
     --finding) findings+=("${2:-}"); shift 2 ;;
+    # Отложенная находка: дефект настоящий, но вне цели задачи. Возврата в сборку
+    # не вызывает и уезжает хвостом на ворота приёмки.
+    --finding-deferred) findings+=("deferred:${2:-}"); shift 2 ;;
     # Якорь замечания (id=путь) и объявленный охват прохода (путь) едут тем же
     # списком под префиксом: разбирает их run_state_verdict_encode.
     --finding-anchor) findings+=("anchor:${2:-}"); shift 2 ;;
@@ -25,6 +28,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$task" && -n "$stage" && -n "$run_id" && -n "$epoch" && -n "$result" ]] || exit 2
+
+# Отказ, в котором не осталось ни одного блокирующего замечания, — это не отказ.
+# Проверяющий сам решил, что всё найденное можно отложить, и держать из-за этого
+# маршрут не за что: исход выпрямляем в done, находки едут отложенным хвостом.
+# Иначе такой вердикт разворачивал бы сборку по замечаниям, чинить которые никто
+# не просил, и упирался бы в no-progress ровно потому, что чинить нечего.
+if [[ "$result" == failed && ${#findings[@]} -gt 0 ]]; then
+  has_blocking=0
+  for raw in "${findings[@]}"; do
+    case "$raw" in
+      deferred:*|anchor:*|reviewed:*) ;;
+      *) has_blocking=1; break ;;
+    esac
+  done
+  if [[ $has_blocking -eq 0 ]]; then
+    result=done
+  fi
+fi
+
 verdict_b64=$(run_state_verdict_encode "$result" "$failure_owner" "${findings[@]}") || exit
 
 status_fd=${FACTORY_STATUS_FD:-7}

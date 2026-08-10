@@ -911,6 +911,54 @@ assert_eq 0 "$("$NODE_BIN" -e \
 assert_eq "$(date -u -d '2026-01-01 03:00:00' +%s)" "$(json_field "$rec_wt" lastEventAt)" \
   "lastEventAt still tracks the newest event"
 
+# Отложенная находка: дефект настоящий, но вне цели задачи. Возврата не вызывает,
+# в сторожах топтания не участвует и живёт до ворот приёмки отдельной секцией.
+deferred_attempt=$(begin_selected 69 a_dddddddddddddddddddddddddddddddd)
+assert_rc 0 "$?" "попытка для отложенных находок подготовлена"
+attempt_stage_state_init_v2 69 "$deferred_attempt" debug >/dev/null
+attempt_stage_state_commit_v2 69 "$deferred_attempt" instrument done >/dev/null
+deferred_verdict=$(run_state_verdict_encode done build \
+  'deferred:side-defect=спиннер не гаснет при отказе сети, к цели задачи не относится')
+assert_rc 0 "$?" "done принимает вердикт из одних отложенных находок"
+deferred_commit=$(attempt_stage_state_commit_v2 \
+  69 "$deferred_attempt" check done 6 "$deferred_verdict" 2)
+assert_rc 0 "$?" "приёмка с отложенным хвостом коммитится"
+assert_eq ready "$(json_field "$deferred_commit" state)" \
+  "отложенная находка не останавливает маршрут"
+deferred_projection=$(attempt_stage_state_findings_v2 69 "$deferred_attempt")
+assert_eq 0 "$(json_field "$deferred_projection" open length)" \
+  "отложенная находка не попадает в набор к ремонту"
+assert_eq 1 "$(json_field "$deferred_projection" deferred length)" \
+  "отложенная находка видна отдельной секцией"
+assert_eq side-defect "$(json_field "$deferred_projection" deferred 0 id)" \
+  "проекция сохраняет id отложенной находки"
+
+# Блокирующее замечание при done — противоречие: движок обязан отвергнуть вердикт,
+# иначе «принято» молча увозило бы нечинёный блокер мимо ворот.
+run_state_verdict_encode done build 'hard-defect=цель задачи не выполнена' >/dev/null 2>&1
+assert_rc 2 "$?" "done с блокирующим замечанием отклоняется"
+
+# Отложенные находки не маскируют топтание: сторож смотрит только на блокирующие.
+mask_attempt=$(begin_selected 70 a_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee)
+assert_rc 0 "$?" "попытка для проверки маскировки подготовлена"
+attempt_stage_state_init_v2 70 "$mask_attempt" debug >/dev/null
+attempt_stage_state_commit_v2 70 "$mask_attempt" instrument done >/dev/null
+mask_first=$(run_state_verdict_encode failed build \
+  'check-contract=проверяемый контракт не выполнен' \
+  'deferred:noise-one=побочная находка первого прохода')
+attempt_stage_state_commit_v2 \
+  70 "$mask_attempt" check failed 6 "$mask_first" 2 >/dev/null
+attempt_stage_state_commit_v2 70 "$mask_attempt" instrument done >/dev/null
+mask_second=$(run_state_verdict_encode failed build \
+  'check-contract=тот же блокер после ремонта' \
+  'deferred:noise-two=другая побочная находка')
+mask_stop=$(attempt_stage_state_commit_v2 \
+  70 "$mask_attempt" check failed 6 "$mask_second" 2)
+assert_eq stopped "$(json_field "$mask_stop" state)" \
+  "смена отложенных находок не выдаётся за прогресс по блокирующему"
+assert_eq no-progress "$(json_field "$mask_stop" stop)" \
+  "сторож топтания считает только блокирующие замечания"
+
 legacy_after=$(sha256sum "$STATE_DIR/t51.pipeline" | awk '{print $1}')
 assert_eq "$legacy_before" "$legacy_after" \
   "all stage-ledger operations leave legacy STATE_DIR byte-for-byte untouched"

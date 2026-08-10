@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { api } from '../shared/api-client.js';
-import { confirmDialog } from '../shared/ui/confirm.js';
+import { confirmDialog, promptDialog } from '../shared/ui/confirm.js';
 import { useSse } from '../composables/useSse.js';
 
 // Inbox показывает только public projection общего API. Provider identity,
@@ -15,6 +15,9 @@ const activeSection = ref('review');
 const payload = ref({ items: [], channels: [], errors: [], truncated: false, worker: null });
 const selection = reactive({});
 const itemAlerts = reactive({});
+// Набранное пояснение живёт до успешной отправки: карточка может обновиться по
+// SSE прямо во время набора, а переписывать абзац заново человек не должен.
+const noteDrafts = reactive({});
 const nowMs = ref(Date.now());
 let loadVersion = 0;
 let clockTimer = null;
@@ -240,7 +243,7 @@ function itemReadOnly(item) {
   return channelsById.value.get(item.channel?.id)?.readOnly !== false;
 }
 
-async function mutateItem(item, action, { allowUnanalyzedAttachments = false } = {}) {
+async function mutateItem(item, action, { operatorNote = '' } = {}) {
   if (busy.value || itemReadOnly(item)) return;
   const messageRefs = [...selectedRefs(item)];
   const body = { revision: item.revision, messageRefs };
@@ -250,8 +253,8 @@ async function mutateItem(item, action, { allowUnanalyzedAttachments = false } =
     body.decisionId = decision.decisionId;
     body.decisionVersion = decision.version;
   } else if (!canDecide(item)) return;
-  if (action === 'task' && allowUnanalyzedAttachments) {
-    body.allowUnanalyzedAttachments = true;
+  if (action === 'task' && operatorNote) {
+    body.operatorNote = operatorNote;
   }
   busy.value = `${item.ref}:${action}`;
   error.value = '';
@@ -263,6 +266,7 @@ async function mutateItem(item, action, { allowUnanalyzedAttachments = false } =
       : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю'
         : 'Обращение возвращено к разбору';
     delete selection[item.ref];
+    delete noteDrafts[item.ref];
     await load();
   } catch (err) {
     const code = err?.data?.error;
@@ -275,14 +279,15 @@ async function mutateItem(item, action, { allowUnanalyzedAttachments = false } =
       } else {
         notice.value = text;
       }
-    } else if (action === 'task' && !allowUnanalyzedAttachments
+    } else if (action === 'task' && !operatorNote
         && ['attachment_analysis_required', 'attachments_skipped'].includes(code)) {
-      itemAlerts[item.ref] = {
-        kind: 'warn',
-        text: err?.message || 'Не удалось полностью разобрать содержимое вложений.',
-        allowUnanalyzedAttachments: true,
-        retry: { revision: item.revision, messageRefs: [...messageRefs] },
-      };
+      // Не тупик, а вопрос к человеку: он видел вложение в самом канале и может
+      // пересказать суть. Модалка открывается сразу — отдельная плашка с кнопкой
+      // означала бы лишний клик ровно там, где решение уже принято.
+      openNoteDialog(item, messageRefs, {
+        message: err?.message || 'Содержимое вложений разобрано не полностью.',
+        attachments: Array.isArray(err?.data?.attachments) ? err.data.attachments : [],
+      });
     } else {
       itemAlerts[item.ref] = {
         kind: 'bad', text: err?.message || 'Не удалось выполнить действие с обращением.',
@@ -293,30 +298,58 @@ async function mutateItem(item, action, { allowUnanalyzedAttachments = false } =
   }
 }
 
-async function createWithUnanalyzedAttachments(item) {
-  if (busy.value || itemReadOnly(item) || !canDecide(item)) return;
-  const retry = itemAlerts[item.ref]?.retry;
-  if (!retry || retry.revision !== item.revision
-      || !sameRefs(retry.messageRefs, selectedRefs(item))) {
-    itemAlerts[item.ref] = {
-      kind: 'warn',
-      text: 'Обращение или выбор изменились. Снова нажмите «Создать задачу», чтобы проверить вложения.',
-    };
-    return;
+/**
+ * Пояснение человека вместо содержимого, которое машина не прочитала.
+ *
+ * Прежняя кнопка «Создать без разбора» ставила задачу из голого текста
+ * сообщений: обращение «на видео предложение по доработке» превращалось в
+ * задачу без сути. Теперь человек, который видел вложение в самом канале,
+ * пересказывает его — и этот текст уходит модели наравне с обращением.
+ */
+async function openNoteDialog(item, messageRefs, { message, attachments }) {
+  const lines = [message];
+  if (attachments.length) {
+    lines.push('', 'Не удалось разобрать:');
+    for (const attachment of attachments) {
+      lines.push(attachment.reason
+        ? `• ${attachment.label} — ${attachment.reason}`
+        : `• ${attachment.label}`);
+    }
   }
-  const confirmed = await confirmDialog(
-    'Содержимое части вложений не удалось разобрать. Всё равно создать задачу с доступными исходными файлами? Неразобранное содержимое не попадёт в постановку.',
-    { okText: 'Создать без разбора' },
+  lines.push(
+    '',
+    'Опишите своими словами, что там было и что нужно сделать.',
+    'Текст уйдёт на разбор модели вместе с обращением и попадёт в описание задачи.',
   );
-  if (!confirmed) return;
-  if (retry.revision !== item.revision || !sameRefs(retry.messageRefs, selectedRefs(item))) {
+  const answer = await promptDialog({
+    title: 'Опишите содержимое вложений',
+    text: lines.join('\n'),
+    placeholder: 'Например: на видео после сохранения фильтра таблица сбрасывает сортировку…',
+    okText: 'Разобрать и создать задачу',
+    value: noteDrafts[item.ref] || '',
+  });
+  if (answer === null) return;
+  const note = String(answer).trim();
+  // Черновик переживает и пустой ввод, и смену карточки: человек мог написать
+  // абзац, и терять его из-за подсказки или гонки с новым сообщением нельзя.
+  noteDrafts[item.ref] = note;
+  if (!note) {
     itemAlerts[item.ref] = {
       kind: 'warn',
-      text: 'Обращение изменилось во время подтверждения. Данные нужно проверить заново.',
+      text: 'Без пояснения задача потеряет суть вложения. Нажмите «Создать задачу» ещё раз и опишите содержимое.',
     };
     return;
   }
-  await mutateItem(item, 'task', { allowUnanalyzedAttachments: true });
+  const current = payload.value.items.find((entry) => entry.ref === item.ref);
+  if (!current || current.revision !== item.revision
+      || !sameRefs(messageRefs, selectedRefs(item))) {
+    itemAlerts[item.ref] = {
+      kind: 'warn',
+      text: 'Обращение или выбор изменились, пока вы писали. Проверьте выбор и нажмите «Создать задачу» — текст пояснения сохранён.',
+    };
+    return;
+  }
+  await mutateItem(item, 'task', { operatorNote: note });
 }
 
 async function changeParticipation(channel, action) {
@@ -459,10 +492,13 @@ function autoTaskState(item) {
   const analysisBlock = analysisBlocksByRef.value.get(item.ref);
   if (analysisBlock) return {
     kind: 'blocked',
-    text: `Вложения не удалось полностью разобрать. Автозадача не создастся; проверьте обращение вручную${
+    text: `Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите «Создать задачу» и опишите содержимое${
       Number.isSafeInteger(analysisBlock.retryAtMs)
-        ? ` или дождитесь новой попытки после ${formatTime(analysisBlock.retryAtMs)}`
+        ? ` либо дождитесь новой попытки после ${formatTime(analysisBlock.retryAtMs)}`
         : ''}.`,
+    // Причина у каждого файла своя: потолок Telegram в 20 МБ не лечится
+    // ожиданием, а сетевой сбой лечится. Без неё человек не знает, что делать.
+    attachments: Array.isArray(analysisBlock.attachments) ? analysisBlock.attachments : [],
   };
   const readyAtMs = Number(item.autoTask.readyAtMs);
   if (Number.isFinite(readyAtMs) && readyAtMs > nowMs.value) return {
@@ -606,9 +642,16 @@ onBeforeUnmount(() => {
           <h2>{{ item.title }}</h2>
           <p v-if="item.description" class="description">{{ item.description }}</p>
           <p class="meta">{{ item.project }} · {{ item.kind }} · {{ formatTime(item.firstAt) }}</p>
-          <p v-if="autoTaskState(item)" class="auto-state" :class="autoTaskState(item).kind">
-            {{ autoTaskState(item).text }}
-          </p>
+          <div v-if="autoTaskState(item)" class="auto-state" :class="autoTaskState(item).kind">
+            <p>{{ autoTaskState(item).text }}</p>
+            <ul v-if="autoTaskState(item).attachments?.length" class="blocked-attachments">
+              <li v-for="(attachment, blockedIndex) in autoTaskState(item).attachments"
+                  :key="`${item.ref}:blocked:${blockedIndex}`">
+                <strong>{{ attachment.label }}</strong>
+                <span v-if="attachment.reason"> — {{ attachment.reason }}</span>
+              </li>
+            </ul>
+          </div>
           <p v-if="item.status === 'mixed'" class="mixed-note">
             <template v-if="pendingMessages(item).length">
               Часть сообщений уже разобрана. Выберите новые сообщения для задачи или ранее
@@ -625,11 +668,6 @@ onBeforeUnmount(() => {
           <div v-if="itemAlerts[item.ref]" class="item-alert" :class="itemAlerts[item.ref].kind"
                :role="itemAlerts[item.ref].kind === 'bad' ? 'alert' : 'status'">
             <span>{{ itemAlerts[item.ref].text }}</span>
-            <button v-if="itemAlerts[item.ref].allowUnanalyzedAttachments" class="btn" type="button"
-                    data-action="attachments-only" :disabled="itemReadOnly(item) || !!busy"
-                    @click="createWithUnanalyzedAttachments(item)">
-              Создать без разбора
-            </button>
           </div>
 
           <div class="messages">
@@ -658,7 +696,7 @@ onBeforeUnmount(() => {
                   </span>
                   <span class="attachment-note">
                     Перед задачей Cockpit проверит содержимое. Без полного разбора
-                    автозадача не создастся.
+                    автозадача не создастся, а вручную задача ставится с вашим пояснением.
                   </span>
                   <span v-for="(attachment, attachmentIndex) in message.attachments"
                         :key="`${message.messageRef}:transcript:${attachmentIndex}`">
@@ -738,6 +776,9 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 16px; margin: 0 0 8px; }
 .item-alert.bad { border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent); }.item-alert.warn { border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); }
 .auto-state { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
 .auto-state.waiting, .auto-state.queued { color: var(--accent); }.auto-state.blocked { color: var(--warn); }.auto-state.off { color: var(--ink-mid); }
+.auto-state p { margin: 0; }
+.blocked-attachments { margin: 6px 0 0; padding-left: 18px; color: var(--ink-mid); font-size: 12px; }
+.blocked-attachments strong { color: var(--ink); font-weight: 500; }
 .messages { display: grid; gap: 7px; margin: 14px 0; }.message { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; }
 .message input { margin-top: 4px; }.selection-placeholder { color: var(--good); text-align: center; }.message-body { display: grid; gap: 5px; min-width: 0; }
 .message-head time { color: var(--ink-mid); font-size: 12px; }.message-text { white-space: pre-wrap; overflow-wrap: anywhere; }.attachments { display: grid; gap: 6px; color: var(--ink-mid); font-size: 12px; }

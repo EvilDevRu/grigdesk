@@ -446,7 +446,16 @@ export const useChatStore = defineStore('chat', {
     compactWindow: 0, speech: normalizeSpeechSnapshot(null),
   }),
   getters: {
-    active: (s) => s.sessions.find((x) => x.id === s.activeId) || null,
+    // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
+    // его в активные. Поэтому выбранный чат и поиск по id смотрят в оба списка;
+    // принадлежность к архиву по-прежнему задаётся только самим списком.
+    active: (s) => s.sessions.find((x) => x.id === s.activeId)
+      || (s.archived || []).find((x) => x.id === s.activeId)
+      || null,
+    session: (s) => (id) => s.sessions.find((x) => x.id === id)
+      || (s.archived || []).find((x) => x.id === id)
+      || null,
+    isArchived: (s) => (id) => (s.archived || []).some((x) => x.id === id),
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
     isOnConveyor: (s) => (taskId) => !!taskId && s.conveyorIds.includes(String(taskId)),
@@ -576,7 +585,7 @@ export const useChatStore = defineStore('chat', {
       try { j = await api.get('/api/chat/pending'); } catch { return; }
       if (!j?.pending?.length) return;
       for (const p of j.pending) {
-        const s = this._get(p.chatKey) || this.archived.find((x) => x.id === p.chatKey);
+        const s = this._find(p.chatKey);
         // Ответ мог прийти после F5: применяем семантическое имя, только если человек
         // не заменил временный заголовок вручную, пока агент работал.
         if (s && p.title) {
@@ -654,7 +663,7 @@ export const useChatStore = defineStore('chat', {
           if (sentChats.get(c.id) === mark) return;
           jobs.push(api.put('/api/chat/store/chat', { chat: c, archived, origin: WINDOW_ID })
             .then((response) => {
-              const live = this._get(c.id) || (this.archived || []).find((item) => item.id === c.id);
+              const live = this._find(c.id);
               applySaveAck(live, response);
               const acknowledged = { ...c };
               applySaveAck(acknowledged, response);
@@ -759,6 +768,7 @@ export const useChatStore = defineStore('chat', {
       notify('История чата не сохраняется', `${this.saveError}. Не закрывай вкладку — идут повторные попытки.`, 'chat-save-error');
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
+    _find(id) { return this._get(id) || (this.archived || []).find((s) => s.id === id) || null; },
 
     /**
      * Чат из истории мог прийти без части полей (запись старой версии, ручная правка
@@ -876,7 +886,7 @@ export const useChatStore = defineStore('chat', {
           // сверяем — но не сразу после загрузки: первое `hello` приходит следом за ней.
           // Заодно снимаем плашки «связь прервалась»: раз событие дошло — связь есть,
           // а что стало с самими ходами, сейчас расскажет _loadActive().
-          for (const c of this.sessions) if (c.offline) c.offline = false;
+          for (const c of [...this.sessions, ...(this.archived || [])]) if (c.offline) c.offline = false;
           if (this.loaded) {
             this._loadWaiting();
             this._loadActive();
@@ -904,7 +914,7 @@ export const useChatStore = defineStore('chat', {
           this.setSpeechSnapshot(d);
         } else if (name === 'chat-step') {
           // Шаг хода агента (инструмент/размышление/результат) — живая лента в чате.
-          const s = this._get(d.chatKey);
+          const s = this._find(d.chatKey);
           if (s && d.step) {
             const steps = (s.steps ||= []);
             steps.push(d.step);
@@ -917,7 +927,7 @@ export const useChatStore = defineStore('chat', {
           // Живой прогресс «думает… · N ток.». Прогресс = агент точно работает:
           // восстанавливаем и sending (окно могло перезагрузиться посреди хода).
           // Кроме сжатия: там работу показывает кольцо, а «думает…» только спорило бы с ним.
-          const s = this._get(d.chatKey);
+          const s = this._find(d.chatKey);
           if (s && !s.compacting) {
             s.sending = true; s.progressTokens = d.tokens;
             // Заполненность контекста ПРЯМО СЕЙЧАС (её сообщает не каждый исполнитель).
@@ -928,7 +938,7 @@ export const useChatStore = defineStore('chat', {
         } else if (name === 'chat-turn-start') {
           // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
           // ожидающего сообщения — теперь оно в работе, а не в списке ожидания.
-          const s = this._get(d.chatKey);
+          const s = this._find(d.chatKey);
           // Чат завели в другом окне и сразу отправили — его копия к нам ещё едет.
           // Тянем сейчас, чтобы разговор появился с работающим агентом, а не после F5.
           if (!s) { this._pullChat(d.chatKey, false); return; }
@@ -943,7 +953,7 @@ export const useChatStore = defineStore('chat', {
           // Ход завершён — снять «думает…»/кольцо во всех окнах (ответ доставляется
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
           // и они ждут очереди, агент продолжит работу: индикатор оставляем.
-          const s = this._get(d.chatKey);
+          const s = this._find(d.chatKey);
           // Событие дошло — связь с сервером есть, даже если рвался длинный POST хода.
           if (s?.offline) s.offline = false;
           if (s && !s.inflight) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
@@ -960,7 +970,7 @@ export const useChatStore = defineStore('chat', {
     _addPending(req) {
       this.pending[req.pid] = req;
       if (this._visible(req.chatKey)) return;
-      const s = this._get(req.chatKey) || this.archived.find((x) => x.id === req.chatKey);
+      const s = this._find(req.chatKey);
       const who = s ? this.tabLabel(s) : 'чат';
       const what = req.kind === 'question'
         ? (req.questions?.[0]?.question || 'Агент задал вопрос')
@@ -1000,7 +1010,7 @@ export const useChatStore = defineStore('chat', {
       try { ({ active } = await api.get('/api/chat/active')); }
       catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
       const byKey = new Map((active || []).map((a) => [a.chatKey, a]));
-      for (const s of this.sessions) {
+      for (const s of [...this.sessions, ...(this.archived || [])]) {
         const a = byKey.get(s.id);
         if (a?.compact) {
           // Сжатие: «думает…» не показываем — его место занимает вертящееся кольцо.
@@ -1040,7 +1050,7 @@ export const useChatStore = defineStore('chat', {
      */
     async _pullChat(id, archived) {
       if (!id) return;
-      const local = this._get(id) || (this.archived || []).find((c) => c.id === id);
+      const local = this._find(id);
       if (local && this._dirty(local)) return;
       let chat = null;
       try { ({ chat } = await api.get(`/api/chat/store/chat/${id}`)); }
@@ -1059,7 +1069,7 @@ export const useChatStore = defineStore('chat', {
      */
     _applyRemoteChat(chat, archived) {
       this.archived ||= [];
-      const localBefore = this._get(chat.id) || this.archived.find((c) => c.id === chat.id);
+      const localBefore = this._find(chat.id);
       const knownMessages = new Set((localBefore?.messages || [])
         .map((message, index) => messageNoticeKey(chat.id, message, index)));
       const target = archived ? this.archived : this.sessions;
@@ -1100,7 +1110,7 @@ export const useChatStore = defineStore('chat', {
         if (i >= 0) list.splice(i, 1);
       }
       sentChats.delete(id);
-      if (this.activeId === id) this.activeId = this.sessions[0]?.id || null;
+      if (this.activeId === id) this.activeId = this.sessions[0]?.id || this.archived[0]?.id || null;
     },
     /**
      * Speech SSE не имеет replay-буфера: после reconnect всегда сверяем
@@ -1135,7 +1145,7 @@ export const useChatStore = defineStore('chat', {
         for (const chat of list) {
           if (!chat?.id) continue;
           onServer.add(chat.id);
-          const local = this._get(chat.id) || (this.archived || []).find((c) => c.id === chat.id);
+          const local = this._find(chat.id);
           if (local && this._dirty(local)) continue; // своё несохранённое важнее чужой копии
           const next = { ...chat };
           delete next.archived;
@@ -1168,7 +1178,7 @@ export const useChatStore = defineStore('chat', {
       // Признак — сам план в запросе, а не имя инструмента: у Claude это ExitPlanMode,
       // у Kimi — обычный запрос разрешения с вариантами plan_*.
       if (p.input?.plan) {
-        const s = this._get(p.chatKey);
+        const s = this._find(p.chatKey);
         if (s) {
           s.messages.push({
             role: 'assistant',
@@ -1223,8 +1233,8 @@ export const useChatStore = defineStore('chat', {
       // Миграция: алиаса «fable» в CLI нет — только полный ID.
       this.sessions.forEach((s) => { if (s.model === 'fable') s.model = 'claude-fable-5'; });
       if (this.defModel === 'fable') this.defModel = 'claude-fable-5';
-      if (!this.sessions.length) this.newSession();
-      else if (!this._get(this.activeId)) this.activeId = this.sessions[0].id;
+      if (!this.sessions.length && !this.archived.length) this.newSession();
+      else if (!this._find(this.activeId)) this.activeId = this.sessions[0]?.id || this.archived[0]?.id || null;
     },
     setSpeechSnapshot(payload) {
       this.speech = normalizeSpeechSnapshot(payload, this.speech);
@@ -1266,15 +1276,17 @@ export const useChatStore = defineStore('chat', {
       this._persist();
     },
     setActive(id) { if (this._get(id)) { this.activeId = id; this._persist(); } },
-    setTitle(id, title) { const s = this._get(id); if (!s) return; s.title = title; this._persist(); },
-    // Выбор чата из сайдбара: открытый — активируем, архивный — восстанавливаем.
+    setTitle(id, title) { const s = this._find(id); if (!s) return; s.title = title; this._persist(); },
+    // Выбор чата из сайдбара ничего не говорит о его месте хранения: архивный
+    // открываем для чтения на месте. Вернуть его можно явной кнопкой или отправкой.
     selectChat(id) {
-      if (this._get(id)) { this.activeId = id; this._persist(); return; }
-      this.restoreArchived(id);
+      if (!this._find(id)) return;
+      this.activeId = id;
+      this._persist();
     },
     // Переименование из сайдбара — работает и для открытых, и для архивных.
     renameChat(id, title) {
-      const s = this._get(id) || this.archived.find((x) => x.id === id);
+      const s = this._find(id);
       if (!s) return;
       s.title = title;
       this._persist();
@@ -1286,6 +1298,7 @@ export const useChatStore = defineStore('chat', {
       const j = this.archived.findIndex((x) => x.id === id);
       if (j < 0) return null;
       this.archived.splice(j, 1);
+      if (this.activeId === id) this.activeId = this.sessions[0]?.id || this.archived[0]?.id || null;
       this._persist();
       return 'deleted';
     },
@@ -1351,7 +1364,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     setTask(id, taskId, title) {
-      const s = this._get(id); if (!s) return;
+      const s = this._find(id); if (!s) return;
       s.taskId = taskId ? String(taskId) : null;
       s.title = title || '';
       this._persist();
@@ -1360,9 +1373,9 @@ export const useChatStore = defineStore('chat', {
      * Режим прав чата (вручную / авто / план …). Запоминаем и как дефолт новых чатов —
      * выбор режима обычно про привычку работы, а не про конкретный разговор.
      */
-    setMode(id, m) { const s = this._get(id); if (!s) return; s.mode = m; this.defMode = m; this._persist(); },
+    setMode(id, m) { const s = this._find(id); if (!s) return; s.mode = m; this.defMode = m; this._persist(); },
     setModel(id, m) {
-      const s = this._get(id); if (!s) return;
+      const s = this._find(id); if (!s) return;
       const resolved = useProvidersStore().modelOf(m);
       s.model = resolved.id || m;
       s.modelRef = resolved.provider && resolved.model
@@ -1378,7 +1391,7 @@ export const useChatStore = defineStore('chat', {
      * updatedAt НЕ трогаем: набор текста не должен поднимать чат в списке.
      */
     setDraft(id, text) {
-      const s = this._get(id);
+      const s = this._find(id);
       if (!s || (s.draft || '') === text) return;
       s.draft = text;
       // Черновик сохраняется на каждую паузу в наборе, поэтому этот путь обязан быть
@@ -1386,8 +1399,8 @@ export const useChatStore = defineStore('chat', {
       // на экране и так перед глазами), а именно он и подвешивал ввод.
       this._persist(false, { snapshot: false });
     },
-    setEffort(id, e) { const s = this._get(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
-    clearChat(id) { const s = this._get(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
+    setEffort(id, e) { const s = this._find(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
+    clearChat(id) { const s = this._find(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
     /**
      * Сброс памяти агента: следующее сообщение уйдёт БЕЗ --resume, то есть в чистую
      * сессию. Переписка на экране остаётся (история кокпита к сессии CLI не привязана),
@@ -1398,7 +1411,7 @@ export const useChatStore = defineStore('chat', {
      * и единственной записью осталось бы наше же сообщение о сбросе).
      */
     resetContext(id, { note = true } = {}) {
-      const s = this._get(id);
+      const s = this._find(id);
       if (!s) return Promise.resolve(false);
       const inflight = sessionResetJobs.get(id);
       if (inflight) return inflight;
@@ -1457,7 +1470,7 @@ export const useChatStore = defineStore('chat', {
      * переписку. Поэтому обнуляем счётчик и ждём следующего обычного хода — он измерит.
      */
     async compact(id) {
-      const s = this._get(id);
+      const s = this._find(id);
       if (!s || s.compacting || s.sending || !s.sessionId) return;
       const before = s.contextTokens || 0;
       s.compacting = true;
@@ -1526,7 +1539,7 @@ export const useChatStore = defineStore('chat', {
      * Флаг sending снимет сам ответ запроса send(), поэтому здесь его не трогаем.
      */
     async stop(id) {
-      const s = this._get(id);
+      const s = this._find(id);
       // Сжатие останавливается так же, как обычный ход: это тот же процесс CLI в activeRuns.
       if (!s?.sending && !s?.compacting) return;
       s.stopping = true;
@@ -1534,13 +1547,21 @@ export const useChatStore = defineStore('chat', {
     },
 
     async send(id, text, attachments = [], opts = {}) {
-      const s = this._get(id); if (!s) return;
+      let s = this._find(id); if (!s) return;
       if (!text.trim() && !attachments.length) return;
       const resetJob = sessionResetJobs.get(id);
       if (resetJob && !await resetJob) return false;
       // После отклонённого reset нельзя молча продолжить старую Kimi session: UI уже
       // обещал чистый разговор. Текст остаётся в поле ввода (см. ChatSession.submit).
       if (s.sessionResetFailed) return false;
+      // Само открытие архивного разговора — только просмотр. Новое сообщение является
+      // осознанным продолжением: перед durable save переносим тот же объект в активные,
+      // чтобы запрос и последующие SSE уже однозначно относились к открытому чату.
+      if (this.isArchived(id)) {
+        this.restoreArchived(id);
+        s = this._get(id);
+        if (!s) return false;
+      }
       // Служебный ход провайдерской слэш-команды (меню «/»): исполняется CLI локально,
       // автоназвание по её тексту не нужно — ни серверный хук, ни provisional-заголовок.
       const slashCommand = typeof opts.slashCommand === 'string' && opts.slashCommand.startsWith('/')

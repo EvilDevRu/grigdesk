@@ -295,7 +295,10 @@ test('HTTP error mapping не отражает provider secrets и фиксир�
   assert.equal(analysis.statusCode, 409);
   assert.deepEqual(analysis.json(), {
     error: 'attachment_analysis_required',
-    message: 'Не удалось полностью разобрать содержимое вложений. Обращение осталось новым.',
+    message: 'Содержимое вложений разобрано не полностью. Опишите его, чтобы поставить задачу.',
+    // Отказ обязан назвать неразобранные вложения: человеку предстоит описать
+    // именно их. Без деталей сервиса список пуст, но поле остаётся в контракте.
+    attachments: [],
   });
   assert.ok(!analysis.body.includes('super-secret'));
 
@@ -313,6 +316,51 @@ test('HTTP error mapping не отражает provider secrets и фиксир�
 
   mode = 'unsafe-url';
   assert.equal((await request()).json().taskUrl, '');
+});
+
+test('список неразобранных вложений доезжает до человека, но проходит санитайз', async (t) => {
+  const { app } = await fixture(t, {
+    taskServiceOver: {
+      async task() {
+        throw Object.assign(new Error('нельзя'), {
+          code: 'attachment_analysis_required',
+          statusCode: 409,
+          details: {
+            attachments: [
+              {
+                label: 'видео · bug.mp4',
+                reason: 'файл 53 МБ — бот не может скачать больше 20 МБ',
+              },
+              // Управляющие символы и переполнение схлопываются: строка рисуется
+              // в модалке, а не в терминале.
+              { label: `a\nb c${'x'.repeat(400)}`, reason: 'y'.repeat(400) },
+              { label: '', reason: '' },
+              ...Array.from({ length: 20 }, () => ({ label: 'лишнее', reason: 'лишнее' })),
+            ],
+          },
+        });
+      },
+    },
+  });
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/inbox/items/ref/task',
+    payload: { revision: 'x', messageRefs: ['m'] },
+  });
+
+  assert.equal(response.statusCode, 409);
+  const { attachments } = response.json();
+  assert.equal(attachments.length, 12, 'список bounded: карточка не растягивается чужим payload');
+  assert.deepEqual(attachments[0], {
+    label: 'видео · bug.mp4',
+    reason: 'файл 53 МБ — бот не может скачать больше 20 МБ',
+  });
+  // Перевод строки схлопнут в пробел: подпись рисуется одной строкой в модалке.
+  assert.equal(attachments[1].label.includes('\n'), false);
+  assert.ok(attachments[1].label.startsWith('a b c'));
+  assert.ok(attachments[1].label.length <= 200);
+  assert.ok(attachments[1].reason.length <= 240);
+  assert.equal(attachments[2].label, 'вложение', 'пустая подпись остаётся понятной');
 });
 
 test('настоящий item ref длиннее дефолтного :param — роутеру нужен свой maxParamLength', async (t) => {

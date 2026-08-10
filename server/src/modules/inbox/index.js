@@ -21,8 +21,8 @@ const PUBLIC_MESSAGES = Object.freeze({
   no_b24: 'Битрикс24 не подключён — задачу ставить негде.',
   b24_failed: 'Битрикс24 не принял задачу. Обращение осталось новым.',
   channel_materialize_failed: 'Канал не смог подготовить вложения.',
-  attachments_skipped: 'Не все вложения удалось подготовить; обращение осталось новым.',
-  attachment_analysis_required: 'Не удалось полностью разобрать содержимое вложений. Обращение осталось новым.',
+  attachments_skipped: 'Не все вложения удалось подготовить. Опишите их содержимое, чтобы поставить задачу.',
+  attachment_analysis_required: 'Содержимое вложений разобрано не полностью. Опишите его, чтобы поставить задачу.',
   indeterminate_task_commit: 'B24-задача могла быть создана, но Inbox не подтвердил решение. Нужна сверка оператора.',
   inbox_failed: 'Inbox временно не смог выполнить операцию.',
 });
@@ -44,6 +44,28 @@ function safeTaskUrl(value) {
   try { return safeInboxSourceUrl(value) || ''; } catch { return ''; }
 }
 
+const MAX_FAILED_ATTACHMENTS = 12;
+const safeLine = (value, limit) => String(value ?? '')
+  .replace(/[\u0000-\u001f\u007f]/gu, ' ')
+  .replace(/\s+/gu, ' ')
+  .trim()
+  .slice(0, limit);
+
+/**
+ * Почему обращение нельзя поставить задачей без пояснения человека.
+ *
+ * Один код отказа этого не объясняет: «не разобралось» одинаково выглядит и у
+ * файла сверх потолка Bot API, и у временного сбоя. Подписи те же, что уже
+ * показаны в карточке, а причину формулирует сам кокпит.
+ */
+function safeFailedAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_FAILED_ATTACHMENTS).map((entry) => ({
+    label: safeLine(entry?.label, 200) || 'вложение',
+    reason: safeLine(entry?.reason, 240),
+  }));
+}
+
 function publicFailure(reply, error) {
   const status = Number.isInteger(error?.statusCode)
     && error.statusCode >= 400
@@ -55,6 +77,9 @@ function publicFailure(reply, error) {
   const publicCode = PUBLIC_CODE_ALIASES[rawCode] || rawCode;
   const code = Object.hasOwn(PUBLIC_MESSAGES, publicCode) ? publicCode : fallbackCode;
   const payload = { error: code, message: PUBLIC_MESSAGES[code] };
+  if (code === 'attachment_analysis_required' || code === 'attachments_skipped') {
+    payload.attachments = safeFailedAttachments(error?.details?.attachments);
+  }
   if (code === 'indeterminate_task_commit') {
     payload.retryable = false;
     payload.taskId = safeTaskId(error?.details?.taskId);

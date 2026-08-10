@@ -9,10 +9,20 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-const SCHEMA = 1;
+import { skipReasonText } from './skip-reason.js';
+
+// Версия ПРАВИЛ разбора, а не формата записи: она входит и в fingerprint ключа,
+// и в проверку чтения, поэтому смена алгоритма производных артефактов обязана
+// её поднимать. Иначе уже разобранное вложение навсегда останется с результатом
+// прежнего алгоритма — так один кадр скринкаста пережил бы починку выборки кадров.
+// 2 — кадры видео берутся по всей длительности, а не только по сменам сцены.
+const SCHEMA = 2;
 const MAX_FILES = 12;
 const MAX_BYTES = 80 * 1024 * 1024;
 const MAX_TEXT_DOCUMENT_BYTES = 256 * 1024;
+// Причина неразбора показывается человеку строкой в карточке: длинная сюда не
+// влезет, а короткая обязана остаться читаемой фразой, а не кодом.
+const MAX_REASON_CHARS = 240;
 const MAX_ENTRY_TEXT_CHARS = 80_000;
 const MAX_RESULT_TEXT_CHARS = 200_000;
 const MAX_CACHE_BYTES = 8 * 1024 * 1024;
@@ -1348,8 +1358,19 @@ export class InboxAttachmentAnalyzer {
           entries.push(entry(entryBase(expected[slot.index], slot.index), {
             status: 'skipped',
             complete: false,
+            // Без причины человек видит «не разобралось» и не может отличить
+            // потолок платформы (ожиданием не лечится) от сетевого сбоя (лечится).
+            // Фраза собирается по КОДУ канала: свободный текст провайдера сюда не
+            // попадает — в нём бывает токен, а нам его потом показывать человеку.
             reason: slot.type === 'skipped'
-              ? 'Вложение не удалось скачать.'
+              ? publicText(
+                skipReasonText(slot.value?.reason, {
+                  sizeBytes: slot.value?.sizeBytes ?? null,
+                  limitBytes: slot.value?.limitBytes ?? null,
+                }),
+                'Вложение не удалось скачать.',
+                MAX_REASON_CHARS,
+              )
               : 'Канал не вернул запрошенное вложение.',
           }));
           continue;

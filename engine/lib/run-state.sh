@@ -89,6 +89,16 @@ REVIEWED_LIMIT = 64
 # `id=summary` и не ломает уже написанные вызовы с одними замечаниями.
 ANCHOR_PREFIX = "anchor:"
 REVIEWED_PREFIX = "reviewed:"
+DEFERRED_PREFIX = "deferred:"
+# Вес замечания. `blocking` — дефолт и единственное, что возвращает работу автору;
+# `deferred` — та самая находка «outside scope / follow-up», которую общий шаблон
+# этапа давно разрешает словами, но выразить машинно было нечем: любой список
+# findings ехал только с `failed`, а `failed` всегда означал возврат. Из-за этого
+# проверяющий, увидев дефект вне цели задачи, был обязан либо развернуть маршрут,
+# либо промолчать. Отсутствие поля читается как `blocking` — старые события в
+# immutable ledger остаются валидными без миграции.
+SEVERITIES = {"blocking", "deferred"}
+DEFAULT_SEVERITY = "blocking"
 
 
 # Отказ обязан называть нарушенное правило. Молчащий код 2 стоил вердикта этапа: на t7802
@@ -128,8 +138,11 @@ def validate(value):
     for index, finding in enumerate(findings, start=1):
         if not isinstance(finding, dict) or not {"id", "summary"} <= set(
             finding
-        ) or not set(finding) <= {"id", "summary", "anchor"}:
-            fail(f"замечание {index}: поля id и summary, необязательно anchor")
+        ) or not set(finding) <= {"id", "summary", "anchor", "severity"}:
+            fail(
+                f"замечание {index}: поля id и summary, "
+                "необязательно anchor и severity"
+            )
         finding_id = finding.get("id")
         summary = finding.get("summary")
         if not isinstance(finding_id, str) or not finding_re.fullmatch(finding_id):
@@ -155,6 +168,11 @@ def validate(value):
                 f"замечание {index} (id={finding_id}): anchor — относительный путь "
                 f"файла до {PATH_LIMIT} символов, без ведущего / и без .."
             )
+        if "severity" in finding and finding["severity"] not in SEVERITIES:
+            fail(
+                f"замечание {index} (id={finding_id}): severity — "
+                f"{' или '.join(sorted(SEVERITIES))}"
+            )
         seen.add(finding_id)
     reviewed = value.get("reviewed")
     if reviewed is not None:
@@ -174,10 +192,14 @@ def validate(value):
 
 if operation == "encode":
     owner = encoded
-    if result != "failed":
+    # `done` несёт вердикт только ради отложенных находок: проверяющий принял работу,
+    # но нашёл дефект вне цели задачи. Прежде такую находку деть было некуда — список
+    # findings движок принимал исключительно с `failed`, то есть ценой возврата в сборку.
+    if result not in {"failed", "done"}:
         if owner or findings_raw:
             fail(
-                f"результат {result}: --failure-owner и --finding допустимы только у failed"
+                f"результат {result}: --failure-owner и --finding "
+                "допустимы только у failed и done"
             )
         print("")
         raise SystemExit(0)
@@ -185,6 +207,8 @@ if operation == "encode":
         # Старые prompts продолжают законно посылать обычный failed без metadata.
         print("")
         raise SystemExit(0)
+    if result == "done" and not findings_raw:
+        fail("результат done: --failure-owner без замечаний не имеет смысла")
     parsed = []
     anchors = {}
     reviewed = []
@@ -201,10 +225,19 @@ if operation == "encode":
                 fail(f"--finding-anchor: якорь для id={anchor_id} задан дважды")
             anchors[anchor_id] = anchor_path_value
             continue
+        severity = DEFAULT_SEVERITY
+        if raw.startswith(DEFERRED_PREFIX):
+            severity = "deferred"
+            raw = raw[len(DEFERRED_PREFIX):]
         if "=" not in raw:
             fail(f"--finding {index}: ожидается вид id=краткое замечание")
         finding_id, summary = raw.split("=", 1)
-        parsed.append({"id": finding_id, "summary": summary})
+        finding = {"id": finding_id, "summary": summary}
+        # Дефолтный вес в payload не пишем: канонический JSON вердикта без отложенных
+        # находок остаётся байт-в-байт прежним, а с ним и хеш события в ledger.
+        if severity != DEFAULT_SEVERITY:
+            finding["severity"] = severity
+        parsed.append(finding)
     for finding in parsed:
         if finding["id"] in anchors:
             finding["anchor"] = anchors.pop(finding["id"])
@@ -213,6 +246,20 @@ if operation == "encode":
             "--finding-anchor ссылается на id, которых нет в вердикте: "
             + ", ".join(sorted(anchors))
         )
+    blocking = [
+        finding["id"]
+        for finding in parsed
+        if finding.get("severity", DEFAULT_SEVERITY) == "blocking"
+    ]
+    if result == "done" and blocking:
+        fail(
+            "результат done: блокирующие замечания недопустимы — "
+            "объяви их отложенными или верни failed: " + ", ".join(sorted(blocking))
+        )
+    if result == "done" and not owner:
+        # У отложенной находки владелец нужен воротам, чтобы показать человеку, к кому
+        # она пойдёт follow-up'ом. Отдельного флага у агента для этого не просим.
+        owner = "build"
     value = {"owner": owner, "findings": parsed}
     if reviewed:
         value["reviewed"] = reviewed
@@ -229,8 +276,10 @@ elif operation in {"validate", "owner"}:
         if operation == "owner":
             print("")
         raise SystemExit(0)
-    if result != "failed" or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", encoded):
-        fail(f"результат {result}: typed verdict возможен только у failed")
+    if result not in {"failed", "done"} or not re.fullmatch(
+        r"[A-Za-z0-9+/]+={0,2}", encoded
+    ):
+        fail(f"результат {result}: typed verdict возможен только у failed и done")
     try:
         payload = base64.b64decode(encoded, validate=True)
         if len(payload) > 32 * 1024:
@@ -250,6 +299,11 @@ elif operation in {"validate", "owner"}:
     ).encode("utf-8")
     if canonical != payload:
         fail("вердикт записан не в канонической форме")
+    if result == "done" and any(
+        finding.get("severity", DEFAULT_SEVERITY) == "blocking"
+        for finding in value["findings"]
+    ):
+        fail("результат done: вердикт содержит блокирующие замечания")
     if operation == "owner":
         print(value["owner"])
 else:

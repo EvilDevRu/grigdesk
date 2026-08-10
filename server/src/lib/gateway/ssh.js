@@ -21,6 +21,29 @@ const execFileAsync = promisify(execFile);
 
 const CONNECT_TIMEOUT_S = 10;
 
+/**
+ * `execFile` не умеет опцию `input` (она есть только у синхронных API). Поэтому stdin
+ * передаём явно через возвращённый ChildProcess. Иначе `ssh-keygen -lf -` ждёт EOF вечно,
+ * а кнопка проверки VPS остаётся на «стучимся…» после успешного ответа сервера.
+ */
+function execFileWithInput(file, args, input, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+    // Ранний выход процесса может закрыть pipe до записи; callback выше всё равно принесёт
+    // содержательную ошибку команды, а этот listener не даёт EPIPE стать uncaught exception.
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
+  });
+}
+
 /** Отказ SSH с машинным кодом: визард обязан назвать следующий шаг, а не показать stderr. */
 export class SshError extends Error {
   constructor(code, message, extra = {}) {
@@ -84,7 +107,20 @@ export async function scanHostKeys(host, port = 22) {
   if (!lines.length) {
     throw new SshError('host_unreachable', `${host}:${port} не ответил на SSH. Сервер поднялся? Порт тот?`);
   }
-  const { stdout: fpOut } = await execFileAsync('ssh-keygen', ['-lf', '-'], { input: stdout });
+  const fingerprints = await fingerprintHostKeys(stdout);
+  // Показываем ed25519, если он есть: короче и его печатает большинство панелей хостеров.
+  const primary = fingerprints.find((f) => f.type === 'ED25519') || fingerprints[0];
+  return { lines, fingerprints, primary };
+}
+
+/** Вычислить отпечатки вывода ssh-keyscan, передав ключи ssh-keygen через настоящий stdin. */
+export async function fingerprintHostKeys(hostKeys) {
+  const { stdout: fpOut } = await execFileWithInput(
+    'ssh-keygen',
+    ['-lf', '-'],
+    hostKeys,
+    { timeout: (CONNECT_TIMEOUT_S + 5) * 1000 },
+  );
   const fingerprints = fpOut
     .split('\n')
     .map((s) => s.trim())
@@ -94,9 +130,7 @@ export async function scanHostKeys(host, port = 22) {
       return m ? { bits: Number(m[1]), hash: m[2], type: m[4] } : null;
     })
     .filter(Boolean);
-  // Показываем ed25519, если он есть: короче и его печатает большинство панелей хостеров.
-  const primary = fingerprints.find((f) => f.type === 'ED25519') || fingerprints[0];
-  return { lines, fingerprints, primary };
+  return fingerprints;
 }
 
 /** Записать подтверждённые ключи хоста в собственный known_hosts визарда. */

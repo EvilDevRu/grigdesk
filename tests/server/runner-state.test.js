@@ -111,7 +111,13 @@ test('runner config and attempts are read from canonical profile files', async (
     'SCHEMA=1', 'RUNNER=codex', 'EPOCH=2', 'MODEL=gpt-5.6-sol',
     'EFFORT=ultra',
     'ROUTE_REASON=fallback_limit',
-    'RESULT_CLASS=ok', 'RC=0', 'SOURCE=runtime', '',
+    'RESULT_CLASS=ok', 'RC=0', 'SOURCE=runtime',
+    // Расход публикует метод `usage` раннера. Он опционален: run-a его не
+    // записал вовсе, и такая попытка обязана остаться с null, а не с нулями —
+    // «не знаем, во что обошёлся ход» и «ход был бесплатным» разные вещи.
+    'TOKENS_IN=2396921', 'TOKENS_OUT=36163',
+    'TOKENS_CACHE_READ=2267904', 'TOKENS_CACHE_WRITE=0',
+    'COST_USD=0.9540', '',
   ].join('\n'));
   await writeFile(path.join(runRoot, 'run-a', 'meta.env'), [
     'SCHEMA=1', 'RUNNER=claude', 'EPOCH=1', 'MODEL=opus',
@@ -122,11 +128,14 @@ test('runner config and attempts are read from canonical profile files', async (
   assert.deepEqual(await readRunnerAttempts(path.join(root, 'state'), '42', 'BUILD'), [
     {
       id: 'run-a', epoch: 1, runner: 'claude', model: 'opus', reason: null,
-      effort: null, result: 'limited', rc: 1, source: 'runtime',
+      effort: null, result: 'limited', rc: 1, source: 'runtime', tokens: null,
     },
     {
       id: 'run-b', epoch: 2, runner: 'codex', model: 'gpt-5.6-sol',
       effort: 'ultra', reason: 'fallback_limit', result: 'ok', rc: 0, source: 'runtime',
+      tokens: {
+        in: 2396921, out: 36163, cacheRead: 2267904, cacheWrite: 0, costUsd: 0.954,
+      },
     },
   ]);
 });

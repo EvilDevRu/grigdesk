@@ -15,6 +15,8 @@ import { agentActivityLabel } from '../shared/agent-activity.js';
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
 import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
 import {
+  attemptCostLabel,
+  attemptCostTitle,
   attemptResultLabel,
   providerLabel,
   runnerAttemptModelLabel,
@@ -138,6 +140,13 @@ const NODE_DOC = {
   baseline: 'diag', perfplan: 'plan', perfskeptic: 'plan',
   ship: 'ship', gate_accept: 'report', browser: 'report', triage: 'report',
   measure: 'report', measurecheck: 'report',
+  // У аудита свой документ — досье приёмки. Ворота рядом продолжают показывать
+  // отчёт: сводку аудита узел дописывает и туда, поэтому человеку на воротах
+  // видно главное, а полное досье — в клике по узлу.
+  audit: 'audit',
+  // Ревью пишет собственный t<TASK>.review.md с первого дня, но в карте его не
+  // было: документ существовал и не открывался нигде.
+  review: 'review',
 };
 const STAGE_HINT = {
   done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
@@ -169,6 +178,7 @@ function openStage(t, node) {
   };
   loadFactoryRunners();
   gateComment.value = ''; gateRejecting.value = false; rewindComment.value = '';
+  runnerPending.value = null;
   stageActivity.value = null;
   stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
   stageLogOpen.value = false;
@@ -237,6 +247,30 @@ const gateDecidable = computed(() => Boolean(
   stage.value && !stage.value.readOnly && stage.value.isGate
   && ['wait', 'premature'].includes(stage.value.status),
 ));
+// Только компоновка модалки: на широком экране информационная колонка и управление
+// живут рядом, но пустую колонку не держим ради одной рамки. Условия действий остаются
+// теми же, что и у самих секций ниже.
+const stageHasRewind = computed(() => Boolean(
+  stage.value && !stage.value.readOnly && !stage.value.isGate,
+));
+const stageHasMain = computed(() => Boolean(
+  stage.value?.meta?.runner
+  || stageDocLoading.value
+  || stageDoc.value
+  || (stage.value?.status === 'run' && (stageActivity.value?.live || stageActivity.value?.tail?.length)),
+));
+const stageHasRail = computed(() => gateDecidable.value || stageHasRewind.value);
+// Контекст открытого этапа остаётся живым: название задачи может догрузиться из B24 уже
+// после открытия модалки, а стенд — появиться после очередного SSE-обновления графа.
+// Снимок в openStage здесь дал бы устаревшие название и порты до повторного открытия.
+const stageTask = computed(() => {
+  if (!stage.value) return null;
+  return tasks.value.find((item) => Number(item.task) === Number(stage.value.task)) || null;
+});
+const stageTaskTitle = computed(() => (
+  stage.value ? title(stageTask.value || stage.value.task) : null
+));
+const stageGraph = computed(() => stageTask.value?.graph || null);
 // Пояснение — часть ОТКЛОНЕНИЯ, а не ворот вообще: при «Принять» движок его выбрасывает
 // (`route_v2_gate_decide`: reject_feedback обнуляется на любом исходе кроме rejected).
 // Пока поле висело всегда, интерфейс обещал доставку текста, которой при принятии нет.
@@ -284,6 +318,9 @@ async function forceStatus(status) {
   }
   catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
 }
+// Выбор исполнителя модалку НЕ закрывает: человек сравнивает варианты и перебирает их,
+// а закрытие после каждого клика заставляло открывать узел заново. Новое состояние узла
+// приезжает обычным путём — load() → watch(stageLive) → stage.meta.
 async function switchRunner(target) {
   if (!await confirmDialog(
     `Остановить текущий запуск ${providerLabel(stage.value.meta.runner.actual)} и продолжить этап через ${providerLabel(target)}?`,
@@ -296,7 +333,6 @@ async function switchRunner(target) {
       target,
     });
     await load();
-    closeStage();
   } catch (e) {
     alertDialog(`Не удалось переключить исполнителя: ${e.message}`);
   } finally {
@@ -330,23 +366,31 @@ const stageRunnerLive = computed(() => Boolean(
   && stage.value?.status === 'run'
   && stage.value?.meta?.runner?.actual,
 ));
+// Кого выбрали прямо сейчас: подсветка обязана переехать по клику, а не через секунду,
+// когда доедет полный load() всех задач с графами.
+const runnerPending = ref(null);
+const stageRunnerActive = computed(() => (
+  runnerPending.value ?? (stage.value?.meta?.runner?.primary || '')
+));
 // Override исполнителя до запуска этапа (бегущий переключают только кнопки switch).
 // '' — снять override этапа: вернётся переопределение задачи с запуска или профиль.
 async function setStageRunner(primary) {
+  if (stageBusy.value) return;
   stageBusy.value = 'runner-override';
+  // У сброса будущего значения нет (его решит профиль) — подсветку до ответа не двигаем.
+  runnerPending.value = primary || null;
   try {
     await taskStore.setStageRunner(stage.value.task, stage.value.runnerKey, primary);
     await load();
-    closeStage();
   } catch (e) {
     alertDialog(`Не удалось сменить исполнителя этапа: ${e.message}`);
   } finally {
     stageBusy.value = null;
+    runnerPending.value = null;
   }
 }
-function onStageRunnerPick(event) {
-  const primary = event.target.value;
-  if (primary === (stage.value?.meta?.runner?.primary || '')) return;
+function pickStageRunner(primary) {
+  if (primary === stageRunnerActive.value) return;
   setStageRunner(primary);
 }
 // Подпись у `meta.comment`: один и тот же ключ реестра (`<КЛЮЧ>_COMMENT`) значит разное.
@@ -680,16 +724,48 @@ function cardState(g) {
 
     <!-- Модалка этапа (клик по узлу графа): инфо + управление -->
     <div v-if="stage" class="soverlay" @click.self="closeStage()">
-      <div class="smodal">
+      <section class="smodal" role="dialog" aria-modal="true" aria-labelledby="stage-modal-title"
+               aria-describedby="stage-task-context">
         <header class="sh">
-          <span class="mono muted">#{{ stage.task }}</span>
-          <h3>{{ stage.label }}</h3>
-          <button class="sx" @click="closeStage()">✕</button>
+          <div class="shead-copy">
+            <span class="shead-kicker">Этап конвейера</span>
+            <h3 id="stage-modal-title">{{ stage.label }}</h3>
+          </div>
+          <span class="sbadge" :class="stage.status">{{ STAGE_HINT[stage.status] || stage.status }}</span>
+          <button type="button" class="sx" title="Закрыть" aria-label="Закрыть" @click="closeStage()">✕</button>
         </header>
 
+        <!-- Контекст решения: задачу и её стенд видно, пока ворота открыты. Ссылки те же,
+             что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
+        <div id="stage-task-context" class="stage-context">
+          <div class="stage-task-context">
+            <span class="stage-context-label">Задача <b class="mono">#{{ stage.task }}</b></span>
+            <span v-if="stageTaskTitle" class="stage-task-title" :title="stageTaskTitle">{{ stageTaskTitle }}</span>
+            <span v-else class="stage-task-title muted">Название загружается…</span>
+          </div>
+          <div class="stage-stand-context">
+            <span class="stage-context-label">Стенд</span>
+            <template v-if="stageGraph?.fePort">
+              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort)" target="_blank" rel="noopener">
+                Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
+              </a>
+              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort)"
+                 target="_blank" rel="noopener">
+                API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
+              </a>
+            </template>
+            <span v-else-if="stageGraph?.sandbox" class="stage-stand-state building">
+              <span class="spin"></span>
+              строится · {{ stageGraph.sandbox.step }}/{{ stageGraph.sandbox.total }} · {{ stageGraph.sandbox.label }}
+            </span>
+            <span v-else class="stage-stand-state">не поднят</span>
+          </div>
+        </div>
+
         <!-- Компактная строка метаданных -->
-        <div class="smeta">
-          <span class="sbadge" :class="stage.status">{{ STAGE_HINT[stage.status] || stage.status }}</span>
+        <div v-if="stage.meta.at || stage.meta.dur != null || stage.meta.fanout != null
+          || stage.meta.tokens || stage.meta.fails || stage.sub || stageActivity"
+          class="smeta" aria-label="Показатели этапа">
           <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
           <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
           <span v-if="stage.meta.fanout != null" class="smchip">{{ stage.meta.fanout }} субаг.</span>
@@ -702,173 +778,193 @@ function cardState(g) {
         <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.
              Для skipped это единственное, что отличает «нечего было проверять» от
              «агент сдался» — раньше оно оставалось в журнале прогона. -->
-        <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
-          <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
-          {{ stage.meta.comment }}
-        </div>
-        <div v-if="stage.meta.stall" class="scomment bad">
-          <span class="sclbl">Почему этап остановился</span>
-          <b>{{ stage.meta.stall.title }}</b>
-          <div>{{ stage.meta.stall.hint }}</div>
+        <div v-if="stage.meta.comment || stage.meta.stall" class="snotices">
+          <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
+            <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
+            {{ stage.meta.comment }}
+          </div>
+          <div v-if="stage.meta.stall" class="scomment bad">
+            <span class="sclbl">Почему этап остановился</span>
+            <b>{{ stage.meta.stall.title }}</b>
+            <div>{{ stage.meta.stall.hint }}</div>
+          </div>
         </div>
 
-        <div class="sb">
-          <!-- Та же runner-chain, по которой движок реально принимает решение. -->
-          <div v-if="stage.meta.runner" class="sect runner-sect">
-            <div class="secth">
-              Исполнитель
-              <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
-            </div>
-            <div class="runner-chain">
-              <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
-                <span v-if="i" class="runner-arrow">→</span>
-                <span class="runner-hop"
-                      :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }">
-                  <b>{{ providerLabel(id) }}</b>
-                  <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
-                </span>
+        <div v-if="stageHasMain || stageHasRail" class="sworkspace"
+             :class="{ 'main-only': stageHasMain && !stageHasRail, 'rail-only': stageHasRail && !stageHasMain }">
+          <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
+               прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
+          <aside v-if="stageHasRail" class="srail">
+            <!-- Ворота: принять/отклонить. Поле пояснения принадлежит ОТКЛОНЕНИЮ и
+                 раскрывается по кнопке: при принятии текст никуда не уходит. -->
+            <div v-if="gateDecidable" class="sect gate-sect">
+              <div class="secth">Ворота — твоё решение</div>
+              <template v-if="gateRejecting">
+                <label class="gate-lbl" for="gate-note">Что доработать</label>
+                <textarea id="gate-note" ref="gateNoteEl" v-model="gateComment" rows="6"
+                  placeholder="Что не так и что сделать иначе"></textarea>
+                <p class="gate-hint">Текст станет заданием агенту на следующем заходе — целиком, вместе с разметкой и абзацами (до 20 000 символов). Можно и без него — тогда узел вернётся без пояснения.</p>
+                <div class="gbtns">
+                  <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">
+                    {{ stageBusy === 'gate' ? '…' : '✗ Отправить на доработку' }}
+                  </button>
+                  <button class="btn" :disabled="stageBusy === 'gate'" @click="cancelGateReject()">Отмена</button>
+                </div>
+              </template>
+              <template v-else>
+                <p class="gate-hint">Принять — маршрут пойдёт дальше. Отклонить — вернём агенту, там же напишешь, что доработать.</p>
+                <div class="gbtns">
+                  <button class="btn good" :disabled="stageBusy === 'gate'" @click="gateDecide('approve')">✓ Принять</button>
+                  <button class="btn bad" :disabled="stageBusy === 'gate'" @click="startGateReject()">✗ Отклонить</button>
+                </div>
               </template>
             </div>
-            <div v-if="stage.meta.runner.actual" class="runner-current"
-                 :class="{ switched: stage.meta.runner.switched }">
-              Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
-              <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
-            </div>
-            <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
-              <div class="runner-attempt-title">Попытки запуска</div>
-              <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
-                <span class="mono">#{{ a.epoch ?? '—' }}</span>
-                <b>{{ providerLabel(a.runner) }}</b>
-                <span v-if="runnerAttemptModelLabel(a)" class="mono">{{ runnerAttemptModelLabel(a) }}</span>
-                <span class="runner-result" :class="{
-                  good: a.result === 'ok',
-                  switched: a.result === 'manual_switch',
-                  bad: a.result && !['ok', 'manual_switch'].includes(a.result),
-                }">
-                  {{ attemptResultLabel(a.result) }}
-                </span>
-              </div>
-            </div>
-            <div v-if="!stage.readOnly && stageRunnerLive" class="runner-switches">
-              <button v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
-                      :key="id" class="btn runner-switch"
-                      :disabled="stageBusy === 'runner-switch'" @click="switchRunner(id)">
-                {{ stageBusy === 'runner-switch' ? 'переключаю…' : `Переключить сейчас на ${providerLabel(id)}` }}
+
+            <!-- Возврат на узел. Своя секция рядом с отправляющей его кнопкой. -->
+            <div v-if="stageHasRewind" class="sect rewind-sect">
+              <div class="secth">Вернуть конвейер сюда</div>
+              <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
+              <textarea v-model="rewindComment" rows="6"
+                placeholder="Указание агенту — что сделать иначе (необязательно)"></textarea>
+              <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')">
+                {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
               </button>
             </div>
-            <!-- Override до запуска этапа: бегущий этап переключают только кнопки выше. -->
-            <div v-if="!stage.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
-              <label class="runner-override-lbl" for="stage-runner">Исполнитель этапа</label>
-              <div class="runner-override-row">
-                <select id="stage-runner" class="runner-select" :disabled="stageBusy === 'runner-override'"
-                        :value="stage.meta.runner.primary" @change="onStageRunnerPick">
-                  <option v-for="id in stageRunnerOptions" :key="id" :value="id">{{ providerLabel(id) }}</option>
-                </select>
-                <button v-if="stage.meta.runner.source === 'task-stage'" class="btn runner-reset"
-                        :disabled="stageBusy === 'runner-override'" @click="setStageRunner('')">
-                  Сбросить
+          </aside>
+
+          <main v-if="stageHasMain" class="smain">
+            <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
+            <div v-if="stage.meta.runner" class="sect runner-sect">
+              <div class="secth">
+                Исполнитель
+                <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
+              </div>
+              <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
+              <div v-if="!stage.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
+                <div class="runner-override-row">
+                  <span class="runner-override-lbl">Исполнитель этапа</span>
+                  <button v-if="stage.meta.runner.source === 'task-stage'" class="btn small runner-reset"
+                          :disabled="stageBusy === 'runner-override'" @click="setStageRunner('')">
+                    Сбросить
+                  </button>
+                </div>
+                <div class="runner-picks">
+                  <button v-for="id in stageRunnerOptions" :key="id" class="runner-pick"
+                          :class="{ on: id === stageRunnerActive, busy: runnerPending === id }"
+                          :aria-pressed="id === stageRunnerActive"
+                          :disabled="stageBusy === 'runner-override'"
+                          @click="pickStageRunner(id)">
+                    <b>{{ providerLabel(id) }}</b>
+                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
+                  </button>
+                </div>
+                <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
+                  Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
+                </p>
+                <p v-if="stage.status === 'run' && !stage.daemonAlive" class="runner-hint">
+                  Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
+                </p>
+              </div>
+              <!-- Цепочка вторична: она объясняет, кто подхватит этап при аварии, и решения не требует. -->
+              <div class="runner-chain">
+                <span class="runner-chain-lbl">цепочка</span>
+                <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
+                  <span v-if="i" class="runner-arrow">→</span>
+                  <span class="runner-hop"
+                        :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }"
+                        :title="i ? 'резерв: подхватит этап, если основной отпадёт' : 'основной исполнитель'">
+                    {{ providerLabel(id) }}
+                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
+                  </span>
+                </template>
+              </div>
+              <div v-if="stage.meta.runner.actual" class="runner-current"
+                   :class="{ switched: stage.meta.runner.switched }">
+                Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
+                <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
+              </div>
+              <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
+                <div class="runner-attempt-title">Попытки запуска</div>
+                <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
+                  <span class="mono">#{{ a.epoch ?? '—' }}</span>
+                  <b>{{ providerLabel(a.runner) }}</b>
+                  <span v-if="runnerAttemptModelLabel(a)" class="runner-attempt-model mono">{{ runnerAttemptModelLabel(a) }}</span>
+                  <span v-if="attemptCostLabel(a)" class="runner-attempt-cost mono"
+                        :title="attemptCostTitle(a)">{{ attemptCostLabel(a) }}</span>
+                  <span class="runner-result" :class="{
+                    good: a.result === 'ok',
+                    switched: a.result === 'manual_switch',
+                    bad: a.result && !['ok', 'manual_switch'].includes(a.result),
+                  }">
+                    {{ attemptResultLabel(a.result) }}
+                  </span>
+                </div>
+              </div>
+              <div v-if="!stage.readOnly && stageRunnerLive" class="runner-switches">
+                <button v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
+                        :key="id" class="btn runner-switch"
+                        :disabled="stageBusy === 'runner-switch'" @click="switchRunner(id)">
+                  {{ stageBusy === 'runner-switch' ? 'переключаю…' : `Переключить сейчас на ${providerLabel(id)}` }}
                 </button>
               </div>
-              <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
-                Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
-              </p>
-              <p v-if="stage.status === 'run' && !stage.daemonAlive" class="runner-hint">
-                Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
-              </p>
             </div>
-          </div>
 
-          <!-- Ворота: принять/отклонить — первым делом, если ждёт решения.
-               Поле пояснения принадлежит ОТКЛОНЕНИЮ и раскрывается по кнопке: при принятии
-               текст никуда не уходит, и висящее поле обещало доставку, которой нет. -->
-          <div v-if="gateDecidable" class="sect gate-sect">
-            <div class="secth">Ворота — твоё решение</div>
-            <template v-if="gateRejecting">
-              <label class="gate-lbl" for="gate-note">Что доработать</label>
-              <textarea id="gate-note" ref="gateNoteEl" v-model="gateComment" rows="8"
-                placeholder="Что не так и что сделать иначе"></textarea>
-              <p class="gate-hint">Текст станет заданием агенту на следующем заходе — целиком, вместе с разметкой и абзацами (до 20 000 символов). Можно и без него — тогда узел вернётся без пояснения.</p>
-              <div class="gbtns">
-                <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">
-                  {{ stageBusy === 'gate' ? '…' : '✗ Отправить на доработку' }}
-                </button>
-                <button class="btn" :disabled="stageBusy === 'gate'" @click="cancelGateReject()">Отмена</button>
+            <!-- Живая лента действий агента (для идущего этапа) -->
+            <div v-if="stage.status === 'run' && stageActivity?.live" class="sect content-sect">
+              <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
+              <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
+                <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
+                  <span class="lf-icon">{{ liveIcon(a) }}</span>
+                  <span class="lf-body">
+                    <template v-if="a.type === 'tool' || a.type === 'subagent'">
+                      <span class="lf-name">{{ a.name }}</span>
+                      <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
+                      <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
+                    </template>
+                    <template v-else>
+                      <span class="lf-text">{{ a.text }}</span>
+                    </template>
+                  </span>
+                  <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
+                </div>
               </div>
-            </template>
-            <template v-else>
-              <p class="gate-hint">Принять — маршрут пойдёт дальше. Отклонить — вернём агенту, там же напишешь, что доработать.</p>
-              <div class="gbtns">
-                <button class="btn good" :disabled="stageBusy === 'gate'" @click="gateDecide('approve')">✓ Принять</button>
-                <button class="btn bad" :disabled="stageBusy === 'gate'" @click="startGateReject()">✗ Отклонить</button>
-              </div>
-            </template>
-          </div>
+              <p v-else class="muted small">Ожидание действий агента…</p>
+              <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
+            </div>
 
-          <!-- Живая лента действий агента (для идущего этапа) -->
-          <div v-if="stage.status === 'run' && stageActivity?.live" class="sect">
-            <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
-            <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
-              <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
-                <span class="lf-icon">{{ liveIcon(a) }}</span>
-                <span class="lf-body">
-                  <template v-if="a.type === 'tool' || a.type === 'subagent'">
-                    <span class="lf-name">{{ a.name }}</span>
-                    <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
-                    <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
-                  </template>
-                  <template v-else>
-                    <span class="lf-text">{{ a.text }}</span>
-                  </template>
-                </span>
-                <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
+            <!-- Журнал этапов (stages.log) — сворачиваемый -->
+            <div v-if="stage.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
+              <div class="secth doct" @click="stageLogOpen = !stageLogOpen">
+                {{ stageLogOpen ? '▾' : '▸' }} Журнал этапов
+                <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
+              </div>
+              <div v-if="stageLogOpen" class="log">
+                <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
               </div>
             </div>
-            <p v-else class="muted small">Ожидание действий агента…</p>
-            <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
-          </div>
 
-          <!-- Журнал этапов (stages.log) — сворачиваемый -->
-          <div v-if="stage.status === 'run' && stageActivity?.tail?.length" class="sect">
-            <div class="secth doct" @click="stageLogOpen = !stageLogOpen">
-              {{ stageLogOpen ? '▾' : '▸' }} Журнал этапов
-              <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
+            <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
+            <div v-if="stageDocLoading" class="sect content-sect">
+              <div class="secth"><span class="spin"></span> Документ этапа</div>
             </div>
-            <div v-if="stageLogOpen" class="log">
-              <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
+            <div v-else-if="stageDoc" class="sect content-sect document-sect">
+              <div class="secth doct" @click="stageDocOpen = !stageDocOpen">
+                {{ stageDocOpen ? '▾' : '▸' }} Документ этапа
+              </div>
+              <div v-if="stageDocOpen" class="sdoc md" v-html="mdToHtml(stageDoc)"></div>
             </div>
-          </div>
+          </main>
+        </div>
 
-          <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
-          <div v-if="stageDocLoading" class="sect">
-            <div class="secth"><span class="spin"></span> Документ этапа</div>
-          </div>
-          <div v-else-if="stageDoc" class="sect">
-            <div class="secth doct" @click="stageDocOpen = !stageDocOpen">
-              {{ stageDocOpen ? '▾' : '▸' }} Документ этапа
-            </div>
-            <div v-if="stageDocOpen" class="sdoc md" v-html="mdToHtml(stageDoc)"></div>
-          </div>
-
-          <!-- Возврат на узел. Своя секция, а не поле в ряду кнопок: указание уезжает тем же
-               запросом, что и возврат (своей кнопки «отправить» у него нет), и стоять оно
-               должно рядом с кнопкой, которая его отправляет, а не рядом с чатом и диффом. -->
-          <div v-if="!stage.readOnly && !stage.isGate" class="sect rewind-sect">
-            <div class="secth">Вернуть конвейер сюда</div>
-            <textarea v-model="rewindComment" rows="6"
-              placeholder="Указание агенту — что сделать иначе (необязательно)"></textarea>
-            <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
-            <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')">
-              {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
-            </button>
-          </div>
-
-          <!-- Действия -->
-          <div class="sect sactions">
+        <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
+        <footer class="sactions">
+          <span class="sactions-context"><b class="mono">#{{ stage.task }}</b> · действия с задачей</span>
+          <div class="sactions-buttons">
             <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
             <OpenDiffButton :task-id="stage.task" />
           </div>
-        </div>
-      </div>
+        </footer>
+      </section>
     </div>
   </div>
 </template>
@@ -1005,71 +1101,143 @@ function cardState(g) {
 .otimer { color: var(--good); font-size: 15px; flex: none; }
 
 /* Модалка этапа */
-.soverlay { position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(4px); display: flex; align-items: flex-start;
-  justify-content: center; padding: 60px 16px; z-index: 100; overflow-y: auto; }
-.smodal { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
-  width: 100%; max-width: 760px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
-.sh { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-.sh h3 { flex: 1; margin: 0; font-size: 16px; font-weight: 640; }
-.sx { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
+.soverlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow: hidden;
+  padding: 16px; background: #04060acc; backdrop-filter: blur(5px); }
+.smodal { width: min(1240px, calc(100vw - 32px)); min-width: 0;
+  min-height: min(560px, calc(100dvh - 32px)); max-height: min(900px, calc(100dvh - 32px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
+  box-shadow: 0 26px 80px #000c, inset 0 1px 0 #ffffff08; }
+.sh { min-height: 64px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; gap: 14px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line);
+  background: var(--topbar); }
+.shead-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.shead-kicker { color: var(--ink-mid); font-size: 10.5px; line-height: 1.25; text-transform: uppercase;
+  letter-spacing: .08em; }
+.sh h3 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 17px; font-weight: 650;
+  line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.sx { width: 36px; height: 36px; flex: none; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 9px; color: var(--ink-mid); cursor: pointer; font-size: 14px; }
+.sx:hover { color: var(--ink); border-color: var(--line-2); background: color-mix(in srgb, var(--surface-2) 80%, var(--ink-mid)); }
+
+/* Контекст открытого решения: название задачи слева, прямой вход на её стенд справа. */
+.stage-context { min-height: 56px; flex: none; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px;
+  padding: 8px 18px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ground) 72%, var(--surface)); }
+.stage-task-context { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.stage-context-label { flex: none; color: var(--ink-mid); font-size: 10px; line-height: 1.3;
+  text-transform: uppercase; letter-spacing: .065em; white-space: nowrap; }
+.stage-context-label b { color: var(--ink); font-weight: 600; letter-spacing: 0; }
+.stage-task-title { min-width: 0; overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 600;
+  line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.stage-stand-context { min-width: 0; display: flex; align-items: center; justify-content: flex-end;
+  gap: 7px; }
+.stage-stand-link { min-height: 30px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); color: var(--accent);
+  font-size: 11.5px; text-decoration: none; white-space: nowrap; }
+.stage-stand-link:hover { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
+.stage-stand-link b { color: inherit; font-weight: 550; }
+.stage-stand-state { max-width: 310px; color: var(--ink-mid); font-size: 12px; line-height: 1.35;
+  overflow-wrap: anywhere; }
+.stage-stand-state.building { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); }
 
 /* Компактная строка метаданных */
-.smeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px;
-  border-bottom: 1px solid var(--line); background: var(--ground); }
-.sbadge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
-  padding: 3px 10px; border-radius: 999px; }
+.smeta { min-height: 40px; max-height: 76px; flex: none; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px; overflow-y: auto; padding: 7px 18px; border-bottom: 1px solid var(--line); background: var(--ground); }
+.sbadge { flex: none; padding: 5px 11px; border-radius: 999px; font-size: 10.5px; font-weight: 650;
+  line-height: 1.15; text-transform: uppercase; letter-spacing: .055em; white-space: nowrap; }
 .sbadge.run { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .sbadge.done { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
 .sbadge.wait, .sbadge.premature { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .sbadge.pending, .sbadge.idle { background: var(--surface-2); color: var(--ink-mid); }
-.sbadge.stall, .sbadge.skipbad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.sbadge.stall, .sbadge.skipbad, .sbadge.fail { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
 .sbadge.skip { background: var(--surface-2); color: var(--ink-mid); }
-.smchip { font-size: 11.5px; color: var(--ink-mid); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; }
+.smchip { flex: none; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-mid);
+  font-size: 11.5px; line-height: 1.35; white-space: nowrap; }
 .smchip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.scomment { margin: 8px 14px 0; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.45;
-  color: var(--ink-mid); background: var(--surface-2); border-left: 3px solid var(--line); }
+.snotices { max-height: 130px; flex: none; display: flex; flex-direction: column; gap: 7px; overflow-y: auto;
+  padding: 9px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.scomment { margin: 0; padding: 8px 11px; border-left: 3px solid var(--line); border-radius: 8px;
+  background: var(--surface-2); color: var(--ink-mid); font-size: 12.5px; line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
 .scomment.bad { color: var(--ink); border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, transparent); }
-.sclbl { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); opacity: .75; margin-bottom: 2px; }
+.sclbl { display: block; margin-bottom: 2px; color: var(--ink-mid); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .055em; opacity: .8; }
 .jf { font-size: 11px; color: var(--ink-mid); padding: 2px 8px; border-radius: 6px;
   background: var(--surface-2); text-transform: none; letter-spacing: 0; margin-left: auto; }
 .jf.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 
-.sb { padding: 12px 16px; display: flex; flex-direction: column; }
+/* Рабочая область: информация слева, действия справа. Обе колонки скроллятся внутри
+   viewport-рамки, поэтому шапка и нижние действия всегда остаются на экране. */
+.sworkspace { min-width: 0; min-height: 0; flex: 1; display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); grid-template-areas: "main rail";
+  overflow: hidden; background: var(--surface); }
+.sworkspace.main-only { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; }
+.sworkspace.rail-only { grid-template-columns: minmax(0, 1fr); grid-template-areas: "rail"; }
+.smain, .srail { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px 18px; }
+.smain { grid-area: main; }
+.srail { grid-area: rail; border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ground) 45%, var(--surface)); }
+.sworkspace.rail-only .srail { border-left: 0; background: var(--surface); }
+.sect { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.secth { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--ink-mid); font-size: 11px;
+  font-weight: 600; line-height: 1.3; text-transform: uppercase; letter-spacing: .08em; }
+.content-sect { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--ground); }
 
 /* Фактическая multi-AI цепочка этапа и история аварийных переключений. */
-.runner-sect { margin-top: 0; padding: 10px; border: 1px solid var(--line);
-  border-radius: 10px; background: var(--ground); }
+.runner-sect { padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--ground); }
 .runner-source { margin-left: auto; font-size: 10.5px; text-transform: none;
-  letter-spacing: 0; font-weight: 400; opacity: .75; }
-.runner-chain { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
-.runner-arrow { color: var(--ink-mid); align-self: center; }
-.runner-hop { display: flex; flex-direction: column; gap: 1px; min-width: 92px;
-  padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-mid); }
-.runner-hop small { font: 10.5px var(--mono); color: var(--ink-mid); }
+  letter-spacing: 0; font-weight: 400; text-align: right; opacity: .8; }
+/* Цепочка — справка, а не выбор: одна мелкая строка чипов, без заливки и веса. */
+.runner-chain { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11px; color: var(--ink-mid); }
+.runner-chain-lbl { text-transform: uppercase; letter-spacing: .06em; font-size: 10px; opacity: .8; }
+.runner-arrow { flex: none; opacity: .7; }
+.runner-hop { min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: 999px; }
+.runner-hop small { color: var(--ink-mid); font: 10px/1.4 var(--mono); opacity: .75; overflow-wrap: anywhere; }
 .runner-hop.reserve { border-style: dashed; }
-.runner-hop.actual { color: var(--accent); border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, transparent); }
-.runner-current { font-size: 12px; color: var(--ink-mid); }
+.runner-hop.actual { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.runner-current { padding: 7px 9px; border-radius: 8px; background: var(--surface-2); color: var(--ink-mid);
+  font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .runner-current.switched { color: var(--warn); }
-.runner-attempts { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line);
-  padding-top: 7px; }
-.runner-attempt-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--ink-mid); }
-.runner-attempt { display: grid; grid-template-columns: 34px 72px minmax(110px, 1fr) auto;
-  align-items: baseline; gap: 7px; font-size: 11.5px; color: var(--ink-mid); }
+.runner-attempts { max-height: min(250px, 30vh); display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto; padding-top: 9px; border-top: 1px solid var(--line); }
+.runner-attempt-title { position: sticky; top: 0; z-index: 1; padding: 0 4px 5px; background: var(--ground);
+  color: var(--ink-mid); font-size: 10px; text-transform: uppercase; letter-spacing: .065em; }
+.runner-attempt { min-height: 27px; display: grid;
+  grid-template-columns: 34px 72px minmax(110px, 1fr) auto auto;
+  align-items: center; gap: 8px; padding: 3px 6px; border-radius: 6px; color: var(--ink-mid); font-size: 11.5px; }
+.runner-attempt:nth-child(odd) { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+.runner-attempt-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runner-attempt-cost { justify-self: end; white-space: nowrap; color: var(--ink-low); }
+.runner-result { justify-self: end; white-space: nowrap; }
 .runner-result.good { color: var(--good); }
 .runner-result.switched { color: var(--accent); }
 .runner-result.bad { color: var(--warn); }
-.runner-switches { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+.runner-switches { display: flex; flex-wrap: wrap; gap: 7px; }
 .runner-switch { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
-/* Выбор исполнителя до запуска этапа (override) — рядом с фактической цепочкой. */
-.runner-override { border-top: 1px solid var(--line); padding-top: 8px;
-  display: flex; flex-direction: column; gap: 5px; }
-.runner-override-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); }
+/* Выбор исполнителя до запуска этапа (override) — главное действие блока, отсюда карточки. */
+.runner-override { display: flex; flex-direction: column; gap: 8px; }
+.runner-override-lbl { color: var(--ink-mid); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .runner-override-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.runner-select { height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--surface-2); color: var(--ink); font-size: 12.5px; }
-.runner-reset { color: var(--ink-mid); }
+.runner-picks { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.runner-pick { min-width: 126px; flex: 1 1 150px; display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2);
+  color: var(--ink-mid); font: inherit; font-size: 13px; line-height: 1.25; text-align: left; cursor: pointer; }
+.runner-pick b { color: var(--ink); font-weight: 600; }
+.runner-pick small { color: var(--ink-mid); font: 10.5px/1.4 var(--mono); overflow-wrap: anywhere; }
+.runner-pick:hover:not(:disabled) { border-color: var(--line-2); }
+.runner-pick.on, .runner-pick.on b { color: var(--accent); }
+.runner-pick.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+.runner-pick:disabled { cursor: default; }
+.runner-pick:disabled:not(.on):not(.busy) { opacity: .5; }
+.runner-pick.busy { opacity: .8; }
+.runner-reset { align-self: center; margin-left: auto; color: var(--ink-mid); }
 .runner-reset:hover:not(:disabled) { color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
 .runner-hint { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.4; }
@@ -1078,8 +1246,8 @@ function cardState(g) {
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad);
   animation: live-pulse 1.2s ease-in-out infinite; display: inline-block; }
 @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-.live-feed { max-height: 300px; overflow-y: auto; background: var(--ground); border: 1px solid var(--line);
-  border-radius: 10px; padding: 4px 0; }
+.live-feed { max-height: 280px; overflow-y: auto; background: color-mix(in srgb, var(--ground) 88%, #000);
+  border: 1px solid var(--line); border-radius: 9px; padding: 4px 0; }
 .lf-row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 12px; font-size: 12.5px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent); }
 .lf-row:last-child { border-bottom: none; }
@@ -1088,7 +1256,7 @@ function cardState(g) {
 .lf-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .lf-name { font-weight: 600; color: var(--ink); }
 .lf-desc { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lf-text { color: var(--ink-mid); font-style: italic; }
+.lf-text { color: var(--ink-mid); font-style: italic; overflow-wrap: anywhere; }
 .lf-sub { font-size: 11px; color: var(--ink-mid); }
 .lf-st { flex: none; width: 16px; text-align: center; font-size: 11px; }
 .lf-st.done { color: var(--good); }
@@ -1096,17 +1264,17 @@ function cardState(g) {
 .lf-st.error { color: var(--bad); }
 .lf-model { font-size: 10.5px; color: var(--ink-mid); margin-top: 6px; text-align: right; }
 
-.sect { padding-top: 10px; margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
-.sect.row { flex-direction: row; flex-wrap: wrap; align-items: center; }
-.secth { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-mid); display: flex; align-items: center; gap: 8px; }
-.log { max-height: 160px; overflow-y: auto; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-.logline { font-size: 12px; padding: 2px 0; }
+.log { max-height: 180px; overflow: auto; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: color-mix(in srgb, var(--ground) 88%, #000); }
+.logline { padding: 2px 0; font-size: 12px; overflow-wrap: anywhere; }
 .small { font-size: 12px; }
-.sect textarea { background: var(--ground); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 8px 10px; font-family: inherit; font-size: 13.5px; resize: vertical; }
+.sect textarea { width: 100%; min-height: 112px; max-height: 220px; resize: vertical; padding: 10px 11px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink);
+  font-family: inherit; font-size: 13px; line-height: 1.5; }
 .secth.doct { cursor: pointer; user-select: none; }
-.sdoc { max-height: 52vh; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere;
-  background: var(--ground); border: 1px solid var(--line);
-  border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.55; }
+.sdoc { min-width: 0; overflow-x: auto; overflow-wrap: anywhere; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--ground) 88%, #000);
+  font-size: 13px; line-height: 1.55; }
 .sdoc :deep(h1) { font-size: 15px; margin: 4px 0 8px; }
 .sdoc :deep(h2) { font-size: 13.5px; margin: 12px 0 6px; }
 .sdoc :deep(h3) { font-size: 12.5px; margin: 10px 0 4px; }
@@ -1114,18 +1282,95 @@ function cardState(g) {
 .sdoc :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-x: auto; }
 .sdoc :deep(table) { border-collapse: collapse; }
 .sdoc :deep(td), .sdoc :deep(th) { border: 1px solid var(--line); padding: 4px 8px; font-size: 12px; }
-.gate-sect { background: color-mix(in srgb, var(--warn) 6%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
-  border-radius: 10px; padding: 12px; margin-bottom: 4px; }
-.rewind-sect { border-top: 1px solid var(--line); }
+.gate-sect, .rewind-sect { padding: 14px; border-radius: 11px; }
+.gate-sect { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+  background: color-mix(in srgb, var(--warn) 7%, var(--ground)); }
+.gate-sect .secth { color: var(--warn); }
+.rewind-sect { border: 1px solid color-mix(in srgb, var(--warn) 22%, var(--line));
+  background: color-mix(in srgb, var(--warn) 4%, var(--ground)); }
 .gate-lbl { font-size: 12.5px; color: var(--ink); }
-.gate-hint { margin: 0; font-size: 12px; line-height: 1.4; color: var(--ink-mid); }
+.gate-hint { margin: 0; color: var(--ink-mid); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .sect textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
-.sactions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px;
-  border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
-.sect .btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 7px 13px; font-size: 13px; cursor: pointer; align-self: flex-start; }
-.sect .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
-.sect .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }
-.sect .btn.small { padding: 5px 10px; font-size: 12px; }
-.sect .btn:disabled { opacity: .5; cursor: default; }
+.smodal .btn { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; align-self: flex-start;
+  padding: 7px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2);
+  color: var(--ink); font-size: 13px; line-height: 1.2; cursor: pointer; }
+.smodal .btn:hover:not(:disabled) { border-color: var(--line-2); }
+.smodal .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
+.smodal .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }
+.smodal .btn.play { width: 100%; background: color-mix(in srgb, var(--warn) 15%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); font-weight: 600; }
+.smodal .btn.small { min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.smodal .btn:disabled { opacity: .5; cursor: default; }
+
+/* Чат и диф закреплены в подвале модалки. */
+.sactions { min-height: 58px; flex: none; display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; margin-top: auto; padding: 9px 16px 9px 18px; border-top: 1px solid var(--line); background: var(--topbar); }
+.sactions-context { color: var(--ink-mid); font-size: 11.5px; white-space: nowrap; }
+.sactions-context b { color: var(--ink); font-weight: 550; }
+.sactions-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.sactions :deep(.oc) { min-height: 38px; padding: 7px 13px; border-radius: 9px; font-size: 13px; }
+
+/* Планшет: одна внутренняя колонка; управление идёт первым благодаря порядку DOM. */
+@media (max-width: 980px) {
+  .smodal { width: min(860px, calc(100vw - 20px)); height: calc(100dvh - 20px);
+    min-height: 0; max-height: calc(100dvh - 20px); }
+  .soverlay { padding: 10px; }
+  .sworkspace, .sworkspace.main-only, .sworkspace.rail-only { display: flex; flex-direction: column;
+    gap: 12px; overflow-y: auto; padding: 12px; }
+  .smain, .srail { flex: none; overflow: visible; padding: 0; border: 0; background: transparent;
+    scrollbar-gutter: auto; }
+}
+
+/* Телефон: тот же fullscreen-паттерн, что у просмотра документа. */
+@media (max-width: 600px) {
+  .soverlay { padding: 0; }
+  .smodal { width: 100vw; height: 100dvh; min-height: 0; max-height: none; border: 0; border-radius: 0; }
+  .sh { min-height: 66px; grid-template-columns: minmax(0, 1fr) 44px; grid-template-rows: auto auto;
+    column-gap: 10px; row-gap: 5px; padding: 8px 10px 8px 14px; }
+  .shead-copy { grid-column: 1; grid-row: 1; }
+  .sh > .sbadge { grid-column: 1; grid-row: 2; justify-self: start; }
+  .sx { grid-column: 2; grid-row: 1 / span 2; width: 44px; height: 44px; }
+  .sh h3 { font-size: 15px; }
+  .shead-kicker { font-size: 9.5px; }
+  .stage-context { min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 8px 12px 9px; }
+  .stage-task-context { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+  .stage-task-title { display: -webkit-box; overflow: hidden; font-size: 13px; white-space: normal;
+    overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .stage-stand-context { justify-content: flex-start; gap: 6px; overflow-x: auto; }
+  .stage-stand-link { min-height: 34px; }
+  .stage-stand-state { max-width: none; }
+  .smeta { min-height: 38px; max-height: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+    padding: 6px 12px; }
+  .jf { margin-left: 0; }
+  .snotices { max-height: 110px; padding: 8px 12px; }
+  .sworkspace, .sworkspace.main-only, .sworkspace.rail-only { gap: 10px; padding: 10px; }
+  .smain, .srail { gap: 10px; }
+  .runner-sect, .content-sect, .gate-sect, .rewind-sect { padding: 12px; }
+  .secth { flex-wrap: wrap; }
+  .runner-source { width: 100%; margin-left: 0; text-align: left; }
+  .runner-attempt { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: auto auto;
+    align-items: baseline; gap: 2px 7px; padding: 5px 6px; }
+  .runner-attempt-model { grid-column: 2 / 3; grid-row: 2; white-space: normal; overflow-wrap: anywhere; }
+  /* Цена — под результатом своей же попытки: колонки узкие, и в первой строке
+     она вытолкнула бы имя исполнителя за край. */
+  .runner-attempt-cost { grid-column: 3; grid-row: 2; }
+  .runner-result { grid-column: 3; grid-row: 1; }
+  /* Пальцем — по одной карточке в ряд: на 320-360 px две в ряд дают 8-9 знаков имени. */
+  .runner-pick { min-width: 0; flex: 1 1 100%; min-height: 44px; }
+  .sect textarea { min-height: 96px; max-height: 160px; }
+  .gbtns .btn { flex: 1 1 140px; }
+  .sactions { min-height: 62px; padding: 9px 10px calc(9px + env(safe-area-inset-bottom)); }
+  .sactions-context { display: none; }
+  .sactions-buttons { width: 100%; }
+  .sactions-buttons > .btn, .sactions :deep(.oc) { min-height: 42px; flex: 1; }
+}
+
+@media (max-height: 700px) and (min-width: 601px) {
+  .soverlay { padding: 8px; }
+  .smodal { height: calc(100dvh - 16px); min-height: 0; max-height: calc(100dvh - 16px); }
+  .sh { min-height: 56px; }
+  .live-feed { max-height: 190px; }
+  .runner-attempts { max-height: 200px; }
+}
 </style>

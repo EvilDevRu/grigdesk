@@ -116,9 +116,51 @@ async function extractFrames(file, destDir, maxFrames, runner, signal = undefine
 }
 
 /**
- * Ограниченный набор кадров по сменам сцены для других локальных потребителей
- * media runtime (например, разбора видео из Inbox). Исходный файл не покидает
- * хост, а вызывающий владеет destDir и его очисткой.
+ * Кадры равномерно по всей длительности — основной путь для записи экрана.
+ *
+ * Детектор сцен на скринкасте бесполезен: изменение занимает крошечную долю
+ * кадра, и порог его не спасает (замер на синтетической записи «таблица →
+ * активный чекбокс»: `gt(scene,0.4)` и даже `gt(scene,0.1)` дают НОЛЬ кадров).
+ * Раньше отсюда падали в «первый кадр», и модель получала начало ролика, где
+ * действие ещё не началось — то есть про само видео не узнавала ничего.
+ *
+ * Кадр берётся из СЕРЕДИНЫ своего интервала: нулевая секунда записи экрана —
+ * это ещё не начатое действие. Отдельный seek на кадр, а не один `fps`-фильтр:
+ * так момент каждого кадра задан явно, а сбой одного не уносит остальные.
+ */
+async function extractSpanFrames(file, destDir, count, duration, runner, signal = undefined) {
+    const frames = [];
+    for (let i = 0; i < count; i += 1) {
+        const at = (duration * (i + 0.5)) / count;
+        const frame = join(destDir, `span-${String(i + 1).padStart(3, '0')}.jpg`);
+        try {
+            await runner('ffmpeg', [
+                '-y',
+                '-ss', at.toFixed(3),
+                '-i', file,
+                '-an', '-frames:v', '1',
+                '-vf', 'scale=1280:-2',
+                '-q:v', '3',
+                frame,
+            ], { signal });
+        } catch (error) {
+            if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+            continue;
+        }
+        if (existsSync(frame)) frames.push(frame);
+    }
+    return frames;
+}
+
+/**
+ * Ограниченный набор кадров для других локальных потребителей media runtime
+ * (например, разбора видео из Inbox). Исходный файл не покидает хост, а
+ * вызывающий владеет destDir и его очисткой.
+ *
+ * Сцены остаются приоритетом (у смонтированного ролика они содержательны), но
+ * недобор ВСЕГДА дополняется равномерной выборкой: раньше она включалась
+ * только при полном нуле сцен, поэтому одна случайно найденная смена оставляла
+ * ролик с единственным кадром.
  */
 export async function extractSceneFrames({
     filePath,
@@ -138,10 +180,29 @@ export async function extractSceneFrames({
     } catch (error) {
         if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
     }
+    if (frames.length >= maxFrames) return frames;
+
+    let duration = 0;
+    try {
+        ({ duration } = await probe(filePath, runner, signal));
+    } catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+    }
+    if (duration > 0) {
+        const span = await extractSpanFrames(
+            filePath,
+            destDir,
+            maxFrames - frames.length,
+            duration,
+            runner,
+            signal,
+        );
+        if (frames.length + span.length) return [...frames, ...span];
+    }
     if (frames.length) return frames;
 
-    // У статичной записи экрана может не быть ни одной смены сцены. Первый кадр
-    // всё равно нужен модели: иначе такое видео ошибочно считалось бы неразбираемым.
+    // Длительность не прочиталась (битый контейнер, ffprobe недоступен) — остаётся
+    // хотя бы первый кадр: иначе такое видео считалось бы неразбираемым вовсе.
     const fallback = join(destDir, 'frame-001.jpg');
     await runner('ffmpeg', [
         '-y', '-i', filePath,

@@ -593,7 +593,11 @@ test('materialize соблюдает Bot API limit, продолжает пос�
     }]);
     assert.equal(materialized.skipped.length, 3);
     assert.equal(JSON.stringify(materialized).includes(TOKEN), false);
-    assert.match(materialized.skipped[0].reason, /20 МБ|больше/i);
+    // Причина — машинный код, а не фраза: свободный текст ошибки провайдера
+    // может нести токен, а человеческую формулировку собирает сам кокпит.
+    assert.equal(materialized.skipped[0].reason, 'file_too_large');
+    assert.equal(materialized.skipped[0].limitBytes, FILE_LIMIT);
+    assert.ok(Number.isSafeInteger(materialized.skipped[0].sizeBytes));
   } finally { await context.release(); }
 });
 

@@ -478,72 +478,105 @@ watch(taskId, (id) => {
 
 <template>
   <div v-if="taskId" class="overlay" @click.self="ui.close()">
-    <div class="panel">
+    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
       <header class="mhead">
-        <span class="mid mono">#{{ taskId }}</span>
-        <h3 class="mtitle"><span v-if="loading && !detail" class="spin"></span> {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}</h3>
+        <div class="midentity">
+          <span class="meyebrow">Задача Битрикс24</span>
+          <span class="mid mono">#{{ taskId }}</span>
+        </div>
+        <h3 id="task-modal-title" class="mtitle"><span v-if="loading && !detail" class="spin"></span> {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}</h3>
         <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
                             :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
                             :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
                             @toggle="toggleFavorite" />
-        <button class="icon" title="Обновить" @click="refresh">⟳</button>
-        <button class="icon" title="Закрыть" @click="ui.close()">✕</button>
+        <button class="icon" title="Обновить" aria-label="Обновить задачу" @click="refresh">⟳</button>
+        <button class="icon" title="Закрыть" aria-label="Закрыть задачу" @click="ui.close()">✕</button>
       </header>
 
-      <div class="mbody">
+      <div v-if="err || favorites.error" class="malerts" aria-live="polite">
         <p v-if="err" class="err">{{ err }}</p>
         <p v-if="favorites.error" class="err">Избранное: {{ favorites.error }}</p>
+      </div>
 
+      <div class="mcontext" aria-label="Состояние задачи">
         <div class="meta">
           <span v-if="detail?.status_label" class="tag">{{ detail.status_label }}</span>
           <span v-if="detail?.priority_label" class="tag">{{ detail.priority_label }}</span>
           <span v-if="boardTask?.group" class="tag">{{ boardTask.group }}</span>
           <span v-if="boardTask?.deadline" class="tag" :class="{ over: boardTask.overdue }">до {{ boardTask.deadline }}</span>
+          <span v-if="!detail?.status_label && !detail?.priority_label && !boardTask?.group && !boardTask?.deadline"
+                class="context-empty">{{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}</span>
         </div>
+      </div>
 
-        <p v-if="cleanDesc" class="desc" v-html="descHtml"></p>
-
-        <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
-        <section v-if="tgLinks.length" class="tg">
-          <div class="tlbl">Обсуждение в Telegram</div>
-          <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
-            <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
-                 как «в чате пусто», а причина — как «сюда нет доступа». -->
-            <div v-if="!l.ok" class="tgfail">
-              <span class="tgurl">{{ l.url }}</span>
-              <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
+      <div class="mbody">
+        <section class="task-pane brief-pane" aria-labelledby="task-brief-title">
+          <div class="pane-head">
+            <div>
+              <span class="pane-kicker">Постановка</span>
+              <h4 id="task-brief-title" class="pane-title">Что нужно сделать</h4>
             </div>
-            <template v-else>
-              <div class="tghead">
-                <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
-                <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
-                <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
-                <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
-              </div>
-              <div v-for="q in l.quotes" :key="q.messageId" class="tgq" :class="{ tgtarget: q.target }">
-                <div class="tgmeta">
-                  <span class="tgauthor">{{ q.author }}</span>
-                  <span class="tgtime">{{ tgTime(q.at) }}</span>
-                  <span v-if="q.target" class="tgpin">← ссылка</span>
+          </div>
+          <div class="brief-scroll">
+            <div v-if="cleanDesc" class="desc-box">
+              <div class="tlbl">Описание</div>
+              <p class="desc" v-html="descHtml"></p>
+            </div>
+
+            <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
+            <section v-if="tgLinks.length" class="tg">
+              <div class="tlbl">Обсуждение в Telegram</div>
+              <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
+                <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
+                     как «в чате пусто», а причина — как «сюда нет доступа». -->
+                <div v-if="!l.ok" class="tgfail">
+                  <span class="tgurl">{{ l.url }}</span>
+                  <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
                 </div>
-                <div class="tgtext">{{ q.text }}<template v-if="q.trimmed">…</template></div>
-                <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
+                <template v-else>
+                  <div class="tghead">
+                    <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
+                    <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
+                    <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
+                    <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
+                  </div>
+                  <div v-for="q in l.quotes" :key="q.messageId" class="tgq" :class="{ tgtarget: q.target }">
+                    <div class="tgmeta">
+                      <span class="tgauthor">{{ q.author }}</span>
+                      <span class="tgtime">{{ tgTime(q.at) }}</span>
+                      <span v-if="q.target" class="tgpin">← ссылка</span>
+                    </div>
+                    <div class="tgtext">{{ q.text }}<template v-if="q.trimmed">…</template></div>
+                    <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
+                  </div>
+                  <div v-if="l.more" class="tgmore">ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке</div>
+                </template>
               </div>
-              <div v-if="l.more" class="tgmore">ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке</div>
-            </template>
+            </section>
+            <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
+              Постановка пока не загружена или в задаче нет описания.
+            </div>
           </div>
         </section>
 
-        <!-- Табы: Триаж | Комментарии -->
-        <nav class="mtabs">
-          <button class="mtab" :class="{ active: mtab === 'triage' }" @click="mtab = 'triage'">Триаж</button>
-          <button class="mtab" :class="{ active: mtab === 'comments' }" @click="mtab = 'comments'">
-            Комментарии<template v-if="comments?.length"> ({{ comments.length }})</template>
-          </button>
-        </nav>
+        <section class="task-pane work-pane" aria-labelledby="task-work-title">
+          <div class="work-head">
+            <div>
+              <span class="pane-kicker">Рабочая зона</span>
+              <h4 id="task-work-title" class="pane-title">Разбор и связь</h4>
+            </div>
+            <!-- Табы: Триаж | Комментарии -->
+            <nav class="mtabs" aria-label="Раздел карточки задачи">
+              <button class="mtab" :class="{ active: mtab === 'triage' }" @click="mtab = 'triage'">Триаж</button>
+              <button class="mtab" :class="{ active: mtab === 'comments' }" @click="mtab = 'comments'">
+                Комментарии<template v-if="comments?.length"> ({{ comments.length }})</template>
+              </button>
+            </nav>
+          </div>
 
-        <!-- Триаж: оценка сложности/рисков без стенда -->
-        <div v-show="mtab === 'triage'" class="triage">
+          <div class="tab-scroll">
+            <!-- Триаж: оценка сложности/рисков без стенда -->
+            <div v-show="mtab === 'triage'" class="triage">
           <div class="thead2">
             <span class="tlbl">Триаж</span>
             <template v-if="triage?.analysis">
@@ -644,9 +677,12 @@ watch(taskId, (id) => {
             </button>
           </div>
         </div>
+          </div>
+        </section>
+      </div>
 
-        <!-- Управление -->
-        <div class="controls">
+      <!-- Управление -->
+      <footer class="controls" aria-label="Действия с задачей">
           <div class="timer mono" :class="{ run: running }">
             <span class="tclock">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
             <span class="tstate">{{ running ? 'идёт' : 'остановлен' }}</span>
@@ -788,40 +824,77 @@ watch(taskId, (id) => {
           </div>
           <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
-        </div>
+      </footer>
       </div>
     </div>
-  </div>
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; background: #04060acc; backdrop-filter: blur(4px); display: flex; align-items: flex-start;
-  justify-content: center; padding: 48px 16px; z-index: 100; overflow-y: auto; }
-.panel { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
-  width: 100%; max-width: 860px; box-shadow: 0 20px 60px #000b; overflow: hidden; }
-.mhead { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-.mid { color: var(--ink-mid); font-size: 13px; flex: none; }
-.mtitle { flex: 1; margin: 0; font-size: 16px; font-weight: 640; min-width: 0; }
-.icon { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
-  width: 30px; height: 30px; border-radius: 8px; cursor: pointer; flex: none; }
-.icon:hover { color: var(--ink); }
-.mbody { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.err { color: var(--bad); margin: 0; font-size: 13px; }
-.meta { display: flex; flex-wrap: wrap; gap: 6px; }
-.tag { font-size: 12px; color: var(--ink-mid); background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 999px; padding: 2px 10px; }
-.tag.over { color: var(--bad); }
-.desc { margin: 0; font-size: 14px; color: var(--ink); white-space: pre-wrap; line-height: 1.55;
-  max-height: 300px; overflow-y: auto; }
+.overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
+  justify-content: center; padding: 20px; overflow: hidden; background: #04060ad9;
+  backdrop-filter: blur(7px); }
+.panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  width: min(1240px, 100%); height: min(900px, calc(100dvh - 40px));
+  max-height: calc(100dvh - 40px); overflow: hidden; background: var(--surface);
+  border: 1px solid var(--line-2); border-radius: 16px; box-shadow: 0 26px 80px #000c; }
+.mhead { flex: none; display: flex; align-items: center; gap: 12px; min-height: 66px;
+  padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.midentity { flex: none; width: 112px; display: flex; flex-direction: column; gap: 2px; }
+.meyebrow, .pane-kicker { color: var(--ink-mid); font-size: 10px; font-weight: 650;
+  letter-spacing: .09em; line-height: 1.2; text-transform: uppercase; }
+.mid { color: var(--accent); font-size: 13px; font-weight: 650; }
+.mtitle { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ink);
+  font-size: 17px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.icon { flex: none; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line);
+  border-radius: 9px; background: var(--ground); color: var(--ink-mid); cursor: pointer; }
+.icon:hover { border-color: var(--line-2); color: var(--ink); }
+.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.malerts { flex: none; display: grid; gap: 4px; max-height: 104px; overflow-y: auto;
+  padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));
+  background: color-mix(in srgb, var(--bad) 9%, var(--surface)); }
+.err { margin: 0; color: var(--bad); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.mcontext { flex: none; min-width: 0; min-height: 43px; display: flex; align-items: center;
+  padding: 7px 16px; border-bottom: 1px solid var(--line); background: var(--ground); }
+.meta { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { max-width: 100%; padding: 3px 9px; overflow: hidden; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface-2); color: var(--ink-mid); font-size: 11.5px;
+  line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.tag.over { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); color: var(--bad); }
+.context-empty { color: var(--ink-mid); font-size: 12px; }
+.mbody { flex: 1; min-width: 0; min-height: 0; display: grid;
+  grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: 14px;
+  padding: 14px 16px; overflow: hidden; }
+.task-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
+.pane-head { flex: none; min-height: 56px; display: flex; align-items: center; padding: 9px 13px;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 72%, var(--ground)); }
+.pane-title { margin: 3px 0 0; color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.25; }
+.brief-scroll, .tab-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain; scrollbar-gutter: stable; }
+.brief-scroll { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.desc-box { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); }
+.desc-box .tlbl { margin-bottom: 7px; }
+.desc { margin: 0; color: var(--ink); font-size: 13.5px; line-height: 1.58; white-space: pre-wrap;
+  overflow-wrap: anywhere; }
 .desc :deep(a) { color: var(--accent); text-decoration: none; word-break: break-all; }
 .desc :deep(a:hover) { text-decoration: underline; }
+.brief-empty { display: grid; min-height: 150px; place-items: center; padding: 18px;
+  border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-mid); font-size: 13px;
+  line-height: 1.45; text-align: center; }
+.work-head { flex: none; min-width: 0; min-height: 56px; display: flex; align-items: flex-end;
+  justify-content: space-between; gap: 12px; padding: 8px 13px 0;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 72%, var(--ground)); }
+.work-head > div { flex: none; align-self: center; }
+.tab-scroll { padding: 12px; }
 
 /* Обсуждение в Telegram. min-width: 0 обязателен: блок стоит во флекс-колонке,
    а без него флекс-элемент не сжимается ниже своего содержимого — одна длинная
    ссылка из чужого чата раздвинула бы модалку (та же грабля, что была в чате).
    Ветка скроллится внутри себя: переписка не должна вытеснять описание. */
-.tg { min-width: 0; max-height: 320px; overflow-y: auto;
-  background: var(--ground); border: 1px solid var(--line); border-radius: 12px;
+.tg { flex: none; min-width: 0; max-height: 360px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
 .tgitem { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .tgfail { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
@@ -844,7 +917,7 @@ watch(taskId, (id) => {
 .tgmedia { font-size: 11px; color: var(--ink-mid); overflow-wrap: anywhere; }
 .tgmore { font-size: 11px; color: var(--ink-mid); }
 
-.triage { background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+.triage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px; }
 .thead2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tlbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); margin-right: 4px; }
@@ -886,15 +959,16 @@ watch(taskId, (id) => {
 .attx { background: none; border: none; color: var(--ink-mid); cursor: pointer; padding: 0 2px; }
 .attx:hover { color: var(--bad); }
 /* ── Табы модалки ── */
-.mtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
-.mtab { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
-  color: var(--ink-mid); font-size: 13px; padding: 7px 12px; cursor: pointer; }
+.mtabs { align-self: stretch; display: flex; gap: 2px; border-bottom: 0; }
+.mtab { display: inline-flex; align-items: center; background: none; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--ink-mid);
+  font-size: 12.5px; padding: 0 11px; cursor: pointer; }
 .mtab:hover { color: var(--ink); }
 .mtab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 /* ── Таб комментариев ── */
-.comtab { display: flex; flex-direction: column; gap: 12px; }
-.comlist { display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; }
-.com { background: var(--ground); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+.comtab { min-height: 100%; display: flex; flex-direction: column; gap: 12px; }
+.comlist { display: flex; flex-direction: column; gap: 10px; }
+.com { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
 .comhead { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
 .comtime { color: var(--ink-mid); font-size: 11.5px; }
 .comtext { margin-top: 4px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -913,14 +987,16 @@ watch(taskId, (id) => {
   border-radius: 4px; padding: 1px 4px; }
 .tnote :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
 .tmeta { margin: 0; font-size: 11px; color: var(--ink-mid); }
-.controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  padding: 14px 16px; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; }
-.timer { display: flex; flex-direction: column; margin-right: auto; }
-.tclock { font-size: 19px; font-weight: 650; }
+.controls { position: relative; flex: none; min-width: 0; display: flex; align-items: center;
+  gap: 12px; flex-wrap: wrap; padding: 10px 16px; background: var(--surface-2);
+  border-top: 1px solid var(--line); }
+.timer { flex: none; display: flex; flex-direction: column; min-width: 92px; margin-right: auto; }
+.tclock { font-size: 18px; font-weight: 650; line-height: 1.1; }
 .timer.run .tclock { color: var(--good); }
 .tstate { font-size: 11px; color: var(--ink-mid); }
-.cbtns { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
-.btn { height: 40px; padding: 0 15px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2);
+.cbtns { min-width: 0; display: flex; align-items: stretch; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.cbtns :deep(.oc) { min-height: 36px; padding: 5px 11px; }
+.btn { height: 36px; padding: 0 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground);
   color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1; cursor: pointer; white-space: nowrap;
   display: inline-flex; align-items: center; justify-content: center; }
 .btn:disabled { opacity: .5; cursor: default; }
@@ -933,7 +1009,7 @@ watch(taskId, (id) => {
 .btn.onconv.stalled { background: color-mix(in srgb, var(--bad) 16%, transparent);
   border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); color: var(--bad); }
 .btn.onconv.stalled:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
-.convstall { display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 6px;
+.convstall { display: flex; flex-direction: column; gap: 2px; width: 100%;
   padding: 7px 10px; border-radius: 8px; color: var(--bad);
   background: color-mix(in srgb, var(--bad) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); font-size: 12px; }
@@ -947,9 +1023,13 @@ watch(taskId, (id) => {
   animation: sbspin .8s linear infinite; }
 @keyframes sbspin { to { transform: rotate(360deg); } }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
-/* Форма запуска: решение человека сверху, технический immutable-контракт — свёрнут. */
-.lform { flex-basis: 100%; display: flex; flex-direction: column; gap: 7px; margin-top: 8px;
-  padding: 11px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
+/* Форма запуска открывается как ограниченная по высоте панель над постоянными
+   действиями: большой delivery contract не выталкивает карточку за viewport. */
+.lform { position: absolute; z-index: 3; left: -1px; right: -1px; bottom: calc(100% + 1px);
+  display: flex; flex-direction: column; gap: 8px; max-height: min(560px, 62dvh);
+  margin: 0; padding: 14px 16px 16px; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-gutter: stable; border: 1px solid var(--line-2); border-bottom-color: var(--line);
+  border-radius: 12px 12px 0 0; background: var(--surface-2); box-shadow: 0 -18px 48px #0009; }
 .lrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .llbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); }
 .lopt { text-transform: none; letter-spacing: 0; }
@@ -957,7 +1037,7 @@ watch(taskId, (id) => {
   background: var(--ground); color: var(--ink); font-size: 13px; }
 .lrepo { display: grid; grid-template-columns: minmax(90px, auto) 1fr; align-items: center; gap: 10px; }
 .lrepo code { color: var(--ink); overflow-wrap: anywhere; }
-.linp { min-width: 0; height: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line);
+.linp { min-width: 0; width: 100%; height: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--ground); color: var(--ink); font-family: inherit; font-size: 13px; }
 .linp:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .lhint { font-size: 12px; color: var(--ink-mid); }
@@ -970,7 +1050,8 @@ watch(taskId, (id) => {
 .lsummary-row > b { min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
 .lshipwarn { margin: 2px 0 0; padding-top: 6px; border-top: 1px solid var(--line);
   color: var(--warn); font-size: 11.5px; line-height: 1.4; }
-.lform textarea { resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+.lform textarea { min-width: 0; width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
   background: var(--ground); color: var(--ink); font-family: inherit; font-size: 13px; }
 .lform textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .lnote { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.45; }
@@ -980,8 +1061,85 @@ watch(taskId, (id) => {
 .ladvanced-body { display: flex; flex-direction: column; gap: 7px; }
 .lerror { margin: 0; color: var(--bad); font-size: 12px; }
 .lbtns { display: flex; gap: 8px; justify-content: flex-end; }
-.comment { display: flex; gap: 8px; align-items: flex-end; }
-.comment textarea { flex: 1; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);
+.comment { display: flex; gap: 8px; align-items: flex-end; margin-top: auto; }
+.comment textarea { flex: 1; min-width: 0; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--ground); color: var(--ink); font-family: inherit; font-size: 14px; }
 .comment textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+@media (max-width: 980px) {
+  .overlay { padding: 12px; }
+  .panel { width: min(900px, 100%); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); }
+  .midentity { width: 100px; }
+  .mbody { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-gutter: stable; }
+  .task-pane { flex: none; min-height: auto; overflow: visible; }
+  .brief-scroll, .tab-scroll { flex: none; min-height: auto; overflow: visible; scrollbar-gutter: auto; }
+  .tg { max-height: 320px; }
+  .controls { gap: 10px; }
+  .timer { min-width: 82px; }
+  .cbtns { flex: 1; }
+}
+
+@media (max-width: 600px) {
+  .overlay { align-items: stretch; padding: 0; }
+  .panel { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .mhead { gap: 7px; min-height: 56px; padding: 7px 10px; }
+  .midentity { width: auto; }
+  .meyebrow { display: none; }
+  .mid { font-size: 12px; }
+  .mtitle { font-size: 14px; line-height: 1.25; }
+  .mhead :deep(.favbtn) { width: 38px; height: 38px; }
+  .icon { width: 38px; height: 38px; }
+  .malerts { max-height: 88px; padding: 7px 10px; }
+  .mcontext { min-height: 38px; padding: 6px 10px; overflow: hidden; }
+  .meta { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .meta::-webkit-scrollbar { display: none; }
+  .tag { flex: none; }
+  .mbody { gap: 10px; padding: 10px; }
+  .task-pane { border-radius: 10px; }
+  .pane-head { min-height: 50px; padding: 8px 11px; }
+  .brief-scroll, .tab-scroll { padding: 10px; }
+  .desc-box { padding: 10px; }
+  .desc { font-size: 13px; line-height: 1.55; }
+  .tg { max-height: 280px; padding: 9px 10px; }
+  .work-head { min-height: 44px; padding: 0 7px; }
+  .work-head > div { display: none; }
+  .mtabs { width: 100%; }
+  .mtab { flex: 1; justify-content: center; min-height: 44px; padding: 0 8px; }
+  .triage { padding: 10px; }
+  .thead2 .tbtn { width: 100%; margin-left: 0; }
+  .clarify-row { flex-wrap: wrap; }
+  .clarify-row textarea { flex-basis: 100%; }
+  .clarify-row .tbtn { flex: 1; min-height: 40px; }
+  .attachbtn { width: 40px; height: 40px; }
+  .comment { flex-direction: column; align-items: stretch; }
+  .comment .btn { align-self: flex-end; min-height: 40px; }
+  .controls { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 9px;
+    padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); }
+  .timer { min-width: 58px; margin: 0; }
+  .tclock { font-size: 15px; }
+  .tstate { font-size: 10px; }
+  .cbtns { width: 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto;
+    overscroll-behavior-x: contain; scrollbar-width: none; padding: 1px 0 3px; }
+  .cbtns::-webkit-scrollbar { display: none; }
+  .cbtns > *, .cbtns :deep(.oc) { flex: none; min-height: 40px; }
+  .btn { height: 40px; }
+  .convstall, .lmsg { grid-column: 1 / -1; }
+  .lform { left: -10px; right: -10px; max-height: 60dvh;
+    padding: 12px 12px 14px; border-radius: 12px 12px 0 0; }
+  .lrow { align-items: stretch; }
+  .lrow .lsel { flex: 1; min-width: 0; height: 38px; }
+  .lsummary-row, .lrepo { grid-template-columns: 1fr; gap: 3px; }
+  .linp { height: 40px; }
+  .lbtns .btn { flex: 1; }
+}
+
+@media (min-width: 981px) and (max-height: 720px) {
+  .mhead { min-height: 56px; padding-block: 8px; }
+  .mcontext { min-height: 38px; padding-block: 5px; }
+  .mbody { gap: 10px; padding-block: 10px; }
+  .pane-head, .work-head { min-height: 50px; }
+  .brief-scroll, .tab-scroll { padding: 10px; }
+  .controls { padding-block: 8px; }
+}
 </style>

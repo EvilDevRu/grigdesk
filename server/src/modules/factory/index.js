@@ -206,7 +206,18 @@ async function factoryModule(fastify, opts) {
 
   // Документ этапа — человеку у ворот: план (утверждение), разведнота, диагноз,
   // шип-инструкция, отчёт браузерной проверки. Без него решение по воротам слепое.
-  const STAGE_DOCS = { plan: 'plan.md', recon: 'recon.md', diag: 'diag.md', ship: 'ship.md', report: 'report.md' };
+  // `audit` — досье к приёмке, `review` — отчёт независимого ревью: второй
+  // писался с первого дня, но в этом списке его не было, то есть открыть его
+  // было нечем ни на одном узле.
+  const STAGE_DOCS = {
+    plan: 'plan.md',
+    recon: 'recon.md',
+    diag: 'diag.md',
+    ship: 'ship.md',
+    report: 'report.md',
+    audit: 'audit.md',
+    review: 'review.md',
+  };
   fastify.get('/api/tasks/:id/doc/:name', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     const file = STAGE_DOCS[request.params.name];

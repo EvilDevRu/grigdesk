@@ -283,6 +283,81 @@ runner_claude_limit_until() {
   printf '%s\n' "$value"
 }
 
+runner_claude_usage() {
+  # Опциональный метод контракта: расход токенов завершённого хода.
+  # Событие `result` несёт уже сложенный по всему ходу usage — берём его, чтобы
+  # не повторять арифметику CLI. Если хода оборвали (timeout, KILL, падение), то
+  # `result` не будет вовсе, а токены уже потрачены: тогда складываем usage
+  # assistant-событий, у каждого из которых он свой на обращение к модели.
+  # Именно оборванный ход и есть самый дорогой случай, ради которого замер нужен.
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+# Кэш-чтение и кэш-запись остаются отдельными полями: они тарифицируются
+# по-разному, и без них «дорогой этап» не отличить от длинного, но целиком
+# прочитанного из кэша.
+FIELDS = (
+    ("TOKENS_IN", "input_tokens"),
+    ("TOKENS_OUT", "output_tokens"),
+    ("TOKENS_CACHE_READ", "cache_read_input_tokens"),
+    ("TOKENS_CACHE_WRITE", "cache_creation_input_tokens"),
+)
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+final = None
+cost = None
+partial = {key: 0 for _, key in FIELDS}
+seen_partial = False
+
+with source:
+    for line in source:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        kind = event.get("type")
+        if kind == "result":
+            usage = event.get("usage")
+            if isinstance(usage, dict):
+                final = usage
+            value = event.get("total_cost_usd")
+            if isinstance(value, (int, float)):
+                cost = value
+        elif kind == "assistant":
+            usage = (event.get("message") or {}).get("usage")
+            if not isinstance(usage, dict):
+                continue
+            seen_partial = True
+            for _, key in FIELDS:
+                value = usage.get(key)
+                if isinstance(value, int) and value > 0:
+                    partial[key] += value
+
+if final is None and not seen_partial:
+    raise SystemExit(1)
+
+out = []
+for name, key in FIELDS:
+    if final is not None:
+        value = final.get(key)
+        value = value if isinstance(value, int) and value >= 0 else 0
+    else:
+        value = partial[key]
+    out.append(f"{name}={value}")
+if isinstance(cost, (int, float)) and cost > 0:
+    out.append(f"COST_USD={cost:.4f}")
+print("\n".join(out))
+PYTHON
+}
+
 runner_claude_fanout_count() {
   grep -cE '"name":"(Agent|Task)"' "$1/events.jsonl" 2>/dev/null || printf '0\n'
 }

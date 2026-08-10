@@ -25,8 +25,8 @@
 //   verify   — связь по кругу: наружу на VPS и обратно в туннель.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import { Resolver } from 'node:dns/promises';
 import fs from 'node:fs/promises';
+import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -53,8 +53,17 @@ const LOG_TAIL = 400;
 const DNS_POLL_MS = 15_000;
 const DNS_WAIT_MS = 5 * 60_000;
 
-/** Публичные резолверы: спрашивать локальный бессмысленно — он может отдавать кеш провайдера. */
-const DNS_SERVERS = ['1.1.1.1', '8.8.8.8'];
+// `node:dns`/c-ares отправляет запросы без EDNS. У публичных резолверов такой запрос может
+// попасть в отдельный отрицательный кеш, хотя обычный браузерный/DoH-запрос и authoritative DNS
+// уже видят новую запись (реальный случай: SOA держал старый NXDOMAIN 30 минут, а визард ждал 5).
+// Поэтому публичное состояние проверяем тем же современным путём, которым пользуются внешние
+// клиенты: DNS-over-HTTPS у двух независимых провайдеров.
+const DNS_DOH_ENDPOINTS = [
+  'https://cloudflare-dns.com/dns-query',
+  'https://dns.google/resolve',
+];
+const DNS_QUERY_TIMEOUT_MS = 5_000;
+const DNS_TYPE_CODES = { A: 1, AAAA: 28 };
 
 const STEPS = [
   { key: 'keys', title: 'Ключи доступа' },
@@ -215,21 +224,50 @@ function runLocal(cmd, args, { input = null, timeoutMs = 30 * 60_000, onData, en
   });
 }
 
-/** Один публичный резолвер: отсутствие записи отличается от таймаута/SERVFAIL. */
-async function resolvePublicOne(server, name, type) {
-  const resolver = new Resolver({ timeout: 3000, tries: 1 });
-  resolver.setServers([server]);
+/** Один DoH-резолвер: отсутствие записи отличается от таймаута/SERVFAIL/битого ответа. */
+async function resolvePublicOne(endpoint, name, type, fetchImpl) {
+  const typeCode = DNS_TYPE_CODES[type];
+  if (!typeCode) return null;
+  const url = new URL(endpoint);
+  url.searchParams.set('name', name);
+  url.searchParams.set('type', type);
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), DNS_QUERY_TIMEOUT_MS);
   try {
-    return await resolver.resolve(name, type);
-  } catch (e) {
-    if (e?.code === 'ENODATA' || e?.code === 'ENOTFOUND') return [];
+    const response = await fetchImpl(url, {
+      headers: { accept: 'application/dns-json' },
+      cache: 'no-store',
+      signal: ac.signal,
+    });
+    if (!response?.ok) return null;
+    const payload = await response.json().catch(() => null);
+    if (!payload || !Number.isInteger(payload.Status)) return null;
+    if (payload.Status === 3) return []; // NXDOMAIN — доказанное отсутствие имени.
+    if (payload.Status !== 0) return null;
+    if (payload.Answer !== undefined && !Array.isArray(payload.Answer)) return null;
+    const out = [];
+    for (const answer of payload.Answer || []) {
+      if (answer?.type !== typeCode) continue;
+      const value = typeof answer.data === 'string' ? answer.data.trim() : '';
+      if (isIP(value) !== (type === 'A' ? 4 : 6)) return null;
+      out.push(value);
+    }
+    return out;
+  } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 /** Сверить оба публичных резолвера; ошибка любого не может означать «AAAA отсутствует». */
-async function resolvePublic(name, type = 'A') {
-  const answers = await Promise.all(DNS_SERVERS.map((server) => resolvePublicOne(server, name, type)));
+export async function resolvePublic(name, type = 'A', {
+  fetchImpl = fetch,
+  endpoints = DNS_DOH_ENDPOINTS,
+} = {}) {
+  const answers = await Promise.all(
+    endpoints.map((endpoint) => resolvePublicOne(endpoint, name, type, fetchImpl)),
+  );
   if (answers.some((item) => item === null)) return null;
   return answers.flat();
 }

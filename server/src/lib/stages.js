@@ -21,6 +21,10 @@ export const STAGES = Object.freeze({
   build: { kind: 'agent', label: 'Build' },
   simplify: { kind: 'agent', label: 'Симплифаер' },
   review: { kind: 'agent', label: 'Ревью' },
+  // Досье к воротам приёмки: соответствие утверждённому решению, скорость на
+  // горячем пути, тесты и безопасность. Возврат маршрута узел не назначает —
+  // он приносит человеку проверяемый вердикт, а решение остаётся на воротах.
+  audit: { kind: 'agent', label: 'Аудит' },
   trace: { kind: 'agent', label: 'Trace-verify' },
   php: { kind: 'code', label: 'PHP-чек' },
   lint: { kind: 'code', label: 'Линт' },

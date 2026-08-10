@@ -317,6 +317,58 @@ print(len(seen))
   printf '0\n'
 }
 
+runner_codex_usage() {
+  # Опциональный метод контракта: расход токенов завершённого хода.
+  # `turn.completed.usage` у codex НАКОПИТЕЛЬНЫЙ по всему thread: после каждого
+  # вызова инструмента он снова прибавляет весь вход. Поэтому берём ПОСЛЕДНЕЕ
+  # такое событие, а не сумму — сумма завысила бы расход в разы и тем громче,
+  # чем больше инструментов позвал агент.
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+# reasoning_output_tokens у codex входит в output_tokens и отдельным ключом не
+# едет: набор полей общий для всех раннеров, иначе кокпиту пришлось бы знать,
+# какой вендор какими словами называет свой расход.
+FIELDS = (
+    ("TOKENS_IN", "input_tokens"),
+    ("TOKENS_OUT", "output_tokens"),
+    ("TOKENS_CACHE_READ", "cached_input_tokens"),
+    ("TOKENS_CACHE_WRITE", "cache_write_input_tokens"),
+)
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+final = None
+with source:
+    for line in source:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if event.get("type") != "turn.completed":
+            continue
+        usage = event.get("usage")
+        if isinstance(usage, dict):
+            final = usage
+
+if final is None:
+    raise SystemExit(1)
+
+out = []
+for name, key in FIELDS:
+    value = final.get(key)
+    out.append(f"{name}={value if isinstance(value, int) and value >= 0 else 0}")
+print("\n".join(out))
+PYTHON
+}
+
 runner_codex_dialect() {
   printf 'Codex JSONL; no native Claude Task requirement; terminal status through stage-result.\n'
 }

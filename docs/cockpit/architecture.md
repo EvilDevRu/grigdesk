@@ -95,7 +95,10 @@ commit блокирует автоматический retry до operator recon
 лениво materialize Bot API attachments. Общий `InboxAttachmentAnalyzer` до model triage/B24
 локально транскрибирует речь, извлекает bounded кадры видео, готовит raster visual inputs и
 читает bounded UTF-8 документы; неподдерживаемый или неполный разбор fail-closed оставляет
-item человеку. Недоверенный Inbox не запускается через coding executor: отдельный
+item человеку — с названной причиной по каждому вложению (канал даёт машинный код, фразу
+собирает `lib/inbox/skip-reason.js`) и возможностью поставить задачу вручную через
+пояснение оператора, которое уходит в тот же триаж. Недоверенный Inbox не запускается
+через coding executor: отдельный
 `runUntrusted` не имеет tools/workspace/MCP/session, а visual realpath проверяется внутри
 server-owned media cache и превращается в media type + base64 до границы provider-а.
 Provider/модель без такого transport или image capability остаются fail-closed и не дают

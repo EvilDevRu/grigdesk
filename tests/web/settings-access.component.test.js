@@ -709,3 +709,32 @@ test('ACCESS-WEB-16: старый accessGateway не раскрывает мас
   assert.equal(wrapper.find('#gateway-settings').exists(), false);
   assert.match(wrapper.get('[data-testid="access-route-internet"]').text(), /Не настроен/);
 });
+
+test('ACCESS-WEB-17: мастер явно различает права Cloudflare и объясняет SSH-отпечаток', async (t) => {
+  const { wrapper, flushPromises } = await mountSettingsAccess(t, {
+    gateway: {
+      setup: {
+        domain: 'cockpit.example.com', gateway: '203.0.113.10', sshPort: 22,
+        sshUser: 'root', dns: 'cloudflare',
+      },
+      job: null,
+      publicDomain: 'cockpit.example.com',
+    },
+  });
+
+  await wrapper.get('[data-testid="gateway-details-toggle"]').trigger('click');
+  await flushPromises();
+  const gateway = wrapper.get('#gateway-settings');
+  assert.match(gateway.text(), /Zone → Zone → Read/);
+  assert.match(gateway.text(), /Zone → DNS → Edit/);
+  assert.match(gateway.text(), /Zone → Zone → Edit.*права менять DNS/);
+
+  const probe = gateway.findAll('button').find((button) => button.text() === 'Проверить сервер');
+  assert.ok(probe);
+  await probe.trigger('click');
+  await flushPromises();
+  assert.match(gateway.text(), /ключа самого VPS \(SSH host key\)/);
+  assert.match(gateway.text(), /веб-консоль\/VNC/);
+  assert.match(gateway.text(), /ssh_host_\*_key\.pub/);
+  assert.match(gateway.text(), /SHA256/);
+});

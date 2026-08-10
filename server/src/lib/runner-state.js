@@ -144,6 +144,24 @@ export function activeRunnerReason(runner, attempts = []) {
 }
 
 /**
+ * Расход токенов запуска. Пишет его runner-launcher методом `usage` раннера, и
+ * метод этот опциональный: у kimi ACP-мост расхода не публикует вовсе. Поэтому
+ * отсутствие ключей означает «не знаем», а не «ход был бесплатным», и наружу
+ * уходит null — нулями такую разницу не выразить.
+ */
+function runAttemptTokens(meta) {
+  const num = (value) => (/^\d+$/.test(value || '') ? Number(value) : null);
+  const tokens = {
+    in: num(meta.TOKENS_IN),
+    out: num(meta.TOKENS_OUT),
+    cacheRead: num(meta.TOKENS_CACHE_READ),
+    cacheWrite: num(meta.TOKENS_CACHE_WRITE),
+    costUsd: /^\d+(\.\d+)?$/.test(meta.COST_USD || '') ? Number(meta.COST_USD) : null,
+  };
+  return Object.values(tokens).some((value) => value != null) ? tokens : null;
+}
+
+/**
  * История реально стартовавших процессов этапа. meta.env пишет runner-launcher;
  * это диагностические данные, поэтому битый/исчезнувший run не ломает весь граф.
  */
@@ -171,6 +189,7 @@ export async function readRunnerAttempts(stateDir, task, stage) {
         result: meta.RESULT_CLASS || null,
         rc: /^-?\d+$/.test(meta.RC || '') ? Number(meta.RC) : null,
         source: meta.SOURCE || null,
+        tokens: runAttemptTokens(meta),
       });
     } catch { /* незавершённый запуск ещё мог не записать meta.env */ }
   }));

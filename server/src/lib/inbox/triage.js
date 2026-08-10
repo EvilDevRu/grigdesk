@@ -20,6 +20,7 @@ export const INBOX_TRIAGE_LIMITS = Object.freeze({
   attachmentBytes: 20 * 1024 * 1024,
   attachmentTotalBytes: 80 * 1024 * 1024,
   statements: 10,
+  operatorNote: 4_000,
 });
 export const INBOX_AUTO_MAX_AGE_MS = 86_400_000;
 
@@ -163,7 +164,7 @@ export async function loadInboxVisualInputs(visualPaths, { config = {}, fsImpl =
   return { ok: true, images };
 }
 
-function promptContext(item, attachmentAnalysis, { numbered = false } = {}) {
+function promptContext(item, attachmentAnalysis, { numbered = false, operatorNote = '' } = {}) {
   const messages = visibleInboxMessages(item?.messages || []);
   const transcript = inboxTranscript(messages, {
     limit: INBOX_TRIAGE_LIMITS.transcript,
@@ -190,11 +191,23 @@ function promptContext(item, attachmentAnalysis, { numbered = false } = {}) {
         'Обязательно изучи сами изображения перед решением.',
       ]
       : [],
+    // Пояснение приходит не из канала, а от оператора кокпита: он посмотрел то,
+    // что машина прочитать не смогла (видео сверх лимита Telegram, чужой формат),
+    // и пересказал суть. Для модели это самый достоверный кусок входа, и сказать
+    // об этом надо прямо — иначе она уравняет его с болтовнёй в чате.
+    operatorBlock: text(operatorNote)
+      ? [
+        '',
+        'Пояснение оператора кокпита (он видел вложения, которые не удалось разобрать):',
+        text(operatorNote).slice(0, INBOX_TRIAGE_LIMITS.operatorNote),
+        'Это достоверный источник: опирайся на него наравне с текстом обращения.',
+      ]
+      : [],
   };
 }
 
-export function buildInboxTriagePrompt(item, { attachmentAnalysis = null } = {}) {
-  const ctx = promptContext(item, attachmentAnalysis);
+export function buildInboxTriagePrompt(item, { attachmentAnalysis = null, operatorNote = '' } = {}) {
+  const ctx = promptContext(item, attachmentAnalysis, { operatorNote });
   return {
     system: [
       'Ты разбираешь обращение из рабочего канала и решаешь, нужна ли по нему задача.',
@@ -204,6 +217,11 @@ export function buildInboxTriagePrompt(item, { attachmentAnalysis = null } = {})
       'reason (одно краткое предложение с причиной решения).',
       'Ничего не додумывай. Благодарность, разговор или вопрос без задачи — kind "none".',
       'Если не уверен, снижай confidence: обращение останется человеку.',
+      // Ручной путь: решение «задача нужна» уже принято человеком, модель здесь
+      // формулирует постановку, а не голосует заново.
+      ...(text(operatorNote)
+        ? ['Оператор уже решил, что задача нужна: сформулируй её из обращения и пояснения.']
+        : []),
     ].join('\n'),
     user: [
       `Канал: ${ctx.label}. Источник: ${ctx.source}.`,
@@ -213,6 +231,7 @@ export function buildInboxTriagePrompt(item, { attachmentAnalysis = null } = {})
       ctx.transcript,
       ...ctx.attachmentBlock,
       ...ctx.visualBlock,
+      ...ctx.operatorBlock,
     ].join('\n'),
   };
 }
@@ -489,6 +508,7 @@ export async function runInboxTriage({
   log = console,
   signal,
   mode = 'verdict',
+  operatorNote = '',
 } = {}) {
   if (!['verdict', 'plan'].includes(mode)) return { ok: false, error: 'invalid_triage_mode' };
   const analysis = safeAttachmentAnalysis(attachmentAnalysis);
@@ -518,7 +538,9 @@ export async function runInboxTriage({
   }
   const prompt = mode === 'plan'
     ? buildInboxTriagePlanPrompt(item, { attachmentAnalysis: analysis })
-    : buildInboxTriagePrompt(item, { attachmentAnalysis: analysis });
+    // Пояснение оператора существует только у ручного пути: разбивать карточку
+    // на поводы человек в этот момент уже не просит, он ставит одну задачу.
+    : buildInboxTriagePrompt(item, { attachmentAnalysis: analysis, operatorNote });
   let output;
   try {
     output = await executor.runUntrusted({
