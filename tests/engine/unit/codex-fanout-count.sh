@@ -6,16 +6,15 @@ source "$FACTORY_HOME/lib/runners/codex.sh"
 # В отличие от kimi (KIMI.md: работа субагентов не видна в stream-json вовсе)
 # codex публикует протокол совместной работы прямо в поток: item типа
 # `collab_tool_call` с sender_thread_id и receiver_thread_ids. Конверты ниже —
-# дословная форма живой телеметрии (замер 222 прогонов, 2026-08-07), поэтому
-# счётчик проверяется на том, что действительно приходит от CLI, а не на
-# придуманном формате.
+# форма протокола CLI, сведённая к синтетическим идентификаторам, поэтому счётчик
+# проверяется на реальной структуре событий без копирования живой телеметрии.
 
 run_dir="$TEST_ROOT/run"
 mkdir -p "$run_dir"
 events="$run_dir/events.jsonl"
 
 collab() { # tool, статус, получатели
-  printf '{"type":"item.completed","item":{"id":"item_%s","type":"collab_tool_call","tool":"%s","sender_thread_id":"019fcdd9-461d-7611-a37a-1a26e44a67ae","receiver_thread_ids":[%s],"prompt":null,"agents_states":{},"status":"%s"}}\n' \
+  printf '{"type":"item.completed","item":{"id":"item_%s","type":"collab_tool_call","tool":"%s","sender_thread_id":"00000000-0000-4000-8000-000000000031","receiver_thread_ids":[%s],"prompt":null,"agents_states":{},"status":"%s"}}\n' \
     "$RANDOM" "$1" "$3" "$2"
 }
 
@@ -23,7 +22,7 @@ collab() { # tool, статус, получатели
 # Ровно то, что видно на всех живых прогонах: collab-вызовы есть, получателей нет.
 test_note "ход без делегирования"
 {
-  printf '{"type":"thread.started","thread_id":"019fcdd9-461d-7611-a37a-1a26e44a67ae"}\n'
+  printf '{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000031"}\n'
   printf '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls"}}\n'
   collab wait completed ''
   collab wait completed ''

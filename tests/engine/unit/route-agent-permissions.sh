@@ -8,9 +8,9 @@ PROFILE_AGENT_CWD="$repo"
 PROFILE_AGENT_DIRS="$repo"
 profile_stage_agent_allow() {
   case "$1" in
-    SHIP) printf '%s\n' 'Bash(gh pr create:*)' 'Bash(b24:*)' ;;
-    HUNT_ACCESS) printf '%s\n' 'Bash(hunt-evidence.sh:*)' ;;
-    VERIFY) printf '%s\n' 'Bash(hunt-evidence.sh:*)' 'Bash(stand-facts.sh:*)' ;;
+    SHIP) printf '%s\n' 'Bash(profile-deliver.sh:*)' 'Bash(tracker-update.sh:*)' ;;
+    HUNT_ACCESS) printf '%s\n' 'Bash(profile-evidence.sh:*)' ;;
+    VERIFY) printf '%s\n' 'Bash(profile-evidence.sh:*)' 'Bash(profile-verify.sh:*)' ;;
   esac
   return 0
 }
@@ -93,13 +93,13 @@ fi
 
 ship_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write _agent_settings SHIP)
 ship_settings=$(cat "$ship_settings")
-assert_contains "$ship_settings" '"Bash(gh pr create:*)"' \
+assert_contains "$ship_settings" '"Bash(profile-deliver.sh:*)"' \
   "delivery node receives its profile-owned command"
-assert_contains "$ship_settings" '"Bash(b24:*)"' \
+assert_contains "$ship_settings" '"Bash(tracker-update.sh:*)"' \
   "delivery node receives its tracker command"
 case "$settings" in
-  *'Bash(gh pr create:*)'*)
-    test_fail "state-only review has no delivery grant" "gh leaked to REVIEW"
+  *'Bash(profile-deliver.sh:*)'*)
+    test_fail "state-only review has no delivery grant" "delivery command leaked to REVIEW"
     ;;
   *)
     test_ok "state-only review has no delivery grant"
@@ -108,10 +108,10 @@ esac
 
 hunt_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY=state-only _agent_settings HUNT_ACCESS)
 hunt_settings=$(cat "$hunt_settings")
-assert_contains "$hunt_settings" '"Bash(hunt-evidence.sh:*)"' \
+assert_contains "$hunt_settings" '"Bash(profile-evidence.sh:*)"' \
   "hunt lens receives its trusted evidence command"
 case "$hunt_settings" in
-  *'gh pr create'*|*'Bash(b24:*)'*)
+  *'profile-deliver.sh'*|*'Bash(tracker-update.sh:*)'*)
     test_fail "hunt lens has no delivery grant" "$hunt_settings"
     ;;
   *)
@@ -121,7 +121,7 @@ esac
 
 verify_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY=state-only _agent_settings VERIFY)
 verify_settings=$(cat "$verify_settings")
-assert_contains "$verify_settings" '"Bash(stand-facts.sh:*)"' \
-  "verify receives the trusted stand-facts command"
+assert_contains "$verify_settings" '"Bash(profile-verify.sh:*)"' \
+  "verify receives the trusted profile verification command"
 
 finish_tests

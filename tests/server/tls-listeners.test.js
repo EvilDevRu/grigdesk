@@ -22,7 +22,7 @@ const websocketPlugin = requireFromServer('@fastify/websocket');
 const WebSocket = requireFromServer('ws');
 
 test('TLS-SCOPE-01: решение по запросу на http-сокете', () => {
-  const lan = { remoteAddress: '192.168.3.50', routeUrl: '/api/tasks', httpsUp: true };
+  const lan = { remoteAddress: '192.168.50.20', routeUrl: '/api/tasks', httpsUp: true };
 
   // https не поднялся — всё работает как раньше, иначе кокпит пропадает из сети целиком.
   assert.equal(decideHttpRequest({ ...lan, httpsUp: false }), 'pass');
@@ -50,14 +50,14 @@ test('TLS-SCOPE-01: решение по запросу на http-сокете', 
 });
 
 test('TLS-SCOPE-02: приватность адреса и хост редиректа', () => {
-  for (const addr of ['10.1.2.3', '172.16.0.1', '172.31.255.254', '192.168.3.107', '127.0.0.1', '::1', 'fd00::1']) {
+  for (const addr of ['10.1.2.3', '172.16.0.1', '172.31.255.254', '192.168.50.10', '127.0.0.1', '::1', 'fd00::1']) {
     assert.equal(isPrivateAddress(addr), true, addr);
   }
   for (const addr of ['8.8.8.8', '172.32.0.1', '203.0.113.9', '2a00:1450::1', '', null]) {
     assert.equal(isPrivateAddress(addr), false, String(addr));
   }
 
-  assert.equal(redirectHost('192.168.3.107:8140'), '192.168.3.107');
+  assert.equal(redirectHost('192.168.50.10:8140'), '192.168.50.10');
   assert.equal(redirectHost('cockpit.local'), 'cockpit.local');
   assert.equal(redirectHost('[fd00::1]:8140'), '[fd00::1]');
   // Заголовок Host приходит от клиента: мусор в Location превращает редирект в чужой сайт.
@@ -76,11 +76,11 @@ test('TLS-SCOPE-03: хук редиректит из сети и пропуск�
   const fromLan = await app.inject({
     method: 'GET',
     url: '/api/tasks?a=1',
-    remoteAddress: '192.168.3.50',
-    headers: { host: '192.168.3.107:8140' },
+    remoteAddress: '192.168.50.20',
+    headers: { host: '192.168.50.10:8140' },
   });
   assert.equal(fromLan.statusCode, 301);
-  assert.equal(fromLan.headers.location, 'https://192.168.3.107:8143/api/tasks?a=1');
+  assert.equal(fromLan.headers.location, 'https://192.168.50.10:8143/api/tasks?a=1');
 
   const local = await app.inject({
     method: 'GET',
@@ -93,8 +93,8 @@ test('TLS-SCOPE-03: хук редиректит из сети и пропуск�
   const ca = await app.inject({
     method: 'GET',
     url: '/api/settings/tls/ca.crt',
-    remoteAddress: '192.168.3.50',
-    headers: { host: '192.168.3.107:8140' },
+    remoteAddress: '192.168.50.20',
+    headers: { host: '192.168.50.10:8140' },
   });
   assert.equal(ca.statusCode, 200, 'корень обязан отдаваться по http из сети — иначе его нечем поставить');
 
@@ -103,8 +103,8 @@ test('TLS-SCOPE-03: хук редиректит из сети и пропуск�
   const degraded = await app.inject({
     method: 'GET',
     url: '/api/tasks',
-    remoteAddress: '192.168.3.50',
-    headers: { host: '192.168.3.107:8140' },
+    remoteAddress: '192.168.50.20',
+    headers: { host: '192.168.50.10:8140' },
   });
   assert.equal(degraded.statusCode, 200);
 });
@@ -116,7 +116,7 @@ test('TLS-SCOPE-04: второй сокет несёт тот же роутер 
     dir: path.join(root, 'state', 'tls'),
     caDir: path.join(root, 'ca'),
   });
-  await localTls.generate({ addresses: ['192.168.3.107'] });
+  await localTls.generate({ addresses: ['192.168.50.10'] });
   const pair = localTls.load();
   const ca = localTls.caCertificate().pem;
 
@@ -172,7 +172,7 @@ test('TLS-SCOPE-05: занятый порт не роняет процесс —
     dir: path.join(root, 'state', 'tls'),
     caDir: path.join(root, 'ca'),
   });
-  await localTls.generate({ addresses: ['192.168.3.107'] });
+  await localTls.generate({ addresses: ['192.168.50.10'] });
   const pair = localTls.load();
 
   // Кто-то уже сидит на этом порту (соседний экземпляр, недобитый прошлый процесс).
@@ -205,7 +205,7 @@ test('TLS-SRC-01: тумблер режима решает, поднимать �
     dir: path.join(root, 'state', 'tls'),
     caDir: path.join(root, 'ca'),
   });
-  await localTls.generate({ addresses: ['192.168.3.107'] });
+  await localTls.generate({ addresses: ['192.168.50.10'] });
 
   // Режим включён — берём выпущенное из «Настроек».
   const on = loadTlsSource({ keyPath: '', certPath: '', modeEnabled: true, localTls });
@@ -229,7 +229,7 @@ test('TLS-SRC-02: сертификат из окружения тумблеро�
   t.after(() => rm(root, { recursive: true, force: true }));
   const dir = path.join(root, 'state', 'tls');
   const localTls = new LocalTls({ dir, caDir: path.join(root, 'ca') });
-  await localTls.generate({ addresses: ['192.168.3.107'] });
+  await localTls.generate({ addresses: ['192.168.50.10'] });
 
   // COCKPIT_TLS_KEY/CERT — настройка машины, а не режим в UI: галка в браузере её не отменяет.
   const env = loadTlsSource({

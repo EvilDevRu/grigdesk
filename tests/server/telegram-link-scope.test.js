@@ -49,7 +49,7 @@ test('чат без правила не разворачивается: not_allo
   // Причина обязана быть словами: нераскрытая ссылка показывается человеку с ней.
   assert.match(priv.message, /не привязан/i);
 
-  const pub = checkScope(list, targetOfLink(one('https://t.me/random_chat/7')));
+  const pub = checkScope(list, targetOfLink(one('https://t.me/example_random/7')));
   assert.equal(pub.allowed, false);
   assert.equal(pub.reason, 'not_allowed');
 });
@@ -117,8 +117,8 @@ test('тема форума решает доступ сама: своя тем�
 });
 
 test('имя чата сверяется без учёта регистра и «собаки»', () => {
-  const list = rules({ project: 'alpha', username: '@Cockpit_Bugs' });
-  const verdict = checkScope(list, targetOfLink(one('https://t.me/cockpit_BUGS/1287')));
+  const list = rules({ project: 'alpha', username: '@Example_Team' });
+  const verdict = checkScope(list, targetOfLink(one('https://t.me/example_TEAM/1287')));
   assert.equal(verdict.allowed, true);
 });
 
@@ -126,8 +126,8 @@ test('решает фактический чат резолва, а не фор�
   // За `t.me/<имя>/<N>` стоит и пост канала, и сообщение группы обсуждения —
   // это разные чаты. Совпадения по имени из ссылки мало: доступ решает тот чат,
   // в котором сообщение нашлось на самом деле.
-  const list = rules({ project: 'alpha', username: 'cockpit_bugs' });
-  const link = one('https://t.me/cockpit_bugs/900');
+  const list = rules({ project: 'alpha', username: 'example_team' });
+  const link = one('https://t.me/example_team/900');
   assert.equal(link.ambiguous, true);
   assert.equal(checkScope(list, targetOfLink(link)).allowed, true);
 
@@ -140,7 +140,7 @@ test('решает фактический чат резолва, а не фор�
   // Обратный случай: чат привязан по id, а ссылка пришла публичной формой.
   // Найденное сообщение знает обе стороны адреса, поэтому правило совпадает.
   const byId = rules({ project: 'alpha', chatId: BUGS });
-  const found = message({ chatId: BUGS, chatUsername: 'cockpit_bugs', messageId: 900 });
+  const found = message({ chatId: BUGS, chatUsername: 'example_team', messageId: 900 });
   assert.equal(checkScope(byId, targetOfMessage(found)).allowed, true);
 });
 

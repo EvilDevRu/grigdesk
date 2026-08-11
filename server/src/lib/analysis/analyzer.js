@@ -242,7 +242,7 @@ export class Analyzer {
   }
 
   _pump() {
-    // Конкуренция настраиваемая: очередь в 70 задач при одном воркере — это часы.
+    // Конкуренция настраиваемая: большая очередь при одном воркере обрабатывается часами.
     const max = Math.max(1, Number(this.config.analysisConcurrency) || 1);
     this._active = this._active || 0;
     while (this._active < max && this._queue.length) {

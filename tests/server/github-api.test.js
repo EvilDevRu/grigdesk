@@ -19,8 +19,8 @@ import {
 } from '../../server/src/lib/github/api.js';
 
 const TOKEN = 'github_pat_11AA00_reallySecretValue9876';
-const OWNER = 'EvilDevRu';
-const REPO = 'ai-cockpit';
+const OWNER = 'example-org';
+const REPO = 'example-repo';
 const SECRET = 'server-generated-webhook-secret';
 
 function jsonResponse(payload, status = 200, headers = {}) {

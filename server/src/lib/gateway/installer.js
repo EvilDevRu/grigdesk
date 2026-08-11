@@ -55,7 +55,7 @@ const DNS_WAIT_MS = 5 * 60_000;
 
 // `node:dns`/c-ares отправляет запросы без EDNS. У публичных резолверов такой запрос может
 // попасть в отдельный отрицательный кеш, хотя обычный браузерный/DoH-запрос и authoritative DNS
-// уже видят новую запись (реальный случай: SOA держал старый NXDOMAIN 30 минут, а визард ждал 5).
+// уже видят новую запись. Тогда визард ошибочно ждёт истечения старого SOA TTL.
 // Поэтому публичное состояние проверяем тем же современным путём, которым пользуются внешние
 // клиенты: DNS-over-HTTPS у двух независимых провайдеров.
 const DNS_DOH_ENDPOINTS = [
@@ -64,6 +64,11 @@ const DNS_DOH_ENDPOINTS = [
 ];
 const DNS_QUERY_TIMEOUT_MS = 5_000;
 const DNS_TYPE_CODES = { A: 1, AAAA: 28 };
+
+/** Диагностика туннельных юнитов обязана проверять gate даже при opt-out сервера. */
+export function forcedVpnGateEnv(env = {}) {
+  return { ...env, COCKPIT_REQUIRE_VPN: '1' };
+}
 
 const STEPS = [
   { key: 'keys', title: 'Ключи доступа' },
@@ -641,12 +646,15 @@ export function createGatewayInstaller({ config, onEvent = () => {}, log = conso
       // Туннель ходит ЧЕРЕЗ VPN и стоит на тех же воротах, что кокпит, поэтому первый вопрос —
       // жив ли VPN. Спрашиваем те же ворота, что и юнит: иначе ожидание маршрута читается как
       // поломка, и человек идёт чинить работающее.
-      const gate = await runLocal(path.join(config.rootDir, 'deploy', 'require-vpn.sh'), [], { timeoutMs: 15_000 });
+      const gate = await runLocal(path.join(config.rootDir, 'deploy', 'require-vpn.sh'), [], {
+        timeoutMs: 15_000,
+        env: forcedVpnGateEnv(process.env),
+      });
       const why = gate.code === 0
         ? 'VPN на месте, значит дело не в нём — смотри `journalctl -u cockpit-tunnel-app -n 50`.'
-        : `VPN сейчас не поднят (${gate.stderr.trim() || gate.stdout.trim() || `код ${gate.code}`}). `
-          + 'Туннель ходит через него намеренно и ждёт маршрута — юниты поднимутся сами, как только '
-          + 'появится VPN. Ничего в его настройках менять не нужно.';
+        : `VPN-ворота не открылись (${gate.stderr.trim() || gate.stdout.trim() || `код ${gate.code}`}). `
+          + 'Если VPN ещё поднимается, юниты дождутся маршрута сами. Если он уже работает, но использует '
+          + 'не TUN-интерфейс, укажи COCKPIT_VPN_IFACE в корневом .env; сам VPN перенастраивать не нужно.';
       throw new GatewaySetupError('tunnel_units_down', `Юниты не поднялись: ${dead.join(', ')}. ${why}`);
     }
     stepState('brain', 'ok', 'туннели подняты');
@@ -794,11 +802,10 @@ export function createGatewayInstaller({ config, onEvent = () => {}, log = conso
         stepState('verify', 'skip', 'после ручного шага — кнопкой «Проверить связь»');
       }
 
-      // Шага «добавь в v2rayN правило <адрес шлюза> → direct» здесь БЫЛО и больше нет —
-      // не возвращать. Решение человека: туннель ходит через VPN, VPN важнее скорости
-      // туннеля. Правка чужого конфига ради латентности того не стоит, а цена принята —
-      // двойной крюк до VPS и падение туннеля вместе с VPN (юниты его же и ждут воротами
-      // require-vpn.sh, см. deploy/gateway/brain-setup.sh). Пустой manual — это успех
+      // Шага «добавь direct-bypass для адреса шлюза» здесь нет и быть не должно:
+      // туннель подчиняется настроенной VPN-policy хоста. Правка чужого сетевого конфига
+      // ради латентности нарушила бы эту границу; готовности маршрута юниты ждут через
+      // require-vpn.sh (см. deploy/gateway/brain-setup.sh). Пустой manual — это успех
       // визарда: карточка «Осталось сделать руками» тогда не показывается вовсе.
 
       job.state = 'done';

@@ -1,7 +1,6 @@
 // Кольцо контекста показывало цифру С ПРОШЛОГО ХОДА. Пока ходы короткие, разница
 // незаметна; но автокомпакт CLI срабатывает НА ГРАНИЦЕ хода, и после него кольцо весь
-// оставшийся ход горело красным по контексту, которого уже нет (замер на живом чате:
-// 448 417 показанных против 126 135 реальных, красное вместо зелёного).
+// оставшийся ход могло гореть красным по контексту, которого уже нет.
 //
 // Живой размер приезжает рантайм-полем `liveContext` (SSE `chat-progress` + сверка
 // `GET /api/chat/active`). Именно рантайм: `contextTokens` уходит в историю, и запись
@@ -15,7 +14,7 @@ function fixture() {
   return chatStoreFixture({
     sessions: [{
       id: 'c1', taskId: null, title: 'Чат', messages: [], sessionId: 'sess-1',
-      contextTokens: 448417, sending: false, compacting: false, steps: [], draft: '',
+      contextTokens: 180000, sending: false, compacting: false, steps: [], draft: '',
     }],
   });
 }
@@ -25,10 +24,10 @@ test('CTX-01: chat-progress приносит живой размер конте�
   const sse = sseOf(chat);
   const sess = chat.sessions[0];
 
-  sse('chat-progress', { chatKey: 'c1', tokens: 120, contextTokens: 126135 });
+  sse('chat-progress', { chatKey: 'c1', tokens: 120, contextTokens: 60000 });
 
-  assert.equal(sess.liveContext, 126135, 'кольцо обязано увидеть падение сразу');
-  assert.equal(sess.contextTokens, 448417, 'сохранённая цифра меняется только ответом хода');
+  assert.equal(sess.liveContext, 60000, 'кольцо обязано увидеть падение сразу');
+  assert.equal(sess.contextTokens, 180000, 'сохранённая цифра меняется только ответом хода');
   assert.equal(sess.sending, true);
 });
 
@@ -41,7 +40,7 @@ test('CTX-02: исполнитель без замера контекста ни
   sse('chat-progress', { chatKey: 'c1', tokens: 42 });
 
   assert.ok(!sess.liveContext, 'живого замера нет — кольцо остаётся на сохранённой цифре');
-  assert.equal(sess.contextTokens, 448417);
+  assert.equal(sess.contextTokens, 180000);
 });
 
 test('CTX-03: новый ход начинается без чужого замера', async () => {
@@ -49,7 +48,7 @@ test('CTX-03: новый ход начинается без чужого зам�
   const sse = sseOf(chat);
   const sess = chat.sessions[0];
 
-  sse('chat-progress', { chatKey: 'c1', tokens: 10, contextTokens: 126135 });
+  sse('chat-progress', { chatKey: 'c1', tokens: 10, contextTokens: 60000 });
   sse('chat-turn-start', { chatKey: 'c1', at: 2 });
 
   assert.equal(sess.liveContext, 0, 'замер прошлого хода к новому отношения не имеет');

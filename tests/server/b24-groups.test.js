@@ -13,13 +13,13 @@ const Fastify = requireFromServer('fastify');
 
 test('нормализация проектов приводит id к числу, чистит мусор и сортирует имена', () => {
   assert.deepEqual(B24Client.normalizeGroups([
-    { id: '32', name: 'arsenkin.ru', type: 'project' },
+    { id: '101', name: 'Проект Альфа', type: 'project' },
     { ID: '41', NAME: ' Магазин ', TYPE: 'PROJECT' },
     { id: '0', name: 'Все проекты', type: 'project' },
     { id: 'oops', name: 'Мусор' },
   ]), [
     { id: 41, name: 'Магазин', type: 'project' },
-    { id: 32, name: 'arsenkin.ru', type: 'project' },
+    { id: 101, name: 'Проект Альфа', type: 'project' },
   ]);
 });
 
@@ -65,7 +65,7 @@ async function appWithGroups(t, listGroups) {
 }
 
 test('GET /api/b24/groups отдаёт узкий справочник id + имя', async (t) => {
-  const groups = [{ id: 32, name: 'arsenkin.ru', type: 'project' }];
+  const groups = [{ id: 101, name: 'Проект Альфа', type: 'project' }];
   const app = await appWithGroups(t, async () => groups);
   const response = await app.inject({ method: 'GET', url: '/api/b24/groups' });
 

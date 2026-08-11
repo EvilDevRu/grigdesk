@@ -76,7 +76,7 @@ async function compilePipelineView() {
 function makeFixture({ workspaceMode = 'shared', fePort = 13000, sandbox = null } = {}) {
   const factoryTask = {
     task: 90002,
-    profile: 'parser',
+    profile: 'project-alpha',
     route: 'feature',
     readOnly: false,
     workspaceMode,

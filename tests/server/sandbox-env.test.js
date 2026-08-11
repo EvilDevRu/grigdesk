@@ -18,9 +18,9 @@ function genericEnv(root) {
   return {
     WORKSPACE_MODE: 'isolated',
     REPO_COUNT: '1',
-    REPO_0_NAME: 'rdesigner',
-    REPO_0_SOURCE: path.join(root, 'rdesigner-source'),
-    REPO_0_WT: path.join(root, 'rdesigner-worktree'),
+    REPO_0_NAME: 'project-alpha',
+    REPO_0_SOURCE: path.join(root, 'project-alpha-source'),
+    REPO_0_WT: path.join(root, 'project-alpha-worktree'),
     REPO_0_BRANCH: 'factory/t9123',
     // Эти значения не имеют права стать fallback при заявленном generic-формате.
     BE_WT: path.join(root, 'wrong-be'),
@@ -41,9 +41,9 @@ test('sandbox env: single-repo generic и shared mode разбираются т�
   const generic = parseSandboxRepositories(genericEnv('/tmp/cockpit-generic'));
   assert.equal(generic.kind, 'generic');
   assert.deepEqual(generic.repos, [{
-    name: 'rdesigner',
-    source: '/tmp/cockpit-generic/rdesigner-source',
-    path: '/tmp/cockpit-generic/rdesigner-worktree',
+    name: 'project-alpha',
+    source: '/tmp/cockpit-generic/project-alpha-source',
+    path: '/tmp/cockpit-generic/project-alpha-worktree',
     branch: 'factory/t9123',
   }]);
 
@@ -52,7 +52,7 @@ test('sandbox env: single-repo generic и shared mode разбираются т�
   const shared = parseSandboxRepositories({
     ...genericEnv('/tmp/cockpit-shared'),
     WORKSPACE_MODE: 'shared',
-    REPO_0_SOURCE: '/tmp/cockpit-shared/rdesigner-worktree',
+    REPO_0_SOURCE: '/tmp/cockpit-shared/project-alpha-worktree',
   });
   assert.equal(shared.workspaceMode, 'shared');
 
@@ -69,9 +69,9 @@ test('sandbox env: single-repo generic и shared mode разбираются т�
 test('sandbox env: повреждённый generic fail-closed и не откатывается к BE_WT', () => {
   const malformed = parseSandboxRepositories({
     REPO_COUNT: '1',
-    REPO_0_NAME: 'rdesigner',
-    REPO_0_SOURCE: '/tmp/rdesigner-source',
-    REPO_0_WT: '/tmp/rdesigner-worktree',
+    REPO_0_NAME: 'project-alpha',
+    REPO_0_SOURCE: '/tmp/project-alpha-source',
+    REPO_0_WT: '/tmp/project-alpha-worktree',
     BE_WT: '/tmp/legacy-must-not-open',
   });
   assert.equal(malformed.kind, 'invalid');
@@ -82,7 +82,7 @@ test('sandbox env: повреждённый generic fail-closed и не отка
     { ...genericEnv('/tmp/b'), REPO_COUNT: '01' },
     { ...genericEnv('/tmp/c'), REPO_0_WT: '../relative' },
     { ...genericEnv('/tmp/d'), REPO_0_SOURCE: '../relative' },
-    { ...genericEnv('/tmp/e'), REPO_0_SOURCE: '/tmp/e/rdesigner-worktree' },
+    { ...genericEnv('/tmp/e'), REPO_0_SOURCE: '/tmp/e/project-alpha-worktree' },
   ]) {
     assert.equal(parseSandboxRepositories(env).kind, 'invalid');
   }
@@ -125,7 +125,7 @@ test('factory API отдаёт и диффит single-repo generic без BE/FE 
     url: '/api/tasks/9123/workspace',
   })).json();
   assert.deepEqual(workspace.repos, [{
-    name: 'rdesigner',
+    name: 'project-alpha',
     source: env.REPO_0_SOURCE,
     path: env.REPO_0_WT,
     branch: 'factory/t9123',
@@ -139,7 +139,7 @@ test('factory API отдаёт и диффит single-repo generic без BE/FE 
     url: '/api/tasks/9123/diff',
   })).json();
   assert.deepEqual(diff.repos.map((repo) => [repo.name, repo.path]), [
-    ['rdesigner', env.REPO_0_WT],
+    ['project-alpha', env.REPO_0_WT],
   ]);
 });
 
@@ -203,16 +203,16 @@ async function chatServer(t, root, env, calls) {
 test('task-chat берёт первый generic repo как cwd, остальные как add-dir', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-sandbox-chat-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const first = path.join(root, 'rdesigner-worktree');
+  const first = path.join(root, 'project-alpha-worktree');
   const second = path.join(root, 'assets-worktree');
-  const firstSource = path.join(root, 'rdesigner-source');
+  const firstSource = path.join(root, 'project-alpha-source');
   const secondSource = path.join(root, 'assets-source');
   await Promise.all([mkdir(first), mkdir(second)]);
   const calls = [];
   const app = await chatServer(t, root, {
     WORKSPACE_MODE: 'isolated',
     REPO_COUNT: '2',
-    REPO_0_NAME: 'rdesigner',
+    REPO_0_NAME: 'project-alpha',
     REPO_0_SOURCE: firstSource,
     REPO_0_WT: first,
     REPO_0_BRANCH: 'factory/t9123',
@@ -241,9 +241,9 @@ test('task-chat с повреждённым generic env не запускает�
   const app = await chatServer(t, root, {
     WORKSPACE_MODE: 'isolated',
     REPO_COUNT: '1',
-    REPO_0_NAME: 'rdesigner',
-    REPO_0_SOURCE: path.join(root, 'rdesigner-source'),
-    REPO_0_WT: path.join(root, 'rdesigner-worktree'),
+    REPO_0_NAME: 'project-alpha',
+    REPO_0_SOURCE: path.join(root, 'project-alpha-source'),
+    REPO_0_WT: path.join(root, 'project-alpha-worktree'),
     BE_WT: path.join(root, 'legacy-must-not-open'),
   }, calls);
 

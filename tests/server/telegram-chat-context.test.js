@@ -42,7 +42,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 
 const ME = {
   id: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
@@ -73,11 +73,11 @@ const logStub = () => ({ warn() {}, error() {}, info() {}, debug() {} });
 
 const TICKET = {
   schema: 1,
-  taskId: '8162',
-  title: 'Починить проведение чека',
+  taskId: '44',
+  title: 'Проверить обработку события',
   description: `Обсуждение: ${link(BUGS, 100)}`,
-  acceptanceCriteria: ['Чек проводится'],
-  sourceUrl: 'http://127.0.0.1:8140/api/tasks/8162',
+  acceptanceCriteria: ['Событие обработано'],
+  sourceUrl: 'http://127.0.0.1:8140/api/tasks/44',
 };
 
 /**
@@ -182,7 +182,7 @@ async function fixture(t, {
   });
 
   return {
-    async send(task = 8162, message = 'что там по задаче?') {
+    async send(task = 44, message = 'что там по задаче?') {
       const res = await app.inject({
         method: 'POST',
         url: `/api/tasks/${task}/chat`,
@@ -248,7 +248,7 @@ test('потолок описания тикета не съедает обсу�
   });
 
   const sent = await send();
-  assert.match(sent, /\[описание обрезано; полный текст: .*t8162\.ticket\.json\]/);
+  assert.match(sent, /\[описание обрезано; полный текст: .*t44\.ticket\.json\]/);
   assert.match(sent, new RegExp(SECRET), 'обрезка описания унесла с собой обсуждение');
 });
 

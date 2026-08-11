@@ -788,7 +788,7 @@ watch(taskId, (id) => {
                   </label>
                   <textarea id="launch-instrumentation" v-model="launchForm.instrumentationFiles" rows="3"
                             spellcheck="false" class="mono"
-                            placeholder="backend:app/Path/To/File.php"></textarea>
+                            placeholder="service:src/path/file.ext"></textarea>
                   <div class="lrow">
                     <label class="llbl" for="launch-diagnosis-kind">Тип диагноза</label>
                     <select id="launch-diagnosis-kind" v-model="launchForm.diagnosisKind" class="lsel">

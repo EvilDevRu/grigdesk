@@ -103,7 +103,7 @@ function makeFixture({
 } = {}) {
   const factoryTask = {
     task: 42,
-    profile: 'arsenkin',
+    profile: 'project-alpha',
     route: 'feature',
     readOnly,
     daemonAlive,

@@ -527,7 +527,7 @@ export function buildCodexExecArgs({
 
 // TUI-команды Codex. `codex exec` слэш-текст отдаёт модели как обычный промпт, поэтому
 // весь список информационный (run: 'none'): исполнить их можно только в интерактивном
-// TUI самого CLI. Состав сверен с бинарём codex-cli 0.145.0 (гейт 2026-08-06);
+// TUI самого CLI. Состав сверен contract gate с codex-cli 0.145.0;
 // /undo, /quit, /exit в этой версии отсутствуют.
 const CODEX_TUI_HINT = 'Исполняется только в TUI Codex';
 const CODEX_TUI_COMMANDS = [

@@ -236,10 +236,10 @@ test('TG-UI-02: раскрытая ветка показывает чат, те�
   const wrapper = await mountModal(t, {
     id: 42,
     title: 'Задача 42',
-    description: 'Обсуждали тут: https://t.me/team/100/55',
+    description: 'Обсуждали тут: https://t.me/example_team/100/55',
     telegram: {
       links: [{
-        url: 'https://t.me/team/100/55',
+        url: 'https://t.me/example_team/100/55',
         ok: true,
         chat: { title: 'Команда', username: 'team' },
         thread: 100,
@@ -305,10 +305,10 @@ test('TG-UI-04: HTML из чужого чата не исполняется', as
   const wrapper = await mountModal(t, {
     id: 42,
     title: 'Задача 42',
-    description: 'ссылка https://t.me/team/1',
+    description: 'ссылка https://t.me/example_team/1',
     telegram: {
       links: [{
-        url: 'https://t.me/team/1',
+        url: 'https://t.me/example_team/1',
         ok: true,
         chat: { title: '<img src=x onerror="globalThis.__tgPwned=1">', username: '' },
         thread: 0,

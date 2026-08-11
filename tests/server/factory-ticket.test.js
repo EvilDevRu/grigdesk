@@ -28,20 +28,20 @@ const CONFIG = {
 
 const BASE = {
   task: '8200',
-  title: 'Починить экспорт',
-  description: 'Экспорт падает на больших выборках.',
+  title: 'Починить обработку данных',
+  description: 'Операция падает на больших выборках.',
   sourceUrl: 'https://portal.example.ru/company/personal/user/1/tasks/task/view/8200/',
 };
 
 test('TICKET-01: собранный тикет — ровно шесть полей валидатора движка', () => {
-  const ticket = buildTicket({ ...BASE, acceptanceCriteria: ['экспорт не падает'] });
+  const ticket = buildTicket({ ...BASE, acceptanceCriteria: ['операция не падает'] });
   assert.deepEqual(Object.keys(ticket).sort(), [
     'acceptanceCriteria', 'description', 'schema', 'sourceUrl', 'taskId', 'title',
   ]);
   assert.equal(ticket.schema, 1);
   // taskId именно строкой: TASK_RE валидатора работает по строке, число он отвергнет.
   assert.equal(ticket.taskId, '8200');
-  assert.deepEqual(ticket.acceptanceCriteria, ['экспорт не падает']);
+  assert.deepEqual(ticket.acceptanceCriteria, ['операция не падает']);
   // Сериализация ровно та, что уедет в файл: лишних полей объекта в ней нет.
   assert.equal(JSON.parse(serializeTicket({ ...ticket, лишнее: 1 })).лишнее, undefined);
 });
@@ -79,7 +79,7 @@ test('TICKET-05: уточнения и комментарии уезжают в 
       { title: '[Пусто]', text: '' },
     ],
   });
-  assert.match(ticket.description, /^Экспорт падает на больших выборках\./);
+  assert.match(ticket.description, /^Операция падает на больших выборках\./);
   assert.match(ticket.description, /\[Внутренние уточнения человека\]\nскрин в задаче неактуален/);
   assert.match(ticket.description, /\[Комментарии к задаче из трекера\]\n— Пётр: только для админов/);
   assert.doesNotMatch(ticket.description, /\[Пусто\]/);
@@ -152,19 +152,19 @@ test('ARGS-01c: work-time разбирается только как безоп�
 
 test('ARGS-01b: UI launch передаёт immutable debug и delivery inputs явными аргументами', () => {
   const args = routeStartArgs(CONFIG, {
-    task: '7802',
-    profile: 'arsenkin',
+    task: '42',
+    profile: 'project-alpha',
     route: 'debug',
-    ticketFile: '/state/tickets/t7802.ticket.json',
-    instrumentationFiles: ['backend:app/Api/Actions/Keywords/RestoreKeywordsAction.php'],
+    ticketFile: '/state/tickets/t42.ticket.json',
+    instrumentationFiles: ['service-a:src/handlers/restore-item.js'],
     diagnosisKind: 'data',
-    diagnosisSignal: 'после восстановления число фраз удваивается',
+    diagnosisSignal: 'после повторной операции число элементов удваивается',
     deliveryTargets: ['backend=master', 'frontend=main'],
   });
   assert.deepEqual(args.slice(-10), [
-    '--instrumentation-file', 'backend:app/Api/Actions/Keywords/RestoreKeywordsAction.php',
+    '--instrumentation-file', 'service-a:src/handlers/restore-item.js',
     '--diagnosis-kind', 'data',
-    '--diagnosis-signal', 'после восстановления число фраз удваивается',
+    '--diagnosis-signal', 'после повторной операции число элементов удваивается',
     '--delivery-target', 'backend=master',
     '--delivery-target', 'frontend=main',
   ]);
@@ -172,10 +172,10 @@ test('ARGS-01b: UI launch передаёт immutable debug и delivery inputs я
 
 test('ARGS-01d: publish launch разрешает task-comment явным флагом движку', () => {
   const args = routeStartArgs(CONFIG, {
-    task: '8166',
-    profile: 'arsenkin',
+    task: '47',
+    profile: 'project-alpha',
     route: 'feature',
-    ticketFile: '/state/tickets/t8166.ticket.json',
+    ticketFile: '/state/tickets/t47.ticket.json',
     deliveryTargets: ['backend=master', 'frontend=main'],
     taskComment: true,
   });
@@ -187,8 +187,8 @@ test('ARGS-01d: publish launch разрешает task-comment явным фла
     '--task-comment',
   ]);
   assert.equal(routeStartArgs(CONFIG, {
-    task: '8166', profile: 'arsenkin', route: 'hunt',
-    ticketFile: '/state/tickets/t8166.ticket.json',
+    task: '47', profile: 'project-alpha', route: 'hunt',
+    ticketFile: '/state/tickets/t47.ticket.json',
   }).includes('--task-comment'), false);
 });
 

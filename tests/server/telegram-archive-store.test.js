@@ -14,7 +14,7 @@ import test from 'node:test';
 
 import { TelegramArchiveStore, archiveMonth } from '../../server/src/lib/telegram/archive-store.js';
 
-const CHAT = -1002263563987;
+const CHAT = -1001000000042;
 const AUG = Date.UTC(2026, 7, 7, 10, 0, 0) / 1000; // секунды, как date у Bot API
 const SEP = Date.UTC(2026, 8, 1, 10, 0, 0) / 1000;
 
@@ -26,7 +26,7 @@ function logStub() {
 
 const msg = (over = {}) => ({
   chatId: CHAT,
-  chatTitle: 'AT projects · dev',
+  chatTitle: 'Команда Альфа · разработка',
   chatType: 'supergroup',
   isForum: true,
   messageId: 100,
@@ -139,14 +139,14 @@ test('лента отдаёт хвост по возрастанию време�
 test('карта чатов: заголовок, счётчик и время последнего — для привязки к проектам', async (t) => {
   const { dir, s } = await store(t);
   await s.append(msg({ messageId: 1, date: AUG }));
-  await s.append(msg({ messageId: 2, date: AUG + 100, chatTitle: 'AT projects · dev (переименован)' }));
+  await s.append(msg({ messageId: 2, date: AUG + 100, chatTitle: 'Команда Альфа · разработка (переименован)' }));
   await s.flush();
 
   const cold = new TelegramArchiveStore({ dir, log: logStub() });
   const chats = await cold.chats();
   assert.equal(chats.length, 1);
   assert.equal(chats[0].id, CHAT);
-  assert.equal(chats[0].title, 'AT projects · dev (переименован)', 'заголовок берётся свежий');
+  assert.equal(chats[0].title, 'Команда Альфа · разработка (переименован)', 'заголовок берётся свежий');
   assert.equal(chats[0].isForum, true);
   assert.equal(chats[0].messages, 2);
   assert.equal(chats[0].lastAt, AUG + 100);

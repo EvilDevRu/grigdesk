@@ -45,7 +45,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 
 const ME = {
   id: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,

@@ -6,12 +6,19 @@ import test from 'node:test';
 import {
   dnsAnswersAbsent,
   dnsAnswersMatch,
+  forcedVpnGateEnv,
   resolvePublic,
 } from '../../server/src/lib/gateway/installer.js';
 
 const DOMAIN = 'cockpit.example.com';
 const IP = '203.0.113.17';
 const ENDPOINTS = ['https://resolver-one.test/dns-query', 'https://resolver-two.test/resolve'];
+
+test('GW-VPN-01: диагностика туннеля форсирует gate поверх opt-out сервера', () => {
+  const source = { COCKPIT_REQUIRE_VPN: '0', KEEP: 'value' };
+  assert.deepEqual(forcedVpnGateEnv(source), { COCKPIT_REQUIRE_VPN: '1', KEEP: 'value' });
+  assert.equal(source.COCKPIT_REQUIRE_VPN, '0');
+});
 
 function dohResponse({ Status = 0, Answer } = {}, { status = 200 } = {}) {
   return new Response(JSON.stringify({ Status, ...(Answer === undefined ? {} : { Answer }) }), {

@@ -15,8 +15,8 @@ import { telegramActivationMarker } from '../../server/src/lib/telegram/activati
 const ACCOUNT_REF = 'acc_telegram_inbox_0001';
 const BOT_ID = '8123456789';
 const TOKEN = `${BOT_ID}:AAHrEaLLyLoNgSeCrEtPaRt_x1y2z3w4v5u6`;
-const CHAT = -1002263563987;
-const THREAD = 6779;
+const CHAT = -1001000000042;
+const THREAD = 42;
 const T0 = 1_786_172_400;
 const FILE_LIMIT = 20 * 1024 * 1024;
 const MAX_MATERIALIZED_ATTACHMENTS = 12;
@@ -30,7 +30,7 @@ const windows = (startSeq = 0, startAt = T0 - 1) => [
 const nativeMessage = (over = {}) => ({
   chatId: CHAT,
   chatUsername: '',
-  chatTitle: 'AT projects · dev',
+  chatTitle: 'Команда Альфа · разработка',
   chatType: 'supergroup',
   isForum: true,
   messageId: 100,
@@ -63,7 +63,7 @@ const defaultRule = (over = {}) => normalizeRules([{
   chatId: CHAT,
   threadId: THREAD,
   kind: 'bug',
-  title: 'AT projects · dev · Баги',
+  title: 'Команда Альфа · разработка · Баги',
   b24: { groupId: 42, responsibleId: 5, priority: 2 },
   autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
   ...over,
@@ -206,7 +206,7 @@ test('mapping принимает normalizeUpdate(...).msg и не протаск
       message_thread_id: THREAD,
       media_group_id: 'album-7',
       date: T0,
-      chat: { id: CHAT, title: 'AT projects · dev', type: 'supergroup', is_forum: true },
+      chat: { id: CHAT, title: 'Команда Альфа · разработка', type: 'supergroup', is_forum: true },
       sender_chat: { id: -100999, title: 'Канал' },
       caption: 'скриншот',
       photo: [{ file_id: 'small', file_unique_id: 'u-small', width: 10, height: 10 }, {
@@ -219,7 +219,7 @@ test('mapping принимает normalizeUpdate(...).msg и не протаск
     schema: 1,
     channel: 'telegram',
     accountRef: ACCOUNT_REF,
-    source: { id: String(CHAT), title: 'AT projects · dev', threadId: String(THREAD) },
+    source: { id: String(CHAT), title: 'Команда Альфа · разработка', threadId: String(THREAD) },
     id: '20425',
     parentId: null,
     groupId: 'album-7',
@@ -263,7 +263,7 @@ test('authorized native row становится strict batch с topic policy sc
     const [batch] = batches;
     assert.equal(batch.activationEpoch, 1);
     assert.deepEqual(batch.source, {
-      id: String(CHAT), title: 'AT projects · dev', threadId: String(THREAD),
+      id: String(CHAT), title: 'Команда Альфа · разработка', threadId: String(THREAD),
     });
     assert.deepEqual(batch.messages.map((message) => message.id), ['100']);
     assert.equal(batch.policy.project, 'cockpit');
@@ -273,7 +273,7 @@ test('authorized native row становится strict batch с topic policy sc
     assert.match(batch.policy.scopeId, /^[A-Za-z0-9_-]+$/u);
     assert.equal(batch.truncated, false);
     assert.equal(context.sourceUrl({ source: batch.source, message: batch.messages[0] }),
-      `https://t.me/c/2263563987/${THREAD}/100`);
+      `https://t.me/c/1000000042/${THREAD}/100`);
     assert.equal(counters.rules, 1);
     assert.equal(counters.read, 1);
   } finally {

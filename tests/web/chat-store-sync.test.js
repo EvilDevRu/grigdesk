@@ -34,7 +34,7 @@ test('WEB-00: старые миллионы Codex не заполняют кол
   const chat = await fixture({
     model: 'gpt-5.6-sol',
     modelRef: { provider: 'codex', model: 'gpt-5.6-sol' },
-    contextTokens: 25_626_388,
+    contextTokens: 240_000,
     contextMetric: '',
   });
   const session = chat.sessions[0];
@@ -44,7 +44,7 @@ test('WEB-00: старые миллионы Codex не заполняют кол
   assert.equal(session.contextWindow, 0);
   assert.equal(session.contextMetric, 'legacy-unavailable');
   assert.equal(session.contextIsEstimate, true);
-  assert.equal(session.totalInputTokens, 25_626_388, 'старое значение остаётся только расходом');
+  assert.equal(session.totalInputTokens, 240_000, 'старое значение остаётся только расходом');
 });
 
 test('WEB-01: чат, начатый на другом устройстве, появляется без перезагрузки', async () => {

@@ -30,7 +30,7 @@ test('graph exposes a human stall on the affected node instead of showing it as 
       },
     },
   }));
-  await writeFile(path.join(stateDir, 't7379.pipeline'), [
+  await writeFile(path.join(stateDir, 't49.pipeline'), [
     'PROFILE=demo',
     'ROUTE=feature',
     'WF_STATUS=running',
@@ -41,12 +41,12 @@ test('graph exposes a human stall on the affected node instead of showing it as 
     'SHIP=pending',
     '',
   ].join('\n'));
-  await writeFile(path.join(stateDir, 'logs', 't7379.stages.log'), [
-    '2026-07-28 22:26:52 [t7379] REVIEW: 3 попытки без результата — СТОП, нужен человек',
+  await writeFile(path.join(stateDir, 'logs', 't49.stages.log'), [
+    '2026-07-28 22:26:52 [t49] REVIEW: 3 попытки без результата — СТОП, нужен человек',
     '',
   ].join('\n'));
 
-  const graph = await new FactoryStateAdapter({ stateDir, profilesDir }).getTaskGraph('7379');
+  const graph = await new FactoryStateAdapter({ stateDir, profilesDir }).getTaskGraph('49');
 
   assert.equal(graph.stall.stage, 'REVIEW');
   assert.equal(graph.stall.node, 'review');
@@ -61,8 +61,8 @@ test('route environment rc=75 is classified without prescribing shared cleanup',
     registry: { STALLED_HUMAN: '1' },
     daemonAlive: false,
     logText: [
-      '2026-08-02 13:51:34 [t8162] v2: обнаружена частично созданная песочница; автоматическое удаление запрещено',
-      '2026-08-02 13:51:34 [t8162] v2: среда профиля не готова (код 75)',
+      '2026-08-02 13:51:34 [t44] v2: обнаружена частично созданная песочница; автоматическое удаление запрещено',
+      '2026-08-02 13:51:34 [t44] v2: среда профиля не готова (код 75)',
       '',
     ].join('\n'),
   });
@@ -79,7 +79,7 @@ test('typed no-progress stop identifies the exact reviewer node', () => {
     },
     daemonAlive: false,
     logText: [
-      '2026-08-03 11:15:00 [t7788] REVIEW: маршрут остановлен: no-progress',
+      '2026-08-03 11:15:00 [t43] REVIEW: маршрут остановлен: no-progress',
       '',
     ].join('\n'),
   });
@@ -99,7 +99,7 @@ test('строка журнала v2 с префиксом route: распозн
     registry: { STALLED_HUMAN: '1' },
     daemonAlive: false,
     logText: [
-      '2026-08-10 00:46:09 [t8266] route: REVIEW: маршрут остановлен: no-progress',
+      '2026-08-10 00:46:09 [t48] route: REVIEW: маршрут остановлен: no-progress',
       '',
     ].join('\n'),
   });
@@ -117,7 +117,7 @@ test('точная причина остановки доезжает до за�
     registry: { STALLED_HUMAN: '1' },
     daemonAlive: false,
     logText: [
-      '2026-08-10 00:46:09 [t8266] REVIEW: маршрут остановлен: no-progress'
+      '2026-08-10 00:46:09 [t48] REVIEW: маршрут остановлен: no-progress'
         + ' — повторяется тот же набор открытых замечаний после одного ремонта',
       '',
     ].join('\n'),

@@ -15,8 +15,8 @@ import {
   TelegramRulesStore, matchRule, normalizeRules,
 } from '../../server/src/lib/telegram/rules-store.js';
 
-const CHAT = -1002263563987; // приватный форум, тот же, что в архивных тестах
-const PUB = 'atprojects';
+const CHAT = -1001000000042; // явно синтетический приватный форум
+const PUB = 'example_team';
 
 function logStub() {
   const warns = [];
@@ -74,7 +74,7 @@ test('тема сильнее общего правила чата, и поря�
   assert.equal(matchRule(forward, { chatId: CHAT, threadId: 7 })?.notifyTaskCreated, false);
 });
 
-// Ссылка на публичный чат приходит именем (`t.me/atprojects/20423`), а chatId в ней
+// Ссылка на публичный чат приходит именем (`t.me/example_team/42`), а chatId в ней
 // нет вовсе. Без поиска по имени такую ссылку нечем сопоставить с правилом —
 // и весь хук на чтение для публичных чатов молча не работал бы.
 test('публичный чат разрешается по имени, регистр и «собака» не мешают', () => {

@@ -106,7 +106,7 @@ assert_contains "$source_text" '"$pipeline_gate_key" waiting STALLED_HUMAN 1' \
 # Синхронному вызывающему (кокпит по HTTP) нужен выход сразу после фиксации:
 # иначе gate ведёт маршрут дальше и переживает чужой таймаут только сиротой.
 # Снятие STALLED_HUMAN — строго ПОСЛЕ CAS: упавший commit-only не имеет права
-# стирать маркер остановки у стоящего маршрута (t8164).
+# стирать маркер остановки у стоящего маршрута.
 assert_contains "$source_text" 'v2_gate_commit "$attempt" || return
     set_st "$TASK" STALLED_HUMAN 0 || return
     return 0' \
@@ -278,8 +278,8 @@ assert_contains "$lock_error" "оркестратор t${fixture_task} уже р
 assert_file_missing "$shared_state/t${fixture_task}.pipeline" \
   "task lock loser publishes no route registry"
 
-# t7788: недоступный provider обязан закрыть операции, которые реально запускают
-# агентов. Проверяем start на отдельной задаче до захвата shared-ресурсов основным
+# Недоступный provider обязан закрыть операции, которые реально запускают агентов.
+# Проверяем start на отдельной задаче до захвата shared-ресурсов основным
 # fixture; ни attempt, ни вторичная pipeline-проекция появиться не должны.
 preflight_task=9003
 preflight_ticket="$TEST_ROOT/ticket-${preflight_task}.json"
@@ -427,7 +427,7 @@ assert_rc 0 "$repair_resume_rc" "resume repairs an unprojected immutable reset"
 assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "projection repair reruns the target before pausing at the gate"
 
-# t8164: решение прислали для ворот, на которых курсор НЕ стоит (в закреплённом
+# Решение прислали для ворот, на которых курсор НЕ стоит (в закреплённом
 # маршруте такого узла вовсе нет). Упавший commit-only обязан сохранить маркер
 # остановки: раньше STALLED_HUMAN сбрасывался ещё до CAS, и кокпит терял «ждёт
 # человека» у стоящего маршрута, дорисовывая ложные ворота дальше по цепочке.
@@ -493,7 +493,7 @@ assert_eq "$reject_feedback" \
   "$(awk -F= '$1=="GATE_PLAN_COMMENT"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "conflicting gate retry cannot project text absent from the ledger"
 
-# Форма отказа t8164: после rewind курсор стоит на plan, а решение повторно
+# После rewind курсор стоит на plan, а решение повторно
 # прислали для gate_plan. CAS на устаревшем узле ворот — ровно код 75, и
 # записанное ранее решение остаётся видимым.
 stale_gate=$(FACTORY_FORBID_LIVE=0 \

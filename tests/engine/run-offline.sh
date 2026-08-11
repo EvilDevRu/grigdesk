@@ -20,12 +20,13 @@ if [[ "${1:-}" == "--one" ]]; then
   }
   trap cleanup_worker EXIT INT TERM
   mkdir -p "$test_root/config" "$test_root/state" "$test_root/xdg-config" \
-    "$test_root/xdg-state" "$test_root/xdg-cache" "$test_root/work"
+    "$test_root/xdg-state" "$test_root/xdg-cache" "$test_root/work" \
+    "$test_root/profiles"
   env -i \
     PATH="$FACTORY_TESTS_HOME/fakes/bin:/usr/bin:/bin" \
     LC_ALL=C \
     FACTORY_HOME="$FACTORY_HOME" \
-    FACTORY_PROFILES_DIR="$PROJECT_ROOT/profiles" \
+    FACTORY_PROFILES_DIR="$test_root/profiles" \
     FACTORY_TESTS_HOME="$FACTORY_TESTS_HOME" \
     FACTORY_TESTING=1 \
     FACTORY_FORBID_LIVE=1 \

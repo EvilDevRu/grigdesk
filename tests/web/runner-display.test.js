@@ -78,18 +78,17 @@ test('missing attempt telemetry falls back to runner policy', () => {
   assert.equal(runnerModelEffortLabel(runner), 'gpt-5.6-sol · effort max');
 });
 
-// Цена запуска. Замер по живой телеметрии: один заход BROWSER стоил $0.95 при
-// 1,69 млн токенов кэш-чтения — без этой строки узел маршрута нечем сравнить
-// с соседним, и вопрос «дорогой ли он» решается на глаз.
+// Цена запуска важнее объёма токенов: она позволяет сравнивать узлы
+// маршрута, а разбивка по кэшу остаётся в подсказке.
 test('attempt cost prefers money over token volume', () => {
   const attempt = {
     tokens: {
-      in: 56, out: 7113, cacheRead: 1686672, cacheWrite: 56223, costUsd: 0.954,
+      in: 2_400_000, out: 100_000, cacheRead: 2_200_000, cacheWrite: 0, costUsd: 0.5,
     },
   };
-  assert.equal(attemptCostLabel(attempt), '$0.95');
-  assert.match(attemptCostTitle(attempt), /из кэша 1\s686\s672/u);
-  assert.match(attemptCostTitle(attempt), /стоимость \$0\.9540/u);
+  assert.equal(attemptCostLabel(attempt), '$0.50');
+  assert.match(attemptCostTitle(attempt), /из кэша 2\s200\s000/u);
+  assert.match(attemptCostTitle(attempt), /стоимость \$0\.5000/u);
 });
 
 test('attempt cost falls back to token total when the CLI never named a price', () => {
@@ -98,7 +97,7 @@ test('attempt cost falls back to token total when the CLI never named a price', 
     '100к ток.',
   );
   assert.equal(
-    attemptCostLabel({ tokens: { in: 0, out: 36163, cacheRead: 2267904, cacheWrite: 0 } }),
+    attemptCostLabel({ tokens: { in: 0, out: 100000, cacheRead: 2200000, cacheWrite: 0 } }),
     '2.3М ток.',
   );
 });

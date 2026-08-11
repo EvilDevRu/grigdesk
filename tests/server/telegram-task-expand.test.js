@@ -40,7 +40,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 
 const ME = {
   id: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
@@ -73,7 +73,7 @@ const TASK = {
   description: `<p>Обсуждение: ${link(BUGS, 100)}</p>`,
   status_label: 'Выполняется',
   priority_label: 'Высокий',
-  responsible: { id: 1, name: 'Дмитрий' },
+  responsible: { id: 1, name: 'Тестовый пользователь' },
 };
 
 const logStub = () => ({ warn() {}, error() {}, info() {}, debug() {} });

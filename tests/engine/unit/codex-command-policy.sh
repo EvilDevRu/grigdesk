@@ -15,10 +15,13 @@ PY
   printf '%s\n' "$payload" | python3 "$policy" shared-stand
 }
 
+sample_repo="$TEST_ROOT/work/sample-repository"
+profile_tool="$TEST_ROOT/profiles/sample-profile/stand-tool.sh"
+
 for command in \
   '/usr/bin/docker ps' \
-  'command docker inspect rdesigner' \
-  'git -C /home/evildev/Workspace/rdesigner worktree add /tmp/wt main' \
+  'command docker inspect sample-container' \
+  "git -C $sample_repo worktree add $TEST_ROOT/worktree main" \
   '/usr/bin/git commit -am forbidden' \
   'git push origin HEAD' \
   'gh pr create --title forbidden'; do
@@ -27,8 +30,7 @@ for command in \
     "shared-stand command policy denies: $command"
 done
 
-output=$(policy_command \
-  'bash /home/evildev/Workspace/cockpit/profiles/rdesigner/stand-tool.sh metrics --json')
+output=$(policy_command "bash $profile_tool metrics --json")
 assert_eq '' "$output" "profile-owned stand-tool remains available through the broker"
 
 output=$(printf '{broken\n' | python3 "$policy" shared-stand)

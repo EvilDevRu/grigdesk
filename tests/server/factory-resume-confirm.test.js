@@ -1,6 +1,6 @@
 // Подтверждение запуска resume. `systemd-run` возвращает 0 сразу после регистрации
 // юнита, поэтому «прогон продолжен» раньше означало лишь «юнит зарегистрирован»:
-// на t7802 юнит умирал через две секунды на разошедшемся контракте профиля (код 75),
+// В регрессионном сценарии юнит умирал через две секунды на разошедшемся контракте профиля (код 75),
 // а кокпит четыре раза подряд отвечал успехом.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,7 +72,7 @@ test('мёртвый оркестратор при живом юните — т�
 test('в причину попадает только дописанное после запуска, и не в байтах', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 't7802.stages.log');
+  const file = path.join(dir, 't42.stages.log');
   const before = 'старая строка про узел diagnose\n';
   await writeFile(file, before, 'utf8');
 
@@ -88,7 +88,7 @@ test('в причину попадает только дописанное по�
 test('typed preflight прошлого запуска не типизирует новый несвязанный отказ', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 't7788.launch.log');
+  const file = path.join(dir, 't43.launch.log');
   await writeFile(file,
     'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=kimi\n', 'utf8');
   const from = await logLength(file);

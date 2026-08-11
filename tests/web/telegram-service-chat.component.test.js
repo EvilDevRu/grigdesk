@@ -14,14 +14,14 @@ import { apiError, mountTelegramView, settle } from './helpers/telegram-view.js'
 
 process.env.NODE_ENV = 'test';
 
-const GROUP = -1002263563987;   // рабочий чат — служебным быть не может
+const GROUP = -1001000000042;   // явно синтетический рабочий чат — служебным быть не может
 const OWNER = 5551234;          // личка хозяина
 const T0 = Date.UTC(2026, 7, 7, 10, 0, 0) / 1000;
 
 const bot = (over = {}) => ({
   configured: true,
   botId: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canReadAllGroupMessages: true,
   tokenHint: '…v5u6',
@@ -38,8 +38,8 @@ const POLL = {
 };
 
 const CHATS = [
-  { id: GROUP, title: 'AT projects · dev', type: 'supergroup', isForum: true, messages: 3, lastAt: T0 },
-  { id: OWNER, title: 'Дмитрий', type: 'private', isForum: false, messages: 1, lastAt: T0 - 3600 },
+  { id: GROUP, title: 'Команда Альфа · разработка', type: 'supergroup', isForum: true, messages: 3, lastAt: T0 },
+  { id: OWNER, title: 'Тестовый пользователь', type: 'private', isForum: false, messages: 1, lastAt: T0 - 3600 },
 ];
 
 /**
@@ -91,7 +91,7 @@ test('в списке только личка: групповой чат слу�
   // Групповой чат бот слышит, и он есть выше в «Что слышит бот» — но выбрать его
   // служебным нельзя: копию там увидят все участники.
   assert.deepEqual(optionValues(wrapper), ['', String(OWNER)]);
-  assert.ok(!card(wrapper).text().includes('AT projects'), 'групповой чат попал в выбор');
+  assert.ok(!card(wrapper).text().includes('Команда Альфа'), 'групповой чат попал в выбор');
   // Пока не выбран — сказано, что ссылки останутся неразвёрнутыми.
   assert.match(card(wrapper).text(), /неразвёрнут/i);
   assert.deepEqual(srv.posts, [], 'открытие раздела что-то сохранило');
@@ -113,11 +113,11 @@ test('адрес уезжает числом и только по кнопке',
   assert.equal(srv.posts[0].body.botId, 8123456789, 'provider identity служит CAS старой формы');
   assert.equal(srv.posts[0].body.chatId, OWNER, 'id чата должен быть числом, как в архиве');
   assert.equal(saveBtn(wrapper), undefined, 'кнопка осталась, хотя всё сохранено');
-  assert.match(wrapper.get('.ok').text(), /Дмитрий/);
+  assert.match(wrapper.get('.ok').text(), /Тестовый пользователь/);
 });
 
 test('«не выбран» снимает адрес, а не оставляет прежний', async (t) => {
-  const srv = server({ saved: bot({ serviceChatId: OWNER, serviceChatTitle: 'Дмитрий' }) });
+  const srv = server({ saved: bot({ serviceChatId: OWNER, serviceChatTitle: 'Тестовый пользователь' }) });
   const { wrapper, flushPromises } = await mountView(t, { api: srv.api });
 
   assert.equal(select(wrapper).element.value, String(OWNER));

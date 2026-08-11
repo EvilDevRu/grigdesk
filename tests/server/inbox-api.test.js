@@ -363,15 +363,15 @@ test('список неразобранных вложений доезжает 
   assert.equal(attachments[2].label, 'вложение', 'пустая подпись остаётся понятной');
 });
 
-test('настоящий item ref длиннее дефолтного :param — роутеру нужен свой maxParamLength', async (t) => {
-  // Живой ref обычной Telegram-карточки — 220 символов base64url, а дефолт fastify — 100.
+test('реалистичный item ref длиннее дефолтного :param — роутеру нужен свой maxParamLength', async (t) => {
+  // Синтетический ref обычной Telegram-карточки длиннее 100 символов base64url.
   // Роутер отвечал 414 раньше обработчика, поэтому автомат работал (он ходит внутри
   // процесса), а все три ручные кнопки человека были мертвы.
   const ref = encodeInboxRef('item', {
     channel: 'telegram',
-    accountRef: 'acc_kxNyiLHMy2VvCFq-wxpWpuOxRCfrBQ4Z',
+    accountRef: 'acc_00000000000000000000000000000000',
     localBundleId: Buffer.from(JSON.stringify(
-      [1, 'bundle', '-1002263563987', 1, ['thread-author', '6781', '206307679'], '20451'],
+      [1, 'bundle', '-1001000000042', 1, ['thread-author', '42', '424242424'], '43'],
     ), 'utf8').toString('base64url'),
   });
   assert.ok(ref.length > 100, `ref должен быть длиннее дефолта fastify, получено ${ref.length}`);

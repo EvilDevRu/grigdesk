@@ -61,7 +61,8 @@ OWNER_HOME="$(getent passwd "$OWNER" | cut -d: -f6)"
 KEY="$OWNER_HOME/.ssh/cockpit-tunnel"
 
 # Ворота VPN и машинные переменные берём из того же репозитория кокпита, что и его юнит:
-# двух копий правды о том, как называется VPN-интерфейс, быть не должно.
+# двух копий правды о VPN-маршруте быть не должно. Туннель включает gate принудительно;
+# TUN определяется по маршруту, а нестандартные interface и probe задаются в корневом `.env`.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VPN_GATE="$REPO_ROOT/deploy/require-vpn.sh"
 [ -x "$VPN_GATE" ] || die "Не найден исполняемый $VPN_GATE — без ворот VPN туннель ставить нельзя."
@@ -153,21 +154,20 @@ Description=Кокпит: обратный туннель — $desc
 After=network-online.target $( [ "$name" = cockpit-tunnel-sandbox ] && echo cockpit-sandbox-proxy.service )
 Wants=network-online.target
 # Ноль вместо дефолтных «5 стартов за 10 секунд»: с воротами VPN туннель после перезагрузки
-# ждёт sing-box сколько нужно, а лимит увёл бы юнит в failed НАВСЕГДА — ровно там, где VPN
-# поднимается руками и может появиться через минуты. То же самое стоит у юнита кокпита.
+# ждёт внешний интерфейс сколько нужно, а лимит увёл бы unit в failed навсегда.
 StartLimitIntervalSec=0
 
 [Service]
 User=$OWNER
-# COCKPIT_VPN_IFACE/COCKPIT_VPN_PROBE для ворот — из корневого .env кокпита, как у его юнита.
+# Нестандартные COCKPIT_VPN_IFACE/COCKPIT_VPN_PROBE — из корневого .env, как у юнита кокпита.
 EnvironmentFile=-$REPO_ROOT/.env
 # ВОРОТА VPN — не удобство, а защита самого VPN. Туннель ходит через него намеренно, и без
-# ворот ssh успевал бы уйти НАПРЯМУЮ в окно, когда sing-box уже поднял интерфейс, но ещё не
+# ворот ssh мог бы уйти НАПРЯМУЮ в окно, когда VPN уже поднял интерфейс, но ещё не
 # расставил маршруты: адрес мозга уехал бы на VPS мимо туннеля. Ordering-таргетом это не
 # лечится (интерфейс появляется раньше маршрутов) — проверяется именно маршрут до пробы.
-# ExecStartPre наследует User=, а sing-box маршрутизирует по владельцу сокета — проверка
+# ExecStartPre наследует User=, а policy routing может зависеть от владельца сокета — проверка
 # идёт от того же пользователя, что и сам ssh.
-ExecStartPre=$VPN_GATE
+ExecStartPre=/usr/bin/env COCKPIT_REQUIRE_VPN=1 $VPN_GATE
 ExecStart=/usr/bin/ssh -NT \\
   -o ExitOnForwardFailure=yes \\
   -o ServerAliveInterval=20 \\
@@ -221,6 +221,8 @@ $(cat "$KEY.pub")
   на VPS:  ss -tlnp | grep 1814     (должны появиться оба порта)
 
 Туннель ходит через VPN намеренно и без него не стартует (ворота require-vpn.sh).
-Поэтому «activating» в статусе при опущенном sing-box — это ожидание, а не поломка:
+Поэтому «activating» в статусе при опущенном VPN — это ожидание, а не поломка:
 в журнале будет строка ворот, а юнит поднимется сам, когда появится маршрут.
+Если VPN уже работает, но его интерфейс не является TUN, укажи в корневом .env:
+  COCKPIT_VPN_IFACE=<имя-интерфейса>
 EOF

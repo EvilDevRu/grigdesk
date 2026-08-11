@@ -1,4 +1,4 @@
-// Ворота и курсор журнала (t8164): проекция не рисует ложное «ждёт тебя»,
+// Ворота и курсор журнала: проекция не рисует ложное «ждёт тебя»,
 // а /gate отказывает решению для ворот, на которых маршрут не стоит.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -193,7 +193,7 @@ async function server(t, fx) {
 const POS = { build: [0, 0], lint: [1, 0], gate_accept: [2, 0], ship: [3, 0] };
 
 test('v2-реестр не дорисовывает ворота без явной записи waiting', () => {
-  // t8164: LINT=done записан узлом, коммит в журнал не лёг — ворота не достигнуты.
+  // LINT=done записан узлом, коммит в журнал не лёг — ворота не достигнуты.
   const stalled = computeNodeStatuses({
     pf: {
       CATALOG_PROTOCOL: 'route-v2', BUILD: 'done', LINT: 'done', GATE_ACCEPT: 'pending', SHIP: 'pending',

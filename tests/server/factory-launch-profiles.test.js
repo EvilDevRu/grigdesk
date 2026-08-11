@@ -17,23 +17,23 @@ async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-profiles-'));
   const profilesDir = path.join(root, 'profiles');
   await Promise.all([
-    mkdir(path.join(profilesDir, 'arsenkin'), { recursive: true }),
-    mkdir(path.join(profilesDir, 'rdesigner'), { recursive: true }),
+    mkdir(path.join(profilesDir, 'project-alpha'), { recursive: true }),
+    mkdir(path.join(profilesDir, 'project-beta'), { recursive: true }),
   ]);
-  await writeFile(path.join(profilesDir, 'arsenkin', 'graph.json'), JSON.stringify({
+  await writeFile(path.join(profilesDir, 'project-alpha', 'graph.json'), JSON.stringify({
     capabilities: [],
     default_route: 'feature',
     routes: { feature: { pos: { build: [0, 0] }, edges: [] } },
   }));
-  await writeFile(path.join(profilesDir, 'rdesigner', 'graph.json'), JSON.stringify({
+  await writeFile(path.join(profilesDir, 'project-beta', 'graph.json'), JSON.stringify({
     capabilities: [],
     default_route: 'feature',
     routes: { feature: { pos: { build: [0, 0] }, edges: [] } },
   }));
-  await writeFile(path.join(profilesDir, 'rdesigner', 'profile.sh'), `
-PROFILE_TRIAGE_REPOS="app:/srv/rdesigner"
-profile_repositories() { printf 'rdesigner\\t/srv/rdesigner\\t/srv/rdesigner\\n'; }
-profile_delivery_targets() { printf 'rdesigner\\tmaster\\n'; }
+  await writeFile(path.join(profilesDir, 'project-beta', 'profile.sh'), `
+PROFILE_TRIAGE_REPOS="app:/srv/project-beta"
+profile_repositories() { printf 'project-beta\\t/srv/project-beta\\t/srv/project-beta\\n'; }
+profile_delivery_targets() { printf 'project-beta\\tmaster\\n'; }
 `);
   const factoryBin = path.join(root, 'factory');
   await writeFile(factoryBin, `#!/bin/sh
@@ -42,7 +42,7 @@ if [ "$1" = check ]; then
     *"--route consilium-debug"*) instrumentation=explicit; route=consilium-debug ;;
     *) instrumentation=disabled; route=feature ;;
   esac
-  echo "OK profile=rdesigner catalog=${'b'.repeat(64)} route=$route delivery=publish instrumentation=$instrumentation"
+  echo "OK profile=project-beta catalog=${'b'.repeat(64)} route=$route delivery=publish instrumentation=$instrumentation"
   exit 0
 fi
 exit 99
@@ -52,12 +52,12 @@ exit 99
   const app = Fastify({ logger: false });
   await app.register(factoryModule, {
     factoryState: {
-      discoverProfiles() { return ['arsenkin', 'rdesigner']; },
-      async primaryProfile() { return 'arsenkin'; },
+      discoverProfiles() { return ['project-alpha', 'project-beta']; },
+      async primaryProfile() { return 'project-alpha'; },
       async readRegistry() { throw new Error('задача ещё не запускалась'); },
       isDaemonAlive() { return false; },
       async catalog(profile) {
-        return profile === 'rdesigner'
+        return profile === 'project-beta'
           ? {
             routes: ['consilium-debug', 'feature'],
             catalogHash: 'b'.repeat(64),
@@ -94,8 +94,8 @@ exit 99
           analysis: {
             route_guess: 'consilium-debug',
             areas: ['data-migration'],
-            files: ['app:webapp/pipeline.py'],
-            title: 'Экспорт удваивает сущности',
+            files: ['app:src/diagnostics.py'],
+            title: 'Повторный запуск создаёт дубликаты',
           },
         };
       },
@@ -117,25 +117,25 @@ test('launch-options отдаёт профили и fail-closed каталог �
     url: '/api/tasks/9123/launch-options',
   });
   assert.equal(defaults.statusCode, 200);
-  assert.equal(defaults.json().profile, 'arsenkin');
+  assert.equal(defaults.json().profile, 'project-alpha');
   assert.equal(defaults.json().error, 'no_catalog');
   assert.equal('generation' in defaults.json(), false);
-  assert.deepEqual(defaults.json().profiles, ['arsenkin', 'rdesigner']);
+  assert.deepEqual(defaults.json().profiles, ['project-alpha', 'project-beta']);
 
   const selected = await app.inject({
     method: 'GET',
-    url: '/api/tasks/9123/launch-options?profile=rdesigner',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
   });
   assert.equal(selected.statusCode, 200);
-  assert.equal(selected.json().profile, 'rdesigner');
-  assert.deepEqual(selected.json().profiles, ['rdesigner']);
+  assert.equal(selected.json().profile, 'project-beta');
+  assert.deepEqual(selected.json().profiles, ['project-beta']);
   assert.equal('generation' in selected.json(), false);
   assert.deepEqual(selected.json().routes, ['consilium-debug', 'feature']);
   assert.equal(selected.json().defaultRoute, 'consilium-debug');
-  assert.deepEqual(selected.json().repositories, [{ name: 'rdesigner', targetBranch: 'master' }]);
-  assert.deepEqual(selected.json().instrumentationSuggestions, ['rdesigner:webapp/pipeline.py']);
+  assert.deepEqual(selected.json().repositories, [{ name: 'project-beta', targetBranch: 'master' }]);
+  assert.deepEqual(selected.json().instrumentationSuggestions, ['project-beta:src/diagnostics.py']);
   assert.deepEqual(selected.json().diagnosisSuggestion, {
-    kind: 'data', signal: 'Экспорт удваивает сущности',
+    kind: 'data', signal: 'Повторный запуск создаёт дубликаты',
   });
   assert.deepEqual(selected.json().routeOptions['consilium-debug'], {
     deliveryMode: 'publish', instrumentationMode: 'explicit', instrumentationRequired: true,
@@ -148,7 +148,7 @@ test('переименованный explicit-маршрут требует scop
     method: 'POST',
     url: '/api/tasks/9123/launch',
     payload: {
-      profile: 'rdesigner',
+      profile: 'project-beta',
       route: 'consilium-debug',
       title: 'Проверка scope',
       description: 'Имя маршрута не должно отключать контракт инструментации.',
@@ -168,7 +168,7 @@ test('launch профиля без каталога отказывает до з
     method: 'POST',
     url: '/api/tasks/9123/launch',
     payload: {
-      profile: 'arsenkin',
+      profile: 'project-alpha',
       route: 'feature',
       title: 'Проверка fail closed',
       description: 'Движок не должен запускаться без опубликованного каталога.',
@@ -185,7 +185,7 @@ test('launch не принимает старую строковую форму 
   const response = await app.inject({
     method: 'POST',
     url: '/api/tasks/9123/launch',
-    payload: { profile: 'rdesigner', route: 'feature', ticket: 'старый payload' },
+    payload: { profile: 'project-beta', route: 'feature', ticket: 'старый payload' },
   });
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().error, 'bad_ticket_shape');
@@ -197,13 +197,13 @@ test('launch отклоняет подмену настроенной ветки
     method: 'POST',
     url: '/api/tasks/9123/launch',
     payload: {
-      profile: 'rdesigner',
+      profile: 'project-beta',
       route: 'feature',
       title: 'Проверка ветки',
       description: 'Браузер не должен менять целевую ветку профиля.',
       sourceUrl: 'https://example.test/tasks/9123',
       acceptanceCriteria: [],
-      deliveryTargets: ['rdesigner=release'],
+      deliveryTargets: ['project-beta=release'],
       instrumentationFiles: [],
     },
   });
@@ -214,20 +214,20 @@ test('launch отклоняет подмену настроенной ветки
 
 test('launch-options отклоняет неизвестный и синтаксически опасный profile query', async (t) => {
   const app = await fixture(t);
-  for (const profile of ['unknown', '../rdesigner', 'RDESIGNER']) {
+  for (const profile of ['unknown', '../project-beta', 'PROJECT-BETA']) {
     const response = await app.inject({
       method: 'GET',
       url: '/api/tasks/9123/launch-options?profile=' + encodeURIComponent(profile),
     });
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error, 'bad_profile');
-    assert.deepEqual(response.json().profiles, ['arsenkin', 'rdesigner']);
+    assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta']);
   }
 });
 
 test('launch не принимает profile в обход опубликованного списка', async (t) => {
   const app = await fixture(t);
-  for (const profile of ['unknown', '../rdesigner', 'RDESIGNER']) {
+  for (const profile of ['unknown', '../project-beta', 'PROJECT-BETA']) {
     const response = await app.inject({
       method: 'POST',
       url: '/api/tasks/9123/launch',
@@ -235,6 +235,6 @@ test('launch не принимает profile в обход опубликова�
     });
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error, 'bad_profile');
-    assert.deepEqual(response.json().profiles, ['arsenkin', 'rdesigner']);
+    assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta']);
   }
 });

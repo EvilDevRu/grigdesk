@@ -62,5 +62,5 @@ lib/      core.sh (ядро), multi-runner.sh (dispatcher), run-state.sh (protoc
 Состояние задач — вне репозитория: `~/.factory/state/` (`tNNNN.pipeline`, `logs/`, `archive/`,
 `shots/`, `quarantine/`). Путь берётся из `FACTORY_STATE`/`STATE_DIR`, хардкодить нельзя.
 
-Движок запускает и читает **кокпит** (`~/Workspace/cockpit`) — меняя формат реестра, вывод
-`factory slots` или переменные профиля, проверь и его.
+Движок запускает и читает **кокпит** из корня текущего checkout — меняя формат
+реестра, вывод `factory slots` или переменные профиля, проверь и его.

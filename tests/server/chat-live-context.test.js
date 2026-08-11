@@ -2,8 +2,8 @@
 //
 // До этого `contextTokens` возвращался ОДИН раз — вместе с ответом хода. Пока ходы
 // короткие, разница незаметна; но собственный автокомпакт CLI срабатывает НА ГРАНИЦЕ
-// хода, и весь остаток часового хода кольцо горело красным по контексту, которого уже
-// нет (замер на живом чате: 448 417 показанных против 126 135 реальных).
+// хода, и весь остаток длинного хода кольцо могло гореть красным по контексту,
+// которого уже нет.
 //
 // Поэтому claude отдаёт замер каждого обращения к модели вторым аргументом onProgress,
 // а границу компакта называет вслух шагом ленты — иначе падение цифры втрое читается
@@ -39,7 +39,7 @@ test('Claude отдаёт размер контекста живьём, а не 
       message: {
         model: 'claude-opus-5-1m',
         content: [{ type: 'text', text: 'Смотрю.' }],
-        usage: { input_tokens: 4, cache_read_input_tokens: 448000, cache_creation_input_tokens: 413, output_tokens: 100 },
+        usage: { input_tokens: 10, cache_read_input_tokens: 179000, cache_creation_input_tokens: 990, output_tokens: 100 },
       },
     },
     // CLI сжал контекст сам, по порогу CLAUDE_CODE_AUTO_COMPACT_WINDOW.
@@ -47,7 +47,7 @@ test('Claude отдаёт размер контекста живьём, а не 
       type: 'system',
       subtype: 'compact_boundary',
       session_id: 'sess-live',
-      compactMetadata: { trigger: 'auto', preTokens: 451421, durationMs: 62912 },
+      compactMetadata: { trigger: 'auto', preTokens: 180000, durationMs: 12000 },
     },
     {
       type: 'assistant',
@@ -55,7 +55,7 @@ test('Claude отдаёт размер контекста живьём, а не 
       message: {
         model: 'claude-opus-5-1m',
         content: [{ type: 'text', text: 'Готово.' }],
-        usage: { input_tokens: 135, cache_read_input_tokens: 126000, cache_creation_input_tokens: 0, output_tokens: 40 },
+        usage: { input_tokens: 10, cache_read_input_tokens: 59990, cache_creation_input_tokens: 0, output_tokens: 40 },
       },
     },
     // usage финального result — СУММА за все обращения: в кольцо её брать нельзя.
@@ -66,7 +66,7 @@ test('Claude отдаёт размер контекста живьём, а не 
       session_id: 'sess-live',
       num_turns: 2,
       total_cost_usd: 0.42,
-      usage: { input_tokens: 574552, cache_read_input_tokens: 574000, output_tokens: 140 },
+      usage: { input_tokens: 240000, cache_read_input_tokens: 239000, output_tokens: 140 },
     },
   ];
   const { dir, bin } = await fakeClaude(t, events);
@@ -82,10 +82,10 @@ test('Claude отдаёт размер контекста живьём, а не 
 
   // Замер приезжает на КАЖДОМ обращении к модели, и падение после компакта видно сразу.
   assert.deepEqual(progress, [
-    { tokens: 100, contextTokens: 448417 },
-    { tokens: 140, contextTokens: 126135 },
+    { tokens: 100, contextTokens: 180000 },
+    { tokens: 140, contextTokens: 60000 },
   ]);
-  assert.equal(out.contextTokens, 126135, 'итог — вход последнего обращения, а не сумма result.usage');
+  assert.equal(out.contextTokens, 60000, 'итог — вход последнего обращения, а не сумма result.usage');
   assert.equal(out.sessionId, 'sess-live');
   assert.equal(out.actualModel, 'claude-opus-5-1m');
 
@@ -94,7 +94,7 @@ test('Claude отдаёт размер контекста живьём, а не 
   assert.ok(note, 'граница компакта обязана попасть в ленту хода');
   assert.match(note.text, /Контекст сжат/);
   assert.match(note.text, /сам, по порогу/);
-  assert.ok(digits(note.text).includes('451421'), `размер «до» обязан быть в тексте: ${note.text}`);
+  assert.ok(digits(note.text).includes('180000'), `размер «до» обязан быть в тексте: ${note.text}`);
   assert.deepEqual(live, out.steps, 'лента уезжает в окно живьём и совпадает с сохранённой');
 });
 

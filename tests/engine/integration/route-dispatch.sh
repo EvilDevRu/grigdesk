@@ -19,7 +19,7 @@ stop_feedback_task=9008
 instrumentation_marker="FACTORY-TRACE:t${debug_task}"
 base_repo="$TEST_ROOT/source"
 worktree="$TEST_ROOT/worktree-t${debug_task}"
-scope="$worktree/trace.php"
+scope="$worktree/trace.txt"
 FIXTURE_CONTEXT="$TEST_ROOT/context.json"
 export ROUTE_V2_INSTRUMENTATION_SCOPE_FILE="$TEST_ROOT/instrumentation-scope.txt"
 
@@ -32,8 +32,8 @@ json_field() {
 git init -q "$base_repo"
 git -C "$base_repo" config user.email tests@example.invalid
 git -C "$base_repo" config user.name Tests
-printf '<?php return 1;\n' >"$base_repo/trace.php"
-git -C "$base_repo" add trace.php
+printf 'baseline\n' >"$base_repo/trace.txt"
+git -C "$base_repo" add trace.txt
 git -C "$base_repo" commit -qm baseline
 git -C "$base_repo" worktree add -qb route-run "$worktree"
 printf '%s\n' "$scope" >"$ROUTE_V2_INSTRUMENTATION_SCOPE_FILE"
@@ -58,7 +58,7 @@ cat >"$FIXTURE_CONTEXT" <<JSON
   "task": {"id": $debug_task, "title": "debug"},
   "attempt": {"id": "$attempt"},
   "project": {"profile": "$profile_id"},
-  "workspace": {"backend": {"path": "$worktree"}, "frontend": {"path": "$worktree"}},
+  "workspace": {"service": {"path": "$worktree"}, "client": {"path": "$worktree"}},
   "services": {"apiUrl": "unavailable"},
   "artifacts": {"root": "$STATE_DIR"},
   "diagnosis": {"kind": "functional"},
@@ -76,7 +76,7 @@ cat >"$FIXTURE_CONTEXT" <<JSON
   "delivery": {
     "mode": "publish",
     "actions": ["commit", "push", "pull-request"],
-    "targetBranches": {"be": "master"},
+    "targetBranches": {"service": "main"},
     "sourceBranch": "fixture-${debug_task}"
   },
   "routeCatalog": {"debug": "$(json_field "$published" routeHashes debug)"},
@@ -118,10 +118,10 @@ run_agent() {
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   case "$stage" in
     INSTRUMENT)
-      printf '// %s temporary\n' "$instrumentation_marker" >>"$scope"
+      printf '# %s temporary\n' "$instrumentation_marker" >>"$scope"
       ;;
     TESTS)
-      printf '<?php return 2;\n' >"$worktree/product-change.php"
+      printf 'changed\n' >"$worktree/product-change.txt"
       ;;
     SHIP)
       SHIP_CALLED=1
@@ -164,7 +164,7 @@ if grep -Fq "$instrumentation_marker" "$scope"; then
 else
   test_ok "proof removes transaction-owned instrumentation"
 fi
-assert_eq '<?php return 1;' "$(tr -d '\n' <"$scope")" \
+assert_eq 'baseline' "$(tr -d '\n' <"$scope")" \
   "transaction cleanup restores the exact source baseline"
 
 route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
@@ -174,7 +174,7 @@ assert_rc 20 "$?" "cause gate pauses without polling"
 route_v2_gate_decide "$debug_task" "$attempt" gate_cause approved >/dev/null
 assert_rc 0 "$?" "approved cause gate advances"
 
-for expected in build review measure phpcheck lint gate_accept; do
+for expected in build review measure syntax_check lint gate_accept; do
   advanced=$(route_v2_dispatch_next "$debug_task" "$attempt")
   assert_rc 0 "$?" "agent node advances under its declared filesystem policy"
   assert_eq "$expected" "$(json_field "$advanced" currentNode)" \

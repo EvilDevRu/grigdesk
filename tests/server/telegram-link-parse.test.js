@@ -21,8 +21,8 @@ test('native message link строится только для public username �
     chatId: -1001234567890, chatUsername: '', threadId: null, messageId: 42,
   }), 'https://t.me/c/1234567890/42');
   assert.equal(telegramMessageLink({
-    chatId: -1001234567890, chatUsername: '@cockpit_bugs', threadId: 7, messageId: 42,
-  }), 'https://t.me/cockpit_bugs/7/42');
+    chatId: -1001234567890, chatUsername: '@example_team', threadId: 7, messageId: 42,
+  }), 'https://t.me/example_team/7/42');
   assert.equal(telegramMessageLink({
     chatId: 555000111, chatUsername: '', threadId: null, messageId: 42,
   }), null);
@@ -32,8 +32,8 @@ test('native message link строится только для public username �
 });
 
 test('публичный чат: t.me/<username>/<msg>', () => {
-  const link = one('смотри https://t.me/cockpit_bugs/1287 там всё');
-  assert.equal(link.username, 'cockpit_bugs');
+  const link = one('смотри https://t.me/example_team/1287 там всё');
+  assert.equal(link.username, 'example_team');
   assert.equal(link.chatId, null);
   assert.equal(link.messageId, 1287);
   assert.equal(link.threadId, null);
@@ -43,8 +43,8 @@ test('публичный чат: t.me/<username>/<msg>', () => {
 });
 
 test('публичный форум: t.me/<username>/<thread>/<msg>', () => {
-  const link = one('https://t.me/cockpit_bugs/12/1287');
-  assert.equal(link.username, 'cockpit_bugs');
+  const link = one('https://t.me/example_team/12/1287');
+  assert.equal(link.username, 'example_team');
   assert.equal(link.threadId, 12);
   assert.equal(link.messageId, 1287);
   assert.equal(link.ambiguous, false); // тема бывает только у группы-форума
@@ -66,8 +66,8 @@ test('приватный форум: t.me/c/<internal>/<thread>/<msg>', () => {
 });
 
 test('комментарий к посту канала: ?comment=<id>', () => {
-  const link = one('https://t.me/my_channel/900?comment=17');
-  assert.equal(link.username, 'my_channel');
+  const link = one('https://t.me/example_channel/900?comment=17');
+  assert.equal(link.username, 'example_channel');
   assert.equal(link.messageId, 900);
   assert.equal(link.commentId, 17);
   // Комментарии живут в группе обсуждения — форма уже не двусмысленна.
@@ -76,7 +76,7 @@ test('комментарий к посту канала: ?comment=<id>', () => {
 
 test('хвосты ?single и ?t= разбор не ломают и в ключ не идут', () => {
   assert.equal(one('https://t.me/c/1234567890/42?single').messageId, 42);
-  assert.equal(one('https://t.me/cockpit_bugs/1287?t=1m30s').messageId, 1287);
+  assert.equal(one('https://t.me/example_team/1287?t=1m30s').messageId, 1287);
   // Тот же адрес с разными косметическими хвостами — одна ссылка, не три.
   const links = parseTelegramLinks([
     'https://t.me/c/1234567890/42',
@@ -97,7 +97,7 @@ test('?thread= — та же тема форума, что и сегментом
 test('несколько ссылок в одном тексте; дубли схлопываются', () => {
   const links = parseTelegramLinks([
     'Первое: https://t.me/c/1234567890/42',
-    'Второе: t.me/cockpit_bugs/12/1287 (без схемы)',
+    'Второе: t.me/example_team/12/1287 (без схемы)',
     'Ещё раз первое: https://t.me/c/1234567890/42?single',
   ].join('\n'));
   assert.equal(links.length, 2);
@@ -106,12 +106,12 @@ test('несколько ссылок в одном тексте; дубли с�
 
 test('чужие домены и служебные пути игнорируются', () => {
   const text = [
-    'https://example.com/t.me/cockpit_bugs/1287',
-    'https://nott.me/cockpit_bugs/1287',
+    'https://example.com/t.me/example_team/1287',
+    'https://nott.me/example_team/1287',
     'https://t.me/joinchat/AAAAAEyDvBGtq0j4mIz2xQ',
     'https://t.me/+AbCdEfGhIjKl',
-    'https://t.me/addstickers/CockpitPack',
-    'https://t.me/cockpit_bugs',           // чат без сообщения — раскрывать нечего
+    'https://t.me/addstickers/ExamplePack',
+    'https://t.me/example_team',           // чат без сообщения — раскрывать нечего
     'https://t.me/c/1234567890',            // то же для приватного
   ].join('\n');
   assert.deepEqual(parseTelegramLinks(text), []);
@@ -120,15 +120,15 @@ test('чужие домены и служебные пути игнорирую�
 test('ссылка внутри блока кода ссылкой не считается', () => {
   const fenced = ['Пример вызова:', '```', 'curl https://t.me/c/1234567890/42', '```'].join('\n');
   assert.deepEqual(parseTelegramLinks(fenced), []);
-  assert.deepEqual(parseTelegramLinks('в строке `https://t.me/cockpit_bugs/1287` только пример'), []);
+  assert.deepEqual(parseTelegramLinks('в строке `https://t.me/example_team/1287` только пример'), []);
   // Код рядом с настоящей ссылкой её не глушит.
-  const mixed = `${fenced}\nа обсуждение тут: https://t.me/cockpit_bugs/1287`;
+  const mixed = `${fenced}\nа обсуждение тут: https://t.me/example_team/1287`;
   assert.deepEqual(parseTelegramLinks(mixed).map((l) => l.messageId), [1287]);
 });
 
 test('знаки препинания и скобки в конец ссылки не попадают', () => {
   assert.equal(one('см. (https://t.me/c/1234567890/42).').raw, 'https://t.me/c/1234567890/42');
-  assert.equal(one('тут: https://t.me/cockpit_bugs/1287, дальше текст').messageId, 1287);
+  assert.equal(one('тут: https://t.me/example_team/1287, дальше текст').messageId, 1287);
 });
 
 test('мусор на входе не роняет разбор', () => {

@@ -72,8 +72,8 @@ reset_fixture
 FIXTURE_RESULT[claude]=limited
 FIXTURE_RESULT[codex]=ok
 dispatcher_run_chain 1 PLAN claude codex 200 fixture_resolve fixture_invoke
-assert_rc 0 "$?" "Arsenkin survives Claude limit"
-assert_eq codex "$DISPATCH_RESULT_RUNNER" "Arsenkin falls back to Codex"
+assert_rc 0 "$?" "Claude-first chain survives Claude limit"
+assert_eq codex "$DISPATCH_RESULT_RUNNER" "Claude-first chain falls back to Codex"
 assert_eq fallback_limit "$DISPATCH_REASON" "limit reason is visible"
 assert_eq 0 "$DISPATCH_TRIES_DELTA" "provider failover spends no stage try"
 
@@ -81,14 +81,14 @@ reset_fixture
 FIXTURE_RESULT[codex]=limited
 FIXTURE_RESULT[claude]=ok
 dispatcher_run_chain 2 PLAN codex claude 200 fixture_resolve fixture_invoke
-assert_rc 0 "$?" "Rdesigner survives Codex limit"
-assert_eq claude "$DISPATCH_RESULT_RUNNER" "Rdesigner falls back to Claude"
+assert_rc 0 "$?" "Codex-first chain survives Codex limit"
+assert_eq claude "$DISPATCH_RESULT_RUNNER" "Codex-first chain falls back to Claude"
 
 reset_fixture
 FIXTURE_RESULT[claude]=provider_unavailable
 FIXTURE_RESULT[codex]=ok
 dispatcher_run_chain 21 PLAN claude codex 200 fixture_resolve fixture_invoke
-assert_rc 0 "$?" "Arsenkin survives a proven Claude account refusal"
+assert_rc 0 "$?" "Claude-first chain survives a proven Claude account refusal"
 assert_eq codex "$DISPATCH_RESULT_RUNNER" "proven Claude refusal selects Codex"
 assert_eq fallback_provider_unavailable "$DISPATCH_REASON" \
   "provider refusal is visible as the failover reason"
@@ -97,7 +97,7 @@ reset_fixture
 FIXTURE_RESULT[codex]=provider_unavailable
 FIXTURE_RESULT[claude]=ok
 dispatcher_run_chain 22 PLAN codex claude 200 fixture_resolve fixture_invoke
-assert_rc 0 "$?" "Rdesigner survives a proven Codex account refusal"
+assert_rc 0 "$?" "Codex-first chain survives a proven Codex account refusal"
 assert_eq claude "$DISPATCH_RESULT_RUNNER" "proven Codex refusal selects Claude"
 
 reset_fixture

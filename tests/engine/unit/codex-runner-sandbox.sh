@@ -38,6 +38,19 @@ chmod 400 "$control_dir/client.lock"
 export RUNNER_CODEX_RESTRICT_SHARED_STAND=1
 export PROFILE_AGENT_CONTROL_DIR="$control_dir"
 export RUNNER_CODEX_READ_DIRS="$project_extra"
+
+# Shared-stand resolver проверяет layout установленного npm-пакета. Собираем
+# минимальный tracked-by-test runtime под TEST_ROOT, не полагаясь на ignored
+# node_modules рабочей машины.
+codex_runtime="$TEST_ROOT/codex-runtime"
+codex_entry="$codex_runtime/bin/codex"
+codex_native="$codex_runtime/node_modules/@openai/codex-linux-fixture/vendor/fixture/bin/codex"
+mkdir -p "$(dirname "$codex_entry")" "$(dirname "$codex_native")"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$codex_entry"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$codex_native"
+chmod +x "$codex_entry" "$codex_native"
+export PATH="$codex_runtime/bin:$PATH"
+
 runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir"
 restricted_rc=$?
 assert_rc 0 "$restricted_rc" "shared-stand Codex policy can be inspected without a model call"

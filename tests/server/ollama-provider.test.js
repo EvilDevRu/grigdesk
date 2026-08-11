@@ -15,17 +15,17 @@ import {
 import { createToolbox } from '../../server/src/lib/executors/_ollama-tools.js';
 import { executeProviderUsageAction } from '../../server/src/lib/provider-usage.js';
 
-// Реальная фикстура qwen3.6:latest с машины пользователя: qwen35moe, 36B MoE,
-// 24 ГБ весов на RTX 3070 8 ГБ (CPU-offload). head_count_kv: null — как отдаёт демон.
-const QWEN35MOE_INFO = {
-  'qwen35moe.context_length': 262144,
-  'qwen35moe.block_count': 40,
-  'qwen35moe.attention.head_count': 16,
-  'qwen35moe.attention.head_count_kv': null,
-  'qwen35moe.attention.key_length': 256,
-  'qwen35moe.attention.value_length': 256,
+// Синтетическая MoE-модель: круглые размеры и аппаратные бюджеты не сняты
+// с конкретного хоста. head_count_kv: null закрепляет fallback GQA-эвристики.
+const SYNTHETIC_MOE_INFO = {
+  'fixturemoe.context_length': 262144,
+  'fixturemoe.block_count': 40,
+  'fixturemoe.attention.head_count': 16,
+  'fixturemoe.attention.head_count_kv': null,
+  'fixturemoe.attention.key_length': 256,
+  'fixturemoe.attention.value_length': 256,
 };
-const QWEN35MOE_SIZE = 23938333577;
+const SYNTHETIC_MOE_SIZE = 24 * 1024 ** 3;
 
 // Stub демона Ollama: /api/version, /api/tags, /api/show, /api/ps и NDJSON-стрим
 // /api/chat. Тела запросов к /api/chat складываем в массив — тесты проверяют, что ушло
@@ -374,9 +374,9 @@ test('Ollama run: недоступный демон — понятная оши�
 });
 
 test('kvBytesPerToken: суффиксный поиск ключей, GQA-эвристика при head_count_kv null', () => {
-  // Реальный qwen3.6:latest пользователя: 40 слоёв × 4 KV-головы (ceil(16/4)) ×
+  // Синтетическая MoE-фикстура: 40 слоёв × 4 KV-головы (ceil(16/4)) ×
   // (256+256) × 2 байта fp16 = 160 КБ/токен.
-  assert.equal(kvBytesPerToken(QWEN35MOE_INFO), 40 * 4 * (256 + 256) * 2);
+  assert.equal(kvBytesPerToken(SYNTHETIC_MOE_INFO), 40 * 4 * (256 + 256) * 2);
   // Типичная GQA-модель с явным head_count_kv (llama 8B): 32 × 8 × (128+128) × 2.
   assert.equal(kvBytesPerToken({
     'llama.block_count': 32,
@@ -386,23 +386,23 @@ test('kvBytesPerToken: суффиксный поиск ключей, GQA-эвр�
     'llama.attention.value_length': 128,
   }), 32 * 8 * (128 + 128) * 2);
   // Без block_count оценить нечего — caller берёт дефолт 160 КБ/токен.
-  assert.equal(kvBytesPerToken({ 'qwen3.context_length': 40960 }), null);
+  assert.equal(kvBytesPerToken({ 'fixture.context_length': 40960 }), null);
 });
 
 test('estimateMaxNumCtx: бюджет VRAM+ОЗУ−веса, кламп в окно модели, округление до 1024', () => {
-  // Сетап пользователя: RTX 3070 8 ГБ + 48 ГБ свободной ОЗУ, веса qwen3.6 (24 ГБ, offload).
-  const mem = { freeVramBytes: 8 * 1024 ** 3, freeRamBytes: 48 * 1024 ** 3 };
-  const budget = 8 * 1024 ** 3 + 0.6 * 48 * 1024 ** 3 - QWEN35MOE_SIZE;
+  // Круглые синтетические величины проверяют и VRAM, и CPU-offload.
+  const mem = { freeVramBytes: 12 * 1024 ** 3, freeRamBytes: 32 * 1024 ** 3 };
+  const budget = 12 * 1024 ** 3 + 0.6 * 32 * 1024 ** 3 - SYNTHETIC_MOE_SIZE;
   const expected = Math.floor(Math.floor(budget / (40 * 4 * 512 * 2)) / 1024) * 1024;
   const est = estimateMaxNumCtx({
-    contextLength: 262144, modelInfo: QWEN35MOE_INFO, modelSizeBytes: QWEN35MOE_SIZE, mem,
+    contextLength: 262144, modelInfo: SYNTHETIC_MOE_INFO, modelSizeBytes: SYNTHETIC_MOE_SIZE, mem,
   });
-  assert.equal(est, expected);   // 94208
+  assert.equal(est, expected);
   assert.ok(est <= 262144);      // не выше родного окна модели
   assert.equal(est % 1024, 0);   // округление вниз до шага ползунка
   // Веса не влезают и в ОЗУ (бюджет отрицательный) → минимум ползунка.
   assert.equal(estimateMaxNumCtx({
-    contextLength: 262144, modelInfo: QWEN35MOE_INFO, modelSizeBytes: QWEN35MOE_SIZE,
+    contextLength: 262144, modelInfo: SYNTHETIC_MOE_INFO, modelSizeBytes: SYNTHETIC_MOE_SIZE,
     mem: { freeVramBytes: 0, freeRamBytes: 1024 ** 3 },
   }), 2048);
   // model_info нет вовсе → потолок = родное окно; нет и его → дефолт 131072.
@@ -411,18 +411,18 @@ test('estimateMaxNumCtx: бюджет VRAM+ОЗУ−веса, кламп в ок
 });
 
 test('estimateMaxNumCtx: уже загруженная модель не вычитается из бюджета дважды', () => {
-  // Та же машина ПОСЛЕ первого хода: модель в памяти, поэтому свободного мало —
-  // 0.7 ГБ видеопамяти и 29 ГБ ОЗУ (живой замер). Без возврата занятого модели в бюджет
+  // Синтетический снимок ПОСЛЕ первого хода: модель заняла память, поэтому свободные цифры малы.
+  // Без возврата занятого моделью в бюджет
   // её веса вычитались бы второй раз, бюджет уходил в минус, и потолок падал до 2048:
   // разговор, начавшийся с окном 16k, на втором ходу молча ужимался до 2k и вырождался
   // в пустой ответ — модель не помещала в контекст даже свой системный блок.
-  const args = { contextLength: 262144, modelInfo: QWEN35MOE_INFO, modelSizeBytes: QWEN35MOE_SIZE };
-  const mem = { freeVramBytes: 0.7 * 1024 ** 3, freeRamBytes: 29 * 1024 ** 3 };
+  const args = { contextLength: 262144, modelInfo: SYNTHETIC_MOE_INFO, modelSizeBytes: SYNTHETIC_MOE_SIZE };
+  const mem = { freeVramBytes: 1 * 1024 ** 3, freeRamBytes: 32 * 1024 ** 3 };
   assert.equal(estimateMaxNumCtx({ ...args, mem }), 2048); // как считалось раньше — обрыв
   const withLoaded = estimateMaxNumCtx({
-    ...args, mem, loaded: { vramBytes: 5.2 * 1024 ** 3, ramBytes: 16.4 * 1024 ** 3 },
+    ...args, mem, loaded: { vramBytes: 6 * 1024 ** 3, ramBytes: 18 * 1024 ** 3 },
   });
-  assert.ok(withLoaded > 60000, `потолок с учётом занятого моделью: ${withLoaded}`);
+  assert.ok(withLoaded > 60_000, `потолок с учётом занятого моделью: ${withLoaded}`);
 });
 
 test('Ollama settings: numCtx — ползунок с потолком, вычисленным от памяти и весов', async (t) => {
@@ -451,7 +451,7 @@ test('Ollama settings: numCtx — ползунок с потолком, вычи
 test('Ollama run: оценка памяти ужимает окно, но не ниже рабочего минимума', async (t) => {
   // Веса больше всей памяти машины → оценка потолка выродилась в пол ползунка (2048).
   const { port, chatRequests } = await startOllamaStub(t, {
-    tagsSize: 900 * 1024 ** 3, showModelInfo: QWEN35MOE_INFO, digestPrefix: 'sha256:tight-',
+    tagsSize: 900 * 1024 ** 3, showModelInfo: SYNTHETIC_MOE_INFO, digestPrefix: 'sha256:tight-',
   });
   const steps = [];
   const out = await ollama.run({
@@ -607,7 +607,7 @@ test('Ollama usage: полосы памяти, загруженные модел
   const { port, chatRequests } = await startOllamaStub(t, {
     digestPrefix: 'sha256:usage-',
     loaded: [{
-      name: 'qwen3.6:latest',
+      name: 'example-moe:latest',
       size: 24 * 1024 ** 3,
       size_vram: 6 * 1024 ** 3,
       context_length: 8192,
@@ -623,22 +623,22 @@ test('Ollama usage: полосы памяти, загруженные модел
   assert.equal(daemon.summary, 'версия 0.6.2');
   assert.equal(daemon.note, `http://127.0.0.1:${port}`);
 
-  // Имя модели («qwen3.6:latest») в ключ не годится: контракт ресурсов пропускает
+  // Имя модели с двоеточием в ключ не годится: контракт ресурсов пропускает
   // только [a-z0-9_-]. Поэтому ключи нумерованные, а имя живёт в подписи.
   const model = usage.resources.find((r) => r.key === 'loaded-1');
-  assert.equal(model.label, 'qwen3.6:latest');
+  assert.equal(model.label, 'example-moe:latest');
   assert.match(model.summary, /6.0 ГБ в видеопамяти \+ 18 ГБ в ОЗУ/);
   assert.equal(Math.round(model.percent), 25);
   assert.match(model.note, /окно 8[\s ]?192 токенов/);
   assert.match(model.note, /выгрузится через 5 мин/);
   assert.equal(model.controls[0].action, 'unload-model');
-  assert.deepEqual(model.controls[0].payload, { model: 'qwen3.6:latest' });
+  assert.deepEqual(model.controls[0].payload, { model: 'example-moe:latest' });
   assert.ok(model.controls[0].confirm.text.includes('24 ГБ'));
 
   // Действие идёт общим путём ядра и обязано быть объявлено в usageActions.
   assert.deepEqual(
     await executeProviderUsageAction(ollama, {
-      actionId: 'unload-model', payload: { model: 'qwen3.6:latest' }, requestId: 'req-1', config,
+      actionId: 'unload-model', payload: { model: 'example-moe:latest' }, requestId: 'req-1', config,
     }),
     { ok: true },
   );

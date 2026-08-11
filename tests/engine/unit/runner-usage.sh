@@ -39,9 +39,9 @@ assert_eq "" "$(field "$actual" COST_USD)" "cost is not invented when the CLI ne
 # в разы — берём последнее.
 actual=$(runner_codex_usage "$(fixture codex-usage-cumulative)")
 assert_rc 0 "$?" "codex reports usage from the completed turn"
-assert_eq 2396921 "$(field "$actual" TOKENS_IN)" "codex takes the last cumulative snapshot"
-assert_eq 36163 "$(field "$actual" TOKENS_OUT)" "codex does not sum cumulative turns"
-assert_eq 2267904 "$(field "$actual" TOKENS_CACHE_READ)" "codex maps cached input to cache read"
+assert_eq 2400000 "$(field "$actual" TOKENS_IN)" "codex takes the last cumulative snapshot"
+assert_eq 100000 "$(field "$actual" TOKENS_OUT)" "codex does not sum cumulative turns"
+assert_eq 2200000 "$(field "$actual" TOKENS_CACHE_READ)" "codex maps cached input to cache read"
 
 # Телеметрия без расхода не превращается в нулевой расход: ноль означал бы
 # «ход был бесплатным», а это другое утверждение.

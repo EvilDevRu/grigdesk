@@ -31,7 +31,7 @@ test('рабочие контексты объединяют репозитор�
       dir: '/srv/cockpit/engine',
       trees: [
         tree('/srv/cockpit/engine', { main: true, name: 'основной', branch: 'master' }),
-        tree('/srv/worktrees/t8165', { name: 't8165', task: 't8165', branch: 'task-8165' }),
+        tree('/srv/worktrees/t46', { name: 't46', task: 't46', branch: 'task-46' }),
       ],
     },
     {
@@ -58,9 +58,9 @@ test('рабочие контексты объединяют репозитор�
       },
       {
         repoKey: 'engine',
-        treePath: '/srv/worktrees/t8165',
-        label: 'engine · Задача t8165 · task-8165',
-        branchLabel: 'task-8165',
+        treePath: '/srv/worktrees/t46',
+        label: 'engine · Задача t46 · task-46',
+        branchLabel: 'task-46',
       },
       {
         repoKey: 'web',
@@ -77,8 +77,8 @@ test('рабочие контексты объединяют репозитор�
     ],
   );
   assert.deepEqual(unavailable, [{ repoKey: 'broken', repoDir: '/missing/repo' }]);
-  assert.equal(contexts[1].id, JSON.stringify(['engine', '/srv/worktrees/t8165']));
-  assert.equal(codeContextId('engine', '/srv/worktrees/t8165'), contexts[1].id);
+  assert.equal(contexts[1].id, JSON.stringify(['engine', '/srv/worktrees/t46']));
+  assert.equal(codeContextId('engine', '/srv/worktrees/t46'), contexts[1].id);
 
   assert.notEqual(
     codeContextId('repo:one', '/work:two'),

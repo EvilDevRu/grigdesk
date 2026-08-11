@@ -10,7 +10,7 @@ export function agentActivityLabel(activity) {
   if (activity?.journalFresh) return 'агент пишет';
   if (!Number.isFinite(activity?.journalAgeSec)) return 'журнал не подключён';
   // Имя висящего вызова важнее цифры: десять минут `Bash` — это сборка, полчаса
-  // playwright — мёртвый браузер. Инцидент t8165 читался бы с одного взгляда.
+  // playwright — мёртвый браузер. Такой инцидент должен читаться с одного взгляда.
   const tool = activity.silentTool ? ` (${activity.silentTool})` : '';
   return `нет событий ${minutes(activity.journalAgeSec)} мин${tool}`;
 }

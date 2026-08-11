@@ -872,7 +872,7 @@ async function factoryModule(fastify, opts) {
     const key = String(request.params.key).toUpperCase();
     const decision = request.params.decision;
     // Только GATE_*: других ворот у движка нет. DEMO_ASK был исключением, пока демо стояло
-    // в цепочке; демо удалено целиком (2026-08-01), возвращать этот ключ некуда.
+    // в цепочке; после удаления этого этапа возвращать ключ некуда.
     if (!id || !key.startsWith('GATE_')) return reply.code(400).send({ error: 'bad_gate' });
     if (!['approve', 'reject'].includes(decision)) return reply.code(400).send({ error: 'bad_decision' });
     // Решение применяет единственный движок (immutable журнал попытки), а
@@ -891,7 +891,7 @@ async function factoryModule(fastify, opts) {
     // CAS ворот в движке принимает решение только для узла, на котором стоит
     // курсор журнала (ready|paused). Реестровая проекция опережает журнал, когда
     // диспетчер встал fail-closed после захода узла: кокпит рисовал ворота, до
-    // которых маршрут не дошёл, и клик уезжал в гарантированный отказ 75 (t8164).
+    // которых маршрут не дошёл, и клик уезжал в гарантированный отказ 75.
     // Проверяем сами — ответ «что сейчас делать» вместо голого кода движка.
     const gateNode = key.toLowerCase();
     const { cursor } = trusted;

@@ -186,7 +186,7 @@ assert_rc 78 "$?" "a pre-existing task marker blocks a new transaction"
 # Маркер в игнорируемом файле задачу не запирает: так выглядит вывод самой трассировки.
 # Агент вписывает Log::info в исходник, стенд отрабатывает сценарий и пишет строку с
 # маркером в лог приложения ВНУТРИ дерева. Раньше begin отказывал 78, а cleanup вставал
-# baseline_not_restored — узел нельзя было ни закрыть, ни переиграть (t7802).
+# baseline_not_restored — узел нельзя было ни закрыть, ни переиграть.
 printf '%s\n' 'ignored FACTORY-TRACE:t46 маркер' >"$repo/ignored-marker"
 instrumentation_tx_begin 46 trace-marker-ignored "$TEST_ROOT/marker.scope" \
   'FACTORY-TRACE:t46' "$repo"

@@ -32,18 +32,18 @@ profile_delivery_targets() {
 ${deliveryActions === null ? '' : `profile_delivery_actions() { printf '${deliveryActions}\\n'; }`}
 `);
   const config = { factoryHome: root, profilesDir };
-  return loadFactoryLaunchProfile(config, 'demo', '7802');
+  return loadFactoryLaunchProfile(config, 'demo', '42');
 }
 
 test('launch profile связывает canonical repo, triage alias и delivery defaults', async (t) => {
   const profile = await fixture(t);
   assert.deepEqual(profile.repositories, [
     {
-      name: 'backend', source: '/srv/backend', workspace: '/work/backend-t7802',
+      name: 'backend', source: '/srv/backend', workspace: '/work/backend-t42',
       triageKey: 'be', targetBranch: 'master',
     },
     {
-      name: 'frontend', source: '/srv/frontend', workspace: '/work/frontend-t7802',
+      name: 'frontend', source: '/srv/frontend', workspace: '/work/frontend-t42',
       triageKey: 'fe', targetBranch: 'main',
     },
   ]);

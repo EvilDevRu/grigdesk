@@ -215,7 +215,7 @@ test('CodeView показывает два подписанных уровня, 
       {
         key: 'engine', dir: '/engine', trees: [
           mainTree('/engine', 'master'),
-          worktree('/work/t8165', 't8165', 'task-8165', 't8165'),
+          worktree('/work/t46', 't46', 'task-46', 't46'),
         ],
       },
       {
@@ -260,7 +260,7 @@ test('CodeView показывает два подписанных уровня, 
   ]);
   const optionTexts = wrapper.findAll('#code-context option').map((option) => option.text());
   assert.ok(optionTexts.includes('engine · Основная · master'));
-  assert.ok(optionTexts.includes('engine · Задача t8165 · task-8165'));
+  assert.ok(optionTexts.includes('engine · Задача t46 · task-46'));
   assert.ok(optionTexts.includes('web · Worktree web-preview · detached HEAD'));
   assert.match(wrapper.get('.context-warning').text(), /broken.*\/missing\/broken/s);
   assert.match(wrapper.get('.context-warning a').text(), /Проекты/);

@@ -1,5 +1,5 @@
 // Ветка закреплена НА РЕПОЗИТОРИЙ. У проекта из нескольких репозиториев каноничные
-// ветки не обязаны совпадать (parser живёт на main, ag — на master), и кокпит обязан
+// ветки не обязаны совпадать (service-a живёт на main, service-b — на master), и кокпит обязан
 // сверять env прогона с веткой КАЖДОГО репозитория, а не с одной общей. Манифесты,
 // записанные до этой правки, короче на одно поле — журнал читается и по ним.
 import test from 'node:test';
@@ -126,21 +126,21 @@ function sharedEnv(overrides = {}) {
     FE_PORT: '8830',
     API_PORT: '8830',
     REPO_COUNT: '2',
-    REPO_0_NAME: 'parser',
-    REPO_0_SOURCE: '/srv/parser',
-    REPO_0_WT: '/srv/parser',
+    REPO_0_NAME: 'service-a',
+    REPO_0_SOURCE: '/srv/service-a',
+    REPO_0_WT: '/srv/service-a',
     REPO_0_BRANCH: 'main',
-    REPO_1_NAME: 'ag',
-    REPO_1_SOURCE: '/srv/ag',
-    REPO_1_WT: '/srv/ag',
+    REPO_1_NAME: 'service-b',
+    REPO_1_SOURCE: '/srv/service-b',
+    REPO_1_WT: '/srv/service-b',
     REPO_1_BRANCH: 'master',
     ...overrides,
   };
 }
 
 const TWO_REPOS = [
-  'repo\tparser\t/srv/parser\t/srv/parser\tmain',
-  'repo\tag\t/srv/ag\t/srv/ag\tmaster',
+  'repo\tservice-a\t/srv/service-a\t/srv/service-a\tmain',
+  'repo\tservice-b\t/srv/service-b\t/srv/service-b\tmaster',
 ];
 
 test('shared-манифест несёт свою ветку у каждого репозитория', async () => {
@@ -149,7 +149,7 @@ test('shared-манифест несёт свою ветку у каждого �
   assert.equal(trusted.sourceBranch, 'main');
   assert.deepEqual(
     trusted.repositories.map((repo) => [repo.name, repo.branch]),
-    [['parser', 'main'], ['ag', 'master']],
+    [['service-a', 'main'], ['service-b', 'master']],
   );
   assert.equal(verifyFactoryAttemptEnvironment(trusted, sharedEnv()), true);
 });
@@ -168,12 +168,12 @@ test('env с чужой веткой репозитория отвергаетс
 test('манифест старой формы читается: ветка берётся из source-branch', async () => {
   const dirs = await trustedLedger({
     sourceBranch: 'main',
-    repoLines: ['repo\tparser\t/srv/parser\t/srv/parser'],
+    repoLines: ['repo\tservice-a\t/srv/service-a\t/srv/service-a'],
   });
   const trusted = await read(dirs);
   assert.deepEqual(
     trusted.repositories.map((repo) => [repo.name, repo.branch]),
-    [['parser', 'main']],
+    [['service-a', 'main']],
   );
   const env = sharedEnv({ REPO_COUNT: '1' });
   for (const key of ['REPO_1_NAME', 'REPO_1_SOURCE', 'REPO_1_WT', 'REPO_1_BRANCH']) {

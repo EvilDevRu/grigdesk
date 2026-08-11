@@ -38,7 +38,7 @@ const T0 = Date.UTC(2026, 7, 1, 9, 0, 0) / 1000;
 
 const ME = {
   id: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
@@ -211,7 +211,7 @@ test('назначенный служебный чат используется 
     text: SECRET,
   };
   const { expand, setService, bot } = await build(t, {
-    messages: [msg({ chatId: OWNER, chatType: 'private', chatTitle: 'Дмитрий', isForum: false, messageId: 1, text: '/start' })],
+    messages: [msg({ chatId: OWNER, chatType: 'private', chatTitle: 'Тестовый пользователь', isForum: false, messageId: 1, text: '/start' })],
     handlers: { forwardMessage: forwarded, deleteMessage: true },
   });
 
@@ -274,13 +274,13 @@ test('native mutations отключённого bot возвращают not_con
 
 test('служебный чат остаётся в offline namespace того же bot после disconnect', async (t) => {
   const { setService, status, disconnect } = await build(t, {
-    messages: [msg({ chatId: OWNER, chatType: 'private', chatTitle: 'Дмитрий', isForum: false, messageId: 1, text: '/start' })],
+    messages: [msg({ chatId: OWNER, chatType: 'private', chatTitle: 'Тестовый пользователь', isForum: false, messageId: 1, text: '/start' })],
   });
 
   await setService({ chatId: OWNER });
   const before = (await status()).json().bot;
   assert.equal(before.serviceChatId, OWNER);
-  assert.equal(before.serviceChatTitle, 'Дмитрий');
+  assert.equal(before.serviceChatTitle, 'Тестовый пользователь');
 
   await disconnect();
   assert.equal((await status()).json().bot.serviceChatId, OWNER);

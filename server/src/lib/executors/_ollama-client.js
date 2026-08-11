@@ -16,12 +16,11 @@ export const MIN_NUM_CTX = 512;
 export const FALLBACK_MAX_NUM_CTX = 131072;
 // Нижняя граница ползунка и клампа: меньше для разговора бессмысленно.
 export const MIN_RANGE_NUM_CTX = 2048;
-// Запасная оценка KV-кэша, когда model_info не дал block_count: 160 КБ/токен
-// (ровно столько выходит у реального qwen35moe 36B через GQA-эвристику ниже).
+// Консервативная запасная оценка KV-кэша, когда model_info не дал block_count.
 export const DEFAULT_KV_BYTES_PER_TOKEN = 160 * 1024;
 // Сколько модель ждёт в памяти после хода. Дефолт самой Ollama — 5 минут, и это
-// ЗАМЕТНО: холодная загрузка 36B MoE с диска заняла 38.7 с — столько платит первый
-// ход после паузы в разговоре. Ползунок в минутах, 0 — выгружать сразу после хода.
+// заметно для большой локальной модели: первый ход после выгрузки платит за холодную
+// загрузку с диска. Ползунок в минутах, 0 — выгружать сразу после хода.
 export const DEFAULT_KEEP_ALIVE_MIN = 5;
 export const MAX_KEEP_ALIVE_MIN = 60;
 
@@ -214,7 +213,7 @@ export async function systemMemory() {
 /**
  * Байты KV-кэша на токен контекста (fp16): слои × KV-головы × (key+value) × 2 байта.
  * Ключи model_info ищем по суффиксу — у архитектур разные префиксы (qwen35moe.*, llama.*).
- * head_count_kv бывает null (реальный qwen35moe!) — тогда эвристика GQA ceil(heads/4);
+ * head_count_kv может быть null — тогда эвристика GQA ceil(heads/4);
  * нет и head_count → 1. Не нашли block_count → null: caller берёт DEFAULT_KV_BYTES_PER_TOKEN.
  */
 export function kvBytesPerToken(modelInfo) {
@@ -235,18 +234,16 @@ export function kvBytesPerToken(modelInfo) {
 }
 
 /**
- * Потолок num_ctx от железа: бюджет = свободная VRAM + 60% свободной ОЗУ − веса модели
- * (при CPU-offload веса и KV живут и в ОЗУ — потолок «только от VRAM» на 8-гигабайтной
- * карте с 24-гигабайтной моделью сказал бы «нельзя ничего», что неправда).
+ * Потолок num_ctx от железа: бюджет = свободная VRAM + 60% свободной ОЗУ − веса модели.
+ * При CPU-offload веса и KV живут и в ОЗУ, поэтому потолок только от VRAM был бы неверным.
  * Итог клампится в [MIN_RANGE_NUM_CTX, context_length] и округляется вниз до 1024.
  * model_info нет вовсе → считать нечего, потолок = context_length || FALLBACK_MAX_NUM_CTX.
  *
  * `loaded` — сколько памяти эта же модель занимает ПРЯМО СЕЙЧАС (из /api/ps). Её
  * обязательно вернуть в бюджет: при смене num_ctx демон перезагружает модель, то есть
  * сначала освобождает занятое. Без этого веса вычитались бы дважды (их уже нет в
- * свободной памяти — и мы вычитаем их ещё раз), бюджет уходил в минус, и потолок падал
- * до пола 2048 ровно после первого хода. Проверено живьём: 16 384 на холодной машине
- * и 2048 сразу после загрузки той же модели.
+ * свободной памяти — и мы вычитаем их ещё раз), бюджет уходил в минус, и после первого
+ * хода потолок ошибочно падал до минимального значения.
  */
 export function estimateMaxNumCtx({ contextLength, modelInfo, modelSizeBytes, mem, loaded } = {}) {
   const ctx = Number(contextLength);
@@ -305,8 +302,8 @@ export async function fetchLoadedModels(baseUrl, { timeoutMs = 1500 } = {}) {
         name: String(m.name),
         totalBytes: total,
         vramBytes: vram,
-        // Остаток весов лежит в ОЗУ (CPU-offload): у 36B MoE на 8-гигабайтной карте
-        // это основная часть, и именно она объясняет скорость.
+        // Остаток весов лежит в ОЗУ (CPU-offload); для модели крупнее VRAM это
+        // основная часть, и именно она объясняет скорость.
         ramBytes: Math.max(0, total - vram),
         contextLength: Number(m.context_length) || null,
         expiresInSec: Number.isFinite(expiresAt)

@@ -25,21 +25,21 @@ const TOKEN_EVENT = {
   payload: {
     type: 'token_count',
     info: {
-      total_token_usage: { input_tokens: 25_626_388, cached_input_tokens: 25_025_792 },
-      last_token_usage: { input_tokens: 83_286, cached_input_tokens: 80_640 },
-      model_context_window: 258_400,
+      total_token_usage: { input_tokens: 240_000, cached_input_tokens: 220_000 },
+      last_token_usage: { input_tokens: 80_000, cached_input_tokens: 64_000 },
+      model_context_window: 256_000,
     },
   },
 };
 
 test('Codex token_count разделяет активный контекст и накопительный расход', () => {
   assert.deepEqual(parseCodexTokenInfoLine(JSON.stringify(TOKEN_EVENT)), {
-    contextTokens: 83_286,
-    contextWindow: 258_400,
+    contextTokens: 80_000,
+    contextWindow: 256_000,
     contextMetric: 'active-input-v1',
     contextIsEstimate: false,
-    totalInputTokens: 25_626_388,
-    cachedInputTokens: 25_025_792,
+    totalInputTokens: 240_000,
+    cachedInputTokens: 220_000,
   });
   assert.equal(parseCodexTokenInfoLine('{"payload":{"type":"other"}}'), null);
 });
@@ -47,8 +47,8 @@ test('Codex token_count разделяет активный контекст и 
 test('Codex rollout читается с конца и находит thread по безопасному UUIDv7', async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-home-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const threadId = '019fbcdd-e900-7773-bc27-cf6a12c3e827';
-  const day = path.join(home, 'sessions', '2026', '08', '01');
+  const threadId = '01b8dac5-b400-7000-8000-000000000042';
+  const day = path.join(home, 'sessions', '2030', '01', '01');
   const file = path.join(day, `rollout-test-${threadId}.jsonl`);
   await mkdir(day, { recursive: true });
   await writeFile(file, [

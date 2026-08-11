@@ -5,11 +5,11 @@ import { apiHarness, chatStoreFixture } from './helpers/chat-store.js';
 
 const SOURCE_CHAT = {
   id: 'source-chat',
-  taskId: '8165',
+  taskId: '46',
   title: 'Исходный разговор',
   purpose: '',
   sourceChatId: null,
-  messages: [{ role: 'user', text: 'Экспорт падает' }],
+  messages: [{ role: 'user', text: 'Операция падает' }],
   sessionId: 'source-session',
   contextTokens: 0,
   draft: '',
@@ -27,16 +27,16 @@ test('Debug открывается отдельным черновиком за�
   apiHarness.post = async (...args) => { posts.push(args); return {}; };
   apiHarness.put = async (url, body) => { puts.push({ url, body }); return { ok: true }; };
 
-  const context = '  Ошибка: экспорт завершается с кодом 500.  ';
+  const context = '  Ошибка: операция завершается с кодом 500.  ';
   const expectedDraft = [
-    'Работай в песочнице задачи #8165 в режиме Debug: воспроизведи описанную ошибку, докажи первопричину, внеси минимальное исправление и выполни релевантные проверки.',
+    'Работай в песочнице задачи #46 в режиме Debug: воспроизведи описанную ошибку, докажи первопричину, внеси минимальное исправление и выполни релевантные проверки.',
     'Не начинай менять worktree, пока Hunt или другой читающий конвейер этой задачи ещё выполняется.',
-    '\nКонтекст исходного разговора:\nОшибка: экспорт завершается с кодом 500.',
+    '\nКонтекст исходного разговора:\nОшибка: операция завершается с кодом 500.',
   ].join('\n');
 
   const created = await chat.openDebugFor({
-    taskId: 8165,
-    taskTitle: 'Экспорт',
+    taskId: 46,
+    taskTitle: 'Обработка данных',
     sourceChatId: SOURCE_CHAT.id,
     context,
   });
@@ -63,7 +63,7 @@ test('Debug открывается отдельным черновиком за�
   assert.equal(saved.body.chat.draft, expectedDraft);
 
   const reused = await chat.openDebugFor({
-    taskId: '8165',
+    taskId: '46',
     taskTitle: 'Другое название не создаёт дубль',
     sourceChatId: 'another-source',
     context: 'Новый контекст не заменяет уже подготовленный черновик',
@@ -77,7 +77,7 @@ test('Debug открывается отдельным черновиком за�
   assert.equal(chat.sessions.some((session) => session.id === debug.id), false);
   assert.equal(chat.archived.some((session) => session.id === debug.id), true);
 
-  const restored = await chat.openDebugFor({ taskId: 8165, sourceChatId: SOURCE_CHAT.id });
+  const restored = await chat.openDebugFor({ taskId: 46, sourceChatId: SOURCE_CHAT.id });
   assert.deepEqual(restored, { id: debug.id, created: false });
   assert.equal(chat.archived.some((session) => session.id === debug.id), false);
   assert.equal(chat.sessions.find((session) => session.id === debug.id), debug);

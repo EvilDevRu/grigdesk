@@ -10,13 +10,13 @@ import { apiError, mountTelegramView, settle } from './helpers/telegram-view.js'
 
 process.env.NODE_ENV = 'test';
 
-const CHAT = -1002263563987;
+const CHAT = -1001000000042;
 const T0 = Date.UTC(2026, 7, 7, 10, 0, 0) / 1000;
 
 const BOT = {
   configured: true,
   botId: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canReadAllGroupMessages: true,
   tokenHint: '…v5u6',
@@ -30,7 +30,7 @@ const POLL = {
 };
 
 const CHATS = [
-  { id: CHAT, title: 'AT projects · dev', type: 'supergroup', isForum: true, messages: 3, lastAt: T0 },
+  { id: CHAT, title: 'Команда Альфа · разработка', type: 'supergroup', isForum: true, messages: 3, lastAt: T0 },
   { id: 5551234, title: 'Иван', type: 'private', isForum: false, messages: 1, lastAt: T0 - 3600 },
 ];
 const TOPICS = [
@@ -44,7 +44,7 @@ function rule(over = {}) {
     project: 'demo',
     chatId: CHAT,
     username: null,
-    title: 'AT projects · dev',
+    title: 'Команда Альфа · разработка',
     threadId: null,
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
@@ -61,7 +61,7 @@ function rule(over = {}) {
 function server({
   rules = [],
   projects = ['demo', 'shop'],
-  groups = [{ id: 32, name: 'arsenkin.ru' }],
+  groups = [{ id: 101, name: 'Проект Альфа' }],
   topics = TOPICS,
   onPut = null,
 } = {}) {
@@ -138,7 +138,7 @@ test('правило добавляется чатом из услышанных
   assert.equal(saved.threadId, null, 'пустое поле темы значит «весь чат»');
   // Подпись чата кладём в правило: бота могут убрать из чата, и имени взять
   // будет негде, а правило останется.
-  assert.equal(saved.title, 'AT projects · dev');
+  assert.equal(saved.title, 'Команда Альфа · разработка');
   // Сохранили — несохранённого не осталось.
   assert.equal(saveBtn(wrapper), undefined);
 });
@@ -219,13 +219,13 @@ test('публичный чат привязывается именем — ин
   // группа портала), и «первый input» переставал бы значить то же самое.
   const nameInput = row.findAll('input').find((i) => i.attributes('placeholder') === 'имя_чата');
   assert.ok(nameInput, 'поле имени чата не появилось');
-  await nameInput.setValue('@atprojects');
+  await nameInput.setValue('@example_team');
   await projectSelect(row).setValue('demo');
   await saveBtn(wrapper).trigger('click');
   await settle(flushPromises);
 
   const [saved] = srv.puts[0].rules;
-  assert.equal(saved.username, '@atprojects', 'имя чата уехало не так, как введено');
+  assert.equal(saved.username, '@example_team', 'имя чата уехало не так, как введено');
   assert.equal(saved.chatId, null);
 });
 
@@ -257,29 +257,29 @@ test('проект, которого нет в списке, не подменя
 
 test('проект Битрикс24 выбирается по имени, а в правило уезжает числовой id', async (t) => {
   const srv = server({ groups: [
-    { id: 32, name: 'arsenkin.ru' },
+    { id: 101, name: 'Проект Альфа' },
     { id: 44, name: 'Магазин' },
   ] });
   const { wrapper, flushPromises } = await mountView(t, { api: srv.api });
 
   await btn(wrapper, 'Добавить').trigger('click');
   const row = wrapper.get('.rule');
-  assert.match(b24GroupSelect(row).text(), /arsenkin\.ru/);
+  assert.match(b24GroupSelect(row).text(), /Проект Альфа/);
   assert.match(b24GroupSelect(row).text(), /Магазин/);
 
   await chatSelect(row).setValue(`id:${CHAT}`);
   await projectSelect(row).setValue('demo');
-  await b24GroupSelect(row).setValue('32');
+  await b24GroupSelect(row).setValue('101');
   await saveBtn(wrapper).trigger('click');
   await settle(flushPromises);
 
-  assert.equal(srv.puts[0].rules[0].b24.groupId, 32);
+  assert.equal(srv.puts[0].rules[0].b24.groupId, 101);
   assert.equal(typeof srv.puts[0].rules[0].b24.groupId, 'number');
 });
 
 test('недоступный сохранённый проект Битрикс24 остаётся выбранным', async (t) => {
   const saved = rule({ b24: { responsibleId: null, groupId: 99, priority: 1 } });
-  const srv = server({ rules: [saved], groups: [{ id: 32, name: 'arsenkin.ru' }] });
+  const srv = server({ rules: [saved], groups: [{ id: 101, name: 'Проект Альфа' }] });
   const { wrapper } = await mountView(t, { api: srv.api });
 
   const select = b24GroupSelect(wrapper.get('.rule'));

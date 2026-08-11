@@ -27,7 +27,7 @@ function botView(over = {}) {
   return {
     configured: true,
     botId: 8123456789,
-    username: 'cockpit_inbox_bot',
+    username: 'example_inbox_bot',
     firstName: 'Кокпит · входящие',
     canReadAllGroupMessages: false,
     tokenHint: '…v5u6',
@@ -101,7 +101,7 @@ test('форма подключает бота: пробелы срезаны, �
     ['GET', '/api/b24/users'],
     ['GET', '/api/b24/groups'],
   ]);
-  assert.match(wrapper.text(), /@cockpit_inbox_bot/);
+  assert.match(wrapper.text(), /@example_inbox_bot/);
   assert.match(wrapper.text(), /…v5u6/);
   assert.match(wrapper.get('.ok').text(), /подключён/);
   assert.equal(wrapper.find('input').exists(), false, 'после подключения форма токена не нужна');
@@ -181,7 +181,7 @@ test('подключённый бот показывает, что он уже �
       if (url.endsWith('/chats')) {
         return {
           chats: [
-            { id: -1002263563987, title: 'AT projects · dev', type: 'supergroup', isForum: true, messages: 3, lastAt: T0 },
+            { id: -1001000000042, title: 'Команда Альфа · разработка', type: 'supergroup', isForum: true, messages: 3, lastAt: T0 },
             { id: 5551234, title: '', type: 'private', isForum: false, messages: 1, lastAt: T0 - 3600 },
           ],
         };
@@ -207,7 +207,7 @@ test('подключённый бот показывает, что он уже �
 
   const rows = wrapper.findAll('.chat');
   assert.equal(rows.length, 2);
-  assert.match(rows[0].text(), /AT projects · dev/);
+  assert.match(rows[0].text(), /Команда Альфа · разработка/);
   assert.match(rows[0].text(), /супергруппа, с темами/);
   assert.match(rows[0].text(), /3 сообщения/, 'счётчик со склонением, а не «3 сообщений»');
   // Безымянная личка не должна выглядеть пустой строкой — иначе непонятно, что это.
@@ -288,7 +288,7 @@ test('«Отключить» стирает токен только после �
   assert.deepEqual(posts, [], 'токен стёрли без ответа человека');
   assert.equal(asked.length, 1);
   // Вопрос обязан называть цену: ключ пропадёт, вернуться можно только новым токеном.
-  assert.match(asked[0].text, /@cockpit_inbox_bot/);
+  assert.match(asked[0].text, /@example_inbox_bot/);
   assert.match(asked[0].text, /стёрт/);
   assert.match(asked[0].text, /только для чтения/);
   assert.match(asked[0].text, /отдельно возобновить приём/);

@@ -12,17 +12,17 @@ import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-stor
 const ACCOUNT_REF = 'acc_telegram_context_0001';
 const BOT_ID = '8123456789';
 const TOKEN = `${BOT_ID}:AAHrEaLLyLoNgSeCrEtPaRt_x1y2z3w4v5u6`;
-const CHAT = -1002263563987;
+const CHAT = -1001000000042;
 const T0 = 1_786_172_400;
 
 const message = (over = {}) => ({
   chatId: CHAT,
   chatUsername: '',
-  chatTitle: 'AT projects · dev',
+  chatTitle: 'Команда Альфа · разработка',
   chatType: 'supergroup',
   isForum: true,
   messageId: 100,
-  threadId: 6779,
+  threadId: 42,
   replyToMessageId: null,
   mediaGroupId: null,
   date: T0,

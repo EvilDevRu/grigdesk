@@ -385,7 +385,7 @@ export class B24Client {
     /**
      * Список задач, отсортированный по приоритету.
      * @param {object} opts
-     * @param {boolean} opts.all true — все мои активные задачи (~43), false — приоритизированный набор (~9)
+     * @param {boolean} opts.all true — все активные задачи, false — приоритизированный набор
      */
     async listTasks({ all = true } = {}) {
         const uid = (await this.discoverUserId()) ?? 0;
@@ -747,7 +747,7 @@ export class B24Client {
 
     /**
      * Поиск пользователей по имени: совпадают ВСЕ токены запроса (в любом порядке,
-     * регистронезависимо), поэтому «Бергман Дмитрий» и «Дмитрий Бергман» дадут одно.
+     * регистронезависимо), поэтому «Тестов Алексей» и «Алексей Тестов» дадут одно.
      * Пустой запрос — весь ростер.
      * @returns {Promise<Array<{id:number,name:string,position:string}>>}
      */

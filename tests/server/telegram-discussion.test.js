@@ -16,12 +16,12 @@ import test from 'node:test';
 import { DISCUSSION_LIMITS, buildDiscussion } from '../../server/src/lib/telegram/discussion.js';
 
 const T0 = Date.UTC(2026, 7, 7, 9, 0, 0) / 1000;
-const CHAT = -1002263563987;
+const CHAT = -1001000000042;
 
 const msg = (over = {}) => ({
   chatId: CHAT,
   chatUsername: '',
-  chatTitle: 'AT projects · dev',
+  chatTitle: 'Команда Альфа · разработка',
   chatType: 'supergroup',
   isForum: true,
   messageId: 345,
@@ -29,14 +29,14 @@ const msg = (over = {}) => ({
   replyToMessageId: null,
   date: T0,
   editedAt: null,
-  from: { id: 5551234, name: 'Дмитрий', username: 'dmitry' },
+  from: { id: 424242, name: 'Тестовый пользователь', username: 'test_user' },
   text: 'Касса не открывается после обновления.',
   media: [],
   ...over,
 });
 
 /** Удачный вердикт резолва: ветка сообщений и цель, на которую вела ссылка. */
-function ok({ url = 'https://t.me/c/2263563987/12/345', messages, target } = {}) {
+function ok({ url = 'https://t.me/c/1000000042/12/345', messages, target } = {}) {
   const list = messages || [msg()];
   const aim = target || list[list.length - 1];
   return {
@@ -115,7 +115,7 @@ test('цитаты идут по времени, а та, на которую с
 
   assert.deepEqual(item.quotes.map((q) => q.messageId), [340, 341, 342]);
   assert.deepEqual(item.quotes.map((q) => q.target), [false, true, false]);
-  assert.equal(item.chat.title, 'AT projects · dev');
+  assert.equal(item.chat.title, 'Команда Альфа · разработка');
   assert.equal(item.thread, 12);
   // В тексте видно и автора, и время, и что именно на это была ссылка.
   assert.match(view.text, /Автор 2/);
@@ -143,7 +143,7 @@ test('целевые сообщения всех ссылок влезают д�
   const a = branch(4, 100);
   const b = branch(4, 200);
   const view = buildDiscussion(
-    [ok({ messages: a, target: a[3] }), ok({ url: 'https://t.me/c/2263563987/12/203', messages: b, target: b[3] })],
+    [ok({ messages: a, target: a[3] }), ok({ url: 'https://t.me/c/1000000042/12/203', messages: b, target: b[3] })],
     { maxQuotes: 2 },
   );
 
@@ -199,7 +199,7 @@ test('сообщение без текста показывается вложе
 
   assert.equal(quote.text, '');
   assert.deepEqual(quote.media, ['фото']);
-  assert.match(view.text, /Дмитрий/);
+  assert.match(view.text, /Тестовый пользователь/);
   assert.match(view.text, /фото/);
 });
 

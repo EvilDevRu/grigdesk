@@ -871,7 +871,7 @@ export async function runClaudeUntrusted({
 }
 
 // Слэш-команды Claude для меню чата. Print-режим (`-p --resume`) перехватывает их сам:
-// состав проверен гейтом исполняемости (2026-08-06, claude 2.1.220). /status, /vim и
+// состав проверен contract gate на claude 2.1.220. /status, /vim и
 // прочие TUI-only отвечают «isn't available in this environment» — не берём; /clear
 // ОПАСЕН (молча начинает НОВУЮ сессию с пустым stdout → ложный emptyRun) — не берём.
 // /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (кокпит сильнее).
@@ -1386,8 +1386,8 @@ export default {
           // до агента (см. modules/chat). Это не отказ в действии, в текст его не тащим.
           const denied = [...new Set((j.permission_denials || []).map((d) => d.tool_name).filter((n) => n && n !== 'AskUserQuestion'))];
           // Причину показываем ЧЕЛОВЕКУ, а не только в журнале: «повтори вопрос» без диагноза
-          // загоняет в петлю повторов (инцидент 27.07: три повтора подряд, каждый — новый
-          // процесс на занятую сессию, все с error_during_execution).
+          // загоняет в петлю повторов: каждый повтор создаёт новый процесс на занятую
+          // сессию и завершается с error_during_execution.
           const why = j.subtype && j.subtype !== 'success' ? ` (${j.subtype})` : '';
           const tail = (stderr || '').trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(-300);
           const cliNote = tail ? `\n\nCLI сказал: ${tail}` : '';

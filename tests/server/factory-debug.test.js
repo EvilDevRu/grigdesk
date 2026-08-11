@@ -80,14 +80,14 @@ test('factory debug adapter builds only allowlisted argv', async () => {
     },
   });
 
-  await adapter.set({ scope: 'profile', profile: 'arsenkin', level: 'errors' });
+  await adapter.set({ scope: 'profile', profile: 'project-alpha', level: 'errors' });
   await adapter.set({ scope: 'task', task: '8126', level: 'verbose', duration: '2h' });
-  await adapter.clear({ scope: 'profile', profile: 'arsenkin' });
+  await adapter.clear({ scope: 'profile', profile: 'project-alpha' });
 
   assert.deepEqual(calls, [
-    ['profile', 'arsenkin', 'debug', 'set', 'errors'],
+    ['profile', 'project-alpha', 'debug', 'set', 'errors'],
     ['8126', 'debug', 'set', 'verbose', '--for', '2h'],
-    ['profile', 'arsenkin', 'debug', 'clear'],
+    ['profile', 'project-alpha', 'debug', 'clear'],
   ]);
 });
 

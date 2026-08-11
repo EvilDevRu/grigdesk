@@ -5,7 +5,7 @@ import { recoveryDecision } from '../../server/src/lib/pipeline-recovery.js';
 
 const running = {
   WF_STATUS: 'running',
-  PROFILE: 'arsenkin',
+  PROFILE: 'project-alpha',
   ROUTE: 'feature',
   PLAN: 'running',
 };

@@ -26,7 +26,8 @@
 #/documents?source=cockpit&path=docs%2Fcockpit%2Farchitecture.md
 ```
 
-Старые ответы агентов уже содержат ссылки вида `/home/.../file.md`. Chat renderer превращает
+Старые ответы агентов уже содержат абсолютные ссылки вида `/<absolute-path>/file.md`.
+Chat renderer превращает
 такую ссылку во внутренний адрес с параметром `open`, а обычный клик перехватывает глобальный
 модал без ухода со страницы чатов. Fragment не отправляется HTTP-серверу, а
 `POST /api/documents/resolve` проверяет путь без записи его в access-log query и возвращает

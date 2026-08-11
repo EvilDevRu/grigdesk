@@ -80,11 +80,11 @@ function capturingExecutor(captured) {
 
 const TICKET = {
   schema: 1,
-  taskId: '8162',
-  title: 'Вернуть фиксацию столбца «Группа»',
-  description: 'Столбец «Группа» уезжает при горизонтальной прокрутке.',
-  acceptanceCriteria: ['«Группа» видна при скролле', 'Скроллятся только колонки дат'],
-  sourceUrl: 'http://127.0.0.1:8140/api/tasks/8162',
+  taskId: '44',
+  title: 'Проверить сохранение настройки',
+  description: 'Настройка сбрасывается после обновления страницы.',
+  acceptanceCriteria: ['Настройка сохраняется', 'Остальные поля не меняются'],
+  sourceUrl: 'http://127.0.0.1:8140/api/tasks/44',
 };
 
 test('чат по задаче получает тикет в конверте сообщения', async (t) => {
@@ -94,7 +94,7 @@ test('чат по задаче получает тикет в конверте �
 
   const run = await app.inject({
     method: 'POST',
-    url: '/api/tasks/8162/chat',
+    url: '/api/tasks/44/chat',
     payload: {
       chatKey: 'task-chat',
       modelRef: { provider: 'claude', model: 'claude-test' },
@@ -105,10 +105,10 @@ test('чат по задаче получает тикет в конверте �
 
   assert.equal(run.statusCode, 200);
   assert.match(captured.message, /\[Задача чата\]/);
-  assert.match(captured.message, /задача #8162: «Вернуть фиксацию столбца «Группа»»/);
-  assert.match(captured.message, /Столбец «Группа» уезжает при горизонтальной прокрутке\./);
-  assert.match(captured.message, /1\. «Группа» видна при скролле/);
-  assert.match(captured.message, /2\. Скроллятся только колонки дат/);
+  assert.match(captured.message, /задача #44: «Проверить сохранение настройки»/);
+  assert.match(captured.message, /Настройка сбрасывается после обновления страницы\./);
+  assert.match(captured.message, /1\. Настройка сохраняется/);
+  assert.match(captured.message, /2\. Остальные поля не меняются/);
   assert.match(captured.message, /\[\/Задача чата\]/);
   assert.ok(
     captured.message.indexOf('[/Задача чата]') < captured.message.indexOf('починишь?'),
@@ -123,7 +123,7 @@ test('задача без тикета не роняет ход и не доба
 
   const run = await app.inject({
     method: 'POST',
-    url: '/api/tasks/8162/chat',
+    url: '/api/tasks/44/chat',
     payload: {
       chatKey: 'no-ticket-chat',
       modelRef: { provider: 'claude', model: 'claude-test' },
@@ -164,7 +164,7 @@ test('длинное описание обрезается с указанием
 
   const run = await app.inject({
     method: 'POST',
-    url: '/api/tasks/8162/chat',
+    url: '/api/tasks/44/chat',
     payload: {
       chatKey: 'long-ticket-chat',
       modelRef: { provider: 'claude', model: 'claude-test' },
@@ -174,6 +174,6 @@ test('длинное описание обрезается с указанием
   });
 
   assert.equal(run.statusCode, 200);
-  assert.match(captured.message, /\[описание обрезано; полный текст: .*t8162\.ticket\.json\]/);
+  assert.match(captured.message, /\[описание обрезано; полный текст: .*t44\.ticket\.json\]/);
   assert.doesNotMatch(captured.message, /конец/);
 });

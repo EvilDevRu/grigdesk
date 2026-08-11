@@ -115,9 +115,9 @@ test('runner config and attempts are read from canonical profile files', async (
     // Расход публикует метод `usage` раннера. Он опционален: run-a его не
     // записал вовсе, и такая попытка обязана остаться с null, а не с нулями —
     // «не знаем, во что обошёлся ход» и «ход был бесплатным» разные вещи.
-    'TOKENS_IN=2396921', 'TOKENS_OUT=36163',
-    'TOKENS_CACHE_READ=2267904', 'TOKENS_CACHE_WRITE=0',
-    'COST_USD=0.9540', '',
+    'TOKENS_IN=2400000', 'TOKENS_OUT=100000',
+    'TOKENS_CACHE_READ=2200000', 'TOKENS_CACHE_WRITE=0',
+    'COST_USD=0.5000', '',
   ].join('\n'));
   await writeFile(path.join(runRoot, 'run-a', 'meta.env'), [
     'SCHEMA=1', 'RUNNER=claude', 'EPOCH=1', 'MODEL=opus',
@@ -134,7 +134,7 @@ test('runner config and attempts are read from canonical profile files', async (
       id: 'run-b', epoch: 2, runner: 'codex', model: 'gpt-5.6-sol',
       effort: 'ultra', reason: 'fallback_limit', result: 'ok', rc: 0, source: 'runtime',
       tokens: {
-        in: 2396921, out: 36163, cacheRead: 2267904, cacheWrite: 0, costUsd: 0.954,
+        in: 2400000, out: 100000, cacheRead: 2200000, cacheWrite: 0, costUsd: 0.5,
       },
     },
   ]);
@@ -146,11 +146,11 @@ test('runner work time sums process spans instead of gaps between route events',
   const stateDir = path.join(root, 'state');
 
   async function completed(stage, id, durationMs) {
-    const runDir = path.join(stateDir, 'logs', 'runs', 't8164', stage, id);
+    const runDir = path.join(stateDir, 'logs', 'runs', 't45', stage, id);
     await mkdir(runDir, { recursive: true });
     const meta = path.join(runDir, 'meta.env');
     await writeFile(meta, [
-      'SCHEMA=1', 'TASK=8164', `STAGE=${stage}`, `RUN_ID=${id}`,
+      'SCHEMA=1', 'TASK=45', `STAGE=${stage}`, `RUN_ID=${id}`,
       'RESULT_CLASS=ok', 'RC=0', '',
     ].join('\n'));
     const started = (await stat(runDir)).birthtimeMs;
@@ -164,14 +164,14 @@ test('runner work time sums process spans instead of gaps between route events',
   // Scout и календарная пауза между двумя route events в этот счётчик не входят.
   await completed('SCOUT', 'run-scout', 60 * 60 * 1000);
   const activeDir = path.join(
-    stateDir, 'logs', 'runs', 't8164', 'REVIEW', 'run-review-active',
+    stateDir, 'logs', 'runs', 't45', 'REVIEW', 'run-review-active',
   );
   await mkdir(activeDir, { recursive: true });
   const activeStarted = (await stat(activeDir)).birthtimeMs;
 
   assert.deepEqual(await readRunnerWorkTime(
     stateDir,
-    '8164',
+    '45',
     ['BUILD', 'LINT', 'REVIEW'],
     {
       sinceMs: activeStarted - 60_000,
@@ -184,7 +184,7 @@ test('runner work time sums process spans instead of gaps between route events',
   });
   assert.equal(await readRunnerWorkTime(
     stateDir,
-    '8164',
+    '45',
     ['BUILD', 'LINT'],
     { sinceMs: Date.now() + 60_000 },
   ), null, 'run-каталоги предыдущей attempt не попадают в новый счётчик');

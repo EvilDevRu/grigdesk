@@ -26,12 +26,12 @@ const requireFromServer = createRequire(new URL('../../server/package.json', imp
 const Fastify = requireFromServer('fastify');
 
 const TOKEN = '8123456789:AAHrEaLLyLoNgSeCrEtPaRt_x1y2z3w4v5u6';
-const CHAT = -1002263563987;
+const CHAT = -1001000000042;
 const T0 = Date.UTC(2026, 7, 7, 10, 0, 0) / 1000;
 
 const ME = {
   id: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: true,
@@ -39,7 +39,7 @@ const ME = {
 
 const msg = (over = {}) => ({
   chatId: CHAT,
-  chatTitle: 'AT projects · dev',
+  chatTitle: 'Команда Альфа · разработка',
   chatType: 'supergroup',
   isForum: true,
   messageId: 1,
@@ -118,7 +118,7 @@ test('чаты берутся из архива: имя, счётчик и вр�
   const archive = await archiveWith(t, [
     msg({ messageId: 1 }),
     msg({ messageId: 2, date: T0 + 300 }),
-    msg({ messageId: 3, date: T0 + 60, chatId: 555, chatTitle: 'Личка · Дмитрий', chatType: 'private', isForum: false }),
+    msg({ messageId: 3, date: T0 + 60, chatId: 555, chatTitle: 'Личка · Тестовый пользователь', chatType: 'private', isForum: false }),
   ]);
   const { chats } = await build(t, { archive });
 
@@ -126,7 +126,7 @@ test('чаты берутся из архива: имя, счётчик и вр�
   assert.equal(list.length, 2);
   // Сверху — где говорили последними: с этого чата человек и начнёт привязку.
   assert.equal(list[0].id, CHAT);
-  assert.equal(list[0].title, 'AT projects · dev');
+  assert.equal(list[0].title, 'Команда Альфа · разработка');
   assert.equal(list[0].isForum, true);
   assert.equal(list[0].messages, 2);
   assert.equal(list[0].lastAt, T0 + 300);

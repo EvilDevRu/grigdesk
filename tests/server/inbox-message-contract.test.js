@@ -13,7 +13,7 @@ const message = (over = {}) => ({
   schema: 1,
   channel: CHANNEL,
   accountRef: ACCOUNT,
-  source: { id: '-100:source/#', title: 'Баги', threadId: '6779' },
+  source: { id: '-100:source/#', title: 'Баги', threadId: '42' },
   id: '20425',
   parentId: null,
   groupId: null,

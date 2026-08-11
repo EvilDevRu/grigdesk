@@ -33,7 +33,7 @@ const item = (over = {}) => ({
   ref: REF_NEW,
   revision: `v1_${'a'.repeat(43)}`,
   channel: { id: 'github', label: 'GitHub' },
-  source: { title: 'EvilDevRu/ai-cockpit #9', url: 'https://github.com/EvilDevRu/ai-cockpit/issues/9' },
+  source: { title: 'example-org/example-repo #9', url: 'https://github.com/example-org/example-repo/issues/9' },
   project: 'cockpit',
   kind: 'bug',
   status: 'new',
@@ -74,7 +74,7 @@ test('Inbox показывает source/channel/status и отправляет e
 
   const card = wrapper.get('[data-status="new"]');
   assert.match(card.text(), /GitHub/);
-  assert.match(card.text(), /EvilDevRu\/ai-cockpit #9/);
+  assert.match(card.text(), /example-org\/example-repo #9/);
   assert.match(card.text(), /К разбору/);
   const checks = card.findAll('input[type="checkbox"]');
   assert.equal(checks.length, 2);

@@ -25,7 +25,7 @@ const SECRET = 'AAHrEaLLyLoNgSeCrEtPaRt';
 // Форма уже нормализованная: snake_case Телеграма разбирает сам lib/telegram/api.js.
 const ME = {
   id: 8123456789,
-  username: 'cockpit_inbox_bot',
+  username: 'example_inbox_bot',
   firstName: 'Кокпит · входящие',
   canJoinGroups: true,
   canReadAllGroupMessages: false,
@@ -100,7 +100,7 @@ test('успешное подключение: токен сохранён, в �
   assert.equal(res.statusCode, 200);
   const body = res.json();
   assert.equal(body.ok, true);
-  assert.equal(body.bot.username, 'cockpit_inbox_bot');
+  assert.equal(body.bot.username, 'example_inbox_bot');
   assert.equal(body.bot.botId, 8123456789);
   assert.equal(body.bot.configured, true);
   assert.equal(body.bot.tokenHint, '…v5u6');

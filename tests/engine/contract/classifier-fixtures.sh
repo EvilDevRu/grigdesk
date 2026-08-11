@@ -42,9 +42,44 @@ for name in kimi kimi-beta; do
   assert_rc 126 "$?" "$name basename denied even when mislabeled local"
 done
 
+fixture_root="$TEST_ROOT/classifier-fixtures"
+mkdir -p "$fixture_root"
+
+materialize_fixture() {
+  local name=$1 source="$FACTORY_TESTS_HOME/fixtures/classifiers/$1" target="$fixture_root/$1"
+  cp -a "$source" "$target"
+  case "$name" in
+    claude-synthetic-limit)
+      printf 'You have reached your 5-hour usage limit.\n' >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    claude-runtime-session-limit|codex-runtime-usage-limit|kimi-ok|kimi-interrupted)
+      : >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    codex-synthetic-limit)
+      printf 'usage limit reached\n' >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    codex-denied)
+      printf 'sandbox denied write access\n' >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    kimi-no-login|kimi-auth-after-work)
+      printf '%s\n' \
+        'error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in, then retry; or set default_model in config.toml.' \
+        'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+        >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+    kimi-bad-model)
+      printf '%s\n' \
+        'error: failed to run prompt: config.invalid: Model "kimi-code/no-such-model-zz" is not configured in config.toml. Add a [models."kimi-code/no-such-model-zz"] entry with max_context_size.' \
+        'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+        >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
+  esac
+  printf '%s\n' "$target"
+}
+
 check_fixture() {
   local provider=$1 name=$2 dir expected actual rc
-  dir="$FACTORY_TESTS_HOME/fixtures/classifiers/$name"
+  dir=$(materialize_fixture "$name")
   for required in meta.env stderr.log stdout.log events.jsonl; do
     assert_file_exists "$dir/$required" "$name contains $required"
   done
@@ -77,27 +112,27 @@ check_fixture kimi kimi-interrupted
 check_fixture kimi kimi-auth-after-work
 
 unknown="$TEST_ROOT/unknown-version"
-cp -a "$FACTORY_TESTS_HOME/fixtures/classifiers/codex-denied" "$unknown"
+cp -a "$fixture_root/codex-denied" "$unknown"
 sed -i 's/CLI_VERSION=.*/CLI_VERSION=999.0.0/' "$unknown/meta.env"
 actual=$(runner_call codex classify "$unknown" 1)
 assert_eq unknown "$actual" "unknown CLI version fails closed"
 
 kimi_unknown="$TEST_ROOT/kimi-unknown-version"
-cp -a "$FACTORY_TESTS_HOME/fixtures/classifiers/kimi-no-login" "$kimi_unknown"
+cp -a "$fixture_root/kimi-no-login" "$kimi_unknown"
 sed -i 's/CLI_VERSION=.*/CLI_VERSION=999.0.0/' "$kimi_unknown/meta.env"
 actual=$(runner_call kimi classify "$kimi_unknown" 1)
 assert_eq provider_unavailable "$actual" \
   "new Kimi semver preserves a proven no-activity classifier signature"
 
 kimi_unverified="$TEST_ROOT/kimi-unverified-fixture"
-cp -a "$FACTORY_TESTS_HOME/fixtures/classifiers/kimi-no-login" "$kimi_unverified"
+cp -a "$fixture_root/kimi-no-login" "$kimi_unverified"
 sed -i 's/FIXTURE_VERIFIED=.*/FIXTURE_VERIFIED=0/' "$kimi_unverified/meta.env"
 actual=$(runner_call kimi classify "$kimi_unverified" 1)
 assert_eq unknown "$actual" "unverified Kimi fixture fails closed"
 
 actual=$(bash --noprofile --norc -c \
   'source "$FACTORY_HOME/lib/runners/codex.sh"; runner_codex_classify "$1" 1' \
-  _ "$FACTORY_TESTS_HOME/fixtures/classifiers/codex-denied")
+  _ "$fixture_root/codex-denied")
 assert_eq denied "$actual" "Codex classifier works standalone"
 
 finish_tests

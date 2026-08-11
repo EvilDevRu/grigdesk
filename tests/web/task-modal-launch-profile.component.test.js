@@ -144,7 +144,7 @@ async function mountLaunchForm(t, { launchOptions }) {
   });
   globalThis.__taskModalLaunchTasksStore = defineStore('task-modal-launch-tasks', {
     actions: {
-      async load() { return { title: 'Экспорт чертежа', description: 'Проверить GLB' }; },
+      async load() { return { title: 'Обновить отчёт', description: 'Проверить результат' }; },
       async timer() {},
       async complete() {},
       async comment() {},
@@ -158,7 +158,7 @@ async function mountLaunchForm(t, { launchOptions }) {
   globalThis.__taskModalLaunchBoardStore = defineStore('task-modal-launch-board', {
     state: () => ({
       data: {
-        tasks: [{ id: 42, title: 'Экспорт чертежа', group: 'RDesigner' }],
+        tasks: [{ id: 42, title: 'Обновить отчёт', group: 'Проект Бета' }],
         toReview: [], created: [], accomplice: [], auditor: [],
       },
     }),
@@ -210,7 +210,7 @@ async function mountLaunchForm(t, { launchOptions }) {
   return { wrapper, flushPromises, launchCalls };
 }
 
-test('TaskModal выбирает rdesigner, перечитывает feature и шлёт profile в launch', async (t) => {
+test('TaskModal выбирает project-beta, перечитывает feature и шлёт profile в launch', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://cockpit.test/#/board' });
   for (const [key, value] of Object.entries({
@@ -253,31 +253,31 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   });
   globalThis.__taskModalLaunchTasksStore = defineStore('task-modal-launch-tasks', {
     actions: {
-      async load() { return { title: 'Экспорт чертежа', description: 'Проверить GLB' }; },
+      async load() { return { title: 'Обновить отчёт', description: 'Проверить результат' }; },
       async timer() {},
       async complete() {},
       async comment() {},
       async launchOptions(id, profile = '') {
         optionCalls.push([String(id), profile]);
-        if (profile === 'rdesigner') {
+        if (profile === 'project-beta') {
           return {
-            profile: 'rdesigner',
-            profiles: ['rdesigner'],
+            profile: 'project-beta',
+            profiles: ['project-beta'],
             routes: ['consilium-debug', 'feature'],
             defaultRoute: 'feature',
             routeOptions: {
               'consilium-debug': { deliveryMode: 'publish', instrumentationRequired: true },
               feature: { deliveryMode: 'publish', instrumentationRequired: false },
             },
-            repositories: [{ name: 'rdesigner', targetBranch: 'master' }],
-            instrumentationSuggestions: ['rdesigner:webapp/pipeline.py'],
-            diagnosisSuggestion: { kind: 'data', signal: 'GLB экспорт повреждён' },
+            repositories: [{ name: 'project-beta', targetBranch: 'master' }],
+            instrumentationSuggestions: ['project-beta:src/diagnostics.py'],
+            diagnosisSuggestion: { kind: 'data', signal: 'Повторный запуск создаёт дубликаты' },
             profileContractError: null,
           };
         }
         return {
-          profile: 'arsenkin',
-          profiles: ['arsenkin', 'rdesigner'],
+          profile: 'project-alpha',
+          profiles: ['project-alpha', 'project-beta'],
           routes: [],
           defaultRoute: null,
           error: 'no_catalog',
@@ -293,7 +293,7 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   globalThis.__taskModalLaunchBoardStore = defineStore('task-modal-launch-board', {
     state: () => ({
       data: {
-        tasks: [{ id: 42, title: 'Экспорт чертежа', group: 'RDesigner' }],
+        tasks: [{ id: 42, title: 'Обновить отчёт', group: 'Проект Бета' }],
         toReview: [], created: [], accomplice: [], auditor: [],
       },
     }),
@@ -346,37 +346,37 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
   await wrapper.get('button.launch').trigger('click');
   await flushPromises();
   const profile = wrapper.get('#launch-profile');
-  assert.deepEqual(profile.findAll('option').map((option) => option.text()), ['arsenkin', 'rdesigner']);
+  assert.deepEqual(profile.findAll('option').map((option) => option.text()), ['project-alpha', 'project-beta']);
   assert.match(wrapper.text(), /каталог маршрутов профиля не опубликован/);
   assert.equal(wrapper.get('.lbtns .primary').attributes('disabled'), '');
 
-  await profile.setValue('rdesigner');
+  await profile.setValue('project-beta');
   await flushPromises();
   assert.equal(wrapper.get('#launch-route').element.value, 'feature');
   assert.match(wrapper.text(), /debug/);
   assert.equal(wrapper.find('#launch-profile').exists(), false);
-  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /rdesigner/);
-  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /rdesigner\/master/);
-  assert.equal(wrapper.find('[aria-label="Целевая ветка rdesigner"]').exists(), false);
+  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /project-beta/);
+  assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /project-beta\/master/);
+  assert.equal(wrapper.find('[aria-label="Целевая ветка project-beta"]').exists(), false);
   assert.equal(wrapper.get('.ladvanced').attributes('open'), undefined);
   assert.match(wrapper.get('.ladvanced').text(), /Целевые ветки из конфигурации профиля/);
 
   await wrapper.get('#launch-route').setValue('consilium-debug');
   await flushPromises();
-  assert.equal(wrapper.get('#launch-instrumentation').element.value, 'rdesigner:webapp/pipeline.py');
+  assert.equal(wrapper.get('#launch-instrumentation').element.value, 'project-beta:src/diagnostics.py');
   assert.equal(wrapper.get('#launch-diagnosis-kind').element.value, 'data');
-  assert.equal(wrapper.get('#launch-diagnosis-signal').element.value, 'GLB экспорт повреждён');
+  assert.equal(wrapper.get('#launch-diagnosis-signal').element.value, 'Повторный запуск создаёт дубликаты');
   await wrapper.get('#launch-route').setValue('feature');
   await flushPromises();
 
   await wrapper.get('.lbtns .primary').trigger('click');
   await flushPromises();
-  assert.deepEqual(optionCalls, [['42', ''], ['42', 'rdesigner']]);
+  assert.deepEqual(optionCalls, [['42', ''], ['42', 'project-beta']]);
   assert.equal(launchCalls.length, 1);
   assert.equal(launchCalls[0][0], '42');
-  assert.equal(launchCalls[0][1].profile, 'rdesigner');
+  assert.equal(launchCalls[0][1].profile, 'project-beta');
   assert.equal(launchCalls[0][1].route, 'feature');
-  assert.equal(launchCalls[0][1].title, 'Экспорт чертежа');
+  assert.equal(launchCalls[0][1].title, 'Обновить отчёт');
   assert.deepEqual(launchCalls[0][1].acceptanceCriteria, []);
   assert.equal(Object.hasOwn(launchCalls[0][1], 'deliveryTargets'), false);
   assert.deepEqual(launchCalls[0][1].instrumentationFiles, []);
@@ -388,12 +388,12 @@ test('TaskModal выбирает rdesigner, перечитывает feature и 
 test('TaskModal: исполнитель по умолчанию «из профиля», runnerPrimary уходит только при явном выборе', async (t) => {
   const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
     launchOptions: async () => ({
-      profile: 'arsenkin',
-      profiles: ['arsenkin'],
+      profile: 'project-alpha',
+      profiles: ['project-alpha'],
       routes: ['feature'],
       defaultRoute: 'feature',
       routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
-      repositories: [{ name: 'arsenkin', targetBranch: 'main' }],
+      repositories: [{ name: 'project-alpha', targetBranch: 'main' }],
       runners: ['claude', 'codex'],
       defaultRunner: 'claude',
     }),
@@ -427,7 +427,7 @@ test('TaskModal: исполнитель по умолчанию «из проф�
 
 test('TaskModal: смена профиля сбрасывает выбор исполнителя на «из профиля»', async (t) => {
   const catalog = (override) => ({
-    profiles: ['arsenkin', 'rdesigner'],
+    profiles: ['project-alpha', 'project-beta'],
     routes: ['feature'],
     defaultRoute: 'feature',
     routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
@@ -435,9 +435,9 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
     ...override,
   });
   const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
-    launchOptions: async (id, profile = '') => (profile === 'rdesigner'
-      ? catalog({ profile: 'rdesigner', runners: ['codex'], defaultRunner: 'codex' })
-      : catalog({ profile: 'arsenkin', runners: ['claude', 'codex'], defaultRunner: 'claude' })),
+    launchOptions: async (id, profile = '') => (profile === 'project-beta'
+      ? catalog({ profile: 'project-beta', runners: ['codex'], defaultRunner: 'codex' })
+      : catalog({ profile: 'project-alpha', runners: ['claude', 'codex'], defaultRunner: 'claude' })),
   });
 
   await wrapper.get('button.launch').trigger('click');
@@ -446,7 +446,7 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
   assert.equal(wrapper.get('#launch-runner').element.value, 'codex');
 
   // У нового профиля свой набор исполнителей и свой primary — прошлый выбор терять обязаны.
-  await wrapper.get('#launch-profile').setValue('rdesigner');
+  await wrapper.get('#launch-profile').setValue('project-beta');
   await flushPromises();
   const runner = wrapper.get('#launch-runner');
   assert.equal(runner.element.value, '');
@@ -458,6 +458,6 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
   await wrapper.get('.lbtns .primary').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 1);
-  assert.equal(launchCalls[0][1].profile, 'rdesigner');
+  assert.equal(launchCalls[0][1].profile, 'project-beta');
   assert.equal(Object.hasOwn(launchCalls[0][1], 'runnerPrimary'), false);
 });

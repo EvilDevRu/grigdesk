@@ -1,11 +1,11 @@
 # KimiRuntime: security gate
 
-Статус на 2026-08-04: основной режим запуска Kimi-чатов — **host** (`kimiLaunchMode=host`,
+Текущий основной режим запуска Kimi-чатов — **host** (`kimiLaunchMode=host`,
 умолчание): прямой дочерний процесс сервера `kimi acp`, parity с claude. Contained-профиль
 `kimi-contained-v1` сохранён и включается откатом `COCKPIT_KIMI_LAUNCH_MODE=contained`;
 всё описанное ниже относится к contained и по-прежнему действует при откате.
 
-## Host-режим (умолчание с 2026-08-04)
+## Host-режим (умолчание)
 
 `server/src/lib/kimi/host-launch.js` строит запуск `kimi acp` прямым spawn-ом сервера с
 `KIMI_CODE_HOME = config.kimiHome` (реальный `~/.kimi-code`) и caller-env chat-модуля —
@@ -42,22 +42,22 @@ credentials (`0600`, владелец) и исполняемости бинар�
 
 ## Contained-профиль (откат)
 
-Статус на 2026-08-02: `GO_CONTAINED_MVP` для profile `kimi-contained-v1` и закреплённой
-версии Kimi Code `0.31.1` на текущем host.
+Contained-профиль `kimi-contained-v1` был допущен для закреплённой версии Kimi Code `0.31.1`.
 
 Это узкое разрешение на запуск Kimi из чатов через единственный contained runtime. Оно не
 разрешает прямой spawn CLI, наследование host environment, автоматические permissions или запуск
 другой версии без повторного аудита и preflight.
 
-## Измеренный host preflight
+## Обязательный host preflight
 
-| Gate | Результат | Детали |
-|---|---|---|
-| Linux | pass | текущий host Linux |
-| Bubblewrap | pass | `0.6.1`; user/mount/pid/ipc/uts/network namespaces реально запускаются |
-| cgroup v2 | pass | transient user-systemd service применяет CPU, memory, swap и process limits; `KillMode=control-group` убивает всё дерево |
-| Egress proxy | pass | versioned policy `kimi-code-0.31.1-egress-v1` доступна только через private Unix socket |
-| Credential mount | pass | host credentials mount-ятся rw на весь запуск; transient unmount barrier снят — см. ниже |
+Preflight повторяется на каждой машине; его результаты не являются частью общей поставки.
+Успех означает все условия сразу:
+
+- Linux namespaces действительно создаются через Bubblewrap;
+- transient user-systemd service применяет CPU, memory, swap и process limits, а
+  `KillMode=control-group` убивает всё дерево;
+- versioned egress policy доступна только через private Unix socket;
+- credentials монтируются rw на весь запуск; transient unmount barrier снят — см. ниже.
 
 Прямая делегация writable cgroup subtree сервису всё ещё недоступна. Runtime не ослабляет gate:
 он использует проверенную альтернативу через transient user-systemd service и перед каждым
@@ -140,7 +140,7 @@ special-use DNS/IP, broad workspace mounts и несоответствие runti
 сохранение session ID, config, prompt, permission reverse RPC, `/status`, cancel и отсутствие retry
 после подтверждённого prompt.
 
-Живой contained probe системного Kimi `0.31.1` подтвердил без model prompt:
+Contained probe Kimi `0.31.1` подтвердил без model prompt:
 
 - `initialize` с ACP protocol `1`;
 - authenticated `session/new`;
@@ -150,7 +150,7 @@ special-use DNS/IP, broad workspace mounts и несоответствие runti
 Содержимое credentials не читалось, не копировалось и не логировалось. Этот probe не отправлял
 model prompt и не расходовал квоту.
 
-## Credential barrier снят (2026-08-02)
+## Credential barrier снят
 
 Первый живой ход с model prompt выявил несовместимость barrier-а с Kimi `0.31.1`: OAuthManager
 перечитывает credential file на каждый model request (`ensureFresh → loadState → storage.load`,
@@ -166,11 +166,11 @@ allowlist (только `api.kimi.com`/`auth.kimi.com`) либо записью 
 не выше, чем у остальных исполнителей, работающих на host без sandbox. Long-term направление —
 host-side token broker, выдающий sandbox только short-lived access tokens без `refresh_token`.
 
-Отдельный явно разрешённый live smoke 2026-08-02 подтвердил egress и доставку
-до `llm.request`. Первый ход пользователь отменил через UI; transport отправил ACP cancel. Resume
-этой отменённой session принял следующий prompt, но Kimi `0.31.1` не создал новый `llm.request` и
-вернул пустой ход — тогда это было закреплено как несовместимость resume-after-cancel.
-Повторный smoke 2026-08-06 на `0.33.0` (автоматизированный, `tools/kimi-resume-smoke.mjs`)
+Отдельный явно разрешённый live smoke подтвердил egress и доставку до `llm.request`.
+После отмены хода через UI transport отправил ACP cancel. Resume этой session принял следующий
+prompt, но Kimi `0.31.1` не создал новый `llm.request` и вернул пустой ход — это закрепило
+несовместимость resume-after-cancel для этой версии. Повторный автоматизированный smoke на `0.33.0`
+(`tools/kimi-resume-smoke.mjs`)
 показал, что баг исправлен: после cancel+resume модель отвечает штатно (RESUME_OK). Поэтому
 stop больше не инвалидирует binding — оборванная session возобновляется следующим ходом.
 Инвалидация остаётся только как страховка для пустого post-prompt результата (регресс

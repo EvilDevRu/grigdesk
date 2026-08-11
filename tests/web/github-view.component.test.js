@@ -13,7 +13,7 @@ const CONNECTED = {
   configured: true,
   state: 'connected',
   repositoryId: '123456',
-  fullName: 'EvilDevRu/ai-cockpit',
+  fullName: 'example-org/example-repo',
   connectedAt: 1_786_172_300_000,
   connection: 'connected',
   reason: null,
@@ -43,17 +43,17 @@ test('connect отправляет exact owner/repo/token, после успех
     },
   };
   const { wrapper, settle } = await mountChannelView(t, 'github', { api });
-  await wrapper.get('input[name="owner"]').setValue('  EvilDevRu ');
-  await wrapper.get('input[name="repo"]').setValue(' ai-cockpit  ');
+  await wrapper.get('input[name="owner"]').setValue('  example-org ');
+  await wrapper.get('input[name="repo"]').setValue(' example-repo  ');
   await wrapper.get('input[name="token"]').setValue('  github_pat_private  ');
   await button(wrapper, 'Подключить').trigger('click');
   await settle();
 
   assert.deepEqual(calls[1], [
     'POST', '/api/github/connect',
-    { owner: 'EvilDevRu', repo: 'ai-cockpit', token: 'github_pat_private' },
+    { owner: 'example-org', repo: 'example-repo', token: 'github_pat_private' },
   ]);
-  assert.match(wrapper.text(), /EvilDevRu\/ai-cockpit/);
+  assert.match(wrapper.text(), /example-org\/example-repo/);
   assert.match(wrapper.text(), /signed ping/);
   assert.match(wrapper.text(), /Allowlist пуст/);
   assert.equal(wrapper.get('[data-state="provider-read-only"]').exists(), true);
@@ -83,7 +83,7 @@ test('status рендерит только public allowlist, recheck/disconnect 
     api,
     confirm: async (text) => { prompts.push(text); return true; },
   });
-  assert.match(wrapper.text(), /EvilDevRu\/ai-cockpit/);
+  assert.match(wrapper.text(), /example-org\/example-repo/);
   assert.doesNotMatch(wrapper.text(), /must_not_render|999999/);
   assert.match(wrapper.text(), /не включает очередь автоматически/);
   assert.equal(wrapper.get('a[href="#/inbox"]').exists(), true);

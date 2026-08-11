@@ -118,8 +118,8 @@ function toCode(id) {
           <!-- Редактор путей (кокпитные проекты и фабричные без путей в профиле) -->
           <div v-else class="editbox">
             <div v-for="(r, i) in edit.repos" :key="i" class="erow">
-              <input v-model="r.key" class="ekey mono" placeholder="be" title="Метка репозитория (be, fe…)" />
-              <input v-model="r.dir" class="edir mono" placeholder="/home/…/Workspace/проект/be" title="Абсолютный путь к корню git-репозитория" />
+              <input v-model="r.key" class="ekey mono" placeholder="service" title="Метка репозитория (service, docs…)" />
+              <input v-model="r.dir" class="edir mono" placeholder="/workspace/sample/service" title="Абсолютный путь к корню git-репозитория" />
               <button class="act" title="Убрать строку" @click="delRow(i)">✕</button>
             </div>
             <div class="ebtns">

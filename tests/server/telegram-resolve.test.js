@@ -271,10 +271,10 @@ test('тема, отданная другому проекту, не раскр�
 
 test('публичная ссылка: чат находится по имени, пересылка идёт по нему же', async (t) => {
   const archive = await archiveWith(t, [
-    msg({ chatId: BUGS, chatUsername: 'cockpit_bugs', messageId: 77, text: 'из архива' }),
+    msg({ chatId: BUGS, chatUsername: 'example_team', messageId: 77, text: 'из архива' }),
   ]);
-  const known = await resolveLink(linkOf('https://t.me/Cockpit_Bugs/77'), deps({
-    archive, call: botApi().call, rules: rules({ project: 'alpha', username: 'cockpit_bugs' }),
+  const known = await resolveLink(linkOf('https://t.me/Example_Team/77'), deps({
+    archive, call: botApi().call, rules: rules({ project: 'alpha', username: 'example_team' }),
   }));
   assert.equal(known.ok, true);
   assert.equal(known.source, 'archive');
@@ -282,13 +282,13 @@ test('публичная ссылка: чат находится по имени
 
   // Чата в архиве нет вовсе — id неизвестен, и Bot API принимает имя как адрес.
   const api = botApi({ forwardMessage: forwardCopy(), deleteMessage: true });
-  const unknown = await resolveLink(linkOf('https://t.me/other_chat/77'), deps({
+  const unknown = await resolveLink(linkOf('https://t.me/example_other/77'), deps({
     archive: await archiveWith(t, []),
     call: api.call,
-    rules: rules({ project: 'alpha', username: 'other_chat' }),
+    rules: rules({ project: 'alpha', username: 'example_other' }),
   }));
   assert.equal(unknown.ok, true);
-  assert.equal(api.calls[0].body.from_chat_id, '@other_chat');
+  assert.equal(api.calls[0].body.from_chat_id, '@example_other');
   // Числового id мы так и не узнали — в архив такое не кладём, иначе завели бы
   // второй «чат» с выдуманным адресом.
   assert.equal(unknown.target.chatId, null);
@@ -299,10 +299,10 @@ test('ссылка на комментарий к посту канала: че�
   // ссылке его не вычислить. Разворачивать наугад нельзя: правило проверяется
   // по фактическому чату (раздел 2 плана).
   const api = botApi();
-  const res = await resolveLink(linkOf('https://t.me/cockpit_news/900?comment=15'), deps({
+  const res = await resolveLink(linkOf('https://t.me/example_news/900?comment=15'), deps({
     archive: await archiveWith(t, []),
     call: api.call,
-    rules: rules({ project: 'alpha', username: 'cockpit_news' }),
+    rules: rules({ project: 'alpha', username: 'example_news' }),
   }));
 
   assert.equal(res.ok, false);
@@ -317,10 +317,10 @@ test('messageOfForward: копия описывает оригинал, а не 
     text: '',
     caption: 'релиз выложен',
     photo: [{ file_id: 'AgAC', file_unique_id: 'u1', width: 90, height: 60, file_size: 900 }],
-  }), { chatId: BUGS, chatUsername: 'cockpit_bugs', messageId: 42, threadId: 7 });
+  }), { chatId: BUGS, chatUsername: 'example_team', messageId: 42, threadId: 7 });
 
   assert.equal(fromChannel.chatId, BUGS, 'чат — тот, из которого пересылали, а не служебный');
-  assert.equal(fromChannel.chatUsername, 'cockpit_bugs');
+  assert.equal(fromChannel.chatUsername, 'example_team');
   assert.equal(fromChannel.messageId, 42);
   assert.equal(fromChannel.threadId, 7);
   assert.equal(fromChannel.date, T0);

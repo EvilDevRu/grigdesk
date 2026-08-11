@@ -259,7 +259,7 @@ onMounted(load);
               GitHub не подключён: новые issues не принимаются. Ранее принятые обращения,
               если они есть, остаются в общем Inbox только для чтения.
             </p>
-            <label>Owner<input v-model="connectForm.owner" name="owner" autocomplete="off" placeholder="EvilDevRu"></label>
+            <label>Owner<input v-model="connectForm.owner" name="owner" autocomplete="off" placeholder="example-org"></label>
             <label>Repository<input v-model="connectForm.repo" name="repo" autocomplete="off" placeholder="ai-cockpit"></label>
             <label>Personal access token
               <input v-model="connectForm.token" name="token" type="password" autocomplete="new-password" spellcheck="false" placeholder="github_pat_…">
