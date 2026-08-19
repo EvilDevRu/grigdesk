@@ -19,7 +19,10 @@ import chatModule from '../../server/src/modules/chat/index.js';
 import providersModule from '../../server/src/modules/providers/index.js';
 import kimiExecutor from '../../server/src/lib/executors/kimi.js';
 import claudeExecutor from '../../server/src/lib/executors/claude.js';
-import codexExecutor from '../../server/src/lib/executors/codex.js';
+import codexExecutor, {
+  parseCodexSkillCommands,
+  readCodexSkillCommands,
+} from '../../server/src/lib/executors/codex.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -30,7 +33,7 @@ function assertCommandsShape(list, providerId) {
   assert.ok(Array.isArray(list), `${providerId}: commands() обязан вернуть массив`);
   assert.ok(list.length > 0, `${providerId}: список команд не пуст`);
   for (const entry of list) {
-    assert.match(entry.cmd, /^\/\S+$/, `${providerId}: cmd начинается с /`);
+    assert.match(entry.cmd, /^[/$]\S+$/, `${providerId}: cmd начинается с / или $`);
     assert.ok(['prompt', 'none'].includes(entry.run), `${providerId}: ${entry.cmd} run ∈ prompt|none`);
     assert.equal(typeof entry.desc, 'string', `${providerId}: ${entry.cmd} desc — строка`);
     assert.ok(entry.desc.trim().length > 0, `${providerId}: ${entry.cmd} desc непустой`);
@@ -48,12 +51,105 @@ test('shape commands() у kimi, claude и codex', async () => {
       assert.equal(typeof executor.commands, 'function', `${executor.id}: поле commands не объявлено`);
       assertCommandsShape(await executor.commands({}), executor.id);
     }
-    // Codex exec не исполняет слэш-команды — весь список информационный.
+    // Codex exec не исполняет слэш-команды — вся `/`-часть списка информационная.
+    // Утверждение именно про неё: `$skill` рядом законно приходит с run:'prompt'.
     const codexList = await codexExecutor.commands({});
-    assert.ok(codexList.every((c) => c.run === 'none' && c.hint), 'codex: все команды run=none с hint');
+    const codexCli = codexList.filter((c) => c.cmd.startsWith('/'));
+    assert.ok(codexCli.length > 0, 'codex: TUI-команды никуда не делись');
+    assert.ok(codexCli.every((c) => c.run === 'none' && c.hint), 'codex: все / команды run=none с hint');
+    // Без бинаря и cwd навыки не читаются вовсе: офлайн-набор не поднимает app-server.
+    assert.deepEqual(codexList, codexCli, 'codex: пустой config не даёт $-навыков');
   } finally {
     delete process.env.CLAUDE_CONFIG_DIR;
   }
+});
+
+test('codex skills/list нормализует только cwd-независимые включённые навыки', () => {
+  const longDescription = `Длинное описание ${'x'.repeat(200)}`;
+  const commands = parseCodexSkillCommands({
+    data: [{
+      cwd: '/work/project',
+      skills: [
+        {
+          name: 'pr-fixes',
+          description: 'Полное описание',
+          interface: { shortDescription: 'Только критические замечания' },
+          path: '/home/user/.agents/skills/pr-fixes/SKILL.md',
+          scope: 'user',
+          enabled: true,
+        },
+        {
+          name: 'admin-check', description: longDescription,
+          path: '/etc/codex/skills/admin-check/SKILL.md', scope: 'admin', enabled: true,
+        },
+        {
+          name: 'system-check', description: '', shortDescription: 'Системный навык',
+          path: '/opt/codex/system-check/SKILL.md', scope: 'system', enabled: true,
+        },
+        {
+          name: 'repo-only', description: 'Навык другого cwd',
+          path: '/work/project/.agents/skills/repo-only/SKILL.md', scope: 'repo', enabled: true,
+        },
+        {
+          name: 'disabled', description: 'Выключен',
+          path: '/home/user/.agents/skills/disabled/SKILL.md', scope: 'user', enabled: false,
+        },
+        {
+          name: 'bad name', description: 'Невалидное имя',
+          path: '/home/user/.agents/skills/bad-name/SKILL.md', scope: 'user', enabled: true,
+        },
+        {
+          name: 'pr-fixes', description: 'Дубль из admin',
+          path: '/etc/codex/skills/pr-fixes/SKILL.md', scope: 'admin', enabled: true,
+        },
+        {
+          name: 'unknown-scope', description: 'Неизвестная область',
+          path: '/tmp/unknown/SKILL.md', scope: 'other', enabled: true,
+        },
+      ],
+      errors: [],
+    }],
+  });
+
+  assert.deepEqual(commands.map((command) => command.cmd), [
+    '$pr-fixes', '$admin-check', '$system-check',
+  ]);
+  assert.equal(commands[0].desc, 'Только критические замечания');
+  assert.equal(commands[1].desc.length, 120, 'описание обрезано по контракту меню');
+  assert.equal(commands[2].desc, 'Системный навык');
+  assert.ok(commands.every((command) => command.run === 'prompt'));
+});
+
+test('codex skills/list вызывает app-server с exact cwd и forceReload', async () => {
+  const calls = [];
+  const commands = await readCodexSkillCommands('/usr/bin/codex', '/work/project', {
+    async request(bin, rpc) {
+      calls.push({ bin, rpc });
+      return {
+        result: {
+          data: [{
+            cwd: '/work/project',
+            skills: [{
+              name: 'pr-fixes', description: 'Критические замечания',
+              path: '/home/user/.agents/skills/pr-fixes/SKILL.md', scope: 'user', enabled: true,
+            }],
+            errors: [],
+          }],
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [{
+    bin: '/usr/bin/codex',
+    rpc: {
+      method: 'skills/list',
+      params: { cwds: ['/work/project'], forceReload: true },
+    },
+  }]);
+  assert.deepEqual(commands, [{
+    cmd: '$pr-fixes', desc: 'Критические замечания', run: 'prompt',
+  }]);
 });
 
 test('claude сканирует пользовательские команды из $CLAUDE_CONFIG_DIR/commands', async () => {
@@ -185,8 +281,10 @@ test('/api/providers отдаёт commands каждого исполнителя
       calls += 1;
       return [
         { cmd: '/status', desc: 'Показать статус', run: 'prompt' },
+        { cmd: '$pr-fixes', desc: 'Критические замечания PR', run: 'prompt' },
         { cmd: '/goal', desc: 'Автономная цель', run: 'none', hint: 'только в TUI' },
         { cmd: '/bad', desc: '', run: 'prompt' }, // невалидная запись отбрасывается
+        { cmd: '$bad skill', desc: 'Пробел в имени', run: 'prompt' },
       ];
     })],
     ['broken', stubAdapter('broken', async () => { throw new Error('scan failed'); })],
@@ -207,6 +305,7 @@ test('/api/providers отдаёт commands каждого исполнителя
   const byId = new Map(first.json().providers.map((p) => [p.id, p]));
   assert.deepEqual(byId.get('fake')?.commands, [
     { cmd: '/status', desc: 'Показать статус', run: 'prompt' },
+    { cmd: '$pr-fixes', desc: 'Критические замечания PR', run: 'prompt' },
     { cmd: '/goal', desc: 'Автономная цель', run: 'none', hint: 'только в TUI' },
   ]);
   assert.deepEqual(byId.get('broken')?.commands, [], 'падение commands() не валит реестр');
@@ -305,16 +404,21 @@ async function saveChat(app, id, provider, model) {
 
 const SLASH_COMMANDS = [
   { cmd: '/status', desc: 'Статус сессии', run: 'prompt' },
+  { cmd: '$pr-fixes', desc: 'Критические замечания', run: 'prompt' },
   { cmd: '/goal', desc: 'Автономная цель', run: 'none', hint: 'только в TUI' },
 ];
 
 function slashExecutor(id, runImpl) {
   const calls = [];
+  const commandCalls = [];
   return {
     id,
     retryContract: id === 'kimi' ? KIMI_RETRY_CONTRACT : undefined,
-    commands: () => SLASH_COMMANDS, // намеренно SYNC: контракт не обязывает async
+    // Намеренно SYNC: контракт не обязывает async. Вызовы считаем — у codex чтение
+    // каталога поднимает app-server, и на заведомо отвергаемой форме оно лишнее.
+    commands: (config) => { commandCalls.push(config); return SLASH_COMMANDS; },
     calls,
+    commandCalls,
     async run(opts) {
       calls.push(opts);
       return runImpl(opts, calls.length);
@@ -352,6 +456,7 @@ test('slashCommand валидация: чужая команда, none-кома�
   for (const payload of [
     { message: '/hack', slashCommand: '/hack' }, // нет в списке исполнителя
     { message: '/goal', slashCommand: '/goal' }, // run: 'none' — исполнять нельзя
+    { message: '$pr-fixes', slashCommand: '$pr-fixes' }, // skill — обычный prompt, не служебный ход
     { message: 'обычный текст', slashCommand: '/status' }, // подмена текста флагом
     { message: '/status', slashCommand: '/status; rm -rf /' }, // мусор в поле
   ]) {
@@ -360,6 +465,9 @@ test('slashCommand валидация: чужая команда, none-кома�
     assert.equal(res.json().error, 'unknown_slash_command');
   }
   assert.equal(executor.calls.length, 0, 'ни один невалидный ход не дошёл до executor-а');
+  // Форма имени проверяется ДО чтения каталога: `$pr-fixes` и `/status; rm -rf /`
+  // отказ получают без него (у codex это был бы подъём app-server ради 400).
+  assert.equal(executor.commandCalls.length, 3, 'каталог читается только для `/`-формы');
 });
 
 test('служебный ход claude не автоповторяется при пустом выводе, ответ — плашка note', async (t) => {

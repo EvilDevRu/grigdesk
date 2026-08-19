@@ -371,9 +371,10 @@ async function submit() {
   const t = input.value.trim();
   const atts = pending.value.slice();
   if ((!t && !atts.length) || !sess.value || frozen.value) return;
-  // Точное имя команды — выполняем её, а не шлём агенту. Провайдерские run:'prompt'
-  // идут тем же путём (служебный ход); run:'none' исполнить не можем — обычное сообщение.
-  const exact = allCommands.value.find((c) => c.cmd === t && c.run !== 'none');
+  // Точное имя пункта выполняем через его dispatch. `/`-команды провайдера идут
+  // служебным ходом, `$skill` — обычным prompt; run:'none' остаётся обычным сообщением.
+  // Сверка регистронезависимая — как в меню: имя навыка приходит от исполнителя.
+  const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === t.toLowerCase() && c.run !== 'none');
   if (exact) { runCommand(exact); return; }
   input.value = '';
   atBottom.value = true; // своё сообщение всегда показываем — как в мессенджерах
@@ -402,7 +403,7 @@ function onKey(e) {
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); submit(); }
 }
 
-// ── Слэш-команды: ввод «/» открывает меню со списком и описаниями (как в Claude Code) ──
+// ── Команды и навыки: «/» открывает CLI-команды, «$» — skills Codex ──
 // Две секции: клиентские команды кокпита и команды CLI выбранной модели (провайдерский
 // список приезжает в /api/providers, контракт — server/src/lib/executors/index.js).
 const COMMANDS = [
@@ -431,8 +432,10 @@ const allCommands = computed(() => {
 const cmdIndex = ref(0);
 const cmdMatches = computed(() => {
   const t = input.value.trimStart().toLowerCase();
-  if (!t.startsWith('/') || /[\s\n]/.test(t)) return [];
-  return allCommands.value.filter((c) => c.cmd.startsWith(t));
+  if (!/^[/$]/.test(t) || /[\s\n]/.test(t)) return [];
+  // Имя навыка приходит от Codex и заглавные в нём законны (`$Review-Agent`),
+  // поэтому сверяем в нижнем регистре: иначе такой пункт нельзя было бы найти.
+  return allCommands.value.filter((c) => c.cmd.toLowerCase().startsWith(t));
 });
 // Навигация идёт только по выбираемым пунктам: заголовки секций и пункты run:'none'
 // (команда живёт в TUI исполнителя) пропускаются стрелками и не выбираются Enter/кликом.
@@ -465,7 +468,7 @@ async function runCommand(command) {
     : command;
   if (!c || c.run === 'none') return;
   if (c.source !== 'cockpit') {
-    // Провайдерская команда — служебный ход агента. Гард тот же, что у submit():
+    // Провайдерская команда/навык. Гард тот же, что у submit():
     // пока чат заморожен (сжатие/reset), ничего не выполняем и ввод не трогаем.
     if (!sess.value || frozen.value) return;
     // Команда с обязательным аргументом не отправляется: подставляем в композер.
@@ -474,14 +477,24 @@ async function runCommand(command) {
       cmdIndex.value = 0;
       return;
     }
+    // `$skill` — обычный model prompt: Codex сам раскрывает явное упоминание в
+    // содержимое SKILL.md. `slashCommand` нужен только локальным `/`-командам CLI.
+    // Вложения тоже уезжают только с навыком: у служебного хода их не бывает,
+    // а «переделай вот эту картинку» — обычный сценарий $-навыка.
+    const skill = c.cmd.startsWith('$');
+    const atts = skill ? pending.value.slice() : [];
     input.value = '';
     cmdIndex.value = 0;
     clearTimeout(draftTimer);
     chat.setDraft(props.sid, '');
-    const accepted = await chat.send(props.sid, c.cmd, [], { slashCommand: c.cmd });
-    // Как в submit(): отклонённая отправка не теряет набранное.
+    if (skill) pending.value = [];
+    const accepted = skill
+      ? await chat.send(props.sid, c.cmd, atts)
+      : await chat.send(props.sid, c.cmd, [], { slashCommand: c.cmd });
+    // Как в submit(): отклонённая отправка не теряет ни набранное, ни вложения.
     if (accepted === false) {
       input.value = c.cmd;
+      if (skill) pending.value = atts;
       chat.setDraft(props.sid, c.cmd);
     }
     return;
@@ -1911,7 +1924,8 @@ async function openDebug() {
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
           <p class="e-sub muted">
             {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
-            Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос. «/» — команды.
+            Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
+            «/» — команды, «$» — навыки Codex.
           </p>
         </div>
         <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
@@ -2012,7 +2026,7 @@ async function openDebug() {
           </div>
           <span v-if="attachBusy" class="muted"><span class="spin"></span></span>
         </div>
-        <!-- Меню слэш-команд над композером: секция кокпита + секция исполнителя модели -->
+        <!-- Меню команд/навыков над композером: секция кокпита + секция исполнителя модели -->
         <div v-if="cmdMenu.length" ref="cmdMenuEl" class="cmd-menu">
           <template v-for="item in cmdMenu" :key="item.key">
             <div v-if="item.header" class="cmd-head">
@@ -2358,7 +2372,7 @@ async function openDebug() {
 .speech-actions button:hover { border-color: var(--accent); }
 .speech-actions .speech-primary { border-color: transparent; background: var(--accent); color: white; }
 
-/* Меню слэш-команд: якорится над композером */
+/* Меню команд и навыков: якорится над композером */
 .cs-input .col { position: relative; }
 .cmd-menu { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 6;
   background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden;

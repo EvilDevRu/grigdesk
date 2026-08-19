@@ -22,12 +22,13 @@ import {
 const CACHE_MS = 60_000;
 
 // Меню слэш-команд доверяет только валидным записям контракта (executors/index.js):
-// cmd вида '/name', run ∈ prompt|none, desc до 120 символов.
+// cmd вида '/name' (CLI-команда) либо '$name' (нативный skill Codex),
+// run ∈ prompt|none, desc до 120 символов.
 function normalizeCommands(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((c) => c
-      && typeof c.cmd === 'string' && /^\/\S+$/.test(c.cmd)
+      && typeof c.cmd === 'string' && /^[/$]\S+$/.test(c.cmd)
       && typeof c.desc === 'string' && c.desc.trim()
       && (c.run === 'prompt' || c.run === 'none'))
     .map((c) => ({

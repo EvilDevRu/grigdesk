@@ -138,6 +138,27 @@ const KIMI_PROVIDER = {
   commands: PROVIDER_COMMANDS,
 };
 
+const CODEX_PROVIDER = {
+  id: 'codex',
+  name: 'GPT (Codex)',
+  color: '#10a37f',
+  available: true,
+  models: [{ id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', context: 200000, efforts: [] }],
+  commands: [
+    { cmd: '$pr-fixes', desc: 'Только подтверждённые критические замечания', run: 'prompt' },
+    // Имя навыка даёт Codex, заглавные в нём законны — меню обязано его находить.
+    { cmd: '$Review-Agent', desc: 'Найти ошибки в изменениях', run: 'prompt' },
+  ],
+};
+
+function codexSession() {
+  return makeSession({
+    model: 'gpt-5.6-sol',
+    modelRef: { provider: 'codex', model: 'gpt-5.6-sol' },
+    sessionId: 'codex-session',
+  });
+}
+
 function makeSession(overrides = {}) {
   return {
     id: 'slash-chat',
@@ -163,7 +184,11 @@ async function mountChat(t, { session = makeSession(), provider = KIMI_PROVIDER,
   const browser = await browserHarness();
   const sendCalls = [];
   const calls = { newSession: 0, clearChat: 0, resetContext: 0 };
-  globalThis.__slashMenuApi = { url: (p) => p, async get() { return { tasks: [] }; } };
+  globalThis.__slashMenuApi = {
+    url: (p) => p,
+    async get() { return { tasks: [] }; },
+    async upload() { return { file: 'shot.png', name: 'shot.png', url: '/api/chat/attachment/shot.png', mime: 'image/png' }; },
+  };
   globalThis.__slashMenuChatStore = () => ({
     sessions: [session],
     compactWindow: 0,
@@ -289,6 +314,74 @@ test('клик по провайдерской команде: send с slashComm
   await statusBtn.trigger('click');
   assert.deepEqual(sendCalls, [['slash-chat', '/status', [], { slashCommand: '/status' }]]);
   assert.equal(wrapper.find('textarea').element.value, '');
+});
+
+test('Codex skill показывается по $-префиксу и клик шлёт обычный prompt', async (t) => {
+  const { wrapper, sendCalls } = await mountChat(t, {
+    session: codexSession(),
+    provider: CODEX_PROVIDER,
+  });
+  await wrapper.find('textarea').setValue('$pr');
+  const { heads, items } = menuState(wrapper);
+  assert.deepEqual(heads, ['GPT (Codex)']);
+  assert.deepEqual(items.map((item) => item.cmd), ['$pr-fixes']);
+
+  await wrapper.find('.cmd-menu button.cmd').trigger('click');
+  assert.deepEqual(sendCalls, [['slash-chat', '$pr-fixes', []]]);
+  assert.equal(sendCalls[0][3]?.slashCommand, undefined);
+  assert.equal(wrapper.find('textarea').element.value, '');
+});
+
+test('Enter на Codex skill шлёт $skill без slashCommand', async (t) => {
+  const { wrapper, sendCalls } = await mountChat(t, {
+    session: codexSession(),
+    provider: CODEX_PROVIDER,
+  });
+  const input = wrapper.find('textarea');
+  await input.setValue('$pr-fixes');
+  await input.trigger('keydown', { key: 'Enter' });
+  assert.deepEqual(sendCalls, [['slash-chat', '$pr-fixes', []]]);
+  assert.equal(sendCalls[0][3]?.slashCommand, undefined);
+});
+
+// $skill — обычный ход модели, значит приложенные файлы обязаны уехать вместе с ним:
+// у служебной `/`-команды вложений не бывает, а «разбери вот этот скриншот» — обычный
+// сценарий навыка. Раньше файл молча оставался висеть в композере.
+test('Codex skill уносит приложенные файлы, композер очищается', async (t) => {
+  const { wrapper, sendCalls, flushPromises } = await mountChat(t, {
+    session: codexSession(),
+    provider: CODEX_PROVIDER,
+  });
+  await wrapper.trigger('drop', {
+    dataTransfer: { types: ['Files'], files: [new Blob(['png'], { type: 'image/png' })] },
+  });
+  await flushPromises();
+  assert.equal(wrapper.findAll('.pend .chip').length, 1, 'вложение попало в композер');
+
+  const input = wrapper.find('textarea');
+  await input.setValue('$pr-fixes');
+  await input.trigger('keydown', { key: 'Enter' });
+  await flushPromises();
+  assert.equal(sendCalls.length, 1);
+  assert.deepEqual(sendCalls[0].slice(0, 2), ['slash-chat', '$pr-fixes']);
+  assert.deepEqual(sendCalls[0][2].map((a) => a.file), ['shot.png'], 'файл уехал с навыком');
+  assert.equal(sendCalls[0][3]?.slashCommand, undefined);
+  assert.equal(wrapper.findAll('.pend .chip').length, 0, 'после отправки композер пуст');
+});
+
+// Имя навыка приходит от Codex как есть; заглавные в нём законны.
+test('меню находит $-навык с заглавными буквами по вводу в нижнем регистре', async (t) => {
+  const { wrapper, sendCalls } = await mountChat(t, {
+    session: codexSession(),
+    provider: CODEX_PROVIDER,
+  });
+  const input = wrapper.find('textarea');
+  await input.setValue('$re');
+  assert.deepEqual(menuState(wrapper).items.map((item) => item.cmd), ['$Review-Agent']);
+
+  await input.setValue('$review-agent');
+  await input.trigger('keydown', { key: 'Enter' });
+  assert.deepEqual(sendCalls, [['slash-chat', '$Review-Agent', []]], 'уходит каноничное имя');
 });
 
 test('accepted === false возвращает команду в поле ввода', async (t) => {

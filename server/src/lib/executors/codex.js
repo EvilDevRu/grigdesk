@@ -548,6 +548,48 @@ const CODEX_TUI_COMMANDS = [
   { cmd: '/compact', desc: 'Сжать контекст разговора' },
 ].map((c) => ({ ...c, run: 'none', hint: CODEX_TUI_HINT }));
 
+/**
+ * `skills/list` — канонический источник навыков самого Codex. В глобальный
+ * `/api/providers` берём только cwd-независимые области: repo-skill может быть
+ * доступен свободному чату, но исчезнуть в task-chat с другим worktree.
+ */
+export function parseCodexSkillCommands(result) {
+  const rows = Array.isArray(result?.data) ? result.data : [];
+  const skills = rows.flatMap((row) => (Array.isArray(row?.skills) ? row.skills : []));
+  const seen = new Set();
+  const commands = [];
+  for (const skill of skills) {
+    const name = String(skill?.name || '').trim();
+    if (skill?.enabled !== true || skill?.scope === 'repo'
+      || !['user', 'admin', 'system'].includes(skill?.scope)
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
+      || seen.has(name)) continue;
+    seen.add(name);
+    const description = skill?.interface?.shortDescription
+      || skill?.shortDescription
+      || skill?.description
+      || 'Навык Codex';
+    commands.push({
+      cmd: `$${name}`,
+      desc: String(description).replace(/\s+/g, ' ').trim().slice(0, 120) || 'Навык Codex',
+      run: 'prompt',
+    });
+  }
+  return commands;
+}
+
+export async function readCodexSkillCommands(bin, cwd, {
+  request = codexAppServerRequest,
+} = {}) {
+  if (!bin || !cwd) return [];
+  const response = await request(bin, {
+    method: 'skills/list',
+    params: { cwds: [cwd], forceReload: true },
+  }, { timeoutMs: 5_000 });
+  if (response?.error) return [];
+  return parseCodexSkillCommands(response?.result);
+}
+
 export default {
   id: 'codex',
   name: 'GPT (Codex)',
@@ -565,7 +607,10 @@ export default {
 
   bin(config) { return config.codexBin; },
 
-  commands() { return CODEX_TUI_COMMANDS; },
+  async commands(config) {
+    const skills = await readCodexSkillCommands(config?.codexBin, config?.rootDir);
+    return [...CODEX_TUI_COMMANDS, ...skills];
+  },
 
   probe(config) {
     return new Promise((resolve) => {

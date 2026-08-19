@@ -792,7 +792,10 @@ async function chatModule(fastify, opts) {
     if (!compact && slashCommand != null) {
       const want = String(slashCommand);
       const text = String(message || '').trim();
-      const list = typeof executor?.commands === 'function'
+      // `$skill` тоже лежит в каталоге commands(), но это обычный model prompt:
+      // служебный флаг разрешён только настоящим `/`-командам CLI. Форму проверяем
+      // ДО чтения каталога: у codex это подъём app-server, а ответ всё равно 400.
+      const list = /^\/\S+$/.test(want) && typeof executor?.commands === 'function'
         ? await Promise.resolve(executor.commands(config)).catch(() => [])
         : [];
       slash = list.find((c) => c.cmd === want && c.run === 'prompt'
