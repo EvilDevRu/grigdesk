@@ -59,6 +59,8 @@ test('shape commands() у kimi, claude и codex', async () => {
     assert.ok(codexCli.every((c) => c.run === 'none' && c.hint), 'codex: все / команды run=none с hint');
     // Без бинаря и cwd навыки не читаются вовсе: офлайн-набор не поднимает app-server.
     assert.deepEqual(codexList, codexCli, 'codex: пустой config не даёт $-навыков');
+    assert.equal(claudeExecutor.contextCostCliff, 250_000,
+      'ценовая отсечка объявлена самим Claude executor-ом');
   } finally {
     delete process.env.CLAUDE_CONFIG_DIR;
   }
@@ -325,8 +327,11 @@ test('/api/providers берёт поддержку доверенных ката
     run: async () => ({ reply: 'ok' }),
     trustedDirectories,
   });
+  const priced = { ...runtimeAdapter('priced', true), contextCostCliff: 250_000 };
+  const invalidCliff = { ...runtimeAdapter('invalid-cliff', false), contextCostCliff: 0.5 };
   const adapters = new Map([
-    ['static', runtimeAdapter('static', true)],
+    ['priced', priced],
+    ['invalid-cliff', invalidCliff],
     ['dynamic', runtimeAdapter('dynamic', (config) => config.enableExtraDirs === true)],
     ['broken', runtimeAdapter('broken', () => { throw new Error('capability failed'); })],
     // Setup-only карточка не получает ходы и не должна обещать доступ, даже если
@@ -346,8 +351,14 @@ test('/api/providers берёт поддержку доверенных ката
   const response = await app.inject({ method: 'GET', url: '/api/providers' });
   assert.equal(response.statusCode, 200);
   const byId = new Map(response.json().providers.map((provider) => [provider.id, provider]));
-  assert.equal(byId.get('static')?.trustedDirectories, true);
+  assert.equal(byId.get('priced')?.trustedDirectories, true);
+  assert.equal(byId.get('priced')?.contextCostCliff, 250_000,
+    'generic providers contract пробрасывает декларацию без знания id');
   assert.equal(byId.get('dynamic')?.trustedDirectories, true);
+  assert.equal(Object.hasOwn(byId.get('dynamic'), 'contextCostCliff'), false,
+    'без декларации общей ценовой отсечки нет');
+  assert.equal(Object.hasOwn(byId.get('invalid-cliff'), 'contextCostCliff'), false,
+    'нецелая/невалидная отсечка наружу не проходит');
   assert.equal(byId.get('broken')?.trustedDirectories, false, 'сбой capability не валит реестр');
   assert.equal(byId.get('setup')?.trustedDirectories, false, 'setup-only не получает ход');
 });

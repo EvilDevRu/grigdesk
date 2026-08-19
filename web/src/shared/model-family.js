@@ -34,7 +34,9 @@ export function resolveModelFamily(providers = [], value = '') {
 
   for (const provider of providers) {
     const matched = (provider.models || []).find((model) =>
-      model.id === wanted || (model.aliases || []).includes(wanted));
+      model.id === wanted
+      || (model.modelRefAliases || []).includes(wanted)
+      || (model.aliases || []).includes(wanted));
     if (!matched) continue;
     const family = modelFamilyOf(matched);
     if (!family) return { provider, model: matched, matched, family: '' };

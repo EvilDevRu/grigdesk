@@ -88,9 +88,9 @@ async function compileChatSession() {
     )
     .replace(
       "import HelpTip from '../../shared/ui/HelpTip.vue';",
-      `const HelpTip = {
+      `const HelpTip = globalThis.__chatTaskTooltipHelpTip || {
         props: ['text', 'align', 'triggerFocusable', 'tipStyle'],
-        template: '<span class="help-tip-stub" :data-text="text" :data-focusable="triggerFocusable"><slot /></span>',
+        template: '<span class="help-tip-stub" :data-text="text" :data-focusable="triggerFocusable"><slot /><span class="help-tip-content"><slot name="tip">{{ text }}</slot></span></span>',
       };`,
     )
     .replace(
@@ -152,6 +152,13 @@ async function browserHarness(t) {
   return browser;
 }
 
+function contextTooltipRows(tip) {
+  return Object.fromEntries(tip.findAll('.ctx-pop-row').map((row) => [
+    row.get('.ctx-pop-label').text(),
+    row.get('.ctx-pop-value').text(),
+  ]));
+}
+
 test('HelpTip не добавляет второй Tab-stop составному триггеру и открывается по наведению', async (t) => {
   const browser = await browserHarness(t);
   const [{ h }, { mount }, HelpTip] = await Promise.all([
@@ -188,6 +195,111 @@ test('HelpTip не добавляет второй Tab-stop составному
   assert.equal(tip.classList.contains('on'), false);
   await wrapper.find('select').trigger('focusin');
   assert.equal(tip.classList.contains('on'), true);
+});
+
+test('кольцо контекста открывает форматированный HelpTip без системного title', async (t) => {
+  const browser = await browserHarness(t);
+  const [{ mount, flushPromises }, HelpTip, { reactive, nextTick }] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileHelpTip(),
+    import('../../web/node_modules/vue/index.mjs'),
+  ]);
+  const session = reactive({
+    id: 'ring-help-tip',
+    taskId: null,
+    title: 'Тест подсказки',
+    model: 'claude-opus-5[1m]',
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: 'claude-session',
+    contextTokens: 160_000,
+    totalInputTokens: 29_236_962,
+    cachedInputTokens: 28_474_880,
+    sending: false,
+  });
+  globalThis.__chatTaskTooltipHelpTip = HelpTip;
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 200_000,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [],
+    load() {},
+    modelOf() {
+      return {
+        id: session.model,
+        model: { name: 'Opus 5 (1M)', context: 1_000_000, efforts: [] },
+        provider: { id: 'claude', contextCostCliff: 250_000 },
+      };
+    },
+    visibleModels() { return []; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipHelpTip;
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id, variant: 'page' },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const ring = wrapper.get('.ctx-ring');
+  assert.equal(ring.attributes('title'), undefined);
+  assert.match(ring.attributes('aria-label'), /Контекст: 160[\s\u00a0]000/);
+  const content = browser.document.querySelector('[data-testid="context-tooltip"]');
+  assert.ok(content, 'форматированный слот не попал в HelpTip');
+  const tip = content.closest('[role="tooltip"]');
+  assert.equal(tip.classList.contains('on'), false);
+
+  await wrapper.get('.ctx-tip').trigger('mouseenter');
+  assert.equal(tip.classList.contains('on'), true);
+  assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '80%');
+  assert.deepEqual(
+    [...content.querySelectorAll('.ctx-pop-label')].map((node) => node.textContent.trim()),
+    ['Сейчас', 'Порог', 'Окно', 'За сессию', 'Из кэша'],
+  );
+  const compactValues = Object.fromEntries([...content.querySelectorAll('.ctx-pop-row')].map((row) => [
+    row.querySelector('.ctx-pop-label')?.textContent.trim(),
+    row.querySelector('.ctx-pop-value')?.textContent.trim(),
+  ]));
+  assert.equal(compactValues['За сессию'], '29,2 млн');
+  assert.equal(compactValues['Из кэша'], '28,5 млн');
+
+  // Временно недоступное действие остаётся фокусируемым: иначе вместе с native disabled
+  // клавиатура теряла и саму форматированную подсказку.
+  await wrapper.get('.ctx-tip').trigger('mouseleave');
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  session.sessionId = null;
+  await nextTick();
+  assert.equal(ring.attributes('disabled'), undefined);
+  assert.equal(ring.attributes('aria-disabled'), 'true');
+  await ring.trigger('focusin');
+  assert.equal(tip.classList.contains('on'), true);
+  assert.equal(content.querySelector('.ctx-pop-status')?.textContent.trim(), 'Контекст пуст');
 });
 
 test('ChatSession передаёт в тултип полное загруженное название выбранной задачи', async (t) => {
@@ -295,13 +407,30 @@ test('ChatSession передаёт в тултип полное загружен
   assert.equal(tip.attributes('data-text'), `#42 · ${title}`);
   assert.equal(tip.attributes('data-focusable'), 'false');
   assert.equal(wrapper.find('.sel.task option[value="42"]').text(), `#42 · ${title}`);
-  const ringTitle = wrapper.find('.ctx-ring').attributes('title');
+  const ring = wrapper.find('.ctx-ring');
+  const ringLabel = ring.attributes('aria-label');
+  assert.equal(ring.attributes('title'), undefined, 'native title снова создаст системную подсказку');
+  assert.equal(ring.element.closest('.help-tip-stub')?.classList.contains('ctx-tip'), true);
   // Заполненность — доля практического потолка (здесь автосжатие выключено, значит 80%
   // окна), а окно модели осталось справочной строкой: см. gotchas про кольцо.
-  assert.match(ringTitle, /Контекст: 80[\s ]000 из 204[\s ]800 до потолка окна \(39%\)/);
-  assert.match(ringTitle, /окно модели 256[\s ]000/);
-  assert.match(ringTitle, /за сессию обработано 240[\s\u00a0]000 входных токенов/);
-  assert.match(ringTitle, /220[\s\u00a0]000 из кэша/);
+  assert.match(ringLabel, /Контекст: 80[\s ]000 из 204[\s ]800 до потолка окна \(39%\)/);
+  assert.match(ringLabel, /окно модели 256[\s ]000/);
+  assert.match(ringLabel, /за сессию обработано 240[\s\u00a0]000 входных токенов/);
+  assert.match(ringLabel, /220[\s\u00a0]000 из кэша/);
+  const contextTip = wrapper.get('[data-testid="context-tooltip"]');
+  assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
+  assert.equal(contextTip.get('.ctx-pop-unit').text(), '· токены');
+  assert.equal(contextTip.get('.ctx-pop-pct').text(), '39%');
+  const rows = contextTooltipRows(contextTip);
+  assert.match(rows.Сейчас, /80[\s\u00a0]000/);
+  assert.match(rows.Порог, /204[\s\u00a0]800 · 80% окна/);
+  assert.match(rows.Окно, /256[\s\u00a0]000/);
+  assert.match(rows['За сессию'], /240[\s\u00a0]000/);
+  assert.match(rows['Из кэша'], /220[\s\u00a0]000/);
+  assert.deepEqual(contextTip.findAll('.ctx-pop-action').map((action) => action.text()), [
+    'Кликсжать',
+    'Alt + кликсбросить',
+  ]);
   const messageTime = wrapper.find('.msg.user .m-time');
   assert.equal(messageTime.text(), new Intl.DateTimeFormat('ru-RU', {
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
@@ -450,13 +579,14 @@ test('ChatSession сохраняет выбранную модель после 
 // читал форму, а не оттенок — «места ещё дофига», пока CLI уже сжимал контекст по кругу.
 test('ChatSession рисует дугу и процент кольца по тому же порогу, что и его цвет', async (t) => {
   const browser = await browserHarness(t);
-  const [{ mount, flushPromises }] = await Promise.all([
+  const [{ mount, flushPromises }, { reactive, nextTick }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/vue/index.mjs'),
   ]);
   const CONTEXT_TOKENS = 160_000; // синтетические 80% от порога сжатия
   const COMPACT_WINDOW = 200_000; // «Настройки → Запуски → Сжимать контекст чата»
   const MODEL_WINDOW = 1_000_000; // окно Opus 5 (1M) — впятеро больше порога
-  const session = {
+  const session = reactive({
     id: 'ctx-ring-scale',
     taskId: null,
     title: 'Тестовый проект',
@@ -469,7 +599,7 @@ test('ChatSession рисует дугу и процент кольца по то
     sessionId: 'claude-session',
     contextTokens: CONTEXT_TOKENS,
     sending: false,
-  };
+  });
   globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
   globalThis.__chatTaskTooltipChatStore = () => ({
     sessions: [session],
@@ -492,7 +622,7 @@ test('ChatSession рисует дугу и процент кольца по то
       return {
         id: 'claude-opus-5[1m]',
         model: { name: 'Opus 5 (1M)', context: MODEL_WINDOW, efforts: [] },
-        provider: { id: 'claude' },
+        provider: { id: 'claude', contextCostCliff: 250_000 },
       };
     },
     visibleModels() { return []; },
@@ -516,11 +646,18 @@ test('ChatSession рисует дугу и процент кольца по то
   await flushPromises();
 
   const ring = wrapper.find('.ctx-ring');
+  assert.equal(ring.attributes('title'), undefined);
   // Порог сжатия ниже потолка окна (80% от 1M), значит считаем по нему и так и пишем.
-  assert.match(ring.attributes('title'), /Контекст: 160[\s ]000 из 200[\s ]000 до сжатия \(80%\)/);
-  assert.match(ring.attributes('title'), /разговор уже дорогой, пора сжать/);
+  assert.match(ring.attributes('aria-label'), /Контекст: 160[\s ]000 из 200[\s ]000 до сжатия \(80%\)/);
+  assert.match(ring.attributes('aria-label'), /порог близко — пора сжать/);
+  assert.doesNotMatch(ring.attributes('aria-label'), /уже подорожал/);
   // Окно модели остаётся справочным: как основная шкала оно и обещало запас, которого нет.
-  assert.match(ring.attributes('title'), /окно модели 1[\s ]000[\s ]000/);
+  assert.match(ring.attributes('aria-label'), /окно модели 1[\s ]000[\s ]000/);
+  const contextTip = wrapper.get('[data-testid="context-tooltip"]');
+  assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
+  assert.equal(contextTip.get('.ctx-pop-pct').text(), '80%');
+  assert.equal(contextTip.get('.ctx-pop-status').text(), 'Порог близко — пора сжать');
+  assert.match(contextTooltipRows(contextTip).Порог, /200[\s\u00a0]000 · автосжатие/);
   assert.equal(ring.classes().includes('mid'), true);
 
   // Форма обязана говорить то же, что цвет: дуга заполнена на те же 80%, а не на 16%.
@@ -532,4 +669,269 @@ test('ChatSession рисует дугу и процент кольца по то
     `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по порогу сжатия`,
   );
   assert.ok(filled > CONTEXT_TOKENS / MODEL_WINDOW * 2, 'дуга снова считается от окна модели');
+
+  session.contextTokens = COMPACT_WINDOW;
+  await nextTick();
+  assert.match(ring.attributes('aria-label'), /порог достигнут — пора сжать/);
+  assert.equal(contextTip.get('.ctx-pop-status').text(), 'Порог достигнут — пора сжать');
+  assert.equal(contextTip.get('.ctx-pop-pct').text(), '100%');
+  assert.equal(ring.classes().includes('hi'), true);
+});
+
+// Выключенное автосжатие означает «не вмешивайся», а не «молчи». Если исполнитель
+// объявил свою границу стоимости, кольцо всё равно предупреждает о приближении к ней.
+test('ChatSession учитывает объявленную provider-ом границу стоимости', async (t) => {
+  const browser = await browserHarness(t);
+  const [{ mount, flushPromises }, { reactive, nextTick }] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/vue/index.mjs'),
+  ]);
+  const CONTEXT_TOKENS = 200_000;
+  const COST_CLIFF = 250_000;    // отсечка «дальше ход дорожает»
+  const MODEL_WINDOW = 1_000_000; // окно Fable 5 — встроенный миллион
+  const session = reactive({
+    id: 'ctx-ring-cliff',
+    taskId: null,
+    title: 'Тестовый проект',
+    model: 'claude-fable-5',
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: 'claude-session',
+    contextTokens: CONTEXT_TOKENS,
+    sending: false,
+  });
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0, // «Настройки → Запуски»: автосжатие выключено человеком
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [],
+    load() {},
+    modelOf() {
+      return {
+        id: 'claude-fable-5',
+        model: { name: 'Fable 5', context: MODEL_WINDOW, efforts: [] },
+        provider: { id: 'claude', contextCostCliff: COST_CLIFF },
+      };
+    },
+    visibleModels() { return []; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id, variant: 'page' },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const ring = wrapper.find('.ctx-ring');
+  assert.equal(ring.attributes('title'), undefined);
+  // Подпись обязана назвать ИМЕННО подорожание: «до потолка окна 250 000» при окне
+  // в миллион читается как ошибка счёта.
+  assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 250[\s ]000 до подорожания хода \(80%\)/);
+  assert.match(ring.attributes('aria-label'), /порог близко — пора сжать/);
+  assert.doesNotMatch(ring.attributes('aria-label'), /уже подорожал/);
+  assert.equal(ring.classes().includes('mid'), true);
+
+  const arc = wrapper.find('.ctx-ring .rfg');
+  const circumference = Number(arc.attributes('stroke-dasharray'));
+  const filled = 1 - Number(arc.attributes('stroke-dashoffset')) / circumference;
+  assert.ok(
+    Math.abs(filled - CONTEXT_TOKENS / COST_CLIFF) < 0.01,
+    `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по отсечке подорожания`,
+  );
+  // Прежнее правило (80% окна) дало бы четверть кольца и ни намёка на цену.
+  assert.ok(filled > CONTEXT_TOKENS / (MODEL_WINDOW * 0.8) * 2, 'кольцо снова считается от окна');
+
+  session.contextTokens = COST_CLIFF;
+  await nextTick();
+  assert.match(ring.attributes('aria-label'), /ход уже подорожал — пора сжать/);
+  assert.match(wrapper.get('[data-testid="context-tooltip"]').text(), /Ход уже подорожал — пора сжать/);
+  assert.equal(ring.classes().includes('hi'), true);
+});
+
+test('ChatSession не применяет границу стоимости Claude к другому provider-у', async (t) => {
+  const browser = await browserHarness(t);
+  const { mount, flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const session = {
+    id: 'ctx-ring-ollama',
+    taskId: null,
+    title: 'Локальная модель',
+    model: 'ollama/qwen',
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: 'ollama-session',
+    contextTokens: 200_000,
+    sending: false,
+  };
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [],
+    load() {},
+    modelOf() {
+      return {
+        id: 'ollama/qwen',
+        model: { name: 'Qwen', context: 1_000_000, efforts: [] },
+        // Поля contextCostCliff нет: локальному provider-у нельзя приписывать тариф Claude.
+        provider: { id: 'ollama' },
+      };
+    },
+    visibleModels() { return []; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id, variant: 'page' },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const ring = wrapper.find('.ctx-ring');
+  assert.equal(ring.attributes('title'), undefined);
+  assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
+  assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
+  assert.equal(ring.classes().includes('mid'), false);
+  assert.equal(ring.classes().includes('hi'), false);
+});
+
+test('ChatSession показывает неподтверждённое окно до первого хода и в picker модели', async (t) => {
+  const browser = await browserHarness(t);
+  const { mount, flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const model = {
+    id: 'claude-fable-5',
+    name: 'Fable 5',
+    context: 200_000,
+    contextUnverified: true,
+    efforts: [],
+  };
+  const provider = {
+    id: 'claude',
+    name: 'Claude',
+    available: true,
+    contextCostCliff: 250_000,
+    models: [model],
+  };
+  const session = {
+    id: 'ctx-unverified-empty',
+    taskId: null,
+    title: 'Новый чат',
+    model: model.id,
+    modelRef: { provider: provider.id, model: model.id },
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: null,
+    contextTokens: 0,
+    sending: false,
+  };
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [provider],
+    load() {},
+    modelOf() { return { id: model.id, model, provider }; },
+    visibleModels(value) { return value.models; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id, variant: 'page' },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const ring = wrapper.find('.ctx-ring');
+  const ringLabel = ring.attributes('aria-label');
+  assert.equal(ring.attributes('title'), undefined);
+  assert.match(ringLabel, /Контекст: пусто/);
+  assert.match(ringLabel, /окно модели 200[\s ]000 \(не подтверждено\)/);
+  const contextTip = wrapper.get('[data-testid="context-tooltip"]');
+  assert.match(contextTip.text(), /Контекст пуст/);
+  assert.match(contextTooltipRows(contextTip).Окно, /200[\s\u00a0]000 · неточно/);
+
+  const select = wrapper.find('.sel.model select');
+  assert.match(select.attributes('title'), /окно не подтверждено/);
+  const option = wrapper.find('.sel.model option[value="claude-fable-5"]');
+  assert.match(option.text(), /Fable 5 · окно не подтверждено/);
+  assert.match(option.attributes('title'), /окно не подтверждено/);
 });

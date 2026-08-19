@@ -15,7 +15,11 @@ import { getExecutors } from './executors/index.js';
 // Версия правил составления каталога. Меняем, когда меняется САМ принцип отбора моделей
 // (например «в кратком списке — только свежая версия семейства») — иначе у работающих
 // кокпитов в реестре останется список, собранный по старым правилам.
-const CATALOG_SCHEMA = 7;
+// 9: окно контекста Claude берётся из реестра моделей ВНУТРИ бинаря CLI, а не выводится
+//    из имени («есть [1m] — миллион, иначе 200k»). Прежнее правило занижало окно всему
+//    текущему поколению; деградация теперь per-model, а retired exact ids отделены
+//    от динамических CLI-алиасов.
+const CATALOG_SCHEMA = 9;
 
 let cache = null; // { at, registry }
 const CACHE_MS = 60_000;
@@ -88,16 +92,27 @@ async function mergeDiscovered(file, prov, ex, config) {
  * (кроме записей с `custom: true` — они правлены руками), пропавшие из каталога помечаются
  * `unknown: true` (не удаляем: полный id CLI обычно принимает и без записи о нём).
  */
-async function mergeCatalog(file, prov, ex, config) {
+export async function mergeCatalog(file, prov, ex, config) {
   if (typeof ex?.catalog !== 'function') return false;
   let version = '';
   try { version = (await ex.probe(config))?.version || ''; } catch { version = ''; }
   const meta = (file._meta ||= {});
   const pm = (meta[prov] ||= {});
   const list = (file[prov] ||= []);
+  // Версия бинаря не описывает env/policy, влияющие на каталог. Executor при необходимости
+  // объявляет дополнительный стабильный fingerprint; ошибка hook-а заставляет повторить
+  // каталог, но не фиксируется как успешное состояние.
+  const hasCacheKey = typeof ex.catalogCacheKey === 'function';
+  let catalogCacheKey = '';
+  let cacheKeyVerified = true;
+  if (hasCacheKey) {
+    try { catalogCacheKey = String(await ex.catalogCacheKey(config)); } catch { cacheKeyVerified = false; }
+  }
   // Пересобираем и когда сменилась версия CLI, и когда поменялись правила составления
   // каталога (CATALOG_SCHEMA) — иначе у уже работающих кокпитов остался бы старый список.
-  const metadataChanged = pm.catalogVersion !== version || pm.catalogSchema !== CATALOG_SCHEMA;
+  const metadataChanged = pm.catalogVersion !== version
+    || pm.catalogSchema !== CATALOG_SCHEMA
+    || (hasCacheKey && (!cacheKeyVerified || pm.catalogCacheKey !== catalogCacheKey));
   if (!ex.catalogLive && list.length && !metadataChanged) return false;
 
   let catalog = null;
@@ -106,6 +121,24 @@ async function mergeCatalog(file, prov, ex, config) {
     // Каталог не прочитался (нет бинаря) — оставляем что есть, версию не фиксируем.
     return false;
   }
+  // `modelRefAliases` — миграционная память exact id. Если новый CLI перестал хранить
+  // retired id строкой, алиас всё равно нужен старому schema-2 чату. Но если такой id
+  // снова является отдельной моделью свежего каталога, exact-запись сильнее stale alias:
+  // при непрочитанном context мы не имеем права угадывать их эквивалентность.
+  const catalogCopy = catalog.map((model) => ({ ...model }));
+  const catalogById = new Map(catalogCopy.map((model) => [model.id, model]));
+  for (const current of list) {
+    if (current?.custom || !Array.isArray(current?.modelRefAliases)) continue;
+    const fresh = catalogById.get(current.id);
+    if (!fresh) continue;
+    for (const alias of current.modelRefAliases) {
+      const exactFresh = catalogById.get(alias);
+      if (!exactFresh) {
+        fresh.modelRefAliases = [...new Set([...(fresh.modelRefAliases || []), alias])];
+      }
+    }
+  }
+  catalog = catalogCopy;
   // Каталог задаёт СОСТАВ списка: что CLI забыл (или мы решили не показывать — старые версии),
   // из выбора уходит. Иначе список копит всё, что когда-либо видел любой CLI, и превращается
   // в свалку. Исключение — записи с `custom: true`: их добавил человек, их не трогаем.
@@ -119,13 +152,32 @@ async function mergeCatalog(file, prov, ex, config) {
   file[prov] = next;
   pm.catalogVersion = version;
   pm.catalogSchema = CATALOG_SCHEMA;
+  if (hasCacheKey && cacheKeyVerified) pm.catalogCacheKey = catalogCacheKey;
   return metadataChanged || listChanged;
 }
 
 export function mergeCatalogModel(model, current) {
   // Только явно custom-запись перекрывает живой каталог. Обычная сохранённая копия
   // не должна удерживать старый список efforts после обновления CLI.
-  return current?.custom ? { ...model, ...current, unknown: false } : { ...model };
+  if (current?.custom) return { ...model, ...current, unknown: false };
+  const merged = { ...model };
+  // Непроверенные поля не затирают последнюю проверенную metadata. Признаки деградации
+  // при этом ОСТАЮТСЯ: старое окно — полезный ориентир, но выдавать его за свежий факт
+  // нельзя. Effort ниже дополнительно fail-closed, пока реестр снова не прочитается.
+  if (model.contextUnverified && current?.context > 0) {
+    merged.context = current.context;
+  }
+  if (model.nameUnverified && current?.name) {
+    merged.name = current.name;
+  }
+  if (model.maxOutputUnverified && current?.maxOutput > 0) {
+    merged.maxOutput = current.maxOutput;
+  }
+  if (model.effortUnverified) {
+    if (Array.isArray(current?.capabilities)) merged.capabilities = [...current.capabilities];
+    if (Array.isArray(current?.effortGates)) merged.effortGates = [...current.effortGates];
+  }
+  return merged;
 }
 
 export function resolveModelEfforts(modelEfforts, discoveredEfforts, custom = false) {
@@ -169,10 +221,21 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
         if (!family && typeof ex?.modelFamily === 'function') {
           try { family = String(ex.modelFamily(m) || '').trim(); } catch { family = ''; }
         }
+        // Ладдер и гейт — РАЗНЫЕ оси. Ладдер (имена и порядок ступеней) даёт живой CLI и
+        // он же перебивает устаревший сохранённый список. Кому из моделей какая ступень
+        // доступна — знает только исполнитель: `--effort xhigh` на модели без поддержки
+        // не игнорируется, а роняет запуск. Правленную руками запись не трогаем.
+        let efforts = resolveModelEfforts(m.efforts, discovered, m.custom);
+        if (!m.custom && typeof ex?.modelEfforts === 'function') {
+          try {
+            const allowed = ex.modelEfforts(m, efforts);
+            if (Array.isArray(allowed)) efforts = allowed;
+          } catch { /* гейт не обязан работать — остаётся общий ладдер */ }
+        }
         return {
           ...m,
           ...(family && { family }),
-          efforts: resolveModelEfforts(m.efforts, discovered, m.custom),
+          efforts,
         };
       })
       .sort((a, b) => (b.tier || 0) - (a.tier || 0));
@@ -189,10 +252,17 @@ export async function getModelsRegistry(config, { refresh = false } = {}) {
  */
 export function modelInfoFromRegistry(modelId, registry) {
   if (!modelId) return null;
+  // Реальный id сильнее любого alias во всём реестре, даже если custom-запись создала
+  // коллизию в более раннем provider-е.
+  for (const [provider, models] of Object.entries(registry)) {
+    const model = models.find((m) => m.id === modelId);
+    if (model) return { provider, model };
+  }
   for (const [provider, models] of Object.entries(registry)) {
     // Алиас CLI (`opus`) отдельной записи не имеет — он привязан к модели, в которую
     // резолвится: запрос со старым выбором всё равно находит свойства нужной модели.
-    const model = models.find((m) => m.id === modelId || (m.aliases || []).includes(modelId));
+    const model = models.find((m) => (m.modelRefAliases || []).includes(modelId)
+      || (m.aliases || []).includes(modelId));
     if (model) return { provider, model };
   }
   for (const [provider, models] of Object.entries(registry)) {

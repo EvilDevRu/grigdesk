@@ -48,7 +48,9 @@ export const useProvidersStore = defineStore('providers', {
       if (!id) return '';
       for (const p of state.providers) {
         for (const m of p.models || []) {
-          if (m.id === id || (m.aliases || []).includes(id)) return m.id;
+          if (m.id === id
+            || (m.modelRefAliases || []).includes(id)
+            || (m.aliases || []).includes(id)) return m.id;
         }
       }
       for (const p of state.providers) {
@@ -74,10 +76,16 @@ export const useProvidersStore = defineStore('providers', {
       return (sessionModel) => {
         if (sessionModel && typeof sessionModel === 'object') {
           const providerId = String(sessionModel.provider || '');
-          const modelId = String(sessionModel.model || '');
+          const requestedId = String(sessionModel.model || '');
           const provider = this.providers.find((item) => item.id === providerId) || null;
-          const model = (provider?.models || []).find((item) => item.id === modelId) || null;
-          return { id: modelId, model, provider };
+          // Schema-2 modelRef — точный pin внутри конкретного provider-а. Удалённый
+          // эквивалентный id (например прежний `[1m]`) можно свернуть только по отдельному
+          // `modelRefAliases`; обычные CLI/family aliases здесь намеренно запрещены,
+          // иначе versioned ref незаметно превратится в плавающий `opus`.
+          const model = (provider?.models || []).find((item) => (
+            item.id === requestedId || (item.modelRefAliases || []).includes(requestedId)
+          )) || null;
+          return { id: model?.id || requestedId, model, provider };
         }
         const id = this.resolveModelId(sessionModel) || this.defaultModelId;
         for (const p of this.providers) {

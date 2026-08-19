@@ -207,21 +207,26 @@ function onTaskChange(e) {
 // автокомпакт CLI срабатывает на границе хода, и без живого замера кольцо весь ход горело
 // бы красным по уже сжатому контексту.
 const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext) || sess.value?.contextTokens || 0);
-// ── Порог «дорогого» разговора ────────────────────────────────────────────────
-// Цвет кольца НЕ по проценту окна и НЕ по вбитому числу: красное там, где кокпит и так
-// сожмёт («Настройки → Запуски → Сжимать контекст чата»), но не позже потолка окна модели.
-// Процент окна как единственный ориентир врёт тем сильнее, чем окно больше: на 1M
-// «жёлтые» 60% — это 600k, а дорожает разговор уже с ~250k (кокпит поднимает процесс CLI
-// на каждое сообщение, выше этого кэш промпта на новом ходу не совпадает, и вся переписка
-// пишется в кэш заново по двойному тарифу вместо чтения по десятой доле).
+// ── Ближайший практический порог контекста ────────────────────────────────────
+// Цвет кольца НЕ по одному проценту окна и НЕ по одному вбитому числу: красное у
+// ближайшего события — настроенного сжатия, объявленной исполнителем границы цены или
+// безопасного потолка окна. Только первый порог реально запускает сжатие; остальные
+// предупреждают. Граница цены — свойство транспорта/кэша provider-а, а не универсальное
+// правило для всех моделей.
 // Абсолютное число без потолка врало бы в другую сторону: у модели с окном 200k порог
 // 200k недостижим, кольцо осталось бы зелёным до самого конца разговора.
 const CTX_CEIL_RATIO = 0.8;  // потолок: доля окна модели, дальше которой ждать нельзя
 const CTX_WARN_RATIO = 0.8;  // жёлтое — на подходе к порогу
+const providerCostCliff = computed(() => {
+  const value = current.value?.provider?.contextCostCliff;
+  return Number.isFinite(value) && value > 0 ? Math.max(1, Math.round(value)) : null;
+});
 const ctxLimit = computed(() => {
   const ceil = Math.round(ctxWindow.value * CTX_CEIL_RATIO);
   const want = chat.compactWindow || 0; // 0 — автосжатие в настройках выключено
-  return want > 0 ? Math.min(want, ceil) : ceil;
+  // Побеждает ближайшее событие: сжатие кокпита, подорожание хода или потолок окна.
+  // Отсутствующее `contextCostCliff` означает, что у provider-а такой оси вовсе нет.
+  return Math.min(want > 0 ? want : Infinity, providerCostCliff.value || Infinity, ceil);
 });
 // Заполненность — доля ТОГО ЖЕ порога, по которому кольцо красится. Раньше цвет считался
 // от порога, а дуга и подсказка — от окна модели, и на 1M это расходилось втрое: 168k
@@ -241,22 +246,123 @@ const ctxClass = computed(() => {
   return '';
 });
 const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate);
+const ctxWindowUnverified = computed(() => (
+  !sess.value?.contextWindow && !!currentModel.value?.contextUnverified
+));
 const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+const fmtSessionTokens = (value) => {
+  const tokens = Math.max(0, Number(value) || 0);
+  if (tokens < 1_000_000) return fmtTokens(tokens);
+  return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
+};
 const spentHint = computed(() => {
   const total = sess.value?.totalInputTokens || 0;
   if (!total) return '';
   const cached = sess.value?.cachedInputTokens || 0;
   return ` · за сессию обработано ${fmtTokens(total)} входных токенов${cached ? `, из них ${fmtTokens(cached)} из кэша` : ''}`;
 });
+const ctxAtWarning = computed(() => ctxTokens.value >= ctxLimit.value * CTX_WARN_RATIO);
+const ctxLimitReached = computed(() => ctxTokens.value >= ctxLimit.value);
+const ctxCostCliffReached = computed(() => providerCostCliff.value !== null
+  && ctxTokens.value >= providerCostCliff.value);
+const ctxLimitWhat = computed(() => (
+  chat.compactWindow > 0 && ctxLimit.value === chat.compactWindow ? 'до сжатия'
+    : providerCostCliff.value !== null && ctxLimit.value === providerCostCliff.value ? 'до подорожания хода'
+      : 'до потолка окна'
+));
+const ctxLimitShort = computed(() => (
+  chat.compactWindow > 0 && ctxLimit.value === chat.compactWindow ? 'автосжатие'
+    : providerCostCliff.value !== null && ctxLimit.value === providerCostCliff.value ? 'цена хода'
+      : '80% окна'
+));
+
+// Визуальная подсказка не собирается из одной длинной строки: у штатного HelpTip есть
+// форматированный слот, поэтому числа, предупреждение и действия остаются отдельными
+// смысловыми блоками. `ctxTitle` ниже — только компактная доступная подпись кнопки.
+const ctxTooltip = computed(() => {
+  const s = sess.value;
+  const modelWindow = `${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' · неточно' : ''}`;
+  const rows = [{ label: 'Окно', value: modelWindow, unverified: ctxWindowUnverified.value }];
+  const total = s?.totalInputTokens || 0;
+  const cached = s?.cachedInputTokens || 0;
+  const addSessionRows = () => {
+    if (total) rows.push({ label: 'За сессию', value: fmtSessionTokens(total) });
+    if (cached) rows.push({ label: 'Из кэша', value: fmtSessionTokens(cached) });
+  };
+
+  if (s?.compacting) {
+    return {
+      title: 'Контекст', percent: '', tone: 'active', status: 'Сжимаю контекст…',
+      detail: 'Агент готовит рабочую выжимку разговора.', rows: [], actions: false,
+    };
+  }
+  if (!s?.sessionId) {
+    return {
+      title: 'Контекст', percent: '', tone: '',
+      status: s?.pendingSeed ? 'Контекст сжат' : 'Контекст пуст',
+      detail: s?.pendingSeed
+        ? 'Выжимка уедет агенту со следующим сообщением.'
+        : 'Размер появится после первого хода.',
+      rows, actions: false,
+    };
+  }
+  if (s?.compactedAt && !ctxTokens.value) {
+    addSessionRows();
+    return {
+      title: 'Контекст', percent: '', tone: '', status: 'Контекст сжат',
+      detail: 'Новый размер появится после следующего хода.', rows, actions: true,
+    };
+  }
+  if (ctxUnavailable.value) {
+    addSessionRows();
+    return {
+      title: 'Контекст', percent: '', tone: '', status: 'Точная заполненность пока недоступна',
+      detail: 'Codex сообщит её после следующего завершённого хода.', rows, actions: true,
+    };
+  }
+
+  rows.unshift(
+    {
+      label: 'Сейчас',
+      value: `${ctxIsEstimate.value ? '≈ ' : ''}${fmtTokens(ctxTokens.value)}${s?.sending && s?.liveContext ? ' · этот ход' : ''}`,
+    },
+    { label: 'Порог', value: `${fmtTokens(ctxLimit.value)} · ${ctxLimitShort.value}` },
+  );
+  addSessionRows();
+  return {
+    title: 'Контекст',
+    percent: `${ctxPct.value}%`,
+    tone: ctxCostCliffReached.value || ctxLimitReached.value ? 'bad' : (ctxAtWarning.value ? 'warn' : ''),
+    status: ctxCostCliffReached.value
+      ? 'Ход уже подорожал — пора сжать'
+      : ctxLimitReached.value
+        ? 'Порог достигнут — пора сжать'
+        : (ctxAtWarning.value ? 'Порог близко — пора сжать' : ''),
+    detail: '',
+    rows,
+    actions: true,
+  };
+});
 const ctxTitle = computed(() => {
   const s = sess.value;
   const tokens = fmtTokens(ctxTokens.value);
   if (s?.compacting) return 'Сжимаю контекст…';
-  if (!s?.sessionId) return s?.pendingSeed ? 'Контекст сжат — выжимка уедет со следующим сообщением' : 'Контекст: пусто';
+  if (!s?.sessionId) {
+    const empty = s?.pendingSeed
+      ? 'Контекст сжат — выжимка уедет со следующим сообщением'
+      : 'Контекст: пусто';
+    return ctxWindowUnverified.value
+      ? `${empty} · окно модели ${fmtTokens(ctxWindow.value)} (не подтверждено)`
+      : empty;
+  }
   if (s?.compactedAt && !ctxTokens.value) return 'Контекст сжат — размер покажется после следующего хода';
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
   if (ctxUnavailable.value) return `Точная заполненность Codex появится после следующего завершённого хода${spentHint.value} · ${hint}`;
-  const warn = ctxTokens.value >= ctxLimit.value * CTX_WARN_RATIO ? ' · разговор уже дорогой, пора сжать' : '';
+  const warn = ctxCostCliffReached.value
+    ? ' · ход уже подорожал — пора сжать'
+    : ctxLimitReached.value
+      ? ' · порог достигнут — пора сжать'
+      : (ctxAtWarning.value ? ' · порог близко — пора сжать' : '');
   const estimate = ctxIsEstimate.value ? 'примерно ' : '';
   // Пока ход идёт, цифра замерена ЭТИМ ходом — про это стоит сказать прямо: иначе
   // упавший на глазах контекст (автокомпакт CLI) выглядит сбоем кольца.
@@ -265,9 +371,14 @@ const ctxTitle = computed(() => {
   // справочно: на 1M оно вводило в заблуждение как основная шкала — «из 1 000 000»
   // читается как огромный запас там, где до сжатия остались проценты.
   const limit = fmtTokens(ctxLimit.value);
-  const limitWhat = chat.compactWindow > 0 && ctxLimit.value === chat.compactWindow ? 'до сжатия' : 'до потолка окна';
-  const window = ` · окно модели ${fmtTokens(ctxWindow.value)}`;
-  return `Контекст: ${estimate}${tokens} из ${limit} ${limitWhat} (${ctxPct.value}%)${live}${warn}${window}${spentHint.value} · ${hint}`;
+  // Подпись называет ТО событие, которое случится первым, иначе цифра порога
+  // необъяснима: «до потолка окна 250 000» при окне в миллион читается как ошибка.
+  // «Не подтверждено» — разбор таблицы моделей в бинаре CLI сломался (обновился CLI,
+  // сменился формат), и окно ниже это заглушка, а не факт. Молчать нельзя: именно по
+  // этой цифре человек решает, пора ли сжимать. Замер самой сессии (Codex сообщает своё
+  // окно) сильнее каталога, и к нему оговорка не относится.
+  const window = ` · окно модели ${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' (не подтверждено)' : ''}`;
+  return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)${live}${warn}${window}${spentHint.value} · ${hint}`;
 });
 // Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;
@@ -275,6 +386,11 @@ const RING_C = 2 * Math.PI * 9;
 // (или почти полное) кольцо при вращении выглядело бы неподвижным.
 const SPIN_DASH = RING_C * 0.75;
 const ringDash = computed(() => (sess.value?.compacting ? SPIN_DASH : RING_C * (1 - ctxPct.value / 100)));
+// Нативный disabled выкидывает кнопку из Tab-порядка вместе с её подсказкой. Кольцо
+// остаётся фокусируемым и честно объявляет недоступность через aria-disabled; обработчик
+// ниже всё равно не запускает действие, пока нет сессии или идёт ход/сжатие.
+const ctxRingDisabled = computed(() => !sess.value?.sessionId
+  || !!sess.value?.compacting || !!sess.value?.sending);
 
 /**
  * Клик по кольцу. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
@@ -1872,14 +1988,14 @@ async function openDebug() {
         <div class="sel model">
           <span class="lbl">модель</span>
           <select :value="modelId" :disabled="frozen"
-                  :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` : 'Модель'"
+                  :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` + (currentModel.contextUnverified ? ' · окно не подтверждено' : '') : 'Модель'"
                   @change="onModelChange">
             <template v-if="provGroups.length">
               <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
                 <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
                 <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
-                        :title="`${m.id} · контекст ${(m.context / 1000).toFixed(0)}k` + (m.unknown ? ' · нет в каталоге установленного CLI' : '')">
-                  {{ m.name }}{{ m.unknown ? ' ?' : '' }}
+                        :title="`${m.id} · контекст ${(m.context / 1000).toFixed(0)}k` + (m.contextUnverified ? ' · окно не подтверждено' : '') + (m.unknown ? ' · нет в каталоге установленного CLI' : '')">
+                  {{ m.name }}{{ m.contextUnverified ? ' · окно не подтверждено' : '' }}{{ m.unknown ? ' ?' : '' }}
                 </option>
               </optgroup>
             </template>
@@ -1898,17 +2014,47 @@ async function openDebug() {
         <EffortSlider v-if="effortLevels.length" :model-value="sess.effort" :levels="effortLevels"
                       @update:model-value="chat.setEffort(sid, $event)" />
         <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
-             Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента. -->
-        <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
-                :disabled="!sess.sessionId || sess.compacting || sess.sending"
-                :title="ctxTitle" :aria-label="ctxTitle"
-                @click="onCtxClick">
-          <svg viewBox="0 0 24 24">
-            <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
-            <circle class="rfg" cx="12" cy="12" r="9" fill="none" stroke-width="3" stroke-linecap="round"
-                    :stroke-dasharray="RING_C" :stroke-dashoffset="ringDash" transform="rotate(-90 12 12)" />
-          </svg>
-        </button>
+             Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
+             Подсказка штатная, а не browser title: так она не обрезается и вмещает
+             раздельные числа, состояние и действия. -->
+        <HelpTip class="ctx-tip" align="right" :trigger-focusable="false"
+                 :tip-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }">
+          <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
+                  :aria-disabled="ctxRingDisabled ? 'true' : undefined"
+                  :aria-label="ctxTitle"
+                  @click="onCtxClick">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
+              <circle class="rfg" cx="12" cy="12" r="9" fill="none" stroke-width="3" stroke-linecap="round"
+                      :stroke-dasharray="RING_C" :stroke-dashoffset="ringDash" transform="rotate(-90 12 12)" />
+            </svg>
+          </button>
+          <template #tip>
+            <span class="ctx-pop" data-testid="context-tooltip">
+              <span class="ctx-pop-head">
+                <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
+                <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
+                  {{ ctxTooltip.percent }}
+                </span>
+              </span>
+              <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
+                {{ ctxTooltip.status }}
+              </span>
+              <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
+              <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
+                <span v-for="row in ctxTooltip.rows" :key="row.label"
+                      class="ctx-pop-row" :class="{ unverified: row.unverified }">
+                  <span class="ctx-pop-label">{{ row.label }}</span>
+                  <span class="ctx-pop-value">{{ row.value }}</span>
+                </span>
+              </span>
+              <span v-if="ctxTooltip.actions" class="ctx-pop-actions">
+                <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
+                <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
+              </span>
+            </span>
+          </template>
+        </HelpTip>
       </div>
     </div>
 
@@ -2192,10 +2338,12 @@ async function openDebug() {
 .sel select:focus { outline: none; border-bottom-color: var(--accent); }
 /* Раскрытый список системный — ему нужен непрозрачный фон, иначе на тёмной теме нечитаемо */
 .sel select option, .sel select optgroup { background: var(--surface); color: var(--ink); }
-.sel + .sel, .bar > .sel + :deep(.eff), .bar :deep(.eff) + .ctx-ring {
+.sel + .sel, .bar > .sel + :deep(.eff), .bar :deep(.eff) + .ctx-tip {
   border-left: 1px solid var(--line); padding-left: 12px; margin-left: 4px; }
 
-/* Кольцо контекста — маленькое, кликабельное (сброс) */
+/* Кольцо контекста — маленькое, кликабельное (сжатие; Alt — сброс) */
+.ctx-tip { flex: none; align-items: center; }
+.ctx-tip :deep(.ht-tr) { align-items: center; }
 .ctx-ring { width: 30px; height: 30px; flex: none; padding: 0; border: none; border-radius: 8px;
   background: none; cursor: pointer; display: grid; place-items: center; }
 .ctx-ring svg { width: 22px; height: 22px; }
@@ -2212,8 +2360,30 @@ async function openDebug() {
 .ctx-ring.compacting .rfg { stroke: var(--accent); }
 .ctx-ring.compacting svg { animation: ctx-spin .8s linear infinite; }
 @keyframes ctx-spin { to { transform: rotate(1turn); } }
-.ctx-ring:not(:disabled):hover { background: var(--surface-2); }
-.ctx-ring:disabled { cursor: default; opacity: .7; }
+.ctx-ring:not([aria-disabled="true"]):hover { background: var(--surface-2); }
+.ctx-ring[aria-disabled="true"] { cursor: default; opacity: .7; }
+
+/* Форматированная подсказка кольца. Содержимое слота телепортируется HelpTip-ом в body,
+   но сохраняет scope этого компонента, поэтому локальные стили работают и не текут. */
+.ctx-pop { display: flex; flex-direction: column; gap: 7px; width: 260px; max-width: 100%; text-align: left; }
+.ctx-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.ctx-pop-unit { color: var(--ink-mid); font-weight: 400; }
+.ctx-pop-pct { color: var(--good); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ctx-pop-pct.warn { color: var(--warn); }
+.ctx-pop-pct.bad { color: var(--bad); }
+.ctx-pop-status { display: block; font-weight: 600; }
+.ctx-pop-status.warn { color: var(--warn); }
+.ctx-pop-status.bad { color: var(--bad); }
+.ctx-pop-status.active { color: var(--accent); }
+.ctx-pop-detail { display: block; color: var(--ink-mid); }
+.ctx-pop-rows { display: flex; flex-direction: column; gap: 4px; padding-top: 7px; border-top: 1px solid var(--line); }
+.ctx-pop-row { display: grid; grid-template-columns: minmax(76px, auto) minmax(0, 1fr); gap: 14px; align-items: baseline; }
+.ctx-pop-label { color: var(--ink-mid); }
+.ctx-pop-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctx-pop-row.unverified .ctx-pop-value { color: var(--warn); }
+.ctx-pop-actions { display: flex; flex-direction: column; gap: 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink-mid); }
+.ctx-pop-action { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
+.ctx-pop-action b { color: var(--ink); font-weight: 600; }
 
 /* Воздух сверху/снизу — margin'ом самого скролл-контейнера (не паддингом:
    нижний паддинг при прокрутке до конца ненадёжен). Правый паддинг меньше

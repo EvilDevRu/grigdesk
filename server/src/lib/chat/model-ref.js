@@ -19,12 +19,18 @@ export function normalizeModelRef(value) {
 }
 
 function exactModel(models, modelId) {
-  return (models || []).find((model) => model?.id === modelId) || null;
+  const list = models || [];
+  // Реальный id сильнее declarative alias даже при испорченном/custom models.json.
+  return list.find((model) => model?.id === modelId)
+    || list.find((model) => (model?.modelRefAliases || []).includes(modelId))
+    || null;
 }
 
 function legacyModels(models, modelId) {
   const exact = (models || []).filter((model) => (
-    model?.id === modelId || (model?.aliases || []).includes(modelId)
+    model?.id === modelId
+      || (model?.modelRefAliases || []).includes(modelId)
+      || (model?.aliases || []).includes(modelId)
   ));
   if (exact.length) return exact;
   // Семейства — только legacy-совместимость. В modelRef всегда сохраняется фактический
@@ -44,7 +50,8 @@ function failed(error, extra = {}) {
 
 /**
  * Разрешает уже versioned пару. Provider является частью ключа: поиск в соседних
- * providers и любой fallback запрещены.
+ * providers и любой fallback запрещены. Разрешены только retired-equivalent exact id
+ * из `modelRefAliases`; динамические CLI-алиасы (`opus`) остаются legacy-механизмом.
  */
 export function resolveModelRef(value, registry) {
   const ref = normalizeModelRef(value);

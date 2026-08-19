@@ -17,6 +17,7 @@ const registry = {
       tier: 80,
       extra: false,
       aliases: ['codex-auto-review'],
+      modelRefAliases: ['gpt-5.6-terra-retired'],
     },
   ],
 };
@@ -30,6 +31,7 @@ test('model registry resolves family policy to its current catalog model', () =>
 test('exact model pins and aliases keep precedence over family resolution', () => {
   assert.equal(modelInfoFromRegistry('gpt-5.5-sol', registry).model.id, 'gpt-5.5-sol');
   assert.equal(modelInfoFromRegistry('codex-auto-review', registry).model.id, 'gpt-5.6-terra');
+  assert.equal(modelInfoFromRegistry('gpt-5.6-terra-retired', registry).model.id, 'gpt-5.6-terra');
 });
 
 test('live catalog effort updates replace an ordinary cached copy', () => {

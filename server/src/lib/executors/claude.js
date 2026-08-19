@@ -4,7 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { claudeCatalog, claudeOauthMetadata } from './_claude-catalog.js';
+import {
+  claudeCatalog,
+  claudeCatalogCacheKey,
+  claudeOauthMetadata,
+} from './_claude-catalog.js';
 import { npmLatest } from './_npm-latest.js';
 import { createStepSink } from '../chat/stream-steps.js';
 import { toClaudeSteps } from './_claude-steps.js';
@@ -1070,6 +1074,9 @@ export default {
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
   trustedDirectories: true,
+  // После этой границы Claude перестаёт переиспользовать prompt cache между ходами,
+  // поэтому предупреждение — свойство executor-а, а не общая эвристика для всех ИИ.
+  contextCostCliff: 250_000,
   untrustedInput: Object.freeze({
     text: true,
     images: true,
@@ -1179,6 +1186,31 @@ export default {
   },
 
   /**
+   * Какие ступени общего ладдера доступны КОНКРЕТНОЙ модели.
+   * `--help` перечисляет все уровни, которые понимает CLI, но принимает их не каждая
+   * модель: `--effort xhigh` на Opus 4.6 — не «игнор», а падение с ошибкой валидации.
+   * Разрешения объявляет реестр внутри бинаря (`capabilities`), поэтому ни имён
+   * уровней, ни списка моделей здесь не зашито: появится новая ступень — её пропустит
+   * общий ладдер, появится новая модель — её возможности приедут со своей записью.
+   * null — «данных нет», тогда остаётся общий ладдер, как раньше.
+   */
+  modelEfforts(model, ladder) {
+    // Частично прочитанная запись не имеет права получить общий ladder: неизвестная
+    // ступень не игнорируется CLI, а роняет запуск. Сохранённые metadata остаются в
+    // реестре для диагностики/восстановления, но до здорового скана флаг не передаём.
+    if (model?.effortUnverified) return [];
+    const caps = Array.isArray(model?.capabilities) ? model.capabilities : null;
+    if (!caps || !Array.isArray(ladder) || !ladder.length) return null;
+    // Модель без `effort` вовсе не принимает флаг — слайдер ей не показываем.
+    if (!caps.includes('effort')) return [];
+    // Какие ступени вообще требуют отдельного разрешения, знает не эта модель, а весь
+    // реестр: `effortGates` собран по нему в каталоге. Негейтованная ступень (low,
+    // medium, high) доступна всем, у гейтованной обязан быть свой флаг `<уровень>_effort`.
+    const gated = Array.isArray(model.effortGates) ? model.effortGates : [];
+    return ladder.filter((level) => !gated.includes(level) || caps.includes(`${level}_effort`));
+  },
+
+  /**
    * Режимы прав (`--permission-mode`). В `--help` этого флага нет, зато CLI сам
    * перечисляет допустимые значения в ошибке валидации — спрашиваем его заведомо
    * неверным значением и парсим ответ. Появится новый режим — подхватится сам.
@@ -1244,12 +1276,16 @@ export default {
   },
 
   /**
-   * Каталог моделей УСТАНОВЛЕННОГО CLI (скан бинаря; имена выводятся из id).
-   * Пересобирается при смене версии CLI — новые модели появляются сами, а имена
-   * никогда не расходятся с реальностью («Opus 4.8» при opus → claude-opus-4-6).
+   * Каталог моделей УСТАНОВЛЕННОГО CLI: id сканируются из бинаря, а display name и
+   * возможности читаются из встроенного registry (с явным fallback при деградации).
+   * Пересобирается при смене версии CLI или catalogCacheKey.
    */
   catalog(config) {
     return claudeCatalog(config);
+  },
+
+  catalogCacheKey(config) {
+    return claudeCatalogCacheKey(config);
   },
 
   /** Стабильное семейство для policy агентов и движка. */

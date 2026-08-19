@@ -18,6 +18,7 @@ const providers = [{
       tier: 80,
       extra: false,
       aliases: ['codex-auto-review'],
+      modelRefAliases: ['gpt-5.6-terra[retired]'],
     },
   ],
 }];
@@ -43,4 +44,9 @@ test('family and legacy exact values resolve without losing explicit pins', () =
   const alias = resolveModelFamily(providers, 'codex-auto-review');
   assert.equal(alias.family, 'terra');
   assert.equal(alias.model.id, 'gpt-5.6-terra');
+
+  const retiredExact = resolveModelFamily(providers, 'gpt-5.6-terra[retired]');
+  assert.equal(retiredExact.family, 'terra');
+  assert.equal(retiredExact.model.id, 'gpt-5.6-terra');
+  assert.equal(retiredExact.matched.id, 'gpt-5.6-terra');
 });
