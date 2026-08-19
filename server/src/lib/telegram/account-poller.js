@@ -9,7 +9,9 @@ import { scrubToken } from './api.js';
 import { normalizeTelegramBotId } from './account-bindings.js';
 import { normalizeUpdate } from './updates.js';
 
-const ALLOWED_UPDATES = ['message', 'edited_message', 'message_reaction'];
+// callback_query — кнопки телеграм-пульта; читатель getUpdates ровно один,
+// поэтому нажатия принимает этот же цикл, а не второй.
+const ALLOWED_UPDATES = ['message', 'edited_message', 'message_reaction', 'callback_query'];
 const IDLE_PAUSE_MS = 1_000;
 const ERROR_PAUSE_MS = 15_000;
 
@@ -31,6 +33,7 @@ export class TelegramAccountPoller {
     isEnabled = () => true,
     onMessage = null,
     onReaction = null,
+    onCallback = null,
     onChanged = null,
     now = Date.now,
     log = console,
@@ -43,7 +46,7 @@ export class TelegramAccountPoller {
     if (!botApi || typeof botApi.callBotApi !== 'function') {
       throw new TypeError('TelegramAccountPoller: botApi.callBotApi обязателен.');
     }
-    if (![onMessage, onReaction, onChanged].every((callback) => (
+    if (![onMessage, onReaction, onCallback, onChanged].every((callback) => (
       callback === null || typeof callback === 'function'
     ))) {
       throw new TypeError('TelegramAccountPoller: callbacks должны быть функциями или null.');
@@ -56,6 +59,7 @@ export class TelegramAccountPoller {
     this.isEnabled = isEnabled;
     this.onMessage = onMessage;
     this.onReaction = onReaction;
+    this.onCallback = onCallback;
     this.onChanged = onChanged;
     this.now = now;
     this.log = log;
@@ -133,6 +137,11 @@ export class TelegramAccountPoller {
     const update = normalizeUpdate(raw);
     if (update.type === 'reaction') {
       await this.onReaction?.(update.reaction, lease);
+      return this._current(lease) && await this._enabled();
+    }
+    // Нажатие кнопки — не переписка: в архив не пишется, только хук пульта.
+    if (update.type === 'callback') {
+      await this.onCallback?.(update.callback, lease);
       return this._current(lease) && await this._enabled();
     }
     if (!update.msg) return true;

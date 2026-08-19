@@ -43,10 +43,10 @@ worker по полной process identity.
 | `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_DIR`); проекты кокпита — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
-| `projects`, `code` | `/api/projects*`, read-only `/api/code/:project/*` | профили/prefs + git/worktree |
+| `projects`, `code` | `/api/projects*`, read-only `/api/code/{roots,:project/*}` (в том числе `raw` — байты растровых картинок) | профили/prefs + git/worktree |
 | `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](documents.md)) |
 | `inbox` | `GET /api/inbox[/{summary,status}]`, `POST /api/inbox/channels/:channel/{activate,deactivate}`, решения `POST /api/inbox/items/:ref/{task,dismiss,reset}` | общий merge Telegram/GitHub, account-owned `inbox-state.json`, единый draft/triage/worker и B24 task service; provider credentials здесь отсутствуют |
-| `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,inbox-state.json}` — `config.telegramDir` |
+| `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}`, пульт `POST /api/telegram/pult{,/confirm,/disable}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,pult-state.json,inbox-state.json}` — `config.telegramDir` |
 | `github` | `GET /api/github/status`, `GET/PUT /api/github/rules`, `POST /api/github/{connect,recheck,disconnect,force-forget}`, public HMAC ingress `POST /hooks/github/:ingressRef` | GitHub REST + repository webhook `issues/opened`; PAT/secret в private state, bindings и `accounts/<accountRef>/{archive/,ingress-state.json,rules.json,inbox-state.json}` — `config.githubDir` |
 | `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
@@ -97,7 +97,9 @@ commit блокирует автоматический retry до operator recon
 читает bounded UTF-8 документы; неподдерживаемый или неполный разбор fail-closed оставляет
 item человеку — с названной причиной по каждому вложению (канал даёт машинный код, фразу
 собирает `lib/inbox/skip-reason.js`) и возможностью поставить задачу вручную через
-пояснение оператора, которое уходит в тот же триаж. Недоверенный Inbox не запускается
+пояснение оператора, которое уходит в тот же триаж. Ручная кнопка при настроенной модели
+формулирует постановку тем же verdict-триажем; отказ модели её не запирает — задача
+уезжает текстом обращения. Недоверенный Inbox не запускается
 через coding executor: отдельный
 `runUntrusted` не имеет tools/workspace/MCP/session, а visual realpath проверяется внутри
 server-owned media cache и превращается в media type + base64 до границы provider-а.
@@ -116,6 +118,17 @@ webhook deliveries. Общий `InboxAutoTasks` использует модел�
 они снимают запрещённое. SSE `inbox-changed` будит все окна; минутный poll summary нужен отдельно,
 поскольку Telegram item может созреть без нового события. Полный lifecycle, identity,
 storage и operator gates описаны в [inbox.md](inbox.md).
+
+**Телеграм-пульт** (`lib/telegram/pult/`) — карточки «работа стоит на тебе» и кнопки
+решений в подтверждённой кодом личке владельца, тем же ботом и тем же поллером
+(читатель getUpdates один; `callback_query` принимает общий цикл). Вотчер импортирует
+те же `web/src/shared/{pipeline-wait,agent-activity}.js`, что чип навигации, слушает
+шину через `fastify.sse.subscribe` и ходит в те же ручки через inject; действия
+транслируются в существующие gate/permission/resume/launch/B24/chat-stop с CAS на
+сервере. Оповещение — на переходе, первый снимок silent, state и `message_id` карточек
+переживают рестарт в `pult-state.json`. Мутации — вторым тапом с TTL и сверкой снимка;
+деньги/goto/снос/закрытие не выносятся. Полный контракт —
+[telegram-pult.md](telegram-pult.md).
 
 **Триаж (lib/analysis/analyzer.js), устойчивость:** очередь оценок при старте сервера
 ВОССТАНАВЛИВАЕТСЯ из статус-файлов (`queued` → снова в очередь; `running` → interrupted,
@@ -272,6 +285,15 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   же геометрии; он не импортирует и не создаёт Monaco.
   Односторонний diff добавленного/удалённого файла автоматически занимает одну колонку,
   не оставляя заведомо пустую половину редактора.
+  **Растровая картинка показывается предпросмотром вместо Monaco**: `<img>` тянет байты из
+  `/api/code/:project/raw`, редактор под ней не создаётся вовсе, а пометка «бинарный»
+  заменяется на «изображение» — у файла, который есть чем показать, она была ложной
+  тревогой. Сорванная загрузка объясняется словами (размер, формат), а не пустым местом.
+  **Intent `open-file`** (из чата, deep-link `#/code?project&repo&root&path[&line]` или
+  `openCode`) адресует репозиторий и КОРЕНЬ дерева, а не «текущий выбор»: панель сама
+  переключает рабочую копию, раскрывает каталоги пути (дерево ленивое — иначе файл
+  открылся бы в редакторе, но потерялся бы в навигаторе) и встаёт на строку. Недоступный
+  проект, исчезнувшая рабочая копия и пропавший файл называются в плашке ошибки поимённо.
   Переход 900→899 закрывает док и размонтирует непоказанные панели, чтобы возврат на широкий
   экран сам не создал PTY.
 - **Escape координирует `shared/ui/layer-stack.js`.** Dock, tools-popover, модалки, confirm
@@ -297,6 +319,11 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   «Настройки → Приложение». Она не хранится в серверных prefs, чтобы планшет не менял
   энергоповедение остальных окон. `stores/pwa.js` держит блокировку на уровне всего SPA,
   а после системного освобождения в фоне повторяет запрос по `visibilitychange`.
+- **Пропорции страницы «Чаты» — тоже настройка устройства**: ширина списка чатов
+  (`cockpit-chats-list-width`) и высота поля ввода (`cockpit-chat-composer-h`, у плавающей
+  панели свой ключ) двигаются разделителями и живут в localStorage — рядом с шириной дока и
+  дерева «Кода», по той же причине: серверные prefs навязали бы планшету раскладку монитора.
+  Пустая настройка означает «решает CSS»; правила и границы — [чат с агентами](chat-agents.md).
 - **Чипы «требует меня» в навигации** (`AppShell.vue`, карта `badges`: пункт → `{n, kind, title}`) —
   одно правило на все разделы. Жёлтый пульсирующий (`wait`) — работа СТОИТ, пока не подойду
   (вопрос агента в чате, ворота конвейера); красный (`stall`) — конвейер упёрся или оборвался,

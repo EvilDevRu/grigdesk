@@ -11,10 +11,12 @@ test('waiting reason prefers a route-specific gate meaning', () => {
   };
 
   assert.deepEqual(waitingReason({ ...base, route: 'hunt' }), {
+    node: 'gate_accept',
     text: 'принять находки и покрытие',
     premature: false,
   });
   assert.deepEqual(waitingReason({ ...base, route: 'feature' }), {
+    node: 'gate_accept',
     text: 'принять работу — проверить в браузере',
     premature: false,
   });
@@ -29,6 +31,7 @@ test('waiting reason keeps fallback labels and premature state', () => {
   };
 
   assert.deepEqual(waitingReason(graph), {
+    node: 'gate_custom',
     text: 'Выбрать направление',
     premature: true,
   });

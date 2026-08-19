@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 import { createStepSink } from '../chat/stream-steps.js';
+import { contextCacheStatus } from '../chat/context-cache.js';
 import { createKimiStepNormalizer } from '../executors/_kimi-steps.js';
 import { createAcpClient, initializeKimiAcp } from './acp-client.js';
 import { stageKimiAttachments } from './attachments.js';
@@ -560,6 +561,7 @@ export async function runContainedKimi({
       const status = parseStatus(statusText, modelInfo.context);
       error.contextTokens = status.contextTokens;
       error.contextIsEstimate = status.contextIsEstimate;
+      error.contextCache = contextCacheStatus('unavailable');
       throw error;
     }
     const status = parseStatus(statusText, modelInfo.context);
@@ -580,6 +582,7 @@ export async function runContainedKimi({
       contextWindow: status.contextWindow,
       contextMetric: status.contextMetric,
       contextIsEstimate: status.contextIsEstimate,
+      contextCache: contextCacheStatus('unavailable'),
       emptyRun,
       retryState: promptState,
     };

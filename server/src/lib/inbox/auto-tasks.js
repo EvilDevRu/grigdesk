@@ -175,6 +175,10 @@ export class InboxAutoTasks {
     this.lastTickAt = null;
     this.lastReason = '';
     this.lastError = null;
+    // Карточка, которую модель разбирает ПРЯМО СЕЙЧАС. Между обратным отсчётом
+    // тишины и готовым решением проходят минуты (Whisper + model call), и без
+    // этого поля человек смотрел на карточку без единого признака работы.
+    this.judging = null;
     this.created = 0;
     this.dismissed = 0;
     this.failed = 0;
@@ -194,6 +198,7 @@ export class InboxAutoTasks {
       lastTickAt: this.lastTickAt,
       lastReason: this.lastReason,
       lastError: this.lastError,
+      judging: this.judging ? { ...this.judging } : null,
       created: this.created,
       dismissed: this.dismissed,
       failed: this.failed,
@@ -303,9 +308,23 @@ export class InboxAutoTasks {
           continue;
         }
         const judgedBefore = out.judged;
-        const handled = await this._handle({
-          channel, candidate, ref, made, out, nowMs, signal,
-        });
+        // SSE на входе и выходе: пока карточка у модели, все окна показывают
+        // «разбирается сейчас», а не тишину после сгоревшего обратного отсчёта.
+        this.judging = {
+          ref: candidate.item.ref,
+          channel: channel.id,
+          startedAtMs: this.now(),
+        };
+        this._notifyStatusChanged('judging');
+        let handled;
+        try {
+          handled = await this._handle({
+            channel, candidate, ref, made, out, nowMs, signal,
+          });
+        } finally {
+          this.judging = null;
+          this._notifyStatusChanged('judging-done');
+        }
         if (out.judged > judgedBefore || handled?.advance) {
           this._advanceCursor(channel, candidate.item);
           this.fairChannelCursor = channel.id;

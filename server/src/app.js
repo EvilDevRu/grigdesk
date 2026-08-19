@@ -28,6 +28,10 @@ import { TelegramAccountPoller } from './lib/telegram/account-poller.js';
 import { TelegramConnection } from './lib/telegram/connection.js';
 import { TelegramCredentialsStore } from './lib/telegram/credentials-store.js';
 import { createTelegramInboxChannel } from './lib/telegram/inbox-channel.js';
+import { TelegramPultActions } from './lib/telegram/pult/actions.js';
+import { TelegramPultStateStore } from './lib/telegram/pult/state-store.js';
+import { TelegramPultWatch } from './lib/telegram/pult/watch.js';
+import { PultSendQueue } from './lib/telegram/pult/send-queue.js';
 import { GitHubAccountBindings } from './lib/github/account-bindings.js';
 import { createGitHubAccountContextFactory } from './lib/github/account-context.js';
 import { GitHubConnection } from './lib/github/connection.js';
@@ -198,11 +202,17 @@ async function build() {
     onChanged: notifyInboxChanged,
     log: fastify.log,
   });
+  // Телеграм-пульт собирается ниже, после регистрации модулей (ему нужен inject
+  // по готовым ручкам); поллер получает late-bound ссылку — сообщения и нажатия
+  // начинают обрабатываться, как только runtime собран.
+  let telegramPult = null;
   const telegramPoller = new TelegramAccountPoller({
     acquireLease: () => telegramConnection.acquireLease(),
     botApi: telegramBotApi,
     isEnabled: () => fastify.pluginEnabled?.('telegram') === true,
     onChanged: notifyInboxChanged,
+    onMessage: (msg, type, lease) => telegramPult?.actions?.onMessage(msg, type, lease),
+    onCallback: (callback, lease) => telegramPult?.actions?.onCallback(callback, lease),
     log: fastify.log,
   });
   telegramConnection.attachPoller(telegramPoller);
@@ -258,6 +268,9 @@ async function build() {
       item,
       attachmentAnalysis,
       operatorNote,
+      // Ручной путь: человек уже решил, что задача нужна, — модель формулирует
+      // постановку, а не голосует заново.
+      decided: true,
       modelRef: fastify.pluginSettings('inbox')?.triageModel ?? null,
       config,
       providerSettings: prefs.read().providerSettings || {},
@@ -389,6 +402,49 @@ async function build() {
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });
 
+  // ── Телеграм-пульт: вотчер «требует человека» + команды/кнопки владельца ──
+  // Пульт — ещё одно «окно» кокпита: действия идут через inject в те же ручки,
+  // что жмёт браузер (X-Cockpit-Internal — как у permission-mcp чата).
+  const pultCallApi = async (method, url, payload) => {
+    const res = await fastify.inject({
+      method,
+      url,
+      ...(payload === undefined ? {} : { payload }),
+      headers: { 'x-cockpit-internal': internalToken },
+    });
+    let body = null;
+    try { body = res.json(); } catch { /* не-JSON ответа у этих ручек не бывает */ }
+    return { statusCode: res.statusCode, body };
+  };
+  const pultStores = new Map();
+  const pultQueue = new PultSendQueue();
+  const pultWatch = new TelegramPultWatch({
+    acquireLease: () => telegramConnection.acquireLease(),
+    isEnabled: () => fastify.pluginEnabled?.('telegram') === true,
+    callApi: pultCallApi,
+    stateStoreFor: (lease) => {
+      const file = path.join(lease.context.paths.accountDir, 'pult-state.json');
+      if (!pultStores.has(file)) {
+        pultStores.set(file, new TelegramPultStateStore({ file, log: fastify.log }));
+      }
+      return pultStores.get(file);
+    },
+    queue: pultQueue,
+    subscribe: (listener) => fastify.sse.subscribe(listener),
+    log: fastify.log,
+  });
+  telegramPult = {
+    watch: pultWatch,
+    actions: new TelegramPultActions({
+      isEnabled: () => fastify.pluginEnabled?.('telegram') === true,
+      callApi: pultCallApi,
+      summary: () => pultWatch.statusSnapshot(),
+      forget: (key) => pultWatch.forget(key),
+      queue: pultQueue,
+      log: fastify.log,
+    }),
+  };
+
   // Опрос Телеграма поднимаем только при подключённом боте: без токена цикл всё
   // равно ничего не делает, а с ним — начинает собирать сообщения сразу после
   // старта, не дожидаясь, пока кто-то откроет раздел. Дальше его заводит и гасит
@@ -402,10 +458,14 @@ async function build() {
     githubConnection.start();
     if (telegramState.connection === 'connected') telegramPoller.start();
     inboxAutoTasks.start();
+    // Вотчер пульта сам гейтится живьём (плагин, подключение, подтверждённый
+    // владелец), поэтому заводится безусловно: включение пульта не требует рестарта.
+    pultWatch.start();
   });
   fastify.addHook('onClose', async () => {
     githubConnection.stop();
     await telegramPoller.stop();
+    await pultWatch.stop();
     inboxAutoTasks.stop();
     await speechRuntime.shutdown();
   });

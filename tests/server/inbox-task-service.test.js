@@ -298,7 +298,12 @@ test('task body строгий, а subset сохраняет server order и can
   }), (err) => err.code === 'invalid_request');
   assert.equal(invalid.calls.resolve, 0);
 
-  const ordered = fixture({ twoMessages: true });
+  // Триаж выключен: проверяется именно сырой transcript — при недоступной модели
+  // ручная задача уезжает текстом обращения в authoritative порядке сервера.
+  const ordered = fixture({
+    twoMessages: true,
+    attachmentTriage: { ok: false, error: 'no_model' },
+  });
   const result = await ordered.service.task(ordered.itemRef, {
     revision: REVISION,
     messageRefs: [ordered.secondMessageRef, ordered.messageRef],
@@ -586,8 +591,60 @@ test('визуальное вложение проходит model-разбор 
   assert.equal(visual.calls.attachmentTriage, 1);
   assert.equal(visual.calls.analysisRelease, 1, 'успешный task дожидается release visual lease');
   assert.equal(visual.calls.b24[0].title, 'Баг на скриншоте');
-  assert.match(visual.calls.b24[0].description, /Выжимка визуального разбора/u);
-  assert.match(visual.calls.b24[0].description, /На изображении видна ошибка/u);
+  // Формулировка модели — тело задачи (как у автомата), источник сохраняется
+  // отдельной строкой, а сырой разбор вложений остаётся отдельной секцией.
+  assert.ok(visual.calls.b24[0].description.startsWith('На изображении видна ошибка.'));
+  assert.match(
+    visual.calls.b24[0].description,
+    /Источник · GitHub: https:\/\/github\.com\/owner\/repo\/issues\/501/u,
+  );
+  assert.match(visual.calls.b24[0].description, /Разбор вложений/u);
+  assert.match(visual.calls.decide[0].note, /уверенность 0\.9/u);
+});
+
+test('голое текстовое обращение ручной путь тоже формулирует моделью', async () => {
+  const formulated = fixture();
+  await formulated.service.task(formulated.itemRef, {
+    revision: REVISION,
+    messageRefs: [formulated.messageRef],
+  });
+  assert.equal(formulated.calls.attachmentTriage, 1, 'модель зовётся и без вложений');
+  assert.equal(formulated.calls.b24[0].title, 'Баг на скриншоте');
+  assert.ok(formulated.calls.b24[0].description.startsWith('На изображении видна ошибка.'));
+  assert.match(formulated.calls.b24[0].description, /Источник · GitHub/u);
+  // Модель и уверенность остаются в audit note решения, а не в описании задачи.
+  assert.match(formulated.calls.decide[0].note, /уверенность 0\.9/u);
+  assert.doesNotMatch(formulated.calls.b24[0].description, /уверенность/u);
+
+  // Вердикт «не задача» не запирает ручную постановку и не подменяет тело:
+  // человек уже решил, задача уходит текстом обращения с выжимкой причин.
+  const noneVerdict = fixture({
+    attachmentTriage: {
+      ok: true,
+      verdict: {
+        kind: 'none', confidence: 0.9, title: 'Болтовня',
+        description: 'Задачи нет.', reason: 'Это разговор.',
+      },
+    },
+  });
+  await noneVerdict.service.task(noneVerdict.itemRef, {
+    revision: REVISION,
+    messageRefs: [noneVerdict.messageRef],
+  });
+  assert.equal(noneVerdict.calls.b24[0].title, 'Bug', 'заголовок остаётся из draft');
+  assert.match(noneVerdict.calls.b24[0].description, /Bug\n\nIt broke/u);
+  assert.match(noneVerdict.calls.b24[0].description, /Выжимка разбора/u);
+
+  // Автомат сюда не заходит: он приносит формулировку из плана готовыми полями.
+  const auto = fixture();
+  await auto.service.task(auto.itemRef, {
+    revision: REVISION,
+    messageRefs: [auto.messageRef],
+    title: 'Из плана',
+    description: 'Постановка из плана.',
+  }, { by: 'auto', note: 'разбор auto', requireAllAttachments: true });
+  assert.equal(auto.calls.attachmentTriage, 0);
+  assert.equal(auto.calls.b24[0].title, 'Из плана');
 });
 
 test('visual lease освобождается при неполном анализе и ошибке vision-триажа', async () => {

@@ -74,6 +74,24 @@ test('ответы на РАЗНЫЕ сообщения вне очереди с
   assert.deepEqual(bundles[0].messages.map((msg) => msg.id), ['20442', '20443', '20444']);
 });
 
+test('ответы на ОСТЫВШИЕ связки очереди тоже склеиваются по теме и автору', () => {
+  // Вторая половина того же живого случая: родители ЕСТЬ в очереди (activation window
+  // держит их днями), но их связки давно остыли. Per-parent ключ изолировал каждый reply
+  // в свою карточку и вдобавок отрывал их от обычных сообщений того же автора рядом.
+  const bundles = bundleInboxMessages([
+    entry({ id: 'old-1', occurredAt: 1000 }),
+    entry({ id: 'old-2', occurredAt: 1005 }),
+    entry({ id: 'reply-1', parentId: 'old-1', occurredAt: 51_000 }),
+    entry({ id: 'reply-2', parentId: 'old-2', occurredAt: 51_010 }),
+    entry({ id: 'plain', occurredAt: 51_020 }),
+  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 52_000_000 });
+
+  assert.deepEqual(bundles.map((bundle) => bundle.messages.map((msg) => msg.id)), [
+    ['reply-1', 'reply-2', 'plain'],
+    ['old-1', 'old-2'],
+  ]);
+});
+
 test('известный родитель по-прежнему сильнее темы и автора', () => {
   // Обратная сторона: пока родитель в очереди, ответ обязан уехать в его связку даже от
   // другого автора — иначе обсуждение одного повода распалось бы по участникам.

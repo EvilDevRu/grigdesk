@@ -12,6 +12,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { npmLatest } from './_npm-latest.js';
 import { createStepSink } from '../chat/stream-steps.js';
+import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { createCodexStepNormalizer } from './_codex-steps.js';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
@@ -277,6 +278,7 @@ export function parseCodexTokenInfoLine(line) {
   if (event?.payload?.type !== 'token_count') return null;
   const info = event.payload.info;
   const contextTokens = tokenNumber(info?.last_token_usage?.input_tokens);
+  const cachedRequestTokens = tokenNumber(info?.last_token_usage?.cached_input_tokens);
   const contextWindow = tokenNumber(info?.model_context_window, { positive: true });
   if (contextTokens === null || contextWindow === null) return null;
   return {
@@ -284,6 +286,12 @@ export function parseCodexTokenInfoLine(line) {
     contextWindow,
     contextMetric: CODEX_CONTEXT_METRIC,
     contextIsEstimate: false,
+    contextCache: cachedRequestTokens === null
+      ? contextCacheStatus('unavailable')
+      : reportedContextCache({
+        readTokens: cachedRequestTokens,
+        uncachedTokens: contextTokens - cachedRequestTokens,
+      }),
     totalInputTokens: tokenNumber(info?.total_token_usage?.input_tokens) || 0,
     cachedInputTokens: tokenNumber(info?.total_token_usage?.cached_input_tokens) || 0,
   };
@@ -717,6 +725,7 @@ export default {
         const stopped = new Error('Ход остановлен.');
         stopped.stopped = true;
         stopped.steps = stepSink.steps;
+        stopped.contextCache = contextCacheStatus('unavailable');
         // Даже оборванный первый ход успевает напечатать thread.started. Сохраняем id:
         // следующий вопрос сможет продолжить тот же разговор после кнопки «стоп».
         stopped.sessionId = threadId;
@@ -817,6 +826,7 @@ export default {
           contextWindow: context?.contextWindow ?? 0,
           contextMetric: context?.contextMetric || 'unavailable',
           contextIsEstimate: !context,
+          contextCache: context?.contextCache || contextCacheStatus('unavailable'),
           totalInputTokens: context?.totalInputTokens ?? totalInputTokens,
           cachedInputTokens: context?.cachedInputTokens ?? cachedInputTokens,
           actualModel, steps: stepSink.steps,

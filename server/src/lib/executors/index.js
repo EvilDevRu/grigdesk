@@ -56,8 +56,6 @@
 //                              автокомпакта в токенах. Есть → кокпит подставляет туда
 //                              значение из «Настроек → Запуски». Нет → у этого CLI
 //                              может быть свой transport через opts.compactWindow.
-//   contextCostCliff?        — порог токенов, выше которого ход этого исполнителя
-//                              существенно дорожает; отсутствует → общей отсечки нет.
 //   compaction?              — как сжимать контекст по кнопке на кольце:
 //                              { kind: 'native', message } — CLI понимает слэш-команду
 //                              и в неинтерактивном режиме, сессия сохраняется;
@@ -75,7 +73,13 @@
 //                              обязательный аргумент: команда вставляется в композер, а не
 //                              отправляется. Не объявлен → у исполнителя нет секции в меню.
 //   run(opts)                — выполнить сообщение → { reply, sessionId, contextTokens,
-//                              contextWindow?, contextMetric?, contextIsEstimate?, cost }
+//                              contextWindow?, contextMetric?, contextIsEstimate?, cost,
+//                              contextCache? }. contextCache — метрики КОНКРЕТНОГО
+//                              последнего обращения к модели:
+//                              { scope:'request', status:'reported'|'unavailable'|
+//                              'not-applicable', readTokens?, writeTokens?, uncachedTokens? }.
+//                              Числа — только известные неотрицательные целые; отсутствие
+//                              поля не приравнивается к нулю.
 //                              opts.extraDirs — единый список доверенных/служебных каталогов
 //                              opts.providerSettings — выбор из настроек этого исполнителя
 //                              opts.chatHistory — server-owned история чата (массив сохранённых

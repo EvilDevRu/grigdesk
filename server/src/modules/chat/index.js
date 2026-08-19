@@ -19,6 +19,7 @@ import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
 import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
 import { autoDecision } from '../../lib/chat/auto-approve.js';
+import { normalizeContextCache } from '../../lib/chat/context-cache.js';
 import { MAX_CHAT_STEPS } from '../../lib/chat/stream-steps.js';
 import { DISCUSSION_SECTION_TITLE, stripDiscussionSection } from '../../lib/telegram/discussion.js';
 import {
@@ -60,6 +61,15 @@ const SPEECH_STREAM_PUBLIC_ERRORS = Object.freeze({
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeExecutorContextCache(out) {
+  if (!isPlainObject(out) || !Object.hasOwn(out, 'contextCache')) return out;
+  const contextCache = normalizeContextCache(out.contextCache);
+  if (contextCache) return { ...out, contextCache };
+  const clean = { ...out };
+  delete clean.contextCache;
+  return clean;
 }
 
 function hasExactKeys(value, expected) {
@@ -338,6 +348,7 @@ async function chatModule(fastify, opts) {
       // Живой размер контекста идущего хода — чтобы F5 посреди часового хода не
       // возвращал кольцо к цифре с прошлого хода (у claude она бывает ДО автокомпакта).
       contextTokens: v.contextTokens || 0,
+      ...(v.contextCache ? { contextCache: v.contextCache } : {}),
     })),
   }));
 
@@ -954,12 +965,17 @@ async function chatModule(fastify, opts) {
         // Не сообщил — кольцо живёт как раньше, цифрой с прошлого хода.
         onProgress: chatKey ? (tokens, info) => {
           const contextTokens = Number(info?.contextTokens) || 0;
+          const contextCache = normalizeContextCache(info?.contextCache);
           const a = activeRuns.get(chatKey);
           if (a) {
             a.tokens = tokens;
             if (contextTokens) a.contextTokens = contextTokens;
+            if (contextCache) a.contextCache = contextCache;
           }
-          fastify.sse.broadcast('chat-progress', { chatKey, tokens, contextTokens });
+          fastify.sse.broadcast('chat-progress', {
+            chatKey, tokens, contextTokens,
+            ...(contextCache ? { contextCache } : {}),
+          });
         } : undefined,
         // Лента хода (размышления, инструменты, их результаты) — живьём в окно.
         // Копия в activeRuns: перезагрузка страницы посреди хода не теряет показанное.
@@ -990,6 +1006,7 @@ async function chatModule(fastify, opts) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
         out = await executor.run(runArgs);
       }
+      out = normalizeExecutorContextCache(out);
       // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt
       // повторять нельзя: модель могла выполнить действие, а ответ потеряться. Но и
       // выдавать `(пусто)` как успешный ответ нельзя. На pinned Kimi 0.31.1 так ход
@@ -1065,6 +1082,7 @@ async function chatModule(fastify, opts) {
         // выше инвалидирует binding, а повторное сообщение получит досье сделанного
         // (stopped-brief.js) уже в новую session. Binding не трогаем и с точки зрения
         // гонок: его единственный владелец — эта цепочка ходов чата (turnLocks).
+        const contextCache = normalizeContextCache(err.contextCache);
         const stoppedOut = finishChatTitleHook({
           reply: '⏹ Ход остановлен.', steps: err.steps || [],
           sessionId: err.sessionId || sessionId || null,
@@ -1072,6 +1090,7 @@ async function chatModule(fastify, opts) {
           // стоял жёсткий 0, клиент его игнорировал (нули не пишем), и после «стопа» кольцо
           // врало — у новой сессии оставалось пустым, хотя контекст в ней уже набрался.
           contextTokens: err.contextTokens || 0, contextIsEstimate: !!err.contextIsEstimate,
+          ...(contextCache ? { contextCache } : {}),
           cost: null, model: model || null, effort: runEffort || null, stopped: true, sessionReset: false,
         }, wantsTitle);
         // Следующему ходу из очереди нужен фактический id оборванного разговора:

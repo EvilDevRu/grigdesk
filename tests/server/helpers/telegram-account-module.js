@@ -80,6 +80,9 @@ export function telegramModuleConnection({
   let canReadAllGroupMessages = creds?.read?.()?.canReadAllGroupMessages ?? null;
   let connectedAt = creds?.read?.()?.connectedAt || null;
   let serviceChatId = creds?.read?.()?.serviceChatId || null;
+  let pultChatId = null;
+  let pultUserId = null;
+  let pultConfirmedAtMs = null;
 
   const saved = () => creds?.read?.() || null;
   const botView = () => ({
@@ -102,6 +105,9 @@ export function telegramModuleConnection({
         canReadAllGroupMessages,
         connectedAtMs: connectedAt,
         serviceChatId,
+        pultChatId,
+        pultUserId,
+        pultConfirmedAtMs,
       }),
       setBot: async (next) => {
         username = next.username;
@@ -109,6 +115,11 @@ export function telegramModuleConnection({
         connectedAt = next.connectedAtMs;
       },
       setServiceChatId: async (next) => { serviceChatId = next; },
+      setPult: async ({ chatId = null, userId = null, confirmedAtMs = null } = {}) => {
+        pultChatId = chatId;
+        pultUserId = userId;
+        pultConfirmedAtMs = confirmedAtMs;
+      },
     },
     pollState: { read: async () => null, write: async () => {} },
     inboxState: {},

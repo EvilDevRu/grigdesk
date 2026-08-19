@@ -8,14 +8,24 @@ async function ssePlugin(fastify, opts) {
   const stateDir = opts.stateDir;
   /** @type {Set<import('node:http').ServerResponse>} */
   const clients = new Set();
+  // In-process слушатели тех же событий, что уезжают окнам: телеграм-пульт получает
+  // state-change/chat-* без второго watcher-а. Ошибка слушателя не рвёт рассылку.
+  const listeners = new Set();
 
   function broadcast(event, data) {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const res of clients) {
       try { res.write(payload); } catch { /* мёртвый клиент уберётся на close */ }
     }
+    for (const listener of listeners) {
+      try { listener(event, data); } catch { /* слушатель сам отвечает за себя */ }
+    }
   }
-  fastify.decorate('sse', { broadcast });
+  function subscribe(listener) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+  fastify.decorate('sse', { broadcast, subscribe });
 
   // Файловые изменения приходят пачками, шлём не чаще
   // раза в 300 мс. Событие безадресное («что-то изменилось»), поэтому склейка законна.

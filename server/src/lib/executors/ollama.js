@@ -17,6 +17,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { contextCacheStatus } from '../chat/context-cache.js';
 import { createStepSink, cut } from '../chat/stream-steps.js';
 import {
   DEFAULT_KEEP_ALIVE_MIN,
@@ -640,6 +641,7 @@ export default {
         stopped.stopped = true;
         stopped.sessionId = nextSessionId;
         stopped.contextTokens = maxPromptTokens + doneTokens;
+        stopped.contextCache = contextCacheStatus('not-applicable');
         stopped.steps = sink.steps;
         throw stopped;
       }
@@ -653,6 +655,7 @@ export default {
       sessionId: nextSessionId,
       contextTokens: maxPromptTokens + doneTokens,
       contextWindow: numCtx,
+      contextCache: contextCacheStatus('not-applicable'),
       cost: null,
       steps: sink.steps,
     };

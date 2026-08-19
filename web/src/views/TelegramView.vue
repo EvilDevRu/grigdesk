@@ -154,6 +154,80 @@ async function saveService() {
   }
 }
 
+// --- пульт: карточки и кнопки решений в личке владельца ---
+
+// Блок `pult` приходит из /api/telegram/status и не содержит сырого id чата
+// (маска + заголовок). Владелец — только личка, которую бот уже слышал,
+// включение — 6-значным кодом в неё же (двустороннее доказательство владения).
+const pult = ref(null);
+const pultChoice = ref('');
+const pultCode = ref('');
+
+const pultOptions = computed(() => chats.value
+  .filter((c) => c.type === 'private')
+  .map((c) => ({ value: String(c.id), label: c.title || `чат ${c.id}` })));
+
+async function pultRequest() {
+  if (busy.value || !providerWritable.value || !pultChoice.value) return;
+  busy.value = 'pult';
+  error.value = '';
+  note.value = '';
+  try {
+    const res = await api.post('/api/telegram/pult', {
+      botId: bot.value.botId,
+      chatId: Number(pultChoice.value),
+    });
+    pult.value = res.pult;
+    note.value = 'Код отправлен в личку — введи его ниже, он действует 10 минут.';
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = '';
+  }
+}
+
+async function pultConfirm() {
+  if (busy.value || !providerWritable.value || !pultCode.value.trim()) return;
+  busy.value = 'pult';
+  error.value = '';
+  note.value = '';
+  try {
+    const res = await api.post('/api/telegram/pult/confirm', {
+      botId: bot.value.botId,
+      code: pultCode.value.trim(),
+    });
+    pult.value = res.pult;
+    pultCode.value = '';
+    note.value = `Пульт включён: бот слушает личку ${pult.value?.chatTitle || pult.value?.chatHint || ''}.`;
+  } catch (e) {
+    // Текст сервера уже человеческий (код не совпал / протух) — показываем как есть.
+    error.value = e.message;
+  } finally {
+    busy.value = '';
+  }
+}
+
+async function pultDisable() {
+  const ok = await confirmDialog(
+    'Выключить пульт? Бот перестанет присылать карточки и принимать команды. '
+      + 'Выбор чата сохранится, но для включения понадобится новый код.',
+    { danger: true, okText: 'Выключить' },
+  );
+  if (!ok || busy.value) return;
+  busy.value = 'pult';
+  error.value = '';
+  note.value = '';
+  try {
+    const res = await api.post('/api/telegram/pult/disable', { botId: bot.value.botId });
+    pult.value = res.pult;
+    note.value = 'Пульт выключен.';
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = '';
+  }
+}
+
 // --- правила «чат или тема → проект» ---
 
 // Ростер портала для селекта ответственного. Пустой список — не беда: задача
@@ -465,6 +539,7 @@ async function load() {
     const res = await api.get('/api/telegram/status');
     bot.value = res.bot;
     poll.value = res.poll;
+    pult.value = res.pult || null;
     providerConnection.value = typeof res.connection === 'string'
       ? res.connection
       : (res.bot?.configured ? 'connected' : 'disconnected');
@@ -551,6 +626,9 @@ async function disconnect() {
     topicsByChat.value = {};
     topicLoading.value = {};
     topicErrors.value = {};
+    // Настройка пульта живёт в namespace бота и переживёт возврат того же бота,
+    // но без подключения показывать её нечем.
+    pult.value = null;
     note.value = 'Бот отключён, токен стёрт. Ранее принятые обращения остаются в общем Inbox только для чтения.';
   } catch (e) {
     error.value = e.message;
@@ -647,55 +725,55 @@ async function disconnect() {
         </nav>
 
         <div class="tg-grid">
-          <aside class="side-stack" aria-label="Состояние и вспомогательные настройки">
-            <!-- Подключение и здоровье опроса — отдельные provider-состояния. -->
-            <section id="tg-bot" class="card bot-card">
-              <div class="head">
-                <div class="bot-name">
-                  <span class="status-dot" :class="pollState?.kind === 'good' ? 'on' : 'warn'"></span>
-                  <div>
-                    <div class="section-kicker">Подключённый бот</div>
-                    <div class="name">@{{ bot.username }}</div>
-                  </div>
+          <!-- Подключение и здоровье опроса — отдельные provider-состояния. -->
+          <section id="tg-bot" class="card bot-card">
+            <div class="head">
+              <div class="bot-name">
+                <span class="status-dot" :class="pollState?.kind === 'good' ? 'on' : 'warn'"></span>
+                <div>
+                  <div class="section-kicker">Подключённый бот</div>
+                  <div class="name">@{{ bot.username }}</div>
                 </div>
               </div>
+            </div>
 
-              <div v-if="privacyKnown && bot.canReadAllGroupMessages" class="state good">
-                ✓ Режим приватности выключен — в группах бот видит переписку целиком.
+            <div v-if="privacyKnown && bot.canReadAllGroupMessages" class="state good">
+              ✓ Режим приватности выключен — в группах бот видит переписку целиком.
+            </div>
+            <div v-else-if="privacyKnown" class="state warn">
+              <b>Бот пока не видит переписку в группах.</b>
+              {{ bot.privacyHint }}
+              Выключи режим у @BotFather и нажми «Проверить».
+            </div>
+            <div v-else class="state">
+              Состояние режима приватности неизвестно — нажми «Проверить».
+            </div>
+
+            <div v-if="pollState" class="state" :class="pollState.kind">{{ pollState.text }}</div>
+            <div v-if="providerReason" class="state warn">Причина provider: {{ providerReason }}</div>
+
+            <p class="muted sub">
+              Следующий шаг: добавь @{{ bot.username }} в рабочий чат обычным
+              «Добавить участника» и отправь тестовое сообщение.
+            </p>
+
+            <div class="bot-actions">
+              <button class="btn" :disabled="!!busy" @click="recheck">
+                {{ busy === 'recheck' ? 'Проверяю…' : 'Проверить' }}
+              </button>
+              <button class="btn danger disconnect" :disabled="!!busy" @click="disconnect">Отключить</button>
+            </div>
+
+            <details class="technical">
+              <summary>Данные подключения</summary>
+              <div class="muted sub technical-data">
+                id {{ bot.botId }} · токен {{ bot.tokenHint }}
+                <template v-if="bot.connectedAt"> · подключён {{ fmtMs(bot.connectedAt) }}</template>
               </div>
-              <div v-else-if="privacyKnown" class="state warn">
-                <b>Бот пока не видит переписку в группах.</b>
-                {{ bot.privacyHint }}
-                Выключи режим у @BotFather и нажми «Проверить».
-              </div>
-              <div v-else class="state">
-                Состояние режима приватности неизвестно — нажми «Проверить».
-              </div>
+            </details>
+          </section>
 
-              <div v-if="pollState" class="state" :class="pollState.kind">{{ pollState.text }}</div>
-              <div v-if="providerReason" class="state warn">Причина provider: {{ providerReason }}</div>
-
-              <p class="muted sub">
-                Следующий шаг: добавь @{{ bot.username }} в рабочий чат обычным
-                «Добавить участника» и отправь тестовое сообщение.
-              </p>
-
-              <div class="bot-actions">
-                <button class="btn" :disabled="!!busy" @click="recheck">
-                  {{ busy === 'recheck' ? 'Проверяю…' : 'Проверить' }}
-                </button>
-                <button class="btn danger disconnect" :disabled="!!busy" @click="disconnect">Отключить</button>
-              </div>
-
-              <details class="technical">
-                <summary>Данные подключения</summary>
-                <div class="muted sub technical-data">
-                  id {{ bot.botId }} · токен {{ bot.tokenHint }}
-                  <template v-if="bot.connectedAt"> · подключён {{ fmtMs(bot.connectedAt) }}</template>
-                </div>
-              </details>
-            </section>
-
+          <aside class="side-stack" aria-label="Вспомогательные настройки канала">
             <!-- Единственный источник имён для привязки «чат/тема → проект». -->
             <section id="tg-chats" class="card chats-card">
               <div class="head compact-head">
@@ -774,6 +852,81 @@ async function disconnect() {
                 <p class="muted sub">
                   Бот на секунду пересылает туда исходное сообщение и сразу удаляет копию.
                   Групповой чат не подходит: служебную копию успеют увидеть его участники.
+                </p>
+              </details>
+            </section>
+
+            <!-- Пульт срочных реакций: карточки «работа стоит на тебе» и кнопки решений
+                 в личке владельца. Владелец подтверждается 6-значным кодом. -->
+            <section id="tg-pult" class="card pult-card">
+              <div class="head compact-head">
+                <div>
+                  <div class="section-kicker">Удалённые решения · без VPS</div>
+                  <div class="h">Пульт</div>
+                </div>
+                <span v-if="pult?.confirmed" class="count">включён</span>
+                <span v-else class="optional-chip">Выключен</span>
+              </div>
+
+              <p class="muted sub">
+                Бот присылает в твою личку карточки, когда работа стоит на тебе — ворота,
+                вопрос агента, запрос разрешения, затык, — и принимает решения кнопками.
+                Команды: /status, /task, /launch, /timer, /stop.
+              </p>
+
+              <template v-if="pult?.confirmed">
+                <div class="state good" data-state="pult-on">
+                  ✓ Пульт слушает личку {{ pult.chatTitle || pult.chatHint }}.
+                </div>
+                <div class="row">
+                  <button class="btn danger" :disabled="!!busy" @click="pultDisable">Выключить пульт</button>
+                </div>
+              </template>
+              <template v-else>
+                <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
+                  <div class="service-control">
+                    <select v-model="pultChoice" class="sel">
+                      <option value="">выбери свою личку с ботом</option>
+                      <option v-for="o in pultOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                    </select>
+                    <button class="btn primary" :disabled="!pultChoice" @click="pultRequest">
+                      {{ busy === 'pult' ? 'Отправляю…' : 'Получить код' }}
+                    </button>
+                  </div>
+                  <div v-if="pult?.pending" class="service-control pult-code" data-state="pult-pending">
+                    <input
+                      v-model="pultCode"
+                      class="code-input"
+                      inputmode="numeric"
+                      maxlength="6"
+                      placeholder="код из лички"
+                      @keyup.enter="pultConfirm"
+                    />
+                    <button class="btn primary" :disabled="!pultCode.trim()" @click="pultConfirm">
+                      Включить
+                    </button>
+                  </div>
+                </fieldset>
+                <p v-if="!pultOptions.length" class="muted sub">
+                  Выбирать пока не из чего: напиши боту в личку /start — она появится здесь.
+                </p>
+                <p v-else-if="pult?.configured" class="muted sub">
+                  Прежний выбор ({{ pult.chatTitle || pult.chatHint }}) сохранён; для включения
+                  запроси новый код.
+                </p>
+              </template>
+
+              <details class="explain compact-explain">
+                <summary>Границы и безопасность</summary>
+                <p class="muted sub">
+                  У ботов нет сквозного шифрования: содержимое карточек (названия задач,
+                  вопросы агента, превью команд) видит Telegram. По явному нажатию туда же
+                  отправляются ограниченные plain-text страницы плана задачи. Дифы,
+                  произвольные файлы, полные команды и деньги в пульт не выносятся никогда;
+                  всё, что стоит времени или денег, переспрашивается вторым тапом.
+                  Чужие сообщения и нажатия бот молча
+                  игнорирует. Личку пульта не привязывай правилом к проекту — команды
+                  не должны становиться обращениями Входящих.
                 </p>
               </details>
             </section>
@@ -1184,6 +1337,8 @@ async function disconnect() {
 <style scoped>
 .tg {
   --tg-soft: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  /* Единая высота контролов строки: селект, инпут и кнопка обязаны совпадать. */
+  --ctl-h: 36px;
   width: min(1480px, 100%); margin: 0 auto; padding-bottom: 36px;
   display: flex; flex-direction: column; gap: 16px;
 }
@@ -1260,12 +1415,22 @@ async function disconnect() {
   display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(320px, .75fr);
   align-items: start; gap: 16px;
 }
-/* Native-карточки канала участвуют в общей сетке без лишней DOM-колонки. */
-.side-stack { display: contents; }
+/* Правая колонка — независимая стопка, а не общие грид-ряды с левой: высокая
+   карточка правил иначе раздувает ряд, и карточка ниже (пульт) уезжает под её
+   конец, оставляя дыру. Aside занимает обе строки и пакует детей флексом. */
+.side-stack {
+  min-width: 0; display: flex; flex-direction: column; gap: 16px;
+  grid-column: 2; grid-row: 1 / span 2;
+}
 .bot-card { grid-column: 1; grid-row: 1; }
-.chats-card { grid-column: 2; grid-row: 1; }
-.service-card { grid-column: 2; grid-row: 2; }
 .rules-card { grid-column: 1; grid-row: 2; }
+.pult-code { margin-top: 8px; }
+.code-input {
+  flex: 1; min-width: 0; height: var(--ctl-h); padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px; background: var(--surface-2); color: var(--ink);
+  font-size: 15px; letter-spacing: .2em; font-variant-numeric: tabular-nums;
+}
 [id^='tg-'] { scroll-margin-top: 16px; }
 
 .card {
@@ -1292,7 +1457,7 @@ async function disconnect() {
   border: 1px solid var(--line); color: var(--ink); background: var(--surface-2); cursor: pointer;
   transition: border-color .13s, background .13s, color .13s, transform .13s;
 }
-.btn { min-height: 36px; padding: 8px 13px; border-radius: 9px; font-size: 13px; }
+.btn { min-height: var(--ctl-h); padding: 8px 13px; border-radius: 9px; font-size: 13px; }
 .btn.compact { min-height: 31px; padding: 5px 10px; font-size: 12px; }
 .btn:hover:not(:disabled), .icon-btn:hover:not(:disabled) { border-color: var(--line-2); background: color-mix(in srgb, var(--surface-2) 86%, #fff); }
 .btn.primary { border-color: var(--good); background: var(--good); color: #06210f; font-weight: 660; }
@@ -1306,12 +1471,24 @@ async function disconnect() {
   border-radius: 8px; font-size: 18px; line-height: 1;
 }
 
+/* Контролы форм — ОДНОЙ высоты с кнопками, и высота ЗАКРЕПЛЕНА переменной, а не
+   выводится из padding: разнобой уже разъезжался в строках «селект + кнопка»
+   (селект ниже, инпут кода выше). Меняешь высоту — меняй --ctl-h, не padding. */
 .inp, .sel {
-  width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px;
+  width: 100%; min-width: 0; height: var(--ctl-h);
+  border: 1px solid var(--line); border-radius: 8px;
   color: var(--ink); background: var(--ground); font-family: inherit; font-size: 13px;
 }
-.inp { padding: 9px 11px; }
-.sel { padding: 8px 9px; }
+.inp { padding: 0 11px; }
+/* Селект стилизованный, не нативный (правило проекта): appearance:none + свой
+   шеврон с фиксированным отступом от края — системная стрелка липла к рамке. */
+.sel {
+  appearance: none; -webkit-appearance: none;
+  padding: 0 30px 0 10px; cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888da8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
 .inp.thin, .sel.thin { min-width: 0; }
 .inp:hover, .sel:hover { border-color: var(--line-2); }
 .sel option { color: var(--ink); background: var(--surface); }
@@ -1493,10 +1670,8 @@ async function disconnect() {
 
 @media (max-width: 860px) {
   .tg-grid { grid-template-columns: minmax(0, 1fr); }
-  .side-stack, .rules-card { grid-column: 1; grid-row: auto; }
-  .side-stack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  .bot-card { grid-column: 1 / -1; grid-row: auto; }
-  .chats-card, .service-card { grid-column: auto; grid-row: auto; }
+  .bot-card, .side-stack, .rules-card { grid-column: 1; grid-row: auto; }
+  .side-stack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
   .setup-grid { grid-template-columns: minmax(0, 1fr); }
   .rule-builder { grid-template-columns: minmax(0, 1fr); }
   .rule-part + .rule-part { border-left: 0; border-top: 1px solid var(--line); }

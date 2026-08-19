@@ -206,7 +206,11 @@ function promptContext(item, attachmentAnalysis, { numbered = false, operatorNot
   };
 }
 
-export function buildInboxTriagePrompt(item, { attachmentAnalysis = null, operatorNote = '' } = {}) {
+export function buildInboxTriagePrompt(item, {
+  attachmentAnalysis = null,
+  operatorNote = '',
+  decided = false,
+} = {}) {
   const ctx = promptContext(item, attachmentAnalysis, { operatorNote });
   return {
     system: [
@@ -219,8 +223,10 @@ export function buildInboxTriagePrompt(item, { attachmentAnalysis = null, operat
       'Если не уверен, снижай confidence: обращение останется человеку.',
       // Ручной путь: решение «задача нужна» уже принято человеком, модель здесь
       // формулирует постановку, а не голосует заново.
-      ...(text(operatorNote)
-        ? ['Оператор уже решил, что задача нужна: сформулируй её из обращения и пояснения.']
+      ...(decided || text(operatorNote)
+        ? [text(operatorNote)
+          ? 'Оператор уже решил, что задача нужна: сформулируй её из обращения и пояснения.'
+          : 'Человек уже решил, что задача нужна: сформулируй постановку из обращения.']
         : []),
     ].join('\n'),
     user: [
@@ -509,6 +515,7 @@ export async function runInboxTriage({
   signal,
   mode = 'verdict',
   operatorNote = '',
+  decided = false,
 } = {}) {
   if (!['verdict', 'plan'].includes(mode)) return { ok: false, error: 'invalid_triage_mode' };
   const analysis = safeAttachmentAnalysis(attachmentAnalysis);
@@ -540,7 +547,7 @@ export async function runInboxTriage({
     ? buildInboxTriagePlanPrompt(item, { attachmentAnalysis: analysis })
     // Пояснение оператора существует только у ручного пути: разбивать карточку
     // на поводы человек в этот момент уже не просит, он ставит одну задачу.
-    : buildInboxTriagePrompt(item, { attachmentAnalysis: analysis, operatorNote });
+    : buildInboxTriagePrompt(item, { attachmentAnalysis: analysis, operatorNote, decided });
   let output;
   try {
     output = await executor.runUntrusted({

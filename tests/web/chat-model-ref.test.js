@@ -10,6 +10,7 @@ test('выбор модели сохраняет provider/model, legacy model и
       model: '',
       modelRef: null,
       revision: 0,
+      contextCache: { scope: 'request', status: 'reported', readTokens: 12, uncachedTokens: 3 },
       messages: [],
       createdAt: 1,
       updatedAt: 1,
@@ -35,6 +36,9 @@ test('выбор модели сохраняет provider/model, legacy model и
   };
   await chat._saveChatNow(session);
   assert.deepEqual(payload.chat.modelRef, { provider: 'test-provider', model: 'chosen-model' });
+  assert.deepEqual(payload.chat.contextCache, {
+    scope: 'request', status: 'reported', readTokens: 12, uncachedTokens: 3,
+  });
   assert.equal(payload.chat.revision, 0);
   assert.equal(session.revision, 1);
   assert.equal(session.surface, 'chats');
@@ -79,7 +83,12 @@ test('stale durable save повторяет CAS и запускает ход р�
     assert.equal(url, '/api/chat');
     assert.deepEqual(body.modelRef, { provider: 'test-provider', model: 'chosen-model' });
     requestSentAt = body.sentAt;
-    return { reply: 'План готов', model: 'chosen-model' };
+    return {
+      reply: 'План готов', model: 'chosen-model', contextTokens: 1234, contextMetric: 'exact',
+      contextCache: {
+        scope: 'request', status: 'reported', readTokens: 1000, writeTokens: 34, uncachedTokens: 200,
+      },
+    };
   };
 
   const beforeSend = Date.now();
@@ -94,6 +103,9 @@ test('stale durable save повторяет CAS и запускает ход р�
   assert.equal(chat.sessions[0].offline, false);
   assert.equal(chat.sessions[0].sending, false);
   assert.equal(chat.sessions[0].messages.at(-1).text, 'План готов');
+  assert.deepEqual(chat.sessions[0].contextCache, {
+    scope: 'request', status: 'reported', readTokens: 1000, writeTokens: 34, uncachedTokens: 200,
+  });
   const userMessage = chat.sessions[0].messages.find((message) => message.role === 'user');
   assert.ok(userMessage.sentAt >= beforeSend && userMessage.sentAt <= Date.now());
   assert.equal(requestSentAt, userMessage.sentAt, 'сервер получает исходное время запроса для pending-восстановления');
@@ -176,6 +188,8 @@ test('reset Kimi подтверждается сервером, очищает b
       contextIsEstimate: true,
       totalInputTokens: 789,
       cachedInputTokens: 12,
+      contextCache: { scope: 'request', status: 'reported', readTokens: 100, uncachedTokens: 23 },
+      liveContextCache: { scope: 'request', status: 'reported', readTokens: 90, uncachedTokens: 10 },
       pendingSeed: 'не переносить после явного reset',
       compactedAt: 44,
       createdAt: 1,
@@ -225,6 +239,8 @@ test('reset Kimi подтверждается сервером, очищает b
   assert.equal(session.contextIsEstimate, false);
   assert.equal(session.totalInputTokens, 0);
   assert.equal(session.cachedInputTokens, 0);
+  assert.deepEqual(session.contextCache, { scope: 'request', status: 'unavailable' });
+  assert.equal(session.liveContextCache, null);
   assert.equal(session.pendingSeed, '');
   assert.equal(session.compactedAt, 0);
   assert.equal(session.sessionResetting, false);

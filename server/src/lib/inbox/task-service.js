@@ -12,6 +12,7 @@ import {
 } from './draft.js';
 import { toPublicInboxItem } from './coordinator.js';
 import { skipReasonText } from './skip-reason.js';
+import { inboxAutoNote } from './triage.js';
 
 const TASK_KEYS = new Set([
   'revision', 'messageRefs', 'title', 'description', 'operatorNote',
@@ -617,6 +618,7 @@ export class InboxTaskService {
         let analysisComplete = true;
         let finalTitle = titleOverride || selectedDraft.title;
         let finalDescription = descriptionOverride || selectedDraft.description;
+        let formulationNote = '';
         try {
           if (rawAttachments.length) {
             // Разбор идёт ДАЖЕ с пояснением человека: неподъёмный файл в обращении
@@ -678,8 +680,11 @@ export class InboxTaskService {
           // кадры видео считаются разобранными лишь после содержательного model call;
           // пояснение человека тоже уходит на разбор — иначе оно осталось бы
           // припиской к постановке, собранной из голого текста сообщений.
+          // Голое текстовое обращение ручной путь тоже прогоняет через модель:
+          // человек уже решил, что задача нужна, а постановку формулирует тот же
+          // триаж, что у автомата, — иначе задача уезжала бы сырым transcript-ом.
           const hasVisuals = Boolean(attachmentAnalysis?.visualPaths?.length);
-          if (action.by === 'human' && (hasVisuals || operatorNote)) {
+          if (action.by === 'human') {
             let triaged = null;
             try {
               triaged = this.attachmentTriage
@@ -690,12 +695,13 @@ export class InboxTaskService {
                 })
                 : null;
             } catch (error) {
-              this.log.warn?.({ code: error?.code }, 'inbox: vision-разбор вложений завершился ошибкой');
+              this.log.warn?.({ code: error?.code }, 'inbox: model-разбор обращения завершился ошибкой');
             }
             // Без пояснения инвариант прежний: визуальное вложение, которое модель
             // не прочитала, задачей не становится. С пояснением человек уже сказал
-            // суть своими словами, поэтому отказ модели не запирает создание.
-            if ((!triaged?.ok || !triaged.verdict) && !operatorNote) {
+            // суть своими словами; у голого текста суть и так в сообщениях, поэтому
+            // недоступная модель не запирает ручную постановку — задача уедет как есть.
+            if ((!triaged?.ok || !triaged.verdict) && hasVisuals && !operatorNote) {
               fail(
                 'attachment_analysis_required',
                 'Визуальные вложения не удалось разобрать выбранной моделью.',
@@ -705,8 +711,13 @@ export class InboxTaskService {
               );
             }
             if (!triaged?.ok || !triaged.verdict) {
-              this.log.warn?.({ code: triaged?.error || 'triage_unavailable' },
-                'inbox: пояснение оператора не удалось разобрать моделью; задача из текста и пояснения');
+              const message = operatorNote
+                ? 'inbox: пояснение оператора не удалось разобрать моделью; задача из текста и пояснения'
+                : 'inbox: модель не сформулировала постановку; задача уходит текстом обращения';
+              this.log[operatorNote ? 'warn' : 'info']?.(
+                { code: triaged?.error || 'triage_unavailable' },
+                message,
+              );
             }
             if (triaged?.ok && triaged.verdict) {
               const verdict = triaged.verdict;
@@ -717,14 +728,25 @@ export class InboxTaskService {
                   INBOX_DRAFT_LIMITS.title,
                 ) || finalTitle;
               }
-              const summary = [verdict.description, verdict.reason]
-                .map((part) => String(part || '').trim())
-                .filter(Boolean)
-                .join('\n\n');
-              derivedSections.push({
-                title: operatorNote ? 'Выжимка разбора' : 'Выжимка визуального разбора',
-                text: summary,
-              });
+              if (!descriptionOverride && verdict.kind !== 'none' && verdict.description) {
+                // Как у автомата: постановка модели заменяет сырой transcript в теле,
+                // ссылка на источник сохраняется отдельной строкой. Модель, уверенность
+                // и причина остаются в audit note решения, а не в описании задачи.
+                const sourceLine = selectedDraft.source.url
+                  ? `Источник · ${first.channel.label}: ${selectedDraft.source.url}`
+                  : '';
+                finalDescription = [verdict.description, sourceLine].filter(Boolean).join('\n\n');
+                formulationNote = inboxAutoNote({ model: triaged.model, verdict });
+              } else {
+                const summary = [verdict.description, verdict.reason]
+                  .map((part) => String(part || '').trim())
+                  .filter(Boolean)
+                  .join('\n\n');
+                derivedSections.push({
+                  title: hasVisuals && !operatorNote ? 'Выжимка визуального разбора' : 'Выжимка разбора',
+                  text: summary,
+                });
+              }
             }
           }
           finalDescription = appendBoundedSections(finalDescription, derivedSections);
@@ -826,13 +848,16 @@ export class InboxTaskService {
             taskId,
             taskUrl,
             by: action.by,
-            // В audit остаётся факт: содержимое разобрано не полностью, а
-            // недостающее пересказал человек. Иначе потом не объяснить, почему
-            // в задаче нет расшифровки приложенного видео.
-            note: operatorNote
+            // В audit остаётся факт: чем сформулирована постановка, разобрано ли
+            // содержимое полностью и что пересказал человек. Иначе потом не
+            // объяснить ни модель постановки, ни отсутствие расшифровки видео.
+            note: operatorNote || formulationNote
               ? truncateText(
-                [action.note, `Пояснение оператора при неполном разборе: ${operatorNote}`]
-                  .filter(Boolean).join('\n'),
+                [
+                  action.note,
+                  formulationNote,
+                  operatorNote ? `Пояснение оператора при неполном разборе: ${operatorNote}` : '',
+                ].filter(Boolean).join('\n'),
                 MAX_DECISION_NOTE_BYTES / 4,
               )
               : action.note,

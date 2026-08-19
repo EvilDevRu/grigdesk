@@ -75,8 +75,17 @@ async function compileChatSession() {
       'const mdToHtml = (text) => text;',
     )
     .replace(
-      "import { documentLinkFromClick, documentRouteHref } from '../../features/documents/links.js';",
-      'const documentLinkFromClick = () => ""; const documentRouteHref = () => "";',
+      "import { documentLinkFromClick } from '../../features/documents/links.js';",
+      'const documentLinkFromClick = () => "";',
+    )
+    .replace(
+      "import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';",
+      'const chatFileLinkHref = () => ""; const codeLinkFromClick = () => null;'
+      + ' const loadCodeRoots = () => Promise.resolve([]);',
+    )
+    .replace(
+      "import { useToolLauncher } from '../../shared/tools/launcher.js';",
+      'const useToolLauncher = () => ({ openTool: () => {} });',
     )
     .replace(
       "import { useDocumentPreviewStore } from '../../stores/document-preview.js';",

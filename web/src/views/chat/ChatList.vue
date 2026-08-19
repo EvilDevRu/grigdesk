@@ -118,8 +118,11 @@ async function del(r) {
       <div v-for="r in rows" :key="r.id" class="row" :class="{ cur: r.id === chat.activeId, wait: r.waiting }"
            @click="select(r)" @dblclick="startEdit(r)">
         <!-- Аватар — иконка исполнителя (кто отвечает в этом чате), а не буква названия.
-             Во время работы цвет меняется целиком, а вращается только внешнее кольцо. -->
-        <span class="ava" :class="{ live: r.sending }"
+             Цвет знака — цвет самого исполнителя из реестра (`provider.color`): сам знак
+             монохромный (`currentColor`), красит его место — см. ProviderIcon.
+             Во время работы цвет остаётся исполнительским, а вращается внешнее кольцо. -->
+        <span class="ava" :class="{ live: r.sending, brand: !!r.provider?.color }"
+              :style="r.provider?.color ? { '--prov': r.provider.color } : null"
               :title="r.compacting
                 ? `${r.modelName || 'Модель по умолчанию'} · сжимаю контекст`
                 : r.sending
@@ -163,7 +166,11 @@ async function del(r) {
 </template>
 
 <style scoped>
-.cl { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+/* Ширину задаёт раскладка страницы: `--chat-list-w` ставит ChatsView, когда человек
+   двигал разделитель. Пока не двигал — переменной нет, и ширину целиком решает CSS
+   вместе со своими медиазапросами (второго источника правды о ширине экрана не заводим). */
+.cl { width: var(--chat-list-w, 300px); flex: none; display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--line); }
 
 /* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
    разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
@@ -196,19 +203,44 @@ async function del(r) {
 .ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
   font-size: 15px; font-weight: 600; position: relative; }
-/* «Агент работает»: цвет читается и без движения, кольцо добавляет ощущение процесса. */
-.ava.live { color: color-mix(in srgb, var(--accent) 82%, #fff);
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 24%, transparent); }
+/* Знак исполнителя — в цвете исполнителя. Одинаково-серые аватары в списке из двадцати
+   строк не различаются вовсе: чат приходилось искать по подписи модели, а сам знак
+   работал украшением. Фирменные цвета рассчитаны на светлый фон, поэтому на тёмном
+   подмешиваем белый (знак) и фон карточки (заливка с рамкой) — иначе тёмно-фиолетовый
+   Kimi на #1c222c читается пятном. Чат без знака (реестр ещё не приехал, буква-фоллбэк)
+   остаётся нейтральным: `--prov` там не задан. */
+.ava.brand { color: color-mix(in srgb, var(--prov) 72%, #fff);
+  background: color-mix(in srgb, var(--prov) 17%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--prov) 45%, var(--line)); }
+/* Полную силу цвета получают только чаты, которые сейчас чего-то стоят: открытый,
+   работающий и вставший на вопросе. Остальные приглушены — иначе список из двадцати
+   строк горит ровным ковром и выделять в нём нечего.
+   Приглушаем ОБЕСЦВЕЧИВАНИЕМ (подмешиваем нейтральный `--ink-mid`), а не затемнением
+   и не прозрачностью. Обе «очевидные» альтернативы роняют знак ниже порога графики
+   3:1 к своей заливке, причём первым всегда Kimi — его фиолетовый и так самый тёмный
+   (замер: `opacity: .72` → 2.98, подмешивание тёмной нейтрали → 2.87). Обесцвечивание,
+   наоборот, контраст даже поднимает: нейтраль светлее тёмных фирменных цветов.
+   Текущие числа — знак 3.6–5.6:1 к заливке, отличие от полной силы ΔE 13.5–18.1
+   (рядом видно), различимость исполнителей между собой ΔE ≥ 26.8. */
+.row:not(.cur):not(.wait) .ava.brand:not(.live) {
+  color: color-mix(in srgb, var(--prov) 50%, var(--ink-mid));
+  background: color-mix(in srgb, var(--prov) 9%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--prov) 26%, var(--line)); }
+/* «Агент работает»: цвет читается и без движения, кольцо добавляет ощущение процесса.
+   Цвет тут исполнительский (`--prov`), а не общий акцент: иначе работающие чаты снова
+   сливались бы между собой — ровно в тот момент, когда их и различают. */
+.ava.live { color: color-mix(in srgb, var(--prov, var(--accent)) 82%, #fff);
+  background: color-mix(in srgb, var(--prov, var(--accent)) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--prov, var(--accent)) 62%, var(--line));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--prov, var(--accent)) 24%, transparent); }
 .ava.live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
-  border-top-color: var(--accent);
-  border-right-color: color-mix(in srgb, var(--accent) 68%, transparent);
+  border: 2px solid color-mix(in srgb, var(--prov, var(--accent)) 22%, transparent);
+  border-top-color: var(--prov, var(--accent));
+  border-right-color: color-mix(in srgb, var(--prov, var(--accent)) 68%, transparent);
   animation: chat-live-spin .85s linear infinite; }
 @keyframes chat-live-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .ava.live::after { animation: none; border-color: color-mix(in srgb, var(--accent) 72%, transparent); }
+  .ava.live::after { animation: none; border-color: color-mix(in srgb, var(--prov, var(--accent)) 72%, transparent); }
 }
 /* «Непрочитано» — точка на аватаре: не двигает разметку строки и не спорит с кольцом работы */
 .udot { position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; border-radius: 50%;
@@ -250,7 +282,7 @@ async function del(r) {
 }
 
 /* Планшет-альбом: список уже, но остаётся на экране рядом с чатом */
-@media (min-width: 900px) and (max-width: 1099px) { .cl { width: 232px; } }
+@media (min-width: 900px) and (max-width: 1099px) { .cl { width: var(--chat-list-w, 232px); } }
 
 /* Узкий экран: список занимает всю колонку (чат показывается вместо него — см. ChatsView) */
 @media (max-width: 899px) {

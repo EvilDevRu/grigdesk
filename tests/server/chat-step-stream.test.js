@@ -189,6 +189,9 @@ test('Codex executor передаёт JSONL-шаги живьём и сохра�
       contextWindow: 258_400,
       contextMetric: 'active-input-v1',
       contextIsEstimate: false,
+      contextCache: {
+        scope: 'request', status: 'reported', readTokens: 10, uncachedTokens: 1,
+      },
       totalInputTokens: 17,
       cachedInputTokens: 10,
     }),
@@ -205,6 +208,10 @@ test('Codex executor передаёт JSONL-шаги живьём и сохра�
   assert.equal(out.contextWindow, 258_400);
   assert.equal(out.contextMetric, 'active-input-v1');
   assert.equal(out.contextIsEstimate, false);
+  assert.deepEqual(out.contextCache, {
+    scope: 'request', status: 'reported', readTokens: 10, uncachedTokens: 1,
+  });
+  assert.equal(Object.hasOwn(out.contextCache, 'writeTokens'), false);
   assert.equal(out.totalInputTokens, 17);
   assert.equal(out.cachedInputTokens, 10);
   assert.deepEqual(out.steps.map((step) => step.k), ['start', 'think', 'tool', 'res', 'tool', 'res']);

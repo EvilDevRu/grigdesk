@@ -1,6 +1,7 @@
 // Native control-plane Telegram: provider lifecycle, account-scoped archive/rules,
-// service chat и безопасный разворот t.me-ссылок. Общая очередь, decisions, B24 и
-// worker принадлежат module-inbox и здесь намеренно отсутствуют.
+// service chat, пульт и безопасный разворот t.me-ссылок. Общая очередь, decisions,
+// B24 и worker принадлежат module-inbox и здесь намеренно отсутствуют.
+import { randomInt } from 'node:crypto';
 import fp from 'fastify-plugin';
 
 import * as realBotApi from '../../lib/telegram/api.js';
@@ -84,6 +85,7 @@ async function telegramModule(fastify, opts) {
     poller = null,
     botApi = realBotApi,
     listProjects = async () => [],
+    now = Date.now,
   } = opts;
   if (!connection || typeof connection.status !== 'function'
       || typeof connection.connect !== 'function'
@@ -92,8 +94,9 @@ async function telegramModule(fastify, opts) {
       || typeof connection.acquireLease !== 'function') {
     throw new Error('module-telegram: account-aware connection обязателен');
   }
-  if (!botApi || typeof botApi.callBotApi !== 'function' || typeof listProjects !== 'function') {
-    throw new Error('module-telegram: botApi/listProjects имеют неверный contract');
+  if (!botApi || typeof botApi.callBotApi !== 'function' || typeof listProjects !== 'function'
+      || typeof now !== 'function') {
+    throw new Error('module-telegram: botApi/listProjects/now имеют неверный contract');
   }
 
   const enabled = () => fastify.pluginEnabled('telegram');
@@ -162,6 +165,39 @@ async function telegramModule(fastify, opts) {
     return result;
   }
 
+  /**
+   * Общий каркас нативной мутации формы: exact-тело с botId, живой lease и
+   * трёхсторонний CAS (тело ↔ lease ↔ live connection) — правило service-chat.
+   */
+  async function withCasLease(request, reply, keys, operation) {
+    const body = exactBody(request.body, keys);
+    let expectedBotId = null;
+    try { expectedBotId = normalizeTelegramBotId(body?.botId); } catch { /* invalid client CAS */ }
+    if (!body || expectedBotId === null) {
+      return reply.code(400).send({
+        error: 'invalid_request',
+        message: `Ожидались ровно canonical ${keys.join(', ')}.`,
+      });
+    }
+    const lease = await acquireWritable(reply);
+    if (!lease) return reply;
+    try {
+      const provider = await connection.status();
+      if (!lease.isCurrent()) throw accountChanged();
+      if (provider.connection !== 'connected' || provider.configured !== true) {
+        return reply.code(409).send({
+          error: 'telegram_not_connected',
+          message: PUBLIC_MESSAGES.telegram_not_connected,
+        });
+      }
+      if (normalizeTelegramBotId(lease.context.botId) !== expectedBotId) throw accountChanged();
+      let liveBotId = null;
+      try { liveBotId = normalizeTelegramBotId(provider.bot?.botId); } catch { /* stale projection */ }
+      if (liveBotId !== expectedBotId) throw accountChanged();
+      return await operation({ lease, body, reply });
+    } finally { await lease.release(); }
+  }
+
   const privacyHint = (bot) => (bot.canReadAllGroupMessages
     ? ''
     : 'В группах бот сейчас видит только сообщения, адресованные ему. Чтобы он читал '
@@ -193,12 +229,63 @@ async function telegramModule(fastify, opts) {
     return { ...bot, privacyHint: bot.configured ? privacyHint(bot) : '' };
   }
 
+  // ------------------------------------------------------------------- пульт
+  //
+  // Владелец пульта — личка, подтверждённая 6-значным кодом (§5.1 плана пульта).
+  // Ожидающий код живёт только в памяти процесса: рестарт посреди подключения
+  // просто требует нового запроса, секрет на диск не попадает.
+  const PULT_CODE_TTL_MS = 10 * 60_000;
+  const PULT_CODE_ATTEMPTS = 5;
+  /** accountRef → { botId, chatId, code, expiresAtMs, attempts } */
+  const pultPending = new Map();
+  const emptyPult = () => ({
+    configured: false, confirmed: false, pending: false, chatTitle: '', chatHint: '',
+  });
+
+  function pultPendingAlive(lease) {
+    const pending = pultPending.get(lease.accountRef);
+    if (!pending) return null;
+    let owner = null;
+    try { owner = normalizeTelegramBotId(lease.context.botId); } catch { /* нет владельца */ }
+    if (pending.botId !== owner || pending.expiresAtMs <= now()) {
+      pultPending.delete(lease.accountRef);
+      return null;
+    }
+    return pending;
+  }
+
+  /** Публичная проекция: сырой chat id наружу не уходит — маска и заголовок. */
+  async function pultViewFromLease(lease) {
+    let settings;
+    try { settings = await checked(lease, (context) => context.botSettings.read()); } catch {
+      return emptyPult();
+    }
+    const pending = pultPendingAlive(lease);
+    const shownChat = settings.pultChatId ?? pending?.chatId ?? null;
+    let chatTitle = '';
+    if (shownChat !== null) {
+      const chats = await checked(lease, (context) => context.archive.chats());
+      chatTitle = chats.find((chat) => chat.id === shownChat)?.title || '';
+    }
+    return {
+      configured: settings.pultChatId != null,
+      confirmed: settings.pultConfirmedAtMs != null,
+      pending: pending !== null,
+      chatTitle,
+      chatHint: shownChat !== null ? `…${String(shownChat).slice(-4)}` : '',
+    };
+  }
+
   async function viewSnapshot() {
     let lease;
     try {
       lease = await acquire();
       const status = await checked(lease, () => connection.status());
-      return { status, bot: await viewFromLease(lease, status) };
+      return {
+        status,
+        bot: await viewFromLease(lease, status),
+        pult: await pultViewFromLease(lease),
+      };
     } catch (error) {
       if (error?.code !== 'channel_disconnected') throw error;
       const status = await connection.status();
@@ -207,7 +294,7 @@ async function telegramModule(fastify, opts) {
         serviceChatTitle: '',
         privacyHint: status.bot?.configured ? privacyHint(status.bot) : '',
       };
-      return { status, bot };
+      return { status, bot, pult: emptyPult() };
     } finally {
       await lease?.release?.();
     }
@@ -221,6 +308,7 @@ async function telegramModule(fastify, opts) {
     const snapshot = await viewSnapshot();
     return {
       bot: snapshot.bot,
+      pult: snapshot.pult,
       poll: poller?.status?.() ?? null,
       connection: snapshot.status.connection,
       reason: snapshot.status.reason,
@@ -378,6 +466,92 @@ async function telegramModule(fastify, opts) {
       return { ok: true, bot: await viewFromLease(lease) };
     } finally { await lease.release(); }
   }));
+
+  // Запрос кода: проверка «бот слышал эту личку» → отправка кода в неё.
+  // Порядок жёсткий, как у connect: непроверенное не сохраняется — pending
+  // появляется только ПОСЛЕ успешной отправки.
+  fastify.post('/api/telegram/pult', run(async (request, reply) => (
+    withCasLease(request, reply, ['botId', 'chatId'], async ({ lease, body }) => {
+      const id = Number(body.chatId);
+      const chats = await checked(lease, (context) => context.archive.chats());
+      const chat = Number.isSafeInteger(id) ? chats.find((candidate) => candidate.id === id) : null;
+      if (!chat) {
+        return reply.code(400).send({
+          error: 'pult_chat_unknown',
+          message: 'Эта личка боту не знакома: сначала напиши боту что-нибудь (хотя бы /start).',
+        });
+      }
+      if (chat.type !== 'private' || id <= 0) {
+        return reply.code(400).send({
+          error: 'pult_not_private',
+          message: 'Пультом может быть только личка: в группе карточки увидят все участники.',
+        });
+      }
+      const token = lease.context.credentials?.token || '';
+      if (!token) {
+        return reply.code(409).send({
+          error: 'telegram_not_connected',
+          message: PUBLIC_MESSAGES.telegram_not_connected,
+        });
+      }
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      await checked(lease, (context) => context.botApi.callBotApi(token, 'sendMessage', {
+        chat_id: id,
+        text: `Код пульта кокпита: ${code}\nВведи его в карточке «Пульт». Код действует 10 минут; `
+          + 'если запрашивал не ты — не вводи его и проверь, кто открыл кокпит.',
+      }, { timeoutMs: 15_000 }));
+      pultPending.set(lease.accountRef, {
+        botId: normalizeTelegramBotId(lease.context.botId),
+        chatId: id,
+        code,
+        expiresAtMs: now() + PULT_CODE_TTL_MS,
+        attempts: 0,
+      });
+      return { ok: true, pult: await pultViewFromLease(lease) };
+    })
+  )));
+
+  fastify.post('/api/telegram/pult/confirm', run(async (request, reply) => (
+    withCasLease(request, reply, ['botId', 'code'], async ({ lease, body }) => {
+      const pending = pultPendingAlive(lease);
+      if (!pending) {
+        return reply.code(400).send({
+          error: 'pult_code_expired',
+          message: 'Код не действует — запроси новый в карточке «Пульт».',
+        });
+      }
+      if (String(body.code ?? '').trim() !== pending.code) {
+        pending.attempts += 1;
+        // Пятая неверная попытка аннулирует код: перебор из авторизованного UI
+        // бессмысленен, но дешёвый предохранитель не обязан это обсуждать.
+        if (pending.attempts >= PULT_CODE_ATTEMPTS) pultPending.delete(lease.accountRef);
+        return reply.code(400).send({ error: 'pult_code_mismatch', message: 'Код не совпал.' });
+      }
+      pultPending.delete(lease.accountRef);
+      // Личка: chat.id и есть id собеседника, поэтому владелец — та же цифра.
+      await checked(lease, (context) => context.botSettings.setPult({
+        chatId: pending.chatId,
+        userId: pending.chatId,
+        confirmedAtMs: now(),
+      }));
+      return { ok: true, pult: await pultViewFromLease(lease) };
+    })
+  )));
+
+  fastify.post('/api/telegram/pult/disable', run(async (request, reply) => (
+    withCasLease(request, reply, ['botId'], async ({ lease }) => {
+      pultPending.delete(lease.accountRef);
+      const settings = await checked(lease, (context) => context.botSettings.read());
+      // Выбор чата остаётся в namespace бота (правило служебного чата), гаснет
+      // только подтверждение: повторное включение требует нового кода.
+      await checked(lease, (context) => context.botSettings.setPult({
+        chatId: settings.pultChatId ?? null,
+        userId: settings.pultUserId ?? null,
+        confirmedAtMs: null,
+      }));
+      return { ok: true, pult: await pultViewFromLease(lease) };
+    })
+  )));
 
   async function discussionOf(text, { project = null, limits } = {}) {
     const source = String(text ?? '');

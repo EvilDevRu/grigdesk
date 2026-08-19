@@ -109,12 +109,6 @@ async function providersModule(fastify, opts) {
         // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
         trustedDirectories: await trustedDirectoriesOf(ex),
-        // Экономическая отсечка — декларация исполнителя. У локальных/иных моделей её
-        // может не быть; ядро и UI не должны знать список provider id.
-        ...(typeof ex.run === 'function'
-          && Number.isSafeInteger(ex.contextCostCliff) && ex.contextCostCliff > 0
-          ? { contextCostCliff: ex.contextCostCliff }
-          : {}),
         installed: ok,
         install: ex.install || null,
         // Установка и login могут быть разными сценариями. Старые адаптеры пока

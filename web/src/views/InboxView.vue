@@ -485,6 +485,13 @@ function attachmentAnalysis(attachment, item) {
 }
 
 function autoTaskState(item) {
+  // Живое состояние воркера сильнее расписания: между обратным отсчётом и готовым
+  // решением проходят минуты разбора, и карточка обязана показывать эту работу.
+  const judging = payload.value.worker?.judging;
+  if (judging?.ref === item.ref && ['new', 'mixed'].includes(item.status)) return {
+    kind: 'judging',
+    text: 'Разбирается прямо сейчас: модель читает обращение и решает, какие задачи создать.',
+  };
   if (item.status !== 'new' || !item.autoTask || typeof item.autoTask !== 'object') return null;
   if (item.autoTask.enabled !== true) return {
     kind: 'off', text: 'Автосоздание выключено для этого источника.',
@@ -643,7 +650,10 @@ onBeforeUnmount(() => {
           <p v-if="item.description" class="description">{{ item.description }}</p>
           <p class="meta">{{ item.project }} · {{ item.kind }} · {{ formatTime(item.firstAt) }}</p>
           <div v-if="autoTaskState(item)" class="auto-state" :class="autoTaskState(item).kind">
-            <p>{{ autoTaskState(item).text }}</p>
+            <p>
+              <span v-if="autoTaskState(item).kind === 'judging'" class="spin" aria-hidden="true"></span>
+              {{ autoTaskState(item).text }}
+            </p>
             <ul v-if="autoTaskState(item).attachments?.length" class="blocked-attachments">
               <li v-for="(attachment, blockedIndex) in autoTaskState(item).attachments"
                   :key="`${item.ref}:blocked:${blockedIndex}`">
@@ -717,7 +727,10 @@ onBeforeUnmount(() => {
                :href="link.url" target="_blank" rel="noreferrer">{{ link.label }}</a>
             <template v-if="selectionMode(item) === 'new'">
               <button class="btn accent" type="button" :disabled="itemReadOnly(item) || !!busy"
-                      @click="mutateItem(item, 'task')">Создать задачу</button>
+                      @click="mutateItem(item, 'task')">
+                <span v-if="busy === `${item.ref}:task`" class="spin" aria-hidden="true"></span>
+                {{ busy === `${item.ref}:task` ? 'Разбираю и создаю…' : 'Создать задачу' }}
+              </button>
               <button class="btn" type="button" :disabled="itemReadOnly(item) || !!busy"
                       @click="mutateItem(item, 'dismiss')">Пропустить</button>
             </template>
@@ -775,7 +788,8 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 16px; margin: 0 0 8px; }
 .item-alert { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .item-alert.bad { border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent); }.item-alert.warn { border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); }
 .auto-state { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
-.auto-state.waiting, .auto-state.queued { color: var(--accent); }.auto-state.blocked { color: var(--warn); }.auto-state.off { color: var(--ink-mid); }
+.auto-state.waiting, .auto-state.queued, .auto-state.judging { color: var(--accent); }.auto-state.blocked { color: var(--warn); }.auto-state.off { color: var(--ink-mid); }
+.auto-state .spin, .btn .spin { margin-right: 6px; }
 .auto-state p { margin: 0; }
 .blocked-attachments { margin: 6px 0 0; padding-left: 18px; color: var(--ink-mid); font-size: 12px; }
 .blocked-attachments strong { color: var(--ink); font-weight: 500; }

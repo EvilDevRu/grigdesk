@@ -14,7 +14,9 @@ import ChatPermission from './ChatPermission.vue';
 import HelpTip from '../../shared/ui/HelpTip.vue';
 import { confirmDialog } from '../../shared/ui/confirm.js';
 import { mdToHtml } from '../../shared/md.js';
-import { documentLinkFromClick, documentRouteHref } from '../../features/documents/links.js';
+import { documentLinkFromClick } from '../../features/documents/links.js';
+import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';
+import { useToolLauncher } from '../../shared/tools/launcher.js';
 import { useDocumentPreviewStore } from '../../stores/document-preview.js';
 import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
 
@@ -32,6 +34,11 @@ const chat = useChatStore();
 const tasks = useTasksStore();
 const ui = useUiStore();
 const documentPreview = useDocumentPreviewStore();
+const { openTool } = useToolLauncher();
+// Карта деревьев репозиториев для моста «ссылка на файл кода → панель „Код“».
+// Пока она не приехала (или плагин «Код» выключен), такие ссылки честно рендерятся
+// текстом; резолвер читает реактивный ref, поэтому лента дорисуется сама.
+loadCodeRoots();
 
 function onMarkdownClick(event) {
   if (!isPlainClick(event)) return;
@@ -46,9 +53,15 @@ function onMarkdownClick(event) {
     return;
   }
   const href = documentLinkFromClick(event);
-  if (!href) return;
+  if (href) {
+    event.preventDefault();
+    documentPreview.show(href);
+    return;
+  }
+  const codeTarget = codeLinkFromClick(event);
+  if (!codeTarget) return;
   event.preventDefault();
-  documentPreview.show(href);
+  openTool('code', { type: 'open-file', ...codeTarget });
 }
 
 function isPlainClick(event) {
@@ -203,30 +216,22 @@ function onTaskChange(e) {
 
 // ── Контекст (окно — у каждой модели своё, из реестра) ──
 // Пока ход идёт, кольцо показывает ЖИВОЙ размер (`liveContext` — вход каждого обращения
-// к модели, его сообщает claude), а не цифру с прошлого хода. Разница не косметическая:
+// к модели, если исполнитель его сообщает), а не цифру с прошлого хода. Разница не косметическая:
 // автокомпакт CLI срабатывает на границе хода, и без живого замера кольцо весь ход горело
 // бы красным по уже сжатому контексту.
 const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext) || sess.value?.contextTokens || 0);
 // ── Ближайший практический порог контекста ────────────────────────────────────
-// Цвет кольца НЕ по одному проценту окна и НЕ по одному вбитому числу: красное у
-// ближайшего события — настроенного сжатия, объявленной исполнителем границы цены или
-// безопасного потолка окна. Только первый порог реально запускает сжатие; остальные
-// предупреждают. Граница цены — свойство транспорта/кэша provider-а, а не универсальное
-// правило для всех моделей.
+// Кольцо считает заполненность только по объёму активного контекста: до настроенного
+// автосжатия или безопасного потолка окна. Кэш — отдельный факт последнего запроса;
+// он не меняет ни шкалу, ни цвет кольца.
 // Абсолютное число без потолка врало бы в другую сторону: у модели с окном 200k порог
 // 200k недостижим, кольцо осталось бы зелёным до самого конца разговора.
 const CTX_CEIL_RATIO = 0.8;  // потолок: доля окна модели, дальше которой ждать нельзя
 const CTX_WARN_RATIO = 0.8;  // жёлтое — на подходе к порогу
-const providerCostCliff = computed(() => {
-  const value = current.value?.provider?.contextCostCliff;
-  return Number.isFinite(value) && value > 0 ? Math.max(1, Math.round(value)) : null;
-});
 const ctxLimit = computed(() => {
   const ceil = Math.round(ctxWindow.value * CTX_CEIL_RATIO);
   const want = chat.compactWindow || 0; // 0 — автосжатие в настройках выключено
-  // Побеждает ближайшее событие: сжатие кокпита, подорожание хода или потолок окна.
-  // Отсутствующее `contextCostCliff` означает, что у provider-а такой оси вовсе нет.
-  return Math.min(want > 0 ? want : Infinity, providerCostCliff.value || Infinity, ceil);
+  return Math.min(want > 0 ? want : Infinity, ceil);
 });
 // Заполненность — доля ТОГО ЖЕ порога, по которому кольцо красится. Раньше цвет считался
 // от порога, а дуга и подсказка — от окна модели, и на 1M это расходилось втрое: 168k
@@ -234,10 +239,8 @@ const ctxLimit = computed(() => {
 // оттенок, поэтому почти пустое кольцо перевешивало предупреждение — «места ещё дофига»,
 // пока CLI уже сжимал контекст по кругу.
 const ctxPct = computed(() => Math.min(100, Math.round((ctxTokens.value / Math.max(1, ctxLimit.value)) * 100)));
-const CODEX_CONTEXT_METRIC = 'active-input-v1';
-const ctxUnavailable = computed(() => current.value?.provider?.id === 'codex'
-  && !!sess.value?.sessionId
-  && sess.value?.contextMetric !== CODEX_CONTEXT_METRIC);
+const ctxUnavailable = computed(() => !!sess.value?.sessionId
+  && sess.value?.contextMetric === 'legacy-unavailable');
 const ctxClass = computed(() => {
   if (ctxUnavailable.value) return '';
   const tokens = ctxTokens.value;
@@ -255,25 +258,67 @@ const fmtSessionTokens = (value) => {
   if (tokens < 1_000_000) return fmtTokens(tokens);
   return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
 };
+const fmtCompactTokens = (value) => {
+  const tokens = Math.max(0, Number(value) || 0);
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
+  }
+  if (tokens >= 1_000) {
+    return `${(tokens / 1_000).toLocaleString('ru', { maximumFractionDigits: 1 })} тыс.`;
+  }
+  return fmtTokens(tokens);
+};
 const spentHint = computed(() => {
   const total = sess.value?.totalInputTokens || 0;
-  if (!total) return '';
-  const cached = sess.value?.cachedInputTokens || 0;
-  return ` · за сессию обработано ${fmtTokens(total)} входных токенов${cached ? `, из них ${fmtTokens(cached)} из кэша` : ''}`;
+  return total ? ` · за сессию обработано ${fmtTokens(total)} входных токенов` : '';
 });
+const contextCache = computed(() => {
+  const live = sess.value?.sending ? sess.value?.liveContextCache : null;
+  const cache = live || sess.value?.contextCache;
+  if (cache?.scope !== 'request'
+    || !['reported', 'unavailable', 'not-applicable'].includes(cache?.status)) {
+    return { scope: 'request', status: 'unavailable' };
+  }
+  if (cache.status === 'reported'
+    && !['readTokens', 'writeTokens', 'uncachedTokens'].some((key) => cacheMetric(cache, key) !== null)) {
+    return { scope: 'request', status: 'unavailable' };
+  }
+  return cache;
+});
+const cacheMetric = (cache, key) => (
+  Number.isSafeInteger(cache?.[key]) && cache[key] >= 0 ? cache[key] : null
+);
+const contextCacheValue = computed(() => {
+  const cache = contextCache.value;
+  if (cache.status === 'unavailable') return 'нет данных';
+  if (cache.status === 'not-applicable') return 'без тарифа';
+  const read = cacheMetric(cache, 'readTokens');
+  const write = cacheMetric(cache, 'writeTokens');
+  const uncached = cacheMetric(cache, 'uncachedTokens');
+  const parts = [];
+  // Долю считаем только из одного и того же request-снимка. Размер кольца — другая
+  // метрика и может относиться к иному этапу хода; смешивать их в знаменателе нельзя.
+  if (read !== null && uncached !== null) {
+    const measured = read + (write || 0) + uncached;
+    const percent = (measured > 0 ? (read / measured) * 100 : 0)
+      .toLocaleString('ru', { maximumFractionDigits: 1 });
+    parts.push(`${percent}%`);
+  }
+  if (read !== null) parts.push(`чт. ${fmtCompactTokens(read)}`);
+  if (write !== null) parts.push(`зап. ${fmtCompactTokens(write)}`);
+  if (uncached !== null) parts.push(`мимо ${fmtCompactTokens(uncached)}`);
+  return parts.join(' · ');
+});
+const cacheHint = computed(() => ` · кэш: ${contextCacheValue.value}`);
 const ctxAtWarning = computed(() => ctxTokens.value >= ctxLimit.value * CTX_WARN_RATIO);
 const ctxLimitReached = computed(() => ctxTokens.value >= ctxLimit.value);
-const ctxCostCliffReached = computed(() => providerCostCliff.value !== null
-  && ctxTokens.value >= providerCostCliff.value);
 const ctxLimitWhat = computed(() => (
   chat.compactWindow > 0 && ctxLimit.value === chat.compactWindow ? 'до сжатия'
-    : providerCostCliff.value !== null && ctxLimit.value === providerCostCliff.value ? 'до подорожания хода'
-      : 'до потолка окна'
+    : 'до потолка окна'
 ));
 const ctxLimitShort = computed(() => (
   chat.compactWindow > 0 && ctxLimit.value === chat.compactWindow ? 'автосжатие'
-    : providerCostCliff.value !== null && ctxLimit.value === providerCostCliff.value ? 'цена хода'
-      : '80% окна'
+    : '80% окна'
 ));
 
 // Визуальная подсказка не собирается из одной длинной строки: у штатного HelpTip есть
@@ -284,10 +329,9 @@ const ctxTooltip = computed(() => {
   const modelWindow = `${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' · неточно' : ''}`;
   const rows = [{ label: 'Окно', value: modelWindow, unverified: ctxWindowUnverified.value }];
   const total = s?.totalInputTokens || 0;
-  const cached = s?.cachedInputTokens || 0;
   const addSessionRows = () => {
     if (total) rows.push({ label: 'За сессию', value: fmtSessionTokens(total) });
-    if (cached) rows.push({ label: 'Из кэша', value: fmtSessionTokens(cached) });
+    rows.push({ label: 'Кэш', value: contextCacheValue.value, cache: true });
   };
 
   if (s?.compacting) {
@@ -317,7 +361,7 @@ const ctxTooltip = computed(() => {
     addSessionRows();
     return {
       title: 'Контекст', percent: '', tone: '', status: 'Точная заполненность пока недоступна',
-      detail: 'Codex сообщит её после следующего завершённого хода.', rows, actions: true,
+      detail: 'Она появится после следующего завершённого хода.', rows, actions: true,
     };
   }
 
@@ -332,12 +376,10 @@ const ctxTooltip = computed(() => {
   return {
     title: 'Контекст',
     percent: `${ctxPct.value}%`,
-    tone: ctxCostCliffReached.value || ctxLimitReached.value ? 'bad' : (ctxAtWarning.value ? 'warn' : ''),
-    status: ctxCostCliffReached.value
-      ? 'Ход уже подорожал — пора сжать'
-      : ctxLimitReached.value
-        ? 'Порог достигнут — пора сжать'
-        : (ctxAtWarning.value ? 'Порог близко — пора сжать' : ''),
+    tone: ctxLimitReached.value ? 'bad' : (ctxAtWarning.value ? 'warn' : ''),
+    status: ctxLimitReached.value
+      ? 'Порог достигнут — пора сжать'
+      : (ctxAtWarning.value ? 'Порог близко — пора сжать' : ''),
     detail: '',
     rows,
     actions: true,
@@ -357,12 +399,12 @@ const ctxTitle = computed(() => {
   }
   if (s?.compactedAt && !ctxTokens.value) return 'Контекст сжат — размер покажется после следующего хода';
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
-  if (ctxUnavailable.value) return `Точная заполненность Codex появится после следующего завершённого хода${spentHint.value} · ${hint}`;
-  const warn = ctxCostCliffReached.value
-    ? ' · ход уже подорожал — пора сжать'
-    : ctxLimitReached.value
-      ? ' · порог достигнут — пора сжать'
-      : (ctxAtWarning.value ? ' · порог близко — пора сжать' : '');
+  if (ctxUnavailable.value) {
+    return `Точная заполненность появится после следующего завершённого хода${spentHint.value}${cacheHint.value} · ${hint}`;
+  }
+  const warn = ctxLimitReached.value
+    ? ' · порог достигнут — пора сжать'
+    : (ctxAtWarning.value ? ' · порог близко — пора сжать' : '');
   const estimate = ctxIsEstimate.value ? 'примерно ' : '';
   // Пока ход идёт, цифра замерена ЭТИМ ходом — про это стоит сказать прямо: иначе
   // упавший на глазах контекст (автокомпакт CLI) выглядит сбоем кольца.
@@ -378,7 +420,7 @@ const ctxTitle = computed(() => {
   // этой цифре человек решает, пора ли сжимать. Замер самой сессии (Codex сообщает своё
   // окно) сильнее каталога, и к нему оговорка не относится.
   const window = ` · окно модели ${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' (не подтверждено)' : ''}`;
-  return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)${live}${warn}${window}${spentHint.value} · ${hint}`;
+  return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)${live}${warn}${window}${spentHint.value}${cacheHint.value} · ${hint}`;
 });
 // Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;
@@ -440,6 +482,93 @@ onUnmounted(() => document.removeEventListener('visibilitychange', markRead));
 const input = ref(sess.value?.draft || '');
 const body = ref(null);
 function scrollDown() { if (body.value) body.value.scrollTop = body.value.scrollHeight; }
+
+// ── Высота поля ввода ───────────────────────────────────────────────────────────
+// Настройка устройства (localStorage, как ширина дока и списка чатов): на странице
+// «Чаты» удобно писать длинное задание в большом поле, а в плавающей панели такое же
+// поле съело бы всю переписку — поэтому у страницы и панели РАЗНЫЕ ключи. Пусто =
+// высоту решает CSS, как раньше.
+const COMPOSER_KEY = props.variant === 'page'
+  ? 'cockpit-chat-composer-h'
+  : 'cockpit-chat-panel-composer-h';
+// Минимум совпадает с CSS (`.page .cs-input textarea { min-height: 48px }`): иначе
+// нижняя часть хода разделителя мертва — тянешь, число меняется, поле стоит.
+const COMPOSER_MIN = props.variant === 'page' ? 48 : 36;
+// Потолок тот же, что в CSS (`max-height: 46vh`) — вторая цифра рядом с первой
+// разъезжается, и разделитель снова получает мёртвый ход.
+const COMPOSER_MAX_VH = 0.46;
+const taEl = ref(null);
+
+function storedComposerHeight() {
+  try {
+    const raw = Number(localStorage.getItem(COMPOSER_KEY));
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  } catch { return null; }
+}
+const composerH = ref(storedComposerHeight());
+const composerStyle = computed(() => (composerH.value == null ? null : { '--composer-h': `${composerH.value}px` }));
+
+function composerMax() {
+  const view = typeof window === 'undefined' ? 0 : window.innerHeight;
+  return Math.max(COMPOSER_MIN, Math.round((view || 720) * COMPOSER_MAX_VH));
+}
+function clampComposer(value) {
+  return Math.round(Math.min(Math.max(COMPOSER_MIN, value), composerMax()));
+}
+// Тянем от ФАКТИЧЕСКОЙ высоты поля, а не от сохранённого числа: после смены окна
+// (поворот планшета) CSS уже подрезал поле по 46vh, и старое число дало бы скачок.
+function composerHeightNow() {
+  const h = taEl.value?.getBoundingClientRect?.().height;
+  return clampComposer(h > 0 ? h : (composerH.value ?? COMPOSER_MIN));
+}
+function saveComposerHeight() {
+  if (composerH.value == null) return;
+  try { localStorage.setItem(COMPOSER_KEY, String(composerH.value)); } catch { /* приватный режим может запретить storage */ }
+}
+
+let composerPointer = null;
+let composerFrom = null; // { y, h } на момент захвата
+function startComposerResize(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  composerPointer = event.pointerId;
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
+  composerFrom = { y: event.clientY, h: composerHeightNow() };
+}
+function moveComposerResize(event) {
+  if (composerPointer !== event.pointerId || !composerFrom) return;
+  // Вверх = выше: разделитель на верхней кромке поля, и поле растёт за курсором.
+  composerH.value = clampComposer(composerFrom.h + (composerFrom.y - event.clientY));
+}
+function finishComposerResize(event) {
+  if (composerPointer !== event.pointerId) return;
+  composerPointer = null;
+  composerFrom = null;
+  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  saveComposerHeight();
+}
+function cancelComposerResize(event) {
+  if (composerPointer !== event.pointerId) return;
+  composerPointer = null;
+  composerFrom = null;
+  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  saveComposerHeight();
+}
+function onComposerResizeKey(event) {
+  const step = event.shiftKey ? 48 : 16;
+  if (event.key === 'ArrowUp') composerH.value = clampComposer(composerHeightNow() + step);
+  else if (event.key === 'ArrowDown') composerH.value = clampComposer(composerHeightNow() - step);
+  else if (event.key === 'Home') composerH.value = COMPOSER_MIN;
+  else if (event.key === 'End') composerH.value = composerMax();
+  else return;
+  event.preventDefault();
+  saveComposerHeight();
+}
+// Двойной клик — вернуть обычную высоту. Настройку стираем, а не пишем минимум:
+// умолчание у страницы и панели разное, и записанное число его бы затёрло.
+function resetComposerHeight() {
+  composerH.value = null;
+  try { localStorage.removeItem(COMPOSER_KEY); } catch { /* ignore */ }
+}
 
 // ── Автопрокрутка ──
 // Едем вниз на всё новое (сообщения, шаги ленты, «думает…»), но ТОЛЬКО если пользователь
@@ -1930,7 +2059,7 @@ async function openDebug() {
 </script>
 
 <template>
-  <div v-if="sess" class="cs" :class="[variant, { frozen }]"
+  <div v-if="sess" class="cs" :class="[variant, { frozen }]" :style="composerStyle"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
@@ -2043,7 +2172,7 @@ async function openDebug() {
               <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
               <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
                 <span v-for="row in ctxTooltip.rows" :key="row.label"
-                      class="ctx-pop-row" :class="{ unverified: row.unverified }">
+                      class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
                   <span class="ctx-pop-label">{{ row.label }}</span>
                   <span class="ctx-pop-value">{{ row.value }}</span>
                 </span>
@@ -2100,7 +2229,7 @@ async function openDebug() {
           <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
             <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
             <div v-if="m.role === 'assistant'" class="text md"
-                 v-html="mdToHtml(m.text, { resolveHref: documentRouteHref })"
+                 v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
                  @click="onMarkdownClick"></div>
             <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
               v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
@@ -2162,6 +2291,18 @@ async function openDebug() {
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
+      <!-- Разделитель высоты поля ввода: стоит на верхней кромке (поверх линии),
+           поэтому места в раскладке не занимает и ничего не сдвигает. -->
+      <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
+           aria-label="Высота поля ввода"
+           :aria-valuemin="COMPOSER_MIN" :aria-valuemax="composerMax()"
+           :aria-valuenow="Math.round(composerH ?? COMPOSER_MIN)"
+           title="Потяни — высота поля ввода. Двойной клик — вернуть обычную"
+           @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
+           @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
+           @dblclick="resetComposerHeight" @keydown="onComposerResizeKey">
+        <span></span>
+      </div>
       <div class="col">
         <!-- Чипы ещё не отправленных вложений -->
         <div v-if="pending.length || attachBusy" class="pend">
@@ -2218,7 +2359,7 @@ async function openDebug() {
             </svg>
           </button>
           <input ref="fileInput" type="file" multiple hidden @change="onPick" />
-          <textarea v-model="input" rows="2"
+          <textarea ref="taEl" v-model="input" rows="2"
                     :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
                     @keydown="onKey" @paste="onPaste"></textarea>
           <HelpTip align="right" :text="recording ? 'Остановить · Ctrl+D; отменить · Esc' : drainingSpeech ? 'Завершаю распознавание… Esc — отмена' : transcribing ? 'Расшифровываю запись…' : preparingSpeech || browserInstalling ? 'Подготавливаю… Esc — отмена' : 'Надиктовать голосом · Ctrl+D'">
@@ -2380,6 +2521,7 @@ async function openDebug() {
 .ctx-pop-row { display: grid; grid-template-columns: minmax(76px, auto) minmax(0, 1fr); gap: 14px; align-items: baseline; }
 .ctx-pop-label { color: var(--ink-mid); }
 .ctx-pop-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctx-pop-row.cache .ctx-pop-value { white-space: normal; }
 .ctx-pop-row.unverified .ctx-pop-value { color: var(--warn); }
 .ctx-pop-actions { display: flex; flex-direction: column; gap: 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink-mid); }
 .ctx-pop-action { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
@@ -2500,7 +2642,8 @@ async function openDebug() {
 .m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .m-atts a { text-decoration: none; }
 
-.cs-input { padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+/* position — опора для разделителя высоты поля (.cs-resize) */
+.cs-input { position: relative; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
 /* Чипы вложений до отправки */
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
@@ -2571,9 +2714,26 @@ async function openDebug() {
 
 .composer { display: flex; gap: 6px; align-items: flex-end; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
 .composer:focus-within { border-color: var(--line-2); }
+/* `--composer-h` ставит скрипт, когда человек двигал разделитель; пока не двигал —
+   переменной нет и высота прежняя (rows=2 + min-height). Потолок 46vh продублирован
+   в CSS осознанно: после поворота планшета скрипт про новую высоту окна не знает,
+   а поле не имеет права закрыть собой переписку. Цифра обязана совпадать с
+   COMPOSER_MAX_VH в скрипте — иначе у разделителя появляется мёртвый ход. */
 .cs-input textarea { flex: 1; resize: none; background: transparent; border: none; outline: none; color: var(--ink);
-  padding: 6px 0; font-family: inherit; font-size: 14px; line-height: 1.45; }
+  padding: 6px 0; font-family: inherit; font-size: 14px; line-height: 1.45;
+  height: var(--composer-h, auto); max-height: 46vh; }
 .page .cs-input textarea { min-height: 48px; }
+
+/* Разделитель высоты поля ввода — на верхней кромке блока, поверх его линии
+   (как разделитель дока): собственного места не занимает, включение ресайза
+   ничего не сдвинуло. */
+.cs-resize { position: absolute; left: 0; right: 0; top: -5px; height: 11px; z-index: 3;
+  display: grid; place-items: center; cursor: row-resize; touch-action: none; outline: none; }
+/* Ручка ярче и толще, чем у дока: она лежит поверх уже нарисованной границы блока,
+   и `--line-2` на `--line` неотличим (проверено замером пикселей). */
+.cs-resize span { width: 46px; height: 3px; border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-mid) 42%, transparent); transition: background .12s; }
+.cs-resize:hover span, .cs-resize:focus-visible span { background: var(--accent); }
 .send { flex: none; width: 36px; height: 36px; background: var(--accent); color: #fff; border: none; border-radius: 10px;
   font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .send:disabled { opacity: .5; cursor: default; }

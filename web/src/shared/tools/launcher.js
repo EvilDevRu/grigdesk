@@ -44,7 +44,14 @@ export function useToolLauncher() {
 
   return {
     openTool,
-    openCode: ({ project } = {}) => openTool('code', project ? { type: 'project', project } : null),
+    // Точная цель (репозиторий + путь) сильнее выбора одного проекта: она сама
+    // переключит панель на нужную рабочую копию и откроет файл.
+    openCode: ({ project, repo, root, path, line = 0 } = {}) => openTool(
+      'code',
+      repo && root && path
+        ? { type: 'open-file', project, repo, root, path, line }
+        : (project ? { type: 'project', project } : null),
+    ),
     openTerminal: ({ insert } = {}) => openTool(
       'terminal',
       insert ? { type: 'insert', text: String(insert) } : null,

@@ -456,6 +456,31 @@ test('разбитая карточка останавливается на пе
   assert.equal(calls.task.length, 1, 'после устаревшего состояния второй повод не досылается');
 });
 
+test('пока карточка у модели, status показывает judging и SSE будят окна', async () => {
+  const item = inboxItem('telegram', 'live');
+  let seenDuringTriage = 'not-checked';
+  let workerRef = null;
+  const ctx = harness({
+    channels: [inboxChannel('telegram', [item])],
+    triage: async () => {
+      // Внутри model call все окна обязаны видеть, какую карточку разбирают.
+      seenDuringTriage = workerRef.status().judging;
+      return { ok: true, plan: plan(verdict()), model: 'claude/opus' };
+    },
+  });
+  workerRef = ctx.worker;
+  const result = await ctx.worker.tick({ nowMs: NOW });
+  assert.equal(result.created.length, 1);
+  assert.deepEqual(seenDuringTriage, {
+    ref: item.ref,
+    channel: 'telegram',
+    startedAtMs: NOW,
+  });
+  assert.equal(ctx.worker.status().judging, null, 'после разбора метка снимается');
+  assert.deepEqual(ctx.calls.changed[0], { reason: 'judging' });
+  assert.deepEqual(ctx.calls.changed.at(-1), { reason: 'judging-done' });
+});
+
 test('вложения обязательно разбираются до модели, а неполный разбор оставляет item человеку', async () => {
   const attachment = {
     ref: 'opaque-file', dedupeKey: 'opaque-unique', kind: 'voice',
@@ -487,7 +512,11 @@ test('вложения обязательно разбираются до мод
   assert.equal(blocked.calls.triage.length, 0);
   assert.equal(blocked.calls.task.length, 0);
   assert.equal(blockedReleases, 1, 'ранний incomplete path дожидается release');
-  assert.deepEqual(blocked.calls.changed, [{ reason: 'attachment-analysis-required' }]);
+  assert.deepEqual(blocked.calls.changed, [
+    { reason: 'judging' },
+    { reason: 'attachment-analysis-required' },
+    { reason: 'judging-done' },
+  ]);
   assert.deepEqual(blocked.worker.status().analysisRequired, [{
     ref: mediaItem.ref,
     revision: mediaItem.revision,
@@ -497,10 +526,11 @@ test('вложения обязательно разбираются до мод
     checkedAtMs: NOW,
     retryAtMs: NOW + INBOX_AUTO_TICK.attachmentRetryMs,
   }]);
+  const changedAfterBlock = blocked.calls.changed.length;
   const cooldown = await blocked.worker.tick({ nowMs: NOW + 1 });
   assert.equal(cooldown.judged, 0);
   assert.equal(blocked.calls.analysis.length, 1, 'неповторяем дорогой разбор каждый минутный tick');
-  assert.equal(blocked.calls.changed.length, 1, 'cooldown не шумит повторными SSE');
+  assert.equal(blocked.calls.changed.length, changedAfterBlock, 'cooldown не шумит повторными SSE');
   await blocked.worker.tick({ nowMs: NOW + INBOX_AUTO_TICK.attachmentRetryMs + 1 });
   assert.equal(blocked.calls.analysis.length, 2, 'после cooldown допускается новая попытка');
   assert.equal(blockedReleases, 2, 'каждая попытка освобождает собственный lease');

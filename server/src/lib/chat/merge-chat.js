@@ -123,6 +123,7 @@ const AGENT_KEYS = [
   'contextIsEstimate',
   'totalInputTokens',
   'cachedInputTokens',
+  'contextCache',
   'pendingSeed',
   'compactedAt',
 ];

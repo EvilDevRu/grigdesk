@@ -177,6 +177,7 @@ test('contained runtime соблюдает lifecycle, permission и session dura
   assert.equal(out.contextTokens, 12_345);
   assert.equal(out.contextWindow, 1_048_576);
   assert.equal(out.contextIsEstimate, false);
+  assert.deepEqual(out.contextCache, { scope: 'request', status: 'unavailable' });
   assert.equal(out.retryState, 'post_prompt');
   assert.deepEqual(order, ['bound:session-1', 'permission:Read']);
   assert.deepEqual(process.permissionResponse, { outcome: { outcome: 'selected', optionId: 'approve_once' } });

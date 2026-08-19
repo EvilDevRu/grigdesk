@@ -303,6 +303,7 @@ test('Ollama run: история реплеится, хвостовой дубл
   assert.equal(out.sessionId, 'ollama:chat-1');
   assert.equal(out.contextTokens, 127); // 120 prompt + 7 eval из финального чанка
   assert.equal(out.contextWindow, 8192);
+  assert.deepEqual(out.contextCache, { scope: 'request', status: 'not-applicable' });
   assert.equal(out.cost, null);
   assert.equal(out.emptyRun, undefined); // автоповтор для HTTP-чата запрещён
   assert.ok(steps.some((s) => s.k === 'think' && s.text.includes('сначала подумаю')));
@@ -345,6 +346,7 @@ test('Ollama run: остановка кнопкой бросает stopped-ош�
     assert.equal(err.stopped, true);
     assert.equal(err.message, 'Ход остановлен.');
     assert.equal(err.sessionId, 'ollama:chat-3');
+    assert.deepEqual(err.contextCache, { scope: 'request', status: 'not-applicable' });
     return true;
   });
 });

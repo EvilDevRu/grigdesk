@@ -12,12 +12,24 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { PROFILE_RE } from '../../lib/profiles.js';
+import { PROFILE_RE, listProjects } from '../../lib/profiles.js';
 import { projectRepos } from '../../lib/projects.js';
 import { taskDiff } from '../../lib/git.js';
 
 const exec = promisify(execFile);
 const MAX_BYTES = 1_500_000; // как в lib/git.js: гигантские блобы в браузер не тащим
+
+// Картинки JSON-роут `file` всегда считает бинарными: их отдаёт отдельный raw-роут
+// сырыми байтами. Набор только растровый, SVG исключён намеренно (умеет скрипты) —
+// тот же принцип, что у просмотрщика документов. Список обязан совпадать с IMAGE_EXT
+// в web/src/views/code/CodePanel.vue — сторож в tests/server/code-raw.test.js.
+export const RAW_IMAGE_TYPES = new Map([
+  ['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'], ['webp', 'image/webp'], ['bmp', 'image/bmp'], ['ico', 'image/x-icon'],
+]);
+// У картинок свой потолок: байты идут потоком, а не раздуваются в JSON, но скриншоты
+// и фото легко переваливают за текстовые 1,5 МБ.
+export const RAW_MAX_BYTES = 10_000_000;
 
 // Сегменты, закрытые в ЛЮБОМ дереве: внутренности гита (в .git/config лежат токены
 // remote-ов) и конвенция `.state` — в проекте она гитигнорится целиком (`**/.state/`)
@@ -99,6 +111,26 @@ async function codeModule(fastify, opts) {
     return abs;
   }
 
+  // Карта «абсолютный корень дерева → проект/репозиторий» по всем проектам.
+  // Нужна мосту из чата: клиент по ней превращает файловую ссылку из ответа агента
+  // в открытие этого файла панелью «Код». Ссылка — навигация, а не доступ: чтение
+  // всё равно идёт обычными ls/file/raw с их проверками.
+  fastify.get('/api/code/roots', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ids = await listProjects(config, prefs);
+    const roots = [];
+    await Promise.all(ids.map(async (id) => {
+      const repos = await projectRepos({ config, prefs, id });
+      await Promise.all(repos.map(async (repo) => {
+        const trees = await worktrees(repo.dir).catch(() => []);
+        for (const tree of trees) {
+          roots.push({ project: id, repo: repo.key, root: tree.path, main: tree.main, branch: tree.branch });
+        }
+      }));
+    }));
+    return { roots };
+  });
+
   // Репозитории проекта с их деревьями — для селекторов плагина.
   fastify.get('/api/code/:project/repos', async (req, reply) => {
     if (gate(reply)) return reply;
@@ -152,6 +184,33 @@ async function codeModule(fastify, opts) {
     const binary = buf.subarray(0, 8000).includes(0);
     const tooBig = buf.length > MAX_BYTES;
     return { size: buf.length, binary, tooBig, content: binary || tooBig ? '' : buf.toString('utf8') };
+  });
+
+  // Сырые байты растровой картинки — предпросмотр в панели вместо пустого Monaco.
+  fastify.get('/api/code/:project/raw', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ctx = await resolveRoot(req, reply);
+    if (!ctx) return reply;
+    const abs = inside(ctx.tree.path, req.query.path, reply);
+    if (!abs) return reply;
+    if (isHiddenPath(abs, hidden)) {
+      return reply.code(404).send({ error: 'no_file', message: 'служебный каталог закрыт для просмотра' });
+    }
+    const type = RAW_IMAGE_TYPES.get(path.extname(abs).slice(1).toLowerCase());
+    if (!type) {
+      return reply.code(415).send({ error: 'not_image', message: 'raw отдаёт только растровые изображения' });
+    }
+    let buf;
+    try { buf = await fs.readFile(abs); }
+    catch (e) { return reply.code(404).send({ error: 'no_file', message: e.message }); }
+    if (buf.length > RAW_MAX_BYTES) {
+      return reply.code(413).send({ error: 'too_big', message: `файл ${buf.length} байт — больше потолка ${RAW_MAX_BYTES}` });
+    }
+    return reply
+      .header('Content-Type', type)
+      .header('Cache-Control', 'private, no-store')
+      .header('X-Content-Type-Options', 'nosniff')
+      .send(buf);
   });
 
   // Гит выбранного дерева: ветка + несохранённые изменения (формат дифа задачи) + свежие коммиты.

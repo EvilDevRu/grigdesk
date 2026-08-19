@@ -38,10 +38,21 @@ test('Codex token_count разделяет активный контекст и 
     contextWindow: 256_000,
     contextMetric: 'active-input-v1',
     contextIsEstimate: false,
+    contextCache: {
+      scope: 'request', status: 'reported', readTokens: 64_000, uncachedTokens: 16_000,
+    },
     totalInputTokens: 240_000,
     cachedInputTokens: 220_000,
   });
   assert.equal(parseCodexTokenInfoLine('{"payload":{"type":"other"}}'), null);
+});
+
+test('Codex не выдумывает cache write и помечает отсутствующий cache-read как unavailable', () => {
+  const event = structuredClone(TOKEN_EVENT);
+  delete event.payload.info.last_token_usage.cached_input_tokens;
+  const parsed = parseCodexTokenInfoLine(JSON.stringify(event));
+  assert.deepEqual(parsed.contextCache, { scope: 'request', status: 'unavailable' });
+  assert.equal(Object.hasOwn(parsed.contextCache, 'writeTokens'), false);
 });
 
 test('Codex rollout читается с конца и находит thread по безопасному UUIDv7', async (t) => {

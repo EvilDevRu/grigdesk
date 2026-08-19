@@ -1,0 +1,263 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+process.env.NODE_ENV = 'test';
+
+// Раскладка страницы «Чаты»: ширина списка и высота поля ввода — настройки устройства.
+// Здесь стережём три вещи: разделитель реально меняет размер, выбор переживает
+// перезагрузку (localStorage), а знак исполнителя в списке красится ЕГО цветом.
+const CHATS_VIEW_PATH = fileURLToPath(new URL('../../web/src/views/ChatsView.vue', import.meta.url));
+const CHAT_LIST_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatList.vue', import.meta.url));
+const CHAT_SESSION_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatSession.vue', import.meta.url));
+const VUE_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
+)).href;
+const PINIA_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
+)).href;
+
+const LIST_WIDTH_KEY = 'cockpit-chats-list-width';
+
+let nonce = 0;
+async function compileSfc(path, id, patch = (code) => code) {
+  const { parse, compileScript } = await import(
+    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
+  );
+  const source = await readFile(path, 'utf8');
+  const { descriptor, errors } = parse(source, { filename: path });
+  assert.deepEqual(errors, []);
+  const code = patch(
+    compileScript(descriptor, { id, inlineTemplate: true }).content
+      .replaceAll('from "vue"', `from "${VUE_URL}"`)
+      .replaceAll("from 'vue'", `from "${VUE_URL}"`)
+      .replaceAll("from 'pinia'", `from "${PINIA_URL}"`),
+  );
+  // Хвост-nonce в URL: Node кэширует data:-модуль по всей строке, а байты двух
+  // монтирований одного SFC совпадают — без него второй тест работал бы со сторами первого.
+  return (await import(
+    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce++}`
+  )).default;
+}
+
+const compileChatsView = () => compileSfc(CHATS_VIEW_PATH, 'data-v-chats-resize', (code) => code
+  .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__chatsResizeStore;')
+  .replace("import ChatList from './chat/ChatList.vue';", 'const ChatList = { template: "<aside class=\\"cl\\"></aside>" };')
+  .replace("import ChatSession from './chat/ChatSession.vue';", 'const ChatSession = { props: ["sid", "variant"], template: "<div class=\\"cs\\"></div>" };'));
+
+const compileChatList = () => compileSfc(CHAT_LIST_PATH, 'data-v-chat-list-brand', (code) => code
+  .replace("import { useChatStore } from '../../stores/chat.js';", 'const useChatStore = globalThis.__chatListStore;')
+  .replace("import { useProvidersStore } from '../../stores/providers.js';", 'const useProvidersStore = globalThis.__chatListProviders;')
+  .replace("import ProviderIcon from '../../shared/ProviderIcon.vue';", 'const ProviderIcon = { props: ["provider", "size"], template: "<i class=\\"pico\\"></i>" };')
+  .replace("import ToggleSwitch from '../../shared/ui/ToggleSwitch.vue';", 'const ToggleSwitch = { props: ["modelValue", "label"], template: "<span class=\\"tsw\\"></span>" };')
+  .replace("import { confirmDialog } from '../../shared/ui/confirm.js';", 'const confirmDialog = async () => false;'));
+
+let shared = null;
+async function browserHarness() {
+  if (shared) {
+    shared.localStorage.clear();
+    shared.document.body.innerHTML = '<div id="mount"></div>';
+    return shared;
+  }
+  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
+  const browser = new Window({ url: 'http://cockpit.test/#/chats' });
+  for (const [key, value] of Object.entries({
+    window: browser,
+    document: browser.document,
+    navigator: browser.navigator,
+    location: browser.location,
+    localStorage: browser.localStorage,
+    Node: browser.Node,
+    Element: browser.Element,
+    HTMLElement: browser.HTMLElement,
+    SVGElement: browser.SVGElement,
+    Event: browser.Event,
+    CustomEvent: browser.CustomEvent,
+    getComputedStyle: browser.getComputedStyle.bind(browser),
+  })) {
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  }
+  browser.document.body.innerHTML = '<div id="mount"></div>';
+  shared = browser;
+  return browser;
+}
+
+// Раскладку happy-dom не считает (все rect нулевые), поэтому ширину контейнера задаём
+// сами: проверяем арифметику разделителя, а не движок раскладки.
+function stubHostWidth(el, width) {
+  el.getBoundingClientRect = () => ({ left: 0, top: 0, right: width, bottom: 800, width, height: 800, x: 0, y: 0 });
+}
+
+async function mountChats(t, browser, { storedWidth } = {}) {
+  const [{ mount }, { createPinia, defineStore }] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/pinia/dist/pinia.mjs'),
+  ]);
+  if (storedWidth != null) browser.localStorage.setItem(LIST_WIDTH_KEY, String(storedWidth));
+  globalThis.__chatsResizeStore = defineStore(`chats-resize-${nonce}`, {
+    state: () => ({ activeId: '' }),
+    actions: { ensure() {}, loadConveyor() {} },
+  });
+  const ChatsView = await compileChatsView();
+  const wrapper = mount(ChatsView, {
+    attachTo: browser.document.querySelector('#mount'),
+    global: { plugins: [createPinia()] },
+  });
+  t.after(() => wrapper.unmount());
+  stubHostWidth(wrapper.element, 1200);
+  return wrapper;
+}
+
+const listVar = (wrapper) => wrapper.element.style.getPropertyValue('--chat-list-w').trim();
+
+async function drag(wrapper, x) {
+  const sp = wrapper.find('.lsplit');
+  await sp.trigger('pointerdown', { pointerId: 1, button: 0, clientX: x });
+  await sp.trigger('pointermove', { pointerId: 1, clientX: x });
+  await sp.trigger('pointerup', { pointerId: 1, clientX: x });
+}
+
+test('список чатов: без выбора человека ширину решает CSS, а не встроенный стиль', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser);
+  // Переменной нет вовсе — иначе медиазапрос ChatList (232px на планшете) был бы мёртв.
+  assert.equal(listVar(wrapper), '');
+  assert.equal(browser.localStorage.getItem(LIST_WIDTH_KEY), null);
+});
+
+test('список чатов: перетаскивание меняет ширину и сохраняет её', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser);
+
+  await drag(wrapper, 420);
+  assert.equal(listVar(wrapper), '420px');
+  assert.equal(browser.localStorage.getItem(LIST_WIDTH_KEY), '420');
+});
+
+test('список чатов: ширина зажата минимумом и остатком места под сам чат', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser);
+
+  await drag(wrapper, 40); // утащили за левый край
+  assert.equal(listVar(wrapper), '220px');
+
+  await drag(wrapper, 1180); // утащили за правый: чату должно остаться место
+  assert.equal(listVar(wrapper), '560px');
+});
+
+test('список чатов: сохранённая ширина применяется при следующем открытии', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser, { storedWidth: 380 });
+  assert.equal(listVar(wrapper), '380px');
+});
+
+test('список чатов: двойной клик возвращает умолчание и СТИРАЕТ настройку', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser, { storedWidth: 380 });
+
+  await wrapper.find('.lsplit').trigger('dblclick');
+  // Именно стирает, а не пишет 300: у планшета своё, более узкое умолчание.
+  assert.equal(listVar(wrapper), '');
+  assert.equal(browser.localStorage.getItem(LIST_WIDTH_KEY), null);
+});
+
+test('список чатов: разделитель управляется и с клавиатуры', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser, { storedWidth: 300 });
+  const sp = wrapper.find('.lsplit');
+
+  await sp.trigger('keydown', { key: 'ArrowRight' });
+  assert.equal(listVar(wrapper), '316px');
+  await sp.trigger('keydown', { key: 'ArrowLeft', shiftKey: true });
+  assert.equal(listVar(wrapper), '252px');
+  await sp.trigger('keydown', { key: 'Home' });
+  assert.equal(listVar(wrapper), '220px');
+  assert.equal(browser.localStorage.getItem(LIST_WIDTH_KEY), '220');
+  // Роль и границы — для скринридера и для теста один и тот же источник.
+  assert.equal(sp.attributes('role'), 'separator');
+  assert.equal(sp.attributes('aria-valuenow'), '220');
+});
+
+test('строка чата: знак исполнителя красится цветом исполнителя, безымянный остаётся нейтральным', async (t) => {
+  const browser = await browserHarness();
+  const [{ mount }, { createPinia, defineStore }] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/pinia/dist/pinia.mjs'),
+  ]);
+  const rows = [
+    { id: 'a', title: 'Про кокпит', snippet: '', ts: Date.now(), model: 'claude-opus-5' },
+    { id: 'b', title: 'Про парсер', snippet: '', ts: Date.now(), model: 'gpt-5.6', sending: true },
+    { id: 'c', title: 'Без модели', snippet: '', ts: Date.now(), model: 'ктотоещё' },
+  ];
+  globalThis.__chatListStore = defineStore(`chat-list-brand-${nonce}`, {
+    state: () => ({ activeId: 'a', archived: [] }),
+    actions: { list: () => rows, selectChat() {}, newSession() {}, renameChat() {}, deleteChat() {}, restoreArchived() {} },
+  });
+  globalThis.__chatListProviders = defineStore(`chat-list-prov-${nonce}`, {
+    actions: {
+      load() {},
+      modelOf(ref) {
+        if (ref === 'claude-opus-5') return { model: { name: 'Opus 5' }, provider: { id: 'claude', name: 'Claude', color: '#d97757' } };
+        if (ref === 'gpt-5.6') return { model: { name: 'GPT-5.6' }, provider: { id: 'codex', name: 'Codex', color: '#10a37f' } };
+        return { model: null, provider: null };
+      },
+    },
+  });
+  const ChatList = await compileChatList();
+  const wrapper = mount(ChatList, {
+    attachTo: browser.document.querySelector('#mount'),
+    global: { plugins: [createPinia()] },
+  });
+  t.after(() => wrapper.unmount());
+
+  const avas = wrapper.findAll('.ava');
+  assert.equal(avas.length, 3);
+  assert.equal(avas[0].element.style.getPropertyValue('--prov').trim(), '#d97757');
+  assert.equal(avas[0].classes().includes('brand'), true);
+  assert.equal(avas[1].element.style.getPropertyValue('--prov').trim(), '#10a37f');
+  // Работающий чат остаётся в цвете своего исполнителя: иначе все занятые чаты
+  // сливаются между собой ровно тогда, когда их и различают.
+  assert.equal(avas[1].classes().includes('live'), true);
+  assert.equal(avas[1].classes().includes('brand'), true);
+  // Исполнитель неизвестен (реестр не приехал) — красить нечем, знака тоже нет.
+  assert.equal(avas[2].element.style.getPropertyValue('--prov').trim(), '');
+  assert.equal(avas[2].classes().includes('brand'), false);
+});
+
+test('раскладка чата: JS и CSS считают одни и те же границы', async (t) => {
+  const [list, session] = await Promise.all([
+    readFile(CHAT_LIST_PATH, 'utf8'),
+    readFile(CHAT_SESSION_PATH, 'utf8'),
+  ]);
+  void t;
+
+  // Ширину списка задаёт страница, но применяет её ChatList — через ту же переменную.
+  assert.match(list, /\.cl \{ width: var\(--chat-list-w, 300px\)/);
+  assert.match(list, /@media \(min-width: 900px\) and \(max-width: 1099px\) \{ \.cl \{ width: var\(--chat-list-w, 232px\); \} \}/);
+  // Знак исполнителя красится и в покое, и во время работы.
+  assert.match(list, /\.ava\.brand \{ color: color-mix\(in srgb, var\(--prov\)/);
+  assert.match(list, /\.ava\.live \{ color: color-mix\(in srgb, var\(--prov, var\(--accent\)\)/);
+  // Полную силу цвета держат ровно три состояния: открытый чат, вставший на вопросе и
+  // работающий. Остальные приглушены ОБЕСЦВЕЧИВАНИЕМ (подмешан нейтральный `--ink-mid`),
+  // а не прозрачностью и не затемнением: обе роняют контраст знака к своей заливке ниже
+  // порога графики 3:1 — первым всегда тёмный фиолетовый Kimi.
+  assert.match(
+    list,
+    /\.row:not\(\.cur\):not\(\.wait\) \.ava\.brand:not\(\.live\) \{\s*color: color-mix\(in srgb, var\(--prov\) 50%, var\(--ink-mid\)\);/,
+  );
+  assert.equal(/\.ava[^{]*\{[^}]*opacity:/.test(list), false);
+
+  // Высота поля ввода: разделитель, переменная и ПОТОЛОК. Потолок дублируется в CSS
+  // (поворот планшета скрипт не ловит), поэтому обе цифры обязаны совпадать — иначе
+  // у разделителя появляется мёртвый ход: число меняется, поле стоит.
+  assert.match(session, /class="cs-resize" role="separator" aria-orientation="horizontal"/);
+  assert.match(session, /height: var\(--composer-h, auto\); max-height: 46vh;/);
+  assert.match(session, /const COMPOSER_MAX_VH = 0\.46;/);
+  // Минимум ползунка совпадает с CSS-минимумом страницы по той же причине.
+  assert.match(session, /const COMPOSER_MIN = props\.variant === 'page' \? 48 : 36;/);
+  assert.match(session, /\.page \.cs-input textarea \{ min-height: 48px; \}/);
+  // У страницы и панели РАЗНЫЕ ключи: одинаковая высота поля им не подходит.
+  assert.match(session, /'cockpit-chat-composer-h'/);
+  assert.match(session, /'cockpit-chat-panel-composer-h'/);
+});

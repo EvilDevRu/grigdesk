@@ -105,7 +105,11 @@ function makeMonaco() {
       model: undefined,
       setCalls: [],
       disposed: false,
+      revealed: [],
+      position: null,
       setModel(model) { this.model = model; this.setCalls.push(model); },
+      revealLineInCenter(line) { this.revealed.push(line); },
+      setPosition(value) { this.position = value; },
       updateOptions(value) {
         this.options = { ...this.options, ...value };
         this.optionCalls.push(value);
@@ -818,4 +822,98 @@ test('compact Code оставляет дерево слева и хранит ш
   await wrapper.get('.navigator-toggle').trigger('click');
   assert.equal(wrapper.get('.lay').classes().includes('navigator-collapsed'), true);
   assert.equal(wrapper.find('.code-split').exists(), false);
+});
+
+test('картинка показывается предпросмотром, а не пустым редактором', async (t) => {
+  // JSON-роут `file` считает картинку бинарной и отдаёт пустое содержимое: раньше
+  // это давало пустой Monaco с пометкой «бинарный» — файл выглядел сломанным.
+  const api = {
+    url: (path) => `http://brain${path}`,
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [{ name: 'icon.png', dir: false }, { name: 'app.js', dir: false }] };
+      }
+      if (url.includes('path=icon.png')) return { size: 5177, binary: true, tooBig: false, content: '' };
+      if (url.includes('path=app.js')) return { size: 12, binary: false, tooBig: false, content: 'const a = 1;' };
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api, props: { active: true } });
+
+  await wrapper.get('button[data-file-path="icon.png"]').trigger('click');
+  await settle(flushPromises);
+
+  const img = wrapper.get('.imgwrap img');
+  assert.equal(img.attributes('src'), 'http://brain/api/code/demo/raw?repo=demo&root=%2Fdemo&path=icon.png');
+  assert.equal(img.attributes('alt'), 'icon.png');
+  // Пометка «бинарный» у картинки — ложная тревога: показать её как раз есть чем.
+  assert.equal(wrapper.get('.ehead .note').text(), 'изображение');
+  assert.equal(monacoState.fileEditors.length, 0, 'под картинкой не должно быть редактора');
+
+  // Сорванная загрузка объясняется словами, а не пустым местом.
+  await img.trigger('error');
+  assert.match(wrapper.get('.imgerr').text(), /Не удалось загрузить изображение/);
+
+  // Обычный файл после картинки открывается редактором как раньше.
+  await wrapper.get('button[data-file-path="app.js"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.find('.imgwrap').exists(), false);
+  assert.equal(monacoState.fileEditors.length, 1);
+  assert.equal(monacoState.fileEditors[0].model.content, 'const a = 1;');
+});
+
+test('intent open-file открывает точную рабочую копию, раскрывает дерево и встаёт на строку', async (t) => {
+  // Ссылка из чата адресует репозиторий и КОРЕНЬ дерева: файл задачи обязан открыться
+  // в её worktree, а не одноимённым файлом основного дерева.
+  const api = {
+    url: (path) => path,
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return {
+          repos: [{
+            key: 'demo',
+            dir: '/demo',
+            trees: [mainTree('/demo'), worktree('/work/t1234', 't1234', 'task-1234', 't1234')],
+          }],
+        };
+      }
+      if (url.includes('/ls?')) {
+        const dir = query(url).get('dir') || '';
+        if (dir === '') return { entries: [{ name: 'web', dir: true }] };
+        if (dir === 'web') return { entries: [{ name: 'src', dir: true }] };
+        if (dir === 'web/src') return { entries: [{ name: 'chat.js', dir: false }] };
+        return { entries: [] };
+      }
+      if (url.includes('path=web%2Fsrc%2Fchat.js')) {
+        return { size: 20, binary: false, tooBig: false, content: 'export const chat = 1;' };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api, props: { active: true } });
+  await wrapper.setProps({
+    intents: [{
+      id: 1, type: 'open-file', project: 'demo', repo: 'demo',
+      root: '/work/t1234', path: 'web/src/chat.js', line: 12,
+    }],
+  });
+  await settle(flushPromises, 10);
+
+  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/work/t1234']));
+  assert.equal(wrapper.get('.ehead .epath').text(), 'web/src/chat.js');
+  // Каталоги пути раскрыты: иначе файл открылся бы, но потерялся бы в навигаторе.
+  assert.equal(wrapper.get('button[data-dir-path="web"]').attributes('aria-expanded'), 'true');
+  assert.equal(wrapper.get('button[data-dir-path="web/src"]').attributes('aria-expanded'), 'true');
+  assert.equal(wrapper.get('button[data-file-path="web/src/chat.js"]').classes().includes('sel'), true);
+
+  const editor = monacoState.fileEditors[0];
+  assert.equal(editor.model.content, 'export const chat = 1;');
+  assert.deepEqual(editor.revealed, [12]);
+  assert.deepEqual(editor.position, { lineNumber: 12, column: 1 });
+  assert.deepEqual(wrapper.emitted('consume-intent'), [[1]]);
 });

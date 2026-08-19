@@ -19,6 +19,10 @@ const SETTINGS_KEYS = [
   'version', 'accountRef', 'botId', 'username', 'canReadAllGroupMessages',
   'connectedAtMs', 'serviceChatId', 'updatedAtMs',
 ];
+// Поля телеграм-пульта — НЕОБЯЗАТЕЛЬНАЯ часть той же schema v1: файлы, записанные
+// до пульта, обязаны читаться как «не настроено», а не падать owner-mismatch-ом.
+// Запись всегда кладёт полный набор.
+const PULT_KEYS = ['pultChatId', 'pultUserId', 'pultConfirmedAtMs'];
 const BOT_INPUT_KEYS = ['username', 'canReadAllGroupMessages', 'connectedAtMs'];
 const POLL_STATE_KEYS = ['version', 'offset', 'updatedAtMs'];
 
@@ -40,11 +44,12 @@ function isPlainObject(value) {
   return proto === Object.prototype || proto === null;
 }
 
-function exact(value, keys, where) {
+function exact(value, keys, where, optional = []) {
   if (!isPlainObject(value)) fail('telegram_bot_settings_invalid', `${where}: ожидался объект.`);
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+  const allowed = new Set([...keys, ...optional]);
+  const actual = Object.keys(value);
+  if (keys.some((key) => !Object.hasOwn(value, key))
+      || actual.some((key) => !allowed.has(key))) {
     fail('telegram_bot_settings_invalid', `${where}: поля не совпадают со schema v1.`);
   }
 }
@@ -71,12 +76,32 @@ function serviceChat(value) {
   return value;
 }
 
-function connectedAt(value) {
+function connectedAt(value, where = 'connectedAtMs') {
   if (value === null) return null;
   if (!Number.isSafeInteger(value) || value <= 0) {
-    fail('telegram_bot_settings_invalid', 'connectedAtMs должен быть positive Unix milliseconds|null.');
+    fail('telegram_bot_settings_invalid', `${where} должен быть positive Unix milliseconds|null.`);
   }
   return value;
+}
+
+function pultId(value, where) {
+  if (value === null || value === undefined) return null;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    fail('telegram_bot_settings_invalid', `${where} должен быть positive safe integer|null.`);
+  }
+  return value;
+}
+
+/** Пульт: либо пары нет, либо она согласована; подтверждение без чата невозможно. */
+function pultFields(raw) {
+  const pultChatId = pultId(raw.pultChatId ?? null, 'pultChatId');
+  const pultUserId = pultId(raw.pultUserId ?? null, 'pultUserId');
+  const pultConfirmedAtMs = connectedAt(raw.pultConfirmedAtMs ?? null, 'pultConfirmedAtMs');
+  if ((pultChatId === null) !== (pultUserId === null)
+      || (pultConfirmedAtMs !== null && pultChatId === null)) {
+    fail('telegram_bot_settings_invalid', 'Поля пульта несогласованны.');
+  }
+  return { pultChatId, pultUserId, pultConfirmedAtMs };
 }
 
 const emptySettings = (botId, serviceChatId = null) => ({
@@ -85,10 +110,13 @@ const emptySettings = (botId, serviceChatId = null) => ({
   canReadAllGroupMessages: null,
   connectedAtMs: null,
   serviceChatId,
+  pultChatId: null,
+  pultUserId: null,
+  pultConfirmedAtMs: null,
 });
 
 function normalizeSettings(raw, owner) {
-  exact(raw, SETTINGS_KEYS, 'Telegram bot-settings');
+  exact(raw, SETTINGS_KEYS, 'Telegram bot-settings', PULT_KEYS);
   let storedBotId;
   try { storedBotId = normalizeTelegramBotId(raw.botId, 'bot-settings.botId'); } catch (err) {
     fail('telegram_bot_settings_invalid', 'bot-settings.botId невалиден.', err);
@@ -107,6 +135,7 @@ function normalizeSettings(raw, owner) {
       ),
       connectedAtMs: connectedAt(raw.connectedAtMs),
       serviceChatId: serviceChat(raw.serviceChatId),
+      ...pultFields(raw),
     },
     updatedAtMs: raw.updatedAtMs,
   };
@@ -182,6 +211,22 @@ export class TelegramBotSettingsStore {
     });
   }
 
+  /**
+   * Владелец пульта. Disable передаёт прежние chatId/userId с confirmedAtMs=null:
+   * выбор чата остаётся в namespace бота, а право управлять гаснет.
+   */
+  async setPult({ chatId = null, userId = null, confirmedAtMs = null } = {}) {
+    return this._queued(async () => {
+      const current = await this._read();
+      return this._writeInsideQueue({
+        ...current.view,
+        pultChatId: chatId,
+        pultUserId: userId,
+        pultConfirmedAtMs: confirmedAtMs,
+      });
+    });
+  }
+
   async _writeInsideQueue(view) {
     const updatedAtMs = this.now();
     if (!Number.isSafeInteger(updatedAtMs) || updatedAtMs <= 0) {
@@ -198,6 +243,7 @@ export class TelegramBotSettingsStore {
       ),
       connectedAtMs: connectedAt(view.connectedAtMs),
       serviceChatId: serviceChat(view.serviceChatId),
+      ...pultFields(view),
       updatedAtMs,
     };
     const next = normalizeSettings(

@@ -147,10 +147,11 @@ const emojis = (list) => (Array.isArray(list) ? list : [])
   .filter(Boolean);
 
 /**
- * Апдейт → `{ type, msg, reaction }`.
+ * Апдейт → `{ type, msg, reaction, callback? }`.
  *
- * `type`: `message` | `edited_message` | `reaction` | `unknown`. Незнакомый тип
- * не ошибка: он всё равно двигает offset, иначе поллер застрянет на нём навсегда.
+ * `type`: `message` | `edited_message` | `reaction` | `callback` | `unknown`.
+ * Незнакомый тип не ошибка: он всё равно двигает offset, иначе поллер застрянет
+ * на нём навсегда.
  */
 export function normalizeUpdate(raw) {
   const empty = { type: 'unknown', msg: null, reaction: null };
@@ -158,6 +159,27 @@ export function normalizeUpdate(raw) {
 
   if (raw.message) return { type: 'message', msg: normalizeMessage(raw.message), reaction: null };
   if (raw.edited_message) return { type: 'edited_message', msg: normalizeMessage(raw.edited_message), reaction: null };
+
+  // Нажатие inline-кнопки (телеграм-пульт). Разбирается в плоский контракт:
+  // owner-гейту нужны from и чат, роутеру действий — data и message_id карточки.
+  const cq = raw.callback_query;
+  if (cq) {
+    return {
+      type: 'callback',
+      msg: null,
+      reaction: null,
+      callback: {
+        id: String(cq.id ?? ''),
+        data: typeof cq.data === 'string' ? cq.data : '',
+        from: cq.from
+          ? { id: cq.from.id, name: nameOf(cq.from), username: cq.from.username || '' }
+          : { id: null, name: 'неизвестно', username: '' },
+        chatId: cq.message?.chat?.id ?? null,
+        chatType: cq.message?.chat?.type || '',
+        messageId: cq.message?.message_id ?? null,
+      },
+    };
+  }
 
   const r = raw.message_reaction;
   if (r) {

@@ -11,6 +11,7 @@ import {
 } from './_claude-catalog.js';
 import { npmLatest } from './_npm-latest.js';
 import { createStepSink } from '../chat/stream-steps.js';
+import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { toClaudeSteps } from './_claude-steps.js';
 
 /**
@@ -1074,9 +1075,6 @@ export default {
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
   trustedDirectories: true,
-  // После этой границы Claude перестаёт переиспользовать prompt cache между ходами,
-  // поэтому предупреждение — свойство executor-а, а не общая эвристика для всех ИИ.
-  contextCostCliff: 250_000,
   untrustedInput: Object.freeze({
     text: true,
     images: true,
@@ -1100,8 +1098,8 @@ export default {
   ],
 
   // Порог автокомпакта. Переменная перебивает и настройку самого CLI, и окно модели —
-  // именно это нужно кокпиту: на модели с окном 1M собственный порог CLI ~950k, а
-  // дорого становится с ~250k (см. chatAutoCompactWindow в lib/prefs-store.js).
+  // ранний управляемый порог удерживает размер/задержку хода и оставляет запас до окна
+  // (см. chatAutoCompactWindow в lib/prefs-store.js).
   autoCompactEnv: 'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
 
   // Родной компакт: слэш-команда работает и в режиме `-p --resume`; в сессии появляются
@@ -1360,6 +1358,7 @@ export default {
       let resultEv = null;
       let spentTokens = 0;
       let lastTurnInput = 0;
+      let lastContextCache = null;
       let buf = '';
       // Лента шагов хода: копим на сервере (уедет в историю чата) и параллельно
       // отдаём наружу через onStep — окно рисует их по мере поступления.
@@ -1399,6 +1398,7 @@ export default {
             // кольцо после «стопа» показывало прежнюю (а у свежей сессии — нулевую) цифру,
             // и чат с реальными 80k выглядел пустым.
             stopped.contextTokens = lastTurnInput;
+            stopped.contextCache = lastContextCache || contextCacheStatus('unavailable');
             return reject(stopped);
           }
           if (err?.killed) return reject(new Error('Процесс агента убит извне (сигнал или переполнение буфера вывода).'));
@@ -1434,7 +1434,9 @@ export default {
         }
         resolve({
           reply, sessionId: j.session_id || sessionId || null, cost: j.total_cost_usd ?? null,
-          contextTokens, actualModel, steps, emptyRun, subtype: j.subtype || '',
+          contextTokens,
+          contextCache: lastContextCache || contextCacheStatus('unavailable'),
+          actualModel, steps, emptyRun, subtype: j.subtype || '',
         });
       });
       // stdin не используем — закрываем сразу, иначе claude ждёт ввода (3с warning, бывают зависания).
@@ -1469,10 +1471,26 @@ export default {
             if (ev.message.model) actualModel = ev.message.model;
             // Входные токены последнего хода — реальная заполненность окна контекста.
             lastTurnInput = (mu.input_tokens || 0) + (mu.cache_read_input_tokens || 0) + (mu.cache_creation_input_tokens || 0);
+            // Эти поля относятся именно к ТЕКУЩЕМУ model request. result.usage ниже
+            // накопительный, поэтому для кэша его использовать нельзя.
+            const cacheFields = {};
+            if (Object.hasOwn(mu, 'cache_read_input_tokens')) {
+              cacheFields.readTokens = mu.cache_read_input_tokens;
+            }
+            if (Object.hasOwn(mu, 'cache_creation_input_tokens')) {
+              cacheFields.writeTokens = mu.cache_creation_input_tokens;
+            }
+            if (Object.hasOwn(mu, 'input_tokens')) cacheFields.uncachedTokens = mu.input_tokens;
+            lastContextCache = reportedContextCache(cacheFields);
             // Второй аргумент — ЖИВОЙ размер контекста. Ход бывает длиной в час, а цифра
             // в кольце до этого менялась раз в ход: после автокомпакта CLI оно светилось
             // красным по уже сжатому контексту до самого ответа.
-            try { onProgress?.(spentTokens, { contextTokens: lastTurnInput }); } catch { /* прогресс не критичен */ }
+            try {
+              onProgress?.(spentTokens, {
+                contextTokens: lastTurnInput,
+                contextCache: lastContextCache,
+              });
+            } catch { /* прогресс не критичен */ }
           } else if (ev.type === 'result') {
             resultEv = ev;
           }

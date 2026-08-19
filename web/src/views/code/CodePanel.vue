@@ -106,6 +106,9 @@ let fileEditor = null;
 let diffEditor = null;
 let fileModel = null;
 let diffModels = [];
+// Строка, на которую надо встать, когда модель уже создана: intent приходит раньше
+// ответа сервера, а Monaco умеет прокручивать только существующую модель.
+let pendingReveal = null;
 
 // Generation защищает весь контекст, request ID — конкурирующие запросы внутри него.
 let contextGeneration = 0;
@@ -115,6 +118,19 @@ let gitRequestId = 0;
 let fileLoadingRequestId = 0;
 let gitLoadingRequestId = 0;
 const dirRequestIds = new Map();
+
+// Растровые картинки показываются предпросмотром вместо пустого Monaco: сырые байты
+// отдаёт `/api/code/:project/raw`. Набор обязан совпадать с RAW_IMAGE_TYPES сервера
+// (сторож — tests/server/code-raw.test.js); SVG исключён намеренно, как у документов.
+const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|bmp|ico)$/i;
+const isImagePath = (rel) => IMAGE_EXT.test(String(rel || ''));
+const imageSrc = computed(() => (fileSel.value && isImagePath(fileSel.value) && context.value
+  ? api.url(`/api/code/${encodeURIComponent(project.value)}/raw?${q(captureContext())}&path=${encodeURIComponent(fileSel.value)}`)
+  : ''));
+const imageError = ref('');
+// Бинарность у картинки — норма, а не диагноз: пометку «бинарный» показываем только
+// тем файлам, которые действительно нечем показать.
+const showsImage = computed(() => !!imageSrc.value && !imageError.value);
 
 const contextStorageKey = (id) => `cockpit-code-context:${id}`;
 const captureContext = () => ({
@@ -280,7 +296,7 @@ async function setContext(id, { activation = null } = {}) {
 
 function resetState() {
   dirs.value = new Map(); openDirs.value = new Set();
-  fileSel.value = ''; fileData.value = null;
+  fileSel.value = ''; fileData.value = null; imageError.value = '';
   git.value = null; gitSel.value = '';
   gitOpenDirs.value = new Set(); gitKnownDirs.value = new Set(); gitDirsReady.value = false;
   fileLoading.value = false; gitLoading.value = false;
@@ -360,6 +376,7 @@ async function openFile(rel, { silent = false, activation = null } = {}) {
   const snapshot = captureContext();
   const requestId = ++fileRequestId;
   fileSel.value = rel;
+  imageError.value = '';
   if (!silent) {
     fileLoadingRequestId = requestId;
     fileLoading.value = true;
@@ -487,12 +504,26 @@ function clearDiffModels() {
 }
 
 function showFile(rel, data) {
+  // Картинку показывает <img>, а не редактор: пустая модель Monaco под ней только
+  // мигала бы курсором и держала ресурсы.
+  if (isImagePath(rel)) { clearFileModel(); return; }
   if (!fileHost.value || !data) return;
   if (!fileEditor) fileEditor = monaco.editor.create(fileHost.value, { ...READONLY_OPTS, renderLineHighlight: 'none' });
   const model = monaco.editor.createModel(data.binary || data.tooBig ? '' : data.content, langOf(rel));
   fileEditor.setModel(model);
   fileModel?.dispose(); // старую модель снимаем ПОСЛЕ переустановки (иначе варнинг Monaco)
   fileModel = model;
+  if (pendingReveal && pendingReveal.path === rel) {
+    revealLine(pendingReveal.line);
+    pendingReveal = null;
+  }
+}
+
+/** Ссылка вида `file.js:120` открывает файл на нужной строке и подсвечивает её. */
+function revealLine(line) {
+  if (!fileEditor || !(line > 0)) return;
+  fileEditor.revealLineInCenter(line);
+  fileEditor.setPosition({ lineNumber: line, column: 1 });
 }
 
 function showDiff(f) {
@@ -665,6 +696,57 @@ async function activate({ preserve = false } = {}) {
   layoutEditors();
 }
 
+/**
+ * Открывает точный файл по intent из чата или deep-link: проект → рабочая копия →
+ * раскрытие каталогов пути → сам файл. Цель адресуется репозиторием и корнем дерева,
+ * а не «текущим выбором»: ссылка на worktree задачи не должна открыть одноимённый
+ * файл основного дерева.
+ */
+async function openIntentFile(intent) {
+  const wantRepo = String(intent.repo || '');
+  const wantRoot = String(intent.root || '');
+  const rel = String(intent.path || '');
+  if (!wantRepo || !wantRoot || !rel) return;
+
+  if (intent.project && project.value !== intent.project) {
+    if (!projects.value.some((item) => item.id === intent.project)) {
+      error.value = `Проект «${intent.project}» недоступен в разделе «Код»`;
+      return;
+    }
+    await setProject(intent.project);
+    if (project.value !== intent.project) return;
+  }
+  const target = contexts.value.find((item) => item.repoKey === wantRepo && item.treePath === wantRoot);
+  if (!target) {
+    error.value = `Рабочая копия ${wantRoot} недоступна — проверь пути в разделе «Проекты»`;
+    return;
+  }
+  if (contextId.value !== target.id) {
+    await setContext(target.id);
+    if (contextId.value !== target.id) return;
+  }
+  if (tab.value !== 'files') tab.value = 'files';
+
+  // Каталоги раскрываем по одному сверху вниз: дерево ленивое, и без этого файл
+  // открылся бы в редакторе, но не подсветился бы в навигаторе.
+  const snapshot = captureContext();
+  const segments = rel.split('/').slice(0, -1);
+  let prefix = '';
+  const open = new Set(openDirs.value);
+  for (const segment of segments) {
+    prefix = prefix ? `${prefix}/${segment}` : segment;
+    if (!dirs.value.has(prefix) && !(await loadDir(prefix, snapshot))) break;
+    if (!contextIsCurrent(snapshot)) return;
+    open.add(prefix);
+  }
+  openDirs.value = open;
+  pendingReveal = intent.line > 0 ? { path: rel, line: Number(intent.line) } : null;
+  if ((await openFile(rel)) === false) {
+    pendingReveal = null;
+    error.value = `${rel}: файл не найден в этой рабочей копии`;
+  }
+}
+
 async function processIntents() {
   const pending = unhandledIntents();
   if (!props.active || !initialized || loading.value || processingIntents || !pending.length) return;
@@ -674,6 +756,8 @@ async function processIntents() {
       if (intent.type === 'project' && intent.project && project.value !== intent.project) {
         const target = projects.value.find((item) => item.id === intent.project);
         if (target) await setProject(target.id);
+      } else if (intent.type === 'open-file') {
+        await openIntentFile(intent);
       }
       handledIntentIds.add(intent.id);
       emit('consume-intent', intent.id);
@@ -908,7 +992,8 @@ onBeforeUnmount(() => {
         <div class="ehead">
           <template v-if="tab === 'files' && fileSel">
             <span class="epath mono">{{ fileSel }}</span>
-            <span v-if="fileData?.binary" class="note">бинарный</span>
+            <span v-if="showsImage" class="note img-note">изображение</span>
+            <span v-else-if="fileData?.binary" class="note">бинарный</span>
             <span v-else-if="fileData?.tooBig" class="note">слишком большой — превью отключено</span>
             <span v-if="fileLoading" class="note">читаю…</span>
           </template>
@@ -928,8 +1013,16 @@ onBeforeUnmount(() => {
           <button class="act" :disabled="gitLoading || fileLoading" title="Обновить" @click="refresh">↻</button>
         </div>
         <div class="ebody" data-escape-owner="monaco">
-          <div v-show="tab === 'files'" ref="fileHost" class="editor"></div>
+          <div v-show="tab === 'files' && !imageSrc" ref="fileHost" class="editor"></div>
           <div v-show="tab === 'git'" ref="diffHost" class="editor"></div>
+          <!-- Картинка вместо пустого редактора: сырые байты отдаёт raw-роут «Кода». -->
+          <div v-if="tab === 'files' && imageSrc" class="imgwrap">
+            <img v-if="!imageError" :src="imageSrc" :alt="fileSel" @error="imageError = 'Не удалось загрузить изображение'">
+            <div v-else class="imgerr">
+              {{ imageError }}<br>
+              <span class="muted">Возможно, файл больше 10 МБ или его формат не поддерживается предпросмотром.</span>
+            </div>
+          </div>
           <div v-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
           <div v-else-if="tab === 'git' && git && !git.files.length" class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
         </div>
@@ -1070,6 +1163,21 @@ onBeforeUnmount(() => {
 .editor { position: absolute; inset: 0; }
 .overlay { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-mid);
   font-size: 13px; background: #0a0c10; }
+
+/* Предпросмотр картинки: вписываем целиком, «шахматка» показывает прозрачность. */
+.imgwrap {
+  position: absolute; inset: 0; display: grid; place-items: center; overflow: auto; padding: 16px;
+  background: #0a0c10;
+  background-image:
+    linear-gradient(45deg, #14181f 25%, transparent 25%, transparent 75%, #14181f 75%),
+    linear-gradient(45deg, #14181f 25%, transparent 25%, transparent 75%, #14181f 75%);
+  background-size: 18px 18px; background-position: 0 0, 9px 9px;
+}
+.imgwrap img { max-width: 100%; max-height: 100%; object-fit: contain;
+  border-radius: 6px; box-shadow: 0 2px 18px rgba(0, 0, 0, .45); }
+.imgerr { color: var(--bad); font-size: 13px; text-align: center; line-height: 1.6; }
+.imgerr .muted { color: var(--ink-mid); font-size: 12px; }
+.note.img-note { color: var(--ink-mid); }
 
 .act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
   padding: 4px 10px; font-size: 12.5px; cursor: pointer; flex: none; }

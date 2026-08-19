@@ -93,6 +93,9 @@ test('botSettings пишет owner-bound public metadata без token', async (t
     canReadAllGroupMessages: true,
     connectedAtMs: 1_800_000_000_010,
     serviceChatId: 555000111,
+    pultChatId: null,
+    pultUserId: null,
+    pultConfirmedAtMs: null,
   });
   assert.equal((await context.botSettings.setServiceChatId(null)).serviceChatId, null);
   const serialized = await readFile(context.paths.botSettingsFile, 'utf8');

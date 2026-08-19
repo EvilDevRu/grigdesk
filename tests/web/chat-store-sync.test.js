@@ -36,6 +36,7 @@ test('WEB-00: старые миллионы Codex не заполняют кол
     modelRef: { provider: 'codex', model: 'gpt-5.6-sol' },
     contextTokens: 240_000,
     contextMetric: '',
+    contextCache: { scope: 'request', status: 'reported', readTokens: -1, uncachedTokens: '240000' },
   });
   const session = chat.sessions[0];
   chat._normalize(chat.sessions);
@@ -45,6 +46,8 @@ test('WEB-00: старые миллионы Codex не заполняют кол
   assert.equal(session.contextMetric, 'legacy-unavailable');
   assert.equal(session.contextIsEstimate, true);
   assert.equal(session.totalInputTokens, 240_000, 'старое значение остаётся только расходом');
+  assert.deepEqual(session.contextCache, { scope: 'request', status: 'unavailable' },
+    'reported без единой валидной числовой метрики не изображает измерение');
 });
 
 test('WEB-01: чат, начатый на другом устройстве, появляется без перезагрузки', async () => {

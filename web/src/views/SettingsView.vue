@@ -2199,15 +2199,13 @@ onMounted(() => {
           </div>
           <p class="muted small">
             CLI умеет сжимать разговор сам, но включает это у самого потолка своего окна:
-            на окне 1M — около 950 000 токенов. У Claude ход дорожает гораздо раньше —
-            примерно с 250 000: кокпит поднимает процесс агента на каждое сообщение, и выше
-            этой границы переписка перестаёт читаться из кэша и пишется в него заново по
-            двойному тарифу. У других исполнителей граница стоимости учитывается, только
-            если они её объявили. <b>0</b> — не вмешиваться. Claude получает порог через свою
+            на окне 1M — около 950 000 токенов. <b>0</b> — не вмешиваться. Claude получает порог через свою
             переменную окружения, Codex — через <code>model_auto_compact_token_limit</code>.
-            Кольцо в чате считает до ближайшего события: этого порога (если он не нулевой),
-            объявленной исполнителем границы стоимости (если она есть) или 80% окна модели.
-            На 80% ближайшей границы кольцо желтеет, на самой границе — краснеет.
+            Кольцо в чате считает до меньшей из двух границ: этого порога (если он не
+            нулевой) и 80% окна модели. На 80% ближайшей границы кольцо желтеет, на самой
+            границе — краснеет. Кэш показан отдельно по факту последнего запроса: долей
+            чтения и объёмами, если исполнитель их сообщает, либо честным статусом
+            «нет данных» / «без тарифа». Кэш не меняет цвет кольца.
           </p>
           <div class="compact-setting">
             <label>
@@ -2220,9 +2218,9 @@ onMounted(() => {
           <p class="muted small">
             То же самое, но для агентов на узлах схемы, и порог отдельный: в чате сжатие
             рвёт нить разговора с тобой, а на этапе просто ужимает рабочий контекст между
-            вызовами инструментов. На длинном этапе весь хвост может пройти в дорогой зоне,
-            где каждый вызов инструмента оплачивается как первый. <b>0</b> — не вмешиваться.
-            Применится к новым заходам; уже идущий
+            вызовами инструментов. Настройка ограничивает объём активного контекста и не
+            делает предположений о кэше или тарифе выбранного исполнителя. <b>0</b> — не
+            вмешиваться. Применится к новым заходам; уже идущий
             этап доработает как есть.
           </p>
           <div class="compact-setting">
@@ -2292,7 +2290,10 @@ onMounted(() => {
       </p>
       <div v-if="!pluginsStore.loaded" class="muted">Загрузка…</div>
       <div v-else class="plugcards">
-        <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard">
+        <!-- Плашка с раскрытыми настройками идёт во всю ширину: условие то же, что
+             у блока .plugset ниже, иначе класс и содержимое разъедутся. -->
+        <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard"
+             :class="{ wide: p.enabled && p.settings.length }">
           <div class="plughead">
             <div>
               <b>{{ p.name }}</b>
@@ -3247,9 +3248,16 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .speech-benchmark { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding-top: 12px; border-top: 1px solid var(--line); }
 .speech-benchmark p { margin: 3px 0 0; }
-/* Карточки плагинов — горизонтальной линией, с переносом на узких экранах. */
-.plugcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; align-items: start; }
+/* Карточки плагинов — горизонтальной линией, с переносом на узких экранах.
+   Без align-items: start — плашки в ряду тянутся до общей высоты (как у исполнителей). */
+.plugcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; }
 .plugcard { gap: 8px; }
+/* Плагин с раскрытыми настройками занимает обе колонки: он выше соседа в разы,
+   и выравнивание ряда по нему превращало бы соседнюю плашку в полупустую.
+   Текст и поля при этом держим в читаемой колонке, а не тянем на всю ширину. */
+.plugcard.wide { grid-column: 1 / -1; }
+.plugcard.wide > p, .plugcard.wide .plugset > * { max-width: 760px; }
+.plugcard.wide .plugrow.wide .inp { max-width: 520px; }
 .plughead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .plugver { color: var(--mut); font-size: 12px; margin-left: 8px; }
 .plugtag { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; color: var(--mut); }

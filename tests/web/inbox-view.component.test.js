@@ -339,6 +339,27 @@ test('смена аккаунта во время действия тоже об
   assert.match(wrapper.get('[data-status="new"]').text(), /Новый аккаунт/);
 });
 
+test('карточка показывает «разбирается сейчас», пока воркер держит её у модели', async (t) => {
+  const api = {
+    async get() {
+      return response({
+        worker: {
+          running: true,
+          readiness: 'ready',
+          lastReason: '',
+          lastError: null,
+          judging: { ref: REF_NEW, channel: 'github', startedAtMs: 1_786_172_301_500 },
+        },
+      });
+    },
+    async post() { return { ok: true }; },
+  };
+  const { wrapper } = await mountChannelView(t, 'inbox', { api });
+  const state = wrapper.get('[data-status="new"] .auto-state');
+  assert.match(state.text(), /Разбирается прямо сейчас/u);
+  assert.ok(state.classes().includes('judging'), 'живое состояние воркера сильнее расписания');
+});
+
 test('незавершённый авторазбор вложений виден человеку и блокирует обещание автозадачи', async (t) => {
   const media = item({
     messages: [message(MESSAGE_A, {

@@ -27,11 +27,13 @@ function safeHref(value, { image = false } = {}) {
 }
 
 function resolveUrl(href, resolver) {
-  let resolved = href;
-  if (typeof resolver === 'function') {
-    try { resolved = resolver(href) || href; } catch { resolved = href; }
-  }
-  return resolved;
+  if (typeof resolver !== 'function') return href;
+  let resolved;
+  try { resolved = resolver(href); } catch { return href; }
+  // Строгий false — вердикт резолвера «ссылка ведёт в никуда»: рендерим текстом,
+  // чтобы синий цвет не обещал открытие, которого не будет.
+  if (resolved === false) return false;
+  return resolved || href;
 }
 
 function resolveImageUrl(href, resolver) {
@@ -43,10 +45,14 @@ function isDocumentLink(href) {
   return String(href || '').startsWith('#/documents?');
 }
 
+function isCodeLink(href) {
+  return String(href || '').startsWith('#/code?');
+}
+
 function linkAttributes(href) {
-  return isDocumentLink(href)
-    ? ' data-document-link="true"'
-    : ' target="_blank" rel="noopener noreferrer"';
+  if (isDocumentLink(href)) return ' data-document-link="true"';
+  if (isCodeLink(href)) return ' data-code-link="true"';
+  return ' target="_blank" rel="noopener noreferrer"';
 }
 
 function createRenderer({ resolveHref, resolveImageHref, allowHtml = false } = {}) {
@@ -55,6 +61,7 @@ function createRenderer({ resolveHref, resolveImageHref, allowHtml = false } = {
   renderer.link = function ({ href, title, tokens }) {
     const text = this.parser.parseInline(tokens);
     const resolved = resolveUrl(href, resolveHref);
+    if (resolved === false) return text;
     // Результат расширения проходит тот же allowlist: resolver не может подсунуть
     // javascript:/data: и обойти базовую защиту Markdown-рендерера.
     const safe = safeHref(resolved);
@@ -94,10 +101,17 @@ function sanitizeElement(element, { resolveHref, resolveImageHref } = {}) {
   if (ALIGN_TAGS.has(tag) && ['left', 'center', 'right'].includes(align)) element.setAttribute('align', align);
 
   if (tag === 'a') {
-    const safe = safeHref(resolveUrl(attrs.href, resolveHref));
+    const resolved = resolveUrl(attrs.href, resolveHref);
+    if (resolved === false) {
+      // Живой NodeList нельзя разворачивать прямо в replaceWith: он меняется по ходу.
+      element.replaceWith(...[...element.childNodes]);
+      return;
+    }
+    const safe = safeHref(resolved);
     if (safe) {
       element.setAttribute('href', safe);
       if (isDocumentLink(safe)) element.setAttribute('data-document-link', 'true');
+      else if (isCodeLink(safe)) element.setAttribute('data-code-link', 'true');
       else {
         element.setAttribute('target', '_blank');
         element.setAttribute('rel', 'noopener noreferrer');

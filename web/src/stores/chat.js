@@ -240,7 +240,7 @@ const MAX_STEPS = 400;
 // «думает…»/кольцо и стёрло ленту шагов идущего прямо сейчас хода.
 const RUNTIME_KEYS = [
   'sending', 'compacting', 'stopping', 'progressTokens', 'steps', 'error', 'inflight', 'offline',
-  'sessionResetting', 'sessionResetFailed', 'liveContext',
+  'sessionResetting', 'sessionResetFailed', 'liveContext', 'liveContextCache',
 ];
 function runtimeOf(s) {
   const out = {};
@@ -254,6 +254,27 @@ function insertByCreated(list, chat) {
   const at = chat.createdAt || 0;
   const i = list.findIndex((c) => (c.createdAt || 0) > at);
   if (i < 0) list.push(chat); else list.splice(i, 0, chat);
+}
+
+const CONTEXT_CACHE_STATUSES = new Set(['reported', 'unavailable', 'not-applicable']);
+
+/**
+ * Кэш контекста — снимок одного model request, а не накопительный счётчик сессии.
+ * Границу provider-а держим строгой: неизвестный статус и кривые числа не должны
+ * превращаться в нулевой cache miss или выдуманную экономию.
+ */
+export function normalizeContextCache(value) {
+  const status = value?.scope === 'request' && CONTEXT_CACHE_STATUSES.has(value?.status)
+    ? value.status
+    : 'unavailable';
+  const normalized = { scope: 'request', status };
+  if (status !== 'reported') return normalized;
+  for (const key of ['readTokens', 'writeTokens', 'uncachedTokens']) {
+    if (Number.isSafeInteger(value?.[key]) && value[key] >= 0) normalized[key] = value[key];
+  }
+  return Object.keys(normalized).length > 2
+    ? normalized
+    : { scope: 'request', status: 'unavailable' };
 }
 
 // Чат в том виде, в каком он едет на сервер: без рантайм-полей (sending/error/steps).
@@ -270,6 +291,7 @@ function slimOf(s) {
     contextWindow: s.contextWindow || 0, contextMetric: s.contextMetric || '',
     contextIsEstimate: !!s.contextIsEstimate,
     totalInputTokens: s.totalInputTokens || 0, cachedInputTokens: s.cachedInputTokens || 0,
+    contextCache: normalizeContextCache(s.contextCache),
     // Выжимка после сжатия у исполнителя без родного компакта: ждёт следующего
     // сообщения, чтобы уехать первой в новую сессию. Обязана переживать F5 — иначе
     // сжатие превратилось бы в потерю памяти агента.
@@ -351,6 +373,9 @@ function applyContextUsage(session, payload) {
   if (total !== null) session.totalInputTokens = total;
   const cached = metricNumber(payload.cachedInputTokens);
   if (cached !== null) session.cachedInputTokens = cached;
+  if (Object.hasOwn(payload, 'contextCache')) {
+    session.contextCache = normalizeContextCache(payload.contextCache);
+  }
 }
 
 /** Обнулить provider session и её метрики. Выжимку выбрасываем только при явном reset:
@@ -364,6 +389,8 @@ function clearSessionContext(session, { discardSeed = false } = {}) {
   session.contextIsEstimate = false;
   session.totalInputTokens = 0;
   session.cachedInputTokens = 0;
+  session.contextCache = normalizeContextCache(null);
+  session.liveContextCache = null;
   if (discardSeed) {
     session.pendingSeed = '';
     session.compactedAt = 0;
@@ -784,6 +811,7 @@ export const useChatStore = defineStore('chat', {
         s.contextIsEstimate ??= false;
         s.totalInputTokens ??= 0;
         s.cachedInputTokens ??= 0;
+        s.contextCache = normalizeContextCache(s.contextCache);
         // До active-input-v1 Cockpit сохранял cumulative input как «контекст».
         // Старые миллионы переносим в расход и гасим кольцо до следующего точного хода.
         if (s.sessionId && isCodexChat(s) && s.contextMetric !== CODEX_CONTEXT_METRIC) {
@@ -849,6 +877,7 @@ export const useChatStore = defineStore('chat', {
         createdAt: Date.now(), updatedAt: Date.now(),
         messages: [], sessionId: null, contextTokens: 0, contextWindow: 0,
         contextMetric: '', contextIsEstimate: false, totalInputTokens: 0, cachedInputTokens: 0,
+        contextCache: normalizeContextCache(null),
         sending: false, error: null, draft: opts.draft || '', pendingSeed: '', compactedAt: 0,
       };
       this.sessions.push(s);
@@ -933,6 +962,9 @@ export const useChatStore = defineStore('chat', {
             // В историю не пишем: это рантайм-поле, а иначе каждое обращение к модели
             // стоило бы записи всего чата на сервер (см. slimOf и дебаунс _persist).
             if (d.contextTokens) s.liveContext = d.contextTokens;
+            if (Object.hasOwn(d, 'contextCache')) {
+              s.liveContextCache = normalizeContextCache(d.contextCache);
+            }
           }
         } else if (name === 'chat-turn-start') {
           // Со дна очереди пошёл следующий ход: снимаем «ждёт очереди» с самого раннего
@@ -947,7 +979,10 @@ export const useChatStore = defineStore('chat', {
           // а не «думает…». Раньше признак жил только в затеявшем окне, и на втором
           // устройстве сжатие не отображалось ничем.
           if (d.compact) { s.compacting = true; s.sending = false; s.progressTokens = 0; }
-          else { s.sending = true; s.steps = []; s.progressTokens = 0; s.liveContext = 0; }
+          else {
+            s.sending = true; s.steps = []; s.progressTokens = 0;
+            s.liveContext = 0; s.liveContextCache = null;
+          }
         } else if (name === 'chat-done') {
           // Ход завершён — снять «думает…»/кольцо во всех окнах (ответ доставляется
           // ожидавшему окну или через pending). Но если из этого окна ушли ещё сообщения
@@ -955,7 +990,9 @@ export const useChatStore = defineStore('chat', {
           const s = this._find(d.chatKey);
           // Событие дошло — связь с сервером есть, даже если рвался длинный POST хода.
           if (s?.offline) s.offline = false;
-          if (s && !s.inflight) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
+          if (s && !s.inflight) {
+            s.sending = false; s.stopping = false; s.progressTokens = 0; s.liveContextCache = null;
+          }
           // Своё сжатие разморозит его собственный ответ (он ещё едет и правит счётчики);
           // чужому окну ждать нечего — снимаем кольцо здесь.
           if (s && !compactInflight.has(s.id)) s.compacting = false;
@@ -1019,6 +1056,9 @@ export const useChatStore = defineStore('chat', {
           // Ход идёт час, а сохранённая цифра контекста — с прошлого хода (у claude она
           // бывает ещё и ДО автокомпакта CLI). Поэтому живой размер тоже восстанавливаем.
           s.liveContext = a.contextTokens || 0;
+          s.liveContextCache = Object.hasOwn(a, 'contextCache')
+            ? normalizeContextCache(a.contextCache)
+            : null;
           // Вместе с «думает…» возвращаем и уже показанную ленту шагов текущего хода.
           // Серверную копию берём, если она полнее ИЛИ свежее нашей: обе стороны держат
           // скользящее окно одного размера, поэтому у отставшего окна (связь рвалась,
@@ -1031,6 +1071,7 @@ export const useChatStore = defineStore('chat', {
         } else if (!s.inflight && !compactInflight.has(s.id)) {
           s.sending = false; s.stopping = false; s.compacting = false; s.progressTokens = 0;
           s.liveContext = 0;
+          s.liveContextCache = null;
         }
       }
     },
@@ -1514,6 +1555,8 @@ export const useChatStore = defineStore('chat', {
         s.contextIsEstimate = false;
         s.totalInputTokens = 0;
         s.cachedInputTokens = 0;
+        s.contextCache = normalizeContextCache(null);
+        s.liveContextCache = null;
         s.compactedAt = Date.now();
         s.messages.push({ role: 'note', text: `🗜 Контекст сжат — было ${before.toLocaleString('ru')} токенов.` });
       } catch (e) {
@@ -1592,7 +1635,9 @@ export const useChatStore = defineStore('chat', {
       // лента предыдущего хода уже уехала в своё сообщение, а живой размер контекста
       // прошлого хода к новому отношения не имеет: до первого замера кольцо показывает
       // сохранённую цифру.
-      if (!queued) { s.progressTokens = 0; s.steps = []; s.liveContext = 0; }
+      if (!queued) {
+        s.progressTokens = 0; s.steps = []; s.liveContext = 0; s.liveContextCache = null;
+      }
       s.updatedAt = sentAt;
       // После сжатия «выжимкой» сессии ещё нет: агент увидит состояние работы первым
       // блоком этого сообщения. В переписку на экране блок не попадает — там уже есть и
@@ -1682,6 +1727,7 @@ export const useChatStore = defineStore('chat', {
           s.sessionResetFailed = false;
         }
         if (e.data?.sessionResetFailed) s.sessionResetFailed = true;
+        if (!e.data?.sessionReset) applyContextUsage(s, e.data);
         s.error = e.message;
         // Сетевой обрыв ПОСЛЕ начала model POST — не провал хода: сервер мог принять
         // запрос, агент живёт в его процессе, а ответ доедет через chats/pending.

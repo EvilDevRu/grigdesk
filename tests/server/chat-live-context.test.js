@@ -77,15 +77,34 @@ test('Claude отдаёт размер контекста живьём, а не 
     config: { claudeBin: bin }, message: 'test', cwd: dir, model: 'opus', effort: '',
     sessionId: null, permissionMode: 'default',
     onStep: (step) => live.push(step),
-    onProgress: (tokens, info) => progress.push({ tokens, contextTokens: info?.contextTokens ?? null }),
+    onProgress: (tokens, info) => progress.push({
+      tokens,
+      contextTokens: info?.contextTokens ?? null,
+      contextCache: info?.contextCache ?? null,
+    }),
   });
 
   // Замер приезжает на КАЖДОМ обращении к модели, и падение после компакта видно сразу.
   assert.deepEqual(progress, [
-    { tokens: 100, contextTokens: 180000 },
-    { tokens: 140, contextTokens: 60000 },
+    {
+      tokens: 100,
+      contextTokens: 180000,
+      contextCache: {
+        scope: 'request', status: 'reported', readTokens: 179000, writeTokens: 990, uncachedTokens: 10,
+      },
+    },
+    {
+      tokens: 140,
+      contextTokens: 60000,
+      contextCache: {
+        scope: 'request', status: 'reported', readTokens: 59990, writeTokens: 0, uncachedTokens: 10,
+      },
+    },
   ]);
   assert.equal(out.contextTokens, 60000, 'итог — вход последнего обращения, а не сумма result.usage');
+  assert.deepEqual(out.contextCache, {
+    scope: 'request', status: 'reported', readTokens: 59990, writeTokens: 0, uncachedTokens: 10,
+  }, 'итоговый кэш — тоже последний model request, а не сумма result.usage');
   assert.equal(out.sessionId, 'sess-live');
   assert.equal(out.actualModel, 'claude-opus-5-1m');
 
@@ -115,5 +134,37 @@ test('Ход без компакта и без обращений к модел�
 
   assert.deepEqual(progress, [], 'нечего мерить — нечего и слать');
   assert.equal(out.contextTokens, 0);
+  assert.deepEqual(out.contextCache, { scope: 'request', status: 'unavailable' });
   assert.equal(out.steps.filter((step) => step.k === 'note').length, 0);
+});
+
+test('Claude не превращает отсутствующие cache-поля в нули', async (t) => {
+  const events = [
+    { type: 'system', subtype: 'init', model: 'claude-opus-5-1m', session_id: 'sess-partial' },
+    {
+      type: 'assistant',
+      session_id: 'sess-partial',
+      message: {
+        model: 'claude-opus-5-1m',
+        content: [{ type: 'text', text: 'Готово.' }],
+        usage: { input_tokens: 12, output_tokens: 3 },
+      },
+    },
+    {
+      type: 'result', subtype: 'success', result: 'Готово.', session_id: 'sess-partial',
+      num_turns: 1, usage: { input_tokens: 12, output_tokens: 3 },
+    },
+  ];
+  const { dir, bin } = await fakeClaude(t, events);
+
+  const out = await claude.run({
+    config: { claudeBin: bin }, message: 'test', cwd: dir, sessionId: null,
+    permissionMode: 'default',
+  });
+
+  assert.deepEqual(out.contextCache, {
+    scope: 'request', status: 'reported', uncachedTokens: 12,
+  });
+  assert.equal(Object.hasOwn(out.contextCache, 'readTokens'), false);
+  assert.equal(Object.hasOwn(out.contextCache, 'writeTokens'), false);
 });

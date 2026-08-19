@@ -104,8 +104,17 @@ async function compileChatSession() {
       'const mdToHtml = (text) => text;',
     )
     .replace(
-      "import { documentLinkFromClick, documentRouteHref } from '../../features/documents/links.js';",
-      'const documentLinkFromClick = () => ""; const documentRouteHref = () => "";',
+      "import { documentLinkFromClick } from '../../features/documents/links.js';",
+      'const documentLinkFromClick = () => "";',
+    )
+    .replace(
+      "import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';",
+      'const chatFileLinkHref = () => ""; const codeLinkFromClick = () => null;'
+      + ' const loadCodeRoots = () => Promise.resolve([]);',
+    )
+    .replace(
+      "import { useToolLauncher } from '../../shared/tools/launcher.js';",
+      'const useToolLauncher = () => ({ openTool: () => {} });',
     )
     .replace(
       "import { useDocumentPreviewStore } from '../../stores/document-preview.js';",
@@ -218,6 +227,9 @@ test('кольцо контекста открывает форматирова�
     contextTokens: 160_000,
     totalInputTokens: 29_236_962,
     cachedInputTokens: 28_474_880,
+    contextCache: {
+      scope: 'request', status: 'reported', readTokens: 180_000, writeTokens: 10_000, uncachedTokens: 10_000,
+    },
     sending: false,
   });
   globalThis.__chatTaskTooltipHelpTip = HelpTip;
@@ -243,7 +255,7 @@ test('кольцо контекста открывает форматирова�
       return {
         id: session.model,
         model: { name: 'Opus 5 (1M)', context: 1_000_000, efforts: [] },
-        provider: { id: 'claude', contextCostCliff: 250_000 },
+        provider: { id: 'claude' },
       };
     },
     visibleModels() { return []; },
@@ -280,14 +292,16 @@ test('кольцо контекста открывает форматирова�
   assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '80%');
   assert.deepEqual(
     [...content.querySelectorAll('.ctx-pop-label')].map((node) => node.textContent.trim()),
-    ['Сейчас', 'Порог', 'Окно', 'За сессию', 'Из кэша'],
+    ['Сейчас', 'Порог', 'Окно', 'За сессию', 'Кэш'],
   );
   const compactValues = Object.fromEntries([...content.querySelectorAll('.ctx-pop-row')].map((row) => [
     row.querySelector('.ctx-pop-label')?.textContent.trim(),
     row.querySelector('.ctx-pop-value')?.textContent.trim(),
   ]));
   assert.equal(compactValues['За сессию'], '29,2 млн');
-  assert.equal(compactValues['Из кэша'], '28,5 млн');
+  assert.match(compactValues.Кэш, /90% · чт\. 180 тыс\. · зап\. 10 тыс\. · мимо 10 тыс\./);
+  assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '80%', 'процент кольца не смешан с DTO кэша');
+  assert.doesNotMatch(content.textContent, /28,5 млн/, 'накопительный счётчик не подменяет снимок запроса');
 
   // Временно недоступное действие остаётся фокусируемым: иначе вместе с native disabled
   // клавиатура теряла и саму форматированную подсказку.
@@ -334,6 +348,7 @@ test('ChatSession передаёт в тултип полное загружен
     contextMetric: 'active-input-v1',
     totalInputTokens: 240_000,
     cachedInputTokens: 220_000,
+    contextCache: { scope: 'request', status: 'reported', readTokens: 72_000, uncachedTokens: 8_000 },
     sending: false,
   };
   globalThis.__chatTaskTooltipApi = {
@@ -416,7 +431,7 @@ test('ChatSession передаёт в тултип полное загружен
   assert.match(ringLabel, /Контекст: 80[\s ]000 из 204[\s ]800 до потолка окна \(39%\)/);
   assert.match(ringLabel, /окно модели 256[\s ]000/);
   assert.match(ringLabel, /за сессию обработано 240[\s\u00a0]000 входных токенов/);
-  assert.match(ringLabel, /220[\s\u00a0]000 из кэша/);
+  assert.match(ringLabel, /кэш: 90% · чт\. 72 тыс\. · мимо 8 тыс\./);
   const contextTip = wrapper.get('[data-testid="context-tooltip"]');
   assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
   assert.equal(contextTip.get('.ctx-pop-unit').text(), '· токены');
@@ -426,7 +441,8 @@ test('ChatSession передаёт в тултип полное загружен
   assert.match(rows.Порог, /204[\s\u00a0]800 · 80% окна/);
   assert.match(rows.Окно, /256[\s\u00a0]000/);
   assert.match(rows['За сессию'], /240[\s\u00a0]000/);
-  assert.match(rows['Из кэша'], /220[\s\u00a0]000/);
+  assert.match(rows.Кэш, /90% · чт\. 72 тыс\. · мимо 8 тыс\./);
+  assert.doesNotMatch(contextTip.text(), /220[\s\u00a0]000/);
   assert.deepEqual(contextTip.findAll('.ctx-pop-action').map((action) => action.text()), [
     'Кликсжать',
     'Alt + кликсбросить',
@@ -622,7 +638,7 @@ test('ChatSession рисует дугу и процент кольца по то
       return {
         id: 'claude-opus-5[1m]',
         model: { name: 'Opus 5 (1M)', context: MODEL_WINDOW, efforts: [] },
-        provider: { id: 'claude', contextCostCliff: 250_000 },
+        provider: { id: 'claude' },
       };
     },
     visibleModels() { return []; },
@@ -678,16 +694,16 @@ test('ChatSession рисует дугу и процент кольца по то
   assert.equal(ring.classes().includes('hi'), true);
 });
 
-// Выключенное автосжатие означает «не вмешивайся», а не «молчи». Если исполнитель
-// объявил свою границу стоимости, кольцо всё равно предупреждает о приближении к ней.
-test('ChatSession учитывает объявленную provider-ом границу стоимости', async (t) => {
+// Старый реестр мог оставить поле эвристической «границы цены». Оно больше не является
+// частью шкалы: заполненность и цвет считаются только от контекста.
+test('ChatSession игнорирует устаревшую границу стоимости provider-а', async (t) => {
   const browser = await browserHarness(t);
   const [{ mount, flushPromises }, { reactive, nextTick }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/vue/index.mjs'),
   ]);
   const CONTEXT_TOKENS = 200_000;
-  const COST_CLIFF = 250_000;    // отсечка «дальше ход дорожает»
+  const LEGACY_COST_CLIFF = 250_000;
   const MODEL_WINDOW = 1_000_000; // окно Fable 5 — встроенный миллион
   const session = reactive({
     id: 'ctx-ring-cliff',
@@ -701,6 +717,7 @@ test('ChatSession учитывает объявленную provider-ом гра
     draft: '',
     sessionId: 'claude-session',
     contextTokens: CONTEXT_TOKENS,
+    contextCache: { scope: 'request', status: 'unavailable' },
     sending: false,
   });
   globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
@@ -725,7 +742,7 @@ test('ChatSession учитывает объявленную provider-ом гра
       return {
         id: 'claude-fable-5',
         model: { name: 'Fable 5', context: MODEL_WINDOW, efforts: [] },
-        provider: { id: 'claude', contextCostCliff: COST_CLIFF },
+        provider: { id: 'claude', contextCostCliff: LEGACY_COST_CLIFF },
       };
     },
     visibleModels() { return []; },
@@ -750,31 +767,28 @@ test('ChatSession учитывает объявленную provider-ом гра
 
   const ring = wrapper.find('.ctx-ring');
   assert.equal(ring.attributes('title'), undefined);
-  // Подпись обязана назвать ИМЕННО подорожание: «до потолка окна 250 000» при окне
-  // в миллион читается как ошибка счёта.
-  assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 250[\s ]000 до подорожания хода \(80%\)/);
-  assert.match(ring.attributes('aria-label'), /порог близко — пора сжать/);
-  assert.doesNotMatch(ring.attributes('aria-label'), /уже подорожал/);
-  assert.equal(ring.classes().includes('mid'), true);
+  assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
+  assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
+  assert.equal(ring.classes().includes('mid'), false);
+  assert.equal(contextTooltipRows(wrapper.get('[data-testid="context-tooltip"]')).Кэш, 'нет данных');
 
   const arc = wrapper.find('.ctx-ring .rfg');
   const circumference = Number(arc.attributes('stroke-dasharray'));
   const filled = 1 - Number(arc.attributes('stroke-dashoffset')) / circumference;
   assert.ok(
-    Math.abs(filled - CONTEXT_TOKENS / COST_CLIFF) < 0.01,
-    `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по отсечке подорожания`,
+    Math.abs(filled - CONTEXT_TOKENS / (MODEL_WINDOW * 0.8)) < 0.01,
+    `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по 80% окна`,
   );
-  // Прежнее правило (80% окна) дало бы четверть кольца и ни намёка на цену.
-  assert.ok(filled > CONTEXT_TOKENS / (MODEL_WINDOW * 0.8) * 2, 'кольцо снова считается от окна');
+  assert.ok(filled < CONTEXT_TOKENS / LEGACY_COST_CLIFF / 2, 'старая отсечка снова управляет кольцом');
 
-  session.contextTokens = COST_CLIFF;
+  session.contextTokens = MODEL_WINDOW * 0.8;
   await nextTick();
-  assert.match(ring.attributes('aria-label'), /ход уже подорожал — пора сжать/);
-  assert.match(wrapper.get('[data-testid="context-tooltip"]').text(), /Ход уже подорожал — пора сжать/);
+  assert.match(ring.attributes('aria-label'), /порог достигнут — пора сжать/);
+  assert.doesNotMatch(wrapper.get('[data-testid="context-tooltip"]').text(), /подорож/);
   assert.equal(ring.classes().includes('hi'), true);
 });
 
-test('ChatSession не применяет границу стоимости Claude к другому provider-у', async (t) => {
+test('ChatSession показывает provider-нейтральный статус кэша без тарифа', async (t) => {
   const browser = await browserHarness(t);
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -791,6 +805,7 @@ test('ChatSession не применяет границу стоимости Clau
     draft: '',
     sessionId: 'ollama-session',
     contextTokens: 200_000,
+    contextCache: { scope: 'request', status: 'not-applicable' },
     sending: false,
   };
   globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
@@ -815,7 +830,6 @@ test('ChatSession не применяет границу стоимости Clau
       return {
         id: 'ollama/qwen',
         model: { name: 'Qwen', context: 1_000_000, efforts: [] },
-        // Поля contextCostCliff нет: локальному provider-у нельзя приписывать тариф Claude.
         provider: { id: 'ollama' },
       };
     },
@@ -843,6 +857,7 @@ test('ChatSession не применяет границу стоимости Clau
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
   assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
+  assert.equal(contextTooltipRows(wrapper.get('[data-testid="context-tooltip"]')).Кэш, 'без тарифа');
   assert.equal(ring.classes().includes('mid'), false);
   assert.equal(ring.classes().includes('hi'), false);
 });
@@ -863,7 +878,6 @@ test('ChatSession показывает неподтверждённое окно
     id: 'claude',
     name: 'Claude',
     available: true,
-    contextCostCliff: 250_000,
     models: [model],
   };
   const session = {

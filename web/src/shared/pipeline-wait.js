@@ -18,8 +18,10 @@ export function stripEmoji(s) { return (s || '').replace(/^[^\wА-Яа-яЁё]+/
 
 /**
  * Ворота, на которых конвейер стоит и ждёт решения человека.
+ * `node` — id узла ворот: телеграм-пульту он нужен, чтобы собрать кнопку решения
+ * (ключ ворот для `/api/tasks/:id/gate/:key/:decision` берётся из `g.keys[node]`).
  * @param {object} g граф задачи (ответ /api/tasks/:id/graph)
- * @returns {{text: string, premature: boolean}|null}
+ * @returns {{node: string, text: string, premature: boolean}|null}
  */
 export function waitingReason(g) {
   const statuses = g?.statuses || {};
@@ -29,6 +31,7 @@ export function waitingReason(g) {
     const s = statuses[nid];
     if ((s === 'wait' || s === 'premature') && nid.startsWith('gate_')) {
       return {
+        node: nid,
         text: GATE_REASON[`${g?.route}/${nid}`]
           || GATE_REASON[nid]
           || stripEmoji(g.nodes?.[nid]?.[1])

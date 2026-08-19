@@ -24,7 +24,10 @@ async function apiFixture(t, { executor = null } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-routing-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const app = Fastify({ logger: false });
-  app.decorate('sse', { broadcast() {} });
+  const events = [];
+  app.decorate('sse', {
+    broadcast(event, data) { events.push({ event, data }); },
+  });
   let executorCalls = 0;
   const config = {
     chatsDir: path.join(root, 'chats'),
@@ -48,7 +51,7 @@ async function apiFixture(t, { executor = null } = {}) {
     executorResolver: async () => { executorCalls += 1; return executor; },
   });
   t.after(() => app.close());
-  return { app, config, root, executorCalls: () => executorCalls };
+  return { app, config, root, events, executorCalls: () => executorCalls };
 }
 
 async function saveKimiChat(app, id = 'kimi-chat') {
@@ -157,6 +160,67 @@ test('chat API не принимает client-owned surface и не запуск
   assert.equal(run.statusCode, 400);
   assert.equal(run.json().error, 'unknown_provider');
   assert.equal(executorCalls(), 0);
+});
+
+test('contextCache идёт живьём в SSE, переживает F5 в active и возвращается с ответом', async (t) => {
+  let release;
+  let progressSeen;
+  const gate = new Promise((resolve) => { release = resolve; });
+  t.after(() => release?.());
+  const progress = new Promise((resolve) => { progressSeen = resolve; });
+  const contextCache = {
+    scope: 'request', status: 'reported', readTokens: 90, writeTokens: 7, uncachedTokens: 3,
+  };
+  const executor = {
+    id: 'claude',
+    async run(options) {
+      options.onProgress(5, { contextTokens: 100, contextCache });
+      progressSeen();
+      await gate;
+      return {
+        reply: 'Готово.', sessionId: 'context-cache-session', contextTokens: 100,
+        contextCache, steps: [],
+      };
+    },
+  };
+  const { app, events } = await apiFixture(t, { executor });
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'context-cache-chat',
+        modelRef: { provider: 'claude', model: 'claude-test' },
+        messages: [],
+        createdAt: Date.UTC(2026, 7, 1),
+        updatedAt: Date.UTC(2026, 7, 1),
+        revision: 0,
+      },
+    },
+  });
+  assert.equal(saved.statusCode, 200);
+
+  const running = app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'context-cache-chat',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'проверь кэш',
+    },
+  });
+  await progress;
+
+  const progressEvent = events.find((entry) => entry.event === 'chat-progress');
+  assert.deepEqual(progressEvent?.data.contextCache, contextCache);
+  const active = await app.inject({ method: 'GET', url: '/api/chat/active' });
+  assert.equal(active.statusCode, 200);
+  assert.deepEqual(active.json().active[0]?.contextCache, contextCache);
+
+  release();
+  const result = await running;
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(result.json().contextCache, contextCache);
 });
 
 test('Kimi forged sessionId отсекается до executor-а, resume берётся только из sidecar', async (t) => {
