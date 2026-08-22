@@ -32,7 +32,7 @@ test('channel defaults: Telegram 600 секунд, GitHub Issues 0', () => {
   assert.throws(() => validateInboxGrouping('custom'), InboxBundleError);
 });
 
-test('Telegram склеивает по author/topic до точной границы 600 секунд и split на границе', () => {
+test('Telegram склеивает по теме до точной границы 600 секунд и split на границе', () => {
   const bundles = bundleInboxMessages([
     entry({ id: '1', occurredAt: 1000 }),
     entry({ id: '2', occurredAt: 1599 }),
@@ -45,7 +45,30 @@ test('Telegram склеивает по author/topic до точной грани
   assert.equal(bundles[1].settled, true);
 });
 
-test('reply chain наследует bundle родителя, groupId явно склеивает альбом', () => {
+test('соседи по теме склеиваются независимо от автора', () => {
+  // Живой случай: просьба и уточнение соседа через 40 секунд в одной теме форума
+  // разъезжались на две карточки и давали две задачи, потому что ключ нёс автора.
+  const bundles = bundleInboxMessages([
+    entry({ id: '20654', occurredAt: 1000, author: { id: 'arsenkin', name: 'Александр' } }),
+    entry({ id: '20655', occurredAt: 1040, author: { id: 'dmitriy', name: 'Dmitriy' } }),
+  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_640_000 });
+
+  assert.equal(bundles.length, 1);
+  assert.deepEqual(bundles[0].messages.map((msg) => msg.id), ['20654', '20655']);
+});
+
+test('соседние темы одного чата остаются разными обращениями', () => {
+  const bundles = bundleInboxMessages([
+    entry({ id: 'a', occurredAt: 1000, source: { id: 'chat-a', title: 'Баги', threadId: 'topic-a' } }),
+    entry({ id: 'b', occurredAt: 1005, source: { id: 'chat-a', title: 'Релизы', threadId: 'topic-b' } }),
+  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_605_000 });
+
+  assert.deepEqual(bundles.map((bundle) => bundle.messages.map((msg) => msg.id)), [['b'], ['a']]);
+});
+
+test('reply и альбом остаются в связке своего места, а не рвут её', () => {
+  // Своя ветка у media group ОТРЫВАЛА альбом от текста, отправленного рядом; своя ветка
+  // у reply отменяла склейку места. Оба повода лежат в одной теме — склеивает место.
   const bundles = bundleInboxMessages([
     entry({ id: 'root', author: { id: 'a', name: 'A' } }),
     entry({ id: 'reply', parentId: 'root', occurredAt: 1010, author: { id: 'b', name: 'B' } }),
@@ -55,15 +78,14 @@ test('reply chain наследует bundle родителя, groupId явно �
   ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_100_000 });
 
   assert.deepEqual(bundles.map((bundle) => bundle.messages.map((msg) => msg.id)), [
-    ['album-1', 'album-2'],
-    ['root', 'reply', 'nested'],
+    ['root', 'reply', 'nested', 'album-1', 'album-2'],
   ]);
 });
 
-test('ответы на РАЗНЫЕ сообщения вне очереди склеиваются по теме и автору', () => {
+test('ответы на РАЗНЫЕ сообщения вне очереди склеиваются по месту', () => {
   // Живой случай: три подряд идущих сообщения одного человека, каждое — reply на своё
-  // сообщение старше activation. Родителей в очереди нет, поэтому ключ ['parent', …] был
-  // уникален у каждого: одна просьба разъезжалась на три карточки и три отдельные задачи.
+  // сообщение старше activation. Пока reply имел свою ветку ключа, она была уникальна
+  // у каждого: одна просьба разъезжалась на три карточки и три отдельные задачи.
   const bundles = bundleInboxMessages([
     entry({ id: '20442', parentId: '20300', occurredAt: 1000 }),
     entry({ id: '20443', parentId: '20301', occurredAt: 1013 }),
@@ -74,10 +96,10 @@ test('ответы на РАЗНЫЕ сообщения вне очереди с
   assert.deepEqual(bundles[0].messages.map((msg) => msg.id), ['20442', '20443', '20444']);
 });
 
-test('ответы на ОСТЫВШИЕ связки очереди тоже склеиваются по теме и автору', () => {
+test('ответы на ОСТЫВШИЕ связки очереди тоже склеиваются по месту', () => {
   // Вторая половина того же живого случая: родители ЕСТЬ в очереди (activation window
   // держит их днями), но их связки давно остыли. Per-parent ключ изолировал каждый reply
-  // в свою карточку и вдобавок отрывал их от обычных сообщений того же автора рядом.
+  // в свою карточку и вдобавок отрывал их от обычных сообщений рядом.
   const bundles = bundleInboxMessages([
     entry({ id: 'old-1', occurredAt: 1000 }),
     entry({ id: 'old-2', occurredAt: 1005 }),
@@ -92,18 +114,18 @@ test('ответы на ОСТЫВШИЕ связки очереди тоже с
   ]);
 });
 
-test('известный родитель по-прежнему сильнее темы и автора', () => {
-  // Обратная сторона: пока родитель в очереди, ответ обязан уехать в его связку даже от
-  // другого автора — иначе обсуждение одного повода распалось бы по участникам.
+test('reply не воскрешает разобранный разговор через окно тишины', () => {
+  // Обратная сторона склейки по месту: ответ на давнее сообщение обязан начать НОВОЕ
+  // обращение. Иначе реплай на строку недельной давности дописывал бы сообщение в уже
+  // решённую человеком карточку.
   const bundles = bundleInboxMessages([
-    entry({ id: 'root', occurredAt: 1000, author: { id: 'a', name: 'A' } }),
-    entry({ id: 'other', occurredAt: 1005, author: { id: 'b', name: 'B' } }),
-    entry({ id: 'reply', parentId: 'root', occurredAt: 1010, author: { id: 'b', name: 'B' } }),
-  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_610_000 });
+    entry({ id: 'root', occurredAt: 1000 }),
+    entry({ id: 'reply', parentId: 'root', occurredAt: 51_000 }),
+  ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 51_600_000 });
 
   assert.deepEqual(bundles.map((bundle) => bundle.messages.map((msg) => msg.id)), [
-    ['root', 'reply'],
-    ['other'],
+    ['reply'],
+    ['root'],
   ]);
 });
 
@@ -118,14 +140,15 @@ test('source.id и activationEpoch namespaced: одинаковые IDs не п�
   assert.equal(new Set(bundles.map((bundle) => bundle.localBundleId)).size, 3);
 });
 
-test('anonymous display name не становится identity, service messages отбрасываются', () => {
+test('чат без тем склеивается целиком, service messages отбрасываются', () => {
+  const plain = { id: 'chat', title: '', threadId: null };
   const bundles = bundleInboxMessages([
-    entry({ id: '1', source: { id: 'chat', title: '', threadId: null }, author: { id: null, name: 'Same' } }),
-    entry({ id: '2', source: { id: 'chat', title: '', threadId: null }, author: { id: null, name: 'Same' }, occurredAt: 1001 }),
-    entry({ id: 'service', service: true, occurredAt: 1002 }),
+    entry({ id: '1', source: plain, author: { id: null, name: 'Same' } }),
+    entry({ id: '2', source: plain, author: { id: 'someone', name: 'Кто-то' }, occurredAt: 1001 }),
+    entry({ id: 'service', source: plain, service: true, occurredAt: 1002 }),
   ], { channel: 'telegram', accountRef: ACCOUNT, nowMs: 1_002_000 });
-  assert.equal(bundles.length, 2);
-  assert.equal(bundles.some((bundle) => bundle.messages.some((msg) => msg.service)), false);
+  assert.equal(bundles.length, 1);
+  assert.deepEqual(bundles[0].messages.map((msg) => msg.id), ['1', '2']);
 });
 
 test('GitHub pure bundleKeyOf namespaced source и не ждёт settle window', () => {

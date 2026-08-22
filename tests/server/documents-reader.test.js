@@ -11,7 +11,7 @@ import documentsModule from '../../server/src/modules/documents/index.js';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function fixture(t, { maxBytes = 1024 } = {}) {
+async function fixture(t, { maxBytes = 1024, deps = {} } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-'));
   const root = path.join(dir, 'root');
   const outside = path.join(dir, 'outside');
@@ -20,6 +20,7 @@ async function fixture(t, { maxBytes = 1024 } = {}) {
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const reader = new DocumentReader({
     maxBytes,
+    deps,
     rootProviders: [() => [{ id: 'test', label: 'Тест', path: root }]],
   });
   return { dir, root, outside, reader };
@@ -152,4 +153,107 @@ test('DOC-06: локальные растровые изображения до�
   assert.equal(response.headers['x-content-type-options'], 'nosniff');
   assert.equal(response.headers['cache-control'], 'private, no-store');
   assert.deepEqual(response.rawPayload, png);
+});
+
+test('DOC-07: отсутствие проверки открытого fd закрывает чтение типизированным отказом', async (t) => {
+  const { root, reader } = await fixture(t, {
+    deps: {
+      resolveOpenedPath: async () => {
+        const error = new Error('proc недоступен');
+        error.code = 'ENOENT';
+        throw error;
+      },
+    },
+  });
+  await fs.writeFile(path.join(root, 'note.txt'), 'заметка');
+
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'note.txt' }),
+    { code: 'document_unsafe_path', statusCode: 403, message: 'Не удалось подтвердить путь открытого файла' },
+  );
+});
+
+test('DOC-08: hardlink отвергается, даже если его имя находится внутри source', async (t) => {
+  const { root, outside, reader } = await fixture(t);
+  const original = path.join(outside, 'original.txt');
+  await fs.writeFile(original, 'содержимое');
+  await fs.link(original, path.join(root, 'hardlink.txt'));
+
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'hardlink.txt' }),
+    { code: 'document_unsafe_file', statusCode: 403 },
+  );
+});
+
+test('DOC-09: изменение уже открытого файла после read не публикует смешанный snapshot', async (t) => {
+  let file = '';
+  let statCalls = 0;
+  const { root, reader } = await fixture(t, {
+    deps: {
+      statOpenedFile: async (handle) => {
+        statCalls += 1;
+        if (statCalls === 2) await fs.appendFile(file, '!');
+        return handle.stat({ bigint: true });
+      },
+    },
+  });
+  file = path.join(root, 'changing.txt');
+  await fs.writeFile(file, 'первая версия');
+
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'changing.txt' }),
+    { code: 'document_changed', statusCode: 409 },
+  );
+  assert.equal(statCalls, 2);
+});
+
+test('DOC-10: generic text reader ограничен максимумом 16 MiB', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-limit-'));
+  const root = path.join(dir, 'root');
+  await fs.mkdir(root);
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const reader = new DocumentReader({
+    maxBytes: 32 * 1024 * 1024,
+    rootProviders: [() => [{ id: 'test', label: 'Тест', path: root }]],
+  });
+  const large = path.join(root, 'large.txt');
+  const handle = await fs.open(large, 'w');
+  await handle.truncate((16 * 1024 * 1024) + 1);
+  await handle.close();
+
+  assert.equal(reader.maxBytes, 16 * 1024 * 1024);
+  await assert.rejects(
+    () => reader.read({ source: 'test', path: 'large.txt' }),
+    { code: 'document_too_large', statusCode: 413 },
+  );
+});
+
+test('DOC-11: самый узкий root владеет document и asset при вложенных sources', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-documents-nested-'));
+  const outer = path.join(dir, 'outer');
+  const inner = path.join(outer, 'inner');
+  await fs.mkdir(inner, { recursive: true });
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.writeFile(path.join(inner, 'secret.md'), '# Только inner\n');
+  await fs.writeFile(path.join(inner, 'secret.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+  const reader = new DocumentReader({
+    rootProviders: [() => [
+      { id: 'outer', label: 'Внешний', path: outer },
+      { id: 'inner', label: 'Вложенный', path: inner },
+    ]],
+  });
+
+  assert.equal((await reader.resolveAbsolute(path.join(inner, 'secret.md'))).ref.source, 'inner');
+  await assert.rejects(
+    () => reader.read({ source: 'outer', path: 'inner/secret.md' }),
+    { code: 'document_source_mismatch', statusCode: 403 },
+  );
+  await assert.rejects(
+    () => reader.readAsset({ source: 'outer', path: 'inner/secret.png' }),
+    { code: 'document_source_mismatch', statusCode: 403 },
+  );
+  assert.equal((await reader.read({ source: 'inner', path: 'secret.md' })).content,
+    '# Только inner\n');
+  assert.equal((await reader.readAsset({ source: 'inner', path: 'secret.png' })).size, 4);
 });

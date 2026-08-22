@@ -22,6 +22,9 @@ const VUE_URL = pathToFileURL(fileURLToPath(
 const FACTORY_DEBUG_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/factory-debug.js', import.meta.url),
 )).href;
+const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/src/shared/companion-run.js', import.meta.url),
+)).href;
 let compileNonce = 0;
 
 async function compileAccessOverview() {
@@ -71,7 +74,10 @@ async function compileSettingsView() {
     .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
     .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__accessSettingsApi;')
     .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
-    .replace("import { useUiContextStore } from '../stores/ui-context.js';", stubStore('useUiContextStore'))
+    .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ update() {}, focus() {}, blur() {}, dispose() {} });',
+    )
     .replace(
       "import { useToolLauncher } from '../shared/tools/launcher.js';",
       'const useToolLauncher = () => ({ openTerminal() {} });',
@@ -86,7 +92,12 @@ async function compileSettingsView() {
     )
     .replace(
       "import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';",
-      "const ToggleSwitch = { props: ['modelValue'], template: '<button class=\"toggle\"></button>' };",
+      `const ToggleSwitch = {
+        props: ['modelValue', 'label', 'disabled'], emits: ['update:modelValue'],
+        template: '<button class="toggle" type="button" role="switch"'
+          + ' :aria-checked="String(modelValue)" :disabled="disabled"'
+          + ' @click="$emit(\\\'update:modelValue\\\', !modelValue)">{{ label }}</button>',
+      };`,
     )
     .replace(
       "import NumberField from '../shared/ui/NumberField.vue';",
@@ -95,6 +106,7 @@ async function compileSettingsView() {
     .replace("import { useAuthStore } from '../stores/auth.js';", stubStore('useAuthStore'))
     .replace("import { usePluginsStore } from '../stores/plugins.js';", stubStore('usePluginsStore'))
     .replace("import { useChatStore } from '../stores/chat.js';", stubStore('useChatStore'))
+    .replace("import { useCompanionStore } from '../stores/companion.js';", stubStore('useCompanionStore'))
     .replace("import { usePwaStore } from '../stores/pwa.js';", stubStore('usePwaStore'))
     .replace(
       /import \{\s*blockReasonLabel,\s*UPDATE_STAGE_LABELS,\s*useCockpitUpdateStore,\s*\} from '\.\.\/stores\/cockpit-update\.js';/,
@@ -109,7 +121,10 @@ async function compileSettingsView() {
       "import { useSse } from '../composables/useSse.js';",
       'const useSse = () => ({ connected: { value: false } });',
     )
-    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`);
+    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`)
+    // Чистый модуль без Vue/pinia: подставляем НАСТОЯЩИЙ по абсолютному URL, а не
+    // заглушку — иначе тест разошёлся бы с правилом «полупустая ссылка = дефолт».
+    .replace("from '../shared/companion-run.js';", `from "${COMPANION_RUN_URL}";`);
   const nonce = compileNonce++;
   return (await import(
     `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
@@ -211,9 +226,10 @@ async function mountSettingsAccess(t, {
   confirmAnswers = [],
   prefsPost = null,
   gatewayVerify = { ok: true, checks: [] },
+  tab = 'access',
 } = {}) {
   const browser = await installBrowser(t);
-  browser.localStorage.setItem('cockpit-settings-tab', 'access');
+  browser.localStorage.setItem('cockpit-settings-tab', tab);
 
   let currentPrefs = copy(initialPrefs);
   let tlsReads = 0;
@@ -257,6 +273,31 @@ async function mountSettingsAccess(t, {
     async load() {}, async loadUsage() {}, async saveSetting() {},
     async loadMcp() {}, async runUsageAction() {},
   };
+  const companionChanges = [];
+  const companionAudioChanges = [];
+  const companionStore = {
+    deviceEnabled: true,
+    ttsConsentPrompt: false,
+    outputState: {
+      available: true,
+      prefs: {
+        enabled: true, ttsEnabled: true, ttsConsent: true,
+        voiceURI: 'ru-main', rate: 1, volume: 0.8,
+      },
+      voices: [
+        { voiceURI: 'ru-main', name: 'Русский', lang: 'ru-RU' },
+        { voiceURI: 'en-main', name: 'English', lang: 'en-US' },
+      ],
+    },
+    setDeviceEnabled(value) {
+      companionStore.deviceEnabled = value === true;
+      companionChanges.push(value === true);
+    },
+    setTtsEnabled(value) { companionAudioChanges.push({ ttsEnabled: value === true }); },
+    setOutputPrefs(value) { companionAudioChanges.push(copy(value)); },
+    confirmTtsConsent() { companionAudioChanges.push({ consent: true }); },
+    dismissTtsConsent() { companionAudioChanges.push({ consent: false }); },
+  };
   globalThis.__accessSettingsStores = {
     useProvidersStore: () => providersStore,
     useUiContextStore: () => ({ set() {}, clear() {} }),
@@ -267,6 +308,7 @@ async function mountSettingsAccess(t, {
       loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {},
     }),
     useChatStore: () => ({ compactWindow: 0 }),
+    useCompanionStore: () => companionStore,
     usePwaStore: () => ({
       canInstall: false, wakeLock: false, async install() {}, async checkForUpdate() {},
     }),
@@ -296,6 +338,8 @@ async function mountSettingsAccess(t, {
     gets,
     posts,
     confirmations,
+    companionChanges,
+    companionAudioChanges,
     tlsReadCount: () => tlsReads,
     flushPromises,
   };
@@ -623,6 +667,48 @@ test('ACCESS-WEB-12: SettingsView действительно монтирует 
   await flushPromises();
   assert.equal(wrapper.find('#local-https-settings').exists(), false);
   assert.equal(wrapper.find('#gateway-settings').exists(), false);
+});
+
+test('COMP-SHELL-10: device switch скрывает только companion и остаётся локальной настройкой', async (t) => {
+  const { wrapper, companionChanges, flushPromises } = await mountSettingsAccess(t, { tab: 'app' });
+  const setting = wrapper.get('[data-testid="companion-device-setting"]');
+  const toggle = setting.get('.toggle');
+
+  assert.equal(toggle.attributes('aria-checked'), 'true');
+  assert.match(setting.text(), /Скрывает только аватар и компактное окно на этом устройстве/);
+  assert.match(setting.text(), /«Чаты», история и настройки речи продолжают работать/);
+
+  await toggle.trigger('click');
+  await flushPromises();
+  assert.deepEqual(companionChanges, [false]);
+});
+
+test('COMP-TTS-16: device settings управляют consent, voice, rate и volume без server API', async (t) => {
+  const {
+    wrapper, companionAudioChanges, posts, flushPromises,
+  } = await mountSettingsAccess(t, { tab: 'app' });
+  const setting = wrapper.get('[data-testid="companion-audio-setting"]');
+  assert.match(setting.text(), /Выключено по умолчанию/);
+  assert.match(setting.text(), /внешний облачный сервис/);
+  assert.match(setting.text(), /только сокращённый текст/);
+  assert.match(setting.text(), /только до закрытия этой вкладки/);
+
+  const toggle = setting.get('.toggle');
+  assert.equal(toggle.attributes('aria-checked'), 'true');
+  await toggle.trigger('click');
+  await setting.get('[data-testid="companion-voice-select"]').setValue('en-main');
+  await setting.get('[data-testid="companion-rate"]').setValue('1.2');
+  await setting.get('[data-testid="companion-volume"]').setValue('0.45');
+  await flushPromises();
+
+  assert.deepEqual(companionAudioChanges, [
+    { ttsEnabled: false },
+    { voiceURI: 'en-main' },
+    { rate: 1.2 },
+    { volume: 0.45 },
+  ]);
+  assert.equal(posts.some((call) => call.path.includes('companion')), false,
+    'device output prefs не уходят в server settings');
 });
 
 test('ACCESS-WEB-13: ручная проверка шлюза привязана к фактически проверенному домену', async (t) => {

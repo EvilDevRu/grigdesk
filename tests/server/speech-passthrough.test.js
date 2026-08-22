@@ -28,6 +28,7 @@ const SENTINEL_SPEECH = Object.freeze({
   hotwords: 'Fastify, Pinia, Битрикс24',
   vadSilenceMs: 875,
   conditionOnPreviousText: false,
+  initialPrompt: '',
 });
 
 /** Мок ffmpeg/ffprobe: сцены отдаёт по счётчику, seek-кадры и длительность — по запросу. */
@@ -164,6 +165,22 @@ test('buildTranscribeArgv передаёт все настройки и не д�
   ]);
   assert.equal(argv.includes('--initial-prompt'), false);
   assert.equal(argv.includes('--hallucination-silence-threshold'), false);
+});
+
+test('непустая стилевая подсказка уезжает в argv одним аргументом', () => {
+  const argv = buildTranscribeArgv({
+    scriptPath: '/runtime/transcribe.py',
+    audioPath: '/work/audio.wav',
+    options: { ...SENTINEL_SPEECH, initialPrompt: 'Расшифровка встречи. С пунктуацией.' },
+  });
+  const at = argv.indexOf('--initial-prompt');
+  assert.notEqual(at, -1, 'без флага видео снова распознаётся сплошным потоком');
+  assert.equal(argv[at + 1], 'Расшифровка встречи. С пунктуацией.');
+  assert.equal(
+    argv.filter((item) => item === '--initial-prompt').length,
+    1,
+    'подсказка не должна дублироваться: whisper возьмёт последнюю и это будет молча',
+  );
 });
 
 test('turbo argv передаёт canonical и разрешённые aliases на той же pinned revision', () => {
@@ -642,7 +659,7 @@ sys.argv = ['transcribe.py', '/audio.wav', '--model', 'large-v3', '--lang', 'en'
             '--model-repo', 'Systran/faster-whisper-large-v3',
             '--model-revision', 'edaa852ec7e145841d8ffdb056a99866b5f0a478',
             '--device', 'cuda', '--compute-type', 'float16', '--beam-size', '9',
-            '--hotwords', 'Fastify', '--no-condition-previous', '--vad-silence-ms', '875']
+            '--hotwords', 'Fastify', '--no-condition-previous', '--vad-silence-ms', '875'] + sys.argv[2:]
 stdout = io.StringIO()
 with contextlib.redirect_stdout(stdout):
     module.main()
@@ -663,11 +680,26 @@ print(json.dumps({'calls': calls, 'result': json.loads(stdout.getvalue())}))
     beam_size: 9,
     hotwords: 'Fastify',
     condition_on_previous_text: false,
+    initial_prompt: null,
+    word_timestamps: false,
     vad_filter: true,
     vad_parameters: { min_silence_duration_ms: 875 },
   });
   assert.equal(payload.result.hotwordsTokens, 224);
   assert.equal(payload.result.hotwordsTruncated, true);
+
+  // Тот же скрипт с подсказкой обязан САМ поднять выравнивание по словам. Замер на
+  // large-v3-turbo: без него модель повторяет текст подсказки вместо речи, поэтому
+  // передать промпт и не включить word_timestamps — это тихая порча расшифровки.
+  const withPrompt = spawnSync(
+    'python3',
+    ['-c', source, scriptPath, '--initial-prompt', 'Расшифровка встречи. С пунктуацией.'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(withPrompt.status, 0, withPrompt.stderr);
+  const prompted = JSON.parse(withPrompt.stdout).calls[2].kwargs;
+  assert.equal(prompted.initial_prompt, 'Расшифровка встречи. С пунктуацией.');
+  assert.equal(prompted.word_timestamps, true);
 });
 
 test('one-shot и warmup считают словарь точным tokenizer и тем же лимитом среза', () => {

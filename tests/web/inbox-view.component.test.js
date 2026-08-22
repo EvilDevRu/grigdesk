@@ -604,6 +604,39 @@ test('404 plugin_disabled при version skew — состояние, а не к
   assert.equal(wrapper.find('[role="alert"]').exists(), false);
 });
 
+test('недоставленный ответ в чат виден человеку, доставленный молчит', async (t) => {
+  const notifications = [
+    { enabled: true, sent: false, reason: 'unreachable' },
+    { enabled: true, sent: true, reason: '' },
+    // Правило без галки ответа не обещало сообщения — предупреждать не о чем.
+    { enabled: false, sent: false, reason: '' },
+  ];
+  const api = {
+    async get() { return response(); },
+    async post() { return { taskId: '8422', notification: notifications.shift() }; },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+  const create = async () => {
+    await button(wrapper.get('[data-status="new"]'), 'Создать задачу').trigger('click');
+    await settle();
+    return wrapper.findAll('.banner').find((entry) => /Задача создана/.test(entry.text()));
+  };
+
+  // Повтора у ответа нет по замыслу, поэтому сообщить в чат придётся человеку —
+  // раньше он узнавал об этом только из журнала сервера.
+  const warned = await create();
+  assert.match(warned.text(), /ответ в исходный чат не отправлен \(связь с Telegram оборвалась\)/u);
+  assert.match(warned.text(), /сообщите там сами/u);
+  assert.equal(warned.classes().includes('warn'), true);
+  assert.equal(warned.classes().includes('good'), false);
+
+  for (const quiet of ['доставленный ответ', 'выключенное правило']) {
+    const banner = await create();
+    assert.equal(banner.text().trim(), 'Задача создана', quiet);
+    assert.equal(banner.classes().includes('good'), true, quiet);
+  }
+});
+
 test('router регистрирует lazy /inbox и /github', async () => {
   const source = await readFile(new URL('../../web/src/router.js', import.meta.url), 'utf8');
   assert.match(source, /path: '\/inbox'.*InboxView\.vue/);

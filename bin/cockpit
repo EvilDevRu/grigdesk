@@ -37,6 +37,12 @@ ensure_deps() {
 
 build_web() { echo "→ Сборка web…"; ( cd "$DIR/web" && npm run build ); }
 
+# Probe живёт в отдельном Node-процессе: DatabaseSync не блокирует
+# Fastify. Неготовый runtime отключает только будущий search, а не Cockpit.
+search_preflight() {
+  node --disable-warning=ExperimentalWarning "$DIR/server/scripts/knowledge-search-preflight.mjs" || true
+}
+
 case "$CMD" in
   deps)
     cd "$DIR/server" && npm install --no-audit --no-fund
@@ -47,6 +53,7 @@ case "$CMD" in
     ;;
   dev)
     ensure_deps
+    search_preflight
     echo "→ Dev: vite :5180 + сервер (--watch) :$PORT"
     ( cd "$DIR/web" && npm run dev ) &
     VITE_PID=$!
@@ -59,7 +66,7 @@ case "$CMD" in
       echo "  (чтобы перезапустить — сначала останови процесс на этом порту)"
       exit 0
     fi
-    ensure_deps; build_web
+    ensure_deps; build_web; search_preflight
     # С планшета — по https: без него нет PWA (secure context), а http из сети сам уводит
     # редиректом на защищённый порт. Сертификат — «Настройки → Доступ → Локальный HTTPS».
     echo "→ Сервер поднят: http://localhost:$PORT  (с планшета — https://<адрес мозга>:$TLS_PORT)"

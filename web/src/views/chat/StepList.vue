@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue';
-import { lineDiff, splitRows } from '../../shared/diff.js';
+import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
@@ -57,11 +57,40 @@ const summary = computed(() => {
 function diffOf(row) {
   return lineDiff(row.diff?.old, row.diff?.new);
 }
+function changesOf(row) {
+  return Array.isArray(row.changes)
+    ? row.changes.filter((change) => change && typeof change === 'object')
+    : [];
+}
+function changeDiffOf(change) {
+  if (typeof change.diff === 'string') return unifiedDiff(change.diff);
+  return lineDiff(change.diff?.old, change.diff?.new);
+}
 // Пары строк для показа в две колонки (слева убрано, справа добавлено).
 function splitOf(row) {
   return splitRows(diffOf(row).rows);
 }
+function splitChangeOf(change) {
+  return splitRows(changeDiffOf(change).rows);
+}
+function hasChangeDiff(change) {
+  return typeof change?.diff === 'string'
+    || (change?.diff && typeof change.diff === 'object');
+}
+function hasRichDiff(row) {
+  return changesOf(row).some(hasChangeDiff);
+}
 function diffStat(row) {
+  if (hasRichDiff(row)) {
+    const stat = changesOf(row).reduce((sum, change) => {
+      if (!hasChangeDiff(change)) return sum;
+      const diff = changeDiffOf(change);
+      sum.added += diff.added;
+      sum.removed += diff.removed;
+      return sum;
+    }, { added: 0, removed: 0 });
+    return `+${stat.added} −${stat.removed}`;
+  }
   const d = diffOf(row);
   return `+${d.added} −${d.removed}`;
 }
@@ -71,7 +100,10 @@ function toggle(i, row) {
   expanded.value[i] = !expanded.value[i];
 }
 function hasBody(row) {
-  return !!(row.text || row.command || row.preview || row.diff || row.res?.text || row.sub);
+  return !!(
+    row.text || row.command || row.preview || row.diff || row.res?.text || row.sub
+    || changesOf(row).length
+  );
 }
 
 // Иконка и подпись вида шага.
@@ -133,7 +165,7 @@ function toolLabel(name) {
             <span class="ico">{{ kindOf(r.name).ico }}</span>
             <span class="nm">{{ toolLabel(r.name) }}</span>
             <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
-            <span v-if="r.diff" class="stat">{{ diffStat(r) }}</span>
+            <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
             <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
             <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">{{ r.res.ok ? '✓' : '✕' }}</span>
             <span v-else-if="live" class="mark run">…</span>
@@ -143,8 +175,21 @@ function toolLabel(name) {
             <div v-if="r.sub" class="path">{{ r.sub }}</div>
             <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
             <pre v-if="r.command" class="body command">{{ r.command }}</pre>
+            <!-- Один вызов инструмента может изменить несколько файлов. -->
+            <div v-if="changesOf(r).length" class="changes">
+              <div v-for="(change, c) in changesOf(r)" :key="`${change.path || ''}:${c}`" class="change">
+                <div v-if="change.path" class="path">{{ change.path }}</div>
+                <div v-if="hasChangeDiff(change)" class="diff">
+                  <div class="dhead"><span>было</span><span>стало</span></div>
+                  <div v-for="(d, k) in splitChangeOf(change)" :key="k" class="drow">
+                    <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
+                    <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <!-- Дифф правки в две колонки: слева убранное, справа добавленное -->
-            <div v-if="r.diff" class="diff">
+            <div v-if="r.diff && !hasRichDiff(r)" class="diff">
               <div class="dhead"><span>было</span><span>стало</span></div>
               <div v-for="(d, k) in splitOf(r)" :key="k" class="drow">
                 <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
@@ -200,6 +245,8 @@ function toolLabel(name) {
 
 .body-wrap { padding: 2px 0 6px 26px; display: flex; flex-direction: column; gap: 4px; }
 .path { font-size: 11px; color: var(--ink-mid); font-family: var(--mono, monospace); word-break: break-all; }
+.changes, .change { display: flex; flex-direction: column; gap: 4px; }
+.change + .change { margin-top: 4px; }
 .body { margin: 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
   font-size: 11.5px; line-height: 1.45; color: var(--ink-mid); white-space: pre-wrap; word-break: break-word;
   max-height: 260px; overflow: auto; }

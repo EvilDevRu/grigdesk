@@ -13,6 +13,11 @@ const PINIA_URL = pathToFileURL(fileURLToPath(
 const CHAT_TITLE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/chat-title.js', import.meta.url),
 )).href;
+// Чистый модуль без Vue/pinia — подставляем настоящий по абсолютному URL: у `data:`-модуля
+// нет базового пути, и относительный импорт уронил бы весь файл на этапе импорта.
+const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/src/shared/companion-run.js', import.meta.url),
+)).href;
 
 const apiHarness = {};
 globalThis.__slashChatApi = apiHarness;
@@ -29,7 +34,10 @@ function patch(source) {
       "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
       + ' const document = { hidden: false };',
     )
-    .replace("import { useUiContextStore } from './ui-context.js';", 'const useUiContextStore = () => ({ extra: {} });')
+    .replace(
+      "import { useUiContextStore } from './ui-context.js';",
+      "const useUiContextStore = () => ({ capture: () => ({ promptContext: { page: '', path: '/chats' } }) });",
+    )
     .replace(
       "import { useProvidersStore } from './providers.js';",
       'const useProvidersStore = () => ({ modelOf: (value) => {'
@@ -46,6 +54,14 @@ function patch(source) {
       'const sseSubscribe = () => () => {};',
     )
     .replace("import { mdToText } from '../shared/md.js';", 'const mdToText = (x) => x;')
+    .replace(
+      "import { normalizeCompanionRun } from '../shared/companion-run.js';",
+      `import { normalizeCompanionRun } from "${COMPANION_RUN_URL}";`,
+    )
+    .replace(
+      "import { chatVisibility } from '../shared/chat-visibility.js';",
+      'const chatVisibility = { isVisible: () => false, register: () => ({ update() {}, dispose() {} }) };',
+    )
     // В отличие от helpers/chat-store.js хук названия оставляем НАСТОЯЩИМ: проверяем,
     // что слэш-команда его не инициирует.
     .replace(

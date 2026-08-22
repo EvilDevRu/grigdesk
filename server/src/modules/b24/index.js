@@ -67,7 +67,28 @@ async function b24Module(fastify, opts) {
   };
   const taskId = (request) => String(request.params.id).replace(/[^0-9]/g, '');
 
-  fastify.post('/api/b24/tasks', wrap((r) => b24.createTask(r.body || {})));
+  // Создание задачи. `frames` — кадры записи из раздела «Видео»: браузер присылает
+  // ИМЯ кадра, а путь на диске подставляет сам media (декоратор `mediaFramePath`).
+  // Принимать путь от клиента здесь нельзя: это ручка, которая грузит файлы на портал,
+  // и произвольный путь означал бы «залей туда что скажу». Ссылка ленивая — модуль
+  // media регистрируется отдельно, а при выключенном плагине кадров просто нет.
+  fastify.post('/api/b24/tasks', wrap((r) => {
+    const body = { ...(r.body || {}) };
+    const names = Array.isArray(body.frames) ? body.frames : [];
+    delete body.frames;
+    if (names.length && typeof fastify.mediaFramePath === 'function') {
+      const paths = names.map((name) => fastify.mediaFramePath(name)).filter(Boolean);
+      // На портале у вложения видно ИМЯ, а служебное `p0-00272s.jpg` читается мусором.
+      // Таймкод в него не кладём: имя кадра несёт локальную секунду своей части, а в
+      // описании задачи стоит сквозная — два разных числа сбивали бы с толку сильнее,
+      // чем их отсутствие.
+      const files = paths.map((path, i) => ({ path, name: i ? `запись-${i + 1}.jpg` : 'запись.jpg' }));
+      // Исчезнувший кадр (истёк TTL, сменился разбор) задачу не отменяет: описание с
+      // таймкодом на месте, и терять из-за картинки уже готовую постановку незачем.
+      if (files.length) body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
+    }
+    return b24.createTask(body);
+  }));
   fastify.post('/api/b24/task/:id/comment', wrap((r) => b24.addComment(taskId(r), (r.body || {}).text || '')));
   // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
   fastify.get('/api/b24/task/:id/comments', wrap(async (r) => {

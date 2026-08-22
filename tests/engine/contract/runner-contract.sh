@@ -68,6 +68,40 @@ fi
 kill -0 "$pid" 2>/dev/null
 assert_rc 1 "$?" "foreground runner is reaped before launcher returns"
 
+# Провайдер владеет своим run-каталогом и может подменить имя пути, пока launcher ещё
+# держит исходные безопасно открытые дескрипторы. Это должно быть явной ошибкой хоста
+# даже при нулевом коде провайдера: иначе успешный продуктовый результат обойдёт
+# обязательное запечатывание источника.
+tamper_module="$TEST_ROOT/source-tamper-runner.sh"
+printf '%s\n' \
+  'runner_tamper_probe() { printf "ready\n"; }' \
+  'runner_tamper_catalog() { printf "fake-model\ttamper\tfixture\t1\tdefault\t1\t1\t0\t1\t0.0.0\t999.0.0\n"; }' \
+  'runner_tamper_capabilities() { printf "status status_fd foreground structured_output\n"; }' \
+  'runner_tamper_run() {' \
+  '  local run_dir=$7' \
+  '  rm -f -- "$run_dir/events.jsonl"' \
+  '  : >"$run_dir/events.jsonl"' \
+  '  chmod 600 -- "$run_dir/events.jsonl"' \
+  '  printf "{\"event\":\"retained-source\"}\n"' \
+  '  : >"$run_dir/provider-finished"' \
+  '}' \
+  'runner_tamper_classify() { printf "ok\n"; }' \
+  'runner_tamper_fanout_count() { printf "0\n"; }' \
+  'runner_tamper_dialect() { printf "fixture\n"; }' \
+  'runner_tamper_interrupt() { return 0; }' >"$tamper_module"
+runner_registry_add tamper "$tamper_module"
+tamper_run_dir="$STATE_DIR/logs/runs/t44/CHECK/run-source-tamper"
+runner_launch tamper 44 "tamper" CHECK fake-model high 5 \
+  "$tamper_run_dir" run-source-tamper 1 "$status_token" >/dev/null 2>&1
+assert_rc 76 "$?" "source identity failure overrides a zero provider exit"
+assert_file_exists "$tamper_run_dir/provider-finished" \
+  "source identity failure is detected after provider completion"
+if rg -F retained-source "$tamper_run_dir/events.jsonl" >/dev/null 2>&1; then
+  test_fail "replaced provider path never substitutes for the retained source"
+else
+  test_ok "replaced provider path never substitutes for the retained source"
+fi
+
 # Обычный `factory N resume` из терминала не обязан заранее экспортировать
 # FACTORY_CONFIG_ROOT. Launcher должен получить безопасный персональный default,
 # а не падать до запуска provider с `parameter null or not set`.
@@ -157,6 +191,36 @@ assert_file_missing "$(runner_trusted_identity_file 43)" \
   "deferred signal retires the exact identity after PGID quiescence"
 assert_eq idle "$RUNNER_LAUNCH_STATE" \
   "launcher leaves the signal critical section in a quiescent state"
+
+# В каждую долговечную границу после fork и до SIGCONT можно инъецировать сбой.
+# Удерживаемый потомок должен быть собран, trusted-идентичность снята, а код провайдера
+# не должен создать первый артефакт независимо от того, какая публикация хоста упала.
+fault_ordinal=0
+for fault_point in after_held_identity after_identity_publish after_runner_started after_lineage_started; do
+  fault_ordinal=$((fault_ordinal + 1))
+  fault_task=$((60 + fault_ordinal))
+  fault_run="run-fault-$fault_ordinal"
+  fault_dir="$STATE_DIR/logs/runs/t${fault_task}/CHECK/$fault_run"
+  export FACTORY_RUNNER_LAUNCH_FAULT=$fault_point
+  runner_launch fake "$fault_task" "must-not-run" CHECK fake-model high 5 \
+    "$fault_dir" "$fault_run" 1 "$status_token" >/dev/null 2>&1
+  fault_rc=$?
+  unset FACTORY_RUNNER_LAUNCH_FAULT
+  assert_rc 91 "$fault_rc" "$fault_point aborts at its exact post-fork boundary"
+  assert_file_missing "$fault_dir/last.md" \
+    "$fault_point keeps provider code behind SIGSTOP"
+  assert_file_missing "$(runner_trusted_identity_file "$fault_task")" \
+    "$fault_point retires any published trusted identity"
+  assert_eq idle "$RUNNER_LAUNCH_STATE" \
+    "$fault_point leaves launcher state quiescent"
+  if [[ -f "$fault_dir/meta.env" ]]; then
+    fault_pid=$(awk -F= '$1=="PID"{print $2}' "$fault_dir/meta.env")
+    kill -0 "$fault_pid" 2>/dev/null
+    assert_rc 1 "$?" "$fault_point reaps the held process session"
+  else
+    test_ok "$fault_point reaps before a diagnostic meta mirror exists"
+  fi
+done
 
 # Воспроизводим непосредственно окно восстановления: восстановление TERM само
 # отправляет INT, пока INT ещё указывает на временный trap отложенного сигнала.

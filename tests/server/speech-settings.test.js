@@ -69,7 +69,16 @@ test('read остаётся fail-soft, но readStored показывает ош
 test('video plugin не объявляет второй источник speech-настроек', () => {
   const video = SYSTEM.find((plugin) => plugin.id === 'video');
   assert.ok(video);
-  assert.deepEqual(video.settings, []);
+  // Проверяется именно РЕЧЬ: качество, модель распознавания, язык и словарь живут в
+  // едином speech-контракте, и вторая копия любого из этих ключей в plugin settings
+  // означала бы два места правды. Настройки, которые к распознаванию отношения не
+  // имеют (что делать с уже готовой расшифровкой), плагину принадлежать вправе.
+  const speechKeys = new Set(Object.keys(SPEECH_DEFAULTS));
+  const collisions = video.settings.map((setting) => setting.key).filter((key) => speechKeys.has(key));
+  assert.deepEqual(collisions, []);
+  // Ключей распознавания в speech-контракте достаточно, чтобы проверка была не
+  // формальной: model, videoModel, quality, videoQuality, language, dictionary.
+  assert.ok(speechKeys.has('videoModel') && speechKeys.has('videoQuality'));
 });
 
 test('SpeechSettingsStore сериализует частичные патчи и не теряет соседние поля', async (t) => {

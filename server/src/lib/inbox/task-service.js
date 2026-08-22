@@ -316,6 +316,30 @@ function publicSkipped(entries) {
   });
 }
 
+/**
+ * Чем закончилась попытка ответить в исходный чат.
+ *
+ * Наружу идёт только словарный код: свободный текст отказа провайдера содержит
+ * URL с токеном, а показывать это предстоит в браузере. Больше того, различие
+ * важно человеку: «связь оборвалась» повторится само при следующем обращении,
+ * а «канал отказал» означает права или токен.
+ */
+function notificationFailureReason(err) {
+  if (err?.kind === 'transport') return 'unreachable';
+  if (err?.kind === 'telegram') return 'rejected';
+  return 'failed';
+}
+
+function publicNotification(outcome, fallbackReason = '') {
+  const value = isPlainObject(outcome) ? outcome : {};
+  const enabled = value.enabled !== false;
+  const sent = value.sent === true;
+  const reason = typeof value.reason === 'string' && SAFE_REASON_RE.test(value.reason)
+    ? value.reason
+    : fallbackReason;
+  return Object.freeze({ enabled, sent, reason: sent ? '' : reason });
+}
+
 function safeTaskId(value) {
   const taskId = String(value ?? '').trim();
   if (!taskId
@@ -508,16 +532,20 @@ export class InboxTaskService {
   }
 
   async _deliverTaskNotification(receipt) {
-    if (!receipt) return;
+    if (!receipt) return null;
     try {
-      await receipt.resolved.context.notifyTaskCreated(receipt.payload);
+      return publicNotification(await receipt.resolved.context.notifyTaskCreated(receipt.payload));
     } catch (err) {
       // B24 и durable decision уже состоялись. Ошибка обратного сообщения не
-      // имеет права превратить успех в повтор создания задачи.
+      // имеет права превратить успех в повтор создания задачи. Но и молчать о
+      // ней нельзя: раньше провал жил только в warn-логе, и со стороны человека
+      // это выглядело как «оповещение просто не пришло» — при том, что
+      // автоповтора здесь нет и не будет, а значит сообщить в чат придётся ему.
       this.log.warn?.(
         { channel: receipt.channel, taskId: receipt.payload.taskId, code: err?.code },
         'inbox: задача создана, но channel confirmation не отправлен',
       );
+      return publicNotification({ enabled: true, sent: false }, notificationFailureReason(err));
     } finally {
       await this._release(receipt.resolved);
     }
@@ -931,8 +959,8 @@ export class InboxTaskService {
     // Network confirmation не держит глобальную очередь Inbox: следующий
     // decision может начаться, пока Telegram отвечает. Account lease остаётся
     // жив до конца вызова и не даёт switch подменить bot/token на полпути.
-    await this._deliverTaskNotification(committed.notification);
-    return committed.result;
+    const notification = await this._deliverTaskNotification(committed.notification);
+    return notification ? { ...committed.result, notification } : committed.result;
   }
 
   async dismiss(ref, body, internalOptions) {

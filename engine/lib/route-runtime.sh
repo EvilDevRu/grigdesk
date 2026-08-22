@@ -30,6 +30,8 @@ source "${FACTORY_HOME:?}/lib/attempt-stage-state.sh"
 source "$FACTORY_HOME/lib/workspace-guard.sh"
 # shellcheck disable=SC1091
 source "$FACTORY_HOME/lib/instrumentation-transaction.sh"
+# shellcheck disable=SC1091
+source "$FACTORY_HOME/lib/runtime-analytics.sh"
 
 _route_v2_fail() {
   printf 'route-v2 runtime: %s\n' "$*" >&2
@@ -552,6 +554,106 @@ _route_v2_load_attempt() {
     ROUTE_V2_ROUTES_DIR ROUTE_V2_ATTEMPT_DIR
 }
 
+_route_v2_lifecycle_stage_edge() {
+  local task=$1 attempt=$2 sequence=$3 event_file hash kind outcome action reason transition
+  if [[ "$sequence" == 0 ]]; then
+    printf 'initial\t\t\n'
+    return 0
+  fi
+  event_file=$(mktemp "$(factory_control_root)/.route-v2-lifecycle-edge.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$task" "$attempt" >"$event_file" || {
+    local rc=$?
+    rm -f -- "$event_file"
+    return "$rc"
+  }
+  hash=$(sha256sum -- "$event_file" | awk '{print $1}') || {
+    rm -f -- "$event_file"; return 78;
+  }
+  kind=$(runtime_analytics_json_get_v2 "$event_file" kind 2>/dev/null || true)
+  outcome=$(runtime_analytics_json_get_v2 "$event_file" outcome 2>/dev/null || true)
+  action=$(runtime_analytics_json_get_v2 "$event_file" action.rewind 2>/dev/null || true)
+  if [[ "$kind" == human-rewind ]]; then
+    reason=human_rewind
+  elif [[ -n "$action" && "$outcome" == rejected ]]; then
+    reason=gate_rejected
+  elif [[ -n "$action" ]]; then
+    reason=route_rewind
+  else
+    reason=forward_transition
+  fi
+  transition="tr_${hash:0:32}"
+  rm -f -- "$event_file"
+  printf '%s\t%s\t%s\n' "$reason" "$transition" "$hash"
+}
+
+_route_v2_lifecycle_finish_visit_after_commit() {
+  local task=$1 attempt=$2 outcome=$3 event_file hash action rewind transition exit_kind
+  local status=succeeded reason=normal
+  runtime_lifecycle_enabled_v2 || return 0
+  [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]] || return 78
+  event_file=$(mktemp "$(factory_control_root)/.route-v2-lifecycle-commit.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$task" "$attempt" >"$event_file" || {
+    local rc=$?
+    rm -f -- "$event_file"
+    return "$rc"
+  }
+  hash=$(sha256sum -- "$event_file" | awk '{print $1}') || {
+    rm -f -- "$event_file"; return 78;
+  }
+  action=$(runtime_analytics_json_get_v2 "$event_file" action.next 2>/dev/null || true)
+  rewind=$(runtime_analytics_json_get_v2 "$event_file" action.rewind 2>/dev/null || true)
+  transition="tr_${hash:0:32}"
+  if [[ -n "${ROUTE_V2_GATE_DECISION:-}" ]]; then
+    local feedback_hash=""
+    [[ -z "${ROUTE_V2_GATE_FEEDBACK:-}" ]] || \
+      feedback_hash=$(runtime_analytics_hash_string_v2 "$ROUTE_V2_GATE_FEEDBACK") || {
+        rm -f -- "$event_file"
+        return 78
+      }
+    runtime_lifecycle_gate_decided_v2 \
+      "$FACTORY_LIFECYCLE_NODE_ID" "$ROUTE_V2_GATE_DECISION" "$hash" \
+      "$feedback_hash" "$transition" "$hash" >/dev/null || {
+        rm -f -- "$event_file"
+        return
+      }
+  fi
+  if [[ -n "$action" ]]; then
+    exit_kind=forward_transition
+  elif [[ -n "$rewind" && "$outcome" == rejected ]]; then
+    exit_kind=gate_rejected
+  elif [[ -n "$rewind" ]]; then
+    exit_kind=route_rewind
+  else
+    exit_kind=attempt_terminal
+  fi
+  case "$outcome" in
+    failed) status=failed; reason=product_failure ;;
+    exhausted) status=failed; reason=exhausted ;;
+  esac
+  rm -f -- "$event_file"
+  runtime_lifecycle_node_visit_finish_v2 "$status" "$reason" "$exit_kind" \
+    "$transition" "$hash" >/dev/null
+}
+
+_route_v2_lifecycle_gate_wait_after_pause() {
+  local task=$1 attempt=$2 gate=$3 event_file hash sequence kind rc
+  runtime_lifecycle_enabled_v2 || return 0
+  event_file=$(mktemp "$(factory_control_root)/.route-v2-lifecycle-gate.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$task" "$attempt" >"$event_file" || {
+    rc=$?
+    rm -f -- "$event_file"
+    return "$rc"
+  }
+  hash=$(sha256sum -- "$event_file" | awk '{print $1}') || rc=$?
+  sequence=$(runtime_analytics_json_get_v2 "$event_file" sequence) || rc=$?
+  kind=$(runtime_analytics_json_get_v2 "$event_file" kind) || rc=$?
+  rm -f -- "$event_file"
+  (( ${rc:-0} == 0 )) || return "$rc"
+  [[ "$kind" == pause && "$sequence" =~ ^[1-9][0-9]*$ && "$hash" =~ ^[a-f0-9]{64}$ ]] ||
+    return 78
+  runtime_lifecycle_gate_wait_begin_v2 "$gate" "$sequence" "$hash" >/dev/null
+}
+
 _route_v2_workspace_roots_array() {
   declare -F route_v2_workspace_roots >/dev/null ||
     _route_v2_fail "route_v2_workspace_roots hook is missing" || return
@@ -627,6 +729,7 @@ _route_v2_commit_and_project() {
     "$task" "$attempt" "$node" "$outcome" "$rewind_limit" \
     "$verdict_b64" "$no_progress_limit" "$recovery" "$target_budget" \
     "$reject_feedback") || return
+  _route_v2_lifecycle_finish_visit_after_commit "$task" "$attempt" "$outcome" || return
   if declare -F route_v2_project_latest_reset >/dev/null; then
     route_v2_project_latest_reset "$task" "$attempt" || {
       rc=$?
@@ -743,6 +846,37 @@ _route_v2_transaction_after() {
   fi
 }
 
+# Открытые находки для промпта берём из УЖЕ построенного контекста узла, а не отдельным
+# чтением журнала: `attempt_stage_state_findings_v2` берёт task lock, а мы внутри
+# диспетчера, который этот же лок держит. Контекст-файл содержит секцию evidence всегда —
+# её наполняет factory-context, тогда как requiredContext маршрута решает лишь то, что
+# попадёт в промпт через render_node. Именно поэтому доставка находок не может зависеть
+# от requiredContext: это инвариант движка, а не решение автора схемы.
+#
+# Берём только `open`: `closed` — история, `deferred` адресованы человеку на воротах.
+# Любой сбой разбора даёт пустую строку и молчание — находки усиливают промпт, но не
+# являются условием исполнения узла, и ронять из-за них заход нельзя.
+_route_v2_open_findings_from_context() {
+  local context_file=${1:-}
+  [[ -n "$context_file" && -f "$context_file" && ! -L "$context_file" ]] || return 0
+  python3 -c '
+import json, sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        context = json.load(handle)
+except (OSError, ValueError):
+    raise SystemExit(0)
+if not isinstance(context, dict):
+    raise SystemExit(0)
+evidence = context.get("evidence")
+findings = evidence.get("findings") if isinstance(evidence, dict) else None
+records = findings.get("open") if isinstance(findings, dict) else None
+if isinstance(records, list) and records:
+    json.dump(records, sys.stdout, ensure_ascii=False)
+' "$context_file" 2>/dev/null || return 0
+}
+
 _route_v2_run_agent_node() {
   local task=$1 attempt=$2 node=$3 run_key=$4 policy=$5 sequence=$6
   local _r2_context_file _r2_prompt_file active before_signature after_signature
@@ -752,6 +886,7 @@ _route_v2_run_agent_node() {
   # можно только первое, поэтому источник помечается флагом.
   ROUTE_V2_NO_RESULT=0
   ROUTE_V2_NODE_VERDICT_B64=""
+  ROUTE_V2_FINAL_RUN_ID=""
   declare -F run_agent >/dev/null || _route_v2_fail "run_agent is unavailable" || return
   declare -F route_v2_context_for_node >/dev/null ||
     _route_v2_fail "route_v2_context_for_node hook is missing" || return
@@ -827,6 +962,8 @@ _route_v2_run_agent_node() {
   fi
 
   mkdir -p -- "$STATE_DIR/logs" || return 1
+  local _r2_open_findings
+  _r2_open_findings=$(_route_v2_open_findings_from_context "$_r2_context_file")
   FACTORY_ROUTE_FILESYSTEM_POLICY="$policy" \
   FACTORY_ROUTE_BROWSER_POLICY="${ROUTE_V2_NODE_BROWSER:-forbid}" \
   FACTORY_ROUTE_TIMEOUT_CLASS="${ROUTE_V2_NODE_TIMEOUT_CLASS:-}" \
@@ -836,6 +973,7 @@ _route_v2_run_agent_node() {
   FACTORY_STAGE_RETRY="${ROUTE_V2_NODE_RETRY:-1}" \
   FACTORY_STAGE_RETRY_REASON="${ROUTE_V2_NODE_RETRY_REASON:-}" \
   FACTORY_STAGE_HUMAN_NOTE="${ROUTE_V2_NODE_HUMAN_NOTE:-}" \
+  FACTORY_STAGE_OPEN_FINDINGS="$_r2_open_findings" \
     run_agent "$task" "$(cat "$_r2_prompt_file")" "$run_key" \
       >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
   local agent_rc=$?
@@ -889,6 +1027,7 @@ _route_v2_run_agent_node() {
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
     return 78
   }
+  ROUTE_V2_FINAL_RUN_ID=$run_id
   [[ "$verdict_b64" != - ]] || verdict_b64=""
   run_state_verdict_validate "$result" "$verdict_b64" || {
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
@@ -1100,7 +1239,7 @@ _route_v2_command_verdict_spill() {
 _route_v2_run_command_node() {
   local task=$1 attempt=$2 node=$3 run_key=$4 command_id=$5 policy=$6 sequence=$7
   local context_file result_file guard_before="" guard_after="" rc
-  local outcome comment_b64 verdict_b64 comment
+  local outcome comment_b64 verdict_b64 comment contract_hash verdict_hash=""
   declare -F profile_route_command >/dev/null ||
     _route_v2_fail "profile_route_command hook is missing for command=$command_id" || return
   declare -F route_v2_context_for_node >/dev/null ||
@@ -1143,30 +1282,49 @@ _route_v2_run_command_node() {
     rm -f -- "$context_file" "$result_file"
     return 1
   }
+  contract_hash=$(runtime_analytics_hash_string_v2 \
+    "$ROUTE_V2_CATALOG|$ROUTE_V2_ROUTE_HASH|$node|$command_id|$policy") || {
+      rm -f -- "$context_file" "$result_file"
+      return 78
+    }
+  runtime_lifecycle_command_begin_v2 "$contract_hash" >/dev/null || {
+    rm -f -- "$context_file" "$result_file"
+    return 78
+  }
   profile_route_command \
     "$task" "$ROUTE_V2_ROUTE" "$node" "$run_key" "$command_id" "$context_file" \
     >"$result_file" \
     2>>"$STATE_DIR/logs/t${task}.route-v2.log"
   rc=$?
   if (( rc != 0 )); then
+    runtime_lifecycle_command_finish_v2 failed unavailable "$rc" '' >/dev/null || true
     rm -f -- "$context_file" "$result_file"
     _route_v2_fail "profile command=$command_id failed without verdict (code $rc)" || true
     return 75
   fi
   IFS=$'\t' read -r outcome comment_b64 verdict_b64 \
     < <(_route_v2_command_result "$result_file") || {
+      runtime_lifecycle_command_finish_v2 failed conflict 0 '' >/dev/null || true
       _route_v2_command_verdict_spill "$task" "$node" "$result_file" "форма JSON"
       rm -f -- "$context_file" "$result_file"
       return 78
     }
   [[ "$verdict_b64" != - ]] || verdict_b64=""
   comment=$(printf '%s' "$comment_b64" | base64 -d 2>/dev/null) || {
+    runtime_lifecycle_command_finish_v2 failed conflict 0 '' >/dev/null || true
     _route_v2_command_verdict_spill "$task" "$node" "$result_file" "comment не декодируется"
     rm -f -- "$context_file" "$result_file"
     return 78
   }
   run_state_verdict_validate "$outcome" "$verdict_b64" || {
+    runtime_lifecycle_command_finish_v2 failed conflict 0 '' >/dev/null || true
     _route_v2_command_verdict_spill "$task" "$node" "$result_file" "verdict не прошёл валидацию"
+    rm -f -- "$context_file" "$result_file"
+    return 78
+  }
+  [[ -z "$verdict_b64" ]] || \
+    verdict_hash=$(printf '%s' "$verdict_b64" | base64 -d | sha256sum | awk '{print $1}')
+  runtime_lifecycle_command_finish_v2 succeeded normal 0 "$verdict_hash" >/dev/null || {
     rm -f -- "$context_file" "$result_file"
     return 78
   }
@@ -1197,6 +1355,20 @@ _route_v2_run_command_node() {
   ROUTE_V2_NODE_VERDICT_B64=$verdict_b64
 }
 
+_route_v2_bootstrap_abort_lifecycle_v2() {
+  local active=$1 execution_open=$2 retry_after=$3 reason=$4
+  (( active )) || return 0
+  if (( execution_open )); then
+    runtime_lifecycle_node_execution_finish_v2 \
+      failed "$reason" "$retry_after" '' none '' "${MULTI_LAST_RUN_ID:-}" \
+      >/dev/null || true
+  fi
+  runtime_lifecycle_node_visit_finish_v2 \
+    interrupted "$reason" attempt_interrupted '' '' >/dev/null || true
+  runtime_lifecycle_attempt_span_finish_v2 \
+    bootstrap_finished "bootstrap:scout" failed "$reason" '' >/dev/null || true
+}
+
 route_v2_dispatch_bootstrap() {
   local task attempt artifact description_tmp transition_tmp record_tmp
   local _r2_context_file _r2_prompt_file active before_signature after_signature
@@ -1204,6 +1376,7 @@ route_v2_dispatch_bootstrap() {
   local fanout_mode fanout_max fanout_degrade retry_no_result retry_product
   local provider_attempts provider_strategy browser_policy timeout_class command_id
   local tries_left attempt_no agent_rc
+  local bootstrap_details lifecycle_active=0 execution_open=0 retry_after
   _route_v2_require_isolation || return
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
@@ -1294,6 +1467,20 @@ route_v2_dispatch_bootstrap() {
     return 78
   }
   mkdir -p -- "$STATE_DIR/logs" || return 1
+  if runtime_lifecycle_enabled_v2; then
+    bootstrap_details=$(runtime_analytics_json_v2 \
+      bootstrapId string scout catalogHash string "$ROUTE_V2_CATALOG") || return 78
+    runtime_lifecycle_attempt_span_begin_v2 \
+      bootstrap_started "bootstrap:scout" "$bootstrap_details" >/dev/null || return
+    runtime_lifecycle_node_visit_begin_v2 \
+      scout SCOUT 0 initial '' '' >/dev/null || {
+        rc=$?
+        runtime_lifecycle_attempt_span_finish_v2 \
+          bootstrap_finished "bootstrap:scout" failed unavailable '' >/dev/null || true
+        return "$rc"
+      }
+    lifecycle_active=1
+  fi
   # Ретраи bootstrap по контракту бандла: бюджеты noResult и providerFailure
   # суммируются (см. комментарий в route_v2_dispatch_next). Scout обязан
   # закончиться done, поэтому исчерпание бюджета остаётся отказом 75, а не
@@ -1301,6 +1488,18 @@ route_v2_dispatch_bootstrap() {
   tries_left=$(( 1 + retry_no_result + provider_attempts ))
   attempt_no=1
   while :; do
+    retry_after=$((tries_left - 1))
+    (( retry_after >= 0 )) || retry_after=0
+    runtime_lifecycle_node_execution_begin_v2 \
+      agent "$((attempt_no - 1))" "$retry_after" \
+      "$([[ "$attempt_no" == 1 ]] && printf initial || printf no_result)" \
+      >/dev/null || {
+        rc=$?
+        _route_v2_bootstrap_abort_lifecycle_v2 \
+          "$lifecycle_active" 0 "$retry_after" unavailable
+        return "$rc"
+      }
+    execution_open=1
     FACTORY_ROUTE_FILESYSTEM_POLICY=state-only \
     FACTORY_ROUTE_BROWSER_POLICY="$browser_policy" \
     FACTORY_ROUTE_TIMEOUT_CLASS="$timeout_class" \
@@ -1313,44 +1512,124 @@ route_v2_dispatch_bootstrap() {
         >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
     agent_rc=$?
     if (( agent_rc == 79 )); then
+      runtime_lifecycle_node_execution_finish_v2 \
+        failed unavailable "$retry_after" '' none '' "${MULTI_LAST_RUN_ID:-}" \
+        >/dev/null || true
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+      runtime_lifecycle_attempt_span_finish_v2 \
+        bootstrap_finished "bootstrap:scout" failed unavailable '' >/dev/null || true
       _route_v2_fail "run_agent отказал по конфигурации хоста (код 79): исправь и повтори resume"
       return 75
     fi
     if [[ ! -e "$active" && ! -L "$active" ]]; then
       # Файла нет и не было: Scout ни разу не отчитался — «результата нет».
-      [[ "$before_signature" == missing ]] || return 78
+      [[ "$before_signature" == missing ]] || {
+        _route_v2_bootstrap_abort_lifecycle_v2 \
+          "$lifecycle_active" "$execution_open" "$retry_after" conflict
+        return 78
+      }
       after_signature=$before_signature
     else
       [[ -f "$active" && ! -L "$active" ]] || {
+        _route_v2_bootstrap_abort_lifecycle_v2 \
+          "$lifecycle_active" "$execution_open" "$retry_after" conflict
         return 78
       }
       after_signature=$(sha256sum -- "$active" | awk '{print $1}') || {
+        _route_v2_bootstrap_abort_lifecycle_v2 \
+          "$lifecycle_active" "$execution_open" "$retry_after" unavailable
         return 1
       }
     fi
     [[ "$after_signature" == "$before_signature" ]] || break
+    runtime_lifecycle_node_execution_finish_v2 \
+      failed no_result "$retry_after" '' none '' "${MULTI_LAST_RUN_ID:-}" \
+      >/dev/null || {
+        rc=$?
+        _route_v2_bootstrap_abort_lifecycle_v2 \
+          "$lifecycle_active" "$execution_open" "$retry_after" no_result
+        return "$rc"
+      }
+    execution_open=0
     tries_left=$(( tries_left - 1 ))
-    (( tries_left > 0 )) || return 75
+    if (( tries_left <= 0 )); then
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted exhausted attempt_interrupted '' '' >/dev/null || true
+      runtime_lifecycle_attempt_span_finish_v2 \
+        bootstrap_finished "bootstrap:scout" failed exhausted '' >/dev/null || true
+      return 75
+    fi
     attempt_no=$(( attempt_no + 1 ))
   done
   IFS=$'\t' read -r result run_id verdict_b64 < <(_route_v2_active_result "$active") || {
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" "$execution_open" "$retry_after" conflict
     return 78
   }
   [[ "$verdict_b64" != - ]] || verdict_b64=""
-  run_state_verdict_validate "$result" "$verdict_b64" || return 78
-  [[ "$result" == done && -n "$run_id" && -z "$verdict_b64" ]] || {
+  run_state_verdict_validate "$result" "$verdict_b64" || {
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" "$execution_open" "$retry_after" conflict
     return 78
   }
+  # Отказ обязан назвать себя. Раньше в журнал уходило одно «bootstrap не подтверждён
+  # (код 78)», и живой случай выглядел неотличимо от поломки движка: разведка
+  # отработала успешно (RESULT_CLASS=ok, RC=0, recon.md на диске), а прогон вставал
+  # до первого узла маршрута. Виноват был непустой вердикт — scout приложил два
+  # неблокирующих deferred findings, а bootstrap стоит ВНЕ цепочки, и адресовать их
+  # там некому. Отказ детерминированный, поэтому resume упирается в то же место:
+  # без названной причины человек чинит наугад.
+  [[ "$result" == done && -n "$run_id" && -z "$verdict_b64" ]] || {
+    if [[ "$result" == done && -n "$run_id" && -n "$verdict_b64" ]]; then
+      v2_log "bootstrap scout: вердикт обязан быть пустым, а пришли findings — правь промпт разведки: наблюдения идут текстом в recon, не вердиктом"
+    else
+      v2_log "bootstrap scout: ожидался исход done с run id и пустым вердиктом, получено result=${result:-<пусто>} run_id=${run_id:-<пусто>}"
+    fi
+    runtime_lifecycle_node_execution_finish_v2 \
+      failed conflict "$retry_after" '' none '' "${MULTI_LAST_RUN_ID:-}" \
+      >/dev/null || true
+    runtime_lifecycle_node_visit_finish_v2 \
+      interrupted conflict attempt_interrupted '' '' >/dev/null || true
+    runtime_lifecycle_attempt_span_finish_v2 \
+      bootstrap_finished "bootstrap:scout" failed conflict '' >/dev/null || true
+    return 78
+  }
+  runtime_lifecycle_node_execution_finish_v2 \
+    succeeded normal "$retry_after" done typed_verdict '' "$run_id" \
+    >/dev/null || {
+      rc=$?
+      # Идемпотентно завершаем точную целевую границу до закрытия родительских;
+      # это также обрабатывает инъекцию падения после долговечного дописывания.
+      runtime_lifecycle_node_execution_finish_v2 \
+        succeeded normal "$retry_after" done typed_verdict '' "$run_id" \
+        >/dev/null || true
+      execution_open=0
+      _route_v2_bootstrap_abort_lifecycle_v2 \
+        "$lifecycle_active" 0 "$retry_after" unavailable
+      return "$rc"
+    }
+  execution_open=0
   guard_after=$(
     _route_v2_guard_snapshot "$task" "$attempt" scout bootstrap after
-  ) || return 78
+  ) || {
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" 0 "$retry_after" unavailable
+    return 78
+  }
   if ! workspace_guard_compare "$guard_before" "$guard_after"; then
     workspace_guard_diff_summary "$guard_before" "$guard_after" \
       >"${guard_after%.tsv}.diff" 2>/dev/null || true
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" 0 "$retry_after" policy_rejected
     return 75
   fi
 
-  transition_tmp=$(mktemp "$(factory_control_root)/.route-v2-transition.XXXXXX") || return 1
+  transition_tmp=$(mktemp "$(factory_control_root)/.route-v2-transition.XXXXXX") || {
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" 0 "$retry_after" unavailable
+    return 1
+  }
   "$FACTORY_HOME/bin/factory-route" \
     --routes-dir "$ROUTE_V2_ROUTES_DIR" \
     --profile "$ROUTE_V2_PROFILE" \
@@ -1360,26 +1639,57 @@ route_v2_dispatch_bootstrap() {
     --outcome done >"$transition_tmp" || {
       rc=$?
       rm -f -- "$transition_tmp"
+      _route_v2_bootstrap_abort_lifecycle_v2 \
+        "$lifecycle_active" 0 "$retry_after" unavailable
       return "$rc"
     }
-  record_tmp=$(mktemp "$ROUTE_V2_ATTEMPT_DIR/artifacts/.bootstrap.XXXXXX") || return 1
+  record_tmp=$(mktemp "$ROUTE_V2_ATTEMPT_DIR/artifacts/.bootstrap.XXXXXX") || {
+    rm -f -- "$transition_tmp"
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" 0 "$retry_after" unavailable
+    return 1
+  }
   _route_v2_bootstrap_record make \
     "$transition_tmp" "$task" "$attempt" "$ROUTE_V2_PROFILE" "$ROUTE_V2_CATALOG" \
     "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" "$run_id" "$record_tmp" || {
       rc=$?
       rm -f -- "$transition_tmp" "$record_tmp"
+      _route_v2_bootstrap_abort_lifecycle_v2 \
+        "$lifecycle_active" 0 "$retry_after" conflict
       return "$rc"
     }
-  chmod 400 "$record_tmp" || return 1
+  chmod 400 "$record_tmp" || {
+    rm -f -- "$transition_tmp" "$record_tmp"
+    _route_v2_bootstrap_abort_lifecycle_v2 \
+      "$lifecycle_active" 0 "$retry_after" unavailable
+    return 1
+  }
   if ! ln -- "$record_tmp" "$artifact" 2>/dev/null; then
     _route_v2_bootstrap_record validate \
       "$artifact" "$task" "$attempt" "$ROUTE_V2_PROFILE" "$ROUTE_V2_CATALOG" \
-      "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || return
+      "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || {
+        rc=$?
+        rm -f -- "$transition_tmp" "$record_tmp"
+        _route_v2_bootstrap_abort_lifecycle_v2 \
+          "$lifecycle_active" 0 "$retry_after" conflict
+        return "$rc"
+      }
   fi
   rm -f -- "$transition_tmp" "$record_tmp" "$_r2_context_file" "$_r2_prompt_file"
   _route_v2_bootstrap_record validate \
     "$artifact" "$task" "$attempt" "$ROUTE_V2_PROFILE" "$ROUTE_V2_CATALOG" \
-    "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || return
+    "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || {
+      rc=$?
+      _route_v2_bootstrap_abort_lifecycle_v2 \
+        "$lifecycle_active" 0 "$retry_after" conflict
+      return "$rc"
+    }
+  if (( lifecycle_active )); then
+    runtime_lifecycle_node_visit_finish_v2 \
+      succeeded normal forward_transition '' '' >/dev/null || return
+    runtime_lifecycle_attempt_span_finish_v2 \
+      bootstrap_finished "bootstrap:scout" succeeded normal '' >/dev/null || return
+  fi
   # Узел закрыт — черновик подписываем исходом, а не стираем (см. `_stage_checkpoint_seal`):
   # заход сюда бывает и вторым, и тогда его заметки о том, что уже осмотрено, дешевле
   # любого повторного обхода дерева.
@@ -1393,6 +1703,9 @@ route_v2_dispatch_next() {
   local executor phase run_key policy rc
   local fanout_mode fanout_max fanout_degrade retry_no_result retry_product
   local provider_attempts provider_strategy browser_policy timeout_class command_id
+  local visit_reason visit_transition visit_stage_hash execution_reason retry_before
+  local execution_status execution_finish_reason execution_outcome execution_source
+  local verdict_hash final_run
   _route_v2_require_isolation || return
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
@@ -1434,8 +1747,23 @@ route_v2_dispatch_next() {
   rm -f -- "$description_tmp"
 
   if [[ "$executor" == gate ]]; then
+    IFS=$'\t' read -r visit_reason visit_transition visit_stage_hash \
+      < <(_route_v2_lifecycle_stage_edge "$task" "$attempt" "$sequence") || return 78
+    runtime_lifecycle_node_visit_begin_v2 "$node" "$run_key" "$sequence" \
+      "$visit_reason" "$visit_transition" "$visit_stage_hash" >/dev/null || return
     attempt_stage_state_pause_v2 \
-      "$task" "$attempt" "$node" "human gate: $node" >/dev/null || return
+      "$task" "$attempt" "$node" "human gate: $node" >/dev/null || {
+        rc=$?
+        runtime_lifecycle_node_visit_finish_v2 \
+          interrupted conflict attempt_interrupted '' '' >/dev/null || true
+        return "$rc"
+      }
+    _route_v2_lifecycle_gate_wait_after_pause "$task" "$attempt" "$node" || {
+      rc=$?
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+      return "$rc"
+    }
     if declare -F route_v2_project_work_time >/dev/null; then
       # Метка последнего события = вход в ворота: по ней доска дотикивает
       # ожидание решения. Витрина: ошибка пересчёта не удерживает диспетчер.
@@ -1453,6 +1781,10 @@ route_v2_dispatch_next() {
           "$provider_attempts" != 0 || "$provider_strategy" != none ) ]]; then
     _route_v2_fail "command=$command_id must declare zero/none retry policy" || return
   fi
+  IFS=$'\t' read -r visit_reason visit_transition visit_stage_hash \
+    < <(_route_v2_lifecycle_stage_edge "$task" "$attempt" "$sequence") || return 78
+  runtime_lifecycle_node_visit_begin_v2 "$node" "$run_key" "$sequence" \
+    "$visit_reason" "$visit_transition" "$visit_stage_hash" >/dev/null || return
   _route_v2_mark_node_running "$task" "$node" "$run_key"
 
   # Ретраи по контракту бандла. Попытки без результата (no-result и провайдерский
@@ -1476,13 +1808,60 @@ route_v2_dispatch_next() {
   # событий попытки под локом. Держится до коммита узла, поэтому повторы его тоже видят.
   local human_note=""
   if [[ "$executor" == command ]]; then
+    runtime_lifecycle_node_execution_begin_v2 command 0 0 initial >/dev/null || {
+      rc=$?
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+      return "$rc"
+    }
     _route_v2_run_command_node \
-      "$task" "$attempt" "$node" "$run_key" "$command_id" "$policy" "$sequence" || return
+      "$task" "$attempt" "$node" "$run_key" "$command_id" "$policy" "$sequence"
+    rc=$?
+    if (( rc != 0 )); then
+      runtime_lifecycle_node_execution_finish_v2 failed unavailable 0 '' none '' '' \
+        >/dev/null || return
+      runtime_lifecycle_node_visit_finish_v2 interrupted unavailable attempt_interrupted '' '' \
+        >/dev/null || return
+      return "$rc"
+    fi
     outcome=$ROUTE_V2_NODE_RESULT
     verdict_b64=${ROUTE_V2_NODE_VERDICT_B64:-}
+    verdict_hash=""
+    [[ -z "$verdict_b64" ]] || verdict_hash=$(printf '%s' "$verdict_b64" | base64 -d | sha256sum | awk '{print $1}')
+    execution_status=succeeded
+    execution_finish_reason=normal
+    [[ "$outcome" != failed ]] || { execution_status=failed; execution_finish_reason=product_failure; }
+    runtime_lifecycle_node_execution_finish_v2 "$execution_status" "$execution_finish_reason" \
+      0 "$outcome" command_verdict "$verdict_hash" '' >/dev/null || {
+        rc=$?
+        runtime_lifecycle_node_visit_finish_v2 \
+          interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+        return "$rc"
+      }
   else
-    human_note=$(attempt_stage_state_human_note_v2 "$task" "$attempt" "$node") || return
+    human_note=$(attempt_stage_state_human_note_v2 "$task" "$attempt" "$node") || {
+      rc=$?
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+      return "$rc"
+    }
     while :; do
+      case "$retry_reason" in
+        '') execution_reason=initial ;;
+        no-result) execution_reason=no_result ;;
+        failed) execution_reason=product_failure ;;
+        *) execution_reason=manual_resume ;;
+      esac
+      retry_before=$((tries_left + product_left - 1))
+      (( retry_before >= 0 )) || retry_before=0
+      runtime_lifecycle_node_execution_begin_v2 agent "$((attempt_no - 1))" \
+        "$retry_before" "$execution_reason" >/dev/null || {
+          rc=$?
+          runtime_lifecycle_node_visit_finish_v2 \
+            interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+          return "$rc"
+        }
+      ROUTE_V2_FINAL_RUN_ID=""
       ROUTE_V2_NODE_BROWSER="$browser_policy" \
       ROUTE_V2_NODE_TIMEOUT_CLASS="$timeout_class" \
       ROUTE_V2_NODE_FANOUT_MODE="$fanout_mode" \
@@ -1494,9 +1873,16 @@ route_v2_dispatch_next() {
         "$task" "$attempt" "$node" "$run_key" "$policy" "$sequence"
       rc=$?
       if (( rc == 75 )) && [[ "${ROUTE_V2_NO_RESULT:-0}" == 1 ]]; then
+        runtime_lifecycle_node_execution_finish_v2 failed no_result \
+          "$(( tries_left > 0 ? tries_left - 1 : 0 ))" '' none '' \
+          "${ROUTE_V2_FINAL_RUN_ID:-}" >/dev/null || return
         route_v2_cleanup_active_instrumentation "$task" "$attempt"
         cleanup_rc=$?
-        (( cleanup_rc == 0 || cleanup_rc == 3 )) || return "$cleanup_rc"
+        (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+          runtime_lifecycle_node_visit_finish_v2 \
+            interrupted cleanup_failed attempt_interrupted '' '' >/dev/null || true
+          return "$cleanup_rc"
+        }
         tries_left=$(( tries_left - 1 ))
         if (( tries_left > 0 )); then
           attempt_no=$(( attempt_no + 1 ))
@@ -1508,15 +1894,45 @@ route_v2_dispatch_next() {
         break
       fi
       if (( rc != 0 )); then
+        runtime_lifecycle_node_execution_finish_v2 interrupted unavailable \
+          "$retry_before" '' none '' "${ROUTE_V2_FINAL_RUN_ID:-}" >/dev/null || return
+        runtime_lifecycle_node_visit_finish_v2 interrupted unavailable attempt_interrupted '' '' \
+          >/dev/null || return
         route_v2_cleanup_active_instrumentation "$task" "$attempt"
         cleanup_rc=$?
-        (( cleanup_rc == 0 || cleanup_rc == 3 )) || return "$cleanup_rc"
+        (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+          runtime_lifecycle_node_visit_finish_v2 \
+            interrupted cleanup_failed attempt_interrupted '' '' >/dev/null || true
+          return "$cleanup_rc"
+        }
         return "$rc"
       fi
+      verdict_hash=""
+      [[ -z "${ROUTE_V2_NODE_VERDICT_B64:-}" ]] || \
+        verdict_hash=$(printf '%s' "$ROUTE_V2_NODE_VERDICT_B64" | base64 -d | sha256sum | awk '{print $1}')
+      execution_status=succeeded
+      execution_finish_reason=normal
+      execution_source=typed_verdict
+      [[ "$ROUTE_V2_NODE_RESULT" != failed ]] || {
+        execution_status=failed
+        execution_finish_reason=product_failure
+      }
+      runtime_lifecycle_node_execution_finish_v2 "$execution_status" \
+        "$execution_finish_reason" "$retry_before" "$ROUTE_V2_NODE_RESULT" \
+        "$execution_source" "$verdict_hash" "${ROUTE_V2_FINAL_RUN_ID:-}" >/dev/null || {
+          rc=$?
+          runtime_lifecycle_node_visit_finish_v2 \
+            interrupted unavailable attempt_interrupted '' '' >/dev/null || true
+          return "$rc"
+        }
       if [[ "$ROUTE_V2_NODE_RESULT" == failed ]] && (( product_left > 0 )); then
         route_v2_cleanup_active_instrumentation "$task" "$attempt"
         cleanup_rc=$?
-        (( cleanup_rc == 0 || cleanup_rc == 3 )) || return "$cleanup_rc"
+        (( cleanup_rc == 0 || cleanup_rc == 3 )) || {
+          runtime_lifecycle_node_visit_finish_v2 \
+            interrupted cleanup_failed attempt_interrupted '' '' >/dev/null || true
+          return "$cleanup_rc"
+        }
         product_left=$(( product_left - 1 ))
         attempt_no=$(( attempt_no + 1 ))
         retry_reason=failed
@@ -1530,7 +1946,11 @@ route_v2_dispatch_next() {
   if [[ "$executor" == agent && ( "$outcome" == failed || "$outcome" == exhausted ) ]]; then
     route_v2_cleanup_active_instrumentation "$task" "$attempt"
     rc=$?
-    (( rc == 0 || rc == 3 )) || return "$rc"
+    (( rc == 0 || rc == 3 )) || {
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted cleanup_failed attempt_interrupted '' '' >/dev/null || true
+      return "$rc"
+    }
   fi
   # Legacy failed без typed verdict сохраняет прежний бюджет двух возвратов. Typed
   # verdict получает широкий hard ceiling, но останавливается раньше при расширении
@@ -1549,11 +1969,21 @@ route_v2_dispatch_next() {
     run_state_control_update \
       "$task" "$run_key" failed \
       "${run_key}_COMMENT" "исчерпан бюджет повторов: раннер не зафиксировал результат" \
-      || return
+      || {
+        rc=$?
+        runtime_lifecycle_node_visit_finish_v2 \
+          interrupted conflict attempt_interrupted '' '' >/dev/null || true
+        return "$rc"
+      }
   fi
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" || return
+    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" || {
+      rc=$?
+      runtime_lifecycle_node_visit_finish_v2 \
+        interrupted conflict attempt_interrupted '' '' >/dev/null || true
+      return "$rc"
+    }
   # Черновик хода после терминального коммита НЕ стирается, а подписывается исходом
   # (`_stage_checkpoint_seal`): узел, закрытый `done`, критик отклоняет штатно, и второй
   # заход обязан начать с того, что уже сделано, — иначе он получает промпт, побайтово
@@ -1742,6 +2172,11 @@ route_v2_gate_decide() {
   }
   rm -f -- "$description_tmp"
   [[ "$executor" == gate ]] || return 78
+  if runtime_lifecycle_enabled_v2; then
+    runtime_lifecycle_restore_open_visit_v2 "$node" || return
+    runtime_lifecycle_restore_open_gate_v2 "$node" || return
+  fi
+  local ROUTE_V2_GATE_DECISION=$outcome ROUTE_V2_GATE_FEEDBACK=$reject_feedback
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" 0 '' 0 0 0 "$reject_feedback"
 }
@@ -1786,7 +2221,7 @@ route_v2_work_time() {
 # относит к прерванному провайдеру только записи в заявленной области; любая запись вне
 # области приводит к закрытому отказу. Устойчивое состояние `cleaning` продолжается после
 # SIGKILL напрямую, а `completed` лишь исправляет устаревший указатель active.
-route_v2_cleanup_active_instrumentation() {
+_route_v2_cleanup_active_instrumentation_impl() {
   local task attempt txid dir state rc
   _route_v2_require_isolation || return
   task=$(_attempt_state_task_id "${1:-}") || return
@@ -1829,6 +2264,33 @@ route_v2_cleanup_active_instrumentation() {
     route_v2_instrumentation_restored "$task" "$dir/scope.list" || return
   fi
   return 0
+}
+
+route_v2_cleanup_active_instrumentation() {
+  local task=${1:-} attempt=${2:-} target_hash evidence rc=0
+  local status=succeeded reason=normal released=0 retained=0
+  if ! runtime_lifecycle_enabled_v2; then
+    _route_v2_cleanup_active_instrumentation_impl "$task" "$attempt"
+    return
+  fi
+  target_hash=$(runtime_analytics_hash_string_v2 \
+    "instrumentation-transaction:t${task#t}:$attempt") || return 78
+  runtime_lifecycle_cleanup_begin_v2 instrumentation_transaction "$target_hash" \
+    >/dev/null || return
+  _route_v2_cleanup_active_instrumentation_impl "$task" "$attempt" || rc=$?
+  case "$rc" in
+    0) released=1 ;;
+    3) released=0 ;;
+    *) status=failed; reason=cleanup_failed; retained=1 ;;
+  esac
+  evidence=$(runtime_analytics_hash_string_v2 \
+    "instrumentation-transaction:t${task#t}:$attempt:rc=$rc") || evidence=""
+  runtime_lifecycle_cleanup_finish_v2 instrumentation_transaction \
+    "$status" "$reason" "$released" "$retained" "$evidence" >/dev/null || {
+      (( rc != 0 )) && return "$rc"
+      return
+    }
+  return "$rc"
 }
 
 _route_v2_completed_instrumentation_for_attempt() {

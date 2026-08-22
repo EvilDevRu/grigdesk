@@ -22,6 +22,11 @@ const busy = ref('');
 const status = ref({ ...EMPTY_STATUS });
 const rules = ref([]);
 const rulesLoaded = ref(false);
+const policyFingerprint = ref('');
+const agentSearch = ref(false);
+// После неоднозначного transport failure прежнее значение больше не является
+// фактом. Отдельный флаг не даёт false визуально превратиться в «точно закрыто».
+const agentSearchKnown = ref(false);
 const editingRule = ref(false);
 const connectForm = reactive({ owner: '', repo: '', token: '' });
 const ruleForm = reactive({
@@ -69,6 +74,7 @@ function applyRule(rule) {
     ruleForm.groupId = '';
     ruleForm.priority = 1;
     preservedAutoTask = null;
+    agentSearch.value = false;
     return;
   }
   ruleForm.project = typeof rule.project === 'string' ? rule.project : '';
@@ -77,20 +83,39 @@ function applyRule(rule) {
   ruleForm.groupId = rule.b24?.groupId == null ? '' : String(rule.b24.groupId);
   ruleForm.priority = [0, 1, 2].includes(rule.b24?.priority) ? rule.b24.priority : 1;
   preservedAutoTask = isPlainObject(rule.autoTask) ? { ...rule.autoTask } : null;
+  agentSearch.value = rule.agentSearch === true;
+}
+
+const POLICY_FINGERPRINT_RE = /^ghpol1:[0-9a-f]{64}$/u;
+
+function applyRulesSnapshot(data) {
+  rules.value = Array.isArray(data?.rules) ? data.rules.slice(0, 1) : [];
+  policyFingerprint.value = typeof data?.policyFingerprint === 'string'
+    && POLICY_FINGERPRINT_RE.test(data.policyFingerprint)
+    ? data.policyFingerprint
+    : '';
+  agentSearchKnown.value = Boolean(policyFingerprint.value);
+  applyRule(rules.value[0]);
+  editingRule.value = false;
+}
+
+async function readRulesSnapshot() {
+  const data = await api.get('/api/github/rules');
+  applyRulesSnapshot(data);
+  return data;
 }
 
 async function loadRules() {
   rulesLoaded.value = false;
   if (!verified.value) {
     rules.value = [];
+    policyFingerprint.value = '';
+    agentSearchKnown.value = false;
     applyRule(null);
     rulesLoaded.value = true;
     return;
   }
-  const data = await api.get('/api/github/rules');
-  rules.value = Array.isArray(data?.rules) ? data.rules.slice(0, 1) : [];
-  applyRule(rules.value[0]);
-  editingRule.value = false;
+  await readRulesSnapshot();
   rulesLoaded.value = true;
 }
 
@@ -213,6 +238,63 @@ async function saveRules(nextRules) {
   }
 }
 
+async function changeAgentSearch(event) {
+  const enabled = event?.target?.checked === true;
+  if (event?.target) event.target.checked = agentSearchKnown.value && agentSearch.value;
+  if (busy.value || !providerWritable.value || rules.value.length !== 1
+      || !agentSearchKnown.value || !policyFingerprint.value) return;
+  if (enabled && !(await confirmDialog(
+    'Разрешить coding-агентам выбранного проекта искать содержимое GitHub Issues? Человеческий Inbox от этой настройки не изменится.',
+    { okText: 'Разрешить агентам' },
+  ))) return;
+
+  busy.value = 'agent-search';
+  error.value = '';
+  notice.value = '';
+  try {
+    await api.put('/api/github/rules/agent-search', {
+      repositoryId: status.value.repositoryId,
+      expectedPolicyFingerprint: policyFingerprint.value,
+      enabled,
+    });
+    notice.value = enabled
+      ? 'Поиск по GitHub Issues разрешён агентам выбранного проекта.'
+      : 'Поиск по GitHub Issues для агентов закрыт.';
+    await loadRules();
+  } catch (err) {
+    const mutationMessage = err?.message || 'Ответ изменения доступа не получен.';
+    try {
+      await readRulesSnapshot();
+      rulesLoaded.value = true;
+      if (!agentSearchKnown.value) {
+        throw new Error('Сервер не вернул достоверный policy fingerprint.');
+      }
+      const actual = agentSearch.value;
+      if (actual === enabled) {
+        error.value = '';
+        notice.value = `Повторная проверка подтвердила: поиск агентам ${actual ? 'разрешён' : 'закрыт'}.`;
+      } else {
+        notice.value = '';
+        error.value = `${mutationMessage} Повторная проверка подтвердила: `
+          + `поиск агентам ${actual ? 'разрешён' : 'закрыт'}, `
+          + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
+      }
+    } catch (refreshError) {
+      // Нельзя позволить повторный CAS со старым отпечатком и нельзя показывать
+      // прежний boolean как достоверное состояние после ambiguous commit.
+      policyFingerprint.value = '';
+      agentSearchKnown.value = false;
+      agentSearch.value = false;
+      rulesLoaded.value = true;
+      notice.value = '';
+      error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
+        + `${refreshError?.message || 'правила не удалось перечитать'}`;
+    }
+  } finally {
+    busy.value = '';
+  }
+}
+
 async function removeRule() {
   if (!providerWritable.value || !(await confirmDialog(
     'Убрать репозиторий из allowlist? Новые issues не будут попадать в Inbox.',
@@ -326,6 +408,21 @@ onMounted(load);
                 <label>Приоритет<select v-model.number="ruleForm.priority" name="priority" :disabled="!providerWritable || !!busy"><option :value="0">0</option><option :value="1">1</option><option :value="2">2</option></select></label>
               </div>
             </details>
+            <div v-if="rules.length" class="agent-search-policy">
+              <label class="check-row">
+                <input name="agentSearch" type="checkbox" :checked="agentSearchKnown && agentSearch"
+                       :disabled="!providerWritable || !agentSearchKnown || !policyFingerprint || !!busy"
+                       @change="changeAgentSearch">
+                <span>Разрешить поиск coding-агентам проекта</span>
+              </label>
+              <p class="hint">
+                Это отдельный opt-in только для агентского поиска. Человеческий Inbox и его
+                allowlist не расширяются.
+              </p>
+              <p v-if="!agentSearchKnown" class="warn" data-state="agent-search-unknown">
+                Состояние доступа не подтверждено (неизвестно). Обновите правила перед новым изменением.
+              </p>
+            </div>
             <p class="hint">Новое правило не включает автоматическое создание задач.</p>
             <div class="actions">
               <button class="btn accent" type="submit" :disabled="!providerWritable || !validRule || !!busy">Сохранить</button>
@@ -347,5 +444,6 @@ onMounted(load);
 .connection-head, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.connection-head { justify-content: space-between; }.pill { border-radius: 999px; background: var(--surface-2); padding: 3px 8px; font-size: 12px; }.pill.connected, .good { color: var(--good); }.pill.degraded, .bad, .read-only { color: var(--bad); }.pill.connecting, .warn { color: var(--warn); }.lifecycle-note { color: var(--ink-mid); }.lifecycle-note a { color: var(--accent); }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }dt { color: var(--ink-mid); }dd { margin: 0; overflow-wrap: anywhere; }.actions { margin-top: 13px; }.btn { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line-2); border-radius: 8px; color: var(--ink); background: var(--surface-2); cursor: pointer; }.btn.accent { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 24%, var(--surface)); }.btn.danger { border-color: color-mix(in srgb, var(--bad) 65%, var(--line)); }.btn:disabled { opacity: .45; cursor: default; }
 .banner { padding: 10px 13px; border: 1px solid currentColor; border-radius: 9px; }.empty-allowlist { padding: 13px; margin-bottom: 12px; border: 1px dashed var(--warn); border-radius: 9px; }.empty-allowlist p { margin-bottom: 0; color: var(--ink-mid); }details { border-top: 1px solid var(--line); padding-top: 9px; }summary { cursor: pointer; }.b24-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 9px; }
+.agent-search-policy { border-top: 1px solid var(--line); padding-top: 10px; }.check-row { display: flex !important; grid-template-columns: none; align-items: center; gap: 8px !important; color: var(--ink) !important; }.check-row input { min-height: 0; width: 16px; height: 16px; margin: 0; padding: 0; }
 @media (max-width: 760px) { .github-page { padding: 14px; }.grid { grid-template-columns: 1fr; }.b24-grid { grid-template-columns: 1fr; } }
 </style>

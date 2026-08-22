@@ -13,6 +13,7 @@ import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 import { api } from '../shared/api-client.js';
 import { useSse } from '../composables/useSse.js';
 import { boardTaskListResetKey, selectBoardTasks } from '../shared/board-task-list.js';
+import { confirmDialog } from '../shared/ui/confirm.js';
 
 const ui = useUiStore();
 
@@ -98,20 +99,40 @@ const q = ref('');
 const analysis = useAnalysisStore();
 const favorites = useTaskFavoritesStore();
 const favoriteOnly = ref(false);
+const filtersOpen = ref(false);
 // Новая задача — та, которую ещё не открывали. Отметки серверные, поэтому до их
 // загрузки (и до базовой линии) новых не бывает: см. геттер ready.
 const seen = useTaskSeenStore();
 const newOnly = ref(false);
 const isNewTask = (task) => seen.ready && !seen.isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
-const saved = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
-const sortBy = ref(saved.sortBy || 'b24');   // b24 | risk | complexity | size | fresh
-const onlyUnrated = ref(!!saved.onlyUnrated);
-const onlyNeedsInfo = ref(!!saved.onlyNeedsInfo);
-watch([sortBy, onlyUnrated, onlyNeedsInfo], () => {
-  localStorage.setItem(TRIAGE_LS, JSON.stringify({
-    sortBy: sortBy.value, onlyUnrated: onlyUnrated.value, onlyNeedsInfo: onlyNeedsInfo.value,
-  }));
+const SORT_MODES = new Set(['b24', 'risk', 'complexity', 'size', 'fresh']);
+function readTriagePrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
+    return {
+      sortBy: SORT_MODES.has(saved?.sortBy) ? saved.sortBy : 'b24',
+      // Один режим вместо двух независимых флагов: повреждённое старое значение
+      // больше не может одновременно включить «без оценки» и «нужны уточнения».
+      triageMode: saved?.onlyUnrated ? 'unrated' : saved?.onlyNeedsInfo ? 'needs-info' : 'all',
+    };
+  } catch {
+    return { sortBy: 'b24', triageMode: 'all' };
+  }
+}
+const savedTriage = readTriagePrefs();
+const sortBy = ref(savedTriage.sortBy);   // b24 | risk | complexity | size | fresh
+const triageMode = ref(savedTriage.triageMode); // all | unrated | needs-info
+const onlyUnrated = computed(() => triageMode.value === 'unrated');
+const onlyNeedsInfo = computed(() => triageMode.value === 'needs-info');
+watch([sortBy, triageMode], () => {
+  try {
+    localStorage.setItem(TRIAGE_LS, JSON.stringify({
+      sortBy: sortBy.value,
+      onlyUnrated: onlyUnrated.value,
+      onlyNeedsInfo: onlyNeedsInfo.value,
+    }));
+  } catch { /* приватный режим/запрет хранилища не должен ронять доску */ }
 });
 const triageOf = (t) => analysis.byTask[t.id] || null;
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
@@ -122,7 +143,10 @@ const unrated = computed(() => (data.value?.tasks || []).filter((t) => {
 async function analyzeAllUnrated() {
   const list = unrated.value;
   if (!list.length) return;
-  if (!confirm(`Поставить в очередь триажа ${list.length} задач(и)? Оценки идут последовательно, по несколько минут на задачу.`)) return;
+  if (!(await confirmDialog(
+    `Поставить в очередь триажа ${list.length} задач(и)? Оценки идут последовательно, по несколько минут на задачу.`,
+    { title: 'Оценить все задачи без оценки', okText: 'Поставить в очередь' },
+  ))) return;
   for (const t of list) {
     try { await analysis.analyze(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
   }
@@ -152,6 +176,21 @@ const currentNewCount = computed(() => {
   if (!seen.ready) return 0;
   return (data.value?.tasks || []).filter((task) => !seen.isSeen(task.id)).length;
 });
+const activeFilterCount = computed(() => [
+  sortBy.value !== 'b24',
+  favoriteOnly.value,
+  newOnly.value,
+  triageMode.value !== 'all',
+].filter(Boolean).length);
+const hasListFilters = computed(() => !!q.value.trim()
+  || favoriteOnly.value || newOnly.value || triageMode.value !== 'all');
+function resetTaskFilters() {
+  q.value = '';
+  sortBy.value = 'b24';
+  triageMode.value = 'all';
+  favoriteOnly.value = false;
+  newOnly.value = false;
+}
 const hasFavoriteMatchesBeforeSearch = computed(() => selectBoardTasks({
   tasks: data.value?.tasks || [],
   analysisByTask: analysis.byTask,
@@ -241,16 +280,45 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
         <!-- Мои задачи — основной блок -->
         <section class="col primary">
           <div class="colhead">
-            <h3 class="h big">Мои задачи <span class="cnt">{{ myTasks.length }}</span></h3>
-            <div class="tritools">
-              <select v-model="sortBy" class="trisort" title="Сортировка по оценкам триажа">
+            <h3 class="h big">
+              Мои задачи
+              <span class="cnt">
+                {{ myTasks.length }}<template v-if="hasListFilters"> из {{ data.tasks.length }}</template>
+              </span>
+            </h3>
+            <button type="button" class="filter-toggle" :class="{ on: activeFilterCount }"
+                    :aria-expanded="String(filtersOpen)" aria-controls="board-task-filters"
+                    @click="filtersOpen = !filtersOpen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
+              </svg>
+              <span>Фильтры</span>
+              <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+            </button>
+            <div class="search" role="search">
+              <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              <input v-model="q" aria-label="Поиск по задачам" placeholder="Поиск по задачам…" />
+              <button v-if="q" type="button" class="clr" title="Очистить поиск" aria-label="Очистить поиск" @click="q = ''">✕</button>
+            </div>
+          </div>
+
+          <div id="board-task-filters" class="filterbar" :class="{ expanded: filtersOpen }"
+               role="region" aria-label="Фильтры задач">
+            <label class="filter-section sort-filter">
+              <span class="filter-caption">Сортировка</span>
+              <select v-model="sortBy" class="trisort">
                 <option value="b24">порядок B24</option>
                 <option value="risk">по риску</option>
                 <option value="complexity">по сложности</option>
                 <option value="size">по размеру</option>
                 <option value="fresh">по свежести оценки</option>
               </select>
-              <button class="trif trif-ic favfilter" :class="{ on: favoriteOnly }"
+            </label>
+
+            <div class="filter-section show-filter" role="group" aria-labelledby="board-show-filter-label">
+              <span id="board-show-filter-label" class="filter-caption">Показать</span>
+              <button type="button" class="trif trif-ic favfilter" :class="{ on: favoriteOnly }"
                       :disabled="!favorites.loaded || favorites.loading" :aria-pressed="String(favoriteOnly)"
                       :title="favorites.loaded ? 'Только избранные задачи' : 'Избранное загружается'"
                       @click="favoriteOnly = !favoriteOnly">
@@ -262,7 +330,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
               </button>
               <!-- «Новых» не бывает без загруженной базовой линии отметок, поэтому кнопка
                    ждёт сервер (seen.ready), а не гадает по пустому набору. -->
-              <button class="trif trif-ic newfilter" :class="{ on: newOnly }"
+              <button type="button" class="trif trif-ic newfilter" :class="{ on: newOnly }"
                       :disabled="!seen.ready || seen.loading" :aria-pressed="String(newOnly)"
                       :title="seen.ready ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
                       @click="newOnly = !newOnly">
@@ -272,17 +340,38 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
                 </svg>
                 новые {{ currentNewCount }}
               </button>
-              <button class="trif" :class="{ on: onlyUnrated }" title="Только неоценённые" @click="onlyUnrated = !onlyUnrated; if (onlyUnrated) onlyNeedsInfo = false;">без оценки</button>
-              <button class="trif" :class="{ on: onlyNeedsInfo }" title="Триаж просит уточнений" @click="onlyNeedsInfo = !onlyNeedsInfo; if (onlyNeedsInfo) onlyUnrated = false;">уточнить</button>
-              <button v-if="unrated.length" class="trif trif-ic" title="Оценить все неоценённые (очередь)" @click="analyzeAllUnrated">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-                {{ unrated.length }}
-              </button>
             </div>
-            <div class="search">
-              <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-              <input v-model="q" placeholder="Поиск по задачам…" />
-              <button v-if="q" class="clr" title="Сбросить" @click="q = ''">✕</button>
+
+            <div class="filter-section triage-filter" role="group" aria-labelledby="board-triage-filter-label">
+              <span id="board-triage-filter-label" class="filter-caption">Триаж</span>
+              <div class="trisegment">
+                <button type="button" class="trif" :class="{ on: triageMode === 'all' }"
+                        :aria-pressed="String(triageMode === 'all')" @click="triageMode = 'all'">Все</button>
+                <button type="button" class="trif unrated-filter" :class="{ on: onlyUnrated }"
+                        :aria-pressed="String(onlyUnrated)" @click="triageMode = 'unrated'">Без оценки</button>
+                <button type="button" class="trif needs-info-filter" :class="{ on: onlyNeedsInfo }"
+                        :aria-pressed="String(onlyNeedsInfo)" @click="triageMode = 'needs-info'">Нужны уточнения</button>
+              </div>
+            </div>
+
+            <div class="filter-actions">
+              <button v-if="activeFilterCount" type="button" class="trif filter-reset"
+                      title="Вернуть порядок B24 и показать все задачи" @click="resetTaskFilters">
+                Сбросить
+              </button>
+              <div v-if="unrated.length" class="batch-actions" role="group"
+                   aria-label="Массовые действия с задачами">
+                <button type="button" class="batch-action triage-all"
+                        :aria-label="`Оценить все задачи без оценки: ${unrated.length}`"
+                        title="Поставить все задачи без оценки в очередь триажа" @click="analyzeAllUnrated">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 3.5 14 9l5.5 2-5.5 2-2 5.5-2-5.5L4.5 11 10 9z" />
+                  </svg>
+                  Оценить все
+                  <span class="batch-count mono" aria-hidden="true">{{ unrated.length }}</span>
+                </button>
+              </div>
             </div>
           </div>
           <div v-if="favorites.error" class="faverror" role="alert">
@@ -330,7 +419,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
         </section>
 
         <!-- Контроль / поставленные: блок скрыт, когда обе секции пусты -->
-        <section v-if="data.toReview.length || data.created.length" class="col">
+        <section v-if="data.toReview.length || data.created.length" class="col secondary">
           <h3 class="h">Ждут моего контроля <span class="cnt">{{ data.toReview.length }}</span></h3>
           <ul class="tasks" v-if="data.toReview.length">
             <li v-for="t in data.toReview" :key="t.id" class="trow">
@@ -372,7 +461,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 </template>
 
 <style scoped>
-.board { display: flex; flex-direction: column; gap: 16px; }
+.board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .err { color: var(--bad); }
 .link { color: var(--accent); margin-left: 8px; }
 
@@ -412,40 +501,109 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .atitle:hover { color: var(--accent); }
 .atimer { color: var(--accent); font-size: 15px; }
 
-.cols { display: grid; gap: 18px; grid-template-columns: 1fr; align-items: start; }
-@media (min-width: 860px) { .cols { grid-template-columns: 2fr 1fr; } }
-/* Правой колонки нет (нечего контролировать/не ставил задач) — задачи на всю ширину */
-.cols.solo { grid-template-columns: 1fr; }
+.cols { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; min-width: 0; }
 .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 /* Основной блок «Мои задачи» — в карточке, чтобы визуально доминировал */
-.col.primary { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px 12px; }
-.colhead { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 6px 0 4px; }
+.col.primary {
+  flex: 2 1 720px; container: board-primary / inline-size;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px 12px;
+}
+.col.secondary { flex: 1 1 320px; }
+/* Правой колонки нет — карточка задач занимает всю доступную строку. */
+.cols.solo .primary { flex-basis: 100%; }
+.colhead {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
+  align-items: center; gap: 10px 14px; margin: 6px 0 2px; min-width: 0;
+}
 .h { font-size: 13px; font-weight: 640; margin: 6px 0 2px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-mid); }
 .h.big { font-size: 14px; color: var(--ink); }
-.cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
-/* Тулбар триажа: все контролы одной высоты с поиском (36px) */
-.tritools { display: flex; align-items: center; gap: 6px; flex: none; }
+.cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.filter-toggle, .trisort, .trif, .search, .batch-action {
+  height: var(--control-height); min-height: var(--control-height);
+  border-radius: var(--control-radius); white-space: nowrap;
+}
+.filter-toggle {
+  display: none; align-items: center; gap: 6px; justify-self: end;
+  border: 1px solid var(--line); background: var(--ground); color: var(--ink-mid);
+  padding: 0 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.filter-toggle.on { border-color: var(--accent); color: var(--accent); }
+.filter-toggle svg { width: 15px; height: 15px; flex: none; }
+.filter-count {
+  min-width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0 4px;
+  border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent); font-size: 10px; font-weight: 700; line-height: 1;
+}
+.filterbar {
+  display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 12px;
+  min-width: 0; max-width: 100%; padding: 3px 0 5px;
+}
+.filter-section { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sort-filter { flex: 0 1 205px; }
+.show-filter, .triage-filter { flex: 0 1 auto; }
+.filter-caption {
+  color: var(--ink-dim, var(--ink-mid)); font-size: 10px; font-weight: 650; letter-spacing: .06em;
+  line-height: 1; text-transform: uppercase; white-space: nowrap;
+}
 .trisort {
-  height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px;
+  flex: 1 1 135px; min-width: 0; box-sizing: border-box;
+  background: var(--ground); border: 1px solid var(--line);
   color: var(--ink-mid); font-size: 12px; padding: 0 8px; outline: none; cursor: pointer;
 }
-.trisort:focus, .trisort:hover { border-color: var(--accent); color: var(--ink); }
+.trisort:hover { border-color: var(--accent); color: var(--ink); }
 .trif {
-  height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px;
-  color: var(--ink-mid); font-size: 12px; padding: 0 11px; cursor: pointer;
+  min-width: 0; max-width: 100%; box-sizing: border-box;
+  background: var(--ground); border: 1px solid var(--line);
+  color: var(--ink-mid); font-size: 12px; line-height: 1.15; padding: 7px 11px; cursor: pointer;
 }
 .trif:hover { color: var(--ink); }
 .trif.on { border-color: var(--accent); color: var(--accent); }
 .trif:disabled { opacity: .55; cursor: wait; }
 .favfilter.on { border-color: var(--warn); color: var(--warn); }
-.trif-ic { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.trif-ic { display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-variant-numeric: tabular-nums; }
 .trif-ic svg { width: 13px; height: 13px; }
-.search { display: flex; align-items: center; gap: 8px; height: 36px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; padding: 0 11px; flex: 1; max-width: 340px; }
+.trisegment { display: flex; align-items: stretch; min-width: 0; }
+.trisegment .trif { border-radius: 0; margin-left: -1px; }
+.trisegment .trif:first-child { margin-left: 0; border-radius: var(--control-radius) 0 0 var(--control-radius); }
+.trisegment .trif:last-child { border-radius: 0 var(--control-radius) var(--control-radius) 0; }
+.filter-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; margin-left: auto; }
+.filter-reset { border-color: transparent; background: transparent; }
+.batch-actions {
+  display: flex; align-items: center; flex: none; padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.batch-action {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  box-sizing: border-box; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; padding: 0 13px; font: inherit; font-size: 12px;
+  font-weight: 650; line-height: 1.15; cursor: pointer;
+}
+.batch-action:hover { filter: brightness(1.08); }
+.batch-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent); outline-offset: 2px;
+}
+.batch-action svg { width: 14px; height: 14px; flex: none; }
+.batch-count {
+  min-width: 20px; height: 20px; display: inline-grid; place-items: center; box-sizing: border-box;
+  border-radius: 999px; background: color-mix(in srgb, #000 18%, transparent); padding: 0 5px;
+  font-size: 10px; line-height: 1;
+}
+.search {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
+  box-sizing: border-box; background: var(--ground); border: 1px solid var(--line); padding: 0 11px;
+}
 .search:focus-within { border-color: var(--accent); }
 .search .si { width: 15px; height: 15px; color: var(--ink-mid); flex: none; }
 .search input { background: none; border: none; color: var(--ink); font-size: 14px; flex: 1; min-width: 0; outline: none; }
-.search .clr { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 12px; padding: 0 2px; flex: none; }
-.search .clr:hover { color: var(--ink); }
+.search .clr {
+  align-self: stretch; min-width: calc(var(--control-height) - 4px); min-height: 0; display: grid; place-items: center;
+  margin-right: -9px; background: none; border: none; border-radius: 8px;
+  color: var(--ink-mid); cursor: pointer; font-size: 12px; padding: 0; flex: none;
+}
+.search .clr:hover { color: var(--ink); background: var(--surface-2); }
+.filter-toggle:focus-visible, .trif:focus-visible, .trisort:focus-visible, .search:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent); outline-offset: 1px;
+}
 .faverror {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin: 2px 0 4px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
@@ -486,15 +644,32 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .ttime { font-size: 12px; flex: none; }
 .empty { font-size: 13px; padding: 4px 0 8px; }
 
-@media (max-width: 900px) {
-  .colhead { flex-wrap: wrap; }
-  .search { order: 3; max-width: none; flex-basis: 100%; }
-  .tritools { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+/* Решение принимается по ширине карточки, а не viewport: sidebar, dock и правая
+   колонка могут оставить планшету узкий primary даже при широком окне. */
+@container board-primary (max-width: 720px) {
+  .colhead { grid-template-columns: minmax(0, 1fr) auto; }
+  .filter-toggle { display: inline-flex; }
+  .search { grid-column: 1 / -1; }
+  .filterbar { display: none; padding-top: 5px; border-top: 1px solid var(--line); }
+  .filterbar.expanded { display: flex; }
+  .filter-section { flex: 1 1 100%; align-items: stretch; }
+  .filter-caption { flex-basis: 100%; padding: 2px 1px 0; }
+  .sort-filter .trisort { flex-basis: 100%; width: 100%; }
+  .show-filter .trif { flex: 1 1 calc(50% - 3px); }
+  .trisegment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .trisegment .trif { width: 100%; padding-inline: 7px; }
+  .filter-actions { width: 100%; margin-left: 0; }
+  .filter-actions .trif { flex: 1 1 auto; }
+  .batch-actions { margin-left: auto; }
 }
 
 .charts-head { display: flex; align-items: center; justify-content: space-between; }
 .periods { display: flex; gap: 4px; }
-.periods button { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.periods button {
+  height: var(--control-height); border: 1px solid var(--line); border-radius: var(--control-radius);
+  background: var(--surface-2); color: var(--ink-mid); padding: 0 10px; font-size: 12px;
+  white-space: nowrap; cursor: pointer;
+}
 .periods button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .charts-grid { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 10px; }
 @media (min-width: 720px) { .charts-grid { grid-template-columns: repeat(3, 1fr); } }

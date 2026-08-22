@@ -110,6 +110,12 @@ attempt=$(begin_selected 51 a_11111111111111111111111111111111)
 assert_rc 0 "$?" "selected v2 attempt is prepared"
 attempt_dir="$(attempt_state_v2_task_root 51)/attempts/$attempt"
 
+preinit_transitions="$TEST_ROOT/preinit-routing-transitions.ndjson"
+attempt_stage_state_routing_transitions_v2 51 "$attempt" >"$preinit_transitions"
+assert_rc 0 "$?" "routing projection accepts a selected attempt before cursor initialization"
+assert_eq 0 "$(wc -c <"$preinit_transitions" | tr -d ' ')" \
+  "an uninitialized stage ledger has no authoritative routing transitions"
+
 initial=$(attempt_stage_state_init_v2 51 "$attempt" debug)
 assert_rc 0 "$?" "execution cursor initializes from the verified route entry"
 assert_eq ready "$(json_field "$initial" state)" \

@@ -30,6 +30,7 @@ export function buildTranscribeArgv({ scriptPath, audioPath, options, progressFi
   );
   if (speech.hotwords) argv.push('--hotwords', speech.hotwords);
   if (!speech.conditionOnPreviousText) argv.push('--no-condition-previous');
+  if (speech.initialPrompt) argv.push('--initial-prompt', speech.initialPrompt);
   argv.push('--vad-silence-ms', String(speech.vadSilenceMs));
   if (progressFile) argv.push('--progress-file', progressFile);
   return argv;
@@ -111,6 +112,7 @@ export function encodeIngestJob(value) {
     hotwords: job.hotwords,
     vadSilenceMs: job.vadSilenceMs,
     conditionOnPreviousText: job.conditionOnPreviousText,
+    initialPrompt: job.initialPrompt,
   }, 'video');
   const frames = job.frames ?? 0;
   if (!Number.isInteger(frames) || frames < 0) {
@@ -151,6 +153,7 @@ export function decodeIngestJob(value) {
     hotwords: job.hotwords,
     vadSilenceMs: job.vadSilenceMs,
     conditionOnPreviousText: job.conditionOnPreviousText,
+    initialPrompt: job.initialPrompt,
   }, 'video');
   return {
     ...job,

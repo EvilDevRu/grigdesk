@@ -26,6 +26,7 @@ const PUBLIC_MESSAGES = Object.freeze({
   github_force_forget_confirmation: 'Нужно явно подтвердить возможный orphan GitHub hook.',
   github_rules_invalid: 'Правило GitHub не соответствует контракту.',
   github_rules_owner_mismatch: 'Правило относится к другому repository.',
+  github_rules_stale_policy: 'Правило GitHub изменилось. Обнови форму и повтори действие.',
   github_ingress_gone: 'Этот GitHub webhook ingress больше не действует.',
   github_ingress_not_ready: 'GitHub channel ещё не завершил подключение.',
   github_signature_invalid: 'Подпись GitHub webhook не совпала.',
@@ -42,6 +43,7 @@ const PUBLIC_MESSAGES = Object.freeze({
   github_event_mismatch: 'GitHub webhook содержит неожиданное событие.',
   github_failed: 'Операция GitHub временно не выполнена.',
 });
+const POLICY_FINGERPRINT_RE = /^ghpol1:[0-9a-f]{64}$/u;
 
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -102,6 +104,25 @@ async function githubModule(fastify, opts) {
     code: 'github_account_changed',
     statusCode: 409,
   });
+  const requireWritableRules = async (lease, expectedRepositoryId, reply) => {
+    if (!lease.isCurrent()
+        || lease.context.repositoryId !== expectedRepositoryId) throw accountChanged();
+    const provider = await connection.status();
+    if (!lease.isCurrent()) throw accountChanged();
+    if (provider.connection !== 'connected') {
+      reply.code(409).send({
+        error: 'github_not_connected',
+        message: PUBLIC_MESSAGES.github_not_connected,
+      });
+      return true;
+    }
+    let liveRepositoryId = null;
+    try {
+      liveRepositoryId = normalizeGitHubRepositoryId(provider.repositoryId);
+    } catch { /* Устаревшая или повреждённая публичная проекция. */ }
+    if (liveRepositoryId !== expectedRepositoryId) throw accountChanged();
+    return false;
+  };
 
   const run = (operation) => async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -162,12 +183,12 @@ async function githubModule(fastify, opts) {
     let lease;
     try {
       lease = connection.acquireInboxLease();
-      const rules = await lease.context.rules.read();
+      const policy = await lease.context.rules.readPolicy();
       if (!lease.isCurrent()) throw accountChanged();
-      return { rules };
+      return policy;
     } catch (error) {
       if (error?.code !== 'channel_disconnected') throw error;
-      return { rules: [] };
+      return { rules: [], policyFingerprint: null };
     } finally {
       lease?.release();
     }
@@ -180,11 +201,19 @@ async function githubModule(fastify, opts) {
       if (typeof body?.repositoryId === 'string') {
         expectedRepositoryId = normalizeGitHubRepositoryId(body.repositoryId);
       }
-    } catch { /* invalid client CAS */ }
+    } catch { /* Некорректный клиентский CAS. */ }
     if (!body || expectedRepositoryId === null) return reply.code(400).send({
       error: 'invalid_request',
       message: 'Ожидались ровно canonical repositoryId и rules.',
     });
+    if (Array.isArray(body.rules) && body.rules.some((rule) => (
+      isPlainObject(rule) && Object.hasOwn(rule, 'agentSearch')
+    ))) {
+      return reply.code(400).send({
+        error: 'invalid_request',
+        message: 'agentSearch меняется только отдельной CAS-ручкой.',
+      });
+    }
     let lease;
     try {
       lease = connection.acquireInboxLease();
@@ -199,27 +228,59 @@ async function githubModule(fastify, opts) {
       // Provider id приходит только как optimistic CAS: namespace всегда берём
       // из immutable lease, а не из тела. Поэтому старая вкладка не сможет
       // очистить rules уже подключённого другого repository даже пустым массивом.
-      if (!lease.isCurrent()
-          || lease.context.repositoryId !== expectedRepositoryId) throw accountChanged();
-      const provider = await connection.status();
-      if (!lease.isCurrent()) throw accountChanged();
-      if (provider.connection !== 'connected') {
-        return reply.code(409).send({
-          error: 'github_not_connected',
-          message: PUBLIC_MESSAGES.github_not_connected,
-        });
-      }
-      let liveRepositoryId = null;
-      try {
-        liveRepositoryId = normalizeGitHubRepositoryId(provider.repositoryId);
-      } catch { /* stale/corrupt public projection */ }
-      if (liveRepositoryId !== expectedRepositoryId) throw accountChanged();
+      const rejected = await requireWritableRules(lease, expectedRepositoryId, reply);
+      if (rejected) return rejected;
       const projects = await listProjects();
       if (!lease.isCurrent()) throw accountChanged();
       const rules = await lease.context.rules.write(body.rules, { projects });
       if (!lease.isCurrent()) throw accountChanged();
       changed('rules');
       return { ok: true, rules };
+    } finally {
+      lease.release();
+    }
+  }));
+
+  fastify.put('/api/github/rules/agent-search', run(async (request, reply) => {
+    const body = exactBody(request.body, [
+      'repositoryId', 'expectedPolicyFingerprint', 'enabled',
+    ]);
+    let expectedRepositoryId = null;
+    try {
+      if (typeof body?.repositoryId === 'string') {
+        expectedRepositoryId = normalizeGitHubRepositoryId(body.repositoryId);
+      }
+    } catch { /* Некорректный клиентский CAS. */ }
+    if (!body || expectedRepositoryId === null
+        || typeof body.enabled !== 'boolean'
+        || typeof body.expectedPolicyFingerprint !== 'string'
+        || !POLICY_FINGERPRINT_RE.test(body.expectedPolicyFingerprint)) {
+      return reply.code(400).send({
+        error: 'invalid_request',
+        message: 'Ожидались exact repositoryId, expectedPolicyFingerprint и boolean enabled.',
+      });
+    }
+
+    let lease;
+    try {
+      lease = connection.acquireInboxLease();
+    } catch (error) {
+      if (error?.code !== 'channel_disconnected') throw error;
+      return reply.code(409).send({
+        error: 'github_not_connected',
+        message: PUBLIC_MESSAGES.github_not_connected,
+      });
+    }
+    try {
+      const rejected = await requireWritableRules(lease, expectedRepositoryId, reply);
+      if (rejected) return rejected;
+      const policy = await lease.context.rules.setAgentSearch({
+        enabled: body.enabled,
+        expectedPolicyFingerprint: body.expectedPolicyFingerprint,
+      });
+      if (!lease.isCurrent()) throw accountChanged();
+      changed('agent_search');
+      return { ok: true, ...policy };
     } finally {
       lease.release();
     }

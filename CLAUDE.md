@@ -49,9 +49,11 @@
   analysis, auth, gateway, plugins, projects — реестр проектов с путями репозиториев,
   code — плагин «Код», inbox — плагин «Входящие», telegram/github — плагины каналов).
 - **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Projects, Code, Diff,
-  Tools, Video, Inbox, Telegram, GitHub, Terminal, Settings, Login, TaskModal, ChatPanel),
+  Tools, Video, Inbox, Telegram, GitHub, Terminal, Settings, Login, TaskModal),
   `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
-  ChatSession, ChatTabs, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
+  ChatSession, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
+  `features/companion/` (headless bridge, attention, browser TTS и компактный `CompanionHost`),
+  `features/speech/` (единственный root-owned controller диктовки и provider),
   `stores/` (Pinia: analysis, auth, board, chat, diff, dock, notify-watch, plugins, providers, pwa,
   system, tasks, inbox, ui, ui-context), `shared/`
   (api-client, layout — включая единственный `ToolHost`, tools registry/launcher, format,
@@ -83,6 +85,10 @@
   Запуск: `GET /api/tasks/:id/launch-options` (чем заполнять модалку: профиль,
   маршруты ОПУБЛИКОВАННОГО каталога) → `POST /api/tasks/:id/launch`, `POST /api/tasks/:id/resume`
   (продолжить упавший прогон — только по кнопке человека и exact attempt).
+  **Профиль по умолчанию — тот, чьи репозитории читал триаж задачи** (сверка фактических
+  путей `analysis.repos[].dir` с `source` из `profile_repositories`, `?profile=` и
+  `COCKPIT_FACTORY_PROFILE` сильнее). Неоднозначность и отсутствие триажа оставляют
+  прежний `primaryProfile()`; почему без этого форма заперта — `docs/cockpit/gotchas.md`.
   Единственный route-движок запускает только профиль с capability `route-v2` и опубликованным
   каталогом; иначе запрос fail-closed. Исторический реестр виден только для чтения и никогда
   не передаётся launcher-у. Постановка едет
@@ -102,13 +108,38 @@
   **Присланная копия не замещает серверную, а сливается с ней** (`lib/chat/merge-chat.js`):
   сервер не теряет сообщений, отставшее окно больше не стирает ответы, дошедшие до другого
   устройства — см. `docs/cockpit/chat-agents.md`.
+  Компактный голосовой компаньон использует ту же schema/history: атомарный
+  `POST /api/chat/store/ensure` создаёт или восстанавливает один server-owned разговор
+  `purpose: "companion"` на `logicalIdentity` (`global` либо exact task). Быстрый ход
+  отправляет `companionTurn: true` и request-only `mode: "plan"`; отсутствие честно
+  объявленного executor-ом `plan` даёт `409 companion_plan_unavailable` до запуска процесса.
+  Task identity перед ensure подтверждает только server-owned factory registry или live B24;
+  для task companion-turn дополнительно обязателен непустой валидный factory worktree —
+  B24-only задача сохраняет exact историю, но до запуска песочницы получает
+  `409 companion_task_sandbox_unavailable`, а не fallback в корень Cockpit. Trusted repo
+  path должен оставаться существующим обычным каталогом: symlink/файл/удалённый worktree
+  отклоняются до executor-а. Durable global/task identity совпадает с route и без quick-turn
+  marker; DELETE принятого/ожидающего хода отвечает `409 chat_busy`.
+  Прямая TTS-озвучка требует последнего server-owned `speechSafe: true`: раннее действие,
+  permission или question монотонно снимает attestation и не может исчезнуть вместе со
+  скользящим хвостом шагов. Device opt-in хранится даже без `speechSynthesis`, а mute в
+  bubble относится только к текущей вкладке.
+  **Чем отвечает компаньон — своя серверная настройка** (prefs `companion: {modelRef, effort}`,
+  карточка «Настройки → Приложение → Голосовой компаньон»), а не свойство разговора: чат у
+  компаньона один на все окна, поэтому и модель одна. Она общая для его общего и задачных
+  разговоров, действует со следующего хода, а селекты модели/усилия у companion-чата на
+  `/chats` неактивны и показывают её же — вторая правда там означала бы выбор, живущий до
+  первого хода. Показывать ли аватар и озвучивать ли ответы остаётся выбором УСТРОЙСТВА
+  (localStorage) — см. `docs/cockpit/chat-agents.md`.
+  Полная страница `/chats` продолжает тот же разговор в явно выбранном человеком режиме.
   **Обрыв связи окна ≠ провал хода:** ход живёт в процессе сервера, порванный `POST /api/chat`
   его не останавливает, ответ придёт через `chats/pending`. Клиент такую ошибку в общую
   историю не пишет (локальная плашка «связь прервалась»), а метку обрыва, за которой уже
   стоит ответ агента, сервер снимает при сохранении.
   Полный `PUT /api/chat/store` остался
   только для миграции и восстановления снимка: одним телом история упиралась в лимит
-  запроса — см. `docs/cockpit/gotchas.md`. Принимает `context` (UI-контекст страницы)
+  запроса — см. `docs/cockpit/gotchas.md`. Chat-turn принимает `context` (bounded
+  недоверенный UI-контекст страницы; он не выбирает cwd, задачу или права)
   и `attachments` (вложения). Вложения: `POST /api/chat/upload` (multipart → `chats/attachments/`),
   `GET /api/chat/attachment/:file` (превью). Диктовка: `POST /api/chat/transcribe` (аудио → whisper → текст).
   Разрешения на действия агента: SSE `chat-permission` → `POST /api/chat/permission/:pid` (всплывашка;
@@ -152,7 +183,8 @@
   исполнителя в prefs (`providerSettings.ollama`); `num_ctx` — ползунок, чей потолок
   вычисляется от памяти машины (свободная VRAM + 60% ОЗУ + занятое уже загруженной
   моделью − её веса, делённые на оценку KV-кэша из `model_info`), а `run()` клампит его
-  по per-model оценке, но не ниже рабочего минимума 8192.
+  по per-model оценке. 8192 — floor только при ужатии большего requested значения;
+  явно выбранное меньшее окно текущий chat adapter не повышает.
   Всплывашка в шапке показывает не лимиты (их нет), а память машины, загруженные модели
   и кнопку их выгрузки. Узлы схем конвейера Ollama НЕ исполняет: раннерам движка нужен
   агентский CLI, а `ollama run` — голый REPL (`docs/cockpit/chat-agents.md`).
@@ -184,7 +216,15 @@
   (основное + worktree из `git worktree list`), диф — тем же `lib/git.js`, что приёмка;
   UI показывает два уровня — проект и единую «Рабочую копию» (`repo + root` остаются внутренней
   парой API), а несохранённые изменения переключаются между деревом и плоским списком; гейт
-  `pluginEnabled('code')` живой, как у видео. **Служебные каталоги закрыты для `ls`, `file`
+  `pluginEnabled('code')` живой, как у видео.
+  **Изменения приходят ДВУМЯ группами, как Source Control в VS Code** (`worktreeChanges`):
+  `staged` — индекс против HEAD, `files` — рабочее дерево против ИНДЕКСА плюс неотслеживаемые.
+  Приёмка задач (`taskDiff`, `/api/tasks/:id/diff`) осталась одной величиной «поверх HEAD»:
+  фабрика индекс не трогает. Один путь законно лежит в обеих группах с разными дифами,
+  поэтому выбор в панели адресуется парой `группа:путь` (`gitRef`), а пустая группа не
+  рисуется вовсе — при чистом индексе панель выглядит как раньше. Почему одного «diff HEAD»
+  мало: проиндексированное и откаченное в рабочем дереве изменение из него исчезает
+  целиком, хотя уедет в коммит (`tests/server/code-git-staged.test.js`). **Служебные каталоги закрыты для `ls`, `file`
   и `raw`**
   (`isHiddenPath`): сегменты `.git`/`.state` в любом дереве плюс каталоги данных кокпита
   по фактическому пути из config (`chatsDir`, `telegramDir`, `githubDir`) — переписка и токены не
@@ -251,6 +291,14 @@
   в неё уехало; название модель собрала по недоверенному тексту, поэтому схлопывается в одну
   строку и режется по 200 символам). Ручной и автоматический пути общие; Telegram failure
   не откатывает задачу и не ретраится автоматически, чтобы неопределённый timeout не дал дубль.
+  Раз повтора нет, недоставка не молчит: ответ `task` несёт `notification: {enabled, sent,
+  reason}`, и карточка `/inbox` говорит, что сообщить в чат придётся человеку. Повтор при
+  моргнувшей сети выдан только ИДЕМПОТЕНТНОМУ (`getFile`/скачивание вложений) —
+  `docs/cockpit/gotchas.md`.
+  У rule есть отдельный default-deny `agentSearch`: старые правила закрыты агентам, human
+  allowlist не меняется. Opt-in идёт только через `PUT /api/telegram/rules/agent-search`
+  с подтверждением в UI и CAS по canonical `policyFingerprint`; обычный rules PUT полем
+  не владеет, stale форма получает `409`.
   **Хук на чтение — `POST /api/telegram/expand`** (`lib/telegram/resolve.js`): что стоит
   за ссылками `t.me` в тексте задачи. Ссылки разбирает `lib/telegram/links.js` — он же
   схлопывает дубли (одну ссылку любят вписать и в описание, и в комментарий рядом).
@@ -296,20 +344,39 @@
   проходит, но его источник — портал). Нераскрытая ссылка показывается с причиной и
   без содержимого — как её отдал сервер; UI не придумывает за него ни имени чата,
   ни цитат. Вложения пока словами: `fileId` наружу не уходит вовсе, превью — фаза 4.
-  **Телеграм-пульт** — карточки «работа стоит на тебе» (ворота/вопрос/разрешение/
-  затык/молчание) и кнопки решений в личке владельца: тот же бот и тот же поллер
-  (`callback_query` читает общий цикл — второй getUpdates ловит 409), владелец — личка
-  из архива, подтверждённая 6-значным кодом (`bot-settings.json`, поля `pult*`);
+  **Телеграм-пульт — глаза на конвейер и разговор с ассистентом, а не второй кокпит.**
+  Он отвечает на «что там сейчас» и «не стоит ли работа на мне», а свободный текст
+  и голос в его личке становятся обычным auto-ходом в том же server-owned
+  companion-чате, что открыт на странице `/chats` (без `companionTurn`, `dontAsk` и
+  `bypassPermissions`; пока ход идёт — только `typing`, через 30 секунд — кнопка
+  «Стоп», итог одним сообщением). Текст с `/`, точные подписи постоянной клавиатуры
+  (Конвейер · Агент · Задачи · Ещё) и реплай на карточку решения агенту не уходят.
+  Живая карточка прогона (`live:<task>:<attempt>`) — одно ТИХОЕ сообщение на попытку,
+  которое вотчер правит на месте: узел, `done/total · %`, чем занят агент
+  (`agentActivityLabel` из общего `agent-activity.js`) и время работы. Правка идёт
+  немедленно на смене значимого (`liveSignature`) и не чаще минуты на тикающих цифрах;
+  совпавший текст не отправляется вовсе. Исход прогона (`done:<task>:<attempt>`) —
+  ОТДЕЛЬНОЕ сообщение, потому что правка push не даёт; `completed`/`abandoned` звонят,
+  `recovered`/`human-rewind` уходят тихо. Обе карточки `sticky`: ни уборка ушедших
+  поводов, ни `/clean` их не трогают; решённые карточки поводов удаляются, итог —
+  всплывашкой или эфемерным «✓ …» на реплай-ветке. Плюс прежние карточки «работа стоит на тебе»
+  (ворота/вопрос/разрешение/затык/молчание) с кнопками решений: тот же бот и тот же
+  поллер (`callback_query` читает общий цикл — второй getUpdates ловит 409), владелец —
+  личка из архива, подтверждённая 6-значным кодом (`bot-settings.json`, поля `pult*`);
   чужое — молчаливый ноль исходящих. Каждое нажатие — inject в ту же ручку, что жмёт
   браузер (CAS сервера защищает устаревшие кнопки), правило «что требует человека» —
-  импорт тех же `web/src/shared/{pipeline-wait,agent-activity}.js`. Мутации (resume,
-  пересборка стенда, `/task` с предпросмотром, `/launch` по опубликованному каталогу,
-  `/timer`/`/complete`/`/renew`, `/stop` хода чата) — только вторым тапом с TTL и
-  сверкой серверного снимка; деньги, `goto`, смена исполнителя, снос стенда и закрытие
-  задач в пульт не выносятся. `/status` показывает названия, текущие узлы и честный
-  `done/total` прогресс маршрута; из карточки доступны постраничные статусы всех узлов
-  и bounded plain-text страницы единственного allowlisted документа `plan.md`, в том
-  числе перед `GATE_PLAN`. Тексты — plain без `parse_mode`; дифы, произвольные файлы и токены не
+  импорт тех же `web/src/shared/{pipeline-wait,agent-activity}.js`. Мутаций осталось
+  две — resume и пересборка стенда с карточки затыка, обе вторым тапом с TTL; деньги,
+  запуск прогона, `goto`, смена исполнителя, снос стенда, закрытие задач и постановка
+  в B24 в пульт не выносятся (`/task`, `/launch`, `/timer`, `/complete`, `/renew`,
+  `/stop` сняты: они дублировали мобильный Битрикс, Входящие и кокпит, а `/stop`
+  предлагал выбрать ход по обрезанному `chatKey`). `/status` показывает названия,
+  текущие узлы и честный `done/total` прогресс маршрута; из карточки доступны
+  постраничные статусы всех узлов и bounded plain-text страницы единственного
+  allowlisted документа `plan.md`, в том числе перед `GATE_PLAN`. Вся навигация живёт
+  в одном сообщении-экране и правится на месте (своя запись в `pult-state.json`, вотчер
+  её не трогает); `/clean` сносит накопленное пакетным `deleteMessages`, кроме sticky.
+  Тексты — plain без `parse_mode`; дифы, произвольные файлы и токены не
   едут никогда. Контракт целиком — `docs/cockpit/telegram-pult.md`.
 - **«Входящие» — отдельный общий плагин** (`lib/inbox/`, `modules/inbox/`, раздел
   `/inbox`), а Telegram и GitHub — независимые подключаемые каналы. Список, summary и
@@ -387,7 +454,10 @@
   статусу она висела бы в разборе вечно.
 - GitHub Issues (плагин канала «GitHub Issues», раздел `/github`): один repository,
   `GET /api/github/status`, `POST /api/github/{connect,recheck,disconnect}` и
-  `GET/PUT /api/github/rules`. Connect проверяет repository через GitHub REST, связывает
+  `GET/PUT /api/github/rules`. Отдельный default-deny `agentSearch` меняется только через
+  явный CAS `PUT /api/github/rules/agent-search`; старые rules без поля закрыты агентам,
+  а человеческий allowlist от opt-in не расширяется. Connect проверяет repository через
+  GitHub REST, связывает
   immutable `repository.id` с `accountRef`, создаёт выключенный repository webhook только
   на operator-owned HTTPS callback, затем включает его и ждёт подписанный ping. PAT и
   случайный HMAC secret хранятся только в private `server/.state/github-creds.json`;
@@ -409,14 +479,27 @@
 - Система: `GET /api/system` (CPU% + RAM: сумма «ОЗУ+swap» для цифры в шапке и разбивка
   `ram*`/`swap*` для всплывашки с полосками); `GET /api/system/server` (режим запуска:
   systemd/вручную, по `INVOCATION_ID`), `POST /api/system/restart` (перезапуск кнопкой). Медиа: `GET /api/media/doctor`,
-  `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт).
+  `POST /api/media/upload` (multipart → распознавание), `GET /api/media/ingest/:jobId` (статус/транскрипт),
+  `POST /api/media/plan-tasks` (расшифровку своих job'ов разбирает модель → черновики задач с
+  таймкодами; встреча законно лежит в НЕСКОЛЬКИХ файлах и склеивается сквозными таймкодами
+  до модели; недоверенный текст идёт только через `runUntrusted`, модель — своя настройка
+  плагина `video`, постановщик выбирается человеком и пустым уезжает как `null`),
+  `GET /api/media/frame/:run/:file` (кадр записи на таймкоде задачи: превью до постановки
+  и вложение к ней — наружу уходит ИМЯ кадра, путь на диске подставляет декоратор
+  `mediaFramePath`, потому что `POST /api/b24/tasks` грузит файлы на портал).
+  Контракт — `docs/cockpit/video.md`.
 - Настройки: prefs — `GET/POST /api/settings/prefs`; диагностика фабрики —
   `GET/POST /api/settings/factory-debug`; B24 — `GET/POST /api/settings/b24` +
   `POST /api/settings/b24/test`; доверенные каталоги чат-исполнителей —
   `POST /api/settings/trusted-directories` (хранятся в prefs; поддержку объявляет сам
   адаптер полем `trustedDirectories`, поэтому UI берёт актуальные имена из `/api/providers`
-  без хардкода; Claude/Codex применяют через `--add-dir`, Ollama — как корни файловых
-  инструментов, Kimi — только в contained-режиме; глобальные конфиги CLI не меняются);
+  без хардкода; Claude применяет через `--add-dir`, Codex — через
+  `turn/start.sandboxPolicy.writableRoots`, Ollama — как корни файловых инструментов,
+  Kimi — только в contained-режиме; глобальные конфиги CLI не меняются);
+  исполнитель и усилие голосового компаньона — prefs `companion: {modelRef, effort}`
+  (карточка «Приложение → Голосовой компаньон»; нормализация — `lib/companion-settings.js`,
+  клиенту едет вместе с историей через `GET /api/chat/store`, потому что модель резолвит
+  браузер перед ходом. Настройка серверная, а тумблер показа и озвучка — device-local);
   порог автокомпакта чатов —
   prefs `chatAutoCompactWindow` (дефолт 200 000 токенов, `0` — не вмешиваться; Claude получает
   его через `executor.autoCompactEnv`, Codex — через `model_auto_compact_token_limit`);
@@ -446,7 +529,7 @@
   `POST /api/settings/speech/browser-consent`, model jobs
   `/api/settings/speech/{models/:id/{download,copy},benchmark,jobs/:id}`;
   плагины — `/api/plugins*`. В UI табы:
-  Битрикс24 / Исполнители / Запуски / Речь / Плагины / Сервер / Доступ.
+  Приложение / Речь / Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ.
   Терминал: `GET /api/terminal` (WebSocket, настоящий PTY; сообщения `in` и `resize`,
   размер меняется через `TIOCSWINSZ` + `SIGWINCH`). Реалтайм: `GET /api/events` (SSE).
 
@@ -454,6 +537,10 @@
 
 - **Палитра — точная тёмная тема старого дашборда фабрики** (`#0b0d11/#151920/#5aa2ff/#3fb950/#e0a33a/#f0564c`).
   Кокпит закоммичен в dark.
+- **Одноранговые контролы образуют единый ритм.** Кнопки, поля и select в одной панели
+  используют общие `--control-height` и `--control-radius` из `web/src/styles.css`; нельзя
+  задавать им разные локальные высоты или радиусы. Адаптив меняет раскладку всей группы,
+  но не размер одной кнопки относительно соседних и не вводит свой локальный размер.
 - **Конвейер — порт `dashboard.py`**: `node_geom`/`edge_path` (12 типов кривых), `pipeline_statuses`
   (9 статусов узлов), `loop_facts` — портированы 1:1 в `lib/factory-graph.js` + `web/shared/graph-geom.js`.
 - **B24 принадлежит Cockpit целиком:** сервер — единственный владелец портальной сессии,
@@ -462,6 +549,11 @@
   ограниченный writer вторичной проекции, не внешний control-plane API.
   **flock на `orch.lock` НЕ использовать** (демон держит его весь прогон — дедлок). Контракт запуска —
   машинный (чтение `ORCH_PID`+`/proc`), не парсинг stdout.
+- **Каталог маршрутов закрепляется под task lock движка:** форма присылает
+  `expectedCatalogHash`, а `factory start` сверяет его с current один раз внутри создания
+  попытки и тем же хешем пинит attempt/pins. Публикация нового каталога между открытием
+  формы и стартом даёт типизированный отказ `catalog_changed`, а не молчаливый уезд по
+  другой схеме.
 - **Медиа-конвейер** (whisper/ffmpeg) живёт в Cockpit; установщик идемпотентно создаёт
   runtime-venv в `server/.state/media-venv` (gitignore) из закреплённых
   `server/requirements-media*.txt`, а путь фиксирует как `COCKPIT_MEDIA_PYTHON`.

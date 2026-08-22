@@ -30,6 +30,11 @@
      задаёт поиск с тумблером архива, справа — название, задача и ряд настроек. */
   --chat-head-h: 82px;
 
+  /* Каноническая геометрия обычных контролов. Одноранговые кнопки, поля и select
+     обязаны брать один токен; адаптив меняет раскладку, а не высоту контролов. */
+  --control-height: 36px;
+  --control-radius: 9px;
+
   --radius: 12px;
   --shadow: inset 0 1px 0 #ffffff0a, 0 1px 2px #00000050, 0 6px 22px #00000055;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;

@@ -24,7 +24,14 @@ const MAX_LIMIT = MAX_SCAN_POSITIONS;
 const SCAN_PAGE_POSITIONS = 1000;
 const MAX_MATERIALIZED_ATTACHMENTS = 12;
 const MAX_MATERIALIZED_BYTES = 80 * 1024 * 1024;
-const TASK_REPLY_TIMEOUT_MS = 5_000;
+// Ответ в чат идёт по той же нестабильной дороге, что и остальной Bot API:
+// пять секунд не переживают даже одну ретрансмиссию TLS, и задача уезжала в
+// B24 молча. Повтора у отправки нет по замыслу (см. api.js), поэтому
+// единственный рычаг здесь — дать первой попытке дойти: 15 с, как у клиента.
+const TASK_REPLY_TIMEOUT_MS = 15_000;
+// Скачивание вложения идемпотентно, поэтому моргнувшая сеть не обязана
+// превращаться в «поясните, что на фото»: две дополнительные попытки.
+const ATTACHMENT_FETCH_RETRIES = 2;
 const TELEGRAM_TEXT_LIMIT = 4_096;
 // Название задачи в ответе бота — строка-опознаватель, а не пересказ постановки.
 const TASK_REPLY_TITLE_LIMIT = 200;
@@ -805,7 +812,9 @@ export function createTelegramInboxChannel({
               continue;
             }
             try {
-              const found = await owner.botApi.getFile(token, attachment.ref);
+              const found = await owner.botApi.getFile(token, attachment.ref, {
+                retries: ATTACHMENT_FETCH_RETRIES,
+              });
               await assertCurrent();
               if (!isPlainObject(found) || typeof found.filePath !== 'string'
                   || (found.size !== null && found.size !== undefined
@@ -825,6 +834,7 @@ export function createTelegramInboxChannel({
               }
               const bytes = await owner.botApi.downloadFile(token, found.filePath, {
                 limit: Math.min(FILE_LIMIT, MAX_MATERIALIZED_BYTES - materializedBytes),
+                retries: ATTACHMENT_FETCH_RETRIES,
               });
               await assertCurrent();
               if (!(bytes instanceof Uint8Array) || bytes.byteLength > FILE_LIMIT) {

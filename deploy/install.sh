@@ -25,6 +25,11 @@ echo "→ node:   $NODE_BIN ($(node -v))"
 echo "→ Зависимости сервера…"
 ( cd "$COCKPIT_DIR/server" && npm install --no-audit --no-fund )
 
+# Installer фиксирует фактические Node/SQLite/FTS features. Провал не
+# блокирует остальной Cockpit: search останется degraded/disabled.
+"$NODE_BIN" --disable-warning=ExperimentalWarning \
+  "$COCKPIT_DIR/server/scripts/knowledge-search-preflight.mjs" || true
+
 echo "→ Зависимости web + сборка…"
 ( cd "$COCKPIT_DIR/web" && npm install --no-audit --no-fund && npm run build )
 

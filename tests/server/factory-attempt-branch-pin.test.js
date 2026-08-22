@@ -40,7 +40,11 @@ async function writeContentAddressedJson(dir, prefix, value) {
 }
 
 /** Минимальный доверенный журнал попытки с произвольными строками repo в манифесте. */
-async function trustedLedger({ workspaceMode = 'shared', sourceBranch, repoLines }) {
+async function trustedLedger({
+  workspaceMode = 'shared', sourceBranch, repoLines,
+  attemptSchema = 1, queueDispatchId = null, runnerPrimaryOverride = '',
+  terminalState = null, terminalReason = null,
+}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-branch-pin-'));
   const controlDir = path.join(root, 'control');
   const stateDir = path.join(root, 'state');
@@ -52,7 +56,7 @@ async function trustedLedger({ workspaceMode = 'shared', sourceBranch, repoLines
     protocolVersion: 2, schema: 1,
   }), { mode: 0o400 });
   await writeCheckedJson(attemptDir, 'attempt', {
-    schema: 1,
+    schema: attemptSchema,
     protocolVersion: 2,
     attemptId: ATTEMPT,
     taskId: String(TASK),
@@ -63,6 +67,7 @@ async function trustedLedger({ workspaceMode = 'shared', sourceBranch, repoLines
     origin: 'fresh',
     previousAttemptId: null,
     recoveryReason: null,
+    ...(attemptSchema === 2 ? { queueDispatchId, runnerPrimaryOverride } : {}),
   });
   await writeCheckedJson(attemptDir, 'pins', {
     schema: 1,
@@ -84,6 +89,19 @@ async function trustedLedger({ workspaceMode = 'shared', sourceBranch, repoLines
     routeHash: ROUTE_HASH,
     selectedAt: '2026-08-02T12:01:00Z',
   });
+  if (terminalState !== null) {
+    await writeContentAddressedJson(attemptDir, 'terminal', {
+      schema: 1,
+      protocolVersion: 2,
+      attemptId: ATTEMPT,
+      taskId: String(TASK),
+      state: terminalState,
+      closedAt: '2026-08-02T12:02:00Z',
+      reason: terminalState === 'finished'
+        ? null
+        : (terminalReason ?? 'operator closed attempt'),
+    });
+  }
   await writeFile(path.join(attemptDir, 'artifacts', 'profile-contract.tsv'), [
     'schema\t1',
     'repos-mode\tgeneric',
@@ -96,9 +114,11 @@ async function trustedLedger({ workspaceMode = 'shared', sourceBranch, repoLines
     ...repoLines,
     '',
   ].join('\n'), { mode: 0o400 });
-  await writeFile(path.join(taskRoot, 'active-attempt.json'), jsonBytes({
-    schema: 1, protocolVersion: 2, taskId: String(TASK), attemptId: ATTEMPT,
-  }), { mode: 0o400 });
+  if (terminalState === null) {
+    await writeFile(path.join(taskRoot, 'active-attempt.json'), jsonBytes({
+      schema: 1, protocolVersion: 2, taskId: String(TASK), attemptId: ATTEMPT,
+    }), { mode: 0o400 });
+  }
   return { controlDir, stateDir };
 }
 
@@ -195,4 +215,124 @@ test('в isolated расхождение веток недопустимо', asy
     read(dirs, { ...REGISTRY, WORKSPACE_MODE: 'isolated', STAND_OWNERSHIP: 'task' }),
     /more than one branch/,
   );
+});
+
+test('EC-05: attempt schema 2 round-trip проверяет queue provenance и exact runner override', async () => {
+  const queueDispatchId = '00000000-0000-4000-8000-000000000001';
+  const dirs = await trustedLedger({
+    sourceBranch: 'main',
+    repoLines: TWO_REPOS,
+    attemptSchema: 2,
+    queueDispatchId,
+    runnerPrimaryOverride: 'codex',
+  });
+  const registry = {
+    ...REGISTRY,
+    CATALOG_HASH,
+    QUEUE_DISPATCH_ID: queueDispatchId,
+    RUNNER_OVERRIDE_PRIMARY: 'codex',
+  };
+  const trusted = await read(dirs, registry);
+  assert.equal(trusted.queueDispatchId, queueDispatchId);
+  assert.equal(trusted.runnerPrimaryOverride, 'codex');
+  await assert.rejects(
+    read(dirs, { ...registry, QUEUE_DISPATCH_ID: '' }),
+    /launch provenance/,
+  );
+  await assert.rejects(
+    read(dirs, { ...registry, RUNNER_OVERRIDE_PRIMARY: 'claude' }),
+    /launch provenance/,
+  );
+  await assert.rejects(
+    read(dirs, { ...registry, CATALOG_HASH: 'c'.repeat(64) }),
+    /launch provenance/,
+  );
+});
+
+test('EC-05: attempt schema 1 остаётся читаемым и честно не знает runner provenance', async () => {
+  const dirs = await trustedLedger({ sourceBranch: 'main', repoLines: TWO_REPOS });
+  const trusted = await read(dirs, {
+    ...REGISTRY,
+    // Историческая вторичная проекция могла содержать override, но schema 1
+    // не делает его trusted identity.
+    RUNNER_OVERRIDE_PRIMARY: 'claude',
+  });
+  assert.equal(trusted.queueDispatchId, null);
+  assert.equal(trusted.runnerPrimaryOverride, null);
+});
+
+test('trusted finished переживает crash до обновления registry RESULT', async () => {
+  const dirs = await trustedLedger({
+    sourceBranch: 'main', repoLines: TWO_REPOS, terminalState: 'finished',
+  });
+  const trusted = await read(dirs, { ...REGISTRY, RESULT: 'running' });
+  assert.equal(trusted.terminal, 'completed');
+  assert.equal(trusted.terminalRecord.state, 'finished');
+});
+
+test('trusted abandoned переживает crash до обновления registry RESULT', async () => {
+  const dirs = await trustedLedger({
+    sourceBranch: 'main', repoLines: TWO_REPOS, terminalState: 'abandoned',
+  });
+  const trusted = await read(dirs, { ...REGISTRY, RESULT: 'failed' });
+  assert.equal(trusted.terminal, 'abandoned');
+  assert.equal(trusted.terminalRecord.state, 'abandoned');
+});
+
+test('trusted terminal по-прежнему отвергает противоположный terminal RESULT', async (t) => {
+  for (const [terminalState, result] of [
+    ['finished', 'abandoned'],
+    ['abandoned', 'completed'],
+  ]) {
+    await t.test(`${terminalState} против ${result}`, async () => {
+      const dirs = await trustedLedger({
+        sourceBranch: 'main', repoLines: TWO_REPOS, terminalState,
+      });
+      await assert.rejects(
+        read(dirs, { ...REGISTRY, RESULT: result }),
+        /projection disagrees with trusted attempt ledger/,
+      );
+    });
+  }
+});
+
+test('terminal RESULT без trusted terminal по-прежнему отвергается', async () => {
+  const dirs = await trustedLedger({ sourceBranch: 'main', repoLines: TWO_REPOS });
+  await assert.rejects(
+    read(dirs, { ...REGISTRY, RESULT: 'completed' }),
+    /projection disagrees with trusted attempt ledger/,
+  );
+});
+
+// Границы terminal-причины у кокпита и движка обязаны совпадать. Живой случай: движку
+// ослабили лимит до 20 000 символов с переносами ради многострочных замечаний человека,
+// а этот ридер остался на 500 без переносов. `factory abandon` принимал длинную причину
+// и отвечал успехом, после чего кокпит не мог прочитать СВОЮ ЖЕ закрытую попытку
+// (`attempt_integrity_failed`), и карточка не убиралась с экрана ничем. Прежние тесты
+// этого не ловили: все они писали короткие однострочные причины.
+test('terminal-причина сходится с границами движка', async (t) => {
+  const engineLimit = 20000;
+  const accept = async (terminalReason) => {
+    const dirs = await trustedLedger({
+      sourceBranch: 'main', repoLines: TWO_REPOS, terminalState: 'abandoned', terminalReason,
+    });
+    const trusted = await read(dirs, { ...REGISTRY, RESULT: 'abandoned' });
+    assert.equal(trusted.terminal, 'abandoned');
+  };
+  const reject = async (terminalReason) => {
+    const dirs = await trustedLedger({
+      sourceBranch: 'main', repoLines: TWO_REPOS, terminalState: 'abandoned', terminalReason,
+    });
+    await assert.rejects(read(dirs, { ...REGISTRY, RESULT: 'abandoned' }),
+      /invalid abandon reason/);
+  };
+
+  await t.test('длиннее прежних 500 символов', () => accept('причина '.repeat(120)));
+  await t.test('многострочная', () => accept('первая строка\nвторая\n- пункт разбора'));
+  await t.test('ровно на границе движка', () => accept('я'.repeat(engineLimit)));
+  await t.test('за границей движка', () => reject('я'.repeat(engineLimit + 1)));
+  await t.test('пустая', () => reject(''));
+  await t.test('возврат каретки', () => reject('первая\rвторая'));
+  await t.test('табуляция', () => reject('первая\tвторая'));
+  await t.test('NUL', () => reject('первая\u0000вторая'));
 });

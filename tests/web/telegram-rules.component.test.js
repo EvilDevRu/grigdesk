@@ -37,6 +37,8 @@ const TOPICS = [
   { id: 42, title: 'Баги', messages: 7, lastAt: T0 },
   { id: 77, title: 'Идеи', messages: 3, lastAt: T0 - 60 },
 ];
+const POLICY_FINGERPRINT = `telegram-rules-v1:${'5'.repeat(64)}`;
+const NEXT_POLICY_FINGERPRINT = `telegram-rules-v1:${'6'.repeat(64)}`;
 
 /** Правило в том виде, в каком его отдаёт сервер (нормализованное целиком). */
 function rule(over = {}) {
@@ -79,7 +81,9 @@ function server({
         if (url.endsWith('/users')) return { users: [] };
         // Копия, как у настоящего api-client (там всё приходит из JSON.parse):
         // иначе правка «на месте» меняла бы и то, что якобы лежит на сервере.
-        if (url.endsWith('/rules')) return { rules: structuredClone(rules), projects };
+        if (url.endsWith('/rules')) {
+          return { rules: structuredClone(rules), projects, policyFingerprint: POLICY_FINGERPRINT };
+        }
         return { bot: BOT, poll: POLL };
       },
       async post(url) {
@@ -90,7 +94,7 @@ function server({
         calls.push(['PUT', url]);
         puts.push(body);
         if (onPut) return onPut(body);
-        return { ok: true, rules: body.rules };
+        return { ok: true, rules: body.rules, policyFingerprint: NEXT_POLICY_FINGERPRINT };
       },
     },
   };
@@ -320,4 +324,70 @@ test('«Отменить» возвращает то, что лежит на с�
   assert.equal(projectSelect(wrapper.get('.rule')).element.value, 'demo');
   assert.equal(saveBtn(wrapper), undefined);
   assert.deepEqual(srv.puts, [], 'отмена что-то записала');
+});
+
+test('agentSearch после потерянного ответа PUT подтверждает фактический commit через GET', async (t) => {
+  const stored = [rule({ agentSearch: false })];
+  const srv = server({
+    rules: stored,
+    onPut() {
+      stored[0].agentSearch = true; // commit прошёл, а HTTP-ответ потерялся
+      throw new Error('Связь оборвалась.');
+    },
+  });
+  const { wrapper, flushPromises } = await mountView(t, { api: srv.api });
+
+  await wrapper.get('.agent-search-option input').setValue(true);
+  await settle(flushPromises);
+
+  assert.equal(srv.calls.filter(([method, url]) => method === 'GET' && url.endsWith('/rules')).length, 2);
+  assert.equal(wrapper.get('.agent-search-option input').element.checked, true);
+  assert.match(wrapper.text(), /повторная проверка.*подтвердила.*разрешён/iu);
+});
+
+test('agentSearch после ошибки PUT показывает authoritative отказ, а не запрошенный enable', async (t) => {
+  const stored = [rule({ agentSearch: false })];
+  const srv = server({
+    rules: stored,
+    onPut() { throw new Error('Запрос отклонён.'); },
+  });
+  const { wrapper, flushPromises } = await mountView(t, { api: srv.api });
+
+  await wrapper.get('.agent-search-option input').setValue(true);
+  await settle(flushPromises);
+
+  assert.equal(wrapper.get('.agent-search-option input').element.checked, false);
+  assert.match(wrapper.get('.err').text(),
+    /повторная проверка.*закрыт.*запрошенное включение не применено/iu);
+});
+
+test('agentSearch отключается и явно показывает unknown, если после PUT не удался и GET', async (t) => {
+  let mutationStarted = false;
+  const stored = [rule({ agentSearch: true })];
+  const srv = server({
+    rules: stored,
+    onPut() {
+      mutationStarted = true;
+      throw new Error('Связь оборвалась.');
+    },
+  });
+  const get = srv.api.get.bind(srv.api);
+  srv.api.get = async (url) => {
+    if (mutationStarted && url.endsWith('/rules')) {
+      srv.calls.push(['GET', url]);
+      throw new Error('Не удалось перечитать rules.');
+    }
+    return get(url);
+  };
+  const { wrapper, flushPromises } = await mountView(t, { api: srv.api });
+
+  await wrapper.get('.agent-search-option input').setValue(false);
+  await settle(flushPromises);
+
+  const checkbox = wrapper.get('.agent-search-option input');
+  assert.equal(srv.puts.length, 1);
+  assert.equal(checkbox.element.checked, false);
+  assert.equal(checkbox.element.disabled, true, 'без authoritative fingerprint новый PUT запрещён');
+  assert.match(wrapper.get('[data-state="agent-search-unknown"]').text(),
+    /состояние доступа.*не подтверждено.*неизвестно/iu);
 });

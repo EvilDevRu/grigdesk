@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -43,10 +44,13 @@ async function compileSfc(path, id, patch = (code) => code) {
 
 const compileChatsView = () => compileSfc(CHATS_VIEW_PATH, 'data-v-chats-resize', (code) => code
   .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__chatsResizeStore;')
-  .replace("import ChatList from './chat/ChatList.vue';", 'const ChatList = { template: "<aside class=\\"cl\\"></aside>" };')
-  .replace("import ChatSession from './chat/ChatSession.vue';", 'const ChatSession = { props: ["sid", "variant"], template: "<div class=\\"cs\\"></div>" };'));
+  .replace("import { useUiContextSource } from '../composables/useUiContextSource.js';", 'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });')
+  .replace("import { useDockViewport } from '../shared/tools/viewport.js';", 'const useDockViewport = () => ({ dockCapable: globalThis.__chatsDockCapable });')
+  .replace("import ChatList from './chat/ChatList.vue';", 'const ChatList = { emits: ["open"], template: "<aside class=\\"cl\\"><button class=\\"stub-open\\" @click=\\"$emit(\\\'open\\\')\\"></button></aside>" };')
+  .replace("import ChatSession from './chat/ChatSession.vue';", 'const ChatSession = { props: ["sid"], template: "<div class=\\"cs\\"></div>" };'));
 
 const compileChatList = () => compileSfc(CHAT_LIST_PATH, 'data-v-chat-list-brand', (code) => code
+  .replace("import { contextFill } from '../../shared/chat-context.js';", 'const contextFill = globalThis.__sharedChatContextFill;')
   .replace("import { useChatStore } from '../../stores/chat.js';", 'const useChatStore = globalThis.__chatListStore;')
   .replace("import { useProvidersStore } from '../../stores/providers.js';", 'const useProvidersStore = globalThis.__chatListProviders;')
   .replace("import ProviderIcon from '../../shared/ProviderIcon.vue';", 'const ProviderIcon = { props: ["provider", "size"], template: "<i class=\\"pico\\"></i>" };')
@@ -89,23 +93,38 @@ function stubHostWidth(el, width) {
   el.getBoundingClientRect = () => ({ left: 0, top: 0, right: width, bottom: 800, width, height: 800, x: 0, y: 0 });
 }
 
-async function mountChats(t, browser, { storedWidth } = {}) {
-  const [{ mount }, { createPinia, defineStore }] = await Promise.all([
+async function mountChats(t, browser, { storedWidth, activeId = '', wide = true } = {}) {
+  const [{ mount }, { createPinia, defineStore }, { ref }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
+    import('../../web/node_modules/vue/index.mjs'),
   ]);
   if (storedWidth != null) browser.localStorage.setItem(LIST_WIDTH_KEY, String(storedWidth));
+  const surface = {
+    value: null,
+    disposed: false,
+    update(value) { this.value = { ...value }; },
+    dispose() { this.disposed = true; },
+  };
+  const read = [];
+  globalThis.__chatsDockCapable = ref(wide);
   globalThis.__chatsResizeStore = defineStore(`chats-resize-${nonce}`, {
-    state: () => ({ activeId: '' }),
-    actions: { ensure() {}, loadConveyor() {} },
+    state: () => ({ activeId }),
+    actions: {
+      ensure() {}, loadConveyor() {},
+      registerSurface(owner, initial) { surface.owner = owner; surface.value = { ...initial }; return surface; },
+      markRead(id) { read.push(id); },
+    },
   });
   const ChatsView = await compileChatsView();
   const wrapper = mount(ChatsView, {
     attachTo: browser.document.querySelector('#mount'),
     global: { plugins: [createPinia()] },
   });
-  t.after(() => wrapper.unmount());
+  t.after(() => { if (wrapper.exists()) wrapper.unmount(); });
   stubHostWidth(wrapper.element, 1200);
+  wrapper.__surface = surface;
+  wrapper.__read = read;
   return wrapper;
 }
 
@@ -124,6 +143,20 @@ test('список чатов: без выбора человека ширину
   // Переменной нет вовсе — иначе медиазапрос ChatList (232px на планшете) был бы мёртв.
   assert.equal(listVar(wrapper), '');
   assert.equal(browser.localStorage.getItem(LIST_WIDTH_KEY), null);
+});
+
+test('COMP-VIS-05: mobile list не видит mounted ChatSession, открытый pane регистрирует exact surface', async (t) => {
+  const browser = await browserHarness();
+  const wrapper = await mountChats(t, browser, { activeId: 'chat-mobile', wide: false });
+
+  assert.deepEqual(wrapper.__surface.value, { chatId: 'chat-mobile', visible: false });
+  assert.deepEqual(wrapper.__read, []);
+  await wrapper.find('.stub-open').trigger('click');
+  assert.deepEqual(wrapper.__surface.value, { chatId: 'chat-mobile', visible: true });
+  assert.deepEqual(wrapper.__read, ['chat-mobile']);
+
+  wrapper.unmount();
+  assert.equal(wrapper.__surface.disposed, true);
 });
 
 test('список чатов: перетаскивание меняет ширину и сохраняет её', async (t) => {
@@ -252,12 +285,12 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   // (поворот планшета скрипт не ловит), поэтому обе цифры обязаны совпадать — иначе
   // у разделителя появляется мёртвый ход: число меняется, поле стоит.
   assert.match(session, /class="cs-resize" role="separator" aria-orientation="horizontal"/);
-  assert.match(session, /height: var\(--composer-h, auto\); max-height: 46vh;/);
+  assert.match(session, /height: var\(--composer-h, auto\);[^}]*max-height: 46vh;/);
   assert.match(session, /const COMPOSER_MAX_VH = 0\.46;/);
-  // Минимум ползунка совпадает с CSS-минимумом страницы по той же причине.
-  assert.match(session, /const COMPOSER_MIN = props\.variant === 'page' \? 48 : 36;/);
-  assert.match(session, /\.page \.cs-input textarea \{ min-height: 48px; \}/);
-  // У страницы и панели РАЗНЫЕ ключи: одинаковая высота поля им не подходит.
+  // После удаления floating panel у полноразмерного composer остались один минимум и
+  // один device-key; legacy key здесь даже не читается.
+  assert.match(session, /const COMPOSER_MIN = 48;/);
+  assert.match(session, /\.cs-input textarea \{[^}]*min-height: 48px;/);
   assert.match(session, /'cockpit-chat-composer-h'/);
-  assert.match(session, /'cockpit-chat-panel-composer-h'/);
+  assert.doesNotMatch(session, /cockpit-chat-panel-composer-h/);
 });

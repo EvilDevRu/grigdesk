@@ -29,6 +29,7 @@ async function fixture(t, { enabled = true, connectionOver = {}, projects = ['co
     webhook: [],
     rulesRead: 0,
     rulesWrite: [],
+    agentSearchWrite: [],
     release: 0,
   };
   const events = [];
@@ -38,7 +39,9 @@ async function fixture(t, { enabled = true, connectionOver = {}, projects = ['co
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
     autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
+    agentSearch: false,
   }];
+  const policyFingerprint = 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const connection = {
     async status() { calls.status += 1; return structuredClone(STATUS); },
     async connect(body) { calls.connect.push(body); return structuredClone(STATUS); },
@@ -55,9 +58,20 @@ async function fixture(t, { enabled = true, connectionOver = {}, projects = ['co
           repositoryId: '123456',
           rules: {
             async read() { calls.rulesRead += 1; return structuredClone(rules); },
+            async readPolicy() {
+              calls.rulesRead += 1;
+              return { rules: structuredClone(rules), policyFingerprint };
+            },
             async write(value, options) {
               calls.rulesWrite.push({ value, options });
               return structuredClone(value);
+            },
+            async setAgentSearch(value) {
+              calls.agentSearchWrite.push(value);
+              return {
+                rules: [{ ...structuredClone(rules[0]), agentSearch: value.enabled }],
+                policyFingerprint: 'ghpol1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+              };
             },
           },
         },
@@ -136,7 +150,7 @@ test('force-forget доступен только с exact явным подтв�
   assert.deepEqual(calls.forceForget, [{ confirmOrphanHook: true }]);
 });
 
-test('rules читаются offline, а запись требует connected и повторный generation check', async (t) => {
+test('rules читаются offline с fingerprint, а запись требует connected и повторный generation check', async (t) => {
   let current = true;
   const { app, calls } = await fixture(t, {
     connectionOver: {
@@ -145,7 +159,13 @@ test('rules читаются offline, а запись требует connected �
           context: {
             repositoryId: '123456',
             rules: {
-              async read() { calls.rulesRead += 1; return []; },
+              async readPolicy() {
+                calls.rulesRead += 1;
+                return {
+                  rules: [],
+                  policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                };
+              },
               async write(value, options) {
                 calls.rulesWrite.push({ value, options });
                 current = false;
@@ -160,7 +180,10 @@ test('rules читаются offline, а запись требует connected �
     },
   });
   const read = await app.inject({ method: 'GET', url: '/api/github/rules' });
-  assert.deepEqual(read.json(), { rules: [] });
+  assert.deepEqual(read.json(), {
+    rules: [],
+    policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  });
   const body = {
     repositoryId: '123456',
     rules: [{ repositoryId: '123456', project: 'cockpit', kind: 'bug' }],
@@ -170,6 +193,101 @@ test('rules читаются offline, а запись требует connected �
   assert.equal(write.json().error, 'github_account_changed');
   assert.deepEqual(calls.rulesWrite, [{ value: body.rules, options: { projects: ['cockpit'] } }]);
   assert.equal(calls.release, 2);
+});
+
+test('agentSearch имеет отдельный explicit CAS endpoint и не меняет human rule', async (t) => {
+  const { app, calls, events } = await fixture(t);
+  const payload = {
+    repositoryId: '123456',
+    expectedPolicyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    enabled: true,
+  };
+  const response = await app.inject({
+    method: 'PUT',
+    url: '/api/github/rules/agent-search',
+    payload,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().rules[0].agentSearch, true);
+  assert.equal(
+    response.json().policyFingerprint,
+    'ghpol1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+  assert.deepEqual(calls.agentSearchWrite, [{
+    enabled: true,
+    expectedPolicyFingerprint: payload.expectedPolicyFingerprint,
+  }]);
+  assert.deepEqual(calls.rulesWrite, []);
+  assert.equal(events.at(-1)?.payload?.status, 'agent_search');
+});
+
+test('agentSearch endpoint fail-closed отклоняет stale fingerprint и malformed opt-in', async (t) => {
+  const stale = Object.assign(new Error('stale'), {
+    code: 'github_rules_stale_policy',
+    statusCode: 409,
+  });
+  const { app, calls } = await fixture(t, {
+    connectionOver: {
+      acquireInboxLease() {
+        return {
+          context: {
+            repositoryId: '123456',
+            rules: {
+              async setAgentSearch(value) {
+                calls.agentSearchWrite.push(value);
+                throw stale;
+              },
+            },
+          },
+          isCurrent: () => true,
+          release() { calls.release += 1; },
+        };
+      },
+    },
+  });
+  const base = {
+    repositoryId: '123456',
+    expectedPolicyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    enabled: false,
+  };
+  const response = await app.inject({
+    method: 'PUT', url: '/api/github/rules/agent-search', payload: base,
+  });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'github_rules_stale_policy');
+
+  for (const payload of [
+    { ...base, enabled: 'true' },
+    { ...base, expectedPolicyFingerprint: 'bad' },
+    { ...base, extra: true },
+  ]) {
+    const rejected = await app.inject({
+      method: 'PUT', url: '/api/github/rules/agent-search', payload,
+    });
+    assert.equal(rejected.statusCode, 400);
+  }
+  assert.equal(calls.agentSearchWrite.length, 1);
+});
+
+test('human rules PUT не может пронести agentSearch в общий allowlist payload', async (t) => {
+  const { app, calls } = await fixture(t);
+  const response = await app.inject({
+    method: 'PUT',
+    url: '/api/github/rules',
+    payload: {
+      repositoryId: '123456',
+      rules: [{
+        repositoryId: '123456',
+        project: 'cockpit',
+        kind: 'bug',
+        agentSearch: true,
+      }],
+    },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error, 'invalid_request');
+  assert.deepEqual(calls.rulesWrite, []);
+  assert.equal(calls.status, 0);
 });
 
 test('rules write запрещён disconnected до lease и store', async (t) => {

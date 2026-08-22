@@ -13,13 +13,13 @@ import factoryModule from '../../server/src/modules/factory/index.js';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function fixture(t) {
+async function fixture(t, { analysisRepos = null, twinProfile = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-profiles-'));
   const profilesDir = path.join(root, 'profiles');
-  await Promise.all([
-    mkdir(path.join(profilesDir, 'project-alpha'), { recursive: true }),
-    mkdir(path.join(profilesDir, 'project-beta'), { recursive: true }),
-  ]);
+  const installed = ['project-alpha', 'project-beta', ...(twinProfile ? ['project-gamma'] : [])];
+  await Promise.all(installed.map(
+    (name) => mkdir(path.join(profilesDir, name), { recursive: true }),
+  ));
   await writeFile(path.join(profilesDir, 'project-alpha', 'graph.json'), JSON.stringify({
     capabilities: [],
     default_route: 'feature',
@@ -35,6 +35,20 @@ PROFILE_TRIAGE_REPOS="app:/srv/project-beta"
 profile_repositories() { printf 'project-beta\\t/srv/project-beta\\t/srv/project-beta\\n'; }
 profile_delivery_targets() { printf 'project-beta\\tmaster\\n'; }
 `);
+  // Профиль-двойник на тех же репозиториях: законная схема, но выбор между ними —
+  // решение человека, а не сопоставления по триажу.
+  if (twinProfile) {
+    await writeFile(path.join(profilesDir, 'project-gamma', 'graph.json'), JSON.stringify({
+      capabilities: [],
+      default_route: 'feature',
+      routes: { feature: { pos: { build: [0, 0] }, edges: [] } },
+    }));
+    await writeFile(path.join(profilesDir, 'project-gamma', 'profile.sh'), `
+PROFILE_TRIAGE_REPOS="app:/srv/project-beta"
+profile_repositories() { printf 'project-gamma\\t/srv/project-beta\\t/srv/project-beta\\n'; }
+profile_delivery_targets() { printf 'project-gamma\\tmaster\\n'; }
+`);
+  }
   const factoryBin = path.join(root, 'factory');
   await writeFile(factoryBin, `#!/bin/sh
 if [ "$1" = check ]; then
@@ -52,12 +66,14 @@ exit 99
   const app = Fastify({ logger: false });
   await app.register(factoryModule, {
     factoryState: {
-      discoverProfiles() { return ['project-alpha', 'project-beta']; },
+      discoverProfiles() { return installed; },
       async primaryProfile() { return 'project-alpha'; },
-      async readRegistry() { throw new Error('задача ещё не запускалась'); },
+      async readRegistry() {
+        throw Object.assign(new Error('задача ещё не запускалась'), { code: 'ENOENT' });
+      },
       isDaemonAlive() { return false; },
       async catalog(profile) {
-        return profile === 'project-beta'
+        return profile === 'project-beta' || profile === 'project-gamma'
           ? {
             routes: ['consilium-debug', 'feature'],
             catalogHash: 'b'.repeat(64),
@@ -96,6 +112,7 @@ exit 99
             areas: ['data-migration'],
             files: ['app:src/diagnostics.py'],
             title: 'Повторный запуск создаёт дубликаты',
+            ...(analysisRepos ? { repos: analysisRepos } : {}),
           },
         };
       },
@@ -140,6 +157,49 @@ test('launch-options отдаёт профили и fail-closed каталог �
   assert.deepEqual(selected.json().routeOptions['consilium-debug'], {
     deliveryMode: 'publish', instrumentationMode: 'explicit', instrumentationRequired: true,
   });
+});
+
+// Дефолт формы «профиль первого незакрытого реестра» открывал задачу чужого проекта
+// на постороннем профиле: алиасы триажа не сопоставлялись с его репозиториями, поле
+// инструментации оставалось пустым, и explicit-маршрут было нечем запустить.
+test('launch-options открывает профиль, чьи репозитории читал триаж задачи', async (t) => {
+  const app = await fixture(t, { analysisRepos: { app: { dir: '/srv/project-beta' } } });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().profile, 'project-beta');
+  assert.equal(response.json().error, undefined);
+  assert.deepEqual(response.json().instrumentationSuggestions, ['project-beta:src/diagnostics.py']);
+});
+
+test('явно выбранный профиль сильнее подсказки триажа', async (t) => {
+  const app = await fixture(t, { analysisRepos: { app: { dir: '/srv/project-beta' } } });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-alpha',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().profile, 'project-alpha');
+  assert.equal(response.json().error, 'no_catalog');
+});
+
+test('неоднозначный триаж не выбирает профиль за человека', async (t) => {
+  const app = await fixture(t, {
+    analysisRepos: { app: { dir: '/srv/project-beta' } },
+    twinProfile: true,
+  });
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options',
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().profile, 'project-alpha');
+  assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta', 'project-gamma']);
 });
 
 test('переименованный explicit-маршрут требует scope до ticket и provisioning', async (t) => {

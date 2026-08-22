@@ -5,6 +5,7 @@
 #   attempt_stage_state_init_v2 TASK ATTEMPT_ID ROUTE_ID
 #   attempt_stage_state_read_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_latest_event_v2 TASK ATTEMPT_ID
+#   attempt_stage_state_routing_transitions_v2 TASK ATTEMPT_ID
 #   attempt_stage_state_pause_v2 TASK ATTEMPT_ID NODE REASON
 #   attempt_stage_state_commit_v2 TASK ATTEMPT_ID NODE OUTCOME \
 #     [HARD_REWIND_LIMIT] [VERDICT_B64] [NO_PROGRESS_LIMIT] [RECOVERY] \
@@ -1403,6 +1404,62 @@ elif OP == "work-time":
         last_at = at
     dump({"schema": 1, "nodes": per_node, "lastEventAt": last_at})
 
+elif OP == "routing-transitions":
+    # Эту проекцию вызывают только под task-state lock и после того, как validate-ledger
+    # принял полную неизменяемую цепочку. Сохраняем точный байтовый хеш stage-события:
+    # это долговечный ключ соединения, которым пользуется reconciler двойной записи
+    # журнала жизненного цикла.
+    (directory,) = ARGS
+    try:
+        names = sorted(
+            name for name in os.listdir(directory) if EVENT_RE.fullmatch(name)
+        )
+    except OSError:
+        fail()
+    if len(names) > 1_000_000:
+        fail()
+    for name in names:
+        match = EVENT_RE.fullmatch(name)
+        if match is None:
+            fail()
+        path = os.path.join(directory, name)
+        event = regular_json(path)
+        kind = event.get("kind")
+        if kind not in {"commit", "human-rewind", "rewind-limit", "no-progress"}:
+            continue
+        try:
+            raw = open(path, "rb").read()
+        except OSError:
+            fail()
+        stage_hash = hashlib.sha256(raw).hexdigest()
+        if stage_hash != match.group(2):
+            fail()
+        after = event.get("after")
+        action = event.get("action")
+        if not isinstance(after, dict) or not isinstance(action, dict):
+            fail()
+        if after.get("state") == "stopped":
+            mode = "stop"
+            target = None
+        elif after.get("state") == "ready" and "rewind" in action:
+            mode = "rewind"
+            target = identifier(action.get("rewind"))
+        elif after.get("state") == "ready" and "next" in action:
+            mode = "next"
+            target = identifier(action.get("next"))
+        else:
+            fail()
+        stage_at = timestamp(event.get("at"))
+        projection = {
+            "action": mode,
+            "sequence": integer(event.get("sequence"), 1),
+            "stageAt": stage_at[:-1] + ".000Z",
+            "stageEventHash": stage_hash,
+            "targetNodeId": target,
+            "transitionId": "tr_" + stage_hash[:32],
+        }
+        sys.stdout.buffer.write(canonical_bytes(projection))
+
 elif OP == "validate-ledger":
     directory, task, attempt, profile, catalog, route, route_hash, entry = ARGS
     identifier(task, TASK_RE)
@@ -1849,6 +1906,45 @@ attempt_stage_state_latest_event_v2() {
   fi
   if (( rc == 0 )); then
     cat -- "$event"
+    rc=$?
+  fi
+  [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"
+  _attempt_state_unlock "$lock_fd"
+  return "$rc"
+}
+
+# Печатает одну каноническую строку NDJSON для каждого авторитетного routing-перехода.
+# Проверка и проекция работают под одним task lock, поэтому reconciliation не увидит
+# голову stage из другого поколения, чем проверенная цепочка. init/pause намеренно
+# отсутствуют: ни один из них не коммитит ребро маршрута.
+attempt_stage_state_routing_transitions_v2() {
+  local task attempt root lock_fd runtime_tmp rc has_entries=""
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  root=$(attempt_state_v2_task_root "$task") || return
+  _attempt_state_lock "$task" lock_fd || return
+  _attempt_stage_state_load_locked "$task" "$attempt" ""
+  rc=$?
+  # Выбранную попытку восстановления можно abandon до инициализации её stage-курсора.
+  # Её настоящий приватный каталог stage-results тогда пуст и в нём нет авторитетных
+  # переходов для reconciliation. Но любая запись всё равно проходит через строгий
+  # валидатор полного ledger ниже.
+  if (( rc == 0 )); then
+    has_entries=$(find "$ASTAGE_RESULTS_DIR" -mindepth 1 -maxdepth 1 -printf x -quit) || rc=78
+  fi
+  if (( rc == 0 )) && [[ -z "$has_entries" ]]; then
+    _attempt_state_unlock "$lock_fd"
+    return 0
+  fi
+  if (( rc == 0 )); then
+    runtime_tmp=$(mktemp "$ASTAGE_ATTEMPT_DIR/.routing-transitions.XXXXXX") || rc=1
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_validate_internal_locked "$task" "$attempt" >"$runtime_tmp"
+    rc=$?
+  fi
+  if (( rc == 0 )); then
+    _attempt_stage_state_json routing-transitions "$ASTAGE_RESULTS_DIR"
     rc=$?
   fi
   [[ -z "${runtime_tmp:-}" ]] || rm -f -- "$runtime_tmp"

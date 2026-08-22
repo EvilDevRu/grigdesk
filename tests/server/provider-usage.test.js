@@ -23,6 +23,7 @@ import {
   consumeCodexRateLimitReset,
   parseCodexRateLimits,
   parseCodexUsageResources,
+  readCodexRateLimits,
 } from '../../server/src/lib/executors/codex.js';
 
 test('usage contract never turns an executor error into an empty popup', () => {
@@ -516,4 +517,114 @@ test('successful but empty Claude payload is visible instead of a blank popup', 
   assert.equal(empty.state, 'unavailable');
   assert.match(empty.message, /не вернул/i);
   assert.deepEqual(empty.bars, []);
+});
+
+// --- моргнувшая сеть не должна выглядеть как «лимиты недоступны» ---------------
+// Живой случай 22.08.2026: VPN-туннель моргает секундами, и одиночный (у Codex) либо
+// мгновенно повторённый (у Claude) запрос попадает в то же моргание. В шапке появлялось
+// «Не удалось получить лимиты», хотя аккаунт исправен. Отсюда пауза между попытками:
+// повтор без неё удваивает трафик, не увеличивая шанс на ответ.
+
+test('Claude usage survives a blinking tunnel: retries with a pause, not instantly', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-usage-retry-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const now = 1_800_000_000_000;
+  await writeFile(credentialsPath, JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'live-access',
+      refreshToken: 'live-refresh',
+      expiresAt: now + 3_600_000,
+      refreshTokenExpiresAt: now + 86_400_000,
+      scopes: ['user:profile', 'user:inference'],
+      subscriptionType: 'max',
+    },
+  }), { mode: 0o600 });
+
+  const naps = [];
+  let attempts = 0;
+  const usage = await fetchClaudeUsage({
+    credentialsPath,
+    now: () => now,
+    sleep: async (ms) => { naps.push(ms); },
+    fetchImpl: async () => {
+      attempts += 1;
+      // Два первых запроса попали в моргание, третий доехал.
+      if (attempts < 3) throw new TypeError('fetch failed');
+      return new Response(JSON.stringify({
+        limits: [{ name: 'weekly_all', utilization: 41, resets_at: null }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  assert.equal(attempts, 3, 'до успеха дошли третьей попыткой');
+  assert.deepEqual(naps, [400, 1200], 'между попытками была нарастающая пауза');
+  assert.equal(usage.status, 200, 'человек видит лимиты, а не отказ');
+});
+
+test('Claude usage does not retry a refusal the network cannot fix', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-claude-usage-403-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credentialsPath = path.join(dir, '.credentials.json');
+  const now = 1_800_000_000_000;
+  await writeFile(credentialsPath, JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'live-access',
+      refreshToken: 'live-refresh',
+      expiresAt: now + 3_600_000,
+      refreshTokenExpiresAt: now + 86_400_000,
+      scopes: ['user:profile', 'user:inference'],
+      subscriptionType: 'max',
+    },
+  }), { mode: 0o600 });
+
+  let attempts = 0;
+  const naps = [];
+  const usage = await fetchClaudeUsage({
+    credentialsPath,
+    now: () => now,
+    sleep: async (ms) => { naps.push(ms); },
+    fetchImpl: async () => {
+      attempts += 1;
+      return new Response(JSON.stringify({ error: { message: 'forbidden' } }), { status: 403 });
+    },
+  });
+
+  assert.equal(attempts, 1, 'отказ аккаунта повторять нечем — он не про сеть');
+  assert.deepEqual(naps, [], 'и задерживать человека паузой тоже не за чем');
+  assert.equal(usage.status, 403);
+});
+
+test('Codex usage retries transport failures but accepts a permanent answer at once', async () => {
+  const naps = [];
+  let attempts = 0;
+  const recovered = await readCodexRateLimits('codex', {
+    sleep: async (ms) => { naps.push(ms); },
+    request: async () => {
+      attempts += 1;
+      if (attempts < 3) return { error: { message: 'Codex app-server не ответил за отведённое время' } };
+      return {
+        result: {
+          rateLimits: { primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: null } },
+        },
+      };
+    },
+  });
+
+  assert.equal(attempts, 3, 'таймаут app-server лечится повтором');
+  assert.deepEqual(naps, [400, 1200], 'повтор идёт с нарастающей паузой');
+  assert.equal(classifyCodexUsageResponse(recovered).state, 'ok');
+
+  for (const [label, error] of [
+    ['неавторизован', { message: 'Please run codex login first' }],
+    ['устаревший CLI', { code: -32601, message: 'method not found' }],
+  ]) {
+    let tries = 0;
+    const response = await readCodexRateLimits('codex', {
+      sleep: async () => { throw new Error('паузы быть не должно'); },
+      request: async () => { tries += 1; return { error }; },
+    });
+    assert.equal(tries, 1, `${label}: ожиданием не лечится, повтор не нужен`);
+    assert.notEqual(classifyCodexUsageResponse(response).state, 'ok');
+  }
 });

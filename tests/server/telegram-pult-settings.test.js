@@ -170,6 +170,45 @@ test('верный код включает пульт; код одноразов
   assert.equal(again.json().error, 'pult_code_expired');
 });
 
+test('подтверждение ставит команды и постоянную клавиатуру только в личке владельца', async (t) => {
+  const { request, confirm, botApi } = await build(t);
+  await request(OWNER_CHAT);
+  const result = await confirm(sentCode(botApi));
+  assert.equal(result.statusCode, 200);
+  const calls = botApi.calls.slice(1);
+  assert.deepEqual(calls.map(({ method, body }) => ({
+    method,
+    scope: body.scope,
+    commands: body.commands?.map((command) => command.command),
+    chatId: body.chat_id,
+    keyboard: body.reply_markup?.keyboard,
+    persistent: body.reply_markup?.is_persistent,
+    resized: body.reply_markup?.resize_keyboard,
+  })), [
+    {
+      method: 'setMyCommands',
+      scope: { type: 'chat', chat_id: OWNER_CHAT },
+      commands: ['start', 'status', 'help', 'clean'],
+      chatId: undefined,
+      keyboard: undefined,
+      persistent: undefined,
+      resized: undefined,
+    },
+    {
+      method: 'sendMessage',
+      scope: undefined,
+      commands: undefined,
+      chatId: OWNER_CHAT,
+      keyboard: [
+        [{ text: '📋 Конвейер' }, { text: '💬 Агент' }],
+        [{ text: '📥 Задачи' }, { text: '⚙️ Ещё' }],
+      ],
+      persistent: true,
+      resized: true,
+    },
+  ]);
+});
+
 test('неверный код — pult_code_mismatch; пятая неверная попытка аннулирует код', async (t) => {
   const { request, confirm, botApi } = await build(t);
   await request(OWNER_CHAT);
@@ -230,6 +269,46 @@ test('disable выключает, но выбор чата сохраняетс�
   const ok = await confirm(sentCode(botApi));
   assert.equal(ok.statusCode, 200);
   assert.equal(ok.json().pult.confirmed, true);
+});
+
+test('disable снимает команды и клавиатуру в той же личке, включая повторный вызов', async (t) => {
+  const { request, confirm, disable, botApi } = await build(t);
+  await request(OWNER_CHAT);
+  await confirm(sentCode(botApi));
+  botApi.calls.length = 0;
+  assert.equal((await disable()).statusCode, 200);
+  assert.equal((await disable()).statusCode, 200);
+  assert.deepEqual(botApi.calls.map(({ method, body }) => ({
+    method,
+    scope: body.scope,
+    chatId: body.chat_id,
+    removeKeyboard: body.reply_markup?.remove_keyboard,
+  })), [
+    {
+      method: 'deleteMyCommands',
+      scope: { type: 'chat', chat_id: OWNER_CHAT },
+      chatId: undefined,
+      removeKeyboard: undefined,
+    },
+    {
+      method: 'sendMessage',
+      scope: undefined,
+      chatId: OWNER_CHAT,
+      removeKeyboard: true,
+    },
+    {
+      method: 'deleteMyCommands',
+      scope: { type: 'chat', chat_id: OWNER_CHAT },
+      chatId: undefined,
+      removeKeyboard: undefined,
+    },
+    {
+      method: 'sendMessage',
+      scope: undefined,
+      chatId: OWNER_CHAT,
+      removeKeyboard: true,
+    },
+  ]);
 });
 
 test('выключенный плагин — 404 plugin_disabled на всех ручках пульта', async (t) => {

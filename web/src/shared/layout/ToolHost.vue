@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router';
 import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';
 import { usePluginsStore } from '../../stores/plugins.js';
-import { useUiContextStore } from '../../stores/ui-context.js';
+import { useUiContextSource } from '../../composables/useUiContextSource.js';
 import { NAV_ICONS } from '../nav-icons.js';
 import { registerLayer } from '../ui/layer-stack.js';
 import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';
@@ -14,7 +14,7 @@ const route = useRoute();
 const router = useRouter();
 const dock = useDockStore();
 const plugins = usePluginsStore();
-const ui = useUiContextStore();
+const toolContext = useUiContextSource('tool', { layer: 'dock', active: false });
 const { dockCapable } = useDockViewport();
 
 const routeTool = computed(() => route.meta?.tool || null);
@@ -49,6 +49,7 @@ const maxWidth = computed(() => Math.max(0, Math.floor(contentWidth.value * 0.7)
 const minWidth = computed(() => Math.min(MIN_DOCK_WIDTH, maxWidth.value));
 let contentObserver = null;
 let unregisterDockLayer = null;
+let publishedContextKey = '';
 
 function modeOf(id) {
   return presentedTool.value === id ? presentation.value : 'hidden';
@@ -78,10 +79,33 @@ function onContext(id, value) {
   else delete contexts[id];
   syncUiContext();
 }
+function safeToolDetails(id, value) {
+  const details = { id, presentation: presentation.value };
+  if (id !== 'code') return details;
+  // CodePanel знает рабочую копию, но ToolHost пропускает только подписи и
+  // относительный файл. Абсолютный treePath и содержимое Monaco сюда не входят.
+  for (const key of ['project', 'repository', 'context', 'tab', 'file']) {
+    if (typeof value?.[key] === 'string' && value[key]) details[key] = value[key];
+  }
+  if (Number.isSafeInteger(value?.line) && value.line > 0) details.line = value.line;
+  return details;
+}
 function syncUiContext() {
-  const value = contexts[presentedTool.value];
-  if (value) ui.set('tool', value);
-  else ui.clear('tool');
+  const id = presentedTool.value;
+  const value = contexts[id];
+  if (!id || !value || presentation.value === 'hidden' || presentation.value === 'placeholder') {
+    publishedContextKey = '';
+    toolContext.blur();
+    return;
+  }
+  const contextKey = `${id}:${presentation.value}`;
+  const next = {
+    layer: presentation.value === 'page' ? 'page' : 'dock',
+    details: safeToolDetails(id, value),
+  };
+  if (contextKey !== publishedContextKey) toolContext.focus(next);
+  else toolContext.update(next);
+  publishedContextKey = contextKey;
 }
 
 function focusPresented({ dockHeader = false } = {}) {
@@ -210,7 +234,6 @@ onBeforeUnmount(() => {
   unregisterDockLayer?.();
   contentObserver?.disconnect?.();
   window.removeEventListener('resize', measureContent);
-  ui.clear('tool');
   dock.resetAllRuntime();
 });
 </script>

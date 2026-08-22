@@ -7,7 +7,7 @@
 // Контракт сообщения (он же вход `BundleSet.add` и запись архива):
 //   { chatId, chatUsername, chatTitle, chatType, isForum, messageId, threadId|null,
 //     threadTitle?, threadTitleSource?,
-//     replyToMessageId|null, mediaGroupId|null, date, editedAt|null,
+//     replyToMessageId|null, replyToFromId|null, mediaGroupId|null, date, editedAt|null,
 //     from:{id,name,username}, text, media: [], service? }
 //
 // `chatUsername` — публичная сторона адреса чата. Нужна границе доступа
@@ -122,6 +122,7 @@ export function normalizeMessage(m) {
     messageId: m.message_id,
     threadId: m.message_thread_id ?? null,
     replyToMessageId: replyIdOf(m),
+    replyToFromId: replyIdOf(m) ? (m.reply_to_message?.from?.id ?? null) : null,
     // Альбом Телеграм разбирает на отдельные сообщения с общим `media_group_id`,
     // а подпись отдаёт только одному из них. Без этого поля четыре скриншота
     // выглядели бы четырьмя сообщениями, три из которых пустые.

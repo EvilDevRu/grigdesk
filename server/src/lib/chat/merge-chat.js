@@ -133,9 +133,11 @@ const AGENT_KEYS = [
  *
  * @param {object|null} base — копия с диска (null — чат сохраняется впервые)
  * @param {object} incoming — то, что прислало окно
+ * @param {{allowClear?: boolean}} options — пустая лента сокращает историю только
+ *   после совпавшей revision; stale окно не является подтверждением очистки.
  * @returns {{chat: object, restored: number, dropped: number}}
  */
-export function mergeChat(base, incoming) {
+export function mergeChat(base, incoming, { allowClear = true } = {}) {
   if (!incoming) return { chat: incoming, restored: 0, dropped: 0 };
   // Сливать не с чем (чат сохраняется впервые), но метки обрыва снять всё равно надо:
   // первый ход нового чата обрывается ровно так же, как любой другой.
@@ -149,9 +151,24 @@ export function mergeChat(base, incoming) {
   }
 
   // Пустая лента — это «Очистить чат» из меню, единственное осознанное сокращение
-  // истории в интерфейсе (отдельные сообщения удалять нельзя). Такое уважаем.
+  // истории в интерфейсе (отдельные сообщения удалять нельзя). Но пустой снимок
+  // другого окна может предшествовать уже записанному ходу: без совпавшей revision
+  // он только восстанавливает серверную ленту, а не выдаёт себя за явную очистку.
   if (!Array.isArray(incoming.messages) || !incoming.messages.length) {
-    return { chat: incoming, restored: 0, dropped: 0 };
+    if (allowClear) return { chat: incoming, restored: 0, dropped: 0 };
+    const messages = Array.isArray(base.messages) ? base.messages : [];
+    const chat = { ...incoming, messages };
+    // Это не пользовательский reset, а stale CAS: вместе с историей сохраняем
+    // server-fresher session/context state независимо от client updatedAt.
+    for (const key of AGENT_KEYS) if (base[key] !== undefined) chat[key] = base[key];
+    chat.updatedAt = Math.max(base.updatedAt || 0, incoming.updatedAt || 0) || incoming.updatedAt;
+    if (base.createdAt) chat.createdAt = Math.min(base.createdAt, incoming.createdAt || base.createdAt);
+    if (!chat.title && base.title) chat.title = base.title;
+    return {
+      chat,
+      restored: messages.length,
+      dropped: 0,
+    };
   }
 
   // Метки обрыва снимаем ДО сравнения лент: иначе почищенная серверная копия и присланная

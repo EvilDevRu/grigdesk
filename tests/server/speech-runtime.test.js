@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { MediaAdapter } from '../../server/src/adapters/media.js';
 import {
+  DEFAULT_VIDEO_INITIAL_PROMPT,
   SPEECH_MODEL_CATALOG,
   SpeechRuntime,
   pythonEnv,
@@ -52,6 +53,7 @@ test('resolveSpeechOptions разделяет dictation и video overrides', () 
     hotwords: 'Fastify\nБитрикс24',
     vadSilenceMs: 875,
     conditionOnPreviousText: false,
+    initialPrompt: '',
   });
   assert.deepEqual(resolveSpeechOptions(settings, 'video'), {
     scenario: 'video',
@@ -63,7 +65,57 @@ test('resolveSpeechOptions разделяет dictation и video overrides', () 
     hotwords: 'Fastify\nБитрикс24',
     vadSilenceMs: 500,
     conditionOnPreviousText: true,
+    initialPrompt: DEFAULT_VIDEO_INITIAL_PROMPT,
   });
+});
+
+test('стилевая подсказка принадлежит видео, а очистка поля уважается', () => {
+  assert.ok(
+    resolveSpeechOptions({}, 'video').initialPrompt.length > 0,
+    'без подсказки видео распознаётся сплошным потоком без пунктуации',
+  );
+  // Подсказка — заголовок, который модель продолжает речью. Развёрнутое указание она
+  // продолжает таким же указанием и повторяет его вместо разговора (замер: четыре
+  // одинаковых сегмента на 79 секунд). Потолок стережёт дефолт от такого разрастания.
+  assert.ok(
+    [...DEFAULT_VIDEO_INITIAL_PROMPT].length <= 80,
+    'дефолтная подсказка должна оставаться коротким заголовком, а не инструкцией модели',
+  );
+  assert.equal(
+    resolveSpeechOptions({}, 'dictation').initialPrompt,
+    '',
+    'диктовка короткая и правится руками: подсказка ей не назначается',
+  );
+  assert.equal(
+    resolveSpeechOptions({ videoInitialPrompt: '' }, 'video').initialPrompt,
+    '',
+    'пустое поле — осознанный выбор человека, дефолт не возвращается молча',
+  );
+  assert.equal(
+    resolveSpeechOptions({ videoInitialPrompt: ' Стенограмма\nвстречи. ' }, 'video').initialPrompt,
+    'Стенограмма встречи.',
+    'подсказка уезжает в argv одной строкой',
+  );
+  assert.throws(
+    () => resolveSpeechOptions({ videoInitialPrompt: 'я'.repeat(601) }, 'video'),
+    /videoInitialPrompt/,
+  );
+});
+
+test('transcribe.py не разрывает пару initial_prompt + word_timestamps', () => {
+  const source = readFileSync(
+    new URL('../../server/src/lib/media/transcribe.py', import.meta.url),
+    'utf8',
+  );
+  // Замер на large-v3-turbo: голый initial_prompt при condition_on_previous_text уводит
+  // модель в петлю — она повторяет текст подсказки вместо речи. Выравнивание по словам
+  // снимает петлю, поэтому включаться оно обязано ровно вместе с промптом.
+  assert.match(
+    source,
+    /word_timestamps=bool\(initial_prompt\)/,
+    'word_timestamps должен следовать из наличия промпта, а не задаваться отдельно',
+  );
+  assert.match(source, /initial_prompt=initial_prompt/);
 });
 
 test('resolveSpeechOptions даёт совместимые дефолты и отвергает неизвестное', () => {
@@ -77,6 +129,7 @@ test('resolveSpeechOptions даёт совместимые дефолты и о�
     hotwords: '',
     vadSilenceMs: 500,
     conditionOnPreviousText: true,
+    initialPrompt: '',
   });
   assert.throws(() => resolveSpeechOptions({ quality: 'maximum' }, 'dictation'), /quality/);
   assert.throws(() => resolveSpeechOptions({ videoModel: 'repo\/arbitrary' }, 'video'), /модель/i);

@@ -20,7 +20,10 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
-import { TelegramRulesStore } from '../../server/src/lib/telegram/rules-store.js';
+import {
+  TelegramRulesStore,
+  telegramRulesPolicyFingerprint,
+} from '../../server/src/lib/telegram/rules-store.js';
 import telegramModule from '../../server/src/modules/telegram/index.js';
 import {
   TelegramModuleCredentials,
@@ -45,6 +48,7 @@ const ME = {
 };
 
 const SECRET = 'у нас падает оплата на проде, платёж 4412';
+const EMPTY_POLICY_FINGERPRINT = telegramRulesPolicyFingerprint([]);
 
 const msg = (over = {}) => ({
   chatId: BUGS,
@@ -124,6 +128,10 @@ async function build(t, {
       method: 'POST', url: '/api/telegram/service-chat', payload,
     }),
     putRules: (payload) => app.inject({ method: 'PUT', url: '/api/telegram/rules', payload }),
+    putAgentSearch: (payload) => app.inject({
+      method: 'PUT', url: '/api/telegram/rules/agent-search', payload,
+    }),
+    getRules: () => app.inject({ method: 'GET', url: '/api/telegram/rules' }),
     status: () => app.inject({ method: 'GET', url: '/api/telegram/status' }),
     disconnect: () => app.inject({ method: 'POST', url: '/api/telegram/disconnect' }),
   };
@@ -253,7 +261,11 @@ test('stale bot CAS не меняет service chat или rules нового acc
   });
   for (const response of [
     await setServiceRaw({ botId: 999999999, chatId: OWNER }),
-    await putRules({ botId: 999999999, rules: [] }),
+    await putRules({
+      botId: 999999999,
+      policyFingerprint: EMPTY_POLICY_FINGERPRINT,
+      rules: [],
+    }),
   ]) {
     assert.equal(response.statusCode, 409);
     assert.equal(response.json().error, 'telegram_account_changed');
@@ -265,11 +277,43 @@ test('native mutations отключённого bot возвращают not_con
   const { setServiceRaw, putRules } = await build(t, { connected: false });
   for (const response of [
     await setServiceRaw({ botId: ME.id, chatId: null }),
-    await putRules({ botId: ME.id, rules: [] }),
+    await putRules({
+      botId: ME.id,
+      policyFingerprint: EMPTY_POLICY_FINGERPRINT,
+      rules: [],
+    }),
   ]) {
     assert.equal(response.statusCode, 409);
     assert.equal(response.json().error, 'telegram_not_connected');
   }
+});
+
+test('rules API публикует canonical fingerprint и отклоняет stale policy CAS', async (t) => {
+  const { getRules, putRules, putAgentSearch } = await build(t);
+  const beforeResponse = await getRules();
+  assert.equal(beforeResponse.statusCode, 200);
+  const before = beforeResponse.json();
+  assert.match(before.policyFingerprint, /^telegram-rules-v1:[0-9a-f]{64}$/u);
+  assert.equal(before.rules[0].agentSearch, false);
+
+  const changed = await putAgentSearch({
+    botId: ME.id,
+    expectedPolicyFingerprint: before.policyFingerprint,
+    enabled: true,
+    rule: { project: 'alpha', chatId: BUGS, username: null, threadId: null },
+  });
+  assert.equal(changed.statusCode, 200);
+  assert.equal(changed.json().rules[0].agentSearch, true);
+  assert.notEqual(changed.json().policyFingerprint, before.policyFingerprint);
+
+  const stale = await putRules({
+    botId: ME.id,
+    policyFingerprint: before.policyFingerprint,
+    rules: [{ project: 'beta', chatId: BUGS }],
+  });
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error, 'telegram_rules_stale');
+  assert.equal((await getRules()).json().rules[0].agentSearch, true);
 });
 
 test('служебный чат остаётся в offline namespace того же bot после disconnect', async (t) => {

@@ -318,7 +318,10 @@ test('включённое правило отвечает номером, на�
   assert.equal(calls.length, 1);
   assert.equal(calls[0].token, TOKEN);
   assert.equal(calls[0].method, 'sendMessage');
-  assert.deepEqual(calls[0].options, { timeoutMs: 5_000 });
+  // Ровно один вызов без retries: повтор ответа означал бы дубль в чужом чате
+  // (idempotency key Bot API не даёт). Единственный рычаг против моргнувшей
+  // сети здесь — дать первой попытке дойти, поэтому таймаут клиентский.
+  assert.deepEqual(calls[0].options, { timeoutMs: 15_000 });
   assert.deepEqual(calls[0].body, {
     chat_id: CHAT,
     text: 'Задача #5150 поставлена в Битрикс24.\n'
@@ -518,7 +521,7 @@ test('marker приходит из account context callback под двумя ge
   } finally { await context.release(); }
 });
 
-test('общий bundler сохраняет reply/media semantics и режет gap ровно 600 секунд', async () => {
+test('общий bundler склеивает тему целиком и режет gap ровно 600 секунд', async () => {
   const snapshots = [
     nativeMessage({ messageId: 100, date: T0 }),
     nativeMessage({
@@ -538,11 +541,11 @@ test('общий bundler сохраняет reply/media semantics и режет 
   const { capability } = harness({ snapshots });
   const coordinator = new InboxCoordinator({ channels: [capability] });
   const result = await coordinator.list({ nowMs: (T0 + 2000) * 1000 });
-  const messageSets = result.items.map((item) => item.messages.map((message) => message.text));
-  assert.equal(messageSets.length, 3);
-  assert.ok(messageSets.some((messages) => messages.length === 2), 'reply образовал связку');
-  assert.ok(messageSets.filter((messages) => messages.length === 2).length >= 2, 'album образовал связку');
-  assert.ok(messageSets.some((messages) => messages.length === 1), 'точный 600s gap начал новую связку');
+  // Нативные ID наружу не идут, поэтому связки опознаются по времени сообщений.
+  const sets = result.items.map((item) => item.messages.map((message) => message.occurredAt - T0));
+  // Разные авторы, reply и части альбома лежат в одном месте, поэтому едут одной
+  // карточкой; отдельным обращением стало только то, что отделено 600 секундами тишины.
+  assert.deepEqual(sets, [[610, 700, 701], [0, 10]]);
 });
 
 test('materialize соблюдает Bot API limit, продолжает после ошибок и чистит token', async () => {
@@ -554,17 +557,19 @@ test('materialize соблюдает Bot API limit, продолжает пос�
       { kind: 'document', fileId: 'good', uniqueId: 'u-good', name: 'report', size: 10 },
     ],
   });
-  const calls = { get: [], download: [] };
+  const calls = { get: [], download: [], retries: [] };
   const botApi = {
-    async getFile(token, fileId) {
+    async getFile(token, fileId, opts) {
       assert.equal(token, TOKEN);
       calls.get.push(fileId);
+      calls.retries.push(opts?.retries);
       if (fileId === 'late-big') return { fileId, filePath: 'files/late.bin', size: FILE_LIMIT + 1 };
       return { fileId, filePath: `files/${fileId}.csv`, size: 10 };
     },
-    async downloadFile(token, filePath) {
+    async downloadFile(token, filePath, opts) {
       assert.equal(token, TOKEN);
       calls.download.push(filePath);
+      calls.retries.push(opts?.retries);
       if (filePath.includes('bad')) throw new Error(`скачивание ${TOKEN} оборвалось`);
       return Buffer.from('готово');
     },
@@ -583,6 +588,9 @@ test('materialize соблюдает Bot API limit, продолжает пос�
     const materialized = await context.materializeAttachments(attachments);
     assert.deepEqual(calls.get, ['late-big', 'bad', 'good']);
     assert.deepEqual(calls.download, ['files/bad.csv', 'files/good.csv']);
+    // Скачивание идемпотентно, поэтому моргнувшая сеть не обязана превращаться
+    // в «поясните, что на фото»: право на повтор выдаёт канал каждому вызову.
+    assert.ok(calls.retries.every((value) => value === 2), 'каждый файловый вызов идёт с retries');
     assert.deepEqual(materialized.files, [{
       index: 3,
       buffer: Buffer.from('готово'),

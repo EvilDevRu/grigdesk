@@ -36,18 +36,18 @@ worker по полной process identity.
 | `b24` | `/api/b24/{dashboard,task/:id,users,groups}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
 | `task-favorites`, `task-seen` | `GET /api/b24/task-favorites` + `PUT/DELETE .../:taskId`, `GET/POST /api/b24/task-seen` | личные метки человека (избранное, «просмотрено») — `server/.state/task-{favorites,seen}.json` по opaque-scope аккаунта портала ([детали](b24.md#личные-метки-задач-избранное-и-просмотренное)) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
-| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame}` | общий `SpeechRuntime`, ffmpeg + локальный whisper |
+| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame,plan-tasks,frame/:run/:file}` | общий `SpeechRuntime`, ffmpeg + локальный whisper; разбор расшифровки на черновики задач — `runUntrusted` выбранной модели, кадр записи к задаче — декоратор `mediaFramePath` ([детали](video.md)) |
 | `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls,speech*}` | prefs, speech capabilities/model jobs, engine debug CLI, `CredsStore`, `LocalTls` |
 | `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission, `/api/chat/transcribe*` | выбранный executor + `chats/`; browser/локальная диктовка использует тот же speech-контракт ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
 | `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_DIR`); проекты кокпита — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
-| `projects`, `code` | `/api/projects*`, read-only `/api/code/{roots,:project/*}` (в том числе `raw` — байты растровых картинок) | профили/prefs + git/worktree |
+| `projects`, `code` | `/api/projects*`, read-only `/api/code/{roots,:project/*}` (в том числе `raw` — байты растровых картинок, а `git` — изменения группами `staged`/`files`) | профили/prefs + git/worktree |
 | `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](documents.md)) |
 | `inbox` | `GET /api/inbox[/{summary,status}]`, `POST /api/inbox/channels/:channel/{activate,deactivate}`, решения `POST /api/inbox/items/:ref/{task,dismiss,reset}` | общий merge Telegram/GitHub, account-owned `inbox-state.json`, единый draft/triage/worker и B24 task service; provider credentials здесь отсутствуют |
-| `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}`, пульт `POST /api/telegram/pult{,/confirm,/disable}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,pult-state.json,inbox-state.json}` — `config.telegramDir` |
-| `github` | `GET /api/github/status`, `GET/PUT /api/github/rules`, `POST /api/github/{connect,recheck,disconnect,force-forget}`, public HMAC ingress `POST /hooks/github/:ingressRef` | GitHub REST + repository webhook `issues/opened`; PAT/secret в private state, bindings и `accounts/<accountRef>/{archive/,ingress-state.json,rules.json,inbox-state.json}` — `config.githubDir` |
+| `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, отдельный CAS `PUT /api/telegram/rules/agent-search`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}`, пульт `POST /api/telegram/pult{,/confirm,/disable}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,pult-state.json,inbox-state.json}` — `config.telegramDir` |
+| `github` | `GET /api/github/status`, `GET/PUT /api/github/rules`, CAS `PUT /api/github/rules/agent-search`, `POST /api/github/{connect,recheck,disconnect,force-forget}`, public HMAC ingress `POST /hooks/github/:ingressRef` | GitHub REST + repository webhook `issues/opened`; PAT/secret в private state, bindings и `accounts/<accountRef>/{archive/,ingress-state.json,rules.json,inbox-state.json}` — `config.githubDir` |
 | `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth`, `gateway` | `/api/auth*`, `/api/gateway/{authz,tls-allow}` | сессии, CLI token, внешний Caddy |
 | `terminal` | `/api/terminal` (WebSocket: `in`, `resize`) | stdlib Python helper: `pty.fork()`, `TIOCSWINSZ`/`SIGWINCH`, cleanup process group |
@@ -91,7 +91,7 @@ sets message refs без пересечений; split/merge проецируе�
 assignments, project и policy. Решение пишется после B24 success; неоднозначный провал durable
 commit блокирует автоматический retry до operator reconciliation.
 
-**Каналы.** Telegram группирует reply/topic/author с окном тишины 600 секунд и умеет
+**Каналы.** Telegram группирует по месту разговора (тема, иначе чат) с окном тишины 600 секунд и умеет
 лениво materialize Bot API attachments. Общий `InboxAttachmentAnalyzer` до model triage/B24
 локально транскрибирует речь, извлекает bounded кадры видео, готовит raster visual inputs и
 читает bounded UTF-8 документы; неподдерживаемый или неполный разбор fail-closed оставляет
@@ -119,16 +119,29 @@ webhook deliveries. Общий `InboxAutoTasks` использует модел�
 поскольку Telegram item может созреть без нового события. Полный lifecycle, identity,
 storage и operator gates описаны в [inbox.md](inbox.md).
 
-**Телеграм-пульт** (`lib/telegram/pult/`) — карточки «работа стоит на тебе» и кнопки
-решений в подтверждённой кодом личке владельца, тем же ботом и тем же поллером
+**Телеграм-пульт** (`lib/telegram/pult/`) — живая картина конвейера и кнопки решений
+в подтверждённой кодом личке владельца, тем же ботом и тем же поллером
 (читатель getUpdates один; `callback_query` принимает общий цикл). Вотчер импортирует
 те же `web/src/shared/{pipeline-wait,agent-activity}.js`, что чип навигации, слушает
 шину через `fastify.sse.subscribe` и ходит в те же ручки через inject; действия
-транслируются в существующие gate/permission/resume/launch/B24/chat-stop с CAS на
-сервере. Оповещение — на переходе, первый снимок silent, state и `message_id` карточек
-переживают рестарт в `pult-state.json`. Мутации — вторым тапом с TTL и сверкой снимка;
-деньги/goto/снос/закрытие не выносятся. Полный контракт —
-[telegram-pult.md](telegram-pult.md).
+транслируются в существующие gate/permission/resume с CAS на сервере. Три сорта
+сообщений: тихая живая карточка попытки (правится на месте — узел, прогресс, активность
+агента), звонок об исходе прогона (правка push не даёт) и карточки «работа стоит на
+тебе». Оповещение — на переходе, первый снимок silent, state и `message_id` карточек
+переживают рестарт в `pult-state.json`; навигация живёт в одном правимом на месте
+сообщении-экране и в постоянной reply-клавиатуре (Конвейер · Агент · Задачи · Ещё,
+`setMyCommands`/`ReplyKeyboardRemove` — только со scope лички владельца), решённые
+карточки поводов удаляются (итог — всплывашкой или эфемерным сообщением), карточки
+прогона `sticky` и не удаляются ни уборкой, ни `/clean`. Свободный текст и голос
+владельца — обычный auto-ход в server-owned companion-чате (`pult/assistant.js`:
+ensure → CAS-сохранение обеих реплик → POST /api/chat без `companionTurn`/`dontAsk`/
+`bypassPermissions`, неблокирующе для поллера; во время хода — только `typing`,
+«Стоп» по chatKey после 30 с, итог одним сообщением; «Сжать»/«Сбросить память» —
+через существующие `/api/chat/compact` и `/api/chat/session/reset`). Ход не переживает
+перезапуск сервера: после старта marker сверяется с `/api/chat/active`. Мутаций две —
+resume и пересборка стенда, обе вторым тапом с TTL. Постановка
+задач принадлежит Входящим, запуск прогонов, деньги, goto, снос и закрытие — кокпиту.
+Полный контракт — [telegram-pult.md](telegram-pult.md).
 
 **Триаж (lib/analysis/analyzer.js), устойчивость:** очередь оценок при старте сервера
 ВОССТАНАВЛИВАЕТСЯ из статус-файлов (`queued` → снова в очередь; `running` → interrupted,
@@ -178,6 +191,12 @@ v1/v2 и compatibility resume нет. Слепой форс этапа полу�
 это основной fallback для ручных запусков без Bitrix и мгновенный заголовок до ответа
 портала. Живое название B24 имеет приоритет и только оно открывает B24-модалку; полный
 `description` тикета в список не попадает, чтобы не раздувать периодический ответ.
+
+**Каталог маршрутов закрепляется под task lock движка.** Форма запуска присылает
+`expectedCatalogHash`, HTTP-preflight и `factory check` остаются быстрым fail-fast, а
+авторитетная сверка происходит один раз внутри создания попытки: прочитанный там же hash
+становится пином attempt/pins. Публикация нового каталога между открытием формы и стартом
+даёт типизированный `catalog_changed` без attempt, registry и занятых ресурсов.
 
 | Действие | Кто делает | Как |
 |---|---|---|
@@ -257,8 +276,10 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
   Projects, Code (read-only дерево/файл/git), Documents (скрытый route просмотра MD/TXT),
   Diff (Monaco), Tools (агрегатор), Video, Terminal,
-  Settings (Приложение / Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ), Login,
-  TaskModal и ChatPanel.
+  Settings (Приложение — включая карточку голосового компаньона / Речь / Битрикс24 /
+  Исполнители / Запуски / Плагины / Сервер / Доступ), Login
+  и TaskModal. Глобальный `features/companion/CompanionHost.vue` — компактная chat surface;
+  полный `ChatSession` монтируется только в `ChatsView`.
 - **Code и Terminal монтирует только постоянный `shared/layout/ToolHost.vue`.** Route-компоненты
   `/code` и `/terminal` — пустые адаптеры; `page`, `dock` и `hidden` меняют CSS одного render-site.
   Поэтому во вкладке бывает максимум один Monaco и один terminal WebSocket. Компоненты загружаются
@@ -285,6 +306,19 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   же геометрии; он не импортирует и не создаёт Monaco.
   Односторонний diff добавленного/удалённого файла автоматически занимает одну колонку,
   не оставляя заведомо пустую половину редактора.
+  **Изменения показаны группами «В индексе» и «В рабочем дереве»** (`buildGitGroups`), как
+  Source Control в VS Code. Пустая группа не рисуется, поэтому при чистом индексе панель
+  остаётся прежним списком «Не в коммите», а заголовок второй группы меняется только когда
+  индекс не пуст: пока делить нечего, «не в коммите» точнее. Один путь законно лежит в обеих
+  группах с РАЗНЫМИ сторонами дифа, поэтому и выбор файла, и раскрытие каталога адресуются
+  парой `группа:путь` (`gitRef`) — иначе клик по файлу в индексе выбирал бы одноимённый файл
+  рабочего дерева. Чей это диф, шапка редактора называет только при двух группах.
+  **Лесенка дерева: шаг живёт в CSS (`--tree-step`), скрипт присылает строке только
+  `--depth`.** Место под шеврон занято и у файла (пустой `.chev`): без него имя файла уезжало
+  влево на ширину стрелки и вставало вровень с каталогом уровнем ВЫШЕ — замер показывал
+  файл 2-го уровня на 34 px против каталога 1-го уровня на 40 px, то есть лесенка была
+  инвертирована. Направляющие предков рисует `background-image` строки, поэтому наведение и
+  выделение меняют только `background-color`: shorthand `background` стёр бы линии.
   **Растровая картинка показывается предпросмотром вместо Monaco**: `<img>` тянет байты из
   `/api/code/:project/raw`, редактор под ней не создаётся вовсе, а пометка «бинарный»
   заменяется на «изображение» — у файла, который есть чем показать, она была ложной
@@ -301,13 +335,17 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   Monaco/xterm помечают собственного владельца Escape и не отдают локальную клавишу стеку.
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
   (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.
+- `TaskModal` pin-ит в запуске тот catalog hash, который показал человеку: между
+  открытием формы и стартом профиль мог опубликовать новый каталог.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
   (модалка задачи), `pwa` (обновление/установка и Screen Wake Lock текущего устройства),
-  `chat` (мультисессии, история на сервере),
+  `chat` (мультисессии, история на сервере), `companion` (только состояние компактной
+  поверхности и связывание headless bridge/STT/TTS),
   `analysis`, `auth`, `diff`, `dock`, `plugins`, `providers` (реестр исполнителей),
   `inbox` (общий счётчик новых обращений: initial read + SSE + минутный poll),
   `task-favorites` и `task-seen` (личные метки задач B24, снимок с сервера),
-  `ui-context` (что открыто — для чата), `notify-watch` (что на конвейере встало на человеке).
+  `ui-context` (owner-scoped bounded prompt context и отдельный trusted `routingScope`),
+  `notify-watch` (что на конвейере встало на человеке).
 - **Метки задач B24 живут на сервере, а не в браузере** (`task-favorites`, `task-seen`;
   контракт и инвариант базовой линии — [b24.md](b24.md#личные-метки-задач-избранное-и-просмотренное)).
   Оба стора хранят снимок аккаунта (`scope`/`revision`) и применяют ответ, только если
@@ -315,13 +353,24 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   чужих отметок. Базовую линию просмотра ставит ровно одно место — `board.load()` после
   первого ответа портала; открытие карточки (`TaskModal`) гасит метку «новая» у одной
   задачи, `App.vue` грузит оба стора при входе и чистит их при потере сессии.
+- **Фильтры доски адаптируются по ширине самой карточки, а не viewport.** Sidebar, dock и
+  правая колонка оставляют `BoardView.primary` заметно уже окна, поэтому viewport-breakpoint
+  уже приводил к наложению тулбара на «Ждут моего контроля» в landscape-планшете. Колонки
+  доски переносятся intrinsic-flex-раскладкой, а `board-primary` container query сворачивает
+  фильтры в кнопку на узкой карточке; поиск остаётся видимым всегда. «Избранные» и «Новые» —
+  независимые фильтры, режим триажа — один enum `all|unrated|needs-info`, сортировка и режим
+  сохраняются в прежнем ключе `board.triage`. Массовая оценка остаётся в сворачиваемой панели,
+  но отделена от переключателей как акцентное действие; она относится ко всем задачам без
+  оценки на доске, а не только к видимой выборке. Поиск, select, фильтры и действия имеют
+  одну высоту из глобального токена `--control-height`: адаптив переносит или сворачивает
+  всю группу, но не меняет размеры её отдельных контролов.
 - **Screen Wake Lock** — локальная настройка `cockpit-screen-wake-lock` во вкладке
   «Настройки → Приложение». Она не хранится в серверных prefs, чтобы планшет не менял
   энергоповедение остальных окон. `stores/pwa.js` держит блокировку на уровне всего SPA,
   а после системного освобождения в фоне повторяет запрос по `visibilitychange`.
 - **Пропорции страницы «Чаты» — тоже настройка устройства**: ширина списка чатов
-  (`cockpit-chats-list-width`) и высота поля ввода (`cockpit-chat-composer-h`, у плавающей
-  панели свой ключ) двигаются разделителями и живут в localStorage — рядом с шириной дока и
+  (`cockpit-chats-list-width`) и высота поля ввода (`cockpit-chat-composer-h`) двигаются
+  разделителями и живут в localStorage — рядом с шириной дока и
   дерева «Кода», по той же причине: серверные prefs навязали бы планшету раскладку монитора.
   Пустая настройка означает «решает CSS»; правила и границы — [чат с агентами](chat-agents.md).
 - **Чипы «требует меня» в навигации** (`AppShell.vue`, карта `badges`: пункт → `{n, kind, title}`) —
@@ -392,13 +441,25 @@ InboxView, TelegramView, GitHubView и `ToolHost` для Code показываю
 настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
 действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.
 
-**Настройка типа `model`** (сейчас одна — общий `triageModel` плагина Inbox) хранит пару
-«исполнитель/модель» строкой `<provider>:<model>`, а варианты берёт из живого реестра
-`/api/providers` — `optgroup` по исполнителям, как в чате. Вендор в манифест не зашивается:
+**Настройка типа `model`** (их две и они независимы: `triageModel` плагина Inbox и
+`triageModel` плагина video — см. [video.md](video.md)) хранит объект
+`{provider, model, effort?}`, а варианты берёт из живого реестра `/api/providers` —
+`optgroup` по исполнителям, как в чате. Строкой `<provider>:<model>` живёт только
+значение `<option>`: у локальных исполнителей id модели сам бывает со слэшами и
+двоеточиями, и разобрать склейку обратно нечем. Вендор в манифест не зашивается:
 модель у каждого своя, а зовётся она общим путём (`resolveModelRef` → адаптер → `run`).
 Выбор, пропавший из реестра (сняли CLI, переименовали модель), показывается отдельным
 пунктом «— нет в реестре»: молча показать «не выбрана» нельзя — в настройках он остался,
 и сервер всё ещё ходит именно ей.
+
+**Усилие — отдельный контрол рядом, а не вариант в списке моделей**: одна и та же модель
+работает и быстро, и вдумчиво. Лестницу объявляет сама модель (`model.efforts`), пустая
+означает «уровень передать нечем» — контрола нет вовсе, как слайдера в чате. Пустой выбор
+значит умолчание исполнителя и уезжает ОТСУТСТВИЕМ ключа, а не пустой строкой. Уровень
+сверяется с реестром перед каждым ходом (`resolveInboxTriageTarget`): настройка живёт
+долго, а `--effort xhigh` у модели без такой ступени не игнорируется, а роняет запуск CLI.
+Устаревший уровень снимается с записью в журнал и остаётся видимым в настройках с
+пометкой «нет у этой модели».
 
 ## Демо: удалено целиком
 
@@ -425,7 +486,7 @@ InboxView, TelegramView, GitHubView и `ToolHost` для Code показываю
 Весь `/api` за сессией (httpOnly cookie). Для локальных CLI (bin/b24, ship-этап фабрики,
 скиллы) — `server/.state/cli-token` (0600, создаётся сервером): заголовок `X-Cockpit-Token`.
 `bin/b24` сам читает токен от РЕАЛЬНОГО пути скрипта (readlink -f, симлинк из ~/.local/bin).
-Внутренний `internalToken` (in-memory, per-process) — только для permission-mcp чата.
+Внутренний `internalToken` (in-memory, per-process) — для permission-mcp чата.
 
 ## Авто-шип фабрики
 

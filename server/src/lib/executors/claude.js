@@ -10,6 +10,7 @@ import {
   claudeOauthMetadata,
 } from './_claude-catalog.js';
 import { npmLatest } from './_npm-latest.js';
+import { withRetry } from '../retry.js';
 import { createStepSink } from '../chat/stream-steps.js';
 import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { toClaudeSteps } from './_claude-steps.js';
@@ -360,27 +361,26 @@ function authHeaders(tok) {
 }
 
 /**
- * Сырой ответ ручки потребления. Сеть до api.anthropic.com бывает нестабильна (VPN) —
- * пробуем дважды.
+ * Сырой ответ ручки потребления. Сеть до api.anthropic.com бывает нестабильна (VPN),
+ * поэтому запрос идёт через общий `withRetry` — там же живут правила пауз.
+ *
+ * Повтор безопасен только для сетевых и серверных сбоев. 401/403/429 — самостоятельные
+ * состояния интерфейса: повтор их не изменит, а человека задержит. Читающая ручка
+ * идемпотентна, ничего не расходует — право на повтор у неё есть.
  */
-async function requestUsage(tok, fetchImpl) {
-  let r = null;
-  let error = null;
-  for (let i = 0; i < 2; i++) {
-    try {
-      r = await fetchImpl(`${API}/api/oauth/usage`, {
-        headers: authHeaders(tok),
-        signal: AbortSignal.timeout(10_000),
-      });
-      // Повтор безопасен только для сетевых/серверных сбоев. 401/403/429 —
-      // самостоятельные состояния интерфейса, повтор их лишь задержит.
-      if (r.status < 500) break;
-    } catch (e) {
-      error = e;
-      r = null;
-    }
+async function requestUsage(tok, fetchImpl, sleep = wait) {
+  try {
+    const response = await withRetry(() => fetchImpl(`${API}/api/oauth/usage`, {
+      headers: authHeaders(tok),
+      signal: AbortSignal.timeout(10_000),
+    }), {
+      retryWhen: (r) => r.status >= 500,
+      sleep,
+    });
+    return { response, error: '' };
+  } catch (error) {
+    return { response: null, error: error?.message || '' };
   }
-  return { response: r, error: error?.message || '' };
 }
 
 async function usageResponse(result) {
@@ -425,7 +425,7 @@ export async function fetchClaudeUsage({
     };
   }
 
-  let result = await requestUsage(auth.token, fetchImpl);
+  let result = await requestUsage(auth.token, fetchImpl, sleep);
   if (result.response?.status === 401 && auth.refreshable) {
     const refreshed = await resolveClaudeCliToken({
       ...tokenOpts,
@@ -433,7 +433,7 @@ export async function fetchClaudeUsage({
       failedAccessToken: auth.token,
     });
     if (refreshed.token && refreshed.token !== auth.token) {
-      result = await requestUsage(refreshed.token, fetchImpl);
+      result = await requestUsage(refreshed.token, fetchImpl, sleep);
     } else if (!refreshed.invalid) {
       // Живая OAuth-сессия, которую сейчас не удалось обновить, — временный сбой,
       // а не команда человеку повторно логиниться.

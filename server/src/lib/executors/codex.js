@@ -1,7 +1,7 @@
 // Исполнитель GPT (OpenAI Codex CLI).
 // Установка: npm i -g @openai/codex && codex login — после этого провайдер оживает сам.
-// Запуск неинтерактивный: `codex exec --json` (JSONL-события), резюме через
-// `codex exec resume <thread_id>`. Песочница workspace-write: текущий cwd и явно
+// Ходы идут через `codex app-server`: новый разговор делает `thread/start`, следующий
+// `thread/resume`, затем `turn/start`. Песочница workspace-write: текущий cwd и явно
 // доверенные каталоги доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
 import { execFile, spawn } from 'node:child_process';
@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { npmLatest } from './_npm-latest.js';
+import { withRetry } from '../retry.js';
 import { createStepSink } from '../chat/stream-steps.js';
 import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { createCodexStepNormalizer } from './_codex-steps.js';
@@ -128,10 +129,25 @@ export function parseCodexUsageResources(result) {
   return resources;
 }
 
+// Два класса отказа, которые ожиданием не лечатся: устаревший CLI без метода и
+// неавторизованный аккаунт. Всё остальное — сеть или занятый app-server, и повтор
+// имеет смысл. Правило одно на классификатор и на ретрай: разъехавшись, они дали бы
+// либо бессмысленные повторы на «нужен login», либо отсутствие повтора там, где он лечит.
+const CODEX_USAGE_UNSUPPORTED_RE = /method not found/i;
+const CODEX_USAGE_AUTH_RE = /login|required|sign.?in|unauthori[sz]ed|not authenticated|401/i;
+
+export function codexUsageErrorIsPermanent(error) {
+  if (!error) return false;
+  const detail = String(error?.message || error || '').slice(0, 500);
+  return error?.code === -32601
+    || CODEX_USAGE_UNSUPPORTED_RE.test(detail)
+    || CODEX_USAGE_AUTH_RE.test(detail);
+}
+
 export function classifyCodexUsageResponse({ result = null, error = null } = {}) {
   const detail = String(error?.message || error || '').slice(0, 500);
   if (error) {
-    if (error?.code === -32601 || /method not found/i.test(detail)) {
+    if (error?.code === -32601 || CODEX_USAGE_UNSUPPORTED_RE.test(detail)) {
       return {
         state: 'unsupported',
         bars: [],
@@ -140,7 +156,7 @@ export function classifyCodexUsageResponse({ result = null, error = null } = {})
         action: null,
       };
     }
-    if (/login|required|sign.?in|unauthori[sz]ed|not authenticated|401/i.test(detail)) {
+    if (CODEX_USAGE_AUTH_RE.test(detail)) {
       return {
         state: 'auth_required',
         bars: [],
@@ -426,7 +442,7 @@ export function codexAppServerRequest(bin, { method, params } = {}, {
           return;
         }
         requestSent = true;
-        send({ method: 'initialized', params: {} });
+        send({ method: 'initialized' });
         send({ method, id: 2, ...(params !== undefined && { params }) });
       } else if (message.id === 2) {
         finish(message.error ? { error: message.error } : { result: message.result });
@@ -442,13 +458,31 @@ export function codexAppServerRequest(bin, { method, params } = {}, {
           title: 'Cockpit',
           version: '0.1.0',
         },
+        capabilities: null,
       },
     });
   });
 }
 
-export function readCodexRateLimits(bin, options = {}) {
-  return codexAppServerRequest(bin, { method: 'account/rateLimits/read' }, options);
+/**
+ * Потребление лимитов. Повтор здесь разрешён именно потому, что метод read-only и
+ * идемпотентный: он не создаёт thread/turn, ничего не расходует и не меняет аккаунт.
+ * Соседнему `consume` такого права не выдано — там повтор означал бы второй списанный
+ * сброс лимита.
+ *
+ * Причина повтора не в самом app-server, а в сети под ним: моргание туннеля роняет
+ * единственную попытку, и шапка показывает «не удалось получить лимиты» на живом
+ * аккаунте. Пауза между попытками обязательна — мгновенный повтор попадает в то же
+ * моргание.
+ */
+export async function readCodexRateLimits(bin, options = {}) {
+  const { sleep, request = codexAppServerRequest, ...rest } = options;
+  return withRetry(() => request(bin, { method: 'account/rateLimits/read' }, rest), {
+    // Ответ без ошибки — готово. Устаревший CLI и неавторизованный аккаунт — тоже
+    // окончательный ответ: повтор их не изменит, а человека задержит на секунды.
+    retryWhen: (response) => !!response?.error && !codexUsageErrorIsPermanent(response.error),
+    ...(sleep ? { sleep } : {}),
+  });
 }
 
 export async function consumeCodexRateLimitReset(bin, {
@@ -533,6 +567,399 @@ export function buildCodexExecArgs({
   return args;
 }
 
+function codexAppServerConfig(compactWindow) {
+  const compactAt = Math.max(0, Math.round(Number(compactWindow) || 0));
+  return {
+    sandbox_workspace_write: { network_access: true },
+    model_reasoning_summary: 'detailed',
+    ...(compactAt && { model_auto_compact_token_limit: compactAt }),
+  };
+}
+
+function codexWorkspaceRoots(cwd, extraDirs) {
+  return [...new Set([cwd, ...(extraDirs || [])].filter(Boolean).map(String))];
+}
+
+function codexStoppedError({ sessionId, steps }) {
+  const stopped = new Error('Ход остановлен.');
+  stopped.stopped = true;
+  stopped.steps = steps;
+  stopped.contextCache = contextCacheStatus('unavailable');
+  stopped.sessionId = sessionId || null;
+  return stopped;
+}
+
+function codexRpcError(method, error) {
+  const detail = String(error?.message || error || 'неизвестная ошибка').slice(-600);
+  const wrapped = new Error(`Codex app-server ${method}: ${detail}`);
+  if (error?.code !== undefined) wrapped.code = error.code;
+  return wrapped;
+}
+
+/**
+ * Один app-server процесс обслуживает полный ход: handshake, thread, turn и все
+ * промежуточные notifications. После `turn/completed` процесс нам больше не нужен;
+ * следующий HTTP-ход поднимет новый и сделает `thread/resume` по сохранённому id.
+ */
+export function runCodexAppServer({
+  config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
+  signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+}) {
+  if (signal?.aborted) {
+    return Promise.reject(codexStoppedError({ sessionId, steps: [] }));
+  }
+
+  return new Promise((resolve, reject) => {
+    const stepSink = createStepSink(onStep);
+    const normalizeStep = createCodexStepNormalizer({ model, cwd });
+    const roots = codexWorkspaceRoots(cwd, extraDirs);
+    const pending = new Map();
+    const messageDeltas = new Map();
+    let nextRequestId = 0;
+    let threadId = sessionId || null;
+    let turnId = null;
+    let reply = '';
+    let actualModel = '';
+    let totalInputTokens = 0;
+    let cachedInputTokens = 0;
+    let appContext = null;
+    let progressTokens = 0;
+    let stderrTail = '';
+    let settled = false;
+    let protocol = 'pending';
+    let abortRequested = false;
+    let interruptSent = false;
+    let interruptTimer = null;
+
+    function rememberTail(current, chunk, limit = 4_000) {
+      return `${current}${String(chunk || '')}`.slice(-limit);
+    }
+
+    let child;
+    try {
+      child = spawn(config.codexBin, ['app-server'], {
+        cwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    const lines = createInterface({ input: child.stdout });
+
+    function send(payload) {
+      if (settled || child.stdin.destroyed) throw new Error('Codex app-server stdin уже закрыт');
+      child.stdin.write(`${JSON.stringify(payload)}\n`);
+    }
+
+    function request(method, params) {
+      return new Promise((requestResolve, requestReject) => {
+        const id = ++nextRequestId;
+        pending.set(id, { method, resolve: requestResolve, reject: requestReject });
+        try {
+          send({ method, id, ...(params !== undefined && { params }) });
+        } catch (error) {
+          pending.delete(id);
+          requestReject(error);
+        }
+      });
+    }
+
+    function stopProcess() {
+      clearTimeout(interruptTimer);
+      signal?.removeEventListener('abort', onAbort);
+      try { lines.close(); } catch { /* уже закрыт */ }
+      try { child.stdin.end(); } catch { /* уже закрыт */ }
+      try { child.kill(); } catch { /* уже завершён */ }
+    }
+
+    function rejectPending(error) {
+      const calls = [...pending.values()];
+      pending.clear();
+      for (const call of calls) call.reject(error);
+    }
+
+    function finishError(error) {
+      if (settled) return;
+      settled = true;
+      stopProcess();
+      rejectPending(error);
+      reject(error);
+    }
+
+    function finishStopped() {
+      if (settled) return;
+      finishError(codexStoppedError({ sessionId: threadId, steps: stepSink.steps }));
+    }
+
+    async function finishSuccess() {
+      if (settled) return;
+      if (!reply.trim()) {
+        finishError(new Error('codex не вернул ответ'));
+        return;
+      }
+      settled = true;
+      stopProcess();
+      rejectPending(new Error('Codex app-server завершил ход'));
+      let context = appContext;
+      if (!context) {
+        try { context = await tokenInfoReader(threadId, { env }); } catch { /* точная метрика необязательна */ }
+      }
+      resolve({
+        reply, sessionId: threadId, cost: null,
+        contextTokens: context?.contextTokens ?? 0,
+        contextWindow: context?.contextWindow ?? 0,
+        contextMetric: context?.contextMetric || 'unavailable',
+        contextIsEstimate: context ? context.contextIsEstimate === true : true,
+        contextCache: context?.contextCache || contextCacheStatus('unavailable'),
+        totalInputTokens: context?.totalInputTokens ?? totalInputTokens,
+        cachedInputTokens: context?.cachedInputTokens ?? cachedInputTokens,
+        actualModel, steps: stepSink.steps,
+      });
+    }
+
+    function rememberUsage(params) {
+      const usage = params?.tokenUsage;
+      const last = usage?.last;
+      const total = usage?.total;
+      if (!last || !total) return;
+      const contextTokens = tokenNumber(last.inputTokens);
+      const contextWindow = tokenNumber(usage.modelContextWindow, { positive: true });
+      const cachedRequestTokens = tokenNumber(last.cachedInputTokens);
+      totalInputTokens = tokenNumber(total.inputTokens) || 0;
+      cachedInputTokens = tokenNumber(total.cachedInputTokens) || 0;
+      progressTokens = (tokenNumber(last.outputTokens) || 0)
+        + (tokenNumber(last.reasoningOutputTokens) || 0);
+      if (contextTokens === null || contextWindow === null) return;
+      appContext = {
+        contextTokens,
+        contextWindow,
+        contextMetric: CODEX_CONTEXT_METRIC,
+        contextIsEstimate: false,
+        contextCache: cachedRequestTokens === null
+          ? contextCacheStatus('unavailable')
+          : reportedContextCache({
+            readTokens: cachedRequestTokens,
+            uncachedTokens: contextTokens - cachedRequestTokens,
+          }),
+        totalInputTokens,
+        cachedInputTokens,
+      };
+    }
+
+    function appendMessage(params) {
+      const id = String(params?.itemId || '');
+      if (!id || typeof params?.delta !== 'string') return;
+      messageDeltas.set(id, `${messageDeltas.get(id) || ''}${params.delta}`.slice(0, 100_000));
+    }
+
+    function consumeAppNotification(event) {
+      const method = String(event.method || '');
+      const params = event.params && typeof event.params === 'object' ? event.params : {};
+      stepSink.emitAll(normalizeStep(event));
+
+      if (method === 'thread/started') {
+        threadId = params.thread?.id || threadId;
+      } else if (method === 'turn/started') {
+        turnId = params.turn?.id || turnId;
+        maybeInterrupt();
+      } else if (method === 'item/agentMessage/delta') {
+        appendMessage(params);
+      } else if (method === 'item/completed' && params.item?.type === 'agentMessage') {
+        const item = params.item;
+        const id = String(item.id || '');
+        const text = String(item.text || messageDeltas.get(id) || '');
+        messageDeltas.delete(id);
+        // Commentary уже ушёл отдельным text-шагом. Ответом считается явный final
+        // либо legacy-модель без phase, где последняя agentMessage была ответом.
+        if (item.phase === 'final_answer' || item.phase == null) {
+          if (text.trim()) reply = text;
+        }
+      } else if (method === 'thread/tokenUsage/updated') {
+        rememberUsage(params);
+      } else if (method === 'turn/completed') {
+        const status = String(params.turn?.status || 'completed');
+        turnId = params.turn?.id || turnId;
+        if (progressTokens > 0) {
+          try { onProgress?.(progressTokens); } catch { /* счётчик не должен ронять ход */ }
+        }
+        if (abortRequested || status === 'interrupted') {
+          finishStopped();
+        } else if (status === 'failed') {
+          finishError(codexRpcError('turn/completed', params.turn?.error || 'ход завершился ошибкой'));
+        } else {
+          void finishSuccess();
+        }
+      }
+    }
+
+    function consumeLegacyEvent(event) {
+      protocol = 'legacy';
+      if (event.type === 'thread.started') {
+        threadId = event.thread_id || event.thread?.id || threadId;
+      }
+      if (typeof event.model === 'string' && event.model) actualModel = event.model;
+      if (typeof event.item?.model === 'string' && event.item.model) actualModel = event.item.model;
+      stepSink.emitAll(normalizeStep(event));
+      if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+        const text = event.item.text || event.item.content;
+        if (typeof text === 'string' && text.trim()) reply = text;
+      }
+      if (event.type === 'turn.completed' && event.usage) {
+        totalInputTokens = codexTotalInputTokens(event.usage);
+        cachedInputTokens = tokenNumber(event.usage.cached_input_tokens) || 0;
+        const spent = Number(event.usage.output_tokens || 0)
+          + Number(event.usage.reasoning_output_tokens || 0);
+        if (Number.isFinite(spent) && spent > 0) {
+          try { onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
+        }
+      }
+    }
+
+    function consumeMessage(messageObject) {
+      if (messageObject?.id !== undefined && !messageObject?.method
+        && (Object.hasOwn(messageObject, 'result') || Object.hasOwn(messageObject, 'error'))) {
+        protocol = 'app-server';
+        const call = pending.get(messageObject.id);
+        if (!call) return;
+        pending.delete(messageObject.id);
+        if (messageObject.error) call.reject(codexRpcError(call.method, messageObject.error));
+        else call.resolve(messageObject.result);
+        return;
+      }
+
+      if (messageObject?.method) {
+        protocol = 'app-server';
+        // При policy=never запросов разрешения быть не должно. Не оставляем
+        // неожиданный server request висеть бесконечно — завершаем ход fail-closed.
+        if (messageObject.id !== undefined) {
+          try {
+            send({
+              id: messageObject.id,
+              error: { code: -32601, message: `Cockpit не поддерживает server request ${messageObject.method}` },
+            });
+          } catch { /* основной отказ ниже */ }
+          finishError(new Error(`Codex запросил неподдерживаемое действие: ${messageObject.method}`));
+          return;
+        }
+        consumeAppNotification(messageObject);
+        return;
+      }
+
+      if (messageObject?.type) consumeLegacyEvent(messageObject);
+    }
+
+    function consumeLine(line) {
+      const text = String(line || '').trim();
+      if (!text.startsWith('{')) return;
+      let event;
+      try { event = JSON.parse(text); } catch { return; }
+      consumeMessage(event);
+    }
+
+    function maybeInterrupt() {
+      if (!abortRequested || interruptSent || settled) return;
+      if (protocol === 'legacy') {
+        finishStopped();
+        return;
+      }
+      if (!threadId || !turnId) return;
+      interruptSent = true;
+      clearTimeout(interruptTimer);
+      interruptTimer = setTimeout(finishStopped, 3_000);
+      request('turn/interrupt', { threadId, turnId }).catch(() => finishStopped());
+    }
+
+    function onAbort() {
+      if (settled) return;
+      abortRequested = true;
+      maybeInterrupt();
+      if (!interruptTimer && protocol !== 'legacy') {
+        // Если abort пришёл во время handshake, даём app-server короткое окно
+        // сообщить thread/turn id и затем отправляем штатный interrupt.
+        interruptTimer = setTimeout(finishStopped, 3_000);
+      }
+    }
+
+    child.stderr.on('data', (chunk) => {
+      stderrTail = rememberTail(stderrTail, chunk);
+    });
+    child.stdin.on('error', (error) => {
+      if (!settled) finishError(error);
+    });
+    child.once('error', (error) => {
+      if (error?.code === 'ENOENT') {
+        finishError(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
+        return;
+      }
+      finishError(new Error((stderrTail || error?.message || 'codex app-server не запустился').slice(-600)));
+    });
+    child.once('close', (code) => {
+      if (settled) return;
+      if (abortRequested || signal?.aborted) {
+        finishStopped();
+      } else if (protocol === 'legacy' && reply) {
+        void finishSuccess();
+      } else {
+        const detail = stderrTail.trim().slice(-300);
+        finishError(new Error(`codex app-server завершился до ответа${detail ? `: ${detail}` : ` (код ${code ?? '?'})`}`));
+      }
+    });
+    lines.on('line', consumeLine);
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    async function bootstrap() {
+      await request('initialize', {
+        clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+        capabilities: null,
+      });
+      send({ method: 'initialized' });
+
+      const common = {
+        ...(model && { model }),
+        cwd,
+        approvalPolicy: 'never',
+        sandbox: 'workspace-write',
+        config: codexAppServerConfig(compactWindow),
+      };
+      const opened = sessionId
+        ? await request('thread/resume', { threadId: sessionId, ...common })
+        : await request('thread/start', { ...common, serviceName: 'cockpit' });
+      threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
+      actualModel = String(opened?.model || model || '');
+      stepSink.emitAll(normalizeStep({
+        type: 'thread.started', thread_id: threadId, model: actualModel,
+      }));
+
+      const turnParams = {
+        threadId,
+        input: [{ type: 'text', text: String(message || ''), text_elements: [] }],
+        cwd,
+        approvalPolicy: 'never',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: roots,
+          networkAccess: true,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+        ...(model && { model }),
+        ...(effort && { effort }),
+        summary: 'detailed',
+      };
+      const started = await request('turn/start', turnParams);
+      turnId = started?.turn?.id || turnId;
+      maybeInterrupt();
+    }
+
+    bootstrap().catch((error) => {
+      if (!settled) finishError(error);
+    });
+  });
+}
+
 // TUI-команды Codex. `codex exec` слэш-текст отдаёт модели как обычный промпт, поэтому
 // весь список информационный (run: 'none'): исполнить их можно только в интерактивном
 // TUI самого CLI. Состав сверен contract gate с codex-cli 0.145.0;
@@ -605,12 +1032,11 @@ export default {
   color: '#10a37f',
   order: 2,
   install: 'npm i -g @openai/codex && codex login',
-  // Каждый путь из opts.extraDirs становится writable-root песочницы через --add-dir.
+  // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
   trustedDirectories: true,
 
-  // Ручной компакт пока идёт универсальным путём: `codex exec` принимает prompt, а
-  // app-server `thread/compact/start` потребовал бы другого transport. Автокомпакт при
-  // этом родной: buildCodexExecArgs передаёт официальный model_auto_compact_token_limit.
+  // Ручной компакт пока идёт универсальной выжимкой текстом. Автокомпакт родной:
+  // thread config передаёт app-server-у официальный model_auto_compact_token_limit.
   compaction: { kind: 'summary' },
 
   bin(config) { return config.codexBin; },
@@ -695,143 +1121,9 @@ export default {
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
     signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   }) {
-    const args = buildCodexExecArgs({
-      message, cwd, extraDirs, model, effort, sessionId, compactWindow,
-    });
-
-    return new Promise((resolve, reject) => {
-      // execFile отдаёт stdout только после завершения, поэтому лента Codex раньше
-      // была пустой. Spawn читается построчно: provider-normalizer превращает каждое
-      // JSONL-событие в общий ChatStep и сразу отправляет его в SSE.
-      const stepSink = createStepSink(onStep);
-      const normalizeStep = createCodexStepNormalizer({ model, cwd });
-      let threadId = sessionId || null;
-      let reply = '';
-      let totalInputTokens = 0;
-      let cachedInputTokens = 0;
-      let actualModel = '';
-      let stderrTail = '';
-      let buffer = '';
-      let settled = false;
-
-      function finishError(error) {
-        if (settled) return;
-        settled = true;
-        reject(error);
-      }
-
-      function finishStopped() {
-        if (settled) return;
-        const stopped = new Error('Ход остановлен.');
-        stopped.stopped = true;
-        stopped.steps = stepSink.steps;
-        stopped.contextCache = contextCacheStatus('unavailable');
-        // Даже оборванный первый ход успевает напечатать thread.started. Сохраняем id:
-        // следующий вопрос сможет продолжить тот же разговор после кнопки «стоп».
-        stopped.sessionId = threadId;
-        finishError(stopped);
-      }
-
-      function rememberTail(current, chunk, limit = 4_000) {
-        return `${current}${String(chunk || '')}`.slice(-limit);
-      }
-
-      function consumeEvent(event) {
-        if (event.type === 'thread.started') {
-          threadId = event.thread_id || event.thread?.id || threadId;
-        }
-        if (typeof event.model === 'string' && event.model) actualModel = event.model;
-        if (typeof event.item?.model === 'string' && event.item.model) actualModel = event.item.model;
-
-        stepSink.emitAll(normalizeStep(event));
-
-        if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
-          const text = event.item.text || event.item.content;
-          if (typeof text === 'string' && text.trim()) reply = text;
-        }
-        if (event.type === 'turn.completed') {
-          if (typeof event.last_agent_message === 'string' && event.last_agent_message.trim()) {
-            reply = event.last_agent_message;
-          }
-          if (event.usage) {
-            totalInputTokens = codexTotalInputTokens(event.usage);
-            cachedInputTokens = tokenNumber(event.usage.cached_input_tokens) || 0;
-            const spent = Number(event.usage.output_tokens || 0) + Number(event.usage.reasoning_output_tokens || 0);
-            if (Number.isFinite(spent) && spent > 0) {
-              try { onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
-            }
-          }
-        }
-      }
-
-      function consumeLine(line) {
-        const text = line.trim();
-        if (!text.startsWith('{')) return;
-        let event;
-        try { event = JSON.parse(text); } catch { return; }
-        consumeEvent(event);
-      }
-
-      function consumeBuffer() {
-        let newline;
-        while ((newline = buffer.indexOf('\n')) >= 0) {
-          const line = buffer.slice(0, newline);
-          buffer = buffer.slice(newline + 1);
-          consumeLine(line);
-        }
-      }
-
-      let child;
-      try {
-        child = spawn(config.codexBin, args, {
-          cwd,
-          env,
-          signal,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-      } catch (error) {
-        finishError(error);
-        return;
-      }
-
-      child.stdout?.on('data', (chunk) => {
-        buffer += String(chunk);
-        consumeBuffer();
-      });
-      child.stderr?.on('data', (chunk) => {
-        stderrTail = rememberTail(stderrTail, chunk);
-      });
-      child.once('error', (error) => {
-        if (error?.code === 'ABORT_ERR' || signal?.aborted) return finishStopped();
-        if (error?.code === 'ENOENT') {
-          return finishError(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
-        }
-        return finishError(new Error((stderrTail || error?.message || 'codex не запустился').slice(-600)));
-      });
-      child.once('close', async (code) => {
-        if (buffer.trim()) consumeLine(buffer);
-        buffer = '';
-        if (settled) return;
-        if (signal?.aborted) return finishStopped();
-        if (!reply) {
-          const detail = stderrTail.trim().slice(-300);
-          return finishError(new Error(`codex не вернул ответ${detail ? `: ${detail}` : ` (код ${code ?? '?'})`}`));
-        }
-        settled = true;
-        let context = null;
-        try { context = await tokenInfoReader(threadId, { env }); } catch { /* без точной метрики лучше пусто, чем миллионы */ }
-        resolve({
-          reply, sessionId: threadId, cost: null,
-          contextTokens: context?.contextTokens ?? 0,
-          contextWindow: context?.contextWindow ?? 0,
-          contextMetric: context?.contextMetric || 'unavailable',
-          contextIsEstimate: !context,
-          contextCache: context?.contextCache || contextCacheStatus('unavailable'),
-          totalInputTokens: context?.totalInputTokens ?? totalInputTokens,
-          cachedInputTokens: context?.cachedInputTokens ?? cachedInputTokens,
-          actualModel, steps: stepSink.steps,
-        });
-      });
+    return runCodexAppServer({
+      config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
+      signal, onProgress, onStep, tokenInfoReader,
     });
   },
 };

@@ -3,6 +3,7 @@
 // навигация мимо пунктов run:'none', dispatch провайдерской команды с признаком
 // slashCommand. Компонентный монтаж ChatSession.vue (test-first, план §3.5).
 import assert from 'node:assert/strict';
+globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -36,8 +37,17 @@ async function compileChatSession() {
       'const api = globalThis.__slashMenuApi;',
     )
     .replace(
-      "import { createSpeechStream } from '../../shared/speech-stream.js';",
-      'const createSpeechStream = async () => null;',
+      "import { useDictationController } from '../../features/speech/provider.js';",
+      `const useDictationController = () => ({ acquire: () => ({
+        state: { phase: 'idle', busy: false, prompt: null, interim: '', notice: '' },
+        start: async () => {}, stop: async () => {}, cancel: async () => {},
+        confirmBrowserConsent: async () => {}, useWhisper: async () => {},
+        installBrowserLanguage: async () => {}, release: async () => {},
+      }) });`,
+    )
+    .replace(
+      "import { contextFill } from '../../shared/chat-context.js';",
+      'const contextFill = globalThis.__sharedChatContextFill;',
     )
     .replace(
       "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
@@ -247,7 +257,7 @@ async function mountChat(t, { session = makeSession(), provider = KIMI_PROVIDER,
   ]);
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();

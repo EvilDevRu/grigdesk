@@ -15,9 +15,40 @@ import { maskToken } from './token.js';
 
 const BASE = 'https://api.telegram.org';
 
+// Паузы между повторами транспортного отказа. Короткие: повтор идёт внутри хода,
+// которого ждёт человек, и обязан либо быстро помочь, либо быстро сдаться.
+const RETRY_DELAYS_MS = Object.freeze([500, 1500]);
+
 /** Ошибка с типом отказа; текст уже без секрета. */
 function apiError(message, kind, extra = {}) {
   return Object.assign(new Error(message), { kind, ...extra });
+}
+
+const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * Повтор ТОЛЬКО транспортного отказа и ТОЛЬКО там, где повтор безопасен.
+ *
+ * Право на повтор даёт идемпотентность вызова, а не его важность: `getFile` и
+ * скачивание байтов ничего не меняют на стороне Телеграма, поэтому вторая
+ * попытка после оборванного TLS честно чинит моргнувшую сеть. Отправка
+ * сообщения таким свойством не обладает: после таймаута нельзя узнать, дошла ли
+ * первая, а idempotency key Bot API не даёт — там повтор означал бы дубль в
+ * чужом чате. Поэтому `retries` по умолчанию 0, и включает его вызывающий.
+ *
+ * Отказ самого Телеграма (`kind: 'telegram'`) не повторяется никогда: неверный
+ * токен, отсутствие прав и файл сверх предела ожиданием не лечатся.
+ */
+async function retryTransport(attempt, { retries = 0, sleepImpl = wait } = {}) {
+  const allowed = Math.max(0, Math.min(Number(retries) || 0, RETRY_DELAYS_MS.length));
+  for (let done = 0; ; done += 1) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (err?.kind !== 'transport' || done >= allowed) throw err;
+      await sleepImpl(RETRY_DELAYS_MS[done]);
+    }
+  }
 }
 
 /** Убирает токен из любого текста — в лог и на экран уходит только маска. */
@@ -32,9 +63,13 @@ export function scrubToken(text, token) {
  * @param {string} token
  * @param {string} method
  * @param {object} [body]
- * @param {{ fetchImpl?: Function, timeoutMs?: number }} [opts]
+ * @param {{ fetchImpl?: Function, timeoutMs?: number, retries?: number }} [opts]
  */
 export async function callBotApi(token, method, body, opts = {}) {
+  return retryTransport(() => callBotApiOnce(token, method, body, opts), opts);
+}
+
+async function callBotApiOnce(token, method, body, opts = {}) {
   const { fetchImpl = fetch, timeoutMs = 15000 } = opts;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -87,6 +122,10 @@ export async function getFile(token, fileId, opts) {
  * пустым, а качать в память гигабайт из-за этого не хочется.
  */
 export async function downloadFile(token, filePath, opts = {}) {
+  return retryTransport(() => downloadFileOnce(token, filePath, opts), opts);
+}
+
+async function downloadFileOnce(token, filePath, opts = {}) {
   const { fetchImpl = fetch, timeoutMs = 60000, limit = FILE_LIMIT } = opts;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -113,6 +152,16 @@ export async function downloadFile(token, filePath, opts = {}) {
     throw apiError(`файл ${Math.round(buffer.length / 1024 / 1024)} МБ — больше предела бота`, 'telegram');
   }
   return buffer;
+}
+
+/**
+ * Индикатор «печатает…» в чате. Намеренно без повтора: это неидемпотентный
+ * вызов — после обрыва нельзя узнать, дошла ли первая попытка, а дубль
+ * индикатора хуже его отсутствия. Поэтому идёт через `callBotApiOnce`,
+ * а `retries` из opts здесь не действует.
+ */
+export async function sendChatAction(token, chatId, action, opts = {}) {
+  return callBotApiOnce(token, 'sendChatAction', { chat_id: chatId, action }, opts);
 }
 
 /**

@@ -231,6 +231,28 @@ export function parseKimiUsageResources(result) {
   }];
 }
 
+/**
+ * Стоит ли повторять эту неудачу. У Kimi повтор дороже, чем у соседей: каждая попытка
+ * заново поднимает локальный брокер, поэтому право на него выдано узко.
+ *
+ * Повторяем только там, где брокер УЖЕ поднялся, а споткнулся сам запрос: `request_failed`
+ * и серверные 5xx. Тогда и второй старт, скорее всего, пройдёт быстро.
+ *
+ * Не повторяем:
+ * - `startup_timeout` — он уже съел свои 30 секунд, вторая попытка съест столько же, пока
+ *   человек смотрит на пустую шапку;
+ * - `spawn_failed`, `workspace_prepare_failed` — это локальная поломка, а не сеть;
+ * - 401/402/403 — отказ аккаунта, и 429 тоже: ограничение снимут не через секунду,
+ *   а повтор в моменте только усугубит его.
+ */
+export function kimiUsageIsRetryable({ result = null, status = 0, reason = '' } = {}) {
+  if (result?.kind === 'ok') return false;
+  if (result?.kind === 'error') return (Number(result.status) || 0) >= 500;
+  if (reason === 'request_failed') return true;
+  if (reason === 'response_rejected') return (Number(status) || 0) >= 500;
+  return false;
+}
+
 export function classifyKimiUsageResponse({ result = null, error = '', status = 0, reason = '' } = {}) {
   const login = { kind: 'terminal', label: 'Войти в Kimi', command: 'kimi login' };
   if (result?.kind === 'error') {

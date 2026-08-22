@@ -34,10 +34,17 @@ async function compilePipelineView() {
     .replaceAll("from 'vue'", "from '" + VUE_URL + "'")
     .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__pipelineCloseApi;')
     .replace("import { useSse } from '../composables/useSse.js';", 'const useSse = () => {};')
+    .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
+    )
     .replace("import { useUiStore } from '../stores/ui.js';", 'const useUiStore = globalThis.__pipelineCloseUiStore;')
     .replace("import { useTasksStore } from '../stores/tasks.js';", 'const useTasksStore = globalThis.__pipelineCloseTasksStore;')
     .replace("import { useBoardStore } from '../stores/board.js';", 'const useBoardStore = globalThis.__pipelineCloseBoardStore;')
-    .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__pipelineCloseChatStore;')
+    .replace(
+      "import { useCompanionStore } from '../stores/companion.js';",
+      'const useCompanionStore = globalThis.__pipelineCloseCompanionStore;',
+    )
     .replace(
       "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
       'const liveTimerSec = () => 0; const pipelineWorkSec = (tm) => tm?.workSec ?? null; const secToHMS = (n) => String(n ?? 0);',
@@ -127,6 +134,7 @@ async function mountPipeline(t, { factoryTask, graph }) {
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const posts = [];
+  const companionCalls = [];
   globalThis.__pipelineCloseDialogs = [];
   globalThis.__pipelineCloseApi = {
     async get(url) {
@@ -152,7 +160,9 @@ async function mountPipeline(t, { factoryTask, graph }) {
   globalThis.__pipelineCloseBoardStore = defineStore('pipeline-close-board', {
     state: () => ({ data: null }), actions: { async load() {} },
   });
-  globalThis.__pipelineCloseChatStore = defineStore('pipeline-close-chat', { actions: { openFor() {} } });
+  globalThis.__pipelineCloseCompanionStore = defineStore('pipeline-close-companion', {
+    actions: { openForTask(taskId) { companionCalls.push(String(taskId)); } },
+  });
 
   const wrapper = mount(await compilePipelineView(), {
     attachTo: browser.document.querySelector('#mount'),
@@ -164,12 +174,34 @@ async function mountPipeline(t, { factoryTask, graph }) {
     for (const key of [
       '__pipelineCloseApi', '__pipelineCloseDialogs', '__pipelineCloseWait', '__pipelineCloseDisplay',
       '__pipelineCloseFactoryGraph', '__pipelineCloseUiStore', '__pipelineCloseTasksStore',
-      '__pipelineCloseBoardStore', '__pipelineCloseChatStore',
+      '__pipelineCloseBoardStore', '__pipelineCloseCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
-  return { wrapper, flushPromises, posts, dialogs: globalThis.__pipelineCloseDialogs };
+  return {
+    wrapper,
+    flushPromises,
+    posts,
+    companionCalls,
+    dialogs: globalThis.__pipelineCloseDialogs,
+  };
 }
+
+test('COMP-SHELL-Pipeline: обсуждение открывает companion с exact task и закрывает stage', async (t) => {
+  const { wrapper, flushPromises, companionCalls } = await mountPipeline(t, makeFixture());
+  wrapper.getComponent({ name: 'FactoryGraph' }).vm.$emit('node', {
+    nid: 'retro', label: '🧾 Ретро', status: 'done', sub: '',
+  });
+  await flushPromises();
+
+  const discuss = wrapper.findAll('.sactions-buttons .btn').find((button) => /Обсудить с агентом/.test(button.text()));
+  assert.ok(discuss);
+  await discuss.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(companionCalls, ['90002']);
+  assert.equal(wrapper.find('.smodal').exists(), false);
+});
 
 test('shared-задача с внешним стендом: «закрыть задачу» есть, «снести стенд» — нет', async (t) => {
   const { wrapper, flushPromises, posts, dialogs } = await mountPipeline(t, makeFixture());

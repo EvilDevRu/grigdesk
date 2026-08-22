@@ -6,17 +6,23 @@
 // случайно состоит. Поэтому главные проверки здесь — про отказ по умолчанию и про
 // то, что правило темы не расползается на соседние темы.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import {
+  link, lstat, mkdtemp, readFile, rm, symlink, utimes, writeFile, mkdir,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import {
-  TelegramRulesStore, matchRule, normalizeRules,
+  TelegramRulesStore, matchRule, normalizeRules, telegramRulesPolicyFingerprint,
 } from '../../server/src/lib/telegram/rules-store.js';
 
 const CHAT = -1001000000042; // явно синтетический приватный форум
 const PUB = 'example_team';
+const ACCOUNT_A = 'acc_telegram_rules_owner_a';
+const ACCOUNT_B = 'acc_telegram_rules_owner_b';
+const BOT_A = '8123456789';
+const BOT_B = '9123456789';
 
 function logStub() {
   const warns = [];
@@ -30,6 +36,15 @@ async function tmpDir() {
   test.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
+
+const strictStore = (dir, over = {}) => new TelegramRulesStore({
+  dir,
+  accountRef: ACCOUNT_A,
+  botId: BOT_A,
+  log: logStub(),
+  strictRead: true,
+  ...over,
+});
 
 // --- разрешающий поиск: закрыто по умолчанию ---
 
@@ -111,12 +126,46 @@ test('дефолты проставляются целиком, чтобы по�
   assert.equal(r.draft, 'manual');
   assert.deepEqual(r.b24, { responsibleId: null, groupId: null, priority: 1 });
   assert.equal(r.notifyTaskCreated, false, 'старое правило остаётся молчащим');
+  assert.equal(r.agentSearch, false, 'старое правило закрыто для поиска агента');
   assert.deepEqual(r.autoLaunch, {
     enabled: false, route: '', minConfidence: 0.8, maxPerDay: 3, vetoMinutes: 10,
   });
   // Автомат «чат → задача» выключен по умолчанию: заведённое правило сначала
   // просто показывает поводы в разделе, а решение остаётся кнопкой человека.
   assert.deepEqual(r.autoTask, { enabled: false, minConfidence: 0.7, maxPerDay: 10 });
+});
+
+test('agentSearch — отдельный opt-in и не сужает human allowlist', () => {
+  const [humanOnly, forAgent] = normalizeRules([
+    rule({ threadId: 41 }),
+    rule({ threadId: 42, agentSearch: true }),
+  ]);
+  assert.equal(humanOnly.agentSearch, false);
+  assert.equal(forAgent.agentSearch, true);
+  assert.equal(matchRule([humanOnly], { chatId: CHAT, threadId: 41 })?.project, 'demo');
+  assert.equal(matchRule([forAgent], { chatId: CHAT, threadId: 42 })?.project, 'demo');
+});
+
+test('canonical policy fingerprint стабилен и включает agentSearch', () => {
+  const legacy = telegramRulesPolicyFingerprint([rule()]);
+  const explicitDeny = telegramRulesPolicyFingerprint([rule({ agentSearch: false })]);
+  const allowed = telegramRulesPolicyFingerprint([rule({ agentSearch: true })]);
+
+  assert.match(legacy, /^telegram-rules-v1:[0-9a-f]{64}$/u);
+  assert.equal(legacy, explicitDeny, 'отсутствующее поле равно явному deny');
+  assert.notEqual(legacy, allowed, 'opt-in обязан менять policy fingerprint');
+  assert.notEqual(
+    legacy,
+    telegramRulesPolicyFingerprint([rule()], { accountRef: 'acc_telegram_policy_0001' }),
+    'account owner обязан входить в fingerprint внешней policy',
+  );
+
+  const reorderedKeys = {
+    threadId: null,
+    chatId: CHAT,
+    project: 'demo',
+  };
+  assert.equal(legacy, telegramRulesPolicyFingerprint([reorderedKeys]));
 });
 
 test('пороги автозадач зажимаются, а не принимаются как есть', () => {
@@ -304,4 +353,266 @@ test('отказ валидации не портит уже сохранённ�
   await store.write([rule()]);
   await assert.rejects(store.write([{ chatId: CHAT }]), /проект/i);
   assert.equal((await store.read()).length, 1);
+});
+
+test('agentSearch меняется только отдельным CAS и переживает human-правку exact scope', async () => {
+  const dir = await tmpDir();
+  const store = new TelegramRulesStore({ dir, log: logStub() });
+  await store.write([rule()]);
+  const before = await store.readPolicySnapshot();
+
+  await assert.rejects(
+    store.writeHumanCas([rule({ agentSearch: true })], {
+      expectedPolicyFingerprint: before.policyFingerprint,
+    }),
+    (error) => error?.code === 'telegram_rules_invalid' && error?.statusCode === 400,
+  );
+
+  const after = await store.setAgentSearch({
+    rule: { project: 'demo', chatId: CHAT, username: null, threadId: null },
+    enabled: true,
+    expectedPolicyFingerprint: before.policyFingerprint,
+  });
+  assert.equal(after.rules[0].agentSearch, true);
+  assert.notEqual(after.policyFingerprint, before.policyFingerprint);
+
+  await assert.rejects(
+    store.writeHumanCas([rule({ project: 'старая форма' })], {
+      expectedPolicyFingerprint: before.policyFingerprint,
+    }),
+    (error) => error?.code === 'telegram_rules_stale' && error?.statusCode === 409,
+  );
+  assert.equal((await store.read())[0].agentSearch, true);
+
+  const edited = await store.writeHumanCas([rule({ title: 'Новая подпись' })], {
+    expectedPolicyFingerprint: after.policyFingerprint,
+  });
+  assert.equal(edited.rules[0].title, 'Новая подпись');
+  assert.equal(edited.rules[0].agentSearch, true, 'несвязанная human-правка не снимает opt-in');
+});
+
+test('strict store пишет exact owner-bound schema v2 и публикует доказательство владельца', async () => {
+  const dir = await tmpDir();
+  const store = new TelegramRulesStore({
+    dir,
+    accountRef: ACCOUNT_A,
+    botId: BOT_A,
+    log: logStub(),
+    strictRead: true,
+  });
+
+  await store.write([rule({ agentSearch: true })]);
+  const raw = JSON.parse(await readFile(path.join(dir, 'rules.json'), 'utf8'));
+  assert.deepEqual(Object.keys(raw).sort(), [
+    'accountRef', 'botId', 'channel', 'rules', 'schemaVersion', 'updatedAtMs',
+  ]);
+  assert.equal(raw.schemaVersion, 2);
+  assert.equal(raw.channel, 'telegram');
+  assert.equal(raw.accountRef, ACCOUNT_A);
+  assert.equal(raw.botId, BOT_A);
+  assert.equal(raw.rules[0].agentSearch, true);
+
+  const cold = new TelegramRulesStore({
+    dir,
+    accountRef: ACCOUNT_A,
+    botId: BOT_A,
+    log: logStub(),
+    strictRead: true,
+  });
+  const snapshot = await cold.readPolicySnapshot();
+  assert.equal(snapshot.ownerBound, true);
+  assert.equal(snapshot.rules[0].agentSearch, true);
+});
+
+test('legacy ownerless rules остаются human-only до нового explicit agentSearch CAS', async () => {
+  const dir = await tmpDir();
+  await writeFile(path.join(dir, 'rules.json'), JSON.stringify({
+    updatedAt: 1,
+    rules: [rule({ agentSearch: true })],
+  }));
+  const store = new TelegramRulesStore({
+    dir,
+    accountRef: ACCOUNT_A,
+    botId: BOT_A,
+    log: logStub(),
+    strictRead: true,
+  });
+
+  const legacy = await store.readPolicySnapshot();
+  assert.equal(legacy.ownerBound, false);
+  assert.equal(legacy.rules[0].agentSearch, false, 'ownerless opt-in нельзя наследовать');
+
+  const rebound = await store.setAgentSearch({
+    rule: { project: 'demo', chatId: CHAT, username: null, threadId: null },
+    enabled: true,
+    expectedPolicyFingerprint: legacy.policyFingerprint,
+  });
+  assert.equal(rebound.ownerBound, true);
+  assert.equal(rebound.rules[0].agentSearch, true);
+  const raw = JSON.parse(await readFile(path.join(dir, 'rules.json'), 'utf8'));
+  assert.equal(raw.schemaVersion, 2);
+  assert.equal(raw.accountRef, ACCOUNT_A);
+  assert.equal(raw.botId, BOT_A);
+});
+
+test('owner-bound rules нельзя пересадить другому Telegram account или bot', async () => {
+  const sourceDir = await tmpDir();
+  const targetDir = await tmpDir();
+  const source = new TelegramRulesStore({
+    dir: sourceDir,
+    accountRef: ACCOUNT_A,
+    botId: BOT_A,
+    log: logStub(),
+    strictRead: true,
+  });
+  await source.write([rule({ agentSearch: true })]);
+  await writeFile(
+    path.join(targetDir, 'rules.json'),
+    await readFile(path.join(sourceDir, 'rules.json')),
+  );
+
+  for (const owner of [
+    { accountRef: ACCOUNT_B, botId: BOT_A },
+    { accountRef: ACCOUNT_A, botId: BOT_B },
+  ]) {
+    const transplanted = new TelegramRulesStore({
+      dir: targetDir,
+      ...owner,
+      log: logStub(),
+      strictRead: true,
+    });
+    await assert.rejects(
+      () => transplanted.readPolicySnapshot(),
+      (error) => error?.code === 'telegram_rules_invalid',
+    );
+  }
+});
+
+test('malformed owner-bound schema не понижается до permissive legacy parser', async () => {
+  const dir = await tmpDir();
+  await writeFile(path.join(dir, 'rules.json'), JSON.stringify({
+    schemaVersion: 2,
+    channel: 'telegram',
+    accountRef: ACCOUNT_A,
+    botId: BOT_A,
+    updatedAtMs: 1,
+    rules: [rule({ agentSearch: true })],
+    injected: true,
+  }));
+  const store = new TelegramRulesStore({
+    dir,
+    accountRef: ACCOUNT_A,
+    botId: BOT_A,
+    log: logStub(),
+    strictRead: true,
+  });
+  await assert.rejects(
+    () => store.readPolicySnapshot(),
+    (error) => error?.code === 'telegram_rules_invalid',
+  );
+});
+
+test('strict rules отвергает ancestor symlink и hardlink replay', async () => {
+  const sourceDir = await tmpDir();
+  const source = strictStore(sourceDir);
+  await source.write([rule({ agentSearch: true })]);
+
+  const parent = await tmpDir();
+  const linkedDir = path.join(parent, 'linked-account');
+  await symlink(sourceDir, linkedDir, 'dir');
+  await assert.rejects(
+    () => strictStore(linkedDir).readPolicySnapshot(),
+    (error) => error?.code === 'telegram_rules_invalid',
+  );
+
+  const hardlinkDir = await tmpDir();
+  await link(path.join(sourceDir, 'rules.json'), path.join(hardlinkDir, 'rules.json'));
+  assert.equal((await lstat(path.join(sourceDir, 'rules.json'))).nlink, 2);
+  await assert.rejects(
+    () => strictStore(hardlinkDir).readPolicySnapshot(),
+    (error) => error?.code === 'telegram_rules_invalid',
+  );
+});
+
+test('strict policy не доверяет metadata cache после равнодлинной in-place правки', async () => {
+  const dir = await tmpDir();
+  const store = strictStore(dir);
+  await store.write([rule({ agentSearch: true })]);
+  assert.equal((await store.readPolicySnapshot()).rules[0].agentSearch, true);
+
+  const file = path.join(dir, 'rules.json');
+  const before = await lstat(file);
+  const bytes = await readFile(file, 'utf8');
+  const denied = bytes.replace('"agentSearch": true', '"agentSearch":false');
+  assert.equal(Buffer.byteLength(denied), Buffer.byteLength(bytes));
+  await writeFile(file, denied);
+  await utimes(file, before.atime, before.mtime);
+
+  const current = await store.readPolicySnapshot();
+  assert.equal(current.rules[0].agentSearch, false);
+});
+
+test('inner v2 rules требуют canonical disk types и canonical botId string', async () => {
+  const templateDir = await tmpDir();
+  await strictStore(templateDir).write([rule()]);
+  const template = JSON.parse(await readFile(path.join(templateDir, 'rules.json'), 'utf8'));
+
+  const malformedRules = [
+    { ...template.rules[0], project: 123 },
+    { ...template.rules[0], chatId: [CHAT] },
+    { ...template.rules[0], autoTask: { ...template.rules[0].autoTask, enabled: 'false' } },
+    { ...template.rules[0], autoLaunch: { ...template.rules[0].autoLaunch, enabled: 'false' } },
+  ];
+  for (const malformed of malformedRules) {
+    const dir = await tmpDir();
+    await writeFile(path.join(dir, 'rules.json'), JSON.stringify({
+      ...template,
+      rules: [malformed],
+    }));
+    await assert.rejects(
+      () => strictStore(dir).readPolicySnapshot(),
+      (error) => error?.code === 'telegram_rules_invalid',
+    );
+  }
+
+  const numericBotDir = await tmpDir();
+  await writeFile(path.join(numericBotDir, 'rules.json'), JSON.stringify({
+    ...template,
+    botId: Number(BOT_A),
+  }));
+  await assert.rejects(
+    () => strictStore(numericBotDir).readPolicySnapshot(),
+    (error) => error?.code === 'telegram_rules_invalid',
+  );
+});
+
+test('два strict store одного path сериализуют CAS, а read не отдаёт mutable cache', async () => {
+  const dir = await tmpDir();
+  const first = strictStore(dir);
+  const second = strictStore(dir);
+  await first.write([
+    rule({ threadId: 41 }),
+    rule({ threadId: 42 }),
+  ]);
+  const before = await first.readPolicySnapshot();
+
+  const attempts = await Promise.allSettled([
+    first.setAgentSearch({
+      rule: { project: 'demo', chatId: CHAT, username: null, threadId: 41 },
+      enabled: true,
+      expectedPolicyFingerprint: before.policyFingerprint,
+    }),
+    second.setAgentSearch({
+      rule: { project: 'demo', chatId: CHAT, username: null, threadId: 42 },
+      enabled: true,
+      expectedPolicyFingerprint: before.policyFingerprint,
+    }),
+  ]);
+  assert.deepEqual(attempts.map(({ status }) => status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(attempts.find(({ status }) => status === 'rejected').reason.code, 'telegram_rules_stale');
+
+  const leaked = await first.read();
+  leaked[0].agentSearch = !leaked[0].agentSearch;
+  const authoritative = await first.readPolicySnapshot();
+  assert.notEqual(authoritative.rules[0].agentSearch, leaked[0].agentSearch);
 });

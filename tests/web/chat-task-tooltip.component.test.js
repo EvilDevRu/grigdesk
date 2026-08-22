@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -51,8 +52,17 @@ async function compileChatSession() {
       'const api = globalThis.__chatTaskTooltipApi;',
     )
     .replace(
-      "import { createSpeechStream } from '../../shared/speech-stream.js';",
-      'const createSpeechStream = async () => null;',
+      "import { useDictationController } from '../../features/speech/provider.js';",
+      `const useDictationController = () => ({ acquire: () => ({
+        state: { phase: 'idle', busy: false, prompt: null, interim: '', notice: '' },
+        start: async () => {}, stop: async () => {}, cancel: async () => {},
+        confirmBrowserConsent: async () => {}, useWhisper: async () => {},
+        installBrowserLanguage: async () => {}, release: async () => {},
+      }) });`,
+    )
+    .replace(
+      "import { contextFill } from '../../shared/chat-context.js';",
+      'const contextFill = globalThis.__sharedChatContextFill;',
     )
     .replace(
       "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
@@ -72,7 +82,10 @@ async function compileChatSession() {
     )
     .replace(
       "import EffortSlider from './EffortSlider.vue';",
-      'const EffortSlider = { template: "<span></span>" };',
+      // Пропсы объявлены, чтобы тест мог проверить, ЧТО ему передали (значение, блокировку,
+      // подсказку). Поведение самого слайдера — в effort-slider.component.test.js.
+      'const EffortSlider = { name: "EffortSlider", props: ["modelValue", "levels", "disabled", "hint"],'
+      + ' template: "<span class=\\"eff-stub\\"></span>" };',
     )
     .replace(
       "import StepList from './StepList.vue';",
@@ -274,7 +287,7 @@ test('кольцо контекста открывает форматирова�
 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -412,7 +425,7 @@ test('ChatSession передаёт в тултип полное загружен
   ]);
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -574,7 +587,7 @@ test('ChatSession сохраняет выбранную модель после 
 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -656,7 +669,7 @@ test('ChatSession рисует дугу и процент кольца по то
 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -760,7 +773,7 @@ test('ChatSession игнорирует устаревшую границу ст�
 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -848,7 +861,7 @@ test('ChatSession показывает provider-нейтральный стат�
 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -929,7 +942,7 @@ test('ChatSession показывает неподтверждённое окно
 
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: session.id, variant: 'page' },
+    props: { sid: session.id },
   });
   t.after(() => wrapper.unmount());
   await flushPromises();
@@ -948,4 +961,121 @@ test('ChatSession показывает неподтверждённое окно
   const option = wrapper.find('.sel.model option[value="claude-fable-5"]');
   assert.match(option.text(), /Fable 5 · окно не подтверждено/);
   assert.match(option.attributes('title'), /окно не подтверждено/);
+});
+
+// Сторож единственного владельца выбора у компаньона. Разговор компаньона server-owned и
+// один на все окна, поэтому модель и усилие принадлежат настройке «Настройки → Приложение
+// → Голосовой компаньон». Рабочие селекты здесь дали бы вторую правду: принятый выбор
+// пережил бы ровно до следующего хода (тот резолвит модель из настройки) и читался бы
+// как поломка селекта.
+test('ChatSession: у companion-чата модель и усилие показаны из настройки и не редактируются', async (t) => {
+  const browser = await browserHarness(t);
+  const [{ reactive }, { mount, flushPromises }] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+  ]);
+  const providers = [{
+    id: 'claude',
+    name: 'Claude',
+    available: true,
+    models: [
+      { id: 'claude-opus-5', name: 'Opus 5', context: 1000000, efforts: ['low', 'high'] },
+      { id: 'claude-haiku-4-5', name: 'Haiku 4.5', context: 200000, efforts: ['low', 'high'] },
+    ],
+  }];
+  const modelOf = (value) => {
+    const ref = value && typeof value === 'object' ? value : null;
+    const id = ref?.model || value || '';
+    const provider = providers.find((candidate) => (
+      candidate.id === ref?.provider || candidate.models.some((model) => model.id === id)
+    )) || null;
+    const model = provider?.models.find((candidate) => candidate.id === id) || null;
+    return { id, model, provider };
+  };
+  // В самой записи разговора лежит модель ПРОШЛОГО хода — она не должна победить настройку.
+  const session = reactive({
+    id: 'companion-global',
+    purpose: 'companion',
+    taskId: null,
+    title: 'Компаньон',
+    model: 'claude-haiku-4-5',
+    modelRef: { provider: 'claude', model: 'claude-haiku-4-5' },
+    revision: 4,
+    effort: 'low',
+    mode: 'plan',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: null,
+    contextTokens: 0,
+    sending: false,
+    compacting: false,
+    sessionResetting: false,
+  });
+  const setModels = [];
+  const setEfforts = [];
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0,
+    companion: { modelRef: { provider: 'claude', model: 'claude-opus-5' }, effort: 'high' },
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    setEffort(_id, value) { setEfforts.push(value); },
+    setMode() {},
+    setTask() {},
+    setTitle() {},
+    setModel(_id, value) { setModels.push(value); },
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+    async resetContext() { return true; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers,
+    load() {},
+    modelOf,
+    visibleModels(provider) { return provider.models; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const select = wrapper.find('.sel.model select');
+  assert.equal(select.element.value, 'claude-opus-5', 'селект обязан показывать модель настройки, а не прошлого хода');
+  assert.ok(select.attributes('disabled') !== undefined, 'селект модели companion-чата должен быть неактивен');
+  // Объяснение обязано быть на ОБЁРТКЕ: на disabled-элементе браузер гасит события мыши,
+  // и title самого select человеку не показался бы.
+  assert.match(wrapper.find('.sel.model').attributes('title'), /Настройки → Приложение/);
+
+  // Усилие обязано быть видно: человек вправе знать, чем уйдёт ход, даже не меняя его.
+  const slider = wrapper.findComponent({ name: 'EffortSlider' });
+  assert.ok(slider.exists(), 'слайдер усилия пропал из строки состояния');
+  assert.equal(slider.props('modelValue'), 'high', 'показан уровень из настройки, а не из записи чата');
+  assert.equal(slider.props('disabled'), true);
+  assert.match(slider.props('hint'), /Настройки → Приложение/);
+
+  // Селект неактивен, а стор на всякий случай не получил ни одной попытки записи:
+  // вторая правда не заводится ни через UI, ни мимо него.
+  assert.deepEqual(setEfforts, []);
+  assert.deepEqual(setModels, []);
 });

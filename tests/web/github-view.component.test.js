@@ -135,6 +135,176 @@ test('пустой allowlist виден явно, PUT передаёт rules[0..
   assert.match(wrapper.text(), /Новое правило не включает автоматическое/);
 });
 
+test('agentSearch legacy-default закрыт и включается отдельным подтверждённым CAS', async (t) => {
+  const calls = [];
+  const confirmations = [];
+  let fingerprint = 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  let storedRule = {
+    repositoryId: '123456',
+    project: 'cockpit',
+    kind: 'bug',
+    b24: { responsibleId: null, groupId: null, priority: 1 },
+    autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
+    // Legacy server record намеренно не содержит agentSearch.
+  };
+  const api = {
+    async get(url) {
+      if (url.endsWith('/rules')) return { rules: [storedRule], policyFingerprint: fingerprint };
+      return CONNECTED;
+    },
+    async put(url, body) {
+      calls.push(['PUT', url, body]);
+      assert.equal(url, '/api/github/rules/agent-search');
+      storedRule = { ...storedRule, agentSearch: body.enabled };
+      fingerprint = 'ghpol1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      return { rules: [storedRule], policyFingerprint: fingerprint };
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'github', {
+    api,
+    confirm: async (text) => { confirmations.push(text); return true; },
+  });
+  const checkbox = wrapper.get('input[name="agentSearch"]');
+  assert.equal(checkbox.element.checked, false);
+  assert.match(wrapper.text(), /человеческий Inbox/iu);
+
+  await checkbox.setValue(true);
+  await settle();
+
+  assert.equal(confirmations.length, 1);
+  assert.match(confirmations[0], /агент/iu);
+  assert.deepEqual(calls, [[
+    'PUT', '/api/github/rules/agent-search', {
+      repositoryId: '123456',
+      expectedPolicyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      enabled: true,
+    },
+  ]]);
+  assert.equal(wrapper.get('input[name="agentSearch"]').element.checked, true);
+});
+
+test('agentSearch после потерянного ответа PUT перечитывает и различает фактический исход', async (t) => {
+  let ruleGets = 0;
+  let storedEnabled = false;
+  const api = {
+    async get(url) {
+      if (url === '/api/github/status') return CONNECTED;
+      assert.equal(url, '/api/github/rules');
+      ruleGets += 1;
+      return {
+        rules: [{
+          repositoryId: '123456', project: 'cockpit', kind: 'bug',
+          agentSearch: storedEnabled,
+        }],
+        policyFingerprint: ruleGets === 1
+          ? 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          : 'ghpol1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      };
+    },
+    async put(url) {
+      assert.equal(url, '/api/github/rules/agent-search');
+      storedEnabled = true; // commit прошёл, а ответ потерялся
+      throw new Error('Связь оборвалась.');
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'github', { api });
+
+  await wrapper.get('input[name="agentSearch"]').setValue(true);
+  await settle();
+
+  assert.equal(ruleGets, 2, 'после любой ошибки PUT нужен authoritative GET');
+  assert.equal(wrapper.get('input[name="agentSearch"]').element.checked, true);
+  assert.match(wrapper.text(), /повторная проверка.*подтвердила.*разрешён/iu);
+});
+
+test('agentSearch после ошибки PUT не выдаёт неприменённое желаемое состояние за факт', async (t) => {
+  let ruleGets = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/github/status') return CONNECTED;
+      assert.equal(url, '/api/github/rules');
+      ruleGets += 1;
+      return {
+        rules: [{
+          repositoryId: '123456', project: 'cockpit', kind: 'bug', agentSearch: false,
+        }],
+        policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      };
+    },
+    async put() { throw new Error('Запрос отклонён.'); },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'github', { api });
+
+  await wrapper.get('input[name="agentSearch"]').setValue(true);
+  await settle();
+
+  assert.equal(ruleGets, 2);
+  assert.equal(wrapper.get('input[name="agentSearch"]').element.checked, false);
+  assert.match(wrapper.get('[role="alert"]').text(),
+    /повторная проверка.*закрыт.*запрошенное включение не применено/iu);
+});
+
+test('agentSearch не выдаёт старое значение за достоверное, если PUT и GET провалились', async (t) => {
+  let mutationStarted = false;
+  let puts = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/github/status') return CONNECTED;
+      assert.equal(url, '/api/github/rules');
+      if (mutationStarted) throw new Error('Не удалось перечитать rules.');
+      return {
+        rules: [{
+          repositoryId: '123456', project: 'cockpit', kind: 'bug', agentSearch: true,
+        }],
+        policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      };
+    },
+    async put(url) {
+      assert.equal(url, '/api/github/rules/agent-search');
+      puts += 1;
+      mutationStarted = true;
+      throw new Error('Связь оборвалась.');
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'github', { api });
+
+  await wrapper.get('input[name="agentSearch"]').setValue(false);
+  await settle();
+
+  const checkbox = wrapper.get('input[name="agentSearch"]');
+  assert.equal(puts, 1);
+  assert.equal(checkbox.element.checked, false, 'старое true не показывается как подтверждённый policy');
+  assert.equal(checkbox.element.disabled, true, 'без нового fingerprint повторная мутация запрещена');
+  assert.match(wrapper.get('[data-state="agent-search-unknown"]').text(),
+    /состояние доступа.*не подтверждено.*неизвестно/iu);
+});
+
+test('обычное редактирование rule не переносит agentSearch через human allowlist PUT', async (t) => {
+  const calls = [];
+  const storedRule = {
+    repositoryId: '123456',
+    project: 'cockpit',
+    kind: 'bug',
+    b24: { responsibleId: null, groupId: null, priority: 1 },
+    autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
+    agentSearch: true,
+  };
+  const api = {
+    async get(url) {
+      return url.endsWith('/rules') ? {
+        rules: [storedRule],
+        policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      } : CONNECTED;
+    },
+    async put(url, body) { calls.push(['PUT', url, body]); return { rules: [storedRule] }; },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'github', { api });
+  await wrapper.get('input[name="project"]').setValue('cockpit-next');
+  await button(wrapper, 'Сохранить').trigger('click');
+  await settle();
+  assert.equal(Object.hasOwn(calls[0][2].rules[0], 'agentSearch'), false);
+});
+
 test('404 plugin_disabled старого server не оставляет форму с секретом', async (t) => {
   const api = {
     async get() { throw apiError(404, { error: 'plugin_disabled', message: 'GitHub выключен.' }); },

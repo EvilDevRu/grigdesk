@@ -38,15 +38,25 @@ export function routePathArgs(config) {
 }
 
 /** `check` — единственная команда без побочных эффектов: профиль, capability, маршрут в каталоге. */
-export function routeCheckArgs(config, { profile, route }) {
+const CATALOG_HASH_RE = /^[a-f0-9]{64}$/;
+const DISPATCH_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function routeCheckArgs(config, { profile, route, expectedCatalogHash = '' }) {
   const args = ['check', '--profile', profile];
   if (route) args.push('--route', route);
+  if (expectedCatalogHash) {
+    if (!CATALOG_HASH_RE.test(expectedCatalogHash)) {
+      throw new TypeError('expectedCatalogHash должен быть sha256 в нижнем регистре');
+    }
+    args.push('--expected-catalog-hash', expectedCatalogHash);
+  }
   return [...args, '--routes-dir', config.routesDir];
 }
 
 export function routeStartArgs(config, {
   task, profile, route, ticketFile,
   runnerPrimary = '',
+  expectedCatalogHash = '', queueDispatchId = '',
   instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
   deliveryTargets = [], taskComment = false,
 }) {
@@ -55,6 +65,21 @@ export function routeStartArgs(config, {
   // Выбор исполнителя — сразу за постановкой: порядок аргументов стабилен,
   // на него смотрят тесты.
   if (runnerPrimary) args.push('--runner-primary', runnerPrimary);
+  if (expectedCatalogHash) {
+    if (!CATALOG_HASH_RE.test(expectedCatalogHash)) {
+      throw new TypeError('expectedCatalogHash должен быть sha256 в нижнем регистре');
+    }
+    args.push('--expected-catalog-hash', expectedCatalogHash);
+  }
+  if (queueDispatchId) {
+    if (!expectedCatalogHash) {
+      throw new TypeError('queueDispatchId требует expectedCatalogHash');
+    }
+    if (!DISPATCH_ID_RE.test(queueDispatchId)) {
+      throw new TypeError('queueDispatchId должен быть UUID');
+    }
+    args.push('--queue-dispatch-id', queueDispatchId);
+  }
   args.push(...routePathArgs(config));
   for (const file of instrumentationFiles) args.push('--instrumentation-file', file);
   if (diagnosisKind) args.push('--diagnosis-kind', diagnosisKind);
@@ -111,7 +136,13 @@ export function routeWorkTimeArgs(config, { task, profile, attempt }) {
  * fast rc=75/78 look green in the UI. Only the complete, non-stalled identity is
  * eligible for launch confirmation.
  */
-export function startRegistryIdentity(registry, { profile, route }) {
+export function startRegistryIdentity(registry, {
+  profile,
+  route,
+  expectedCatalogHash = '',
+  queueDispatchId = '',
+  runnerPrimaryOverride = '',
+}) {
   if (!registry || typeof registry !== 'object') return null;
   const attempt = String(registry.ATTEMPT_ID || '');
   const routeHash = String(registry.ROUTE_HASH || '');
@@ -121,11 +152,19 @@ export function startRegistryIdentity(registry, { profile, route }) {
     || !/^[1-9][0-9]*$/.test(pid)
     || registry.PROFILE !== profile
     || registry.ROUTE !== route
+    || (expectedCatalogHash && registry.CATALOG_HASH !== expectedCatalogHash)
+    || (registry.QUEUE_DISPATCH_ID || '') !== queueDispatchId
+    || (registry.RUNNER_OVERRIDE_PRIMARY || '') !== runnerPrimaryOverride
     || registry.RUN_PROTOCOL !== '2'
     || registry.CATALOG_PROTOCOL !== 'route-v2'
     || !['publish', 'disabled'].includes(registry.DELIVERY_MODE)
     || registry.STALLED_HUMAN === '1') return null;
-  return `${attempt}:${pid}:${routeHash}`;
+  const base = `${attempt}:${pid}:${routeHash}`;
+  // Старые callers использовали эту строку только как стабильный bootstrap token.
+  // Новая launch identity добавляется, когда caller действительно её pin-ит.
+  return expectedCatalogHash || queueDispatchId || runnerPrimaryOverride
+    ? `${base}:${registry.CATALOG_HASH || ''}:${registry.QUEUE_DISPATCH_ID || ''}:${registry.RUNNER_OVERRIDE_PRIMARY || ''}`
+    : base;
 }
 
 /**
@@ -209,6 +248,15 @@ export async function readRouteWorkTime(config, identity) {
  */
 export function routeFailure(output) {
   const text = String(output || '');
+  const catalog = /FACTORY_ERROR=catalog_changed\s+EXPECTED=([a-f0-9]{64})\s+ACTUAL=([a-f0-9]{64}|none)\b/.exec(text);
+  if (catalog) {
+    return {
+      error: 'catalog_changed',
+      expectedCatalogHash: catalog[1],
+      actualCatalogHash: catalog[2] === 'none' ? null : catalog[2],
+      message: 'опубликованный каталог изменился после выбора маршрута; поставь задачу заново',
+    };
+  }
   const marker = /FACTORY_ERROR=(runner_preflight_unavailable|runner_preflight_failed)(?:\s+RUNNERS=([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)*))?/.exec(text);
   if (!marker) return null;
   const runners = marker[2] ? marker[2].split(',') : [];

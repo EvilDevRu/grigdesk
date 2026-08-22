@@ -16,6 +16,7 @@ import { useInboxStore } from '../../stores/inbox.js';
 import { useDockStore } from '../../stores/dock.js';
 import { providerUsageView } from '../provider-usage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
+import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../ProviderUsageResources.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
@@ -432,6 +433,9 @@ const { connected } = useSse((name) => {
           </template>
         </HelpTip>
         <span v-if="sys" class="sep" aria-hidden="true">·</span>
+        <!-- Компаньон стоит в ряду исполнителей: на /chats плавающей фигурки нет,
+             а здесь он доступен всегда. Свой разделитель рисует сам. -->
+        <CompanionTopbarButton />
         <AttentionAlerts />
         <!-- pointerdown, а не только mouseenter: на тач-экране ховера нет, и без него
              свежие лимиты приезжали бы уже после раскрытия всплывашки -->

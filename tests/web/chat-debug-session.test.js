@@ -52,7 +52,7 @@ test('Debug открывается отдельным черновиком за�
   assert.deepEqual(debug.messages, [], 'постановка остаётся черновиком, а не сообщением');
   assert.equal(debug.sending, false);
   assert.equal(chat.activeId, debug.id);
-  assert.equal(chat.open, true);
+  assert.equal(Object.hasOwn(chat.$state, 'open'), false, 'chat history не владеет оболочкой');
 
   const saved = puts.find(({ url, body }) => (
     url === '/api/chat/store/chat' && body.chat.id === debug.id

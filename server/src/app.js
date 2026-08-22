@@ -166,6 +166,18 @@ async function build() {
   const githubAccountContextFor = createGitHubAccountContextFactory({ dir: config.githubDir });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
   const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
+  // Идентичность компаньона можно создать и для запущенной задачи фабрики, и для
+  // существующей задачи Б24 до запуска. Подтвердить её имеют право только эти серверные источники;
+  // для быстрого хода модуль чата отдельно требует точное рабочее дерево фабрики.
+  const companionTaskExists = async (taskId) => {
+    try {
+      await factoryState.readRegistry(taskId);
+      return true;
+    } catch { /* задача законно может существовать только в Б24 до запуска конвейера */ }
+    if (!b24.isConfigured()) return false;
+    try { return Boolean(await b24.taskDetail(taskId)); }
+    catch { return false; }
+  };
   const speechRuntime = new SpeechRuntime({
     mediaDir: config.mediaDir,
     mediaHfDir: config.mediaHfDir,
@@ -206,6 +218,8 @@ async function build() {
   // по готовым ручкам); поллер получает late-bound ссылку — сообщения и нажатия
   // начинают обрабатываться, как только runtime собран.
   let telegramPult = null;
+  // Одна исходящая очередь на бота: у пульта единый rate-limit domain.
+  const pultQueue = new PultSendQueue();
   const telegramPoller = new TelegramAccountPoller({
     acquireLease: () => telegramConnection.acquireLease(),
     botApi: telegramBotApi,
@@ -356,7 +370,9 @@ async function build() {
   await fastify.register(authModule, { authStore, config });
   await fastify.register(gatewayModule, { config, prefs });
   await fastify.register(healthModule, { config, factoryState });
-  await fastify.register(factoryModule, { factoryState, config, prefs, b24, analyzer });
+  await fastify.register(factoryModule, {
+    factoryState, config, prefs, b24, analyzer, internalToken,
+  });
   await fastify.register(b24Module, { b24 });
   await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
   await fastify.register(taskSeenModule, { seen: taskSeen });
@@ -367,6 +383,11 @@ async function build() {
     media,
     speechRuntime,
     speechSettings: () => prefs.read().speech,
+    config,
+    // Модель разбора встречи — своя настройка плагина «Видео», читается перед самым
+    // запуском: смена модели в настройках действует со следующего разбора, без рестарта.
+    meetingModelRef: () => fastify.pluginSettings('video')?.triageModel ?? null,
+    providerSettings: () => prefs.read().providerSettings || {},
   });
   await fastify.register(codeModule, { config, prefs });
   await fastify.register(githubModule, {
@@ -388,6 +409,7 @@ async function build() {
   await fastify.register(projectsModule, { config, prefs });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
+    taskExists: companionTaskExists,
   });
   await fastify.register(settingsModule, {
     credsStore, b24, claudeAuth, config, prefs, factoryDebug, localTls, tlsRuntime,
@@ -417,18 +439,20 @@ async function build() {
     return { statusCode: res.statusCode, body };
   };
   const pultStores = new Map();
-  const pultQueue = new PultSendQueue();
+  // Одна фабрика state на вотчер и действия: карточки, экран навигации и реестр
+  // служебных ответов живут в одном pult-state.json (merge-запись по полям).
+  const pultStateStoreFor = (lease) => {
+    const file = path.join(lease.context.paths.accountDir, 'pult-state.json');
+    if (!pultStores.has(file)) {
+      pultStores.set(file, new TelegramPultStateStore({ file, log: fastify.log }));
+    }
+    return pultStores.get(file);
+  };
   const pultWatch = new TelegramPultWatch({
     acquireLease: () => telegramConnection.acquireLease(),
     isEnabled: () => fastify.pluginEnabled?.('telegram') === true,
     callApi: pultCallApi,
-    stateStoreFor: (lease) => {
-      const file = path.join(lease.context.paths.accountDir, 'pult-state.json');
-      if (!pultStores.has(file)) {
-        pultStores.set(file, new TelegramPultStateStore({ file, log: fastify.log }));
-      }
-      return pultStores.get(file);
-    },
+    stateStoreFor: pultStateStoreFor,
     queue: pultQueue,
     subscribe: (listener) => fastify.sse.subscribe(listener),
     log: fastify.log,
@@ -440,6 +464,12 @@ async function build() {
       callApi: pultCallApi,
       summary: () => pultWatch.statusSnapshot(),
       forget: (key) => pultWatch.forget(key),
+      stateStoreFor: pultStateStoreFor,
+      acquireLease: () => telegramConnection.acquireLease(),
+      subscribe: (listener) => fastify.sse.subscribe(listener),
+      speechRuntime,
+      readSpeechPrefs: () => prefs.read().speech,
+      readCompactWindow: () => prefs.read().chatAutoCompactWindow,
       queue: pultQueue,
       log: fastify.log,
     }),
@@ -461,9 +491,16 @@ async function build() {
     // Вотчер пульта сам гейтится живьём (плагин, подключение, подтверждённый
     // владелец), поэтому заводится безусловно: включение пульта не требует рестарта.
     pultWatch.start();
+    // Сверка незавершённых ходов ходит во внутренние HTTP-ручки через fastify.inject.
+    // Ждать её внутри onReady нельзя: inject сам ждёт готовности Fastify, и получается
+    // замкнутое ожидание до FST_ERR_HOOK_TIMEOUT. После выхода из хука сверка доедет в фоне.
+    void telegramPult.actions.start().catch((error) => {
+      fastify.log.warn({ err: error }, 'telegram-pult: восстановление после старта сорвалось');
+    });
   });
   fastify.addHook('onClose', async () => {
     githubConnection.stop();
+    telegramPult.actions.stop();
     await telegramPoller.stop();
     await pultWatch.stop();
     inboxAutoTasks.stop();

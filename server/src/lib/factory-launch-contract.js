@@ -292,6 +292,52 @@ export function normalizeFactoryLaunchInputs({
   };
 }
 
+/**
+ * Каталоги репозиториев, которые триаж ЭТОЙ задачи фактически читал: он пишет их в
+ * `analysis.repos.<alias>.dir` из `PROFILE_TRIAGE_REPOS` профиля прогона, а
+ * `loadFactoryLaunchProfile` тем же путём (`source`) связывает repo с `triageKey`.
+ * Поэтому сравнение буквальное — обе стороны берут путь из одной переменной профиля.
+ */
+function triageRepositoryDirs(analysis) {
+  const repos = analysis?.repos;
+  if (!repos || typeof repos !== 'object' || Array.isArray(repos)) return [];
+  const dirs = [];
+  for (const entry of Object.values(repos)) {
+    const dir = entry?.dir;
+    if (typeof dir !== 'string' || !path.isAbsolute(dir)) continue;
+    const normalized = path.resolve(dir);
+    if (!dirs.includes(normalized)) dirs.push(normalized);
+  }
+  return dirs;
+}
+
+/**
+ * Профиль по умолчанию для формы запуска: тот, чьи репозитории читал триаж задачи.
+ * Иначе форма открывается на профиле случайного активного прогона (`primaryProfile`
+ * берёт первый незакрытый реестр по номеру задачи), и у задачи чужого проекта поле
+ * инструментации пустое: алиасы триажа (`fe:`) не сопоставляются с репозиториями
+ * профиля, а explicit-маршрут без единого файла запускать нечем.
+ *
+ * Совпадение — по фактическим путям, а не по имени профиля, проекта или группы
+ * трекера: имя придумывает человек, а путь объявляет сам профиль. Неоднозначность
+ * (два профиля на одни репозитории — законная схема) выбор не делает: решает человек
+ * селектором, дефолт остаётся прежним. Нечитаемый контракт профиля кандидатом не
+ * является и запуск остальных не ломает.
+ */
+export async function profileMatchingTriage(config, task, analysis, candidates) {
+  const dirs = triageRepositoryDirs(analysis);
+  if (!dirs.length || !Array.isArray(candidates) || !candidates.length) return null;
+  const matched = [];
+  await Promise.all(candidates.map(async (name) => {
+    let profile;
+    try { profile = await loadFactoryLaunchProfile(config, name, task); }
+    catch { return; }
+    const sources = new Set(profile.repositories.map((repo) => path.resolve(repo.source)));
+    if (dirs.every((dir) => sources.has(dir))) matched.push(name);
+  }));
+  return matched.length === 1 ? matched[0] : null;
+}
+
 /** Триаж использует короткие alias (`be:`), движок — canonical repo name (`backend:`). */
 export function instrumentationSuggestions(analysis, repositories) {
   if (!analysis || !Array.isArray(analysis.files) || !Array.isArray(repositories)) return [];

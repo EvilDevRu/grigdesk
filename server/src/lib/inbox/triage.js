@@ -5,6 +5,12 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { resolveModelRef } from '../chat/model-ref.js';
+import {
+  boundedText,
+  exactKeys,
+  jsonCandidates,
+  modelText,
+} from '../model-json.js';
 import { getExecutor } from '../executors/index.js';
 import { getModelsRegistry } from '../models-registry.js';
 import { inboxTranscript, visibleInboxMessages, INBOX_DRAFT_LIMITS } from './draft.js';
@@ -38,13 +44,10 @@ const VISUAL_MEDIA_TYPES = Object.freeze(new Map([
   ['.png', 'image/png'],
   ['.webp', 'image/webp'],
 ]));
-const text = (value) => (typeof value === 'string' ? value.trim() : '');
-
-function bounded(value, limit) {
-  const result = text(value);
-  if (result.length > limit || Buffer.byteLength(result, 'utf8') > limit * 4) return null;
-  return result;
-}
+// Разбор ответа модели общий с разбором встречи (lib/media/meeting-plan.js):
+// формат ответа один, и вторая копия этих проверок разошлась бы с первой.
+const text = modelText;
+const bounded = boundedText;
 
 function clamp(value, limit) {
   const result = text(value);
@@ -53,18 +56,30 @@ function clamp(value, limit) {
   return `${result.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-function exactKeys(value, expectedKeys) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const keys = Object.keys(value).sort();
-  const expected = [...expectedKeys].sort();
-  return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
-}
 
 export function normalizeInboxTriageModel(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const provider = bounded(value.provider, INBOX_TRIAGE_LIMITS.modelSegment);
   const model = bounded(value.model, INBOX_TRIAGE_LIMITS.modelSegment);
-  return provider && model ? { provider, model } : null;
+  if (!provider || !model) return null;
+  // Эффорт здесь только принимается на веру: допустимость уровня знает реестр,
+  // а он ещё не прочитан. Сверка — в resolveInboxTriageTarget.
+  const effort = bounded(value.effort, INBOX_TRIAGE_LIMITS.modelSegment);
+  return effort ? { provider, model, effort } : { provider, model };
+}
+
+/**
+ * Уровень эффорта, который МОЖНО отдать этой модели. Неподдерживаемый не заменяется
+ * соседним и не роняет ход: `--effort xhigh` у модели без такой возможности валит
+ * запуск CLI, а сохранённая настройка живёт долго и легко устаревает после обновления
+ * бинаря. Поэтому устаревший уровень снимается, а ход идёт на умолчании исполнителя.
+ */
+function supportedEffort(effort, model, log) {
+  if (!effort) return null;
+  const levels = Array.isArray(model?.efforts) ? model.efforts : [];
+  if (levels.includes(effort)) return effort;
+  log?.warn?.({ effort, model: model?.id, levels }, 'разбор: уровень эффорта не поддержан моделью, иду на умолчании');
+  return null;
 }
 
 function safeAttachmentAnalysis(value) {
@@ -281,19 +296,6 @@ export function buildInboxTriagePlanPrompt(item, { attachmentAnalysis = null } =
   };
 }
 
-function jsonCandidates(reply) {
-  const source = text(reply);
-  if (!source) return [];
-  const candidates = [];
-  const fence = source.match(/```(?:json)?\s*([\s\S]*?)```/iu);
-  if (fence) candidates.push(fence[1]);
-  const open = source.indexOf('{');
-  const close = source.lastIndexOf('}');
-  if (open >= 0 && close > open) candidates.push(source.slice(open, close + 1));
-  candidates.push(source);
-  return candidates;
-}
-
 function verdictFields(raw) {
   if (!INBOX_TRIAGE_KINDS.includes(raw.kind)) return null;
   const title = bounded(raw.title, INBOX_DRAFT_LIMITS.title);
@@ -469,6 +471,7 @@ export async function resolveInboxTriageTarget({
   modelsRegistry = getModelsRegistry,
   executorResolver = getExecutor,
   requireImages = false,
+  log = console,
 } = {}) {
   const ref = normalizeInboxTriageModel(modelRef);
   if (!ref) return { ok: false, error: 'no_model' };
@@ -500,7 +503,13 @@ export async function resolveInboxTriageTarget({
       return { ok: false, error: 'unsupported_media' };
     }
   }
-  return { ok: true, ref: resolved.modelRef, model: resolved.model, executor };
+  return {
+    ok: true,
+    ref: resolved.modelRef,
+    model: resolved.model,
+    effort: supportedEffort(ref.effort, resolved.model, log),
+    executor,
+  };
 }
 
 export async function runInboxTriage({
@@ -528,6 +537,7 @@ export async function runInboxTriage({
     modelsRegistry,
     executorResolver,
     requireImages: hasVisuals,
+    log,
   });
   if (!target.ok) return target;
   const { provider, model } = target.ref;
@@ -554,6 +564,7 @@ export async function runInboxTriage({
       config,
       message: `${prompt.system}\n\n${prompt.user}`,
       model,
+      effort: target.effort || undefined,
       images: loaded.images,
       providerSettings: providerSettings?.[provider] || {},
       log,

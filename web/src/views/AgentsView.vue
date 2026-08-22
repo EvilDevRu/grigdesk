@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../shared/api-client.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
@@ -25,6 +26,11 @@ const notice = ref('');
 const installing = ref(false);   // идёт установка стандартного набора
 const installNotice = ref('');   // итог установки в шапке списка
 const pro = ref(localStorage.getItem('cockpit-agents-pro') === '1');
+const agentsContext = useUiContextSource('agents', { layer: 'page', active: false });
+watch(selectedId, (agentId) => {
+  if (agentId) agentsContext.focus({ details: { agentId } });
+  else agentsContext.blur();
+}, { immediate: true });
 
 const KINDS = [
   { v: 'agent', label: '🤖 Агент' },

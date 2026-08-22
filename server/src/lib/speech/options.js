@@ -8,6 +8,24 @@ export const SPEECH_PRESETS = Object.freeze({
 
 export const SPEECH_SCENARIOS = Object.freeze(['dictation', 'video']);
 
+/**
+ * Стилевая подсказка первому окну распознавания. Без неё модель на первом же сегменте
+ * срывается в текст без пунктуации, а перенос контекста закрепляет этот стиль до конца
+ * записи — так семнадцать минут встречи превращались в один сплошной поток слов.
+ *
+ * Короткий заголовок здесь не стилистика, а единственная безопасная форма: whisper
+ * получает промпт как УЖЕ СКАЗАННЫЙ текст и продолжает его. Заголовок с точкой
+ * продолжается речью, а инструкция вроде «реплики записаны с пунктуацией и заглавными
+ * буквами» продолжается такой же инструкцией — замер на этой же записи дал четыре
+ * сегмента «Реплика участников записаны с пунктами» вместо разговора. Формулировку
+ * менять только с проверкой на реальном файле.
+ *
+ * Промпт не является словарём терминов: для них есть отдельный hotwords.
+ */
+export const DEFAULT_VIDEO_INITIAL_PROMPT = 'Стенограмма рабочей встречи.';
+
+export const INITIAL_PROMPT_MAX_CHARS = 600;
+
 const LANGUAGES = new Set(['ru', 'en', 'auto']);
 const DEVICES = new Set(['auto', 'cpu', 'cuda']);
 const COMPUTE_TYPES = new Set([
@@ -70,6 +88,22 @@ function hotwordsValue(value) {
   return value.trim();
 }
 
+/**
+ * Подсказка уезжает в argv Python, поэтому переводы строк схлопываются: многострочное
+ * значение сломало бы разбор ответа и ничего не дало бы самой модели.
+ */
+function initialPromptValue(value, field) {
+  if (value == null) return '';
+  if (typeof value !== 'string') {
+    throw new TypeError(`speech.${field} должен быть строкой`);
+  }
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if ([...cleaned].length > INITIAL_PROMPT_MAX_CHARS) {
+    throw new TypeError(`speech.${field} не может быть длиннее ${INITIAL_PROMPT_MAX_CHARS} символов`);
+  }
+  return cleaned;
+}
+
 function assertScenario(scenario) {
   if (!SPEECH_SCENARIOS.includes(scenario)) {
     throw new TypeError(`Неизвестный сценарий речи: ${String(scenario)}`);
@@ -117,6 +151,15 @@ export function resolveSpeechOptions(settings = {}, scenario = 'dictation') {
     conditionOnPreviousText: scenario === 'dictation'
       ? booleanValue(source.conditionOnPreviousText, true, 'conditionOnPreviousText')
       : true,
+    // Только у видео: там ход длинный, перенос контекста включён всегда, и стиль первого
+    // сегмента определяет всю расшифровку. Диктовка короткая и правится руками на месте,
+    // поэтому подсказка ей не назначается и поле сценариями не делится.
+    initialPrompt: scenario === 'video'
+      ? initialPromptValue(
+        source.videoInitialPrompt ?? DEFAULT_VIDEO_INITIAL_PROMPT,
+        'videoInitialPrompt',
+      )
+      : '',
   });
 }
 
@@ -151,5 +194,6 @@ export function normalizeSpeechOptions(options = {}, fallbackScenario = 'dictati
       true,
       'conditionOnPreviousText',
     ),
+    initialPrompt: initialPromptValue(options.initialPrompt, 'initialPrompt'),
   });
 }

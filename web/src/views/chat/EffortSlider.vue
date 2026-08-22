@@ -8,6 +8,11 @@ import { computed } from 'vue';
 const props = defineProps({
   modelValue: { type: String, default: '' },
   levels: { type: Array, default: () => [] },
+  // Уровень показан, но принадлежит не этому разговору (у компаньона им владеет
+  // настройка). Слайдер тогда остаётся индикатором и молча ничего не эмитит.
+  disabled: { type: Boolean, default: false },
+  // Чем заменить обычную подсказку: неактивный слайдер обязан объяснить, где менять.
+  hint: { type: String, default: '' },
 });
 const emit = defineEmits(['update:modelValue']);
 
@@ -17,11 +22,12 @@ const idx = computed(() => {
 const pct = computed(() => (idx.value < 0 ? 0 : (idx.value / Math.max(1, props.levels.length - 1)) * 100));
 function posOf(i) { return (i / Math.max(1, props.levels.length - 1)) * 100; }
 function set(i) {
+  if (props.disabled) return;
   if (i >= 0 && i < props.levels.length) emit('update:modelValue', props.levels[i]);
 }
 // Клик по треку — ближайшая точка.
 function onTrack(e) {
-  if (!props.levels.length) return;
+  if (props.disabled || !props.levels.length) return;
   const r = e.currentTarget.getBoundingClientRect();
   const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
   set(Math.round(f * (props.levels.length - 1)));
@@ -29,13 +35,14 @@ function onTrack(e) {
 </script>
 
 <template>
-  <div class="eff" :data-lvl="modelValue" :title="modelValue ? `Усилие рассуждения: ${modelValue}` : 'Усилие рассуждения: дефолт CLI'">
+  <div class="eff" :class="{ off: disabled }" :data-lvl="modelValue"
+       :title="hint || (modelValue ? `Усилие рассуждения: ${modelValue}` : 'Усилие рассуждения: дефолт CLI')">
     <span class="cap">эффорт</span>
     <div class="track" @click="onTrack">
       <div class="rail"></div>
       <div class="fill" :style="{ width: pct + '%' }"></div>
       <button v-for="(l, i) in levels" :key="l" type="button" class="node" :class="{ on: i <= idx, cur: i === idx }"
-              :style="{ left: posOf(i) + '%' }" :aria-label="l" @click.stop="set(i)"></button>
+              :style="{ left: posOf(i) + '%' }" :aria-label="l" :disabled="disabled" @click.stop="set(i)"></button>
     </div>
     <span class="val">{{ modelValue || '—' }}</span>
   </div>
@@ -54,6 +61,11 @@ function onTrack(e) {
 .node.on { background: var(--accent); }
 .node.cur { width: 14px; height: 14px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; min-width: 46px; }
+
+/* Только индикатор: курсор не обещает клика, но значение остаётся читаемым —
+   человек обязан видеть, каким усилием уйдёт ход. */
+.eff.off .track, .eff.off .node { cursor: default; }
+.eff.off { opacity: .72; }
 
 /* Уровни не красим в warn/bad — это цвета ошибок, настройка не должна «тревожить».
    Всё в акценте, только low приглушён. */

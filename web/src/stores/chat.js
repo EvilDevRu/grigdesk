@@ -1,8 +1,8 @@
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
 // размер контекста. История хранится НА СЕРВЕРЕ (файл в .state кокпита) — общая для всех
-// окон/устройств и переживает чистку браузера. Один стор питает и плавающую панель
-// (ChatPanel), и страницу «Агенты» (AgentsView) — компоненты переиспользуются.
+// окон/устройств и переживает чистку браузера. Это единый источник истории для
+// полноразмерной страницы «Чаты» и компактного companion bridge.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { router } from '../router.js';
@@ -11,6 +11,8 @@ import { useProvidersStore } from './providers.js';
 import { notify } from '../shared/notify.js';
 import { sseSubscribe } from '../composables/useSse.js';
 import { mdToText } from '../shared/md.js';
+import { chatVisibility } from '../shared/chat-visibility.js';
+import { normalizeCompanionRun } from '../shared/companion-run.js';
 import {
   applyGeneratedChatTitle,
   firstMessageTitle,
@@ -285,6 +287,7 @@ function slimOf(s) {
     // чатами, но эта устойчивая метка позволяет повторной кнопке открыть тот же
     // разговор вместо размножения сессий. По заголовку связывать нельзя — он редактируемый.
     purpose: s.purpose || '', sourceChatId: s.sourceChatId || null,
+    ...(s.logicalIdentity ? { logicalIdentity: s.logicalIdentity } : {}),
     schema: s.schema, surface: s.surface, revision: s.revision,
     effort: s.effort, mode: s.mode || '',
     messages: s.messages, sessionId: s.sessionId, contextTokens: s.contextTokens,
@@ -467,9 +470,12 @@ export const useChatStore = defineStore('chat', {
   // оповещением, текст ошибки хранится здесь.
   // compactWindow — порог сжатия контекста из настроек сервера (0 = «не вмешиваться»).
   // Держим в сторе, а не в компоненте: по нему кольцо контекста красится в каждом чате.
+  // companion — чем уходит быстрый ход компаньона: server-owned настройка «Приложение →
+  // Голосовой компаньон», ЕДИНСТВЕННЫЙ владелец его модели и усилия. Селекты чата на
+  // companion-разговор не действуют (см. setModel/setEffort), иначе правд стало бы две.
   state: () => ({
-    ...pickStore(null), loaded: false, open: false, conveyorIds: [], pending: {}, saveError: null,
-    compactWindow: 0, speech: normalizeSpeechSnapshot(null),
+    ...pickStore(null), loaded: false, conveyorIds: [], pending: {}, saveError: null,
+    compactWindow: 0, companion: normalizeCompanionRun(null), speech: normalizeSpeechSnapshot(null),
   }),
   getters: {
     // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
@@ -565,6 +571,8 @@ export const useChatStore = defineStore('chat', {
           // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
           // снимок в браузере хранит только историю, настроек в нём нет.
           this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
+          // Тем же правилом — настройка компаньона: она server-owned и в снимке её нет.
+          this.companion = normalizeCompanionRun(j?.companion);
           // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
           // содержит только историю и не вправе подменять приватностный выбор движка.
           const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
@@ -833,20 +841,17 @@ export const useChatStore = defineStore('chat', {
       }
       return list;
     },
-    /**
-     * Смотрим ли прямо сейчас именно на этот чат: вкладка ОС активна, открыт раздел
-     * «Чаты» или плавающая панель, и это активный чат. Одно правило и для оповещения,
-     * и для метки «непрочитано» — чтобы бейдж не спорил с уведомлением.
-     */
+    /** Один exact-контракт для page/bubble и уведомлений; route/CSS здесь не угадываем. */
     _visible(id) {
-      return !document.hidden
-        && (router.currentRoute.value.path === '/chats' || this.open)
-        && this.activeId === id;
+      return chatVisibility.isVisible(id);
+    },
+    registerSurface(owner, initial = {}) {
+      return chatVisibility.register(owner, initial);
     },
     // Чат увидели — гасим метку. Зовёт открытый на экране ChatSession.
     markRead(id) {
       const s = this._get(id) || this.archived.find((x) => x.id === id);
-      if (!s?.unread) return;
+      if (!s?.unread || !this._visible(id)) return;
       s.unread = false;
       this._persist();
     },
@@ -867,6 +872,9 @@ export const useChatStore = defineStore('chat', {
     },
 
     newSession(opts = {}) {
+      if (opts.purpose === 'companion') {
+        throw new Error('Companion-чат создаётся только атомарно на сервере.');
+      }
       const s = {
         id: uid(), taskId: opts.taskId ? String(opts.taskId) : null, title: opts.title || '',
         purpose: opts.purpose || '', sourceChatId: opts.sourceChatId || null,
@@ -1107,7 +1115,7 @@ export const useChatStore = defineStore('chat', {
      * у окна (идущий ход не должен погаснуть от чужой правки). Чат мог и переехать между
      * открытыми и архивом — тогда переносим его между списками.
      */
-    _applyRemoteChat(chat, archived) {
+    _applyRemoteChat(chat, archived, { notifyReply = true } = {}) {
       this.archived ||= [];
       const localBefore = this._find(chat.id);
       const knownMessages = new Set((localBefore?.messages || [])
@@ -1139,7 +1147,7 @@ export const useChatStore = defineStore('chat', {
         .map((message, index) => ({ message, key: messageNoticeKey(applied.id, message, index) }))
         .filter(({ message, key }) => message.role === 'assistant' && !knownMessages.has(key))
         .at(-1);
-      if (freshReply) this._notifyReply(applied, freshReply.message.text, freshReply.key);
+      if (freshReply && notifyReply) this._notifyReply(applied, freshReply.message.text, freshReply.key);
       sentChats.set(applied.id, fingerprintOf(archived ? archivedSlimOf(applied) : slimOf(applied)));
     },
     /** Чат удалили в другом окне — убираем и здесь (удаление всегда осознанное действие). */
@@ -1276,6 +1284,27 @@ export const useChatStore = defineStore('chat', {
       if (!this.sessions.length && !this.archived.length) this.newSession();
       else if (!this._find(this.activeId)) this.activeId = this.sessions[0]?.id || this.archived[0]?.id || null;
     },
+    /** Атомарный server-side create/restore по server-owned logical identity. */
+    async ensureCompanion({ taskId = null } = {}) {
+      await this.ensure();
+      const canonicalTask = taskId == null ? null : String(taskId).trim();
+      const response = await api.post('/api/chat/store/ensure', {
+        purpose: 'companion',
+        ...(canonicalTask ? { taskId: canonicalTask } : {}),
+        origin: WINDOW_ID,
+      });
+      const ensured = response?.chat || response;
+      if (!ensured?.id || ensured.purpose !== 'companion') {
+        throw new Error('Сервер вернул некорректный companion-чат.');
+      }
+      if (String(ensured.taskId || '') !== (canonicalTask || '')) {
+        throw new Error('Сервер вернул companion-чат другой задачи.');
+      }
+      const selectedBefore = this.activeId;
+      this._applyRemoteChat(ensured, false, { notifyReply: false });
+      if (selectedBefore && this._find(selectedBefore)) this.activeId = selectedBefore;
+      return this._get(ensured.id);
+    },
     setSpeechSnapshot(payload) {
       this.speech = normalizeSpeechSnapshot(payload, this.speech);
       speechSnapshotEpoch += 1;
@@ -1343,20 +1372,6 @@ export const useChatStore = defineStore('chat', {
       return 'deleted';
     },
 
-    // Плавающая панель.
-    async toggle() { await this.ensure(); this.open = !this.open; },
-    close() { this.open = false; },
-    async openFor(taskId, title) {
-      await this.ensure();
-      if (taskId) {
-        const ex = this.sessions.find((s) => s.taskId === String(taskId));
-        if (ex) this.activeId = ex.id;
-        else this.newSession({ taskId, title });
-      }
-      this.open = true;
-      this._persist();
-    },
-
     /**
      * Открыть один устойчивый Debug-разговор для песочницы задачи.
      *
@@ -1398,16 +1413,17 @@ export const useChatStore = defineStore('chat', {
       }
 
       this.activeId = target.id;
-      this.open = true;
       this._persist(true);
       return { id: target.id, created };
     },
 
     setTask(id, taskId, title) {
       const s = this._find(id); if (!s) return;
+      if (s.purpose === 'companion') return false;
       s.taskId = taskId ? String(taskId) : null;
       s.title = title || '';
       this._persist();
+      return true;
     },
     /**
      * Режим прав чата (вручную / авто / план …). Запоминаем и как дефолт новых чатов —
@@ -1416,6 +1432,9 @@ export const useChatStore = defineStore('chat', {
     setMode(id, m) { const s = this._find(id); if (!s) return; s.mode = m; this.defMode = m; this._persist(); },
     setModel(id, m) {
       const s = this._find(id); if (!s) return;
+      // Модель компаньона принадлежит настройке, а не разговору: молча принятый здесь
+      // выбор пережил бы ровно до следующего хода и выглядел бы поломкой селекта.
+      if (s.purpose === 'companion') return;
       const resolved = useProvidersStore().modelOf(m);
       s.model = resolved.id || m;
       s.modelRef = resolved.provider && resolved.model
@@ -1439,7 +1458,11 @@ export const useChatStore = defineStore('chat', {
       // на экране и так перед глазами), а именно он и подвешивал ввод.
       this._persist(false, { snapshot: false });
     },
-    setEffort(id, e) { const s = this._find(id); if (!s) return; s.effort = e; this.defEffort = e; this._persist(); },
+    setEffort(id, e) {
+      const s = this._find(id); if (!s) return;
+      if (s.purpose === 'companion') return; // см. setModel: владелец — настройка компаньона
+      s.effort = e; this.defEffort = e; this._persist();
+    },
     clearChat(id) { const s = this._find(id); if (!s) return; s.messages = []; s.error = null; this._persist(); },
     /**
      * Сброс памяти агента: следующее сообщение уйдёт БЕЗ --resume, то есть в чистую
@@ -1588,6 +1611,25 @@ export const useChatStore = defineStore('chat', {
       try { await api.post('/api/chat/stop', { chatKey: id }); } catch { /* ход мог уже кончиться */ }
     },
 
+    /**
+     * Структурированный результат нужен только локальному инициатору companion-turn:
+     * pending/store-sync позже обновляют историю, но не могут выдать себя за прямой
+     * ответ этого окна. Обычный send сохраняет прежний boolean-контракт.
+     */
+    async sendTurn(id, text, attachments = [], opts = {}) {
+      const result = await this.send(id, text, attachments, { ...opts, returnResult: true });
+      if (result && typeof result === 'object') return result;
+      return {
+        accepted: result === true,
+        directReply: '',
+        messageId: '',
+        steps: null,
+        speechSafe: false,
+        offline: false,
+        error: '',
+      };
+    },
+
     async send(id, text, attachments = [], opts = {}) {
       let s = this._find(id); if (!s) return;
       if (!text.trim() && !attachments.length) return;
@@ -1649,35 +1691,46 @@ export const useChatStore = defineStore('chat', {
       // POST сетевой исход неоднозначен: сервер мог принять запрос и продолжить ход уже
       // без окна — только тогда уместна плашка offline и ожидание chats/pending.
       let modelRequestStarted = false;
+      let directReply = '';
+      let directReplyId = '';
+      let directReplySteps = null;
+      let directReplySpeechSafe = false;
+      let requestError = '';
       // Durable save выполняется ниже после разрешения modelRef и до запуска executor-а.
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/chat` : '/api/chat';
-        // Снимок UI-контекста: страница + детали от неё (агент понимает «поправь здесь»).
-        const route = router.currentRoute.value;
-        const ui = useUiContextStore();
-        const context = {
-          page: route.meta?.title || '',
-          path: route.path,
-          ...(Object.keys(ui.extra).length ? { details: JSON.parse(JSON.stringify(ui.extra)) } : {}),
-        };
+        // Companion может передать уже зафиксированный снимок. В остальных случаях
+        // capture вызывается здесь ровно один раз перед durable save/model POST.
+        const context = Object.hasOwn(opts, 'promptContext')
+          ? opts.promptContext
+          : useUiContextStore().capture(router.currentRoute.value).promptContext;
         // Модель: сохранённый алиас резолвим в конкретную (что показано в селекте, то и считает),
-        // пустое значение — модель по умолчанию из реестра.
+        // пустое значение — модель по умолчанию из реестра. У компаньона выбор принадлежит
+        // не разговору, а server-owned настройке: она одна на все его чаты (общий и задачные)
+        // и на все окна, поэтому смена настройки действует со следующего же хода.
         const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(selectedModel(s));
+        const companionRun = s.purpose === 'companion' ? this.companion : null;
+        const resolvedModel = provStore.modelOf(companionRun ? (companionRun.modelRef || '') : selectedModel(s));
         const effortLevels = resolvedModel.model?.efforts || [];
         if (!resolvedModel.provider || !resolvedModel.model) throw new Error('Выбранная модель недоступна в реестре.');
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
-        await this._saveChatNow(s);
         // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
         // явный effort не отправляем: CLI применит собственный актуальный дефолт.
-        const requestEffort = effortLevels.includes(s.effort) ? s.effort : '';
+        const wantedEffort = companionRun ? companionRun.effort : s.effort;
+        const requestEffort = effortLevels.includes(wantedEffort) ? wantedEffort : '';
+        // У компаньона в записи разговора остаётся ФАКТ хода: по нему рисуются чипы
+        // пузыря и подпись ответа. Владельцем значения запись при этом не становится.
+        if (companionRun) s.effort = requestEffort;
+        await this._saveChatNow(s);
         modelRequestStarted = true;
         const r = await api.post(url, {
           message: seed ? `[Выжимка предыдущего разговора — продолжаем с этого места]\n${seed}\n[/Выжимка]\n\n${text}` : text,
           model: resolvedModel.id, modelRef: s.modelRef,
-          effort: requestEffort, mode: s.mode || '',
+          effort: requestEffort,
+          mode: typeof opts.modeOverride === 'string' ? opts.modeOverride : (s.mode || ''),
           sessionId: s.sessionId, context, chatKey: id, requestTitle, sentAt,
+          ...(opts.companionTurn === true ? { companionTurn: true } : {}),
           ...(slashCommand ? { slashCommand } : {}),
           ...(atts.length ? { attachments: atts.map((a) => ({ file: a.file, name: a.name })) } : {}),
         });
@@ -1702,9 +1755,16 @@ export const useChatStore = defineStore('chat', {
         if (r.note) {
           s.messages.push({ role: 'note', text: r.reply });
         } else {
+          const responseSteps = (r.steps?.length ? r.steps : s.steps) || [];
+          if (!r.stopped) {
+            directReply = r.reply || '(пусто)';
+            directReplyId = `${id}:${sentAt}:assistant`;
+            directReplySteps = [...responseSteps];
+            directReplySpeechSafe = r.speechSafe === true;
+          }
           s.messages.push({
             role: 'assistant', text: r.reply || '(пусто)', cost: r.cost,
-            steps: (r.steps?.length ? r.steps : s.steps) || [],
+            steps: responseSteps,
             model: r.model || s.model, actualModel: r.actualModel || '',
             effort: Object.hasOwn(r, 'effort') ? (r.effort || '') : requestEffort,
             // Метка остановленного хода: по ней сервер соберёт досье для новой
@@ -1717,10 +1777,11 @@ export const useChatStore = defineStore('chat', {
         // setEffort: вынужденный откат не должен становиться дефолтом для новых чатов.
         if (r.effort && r.effort !== s.effort) s.effort = r.effort;
         s.steps = [];
-        // Пользователь не смотрит на этот чат (другая вкладка ОС, другой раздел с закрытой
-        // панелью или другой активный чат) — метка «непрочитано» и оповещение.
+        // Пользователь не смотрит на этот exact chat на зарегистрированной поверхности —
+        // ставим метку «непрочитано» и показываем оповещение.
         this._notifyReply(s, r.reply || '(пусто)');
       } catch (e) {
+        requestError = e?.message || 'Не удалось отправить сообщение';
         if (e.data?.sessionReset) {
           if (seed && !s.pendingSeed) s.pendingSeed = seed;
           clearSessionContext(s);
@@ -1748,6 +1809,17 @@ export const useChatStore = defineStore('chat', {
         // нём вернут SSE (`chat-done`) и сверка активных ходов при восстановлении связи.
         if (!s.inflight && !s.offline) { s.sending = false; s.stopping = false; s.progressTokens = 0; }
         s.updatedAt = Date.now(); this._persist();
+      }
+      if (opts.returnResult === true) {
+        return {
+          accepted: true,
+          directReply,
+          messageId: directReplyId,
+          steps: directReplySteps,
+          speechSafe: directReplySpeechSafe,
+          offline: !!s.offline,
+          error: requestError,
+        };
       }
       return true;
     },

@@ -371,7 +371,7 @@ test('реалистичный item ref длиннее дефолтного :par
     channel: 'telegram',
     accountRef: 'acc_00000000000000000000000000000000',
     localBundleId: Buffer.from(JSON.stringify(
-      [1, 'bundle', '-1001000000042', 1, ['thread-author', '42', '424242424'], '43'],
+      [1, 'bundle', '-1001000000042', 1, ['thread', '424242'], '43'],
     ), 'utf8').toString('base64url'),
   });
   assert.ok(ref.length > 100, `ref должен быть длиннее дефолта fastify, получено ${ref.length}`);

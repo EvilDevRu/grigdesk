@@ -33,6 +33,10 @@ async function compileTaskModal() {
       'const useRouter = () => ({ push() {} });',
     )
     .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
+    )
+    .replace(
       "import { api } from '../shared/api-client.js';",
       'const api = globalThis.__taskModalFavoriteApi;',
     )

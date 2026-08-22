@@ -4,12 +4,13 @@
 # Суффикс `_v2` у внутренних shell API сохранён как версия формата ledger, не как второй launcher.
 #
 # Публичный API:
-#   attempt_state_begin_v2 TASK PROFILE ABS_ROUTES_DIR
+#   attempt_state_begin_v2 TASK PROFILE ABS_ROUTES_DIR [EXPECTED_CATALOG_HASH]
+#                          [QUEUE_DISPATCH_ID] [RUNNER_PRIMARY_OVERRIDE]
 #   attempt_state_select_route_v2 TASK ATTEMPT_ID ROUTE_ID
 #   attempt_state_resume_v2 TASK [EXPECTED_ATTEMPT_ID]
 #   attempt_state_finish_v2 TASK ATTEMPT_ID
 #   attempt_state_abandon_v2 TASK ATTEMPT_ID REASON
-#   attempt_state_recover_v2 TASK PREVIOUS_ATTEMPT_ID REASON
+#   attempt_state_recover_v2 TASK PREVIOUS_ATTEMPT_ID REASON [LEGACY_RUNNER_OVERRIDE]
 #   attempt_state_contract_drift_v2 PINNED_TSV ACTUAL_TSV PINNED_JSON ACTUAL_JSON
 #
 # Коды ошибок: 2 — неверный аргумент/путь, 73 — уже существует/активно,
@@ -41,6 +42,25 @@ _attempt_state_attempt_id() {
   local attempt=${1:-}
   [[ "$attempt" =~ ^a_[a-f0-9]{32}$ ]] || return 2
   printf '%s\n' "$attempt"
+}
+
+_attempt_state_catalog_hash() {
+  local hash=${1:-}
+  [[ "$hash" =~ ^[a-f0-9]{64}$ ]] || return 2
+  printf '%s\n' "$hash"
+}
+
+_attempt_state_dispatch_id() {
+  local dispatch=${1:-}
+  [[ "$dispatch" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+    return 2
+  printf '%s\n' "$dispatch"
+}
+
+_attempt_state_runner_override() {
+  local runner=${1:-}
+  [[ -z "$runner" || "$runner" =~ ^[a-z][a-z0-9_-]{0,63}$ ]] || return 2
+  printf '%s\n' "$runner"
 }
 
 # Причина ручного вмешательства (abandon/recover/goto/pause) ложится в доверенный
@@ -162,6 +182,10 @@ ATTEMPT_RE = re.compile(r"^a_[a-f0-9]{32}$")
 PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 ROUTE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 HASH_RE = re.compile(r"^[a-f0-9]{64}$")
+DISPATCH_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+)
+RUNNER_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TASK_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -224,11 +248,15 @@ def dump(value):
 
 
 def validate_attempt(value, task, attempt):
-    exact(value, {
+    schema_v1 = {
         "schema", "protocolVersion", "attemptId", "taskId", "profile", "createdAt",
         "routesDir", "catalogHash", "origin", "previousAttemptId", "recoveryReason",
-    })
-    if value["schema"] != 1 or value["protocolVersion"] != 2:
+    }
+    schema_v2 = schema_v1 | {"queueDispatchId", "runnerPrimaryOverride"}
+    if not isinstance(value, dict) or value.get("schema") not in {1, 2}:
+        fail()
+    exact(value, schema_v1 if value["schema"] == 1 else schema_v2)
+    if value["protocolVersion"] != 2:
         fail()
     if identifier(value["attemptId"], ATTEMPT_RE) != attempt:
         fail()
@@ -244,6 +272,13 @@ def validate_attempt(value, task, attempt):
     ):
         fail()
     identifier(value["catalogHash"], HASH_RE)
+    if value["schema"] == 2:
+        dispatch = value["queueDispatchId"]
+        if dispatch is not None:
+            identifier(dispatch, DISPATCH_RE)
+        runner = value["runnerPrimaryOverride"]
+        if not isinstance(runner, str) or (runner and not RUNNER_RE.fullmatch(runner)):
+            fail()
     if value["origin"] == "fresh":
         if value["previousAttemptId"] is not None or value["recoveryReason"] is not None:
             fail()
@@ -252,6 +287,8 @@ def validate_attempt(value, task, attempt):
         if value["previousAttemptId"] == attempt:
             fail()
         reason(value["recoveryReason"])
+        if value["schema"] == 2 and value["queueDispatchId"] is not None:
+            fail()
     else:
         fail()
 
@@ -280,9 +317,12 @@ elif OP == "validate-protocol":
     if value != {"schema": 1, "protocolVersion": 2}:
         fail()
 elif OP == "make-attempt":
-    attempt, task, profile, created, routes, catalog, origin, previous, recovery = ARGS
+    (
+        attempt, task, profile, created, routes, catalog, origin, previous,
+        recovery, dispatch, runner,
+    ) = ARGS
     value = {
-        "schema": 1,
+        "schema": 2,
         "protocolVersion": 2,
         "attemptId": attempt,
         "taskId": task,
@@ -293,6 +333,8 @@ elif OP == "make-attempt":
         "origin": origin,
         "previousAttemptId": previous or None,
         "recoveryReason": recovery or None,
+        "queueDispatchId": dispatch or None,
+        "runnerPrimaryOverride": runner,
     }
     validate_attempt(value, task, attempt)
     dump(value)
@@ -641,18 +683,52 @@ _attempt_state_read_current_locked() {
   _attempt_state_json parse-current "$output" "$profile"
 }
 
+# ENOENT у canonical current — доказанный catalog transition в `none`, если
+# вызывающий принёс valid expected hash. Повреждение файла, symlink или
+# нечитаемая иерархия сюда не попадают: их нельзя маскировать под безопасный CAS
+# mismatch, они сохраняют исходный integrity rc от factory-route.
+_attempt_state_current_absent() {
+  local profile=$1 routes=$2 profile_dir catalog_dir current
+  profile_dir="$routes/$profile"
+  catalog_dir="$profile_dir/catalog"
+  current="$catalog_dir/current.json"
+  [[ -d "$profile_dir" && ! -L "$profile_dir" && -x "$profile_dir" &&
+     -d "$catalog_dir" && ! -L "$catalog_dir" &&
+     -r "$catalog_dir" && -x "$catalog_dir" &&
+     ! -e "$current" && ! -L "$current" ]]
+}
+
 _attempt_state_create_locked() {
   local root=$1 task=$2 profile=$3 routes=$4 origin=$5 previous=$6 recovery=$7
+  local expected=${8:-} dispatch=${9:-} runner=${10:-}
   local attempt current catalog created staging final pointer_tmp rc
   attempt=$(_attempt_state_generate_id) || return
   final=$(_attempt_state_attempt_dir "$root" "$attempt") || return
   [[ ! -e "$final" && ! -L "$final" ]] || return 73
 
+  if [[ -n "$expected" ]] && _attempt_state_current_absent "$profile" "$routes"; then
+    printf 'FACTORY_ERROR=catalog_changed EXPECTED=%s ACTUAL=none\n' \
+      "$expected" >&2
+    return 75
+  fi
   current=$(mktemp "$root/.current.XXXXXX") || return 1
   catalog=$(_attempt_state_read_current_locked "$profile" "$routes" "$current")
   rc=$?
   rm -f -- "$current"
-  (( rc == 0 )) || return "$rc"
+  if (( rc != 0 )); then
+    if [[ -n "$expected" ]] &&
+       _attempt_state_current_absent "$profile" "$routes"; then
+      printf 'FACTORY_ERROR=catalog_changed EXPECTED=%s ACTUAL=none\n' \
+        "$expected" >&2
+      return 75
+    fi
+    return "$rc"
+  fi
+  if [[ -n "$expected" && "$catalog" != "$expected" ]]; then
+    printf 'FACTORY_ERROR=catalog_changed EXPECTED=%s ACTUAL=%s\n' \
+      "$expected" "$catalog" >&2
+    return 75
+  fi
 
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return 1
   staging=$(mktemp -d "$root/attempts/.new.XXXXXX") || return 1
@@ -663,7 +739,7 @@ _attempt_state_create_locked() {
   }
   _attempt_state_write_json "$staging/attempt.json" make-attempt \
     "$attempt" "$task" "$profile" "$created" "$routes" "$catalog" \
-    "$origin" "$previous" "$recovery" || {
+    "$origin" "$previous" "$recovery" "$dispatch" "$runner" || {
       rc=$?
       rm -rf -- "$staging"
       return "$rc"
@@ -710,10 +786,19 @@ _attempt_state_create_locked() {
 }
 
 attempt_state_begin_v2() {
-  local task profile routes root lock_fd rc
+  local task profile routes expected=${4:-} dispatch=${5:-} runner=${6:-}
+  local root lock_fd rc
   task=$(_attempt_state_task_id "${1:-}") || return
   profile=$(_attempt_state_profile_id "${2:-}") || return
   routes=$(_attempt_state_routes_dir "${3:-}") || return
+  if [[ -n "$expected" ]]; then
+    expected=$(_attempt_state_catalog_hash "$expected") || return
+  fi
+  if [[ -n "$dispatch" ]]; then
+    dispatch=$(_attempt_state_dispatch_id "$dispatch") || return
+    [[ -n "$expected" ]] || return 2
+  fi
+  runner=$(_attempt_state_runner_override "$runner") || return
   _attempt_state_route_tool >/dev/null || return
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
@@ -729,7 +814,8 @@ attempt_state_begin_v2() {
     fi
   fi
   if (( rc == 0 )); then
-    _attempt_state_create_locked "$root" "$task" "$profile" "$routes" fresh "" ""
+    _attempt_state_create_locked "$root" "$task" "$profile" "$routes" \
+      fresh "" "" "$expected" "$dispatch" "$runner"
     rc=$?
   fi
   _attempt_state_unlock "$lock_fd"
@@ -1081,10 +1167,11 @@ PY
 
 attempt_state_recover_v2() {
   local task previous reason root lock_fd previous_dir terminal terminal_state
-  local active_rc profile routes catalog route_pin_rc rc
+  local active_rc profile routes catalog route_pin_rc previous_schema runner rc
   task=$(_attempt_state_task_id "${1:-}") || return
   previous=$(_attempt_state_attempt_id "${2:-}") || return
   reason=${3:-}
+  runner=${4:-}
   _attempt_state_reason "$reason" || return
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
@@ -1116,6 +1203,17 @@ attempt_state_recover_v2() {
     profile=$(_attempt_state_json get "$previous_dir/attempt.json" profile) || rc=$?
     routes=$(_attempt_state_json get "$previous_dir/attempt.json" routesDir) || rc=$?
     catalog=$(_attempt_state_json get "$previous_dir/attempt.json" catalogHash) || rc=$?
+    previous_schema=$(_attempt_state_json get "$previous_dir/attempt.json" schema) || rc=$?
+    if (( rc == 0 && previous_schema == 2 )); then
+      # Queue provenance принадлежит единственному launch side effect и никогда
+      # не переезжает в recovery. Выбор runner-а, напротив, остаётся фактической
+      # task-level политикой нового прогона и берётся из trusted предшественницы.
+      runner=$(_attempt_state_json get \
+        "$previous_dir/attempt.json" runnerPrimaryOverride) || rc=$?
+    fi
+    if (( rc == 0 )); then
+      runner=$(_attempt_state_runner_override "$runner") || rc=$?
+    fi
     _attempt_state_routes_dir "$routes" >/dev/null || rc=78
   fi
   if (( rc == 0 )); then
@@ -1130,7 +1228,8 @@ attempt_state_recover_v2() {
   fi
   if (( rc == 0 )); then
     _attempt_state_create_locked \
-      "$root" "$task" "$profile" "$routes" recovery "$previous" "$reason"
+      "$root" "$task" "$profile" "$routes" recovery "$previous" "$reason" \
+      "" "" "$runner"
     rc=$?
   fi
   _attempt_state_unlock "$lock_fd"

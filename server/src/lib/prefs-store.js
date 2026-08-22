@@ -2,6 +2,7 @@
 // Дефолты заданы здесь — отсутствующий файл означает «всё по умолчанию».
 import fs from 'node:fs';
 import path from 'node:path';
+import { COMPANION_DEFAULTS, normalizeCompanionSettings } from './companion-settings.js';
 import { SPEECH_DEFAULTS, normalizeSpeechSettings } from './speech-settings.js';
 import { normalizeStoredTrustedDirectories } from './trusted-directories.js';
 
@@ -51,6 +52,11 @@ const DEFAULTS = {
   // Настройки распознавания имеют собственный валидированный endpoint. Объект здесь
   // обязателен: PrefsStore.write отбрасывает неизвестные ключи верхнего уровня.
   speech: SPEECH_DEFAULTS,
+  // Чем уходит быстрый ход голосового компаньона: { modelRef: {provider, model}, effort }.
+  // Настройка серверная, а не device-local: история компаньона server-owned и общая для
+  // всех окон, поэтому один разговор не должен идти разными моделями с разных устройств.
+  // Пустое значение = модель по умолчанию из реестра исполнителей.
+  companion: COMPANION_DEFAULTS,
   // Паспорта КОКПИТНЫХ проектов (раздел «Проекты»): { <id>: { repos: [{key, dir}] } }.
   // Пути локальны для машины-мозга, поэтому живут в .state, а не в гитуемой базе.
   // У проектов фабрики источник путей — их bash-профиль; сюда они не пишутся.
@@ -86,6 +92,7 @@ export class PrefsStore {
       // Общий store мержит верхний уровень. Speech доклеиваем отдельно, иначе старый
       // частичный объект затрёт новые поля defaults целиком.
       speech: normalizeSpeechSettings(loaded.speech),
+      companion: normalizeCompanionSettings(loaded.companion),
     };
   }
 
@@ -96,9 +103,11 @@ export class PrefsStore {
     const next = { ...this.read() };
     for (const k of Object.keys(DEFAULTS)) {
       if (patch && k in patch) {
-        next[k] = k === 'trustedDirectories'
-          ? normalizeStoredTrustedDirectories(patch[k])
-          : patch[k];
+        if (k === 'trustedDirectories') next[k] = normalizeStoredTrustedDirectories(patch[k]);
+        // Форму настройки компаньона нормализуем на записи: она уходит в аргументы CLI,
+        // и произвольный объект из тела запроса храниться здесь не должен.
+        else if (k === 'companion') next[k] = normalizeCompanionSettings(patch[k]);
+        else next[k] = patch[k];
       }
     }
     // Публичный read() намеренно скрывает внутреннюю speech revision. Обычная правка

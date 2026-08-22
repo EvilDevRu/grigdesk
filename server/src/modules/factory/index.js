@@ -11,7 +11,9 @@ import { taskDiff } from '../../lib/git.js';
 import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
 import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.js';
-import { reserveSlot, releaseSlot, slotsOverview, SlotsFullError } from '../../lib/sandbox-slots.js';
+import {
+  hasSlotReservation, reserveSlot, releaseSlot, slotsOverview, SlotsFullError,
+} from '../../lib/sandbox-slots.js';
 import { PROFILE_RE } from '../../lib/profiles.js';
 import {
   buildTicket, validateTicket, writeTicketFile, TicketError,
@@ -22,6 +24,7 @@ import {
   instrumentationSuggestions,
   loadFactoryLaunchProfile,
   normalizeFactoryLaunchInputs,
+  profileMatchingTriage,
 } from '../../lib/factory-launch-contract.js';
 import {
   confirmRouteResume, logLength, readLogSince,
@@ -39,7 +42,9 @@ import { listInstalledRunners } from '../../lib/runners-catalog.js';
 import { loadRunnerConfig, resolveProjectRunnerState } from '../../lib/runner-state.js';
 import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
 
-const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]*$/;
+const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+
+const registryIsMissing = (error) => error?.code === 'ENOENT';
 
 // Потолок человеческого текста, уезжающего в журнал попытки и в промпт агента. Тот же
 // предел стоит в движке (`_attempt_state_reason`): причина едет аргументом execFile и
@@ -79,7 +84,9 @@ function runnerStageIsLive(graph, registry, nodeId, stage) {
 }
 
 async function factoryModule(fastify, opts) {
-  const { factoryState, config, prefs, b24, analyzer } = opts;
+  const {
+    factoryState, config, prefs, b24, analyzer, internalToken = '',
+  } = opts;
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
   const runnerControl = new FactoryRunnerControl({
     factoryBin: config.factoryBin,
@@ -87,6 +94,26 @@ async function factoryModule(fastify, opts) {
     configRoot: config.factoryConfigRoot,
     profilesDir: config.profilesDir,
   });
+  // Все start одной задачи проходят через один promise-tail.
+  // Detached engine может не успеть опубликовать trusted identity до ответа HTTP, поэтому
+  // одного хвоста недостаточно: для такого bootstrap сохраняем process-local fail-closed
+  // marker. Следующий start разрешается только после появления проверяемого прогона.
+  const taskLaunchTails = new Map();
+  const taskLaunchPending = new Map();
+  async function withTaskLaunchLock(task, operation) {
+    const key = String(task);
+    const previous = taskLaunchTails.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const tail = previous.catch(() => {}).then(() => gate);
+    taskLaunchTails.set(key, tail);
+    await previous.catch(() => {});
+    try { return await operation(); }
+    finally {
+      release();
+      if (taskLaunchTails.get(key) === tail) taskLaunchTails.delete(key);
+    }
+  }
 
   const hasRouteProjectionIdentity = (registry) => (
     typeof factoryState.hasRouteProjectionIdentity === 'function'
@@ -122,7 +149,14 @@ async function factoryModule(fastify, opts) {
     let registry;
     try { ({ registry } = await factoryState.readRegistry(id)); }
     catch (err) {
-      reply.code(404).send({ error: 'not_found', message: err.message });
+      if (registryIsMissing(err)) {
+        reply.code(404).send({ error: 'not_found', message: 'Прогон задачи не найден.' });
+      } else {
+        reply.code(409).send({
+          error: 'attempt_integrity_failed',
+          message: 'Реестр прогона недоступен; lifecycle mutation запрещена.',
+        });
+      }
       return null;
     }
     if (!hasRouteProjectionIdentity(registry)) {
@@ -407,46 +441,79 @@ async function factoryModule(fastify, opts) {
   }
 
   /**
-   * Старт прогона по immutable route protocol.
-   *
-   * Отказы должны быть видны до длительного provisioning:
-   *  • маршрут и профиль проверяем синхронным `factory check` ДО любых побочных
-   *    эффектов;
-   *  • постановка едет файлом-тикетом, который валидируется здесь же — движок читает
-   *    его только после подъёма песочницы, то есть через 20–25 минут провижининга;
-   *  • прогон уезжает в transient-СЕРВИС, который возвращает 0 сразу, поэтому исход
-   *    читаем из состояния (ORCH_PID + живость юнита), а причину — из журнала запуска.
+   * Общий side-effect-free preflight ручного запуска и enqueue. Он ничего не пишет,
+   * не обновляет git, не резервирует слот и не создаёт attempt. Queue-вариант собирает
+   * только базовый тикет: уточнения/комментарии/Telegram намеренно перечитываются при dispatch.
    */
-  async function startRoutePipeline(id, {
+  async function preflightRoutePipeline(id, {
     profile, route, title, description, acceptanceCriteria, sourceUrl, reuseTicket = false,
-    runnerPrimary = '',
+    runnerPrimary = '', expectedCatalogHash = '',
     deliveryTargets = [], instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
-  } = {}) {
+  } = {}, { dynamicSections = true } = {}) {
     const wanted = String(route || 'feature');
+    const expected = String(expectedCatalogHash || '');
+    if (expected && !/^[a-f0-9]{64}$/.test(expected)) {
+      return {
+        ok: false,
+        result: { status: 400, body: { error: 'bad_launch_payload', message: 'expectedCatalogHash должен быть sha256' } },
+      };
+    }
     const catalog = await factoryState.catalog(profile);
     if (!catalog) {
       return {
-        status: 409,
-        body: { error: 'no_catalog', message: 'каталог маршрутов профиля не опубликован или повреждён' },
+        ok: false,
+        result: {
+          status: 409,
+          body: { error: 'no_catalog', message: 'каталог маршрутов профиля не опубликован или повреждён' },
+        },
       };
     }
     if (!catalog.routes.includes(wanted)) {
       return {
-        status: 409,
-        body: { error: 'route_not_published', message: `маршрут ${wanted} отсутствует в опубликованном каталоге` },
+        ok: false,
+        result: {
+          status: 409,
+          body: { error: 'route_not_published', message: `маршрут ${wanted} отсутствует в опубликованном каталоге` },
+        },
       };
     }
-    const check = await runRouteEngine(config, routeCheckArgs(config, { profile, route: wanted }));
+    if (expected && catalog.catalogHash !== expected) {
+      return {
+        ok: false,
+        result: {
+          status: 409,
+          body: { error: 'catalog_changed', message: 'опубликованный каталог изменился после открытия формы' },
+        },
+      };
+    }
+    const pinnedCatalogHash = expected || catalog.catalogHash;
+    const check = await runRouteEngine(config, routeCheckArgs(config, {
+      profile,
+      route: wanted,
+      expectedCatalogHash: pinnedCatalogHash,
+    }));
     if (!check.ok) {
-      return { status: 409, body: { error: 'route_check_failed', message: check.message || 'профиль или маршрут не приняты движком' } };
+      const failure = check.failure;
+      return {
+        ok: false,
+        result: {
+          status: 409,
+          body: failure?.error === 'catalog_changed'
+            ? { error: failure.error, message: failure.message }
+            : { error: 'route_check_failed', message: check.message || 'профиль или маршрут не приняты движком' },
+        },
+      };
     }
     const deliveryMode = /\bdelivery=(publish|disabled)\b/.exec(check.stdout)?.[1] || null;
     const instrumentationMode = /\binstrumentation=(explicit|derived|disabled)\b/
       .exec(check.stdout)?.[1] || null;
     if (!deliveryMode || !instrumentationMode) {
       return {
-        status: 409,
-        body: { error: 'route_check_failed', message: 'движок не подтвердил launch contract маршрута' },
+        ok: false,
+        result: {
+          status: 409,
+          body: { error: 'route_check_failed', message: 'движок не подтвердил launch contract маршрута' },
+        },
       };
     }
     const catalogDelivery = catalog.routeOptions?.[wanted]?.deliveryMode;
@@ -454,8 +521,11 @@ async function factoryModule(fastify, opts) {
     if (!catalogDelivery || !catalogInstrumentation
         || catalogDelivery !== deliveryMode || catalogInstrumentation !== instrumentationMode) {
       return {
-        status: 409,
-        body: { error: 'route_check_failed', message: 'опубликованный маршрут и engine check расходятся по launch contract' },
+        ok: false,
+        result: {
+          status: 409,
+          body: { error: 'route_check_failed', message: 'опубликованный маршрут и engine check расходятся по launch contract' },
+        },
       };
     }
 
@@ -464,10 +534,13 @@ async function factoryModule(fastify, opts) {
       launchProfile = await loadFactoryLaunchProfile(config, profile, id);
     } catch (e) {
       return {
-        status: 409,
-        body: {
-          error: 'launch_contract_unavailable',
-          message: e instanceof FactoryLaunchContractError ? e.message : 'profile launch contract недоступен',
+        ok: false,
+        result: {
+          status: 409,
+          body: {
+            error: 'launch_contract_unavailable',
+            message: e instanceof FactoryLaunchContractError ? e.message : 'profile launch contract недоступен',
+          },
         },
       };
     }
@@ -485,7 +558,10 @@ async function factoryModule(fastify, opts) {
       });
     } catch (e) {
       if (e instanceof FactoryLaunchContractError) {
-        return { status: 400, body: { error: 'bad_launch_contract', message: e.message } };
+        return {
+          ok: false,
+          result: { status: 400, body: { error: 'bad_launch_contract', message: e.message } },
+        };
       }
       throw e;
     }
@@ -499,8 +575,11 @@ async function factoryModule(fastify, opts) {
         built = validateTicket(JSON.parse(await fs.readFile(stored, 'utf8')), id);
       } catch (e) {
         return {
-          status: 409,
-          body: { error: 'no_ticket', message: `сохранённой постановки нет или она не проходит проверку (${e.message}) — запусти задачу кнопкой «на конвейер»` },
+          ok: false,
+          result: {
+            status: 409,
+            body: { error: 'no_ticket', message: `сохранённой постановки нет или она не проходит проверку (${e.message}) — запусти задачу кнопкой «на конвейер»` },
+          },
         };
       }
     } else {
@@ -511,14 +590,44 @@ async function factoryModule(fastify, opts) {
           description,
           acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
           sourceUrl: sourceUrl || (await taskSourceUrl(id)),
-          sections: await ticketSections(id, { profile, title, description }),
+          sections: dynamicSections
+            ? await ticketSections(id, { profile, title, description })
+            : [],
         });
       } catch (e) {
-        if (e instanceof TicketError) return { status: 400, body: { error: 'bad_ticket', message: e.message } };
+        if (e instanceof TicketError) {
+          return {
+            ok: false,
+            result: { status: 400, body: { error: 'bad_ticket', message: e.message } },
+          };
+        }
         throw e;
       }
     }
 
+    return {
+      ok: true,
+      value: {
+        profile,
+        route: wanted,
+        runnerPrimary,
+        catalogHash: pinnedCatalogHash,
+        launchInputs,
+        ticket: built,
+      },
+    };
+  }
+
+  /**
+   * Старт после общего preflight: только здесь начинаются git/slot/ticket/engine side effects.
+   */
+  async function startRoutePipeline(id, options = {}, preparedResult = null) {
+    const prepared = preparedResult
+      || await preflightRoutePipeline(id, options, { dynamicSections: true });
+    if (!prepared.ok) return prepared.result;
+    const {
+      profile, route: wanted, runnerPrimary, catalogHash, launchInputs, ticket: built,
+    } = prepared.value;
     const gitRefresh = await maybeRefreshRepos(id, profile);
 
     // Слот стенда резервируем до запуска, чтобы два provisioning не взяли один порт.
@@ -539,24 +648,40 @@ async function factoryModule(fastify, opts) {
     }
     const slotInfo = slot.k === null ? null : { k: slot.k, source: slot.source };
 
-    const ticketFile = await writeTicketFile({ dir: config.ticketsDir, task: id, ticket: built });
-    const launch = await spawnRouteEngine(config, {
-      task: id,
-      args: routeStartArgs(config, {
+    let launch;
+    try {
+      const ticketFile = await writeTicketFile({ dir: config.ticketsDir, task: id, ticket: built });
+      // Именно spawn — первая граница, после которой вызывающий уже не может доказать,
+      // появился ли detached engine. До неё ошибки git/slot/ticket безопасно повторяемы.
+      taskLaunchPending.set(String(id), { startedAt: Date.now() });
+      launch = await spawnRouteEngine(config, {
         task: id,
-        profile,
-        route: wanted,
-        ticketFile,
-        runnerPrimary,
-        ...launchInputs,
-      }),
-      extraEnv: {
-        ...stageAutoCompactEnv(prefs?.read()),
-        ...((slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {}),
-      },
-    });
+        args: routeStartArgs(config, {
+          task: id,
+          profile,
+          route: wanted,
+          ticketFile,
+          runnerPrimary,
+          expectedCatalogHash: catalogHash,
+          ...launchInputs,
+        }),
+        extraEnv: {
+          ...stageAutoCompactEnv(prefs?.read()),
+          ...((slot.k !== null && slot.source !== 'registry') ? { FACTORY_SB_K: String(slot.k) } : {}),
+        },
+      });
+    } catch (err) {
+      if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
+      throw err;
+    }
     if (!launch.ok) {
       if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
+      if (launch.failure?.error === 'catalog_changed') {
+        return {
+          status: 409,
+          body: { error: 'catalog_changed', message: launch.failure.message },
+        };
+      }
       return {
         status: 500,
         body: {
@@ -581,7 +706,12 @@ async function factoryModule(fastify, opts) {
       await new Promise((r) => { setTimeout(r, 250); });
       let registry = null;
       try { registry = (await factoryState.readRegistry(id)).registry; } catch { /* реестр ещё пишется */ }
-      const identity = startRegistryIdentity(registry, { profile, route: wanted });
+      const identity = startRegistryIdentity(registry, {
+        profile,
+        route: wanted,
+        expectedCatalogHash: catalogHash,
+        runnerPrimaryOverride: runnerPrimary,
+      });
       if (identity && factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
         if (identity === launchIdentity) launchConfirmations += 1;
         else { launchIdentity = identity; launchConfirmations = 1; }
@@ -597,6 +727,14 @@ async function factoryModule(fastify, opts) {
             profile,
             route: wanted,
             attempt: registry.ATTEMPT_ID || null,
+            identity: {
+              dispatchId: registry.QUEUE_DISPATCH_ID || null,
+              profile,
+              route: wanted,
+              catalogHash,
+              attempt: registry.ATTEMPT_ID || null,
+              runnerPrimaryOverride: registry.RUNNER_OVERRIDE_PRIMARY || '',
+            },
             gitRefresh,
             slot: slotInfo,
           },
@@ -606,6 +744,12 @@ async function factoryModule(fastify, opts) {
         if (slot.source === 'new') releaseSlot({ stateDir: config.stateDir, task: id });
         const tail = await readLogSince(launch.logFile, launch.logOffset, { lines: 10, limit: 2000 });
         const failure = routeFailure(tail);
+        if (failure?.error === 'catalog_changed') {
+          return {
+            status: 409,
+            body: { error: 'catalog_changed', message: failure.message },
+          };
+        }
         return {
           status: 500,
           body: {
@@ -629,9 +773,73 @@ async function factoryModule(fastify, opts) {
     };
   }
 
+  function compactLaunchIdentity(trusted) {
+    if (!trusted) return null;
+    return {
+      dispatchId: trusted.queueDispatchId || null,
+      profile: trusted.profile,
+      route: trusted.route,
+      catalogHash: trusted.catalogHash,
+      attempt: trusted.attempt,
+      // v1 attempts не хранили override: null честно означает «trusted ledger не знает».
+      runnerPrimaryOverride: trusted.runnerPrimaryOverride ?? null,
+    };
+  }
+
+  function failClosedPendingInspection(id, inspection) {
+    if (inspection?.kind === 'absent' && taskLaunchPending.has(String(id))) {
+      return { kind: 'bootstrap', identity: null, origin: null };
+    }
+    return inspection;
+  }
+
+  /**
+   * Exact inspector очереди. Registry без подтверждённого ledger и промежуток между
+   * slot reservation/unit registration и полным pin — bootstrap, а не доказательство
+   * отсутствия запуска.
+   */
+  async function inspectLaunchState(id) {
+    if (typeof opts.inspectLaunchState === 'function') {
+      return failClosedPendingInspection(id, await opts.inspectLaunchState(id));
+    }
+    let registry = null;
+    try { registry = (await factoryState.readRegistry(id)).registry; }
+    catch (err) {
+      if (!registryIsMissing(err)) {
+        throw new Error('Реестр запуска временно недоступен; отсутствие прогона не доказано.');
+      }
+    }
+    if (!registry) {
+      const reserved = hasSlotReservation({ stateDir: config.stateDir, task: id });
+      const unit = reserved ? false : await routeUnitActive(id);
+      return failClosedPendingInspection(id, reserved || unit
+        ? { kind: 'bootstrap', identity: null, origin: null }
+        : { kind: 'absent', identity: null, origin: null });
+    }
+    if (!hasRouteProjectionIdentity(registry)
+        || typeof factoryState.readTrustedAttempt !== 'function') {
+      return { kind: 'bootstrap', identity: null, origin: null };
+    }
+    let trusted;
+    try { trusted = await factoryState.readTrustedAttempt(id, registry); }
+    catch { return { kind: 'bootstrap', identity: null, origin: null }; }
+    const identity = compactLaunchIdentity(trusted);
+    if (trusted.terminal) {
+      return { kind: 'terminal', identity, origin: trusted.origin || null };
+    }
+    if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
+      return { kind: 'active', identity, origin: trusted.origin || null };
+    }
+    return { kind: 'stopped', identity, origin: trusted.origin || null };
+  }
+
   // Единственная стартовая поверхность. Любой существующий route-run продолжаетcя
   // только через resume; legacy registry не конвертируется в скрытый старый запуск.
-  async function startPipeline(id, opts = {}) {
+  async function prepareStartPipeline(
+    id,
+    opts = {},
+    { dynamicSections = true } = {},
+  ) {
     const { profile: reqProfile } = opts;
     const profile = reqProfile || config.factoryProfile || (await factoryState.primaryProfile());
     if (!profile) return { status: 400, body: { error: 'no_profile', message: 'профиль конвейера не определён' } };
@@ -666,7 +874,18 @@ async function factoryModule(fastify, opts) {
     }
 
     let reg = null;
-    try { reg = (await factoryState.readRegistry(id)).registry; } catch { /* реестра ещё нет */ }
+    try { reg = (await factoryState.readRegistry(id)).registry; }
+    catch (err) {
+      if (!registryIsMissing(err)) {
+        return {
+          status: 409,
+          body: {
+            error: 'attempt_integrity_failed',
+            message: 'Реестр прогона недоступен; новый запуск запрещён до проверки состояния.',
+          },
+        };
+      }
+    }
     if (reg) {
       if (!hasRouteProjectionIdentity(reg)) {
         return {
@@ -692,7 +911,14 @@ async function factoryModule(fastify, opts) {
         };
       }
       if (factoryState.isDaemonAlive(reg.ORCH_PID, id)) {
-        return { status: null, body: { outcome: 'already_running', profile: trusted.profile } };
+        return {
+          status: null,
+          body: {
+            outcome: 'already_running',
+            profile: trusted.profile,
+            identity: compactLaunchIdentity(trusted),
+          },
+        };
       }
       return {
         status: 409,
@@ -708,7 +934,53 @@ async function factoryModule(fastify, opts) {
         },
       };
     }
-    return startRoutePipeline(id, { ...opts, profile });
+    const options = { ...opts, profile, runnerPrimary };
+    const routePreflight = await preflightRoutePipeline(id, options, { dynamicSections });
+    if (!routePreflight.ok) return routePreflight.result;
+    return { status: null, prepared: { options, routePreflight } };
+  }
+
+  async function startPipeline(id, opts = {}, auth = {}) {
+    if (taskLaunchPending.has(String(id))) {
+      let inspection = null;
+      try { inspection = await inspectLaunchState(id); } catch { /* marker остаётся fail-closed */ }
+      if (inspection && ['active', 'stopped', 'terminal'].includes(inspection.kind)) {
+        taskLaunchPending.delete(String(id));
+      } else {
+        return {
+          status: 409,
+          body: {
+            error: 'run_exists',
+            message: 'Предыдущий запуск уже передан движку, но его trusted identity ещё не подтверждена.',
+          },
+        };
+      }
+    }
+    const ready = await prepareStartPipeline(id, opts, auth);
+    if (!ready.prepared) return ready;
+    const key = String(id);
+    let result;
+    try {
+      result = await startRoutePipeline(id, ready.prepared.options, ready.prepared.routePreflight);
+    } catch (err) {
+      // Неизвестно, успел ли detached launcher пересечь границу side effect.
+      // Marker остаётся до точного proof или явного lifecycle-разрешения человеком.
+      throw err;
+    }
+    const provenVisible = result.status === null && result.body?.outcome === 'launched';
+    // `runner_preflight_unavailable` тоже доказан: движок печатает этот маркер в конце
+    // ПОЛНОСТЬЮ отработавшего preflight, а создание попытки идёт строго после него —
+    // ни attempt, ни реестра, ни занятых ресурсов не появляется (проверено: после такого
+    // отказа на диске остаётся только `t<id>.launch.log` с причиной). Без этой ветки
+    // маркер висел до перезапуска сервера, и задача запиралась ответом `run_exists`
+    // из-за чужого CLI: `inspectLaunchState` видит `absent` и marker снять не может.
+    // Соседний `runner_preflight_failed` сюда НЕ входит намеренно — он означает, что
+    // сломалась сама проверка, и такого же доказательства за ним нет.
+    const provenPreSideEffect = (result.status === 409 && result.body?.outcome === 'no_slot')
+      || (result.status === 409 && result.body?.error === 'catalog_changed')
+      || (result.status === 500 && result.body?.error === 'runner_preflight_unavailable');
+    if (provenVisible || provenPreSideEffect) taskLaunchPending.delete(key);
+    return result;
   }
 
   // Чем заполнять модалку запуска: профиль и маршруты только опубликованного каталога.
@@ -727,16 +999,6 @@ async function factoryModule(fastify, opts) {
         profiles: installedProfiles,
       });
     }
-    const profile = requested || config.factoryProfile || (await factoryState.primaryProfile());
-    if (!profile) return reply.code(400).send({ error: 'no_profile', message: 'профиль конвейера не определён' });
-    if (!installedProfiles.includes(profile)) {
-      return reply.code(400).send({
-        error: 'bad_profile',
-        message: 'профиль конвейера по умолчанию не установлен',
-        profiles: installedProfiles,
-      });
-    }
-
     // В обычной форме нет смысла предлагать выключенные профили без опубликованного
     // каталога. Если именно такой профиль выбран по умолчанию, оставляем его первым,
     // чтобы показать fail-closed причину и дать переключиться на реально доступный.
@@ -746,12 +1008,41 @@ async function factoryModule(fastify, opts) {
     }));
     const catalogs = new Map(catalogEntries);
     const launchableProfiles = installedProfiles.filter((name) => catalogs.get(name));
+
+    // Триаж читается ДО выбора профиля: одним снимком он подсказывает форме и профиль,
+    // и маршрут, и файлы инструментации. Разъехавшись, они дают пустое поле scope у
+    // explicit-маршрута — то есть форму, которую нечем отправить.
+    let analysis = null;
+    if (typeof analyzer?.get === 'function') {
+      try { analysis = (await analyzer.get(id))?.analysis || null; }
+      catch { /* триаж — только подсказка, запуск от него не зависит */ }
+    }
+    const profile = requested
+      || config.factoryProfile
+      || (await profileMatchingTriage(config, id, analysis, launchableProfiles))
+      || (await factoryState.primaryProfile());
+    if (!profile) return reply.code(400).send({ error: 'no_profile', message: 'профиль конвейера не определён' });
+    if (!installedProfiles.includes(profile)) {
+      return reply.code(400).send({
+        error: 'bad_profile',
+        message: 'профиль конвейера по умолчанию не установлен',
+        profiles: installedProfiles,
+      });
+    }
     const profiles = catalogs.get(profile)
       ? launchableProfiles
       : [profile, ...launchableProfiles.filter((name) => name !== profile)];
 
     let registry = null;
-    try { registry = (await factoryState.readRegistry(id)).registry; } catch { /* задачи ещё нет */ }
+    try { registry = (await factoryState.readRegistry(id)).registry; }
+    catch (err) {
+      if (!registryIsMissing(err)) {
+        return reply.code(503).send({
+          error: 'attempt_state_unavailable',
+          message: 'Состояние прогона временно недоступно; запуск запрещён до успешного чтения.',
+        });
+      }
+    }
     let trusted = null;
     if (registry && hasRouteProjectionIdentity(registry)
         && typeof factoryState.readTrustedAttempt === 'function') {
@@ -805,11 +1096,6 @@ async function factoryModule(fastify, opts) {
         ? e.message
         : 'profile launch contract недоступен';
     }
-    let analysis = null;
-    if (typeof analyzer?.get === 'function') {
-      try { analysis = (await analyzer.get(id))?.analysis || null; }
-      catch { /* триаж — только подсказка, запуск от него не зависит */ }
-    }
     const repositories = (launchProfile?.repositories || []).map((repo) => ({
       name: repo.name,
       targetBranch: repo.targetBranch,
@@ -839,7 +1125,7 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/launch', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const r = await startPipeline(id, request.body || {});
+    const r = await withTaskLaunchLock(id, () => startPipeline(id, request.body || {}));
     return r.status ? reply.code(r.status).send(r.body) : r.body;
   });
 
@@ -1188,6 +1474,7 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/sandbox/down', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    return withTaskLaunchLock(id, async () => {
     const lifecycle = await managedLifecycle(id, reply);
     if (!lifecycle) return reply;
     const { registry, trusted } = lifecycle;
@@ -1229,6 +1516,7 @@ async function factoryModule(fastify, opts) {
     if (!down.ok) return reply.code(500).send({ error: 'sandbox_down_failed', message: down.message });
     try {
       const archived = await archiveTaskFiles(id, stateDir);
+      taskLaunchPending.delete(String(id));
       return { ok: true, output: down.output, archived, attempt: attemptClosed };
     } catch (err) {
       fastify.log.error({ task: id, err: err.message }, 'стенд снесён, но реестр не перенесён в архив');
@@ -1237,6 +1525,7 @@ async function factoryModule(fastify, opts) {
         message: `стенд снесён, но убрать прогон с экрана не удалось: ${err.message}`,
       });
     }
+    });
   });
 
   // Отдельное закрытие остаётся запасным действием для задачи БЕЗ живого стенда
@@ -1245,6 +1534,7 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/close', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    return withTaskLaunchLock(id, async () => {
     const lifecycle = await managedLifecycle(id, reply);
     if (!lifecycle) return reply;
     const { registry, trusted, env, sandbox } = lifecycle;
@@ -1305,10 +1595,12 @@ async function factoryModule(fastify, opts) {
     }
 
     const moved = await archiveTaskFiles(id, stateDir);
+    taskLaunchPending.delete(String(id));
     return {
       ok: true, archived: moved, branch: branch || null, branches, attempt: attemptClosed,
       workspaceMode: trusted.workspaceMode,
     };
+    });
   });
 
   // Перезапуск стенда после провала подъёма.
@@ -1331,56 +1623,60 @@ async function factoryModule(fastify, opts) {
   fastify.post('/api/tasks/:id/sandbox/retry', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+    return withTaskLaunchLock(id, async () => {
 
-    const lifecycle = await managedLifecycle(id, reply);
-    if (!lifecycle) return reply;
-    const { registry: reg, trusted } = lifecycle;
-    if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
-      return reply.code(409).send({
-        error: 'shared_workspace_lifecycle_forbidden',
-        message: 'Общий checkout и существующий стенд нельзя сносить или пересобирать из Cockpit.',
-      });
-    }
-    // Сносить песочницу под работающим конвейером нельзя: агент этапа потеряет и код,
-    // и базу под собой.
-    if (factoryState.isDaemonAlive(reg.ORCH_PID, id)) {
-      return reply.code(409).send({ error: 'running', message: 'конвейер идёт — перезапускать стенд нечего' });
-    }
-    // Прогон закрыт (или ещё не начинался): resume продолжать нечего, а start без тикета
-    // ушёл бы работать вслепую. Для этого есть кнопка «на конвейер» — с описанием задачи.
-    if (trusted.terminal === 'completed') {
-      return reply.code(409).send({ error: 'not_running', message: 'прогон не открыт — запускай задачу кнопкой «на конвейер»' });
-    }
-
-    const stateDir = config.stateDir;
-    if (trusted.terminal !== 'abandoned') {
-      const done = await runRouteEngine(config, routeAbandonArgs(config, {
-        task: id, profile: trusted.profile, attempt: trusted.attempt, reason: 'перезапуск стенда из кокпита',
-      }));
-      if (!done.ok && done.code !== 73) {
-        return reply.code(409).send({ error: 'abandon_failed', message: done.message });
+      const lifecycle = await managedLifecycle(id, reply);
+      if (!lifecycle) return reply;
+      const { registry: reg, trusted } = lifecycle;
+      if (trusted.workspaceMode === 'shared' || trusted.standOwnership === 'external') {
+        return reply.code(409).send({
+          error: 'shared_workspace_lifecycle_forbidden',
+          message: 'Общий checkout и существующий стенд нельзя сносить или пересобирать из Cockpit.',
+        });
       }
-    }
+      // Сносить песочницу под работающим конвейером нельзя: агент этапа потеряет и код,
+      // и базу под собой.
+      if (factoryState.isDaemonAlive(reg.ORCH_PID, id)) {
+        return reply.code(409).send({ error: 'running', message: 'конвейер идёт — перезапускать стенд нечего' });
+      }
+      // Прогон закрыт (или ещё не начинался): resume продолжать нечего, а start без тикета
+      // ушёл бы работать вслепую. Для этого есть кнопка «на конвейер» — с описанием задачи.
+      if (trusted.terminal === 'completed') {
+        return reply.code(409).send({ error: 'not_running', message: 'прогон не открыт — запускай задачу кнопкой «на конвейер»' });
+      }
 
-    const cmd = await sandboxDownCmd(id, trusted.profile);
-    if (!cmd) return reply.code(501).send({ error: 'not_configured', message: NOT_CONFIGURED });
-    const down = await runSandboxDown(id, cmd, stateDir);
-    if (!down.ok) return reply.code(500).send({ error: 'sandbox_down_failed', message: down.message });
+      const stateDir = config.stateDir;
+      if (trusted.terminal !== 'abandoned') {
+        const done = await runRouteEngine(config, routeAbandonArgs(config, {
+          task: id, profile: trusted.profile, attempt: trusted.attempt, reason: 'перезапуск стенда из кокпита',
+        }));
+        if (!done.ok && done.code !== 73) {
+          return reply.code(409).send({ error: 'abandon_failed', message: done.message });
+        }
+      }
 
-    // Проекция реестра не даёт стартовать заново — убираем её в архив своего же
-    // каталога (не удаляем: следы упавшего подъёма нужны для разбора).
-    await archiveTaskFiles(id, stateDir);
+      const cmd = await sandboxDownCmd(id, trusted.profile);
+      if (!cmd) return reply.code(501).send({ error: 'not_configured', message: NOT_CONFIGURED });
+      const down = await runSandboxDown(id, cmd, stateDir);
+      if (!down.ok) return reply.code(500).send({ error: 'sandbox_down_failed', message: down.message });
 
-    const r = await startPipeline(id, {
-      profile: trusted.profile,
-      route: trusted.route,
-      reuseTicket: true,
+      // Проекция реестра не даёт стартовать заново — убираем её в архив своего же
+      // каталога (не удаляем: следы упавшего подъёма нужны для разбора). Этим человек
+      // также явно разрешает старый uncertain bootstrap, если такой marker остался.
+      await archiveTaskFiles(id, stateDir);
+      taskLaunchPending.delete(String(id));
+
+      const r = await startPipeline(id, {
+        profile: trusted.profile,
+        route: trusted.route,
+        reuseTicket: true,
+      });
+      // Снос уже прошёл, поэтому его вывод отдаём в ЛЮБОМ случае: там видны отказы,
+      // из-за которых новый подъём упадёт снова (например «worktree ОСТАВЛЕН как есть» —
+      // не удалось снять патч, и гард частично созданной песочницы упрётся именно в это).
+      if (r.status) return reply.code(r.status).send({ ...r.body, downOutput: down.output });
+      return { ...r.body, retried: true, downOutput: down.output };
     });
-    // Снос уже прошёл, поэтому его вывод отдаём в ЛЮБОМ случае: там видны отказы,
-    // из-за которых новый подъём упадёт снова (например «worktree ОСТАВЛЕН как есть» —
-    // не удалось снять патч, и гард частично созданной песочницы упрётся именно в это).
-    if (r.status) return reply.code(r.status).send({ ...r.body, downOutput: down.output });
-    return { ...r.body, retried: true, downOutput: down.output };
   });
 
   // «Продолжить» — единственный способ поднять упавший прогон из интерфейса.

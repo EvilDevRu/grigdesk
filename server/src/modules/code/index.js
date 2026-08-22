@@ -14,7 +14,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { PROFILE_RE, listProjects } from '../../lib/profiles.js';
 import { projectRepos } from '../../lib/projects.js';
-import { taskDiff } from '../../lib/git.js';
+import { worktreeChanges } from '../../lib/git.js';
 
 const exec = promisify(execFile);
 const MAX_BYTES = 1_500_000; // как в lib/git.js: гигантские блобы в браузер не тащим
@@ -213,12 +213,14 @@ async function codeModule(fastify, opts) {
       .send(buf);
   });
 
-  // Гит выбранного дерева: ветка + несохранённые изменения (формат дифа задачи) + свежие коммиты.
+  // Гит выбранного дерева: ветка + изменения ДВУМЯ группами (индекс против HEAD и
+  // рабочее дерево против индекса, как Source Control в VS Code) + свежие коммиты.
+  // Приёмка задач считает своё «поверх HEAD» отдельной функцией: там индекс не при чём.
   fastify.get('/api/code/:project/git', async (req, reply) => {
     if (gate(reply)) return reply;
     const ctx = await resolveRoot(req, reply);
     if (!ctx) return reply;
-    const diff = await taskDiff(ctx.tree.path);
+    const diff = await worktreeChanges(ctx.tree.path);
     let log = [];
     try {
       const { stdout } = await exec('git', ['-C', ctx.tree.path, 'log', '-15', '--pretty=%h\t%s\t%cr'], { maxBuffer: 1024 * 1024 });

@@ -82,10 +82,37 @@ test('обычное дополнение ленты идёт как есть', 
 
 test('очистка чата человеком уважается', async (t) => {
   const store = await freshStore(t);
-  await store.saveOne(baseChat(), false);
-  await store.saveOne(baseChat({ messages: [], updatedAt: Date.UTC(2026, 7, 1, 3) }), false);
+  const current = await store.saveOne(baseChat(), false);
+  // Явная очистка является CAS-операцией: только окно с текущей revision вправе
+  // отличить намеренное действие от пустого stale-снимка до первого ответа.
+  await store.saveOne({
+    ...current.chat,
+    messages: [],
+    updatedAt: Date.UTC(2026, 7, 1, 3),
+  }, false);
   const state = await store.read();
   assert.deepEqual(state.sessions[0].messages, []);
+});
+
+test('пустая stale-копия не очищает сообщения другого окна', async (t) => {
+  const store = await freshStore(t);
+  const empty = await store.saveOne(baseChat({ messages: [] }), false);
+  const filled = await store.saveOne({
+    ...empty.chat,
+    messages: [msg('user', 'Вопрос'), msg('assistant', 'Ответ')],
+    sessionId: 'live-session',
+    contextTokens: 42_000,
+    updatedAt: Date.UTC(2026, 7, 1, 3),
+  }, false);
+  assert.equal(filled.chat.messages.length, 2);
+
+  const stale = await store.saveOne(empty.chat, false);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.restored, 2);
+  const persisted = await store.readOne(empty.chat.id);
+  assert.deepEqual(persisted.messages.map((message) => message.text), ['Вопрос', 'Ответ']);
+  assert.equal(persisted.sessionId, 'live-session');
+  assert.equal(persisted.contextTokens, 42_000);
 });
 
 test('одновременные сохранения двух окон не теряют ни одного хвоста', async (t) => {

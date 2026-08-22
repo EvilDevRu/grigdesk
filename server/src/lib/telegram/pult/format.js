@@ -8,6 +8,12 @@
 // Шапка карточки (номер задачи, этап) не отбрасывается никогда: усечение съедает
 // тело. Карточка без номера бесполезна — правило то же, что у ответа
 // «задача создана» в inbox-channel.js.
+//
+// «Что делает агент» карточки НЕ вычисляют: правило одно на всех и живёт в
+// web/src/shared/agent-activity.js — там же, откуда его берут плашка конвейера и
+// чип навигации.
+import { activityFromSilence, agentActivityLabel } from '../../../../../web/src/shared/agent-activity.js';
+import { contextFill } from '../../../../../web/src/shared/chat-context.js';
 
 export const LIMITS = Object.freeze({
   title: 200, // заголовок/шапка
@@ -18,9 +24,89 @@ export const LIMITS = Object.freeze({
   callback: 64, // потолок Bot API на callback_data, байты
 });
 
+/** Потолок текста кнопки: длиннее Telegram показывает обрезком без многоточия. */
+export const BUTTON_TEXT_LIMIT = 56;
+
 export const STATUS_PAGE_SIZE = 5;
 export const NODE_PAGE_SIZE = 12;
 const PLAN_MAX_PAGES = 32;
+
+export const PULT_REPLY_BUTTONS = Object.freeze({
+  pipeline: '📋 Конвейер',
+  agent: '💬 Агент',
+  tasks: '📥 Задачи',
+  more: '⚙️ Ещё',
+});
+
+/** Постоянная клавиатура лички владельца. Каждый вызов отдаёт свежий объект. */
+export function pultReplyKeyboard() {
+  return {
+    keyboard: [
+      [{ text: PULT_REPLY_BUTTONS.pipeline }, { text: PULT_REPLY_BUTTONS.agent }],
+      [{ text: PULT_REPLY_BUTTONS.tasks }, { text: PULT_REPLY_BUTTONS.more }],
+    ],
+    is_persistent: true,
+    resize_keyboard: true,
+  };
+}
+
+export function pultReplyAction(text) {
+  return Object.entries(PULT_REPLY_BUTTONS).find(([, label]) => text === label)?.[0] || null;
+}
+
+export const homeCard = () => [
+  'Пульт кокпита',
+  '',
+  '📋 Конвейер — что сейчас идёт и где требуется решение.',
+  '💬 Агент — разговор с ассистентом и управление его памятью.',
+  '📥 Задачи — просмотр и запуск задач пока недоступны.',
+  '⚙️ Ещё — этот экран и служебные команды.',
+].join('\n');
+
+export const agentCard = () => [
+  '💬 Ассистент',
+  '',
+  'Напиши сообщение или пришли голосовое — это обычный auto-ход в общем разговоре «Компаньон».',
+  'Действия, требующие решения, ассистент спросит отдельной карточкой.',
+].join('\n');
+
+export const tasksCard = () => '📥 Просмотр и запуск задач пока недоступны. Открой задачи в кокпите.';
+
+function tokenCount(value) {
+  const n = Number(value);
+  if (!(n > 0) || !Number.isFinite(n)) return '';
+  if (n < 1_000) return String(Math.round(n));
+  const compact = n >= 1_000_000 ? n / 1_000_000 : n / 1_000;
+  const suffix = n >= 1_000_000 ? 'M' : 'k';
+  return `${compact.toFixed(compact >= 100 ? 0 : 1).replace(/\.0$/u, '')}${suffix}`;
+}
+
+function fileWord(count) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return 'файлов';
+  if (mod10 === 1) return 'файл';
+  if (mod10 >= 2 && mod10 <= 4) return 'файла';
+  return 'файлов';
+}
+
+/** Независимые части итога: неизвестные значения не превращаются в нули. */
+export function turnSummary({ files, tokens, contextTokens, contextWindow, compactWindow = 0 } = {}) {
+  const parts = [];
+  const paths = Array.isArray(files) ? [...new Set(files.filter((value) => typeof value === 'string' && value))] : [];
+  if (paths.length) parts.push(`${paths.length} ${fileWord(paths.length)}`);
+  const formattedTokens = tokenCount(tokens);
+  if (formattedTokens) parts.push(`${formattedTokens} ток.`);
+  if (Number(contextTokens) > 0 && Number(contextWindow) > 0) {
+    const fill = contextFill({
+      tokens: Number(contextTokens),
+      window: Number(contextWindow),
+      compactWindow: Math.max(0, Number(compactWindow) || 0),
+    });
+    parts.push(`контекст ${fill.pct}%`);
+  }
+  return parts.length ? `— ${parts.join(' · ')}` : '';
+}
 
 /** Управляющие символы → пробел, пробелы схлопнуты: недоверенный кусок в одну строку. */
 export function collapseLine(value) {
@@ -57,9 +143,48 @@ export function gateCard({ subject, reason }) {
   return withHeader(`⏳ ${subject} ждёт тебя`, `Ворота: ${collapseLine(reason)}`);
 }
 
-export function questionCard({ subject, question, note = '' }) {
-  const body = [collapseLine(question), collapseLine(note)].filter(Boolean).join('\n');
-  return withHeader(`❓ ${subject}, вопрос агента`, body, LIMITS.question);
+/**
+ * Кто спрашивает. Голое «чат» бесполезно: чатов у человека несколько, и вопрос вроде
+ * «что именно выпиливаем?» без имени разговора неотвечаем — приходится открывать кокпит,
+ * то есть ровно то, ради чего пульт и заведён. Название чата даёт `/api/chat/waiting`;
+ * нет ни его, ни задачи — честно остаётся «чат».
+ */
+export function chatSubject(waiting) {
+  const title = line(waiting?.chatTitle, LIMITS.title);
+  const task = waiting?.taskId == null ? '' : collapseLine(waiting.taskId);
+  if (title && task) return `#${task} — ${title}`;
+  const companion = waiting?.purpose === 'companion'
+    || String(waiting?.logicalIdentity || '').startsWith('companion:');
+  return title || (task ? `#${task}` : (companion ? 'Компаньон' : 'чат'));
+}
+
+/** Строка варианта: номер совпадает с номером кнопки, пояснение агента идёт следом. */
+const OPTION_LIMIT = 160;
+function optionLines(options) {
+  const list = Array.isArray(options) ? options.slice(0, 8) : [];
+  return list.map((option, index) => {
+    const label = line(option?.label || `вариант ${index + 1}`, BUTTON_TEXT_LIMIT);
+    const about = line(option?.description, OPTION_LIMIT);
+    return `${index + 1}) ${label}${about ? `\n   ${about}` : ''}`;
+  });
+}
+
+/**
+ * Карточка вопроса. `header` AskUserQuestion — короткий чип темы («Объём», «Подход»),
+ * ради него он в контракте и есть; пояснения вариантов на кнопку не влезают (56 символов)
+ * и живут в теле карточки под теми же номерами.
+ */
+export function questionCard({ subject, question, options = [], header = '', note = '' }) {
+  const topic = line(header, 60);
+  const choices = optionLines(options);
+  // Блоки собираются по одному и склеиваются пустой строкой: общий `filter(Boolean)`
+  // по строкам выбросил бы сам разделитель, и варианты слипались бы с вопросом.
+  const blocks = [
+    [topic ? `Тема: ${topic}` : '', collapseLine(question)].filter(Boolean).join('\n'),
+    choices.join('\n'),
+    collapseLine(note),
+  ].filter(Boolean);
+  return withHeader(`❓ ${subject} — вопрос агента`, blocks.join('\n\n'), LIMITS.question);
 }
 
 export function permissionCard({ subject, tool, preview }) {
@@ -67,7 +192,7 @@ export function permissionCard({ subject, tool, preview }) {
     `${collapseLine(tool)}: ${line(preview, LIMITS.preview)}`,
     'Полный текст — в кокпите.',
   ].join('\n');
-  return withHeader(`🔐 ${subject}, агент просит разрешение`, body);
+  return withHeader(`🔐 ${subject} — агент просит разрешение`, body);
 }
 
 /** Этап — часть шапки: `🛑 #4188 встал: <причина> (SANDBOX)`. Режется только причина. */
@@ -80,11 +205,6 @@ export function stallCard({ subject, stage, reason }) {
 
 export function silenceCard({ subject, text }) {
   return withHeader(`💤 ${subject}: ${collapseLine(text)}`, '');
-}
-
-/** Повод ушёл: карточка редактируется в «✓ решено» (или конкретный итог действием). */
-export function resolvedCard({ subject, note = 'решено' }) {
-  return withHeader(`✓ ${subject}: ${collapseLine(note)}`, '');
 }
 
 // ------------------------------------------------------ состояние конвейера
@@ -182,6 +302,55 @@ function progressLine(task) {
     : 'Прогресс маршрута: нет данных';
 }
 
+/**
+ * Чем занят агент прямо сейчас: «пишет» против «нет событий 28 мин (playwright)».
+ * Это главный ответ на вопрос «висит или работает», ради которого с телефона и
+ * открывают кокпит. Формулировку даёт общий agentActivityLabel, здесь только шапка.
+ */
+export function activityLine(task) {
+  const activity = activityFromSilence(task?.silence);
+  if (!activity) return '';
+  return `Агент: ${agentActivityLabel(activity)}`;
+}
+
+/** Длительность словами: «3 ч 40 мин», «12 мин», «45 с». */
+export function formatDuration(sec) {
+  const total = Math.max(0, Math.floor(Number(sec) || 0));
+  if (total < 60) return `${total} с`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes} мин`;
+  const rest = minutes % 60;
+  return rest ? `${Math.floor(minutes / 60)} ч ${rest} мин` : `${Math.floor(minutes / 60)} ч`;
+}
+
+/**
+ * Время работы прогона. `approximate` не прячем: цифра собрана из артефактов
+ * запусков, и выдавать её за точную нельзя (см. factory-graph.md).
+ */
+function timingLine(task) {
+  const timing = task?.graph?.timing;
+  const sec = Number(timing?.workSec);
+  if (!Number.isFinite(sec) || sec <= 0) return '';
+  return `Работа: ${timing.approximate ? '≈' : ''}${formatDuration(sec)}`;
+}
+
+/**
+ * Терминальный RESULT trusted-журнала попытки словами. Иконка отделена от текста:
+ * доехавший маршрут и закрытая попытка — разные события, и путать их нельзя.
+ */
+const RUN_RESULT = Object.freeze({
+  completed: { icon: '✅', text: 'маршрут завершён' },
+  abandoned: { icon: '⏹', text: 'попытка закрыта' },
+  recovered: { icon: '♻', text: 'попытка восстановлена в новую' },
+  'human-rewind': { icon: '↩', text: 'возврат человеком' },
+});
+
+export function runResult(value) {
+  const key = String(value ?? '').trim();
+  if (!key) return null;
+  return RUN_RESULT[key] || { icon: '•', text: collapseLine(key) };
+}
+
 function taskCountLabel(value) {
   const n = finiteCount(value);
   const mod100 = n % 100;
@@ -200,11 +369,53 @@ export function taskStatusCard(task) {
     graph?.route ? `Маршрут: ${line(graph.route, 100)}` : '',
     currentLine(task),
     progressLine(task),
+    activityLine(task),
+    timingLine(task),
   ];
   const stall = task?.stall || graph?.stall;
   if (stall?.title) lines.push(`Причина: ${line(stall.title, 400)}`);
   if (task?.quiet?.text) lines.push(`Молчание: ${line(task.quiet.text, 400)}`);
   return clipText(lines.filter(Boolean).join('\n'), 4_000);
+}
+
+/**
+ * Живая карточка прогона: то же тело, что у `/status <id>`, но сообщение не
+ * пересылается заново, а редактируется на месте. Приписка про самообновление
+ * нужна, чтобы человек не жал «Обновить» ради уже приехавшей цифры.
+ */
+export function liveCard(task) {
+  const result = runResult(task?.result);
+  if (result) return finishedCard(task);
+  return `${taskStatusCard(task)}\n\nКарточка обновляется сама.`;
+}
+
+/** Итог прогона: отдельное сообщение `done:` после терминального RESULT. */
+export function finishedCard(task) {
+  const result = runResult(task?.result) || { icon: '•', text: 'прогон закрыт' };
+  const id = collapseLine(task?.task);
+  const title = line(task?.title, LIMITS.title);
+  const { done, total, percent } = taskProgress(task);
+  const lines = [
+    `${result.icon} #${id}${title ? ` — ${title}` : ''}: ${result.text}`,
+    task?.graph?.route ? `Маршрут: ${line(task.graph.route, 100)}` : '',
+    total > 0 ? `Прошло узлов: ${done}/${total} · ${percent}%` : '',
+    timingLine(task),
+  ];
+  return clipText(lines.filter(Boolean).join('\n'), 4_000);
+}
+
+/**
+ * «Значимый» отпечаток задачи: смена узла, статуса, прогресса или исхода правит
+ * карточку немедленно, а тикающие минуты молчания — только по остыванию таймера.
+ * Иначе каждое `state-change` идущего прогона било бы в Telegram правкой.
+ */
+export function liveSignature(task) {
+  const current = taskCurrent(task);
+  return [
+    current.nodeId || '', current.status || '', current.done, current.total,
+    String(task?.result || ''), task?.stall ? '1' : '0', task?.quiet ? '1' : '0',
+    task?.daemonAlive ? '1' : '0',
+  ].join('|');
 }
 
 /** Компактная страница всех прогонов; подробности открываются кнопкой задачи. */
@@ -302,21 +513,6 @@ export function planPageCard({ taskId, pages, page = 0 }) {
   };
 }
 
-/**
- * Описание задачи B24 приходит HTML-ом портала; в тикет и превью пульта оно идёт
- * текстом. Правило то же, что в модалке задачи (htmlToText в TaskModal.vue).
- */
-export function htmlToPlainText(value) {
-  return String(value ?? '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
-    .replace(/\n{3,}/g, '\n\n').trim();
-}
-
 // -------------------------------------------------------------- callback_data
 //
 // ≤ 64 байт по контракту Bot API, поэтому без JSON: короткий префикс формы и
@@ -345,17 +541,19 @@ export const cbData = Object.freeze({
   resumeYes: (task) => encodeCb('r', task, 'y'),
   sandboxRetry: (task) => encodeCb('sb', task),
   sandboxRetryYes: (task) => encodeCb('sb', task, 'y'),
-  launchPick: (task, index) => encodeCb('l', task, index),
-  launchYes: (task, index) => encodeCb('l', task, index, 'y'),
-  stopPick: (index) => encodeCb('st', index),
-  stopYes: (index) => encodeCb('st', index, 'y'),
   statusList: (page = 0) => encodeCb('sl', page),
   statusTask: (task, page = 0) => encodeCb('sd', task, page),
   statusNodes: (task, page = 0, nodePage = 0) => encodeCb('sn', task, page, nodePage),
+  // Узлы открываются на экране навигации — отдельной записи в state, а не на живой
+  // карточке: она принадлежит вотчеру, экран — навигации человека.
+  statusNodesNew: (task) => encodeCb('sm', task),
   planOpen: (task) => encodeCb('po', task),
   planPage: (task, page) => encodeCb('pp', task, page),
-  taskCreate: () => 'tk:y',
-  taskCancel: () => 'tk:n',
+  agentCompact: () => 'ac:c',
+  agentReset: () => 'ac:r',
+  turnStop: (turnId) => encodeCb('ts', turnId),
+  home: () => 'nh',
+  screenClose: () => 'sc',
   dismiss: () => 'x',
 });
 
@@ -363,8 +561,6 @@ export const cbData = Object.freeze({
 //
 // Общие для вотчера (свежая карточка) и действий (пересборка после правки текста:
 // editMessageText без reply_markup СНИМАЕТ кнопки — Bot API так устроен).
-
-const BUTTON_TEXT_LIMIT = 56;
 
 export const gateKeyboard = (taskId, gateKey) => [
   ...(gateKey === 'GATE_PLAN' ? [[
@@ -385,6 +581,28 @@ export const gateRejectKeyboard = (taskId, gateKey) => [
   [{ text: '✓ Всё-таки принять', callback_data: cbData.gateApprove(taskId, gateKey) }],
 ];
 
+/** Ряд закрытия экрана навигации: удаляет само сообщение-экран. */
+export const screenCloseRow = () => [{ text: '✕ Закрыть', callback_data: cbData.screenClose() }];
+export const homeRow = () => [{ text: '‹ Домой', callback_data: cbData.home() }];
+
+/** Подсказка /help живёт на том же экране навигации и закрывается одной кнопкой. */
+export const helpKeyboard = () => [screenCloseRow()];
+
+export const homeKeyboard = () => [screenCloseRow()];
+
+export const agentKeyboard = () => [
+  [{ text: '🗜 Сжать', callback_data: cbData.agentCompact() }],
+  [{ text: '🧹 Сбросить память', callback_data: cbData.agentReset() }],
+  [{ text: '‹ Домой', callback_data: cbData.home() }],
+];
+
+export const tasksKeyboard = () => [[{ text: '‹ Домой', callback_data: cbData.home() }]];
+
+export const stopKeyboard = (turnId) => [[{
+  text: '⏹ Стоп',
+  callback_data: cbData.turnStop(turnId),
+}]];
+
 export function statusListKeyboard(tasks, page, totalPages) {
   const rows = (Array.isArray(tasks) ? tasks : []).map((task) => ([{
     text: `${taskStatusIcon(task)} #${collapseLine(task?.task)} · подробнее`,
@@ -398,8 +616,20 @@ export function statusListKeyboard(tasks, page, totalPages) {
     rows.push(nav);
   }
   rows.push([{ text: '↻ Обновить', callback_data: cbData.statusList(page) }]);
+  rows.push(homeRow());
+  rows.push(screenCloseRow());
   return rows;
 }
+
+/**
+ * Кнопки живой карточки. Всё, что открывается отсюда, уходит на экран навигации —
+ * отдельную запись в state: сама живая карточка принадлежит вотчеру, и он держит
+ * её актуальной сам.
+ */
+export const liveKeyboard = (taskId) => [[
+  { text: '🗺 Все узлы', callback_data: cbData.statusNodesNew(taskId) },
+  { text: '📄 План', callback_data: cbData.planOpen(taskId) },
+]];
 
 export const taskStatusKeyboard = (taskId, page = 0) => [
   [
@@ -410,6 +640,8 @@ export const taskStatusKeyboard = (taskId, page = 0) => [
     { text: '← К списку', callback_data: cbData.statusList(page) },
     { text: '↻ Обновить', callback_data: cbData.statusTask(taskId, page) },
   ],
+  homeRow(),
+  screenCloseRow(),
 ];
 
 export function taskNodesKeyboard(taskId, page = 0, nodePage = 0, totalPages = 1) {
@@ -427,6 +659,8 @@ export function taskNodesKeyboard(taskId, page = 0, nodePage = 0, totalPages = 1
     { text: '← К задаче', callback_data: cbData.statusTask(taskId, page) },
     { text: '📄 План', callback_data: cbData.planOpen(taskId) },
   ]);
+  rows.push(homeRow());
+  rows.push(screenCloseRow());
   return rows;
 }
 
@@ -440,12 +674,15 @@ export function planPageKeyboard(taskId, page, totalPages) {
     rows.push(nav);
   }
   rows.push([{ text: '← К задаче', callback_data: cbData.statusTask(taskId, 0) }]);
+  rows.push(homeRow());
+  rows.push(screenCloseRow());
   return rows;
 }
 
 export const questionKeyboard = (pid, options) => [
   ...options.slice(0, 8).map((option, index) => ([{
-    text: clipText(collapseLine(option?.label || `вариант ${index + 1}`), BUTTON_TEXT_LIMIT),
+    // Номер тот же, что у пояснения в теле карточки: кнопка коротка, объяснение длинно.
+    text: clipText(`${index + 1}) ${collapseLine(option?.label || 'вариант')}`, BUTTON_TEXT_LIMIT),
     callback_data: cbData.question(pid, index),
   }])),
   [{ text: '✍ Свой ответ', callback_data: cbData.questionText(pid) }],
@@ -474,6 +711,7 @@ const TASK_RE = /^\d{1,19}$/u;
 const INDEX_RE = /^\d{1,4}$/u;
 const PID_RE = /^[A-Za-z0-9-]{1,40}$/u;
 const GATE_RE = /^[A-Z][A-Z0-9_]{0,48}$/u;
+const TURN_RE = /^[A-Za-z0-9_-]{1,32}$/u;
 
 const index = (value) => Number(value);
 const step = (value) => (value === undefined ? 'ask' : value === 'y' ? 'yes' : 'no');
@@ -490,6 +728,20 @@ export function parseCallback(data) {
   const [kind] = parts;
 
   if (kind === 'x') return parts.length === 1 ? { kind: 'dismiss' } : null;
+
+  if (kind === 'sc') return parts.length === 1 ? { kind: 'screen-close' } : null;
+
+  if (kind === 'nh') return parts.length === 1 ? { kind: 'nav-home' } : null;
+
+  if (kind === 'ac' && parts.length === 2) {
+    if (parts[1] === 'c') return { kind: 'agent-compact' };
+    if (parts[1] === 'r') return { kind: 'agent-reset' };
+    return null;
+  }
+
+  if (kind === 'ts' && parts.length === 2 && TURN_RE.test(parts[1])) {
+    return { kind: 'turn-stop', turnId: parts[1] };
+  }
 
   if (kind === 'g' && parts.length === 4) {
     const [, taskId, gateKey, decision] = parts;
@@ -524,20 +776,6 @@ export function parseCallback(data) {
     return { kind: kind === 'r' ? 'resume' : 'sandbox-retry', taskId, step: step(tail) };
   }
 
-  if (kind === 'l' && (parts.length === 3 || parts.length === 4)) {
-    const [, taskId, option, tail] = parts;
-    if (!TASK_RE.test(taskId) || !INDEX_RE.test(option)) return null;
-    if (tail !== undefined && tail !== 'y' && tail !== 'n') return null;
-    return { kind: 'launch', taskId, index: index(option), step: step(tail) };
-  }
-
-  if (kind === 'st' && (parts.length === 2 || parts.length === 3)) {
-    const [, option, tail] = parts;
-    if (!INDEX_RE.test(option)) return null;
-    if (tail !== undefined && tail !== 'y' && tail !== 'n') return null;
-    return { kind: 'stop', index: index(option), step: step(tail) };
-  }
-
   if (kind === 'sl' && parts.length === 2 && INDEX_RE.test(parts[1])) {
     return { kind: 'status-list', page: index(parts[1]) };
   }
@@ -555,6 +793,10 @@ export function parseCallback(data) {
     return { kind: 'status-nodes', taskId, page: index(page), nodePage: index(nodePage) };
   }
 
+  if (kind === 'sm' && parts.length === 2 && TASK_RE.test(parts[1])) {
+    return { kind: 'status-nodes-new', taskId: parts[1] };
+  }
+
   if (kind === 'po' && parts.length === 2 && TASK_RE.test(parts[1])) {
     return { kind: 'plan-open', taskId: parts[1] };
   }
@@ -563,12 +805,6 @@ export function parseCallback(data) {
     const [, taskId, page] = parts;
     if (!TASK_RE.test(taskId) || !INDEX_RE.test(page)) return null;
     return { kind: 'plan-page', taskId, page: index(page) };
-  }
-
-  if (kind === 'tk' && parts.length === 2) {
-    if (parts[1] === 'y') return { kind: 'task-create', confirmed: true };
-    if (parts[1] === 'n') return { kind: 'task-create', confirmed: false };
-    return null;
   }
 
   return null;

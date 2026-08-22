@@ -17,6 +17,9 @@ const VUE_URL = pathToFileURL(fileURLToPath(
 const FACTORY_DEBUG_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/factory-debug.js', import.meta.url),
 )).href;
+const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/src/shared/companion-run.js', import.meta.url),
+)).href;
 let compileNonce = 0;
 
 // Node кэширует модуль по всему `data:`-URL, а две компиляции одного SFC дают побайтово
@@ -39,7 +42,10 @@ async function compileSettingsView() {
     .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
     .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__settingsApi;')
     .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
-    .replace("import { useUiContextStore } from '../stores/ui-context.js';", stubStore('useUiContextStore'))
+    .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ update() {}, focus() {}, blur() {}, dispose() {} });',
+    )
     .replace(
       "import { useToolLauncher } from '../shared/tools/launcher.js';",
       'const useToolLauncher = () => ({ openTerminal() {} });',
@@ -63,6 +69,8 @@ async function compileSettingsView() {
     .replace("import { useAuthStore } from '../stores/auth.js';", stubStore('useAuthStore'))
     .replace("import { usePluginsStore } from '../stores/plugins.js';", stubStore('usePluginsStore'))
     .replace("import { useChatStore } from '../stores/chat.js';", stubStore('useChatStore'))
+    .replace("import { useCompanionStore } from '../stores/companion.js';", "const useCompanionStore = () => ({ deviceEnabled: true, setDeviceEnabled() {} });")
+    .replace("import { useCompanionStore } from '../stores/companion.js';", stubStore('useCompanionStore'))
     .replace("import { usePwaStore } from '../stores/pwa.js';", stubStore('usePwaStore'))
     .replace(
       /import \{\s*blockReasonLabel,\s*UPDATE_STAGE_LABELS,\s*useCockpitUpdateStore,\s*\} from '\.\.\/stores\/cockpit-update\.js';/,
@@ -77,7 +85,10 @@ async function compileSettingsView() {
       "import { useSse } from '../composables/useSse.js';",
       'const useSse = () => ({ connected: { value: false } });',
     )
-    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`);
+    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`)
+    // Чистый модуль без Vue/pinia: подставляем НАСТОЯЩИЙ по абсолютному URL, а не
+    // заглушку — иначе тест разошёлся бы с правилом «полупустая ссылка = дефолт».
+    .replace("from '../shared/companion-run.js';", `from "${COMPANION_RUN_URL}";`);
   const nonce = compileNonce++;
   return (await import(
     `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
@@ -121,16 +132,18 @@ function providers() {
       id: 'claude',
       name: 'Claude',
       available: true,
+      // Лестницы эффорта у моделей РАЗНЫЕ — на этом и держится проверка переноса.
       models: [
-        { id: 'claude-opus-5', name: 'Opus 5' },
-        { id: 'claude-opus-4-8', name: 'Opus 4.8', extra: true },
+        { id: 'claude-opus-5', name: 'Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        { id: 'claude-opus-4-8', name: 'Opus 4.8', extra: true, efforts: ['low', 'high'] },
       ],
     },
     {
       id: 'ollama',
       name: 'Ollama',
       available: true,
-      models: [{ id: 'hf.co/unsloth/qwen3.6:latest', name: 'qwen3.6 (hf)' }],
+      // У локального эффорт бинарный: `xhigh` ему передать нельзя.
+      models: [{ id: 'hf.co/unsloth/qwen3.6:latest', name: 'qwen3.6 (hf)', efforts: ['low', 'high'] }],
     },
     { id: 'codex', name: 'GPT (Codex)', available: false, models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }] },
   ];
@@ -212,6 +225,7 @@ async function mountSettings(t, { value = null } = {}) {
     useAuthStore: () => ({ login: 'me', async logoutAll() {} }),
     usePluginsStore: () => plugins,
     useChatStore: () => ({ compactWindow: 0 }),
+    useCompanionStore: () => ({ deviceEnabled: true, setDeviceEnabled() {} }),
     usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };
@@ -297,4 +311,112 @@ test('пропавшая из реестра модель не выдаётся 
   const lost = wrapper.findAll('.plugrow select.inp > option').map((o) => o.text());
   assert.ok(lost.some((text) => text.includes('ollama:сгинувшая:latest') && text.includes('нет в реестре')),
     'выбор должен остаться в списке с пометкой');
+});
+
+// ── Усилие ──────────────────────────────────────────────────────────────────
+// Усилие — свойство ЗАПУСКА, а не модели: одна и та же модель разбирает встречу и
+// быстро, и вдумчиво, а до правки выбора не было вовсе и ход всегда шёл на умолчании
+// исполнителя. Лестницу объявляет сама модель, поэтому контрол не универсальный.
+
+/** Селект усилия — второй `select.inp` карточки; первый всегда модель. */
+function effortSelect(wrapper) {
+  const all = wrapper.findAll('.plugrow select.inp');
+  return all.length > 1 ? all[1] : null;
+}
+
+test('усилия нет, пока не выбрана модель: выбирать уровень не у чего', async (t) => {
+  const { wrapper } = await mountSettings(t);
+
+  assert.equal(effortSelect(wrapper), null);
+});
+
+test('у модели без своей лестницы контрола усилия нет вовсе', async (t) => {
+  // Тот же принцип, что у слайдера в чате: пустой список эффортов — не «выбери низкий»,
+  // а «этой модели уровень передать нечем».
+  const { wrapper } = await mountSettings(t, { value: { provider: 'codex', model: 'gpt-5.6' } });
+
+  assert.equal(effortSelect(wrapper), null, 'у модели без efforts селект усилия рисовать нельзя');
+});
+
+test('усилие уезжает в ту же пару и сохраняется вместе с моделью', async (t) => {
+  const { wrapper, plugins, saved, flushPromises } = await mountSettings(
+    t, { value: { provider: 'claude', model: 'claude-opus-5' } },
+  );
+  const effort = effortSelect(wrapper);
+
+  assert.ok(effort, 'у Opus 5 лестница объявлена — селект обязан быть');
+  assert.deepEqual(
+    effort.findAll('option').map((o) => o.element.value),
+    ['', 'low', 'medium', 'high', 'xhigh', 'max'],
+    'уровни берутся у модели, а не из общего списка',
+  );
+  assert.equal(effort.element.value, '', 'без выбора — умолчание исполнителя, а не выдуманный уровень');
+
+  await effort.setValue('xhigh');
+  assert.deepEqual(plugins.plugin.values.triageModel,
+    { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' });
+
+  await wrapper.find('.plugset button').trigger('click');
+  await flushPromises();
+  assert.deepEqual(saved.at(-1).values.triageModel,
+    { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' },
+    'на сервер уезжает тройка, а не отдельный ключ рядом');
+});
+
+test('пустое усилие СНИМАЕТ ключ, а не пишет пустую строку', async (t) => {
+  const { wrapper, plugins } = await mountSettings(
+    t, { value: { provider: 'claude', model: 'claude-opus-5', effort: 'max' } },
+  );
+
+  await effortSelect(wrapper).setValue('');
+  assert.deepEqual(plugins.plugin.values.triageModel, { provider: 'claude', model: 'claude-opus-5' },
+    'пустая строка в effort означала бы «уровень выбран и он пустой»');
+});
+
+test('смена модели не переносит уровень, которого у новой нет', async (t) => {
+  // Ровно та грабля, из-за которой уровень вообще сверяется: `--effort xhigh` у модели
+  // без такой возможности не игнорируется, а РОНЯЕТ запуск CLI.
+  const { wrapper, plugins, select } = await mountSettings(
+    t, { value: { provider: 'claude', model: 'claude-opus-5', effort: 'xhigh' } },
+  );
+
+  await select.setValue('ollama:hf.co/unsloth/qwen3.6:latest');
+  assert.deepEqual(plugins.plugin.values.triageModel,
+    { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest' },
+    'у локальной модели эффорт бинарный — xhigh переносить некуда');
+
+  // А совпавший уровень переносится: терять осознанный выбор человека тоже нельзя.
+  await effortSelect(wrapper).setValue('high');
+  await select.setValue('claude:claude-opus-5');
+  assert.equal(plugins.plugin.values.triageModel.effort, 'high');
+});
+
+test('уровень, пропавший у модели, показан пометкой, а не молча стёрт', async (t) => {
+  // Обновили CLI, лестница модели изменилась. Сервер такой уровень снимет и пойдёт на
+  // умолчании — человек обязан видеть, что его выбор больше не действует.
+  const { wrapper } = await mountSettings(
+    t, { value: { provider: 'ollama', model: 'hf.co/unsloth/qwen3.6:latest', effort: 'xhigh' } },
+  );
+  const effort = effortSelect(wrapper);
+
+  assert.equal(effort.element.value, 'xhigh');
+  assert.ok(effort.findAll('option').some((o) => o.text().includes('нет у этой модели')),
+    'исчезнувший уровень обязан остаться в списке с оговоркой');
+});
+
+test('широкая плашка занимает две колонки, а в одну колонку — ни одной лишней', async () => {
+  // happy-dom раскладку не считает вовсе, поэтому правило стережём чтением стиля;
+  // сама геометрия замерена в headless Chrome на 1620/1200/860/600 px.
+  const source = await readFile(VIEW_PATH, 'utf8');
+  const style = source.slice(source.indexOf('<style'));
+
+  assert.match(style, /\.plugcards \{[^}]*grid-auto-flow: dense/s,
+    'без dense обычная плашка между двумя широкими остаётся одна в ряду (замер: 24% ряда)');
+  assert.match(style, /\.plugcard\.wide \{ grid-column: span 2; \}/,
+    'целый ряд под одну плашку — та же пустота, что и полупустой сосед');
+  const narrow = style.slice(style.indexOf('@media (max-width: 639px)'));
+  assert.match(narrow, /\.plugcard\.wide \{ grid-column: auto; \}/,
+    'в одну колонку `span 2` создаёт вторую, неявную: замер на 600 px давал плашку в 30 px');
+  assert.match(style, /\.plugset > \.btn \{ align-self: flex-start; \}/,
+    'кнопка обязана быть по содержимому: общий max-width растягивал её на 760 px');
 });

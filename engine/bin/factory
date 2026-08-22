@@ -16,12 +16,15 @@ usage() {
   cat <<'EOF'
 Использование:
   factory check --profile PROFILE [--route ROUTE]
+                   [--expected-catalog-hash SHA256]
                    [--routes-dir ABS]
 
   factory TASK start --profile PROFILE --route ROUTE --ticket-json ABS
                    [--routes-dir ABS]
                    [--state-dir ABS] [--control-dir ABS]
                    [--runner-primary RUNNER]
+                   [--expected-catalog-hash SHA256]
+                   [--queue-dispatch-id UUID]
                    [--instrumentation-file REPO:PATH]...
                    [--diagnosis-kind functional|performance|data|integration]
                    [--diagnosis-signal TEXT]
@@ -235,6 +238,8 @@ DIAGNOSIS_KIND=""
 DIAGNOSIS_SIGNAL=""
 RUNNER_PRIMARY_OVERRIDE=""
 RUNNER_FAILOVER_OVERRIDE=""
+EXPECTED_CATALOG_HASH=""
+QUEUE_DISPATCH_ID=""
 GATE_NODE=""
 GATE_DECISION=""
 GATE_COMMENT=""
@@ -378,6 +383,19 @@ while (( $# > 0 )); do
       RUNNER_PRIMARY_OVERRIDE=$2
       shift 2
       ;;
+    --expected-catalog-hash)
+      (( $# >= 2 )) || die "после --expected-catalog-hash нужен sha256"
+      [[ -z "$EXPECTED_CATALOG_HASH" ]] ||
+        die "--expected-catalog-hash указан повторно"
+      EXPECTED_CATALOG_HASH=$2
+      shift 2
+      ;;
+    --queue-dispatch-id)
+      (( $# >= 2 )) || die "после --queue-dispatch-id нужен UUID"
+      [[ -z "$QUEUE_DISPATCH_ID" ]] || die "--queue-dispatch-id указан повторно"
+      QUEUE_DISPATCH_ID=$2
+      shift 2
+      ;;
     --node|--gate)
       (( $# >= 2 )) || die "после $1 нужен gate id"
       [[ -z "$GATE_NODE" ]] || die "gate id указан повторно"
@@ -445,6 +463,17 @@ done
 # остальные режимы ведут immutable попытку с уже зафиксированной цепочкой.
 [[ "$MODE" == start || -z "$RUNNER_PRIMARY_OVERRIDE" ]] ||
   die "--runner-primary допустим только при start"
+[[ "$MODE" == check || "$MODE" == start || -z "$EXPECTED_CATALOG_HASH" ]] ||
+  die "--expected-catalog-hash допустим только при check или start"
+[[ "$MODE" == start || -z "$QUEUE_DISPATCH_ID" ]] ||
+  die "--queue-dispatch-id допустим только при start"
+[[ -z "$EXPECTED_CATALOG_HASH" || "$EXPECTED_CATALOG_HASH" =~ ^[a-f0-9]{64}$ ]] ||
+  die "expected-catalog-hash: нужен sha256 в нижнем регистре"
+[[ -z "$QUEUE_DISPATCH_ID" ||
+   "$QUEUE_DISPATCH_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+  die "queue-dispatch-id: нужен UUID в нижнем регистре"
+[[ -z "$QUEUE_DISPATCH_ID" || -n "$EXPECTED_CATALOG_HASH" ]] ||
+  die "--queue-dispatch-id требует --expected-catalog-hash"
 # Движок не знает ни одного проекта: профиль обязателен, готовность к v2 он
 # заявляет capability в graph.json, а конкретику отдаёт v2-хуками контракта.
 [[ -n "$PROFILE" && "$PROFILE" =~ ^[a-z][a-z0-9_-]{0,40}$ ]] ||
@@ -479,6 +508,12 @@ if [[ "$MODE" == check || "$MODE" == start ]]; then
   ) || die "current catalog v2 не прошёл проверку"
   CURRENT_CATALOG=$(json_value catalogHash <<<"$CURRENT_JSON") ||
     die "catalog hash не прочитан"
+  if [[ -n "$EXPECTED_CATALOG_HASH" &&
+        "$CURRENT_CATALOG" != "$EXPECTED_CATALOG_HASH" ]]; then
+    printf 'FACTORY_ERROR=catalog_changed EXPECTED=%s ACTUAL=%s\n' \
+      "$EXPECTED_CATALOG_HASH" "$CURRENT_CATALOG" >&2
+    exit 75
+  fi
   if [[ -n "$ROUTE" ]]; then
     CURRENT_ROUTE_JSON=$(
       "$FACTORY_HOME/bin/factory-route" \
@@ -537,7 +572,7 @@ if [[ "$MODE" == start ]]; then
      "$DIAGNOSIS_SIGNAL" != *$'\t'* ]] ||
     die "diagnosis-signal: до 200 символов одной строкой"
   if [[ -n "$RUNNER_PRIMARY_OVERRIDE" ]]; then
-    [[ "$RUNNER_PRIMARY_OVERRIDE" =~ ^[a-z][a-z0-9_-]*$ ]] ||
+    [[ "$RUNNER_PRIMARY_OVERRIDE" =~ ^[a-z][a-z0-9_-]{0,63}$ ]] ||
       die "runner-primary: недопустимый id исполнителя"
     runners_catalog_list | grep -Fxq "$RUNNER_PRIMARY_OVERRIDE" ||
       die "runner-primary: исполнитель не установлен: $RUNNER_PRIMARY_OVERRIDE"
@@ -861,6 +896,10 @@ fi
 V2_SANDBOX_ENV="$STATE_DIR/t${TASK}.env"
 V2_SCOPE_FILE="$STATE_DIR/t${TASK}.instrumentation-scope.list"
 V2_ATTEMPT=""
+V2_ATTEMPT_SCHEMA=""
+V2_ATTEMPT_CATALOG_HASH=""
+V2_ATTEMPT_QUEUE_DISPATCH_ID=""
+V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE=""
 V2_TRUSTED_TICKET=""
 V2_SCOPE_SPEC=""
 V2_DELIVERY_SPEC=""
@@ -1041,9 +1080,23 @@ v2_shared_lease_bind() {
 }
 
 v2_shared_lease_release() {
-  local expected_attempt=$1 fd resource file rc=0
+  local expected_attempt=$1 fd resource file rc=0 lifecycle_rc=0 event_rc
+  local cleanup_hash="" lifecycle_active=0 released=0 total=${#V2_SHARED_RESOURCES[@]}
+  local -a released_resources=()
   [[ "$V2_WORKSPACE_MODE" == shared ]] || return 0
-  v2_shared_lease_lock fd || return
+  if runtime_lifecycle_enabled_v2; then
+    cleanup_hash=$(printf '%s\n' "${V2_SHARED_RESOURCES[@]}" | sha256sum | awk '{print $1}') || return
+    runtime_lifecycle_cleanup_begin_v2 shared_leases "$cleanup_hash" >/dev/null || return
+    lifecycle_active=1
+  fi
+  v2_shared_lease_lock fd || {
+    rc=$?
+    if (( lifecycle_active )); then
+      runtime_lifecycle_cleanup_finish_v2 shared_leases failed cleanup_failed \
+        0 "$total" "$cleanup_hash" >/dev/null || true
+    fi
+    return "$rc"
+  }
   for resource in "${V2_SHARED_RESOURCES[@]}"; do
     file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
     v2_shared_owner_valid "$file" "$resource" "$expected_attempt" || {
@@ -1054,11 +1107,33 @@ v2_shared_lease_release() {
   if (( rc == 0 )); then
     for resource in "${V2_SHARED_RESOURCES[@]}"; do
       file=$(v2_shared_owner_path "$resource") || { rc=78; break; }
-      rm -f -- "$file" || { rc=1; break; }
+      runtime_analytics_durable_unlink_v2 "$file" || { rc=$?; break; }
+      released_resources+=("$resource")
+      ((released += 1))
     done
   fi
   v2_shared_lease_unlock "$fd"
+  if (( lifecycle_active )); then
+    for resource in "${released_resources[@]}"; do
+      runtime_lifecycle_shared_lease_released_v2 \
+        "$resource" released "$cleanup_hash" >/dev/null || {
+          event_rc=$?
+          (( lifecycle_rc != 0 )) || lifecycle_rc=$event_rc
+        }
+    done
+    if (( rc == 0 && lifecycle_rc == 0 )); then
+      runtime_lifecycle_cleanup_finish_v2 shared_leases succeeded normal \
+        "$released" 0 "$cleanup_hash" >/dev/null || lifecycle_rc=$?
+    else
+      runtime_lifecycle_cleanup_finish_v2 shared_leases failed cleanup_failed \
+        "$released" "$((total - released))" "$cleanup_hash" >/dev/null || {
+          event_rc=$?
+          (( lifecycle_rc != 0 )) || lifecycle_rc=$event_rc
+        }
+    fi
+  fi
   (( rc == 0 )) || return "$rc"
+  (( lifecycle_rc == 0 )) || return "$lifecycle_rc"
   V2_SHARED_LEASE_CLAIMED=0
   V2_SHARED_LEASE_BOUND=0
 }
@@ -1091,6 +1166,35 @@ v2_attempt_artifacts() {
   local root
   root=$(attempt_state_v2_task_root "$TASK") || return
   printf '%s/attempts/%s/artifacts\n' "$root" "$V2_ATTEMPT"
+}
+
+# Queue dispatch и точный task-level runner override входят в trusted identity
+# attempt schema 2. Старые schema 1 не содержат этих полей: queue тогда ещё не
+# существовала, а runner override остаётся в совместимой pipeline-проекции.
+v2_load_attempt_launch_identity() {
+  local attempt=$1 file schema catalog queue="" runner=""
+  file="$(attempt_state_v2_task_root "$TASK")/attempts/$attempt/attempt.json"
+  schema=$(_attempt_state_json get "$file" schema) || return
+  catalog=$(_attempt_state_json get "$file" catalogHash) || return
+  case "$schema" in
+    1)
+      runner=$(get "$TASK" RUNNER_OVERRIDE_PRIMARY)
+      ;;
+    2)
+      queue=$(_attempt_state_json get "$file" queueDispatchId) || return
+      runner=$(_attempt_state_json get "$file" runnerPrimaryOverride) || return
+      ;;
+    *)
+      return 78
+      ;;
+  esac
+  _attempt_state_catalog_hash "$catalog" >/dev/null || return 78
+  [[ -z "$queue" ]] || _attempt_state_dispatch_id "$queue" >/dev/null || return 78
+  _attempt_state_runner_override "$runner" >/dev/null || return 78
+  V2_ATTEMPT_SCHEMA=$schema
+  V2_ATTEMPT_CATALOG_HASH=$catalog
+  V2_ATTEMPT_QUEUE_DISPATCH_ID=$queue
+  V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE=$runner
 }
 
 # Repo/project-часть профиля закрепляется рядом с route pins. Профиль остаётся
@@ -1669,6 +1773,31 @@ v2_sandbox_up() {
   v2_read_sandbox
 }
 
+v2_sandbox_up_lifecycle() {
+  local workspace_hash policy_hash evidence rc=0 status=succeeded reason=normal
+  workspace_hash=$(runtime_analytics_hash_string_v2 \
+    "$V2_WORKSPACE_MODE|$PROFILE|t$TASK|$V2_ATTEMPT|$V2_SANDBOX_ENV|${V2_REPO_WORKTREES[*]}") ||
+    return 78
+  policy_hash=$(runtime_analytics_hash_string_v2 \
+    "$V2_ATTEMPT_CATALOG_HASH|${ROUTE_V2_ROUTE_HASH:-}|$V2_WORKSPACE_MODE|sandbox-v2") ||
+    return 78
+  runtime_lifecycle_sandbox_begin_v2 \
+    "$V2_WORKSPACE_MODE" "$workspace_hash" "$policy_hash" >/dev/null || return
+  v2_sandbox_up || rc=$?
+  if (( rc != 0 )); then
+    status=failed
+    reason=unavailable
+  fi
+  evidence=$(runtime_analytics_hash_string_v2 \
+    "sandbox:$V2_ATTEMPT:$V2_WORKSPACE_MODE:rc=$rc") || evidence=""
+  runtime_lifecycle_sandbox_finish_v2 \
+    "$workspace_hash" "$status" "$reason" "$evidence" >/dev/null || {
+      (( rc != 0 )) && return "$rc"
+      return
+    }
+  return "$rc"
+}
+
 route_v2_workspace_roots() {
   printf '%s\n' "${V2_REPO_WORKTREES[@]}"
 }
@@ -2183,10 +2312,198 @@ sys.stdout.write(value)
 PY
 }
 
+V2_LIFECYCLE_SESSION_OPEN=0
+V2_LIFECYCLE_EXIT_STATUS=succeeded
+V2_LIFECYCLE_EXIT_REASON=normal
+
+v2_lifecycle_millisecond_instant() {
+  local value=$1
+  [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 78
+  printf '%s.000Z\n' "${value%Z}"
+}
+
+# Пуст ли journal попытки: 0 — ни одного события, 3 — события есть, иначе код ошибки
+# чтения. Различать обязательно: пустой журнал законен (попытка старше самой аналитики),
+# а нечитаемый — это порча, и молчать о ней нельзя.
+v2_lifecycle_ledger_empty() {
+  local attempt=$1 root ledger rc
+  root=$(factory_control_root) || return
+  ledger=$(mktemp "$root/.lifecycle-empty-probe.XXXXXX") || return 1
+  attempt_lifecycle_read_v2 "$TASK" "$attempt" >"$ledger"
+  rc=$?
+  if (( rc == 0 )) && [[ -s "$ledger" ]]; then
+    rc=3
+  fi
+  rm -f -- "$ledger"
+  return "$rc"
+}
+
+v2_lifecycle_begin_session() {
+  local attempt=$1 mode=$2 route_id=${3:-} route_hash=${4:-}
+  local previous="" previous_rc session_reason record record_hash origin previous_attempt
+  local recovery recovery_hash="" root open_event="" open_rc=3 open_hash=""
+  attempt_lifecycle_init_v2 "$TASK" "$attempt" || return
+  previous=$(runtime_lifecycle_previous_session_v2 "$TASK" "$attempt" 2>/dev/null)
+  previous_rc=$?
+  (( previous_rc == 0 || previous_rc == 3 )) || return "$previous_rc"
+  # Попытка, начатая до появления lifecycle-журнала, не имеет в нём ни одного события,
+  # а первым обязан идти route_selected: без него валидатор схемы отвергает любое событие
+  # со scoped route identity («scoped route identity appears before route_selected»).
+  # Дописать этот route_selected задним числом нечем — сессии и её времени в журнале не
+  # было вовсе, — поэтому lifecycle такой попытке просто не ведётся. Иначе abandon, goto
+  # и resume старой попытки падали кодом 78 детерминированно, то есть у человека
+  # переставали работать «снести стенд», «продолжить прогон» и «перейти сюда».
+  # Все события lifecycle стоят за `runtime_lifecycle_enabled_v2`, поэтому невыставленный
+  # контекст означает «ничего не пишем», а не половину журнала.
+  if [[ "$mode" == resume && -z "$previous" ]]; then
+    v2_lifecycle_ledger_empty "$attempt"
+    previous_rc=$?
+    (( previous_rc == 0 || previous_rc == 3 )) || return "$previous_rc"
+    (( previous_rc != 0 )) || return 0
+  fi
+  if [[ "$mode" == resume ]]; then
+    root=$(factory_control_root) || return
+    open_event=$(mktemp "$root/.lifecycle-open-session.XXXXXX") || return 1
+    runtime_lifecycle_previous_open_session_v2 "$TASK" "$attempt" "$open_event"
+    open_rc=$?
+    if (( open_rc == 0 )); then
+      open_hash=$(runtime_analytics_json_get_v2 "$open_event" eventHash) || {
+        previous_rc=$?
+        rm -f -- "$open_event"
+        return "$previous_rc"
+      }
+    elif (( open_rc != 3 )); then
+      rm -f -- "$open_event"
+      return "$open_rc"
+    fi
+  fi
+  runtime_lifecycle_set_context_v2 \
+    "$TASK" "$attempt" "$PROFILE" "$route_id" "$route_hash" >/dev/null || {
+      previous_rc=$?
+      [[ -z "$open_event" ]] || rm -f -- "$open_event"
+      return "$previous_rc"
+    }
+  case "$mode" in
+    fresh) session_reason=initial ;;
+    recovery) session_reason=recovery ;;
+    resume)
+      if [[ -n "$previous" ]]; then session_reason=resume; else session_reason=recovery; fi
+      ;;
+    *) return 2 ;;
+  esac
+  runtime_lifecycle_session_begin_v2 "$session_reason" "$previous" >/dev/null || {
+    previous_rc=$?
+    [[ -z "$open_event" ]] || rm -f -- "$open_event"
+    return "$previous_rc"
+  }
+  V2_LIFECYCLE_SESSION_OPEN=1
+  if (( open_rc == 0 )); then
+    runtime_lifecycle_attempt_interrupted_v2 crash_detected "$open_hash" >/dev/null || {
+      previous_rc=$?
+      rm -f -- "$open_event"
+      return "$previous_rc"
+    }
+  fi
+  [[ -z "$open_event" ]] || rm -f -- "$open_event"
+  if [[ "$mode" == fresh || "$mode" == recovery ]]; then
+    record="$(attempt_state_v2_task_root "$TASK")/attempts/$attempt/attempt.json"
+    record_hash=$(runtime_analytics_hash_file_v2 "$record") || return
+    origin=$(_attempt_state_json get "$record" origin) || return
+    previous_attempt=$(_attempt_state_json get "$record" previousAttemptId) || return
+    recovery=$(_attempt_state_json get "$record" recoveryReason) || return
+    [[ "$previous_attempt" != null ]] || previous_attempt=""
+    [[ "$recovery" != null ]] || recovery=""
+    [[ -z "$recovery" ]] || recovery_hash=$(runtime_analytics_hash_string_v2 "$recovery") || return
+    runtime_lifecycle_attempt_started_v2 \
+      "$origin" "$previous_attempt" "$recovery_hash" "$record_hash" >/dev/null || return
+  elif [[ -n "$previous" ]]; then
+    runtime_lifecycle_attempt_resumed_v2 "$previous" operator '' >/dev/null || return
+  fi
+  if [[ "$mode" == resume ]]; then
+    runtime_lifecycle_reconcile_routing_v2 "$TASK" "$attempt" >/dev/null || return
+    runtime_lifecycle_reconcile_usage_v2 "$TASK" "$attempt" >/dev/null || return
+  fi
+}
+
+v2_lifecycle_route_selected() {
+  local attempt=$1 selected_route_hash=$2 source=${3:-operator_override} root pin selected pin_hash
+  local nullglob_was_off=0
+  runtime_lifecycle_enabled_v2 || return 0
+  root="$(attempt_state_v2_task_root "$TASK")/attempts/$attempt"
+  shopt -q nullglob || nullglob_was_off=1
+  shopt -s nullglob
+  local -a pins=("$root"/route-pin.*.json)
+  (( nullglob_was_off == 0 )) || shopt -u nullglob
+  (( ${#pins[@]} == 1 )) || return 78
+  pin=${pins[0]}
+  [[ -f "$pin" && ! -L "$pin" ]] || return 78
+  pin_hash=$(runtime_analytics_hash_file_v2 "$pin") || return
+  selected=$(_attempt_state_json get "$pin" selectedAt) || return
+  selected=$(v2_lifecycle_millisecond_instant "$selected") || return
+  runtime_lifecycle_set_route_v2 "$ROUTE" "$selected_route_hash" || return
+  runtime_lifecycle_route_selected_v2 \
+    "$V2_ATTEMPT_CATALOG_HASH" "$pin_hash" "$selected" "$source" >/dev/null
+}
+
+v2_lifecycle_terminal_from_file() {
+  local terminal=$1 reason_code=$2 state closed reason record_hash reason_hash=""
+  runtime_lifecycle_enabled_v2 || return 0
+  [[ -f "$terminal" && ! -L "$terminal" ]] || return 78
+  state=$(_attempt_state_json get "$terminal" state) || return
+  closed=$(_attempt_state_json get "$terminal" closedAt) || return
+  closed=$(v2_lifecycle_millisecond_instant "$closed") || return
+  reason=$(_attempt_state_json get "$terminal" reason) || return
+  [[ "$reason" != null ]] || reason=""
+  [[ -z "$reason" ]] || reason_hash=$(runtime_analytics_hash_string_v2 "$reason") || return
+  record_hash=$(runtime_analytics_hash_file_v2 "$terminal") || return
+  runtime_lifecycle_attempt_terminal_v2 \
+    "$state" "$reason_code" "$reason_hash" "$record_hash" "$closed" >/dev/null
+}
+
+v2_lifecycle_latest_stage_hash() {
+  local attempt=$1 root event hash rc
+  root=$(factory_control_root) || return
+  event=$(mktemp "$root/.lifecycle-stage-evidence.XXXXXX") || return 1
+  attempt_stage_state_latest_event_v2 "$TASK" "$attempt" >"$event"
+  rc=$?
+  if (( rc == 0 )); then
+    hash=$(runtime_analytics_hash_file_v2 "$event") || rc=$?
+  fi
+  rm -f -- "$event"
+  (( rc == 0 )) || return "$rc"
+  printf '%s\n' "$hash"
+}
+
+v2_lifecycle_resolve_human() {
+  local resolution=$1 evidence
+  runtime_lifecycle_enabled_v2 || return 0
+  evidence=$(runtime_analytics_hash_string_v2 \
+    "$resolution:$FACTORY_LIFECYCLE_ATTEMPT_ID:$FACTORY_LIFECYCLE_SESSION_ID") || return
+  runtime_lifecycle_resolve_open_human_v2 "$resolution" "$evidence" >/dev/null
+}
+
+v2_lifecycle_begin_human_for_stop() {
+  local attempt=$1 stop=$2 reason evidence
+  runtime_lifecycle_enabled_v2 || return 0
+  case "$stop" in
+    rewind-limit) reason=rewind_limit ;;
+    no-progress) reason=no_progress ;;
+    human) reason=manual_resume_required ;;
+    *) reason=operator_requested ;;
+  esac
+  evidence=$(v2_lifecycle_latest_stage_hash "$attempt") || return
+  runtime_lifecycle_human_begin_v2 "$reason" "$evidence" >/dev/null
+}
+
 v2_on_signal() {
   local signal=$1 rc=130 stop_rc cleanup_rc
   [[ "$signal" == TERM ]] && rc=143
   trap - TERM INT
+  if runtime_lifecycle_enabled_v2; then
+    runtime_lifecycle_attempt_interrupted_v2 signal '' >/dev/null || true
+    V2_LIFECYCLE_EXIT_STATUS=interrupted
+    V2_LIFECYCLE_EXIT_REASON=signal
+  fi
   v2_log "получен $signal; останавливаю exact active runner"
   runtime_interrupt_trusted_active "$TASK" "" "" "" \
     "${FACTORY_TERM_GRACE_SECONDS:-5}"
@@ -2206,8 +2523,19 @@ v2_on_signal() {
 }
 
 v2_on_exit() {
-  local rc=$?
+  local rc=$? lifecycle_rc=0
   trap - EXIT TERM INT
+  if [[ "$V2_LIFECYCLE_SESSION_OPEN" == 1 ]]; then
+    if (( rc != 0 )) && [[ "$V2_LIFECYCLE_EXIT_STATUS" == succeeded ]]; then
+      V2_LIFECYCLE_EXIT_STATUS=failed
+      V2_LIFECYCLE_EXIT_REASON=unavailable
+    fi
+    runtime_lifecycle_session_finish_v2 \
+      "$V2_LIFECYCLE_EXIT_STATUS" "$V2_LIFECYCLE_EXIT_REASON" '' \
+      >/dev/null || lifecycle_rc=$?
+    V2_LIFECYCLE_SESSION_OPEN=0
+    (( lifecycle_rc == 0 || rc != 0 )) || rc=76
+  fi
   if [[ "$(get "$TASK" ORCH_PID)" == "$$" ]]; then
     set_st "$TASK" ORCH_PID ""
   fi
@@ -2222,7 +2550,7 @@ v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
   local gate_key pipeline_gate_key gate_node cursor stop stop_node rewind_node
-  local stop_reason deferred_file deferred_count
+  local stop_reason deferred_file deferred_count terminal_file
   mkdir -p "$STATE_DIR/logs" "$STATE_DIR/archive"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
   trap 'v2_on_signal TERM' TERM
@@ -2296,23 +2624,37 @@ v2_main() {
   fi
 
   if [[ "$MODE" == start ]]; then
-    set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
-      PROFILE "$PROFILE" \
-      ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
-      ORCH_PID "$$" STALLED_HUMAN 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
-      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
-    # Явный task-level override исполнителя фиксируется в реестре сразу после
-    # его создания: вся дальнейшая маршрутизация читает цепочку из реестра.
-    if [[ -n "$RUNNER_PRIMARY_OVERRIDE" ]]; then
-      set_st "$TASK" RUNNER_OVERRIDE_PRIMARY "$RUNNER_PRIMARY_OVERRIDE" \
-        RUNNER_OVERRIDE_FAILOVER "$RUNNER_FAILOVER_OVERRIDE" || return
-    fi
-    attempt=$(attempt_state_begin_v2 "$TASK" "$PROFILE" "$ROUTES_DIR") || {
+    # Авторитетная catalog CAS и публикация trusted identity происходят ДО
+    # вторичной registry-проекции. Ранний `factory check` остаётся fast-fail:
+    # current мог смениться после него. При mismatch begin не публикует attempt,
+    # а pending shared lease снимает EXIT-cleanup, поэтому task остаётся чистой.
+    attempt=$(attempt_state_begin_v2 \
+      "$TASK" "$PROFILE" "$ROUTES_DIR" "$EXPECTED_CATALOG_HASH" \
+      "$QUEUE_DISPATCH_ID" "$RUNNER_PRIMARY_OVERRIDE") || {
       rc=$?
       v2_log "attempt не создан (код $rc)"
       return "$rc"
     }
     V2_ATTEMPT=$attempt
+    v2_lifecycle_begin_session "$attempt" fresh '' '' || {
+      rc=$?
+      v2_log "lifecycle новой attempt не инициализирован (код $rc)"
+      return "$rc"
+    }
+    v2_load_attempt_launch_identity "$attempt" || {
+      rc=$?
+      v2_log "launch identity новой attempt не прочитана (код $rc)"
+      return "$rc"
+    }
+    set_st "$TASK" --init --stages "$(v2_registry_stage_keys)" \
+      PROFILE "$PROFILE" \
+      ROUTE "$ROUTE" ROUTE_BY human DELIVERY_MODE pending \
+      ORCH_PID "$$" STALLED_HUMAN 0 WORKSPACE_MODE "$V2_WORKSPACE_MODE" \
+      CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
+      QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
+      RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
+      RUNNER_OVERRIDE_FAILOVER "$RUNNER_FAILOVER_OVERRIDE" \
+      PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending || return
     # Черновики ходов принадлежат попытке: новая начинает с чистого листа, иначе первый же
     # этап прочитал бы заметки прошлого, брошенного прогона как свои.
     declare -F _stage_checkpoint_clear_task >/dev/null &&
@@ -2327,6 +2669,12 @@ v2_main() {
       v2_log "route pin не создан (код $rc)"
       return "$rc"
     }
+    v2_lifecycle_route_selected "$attempt" "$route_hash" \
+      "$([[ -n "$V2_ATTEMPT_QUEUE_DISPATCH_ID" ]] && printf queue_override || printf operator_override)" || {
+        rc=$?
+        v2_log "route lifecycle pin не записан (код $rc)"
+        return "$rc"
+      }
   else
     attempt=$EXPECTED_ATTEMPT
     V2_ATTEMPT=$attempt
@@ -2344,6 +2692,17 @@ v2_main() {
       die "--route расходится с immutable pin"
     ROUTE=$pinned_route
     route_hash=$ROUTE_V2_ROUTE_HASH
+    v2_lifecycle_begin_session \
+      "$attempt" resume "$ROUTE" "$route_hash" || {
+        rc=$?
+        v2_log "lifecycle resume не открыт (код $rc)"
+        return "$rc"
+      }
+    v2_lifecycle_resolve_human "$([[ "$MODE" == gate ]] && printf operator_override || printf resume)" || {
+      rc=$?
+      v2_log "human intervention lifecycle не закрыт (код $rc)"
+      return "$rc"
+    }
   fi
 
   # Для start pins появились только что; resume уже загрузил их выше. Проверяем
@@ -2351,6 +2710,11 @@ v2_main() {
   if [[ "$MODE" == start ]]; then
     _route_v2_load_attempt "$TASK" "$attempt" || return
   fi
+  v2_load_attempt_launch_identity "$attempt" || {
+    rc=$?
+    v2_log "launch identity attempt не прочитана (код $rc)"
+    return "$rc"
+  }
   v2_detect_delivery_contract || {
     rc=$?
     v2_log "delivery topology закреплённого маршрута не прочитана (код $rc)"
@@ -2369,7 +2733,10 @@ v2_main() {
       INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
     set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
-      ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
+      CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
+      ROUTE "$ROUTE" ROUTE_HASH "$route_hash" \
+      QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
+      RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"
 
     v2_install_profile_contract || {
       rc=$?
@@ -2386,7 +2753,10 @@ v2_main() {
     INSTRUMENTATION_MODE "$V2_INSTRUMENTATION_MODE"
 
   set_st "$TASK" ATTEMPT_ID "$attempt" CATALOG_PROTOCOL route-v2 \
-    ROUTE "$ROUTE" ROUTE_HASH "$route_hash"
+    CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
+    ROUTE "$ROUTE" ROUTE_HASH "$route_hash" \
+    QUEUE_DISPATCH_ID "$V2_ATTEMPT_QUEUE_DISPATCH_ID" \
+    RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"
 
   v2_install_profile_contract || {
     rc=$?
@@ -2415,7 +2785,7 @@ v2_main() {
     return "$rc"
   }
 
-  v2_sandbox_up || {
+  v2_sandbox_up_lifecycle || {
     rc=$?
     set_st "$TASK" STALLED_HUMAN 1
     v2_log "среда профиля не готова (код $rc)"
@@ -2496,7 +2866,8 @@ v2_main() {
       cursor=$(attempt_stage_state_read_v2 "$TASK" "$attempt") || return
       stop=$(json_value stop <<<"$cursor") || return 78
       if [[ "$stop" == done ]]; then
-        attempt_state_finish_v2 "$TASK" "$attempt" >/dev/null || return
+        terminal_file=$(attempt_state_finish_v2 "$TASK" "$attempt") || return
+        v2_lifecycle_terminal_from_file "$terminal_file" completed || return
         v2_shared_lease_release "$attempt" || {
           rc=$?
           set_st "$TASK" STALLED_HUMAN 1 RESULT lease-release-failed
@@ -2512,6 +2883,7 @@ v2_main() {
         return 0
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
+      v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || return
       if [[ "$stop" == no-progress || "$stop" == rewind-limit ]]; then
         stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
         [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78
@@ -2567,9 +2939,10 @@ v2_quarantine_state_artifacts() {
 # и диспетчеризации. Lock оркестратора берём тот же, что у start/resume, — abandon
 # под живым foreground-прогоном обязан получить отказ, а не резать попытку под ним.
 v2_admin_main() {
-  local rc out
+  local rc out recovery_runner recovery_failover terminal_file stage_hash transition
   mkdir -p "$STATE_DIR/logs"
   v2_lock || die "оркестратор t${TASK} уже работает или lock небезопасен"
+  trap v2_on_exit EXIT
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     case "$MODE" in
       abandon|goto)
@@ -2588,13 +2961,20 @@ v2_admin_main() {
         ;;
     esac
   fi
-  if [[ "$MODE" == goto ]]; then
+  if [[ "$MODE" == goto || "$MODE" == abandon ]]; then
     # Возврат курсора работает по ЗАКРЕПЛЁННОМУ маршруту попытки, поэтому pins
-    # загружаем так же, как перед диспетчеризацией.
+    # загружаем так же, как перед диспетчеризацией. Abandon нужна та же immutable
+    # route identity для host-owned lifecycle terminal/cleanup событий.
     _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+    V2_ATTEMPT=$EXPECTED_ATTEMPT
+    v2_lifecycle_begin_session \
+      "$EXPECTED_ATTEMPT" resume "$ROUTE_V2_ROUTE" "$ROUTE_V2_ROUTE_HASH" || {
+        rc=$?
+        v2_log "$MODE: lifecycle session не открыта (код $rc)"
+        return "$rc"
+      }
   fi
   if [[ "$MODE" == abandon ]]; then
-    V2_ATTEMPT=$EXPECTED_ATTEMPT
     runtime_interrupt_trusted_active "$TASK" "" "" "" \
       "${FACTORY_TERM_GRACE_SECONDS:-5}"
     rc=$?
@@ -2608,11 +2988,23 @@ v2_admin_main() {
       v2_log "abandon: instrumentation cleanup не завершён (код $rc)"
       return "$rc"
     }
-    attempt_state_abandon_v2 "$TASK" "$EXPECTED_ATTEMPT" "$REASON" || {
+    v2_lifecycle_resolve_human abandon || {
+      rc=$?
+      v2_log "abandon: human intervention lifecycle не закрыт (код $rc)"
+      return "$rc"
+    }
+    if [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
+      runtime_lifecycle_node_visit_finish_v2 \
+        abandoned attempt_terminal attempt_terminal '' '' >/dev/null || return
+    fi
+    runtime_lifecycle_attempt_interrupted_v2 operator_abandon '' >/dev/null || return
+    terminal_file=$(attempt_state_abandon_v2 \
+      "$TASK" "$EXPECTED_ATTEMPT" "$REASON") || {
       rc=$?
       v2_log "abandon $EXPECTED_ATTEMPT не принят (код $rc)"
       return "$rc"
     }
+    v2_lifecycle_terminal_from_file "$terminal_file" operator_abandon || return
     # Pipeline-проекция для кокпита — только если реестр v2 уже существует:
     # abandon законен и для попытки, упавшей до первой записи реестра.
     v2_shared_lease_release "$EXPECTED_ATTEMPT" || {
@@ -2649,6 +3041,18 @@ v2_admin_main() {
       v2_log "goto $GATE_NODE не принят (код $rc)"
       return "$rc"
     }
+    v2_lifecycle_resolve_human goto || {
+      rc=$?
+      v2_log "goto: human intervention lifecycle не закрыт (код $rc)"
+      return "$rc"
+    }
+    if [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
+      stage_hash=$(v2_lifecycle_latest_stage_hash "$EXPECTED_ATTEMPT") || return
+      transition="tr_${stage_hash:0:32}"
+      runtime_lifecycle_node_visit_finish_v2 \
+        succeeded manual_resume human_rewind "$transition" "$stage_hash" \
+        >/dev/null || return
+    fi
     route_v2_project_latest_reset "$TASK" "$EXPECTED_ATTEMPT" || {
       rc=$?
       v2_log "goto $GATE_NODE записан, но reset-проекция не завершена (код $rc)"
@@ -2662,7 +3066,12 @@ v2_admin_main() {
     printf 'rewound %s\n' "$GATE_NODE"
     return 0
   fi
-  out=$(attempt_state_recover_v2 "$TASK" "$EXPECTED_ATTEMPT" "$REASON") || {
+  # У schema 1 runner override существовал только в registry. Schema 2 берёт
+  # trusted значение предшественницы внутри attempt_state_recover_v2 и не
+  # доверяет этой fallback-проекции. Queue dispatch не передаётся никогда.
+  recovery_runner=$(get "$TASK" RUNNER_OVERRIDE_PRIMARY)
+  out=$(attempt_state_recover_v2 \
+    "$TASK" "$EXPECTED_ATTEMPT" "$REASON" "$recovery_runner") || {
     rc=$?
     [[ "$V2_WORKSPACE_MODE" != shared ]] || v2_shared_lease_release pending || true
     v2_log "recover из $EXPECTED_ATTEMPT не принят (код $rc)"
@@ -2678,12 +3087,27 @@ v2_admin_main() {
     v2_log "route pin для recovery $out не создан (код $rc)"
     return "$rc"
   }
+  v2_load_attempt_launch_identity "$out" || {
+    rc=$?
+    v2_log "recovery launch identity не прочитана (код $rc)"
+    return "$rc"
+  }
+  V2_ATTEMPT=$out
+  v2_lifecycle_begin_session "$out" recovery '' '' || {
+    rc=$?
+    v2_log "recovery $out: lifecycle session не открыта (код $rc)"
+    return "$rc"
+  }
+  v2_lifecycle_route_selected "$out" "$route_hash" operator_override || {
+    rc=$?
+    v2_log "recovery $out: route lifecycle pin не записан (код $rc)"
+    return "$rc"
+  }
   # Recovery наследует ВХОДНЫЕ immutable-контракты предшественницы (ticket,
   # delivery, scope, diagnosis) — иначе попытка тупиковая: resume только
   # проверяет артефакты и создавать их не имеет права. Результаты работы
   # (bootstrap.json) намеренно не переносятся: recovery = чистый bootstrap.
   old_artifacts="$(attempt_state_v2_task_root "$TASK")/attempts/$EXPECTED_ATTEMPT/artifacts"
-  V2_ATTEMPT=$out
   new_artifacts=$(v2_attempt_artifacts) || return 78
   [[ -d "$new_artifacts" && ! -L "$new_artifacts" ]] || return 78
   for name in ticket.json delivery.tsv instrumentation-scope.tsv diagnosis.env \
@@ -2704,9 +3128,18 @@ v2_admin_main() {
     new_catalog=$(_attempt_state_json get \
       "$(attempt_state_v2_task_root "$TASK")/attempts/$out/attempt.json" catalogHash) ||
       return 78
+    if [[ -n "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" ]]; then
+      recovery_failover=$(get "$TASK" RUNNER_OVERRIDE_FAILOVER)
+    else
+      recovery_failover=""
+    fi
     set_st "$TASK" --init --stages "$(v2_registry_stage_keys "$new_catalog")" \
       STALLED_HUMAN 0 RESULT recovered ATTEMPT_ID "$out" \
+      CATALOG_HASH "$V2_ATTEMPT_CATALOG_HASH" \
       ROUTE "$ROUTE" ROUTE_HASH "$route_hash" ORCH_PID "" \
+      QUEUE_DISPATCH_ID "" \
+      RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE" \
+      RUNNER_OVERRIDE_FAILOVER "$recovery_failover" \
       PLAN_DECISION pending CAUSE_DECISION pending ACCEPTANCE_DECISION pending
   fi
   v2_log "recovery attempt $out создан из $EXPECTED_ATTEMPT: $REASON"

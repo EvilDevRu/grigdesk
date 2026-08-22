@@ -230,3 +230,70 @@ test('вопрос по прямому каналу с текстовым ход
   assert.deepEqual(outcome, { selected: [], text: 'сначала прогони тесты' });
   assert.deepEqual(ack, { ok: true });
 });
+
+test('висящий спрос называет чат: waiting отдаёт название и задачу из истории', async (t) => {
+  const { app, events } = await apiFixture(t);
+  // Клиент сохраняет чат до model POST, поэтому к моменту спроса шапка уже на диске.
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'c-named',
+        title: 'Телеграм-пульт мусор',
+        taskId: '4187',
+        messages: [],
+        createdAt: Date.UTC(2026, 7, 19),
+        updatedAt: Date.UTC(2026, 7, 19),
+      },
+      archived: false,
+    },
+  });
+  assert.equal(saved.statusCode, 200);
+
+  const pending = app.inject({
+    method: 'POST',
+    url: '/api/chat/permission-request',
+    payload: {
+      tool_name: 'AskUserQuestion',
+      input: { questions: [{ header: 'Объём', question: 'Что именно выпиливаем?', options: [{ label: 'Всё' }] }] },
+      chatKey: 'c-named',
+    },
+  });
+  let ev;
+  for (let i = 0; i < 10 && !ev; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    ev = events.find((e) => e.name === 'chat-question');
+  }
+  assert.ok(ev);
+
+  const waiting = (await app.inject({ method: 'GET', url: '/api/chat/waiting' })).json().waiting;
+  const item = waiting.find((w) => w.pid === ev.payload.pid);
+  assert.equal(item.chatTitle, 'Телеграм-пульт мусор', 'внешнему пульту неоткуда узнать имя чата');
+  assert.equal(item.taskId, '4187');
+  assert.equal(item.questions[0].header, 'Объём');
+
+  await app.inject({ method: 'POST', url: `/api/chat/permission/${ev.payload.pid}`, payload: { answers: [{ text: 'всё' }] } });
+  await pending;
+});
+
+test('спрос по неизвестному чату не выдумывает названия', async (t) => {
+  const { app, events } = await apiFixture(t);
+  const pending = app.inject({
+    method: 'POST',
+    url: '/api/chat/permission-request',
+    payload: { tool_name: 'Bash', input: { command: 'ls' }, chatKey: 'c-unknown' },
+  });
+  let ev;
+  for (let i = 0; i < 10 && !ev; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    ev = events.find((e) => e.name === 'chat-permission');
+  }
+  const item = (await app.inject({ method: 'GET', url: '/api/chat/waiting' })).json()
+    .waiting.find((w) => w.pid === ev.payload.pid);
+  assert.equal(item.chatTitle, '');
+  assert.equal(item.taskId, null);
+
+  await app.inject({ method: 'POST', url: `/api/chat/permission/${ev.payload.pid}`, payload: { allow: true } });
+  await pending;
+});

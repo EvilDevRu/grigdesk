@@ -10,6 +10,10 @@ const loading = ref(true);
 const unavailable = ref(false);
 const error = ref('');
 const notice = ref('');
+// Успех бывает неполным: задача создана, а ответ в исходный чат не ушёл. Это
+// не ошибка действия (повторять его нельзя — будет вторая задача), поэтому
+// плашка та же, но цветом честно предупреждает.
+const noticeKind = ref('good');
 const busy = ref('');
 const activeSection = ref('review');
 const payload = ref({ items: [], channels: [], errors: [], truncated: false, worker: null });
@@ -243,6 +247,26 @@ function itemReadOnly(item) {
   return channelsById.value.get(item.channel?.id)?.readOnly !== false;
 }
 
+const NOTIFICATION_REASONS = Object.freeze({
+  unreachable: 'связь с Telegram оборвалась',
+  rejected: 'канал отклонил отправку',
+  plugin_disabled: 'канал выключен',
+});
+
+/**
+ * Хвост к «Задача создана», когда ответ в исходный чат не ушёл.
+ *
+ * Молчать об этом нельзя: автоповтора у ответа нет по замыслу (Bot API не даёт
+ * idempotency key, повтор после таймаута прислал бы дубль), значит сообщить в
+ * чате придётся человеку — а он об этом узнавал только из журнала сервера.
+ * Правило `enabled` уважаем: у чата без галки ответа и не ждали.
+ */
+function notificationFailure(notification) {
+  if (!notification || notification.enabled === false || notification.sent === true) return '';
+  const why = NOTIFICATION_REASONS[notification.reason];
+  return `, но ответ в исходный чат не отправлен${why ? ` (${why})` : ''} — сообщите там сами`;
+}
+
 async function mutateItem(item, action, { operatorNote = '' } = {}) {
   if (busy.value || itemReadOnly(item)) return;
   const messageRefs = [...selectedRefs(item)];
@@ -259,10 +283,13 @@ async function mutateItem(item, action, { operatorNote = '' } = {}) {
   busy.value = `${item.ref}:${action}`;
   error.value = '';
   notice.value = '';
+  noticeKind.value = 'good';
   delete itemAlerts[item.ref];
   try {
-    await api.post(`/api/inbox/items/${encodeURIComponent(item.ref)}/${action}`, body);
-    notice.value = action === 'task' ? 'Задача создана'
+    const done = await api.post(`/api/inbox/items/${encodeURIComponent(item.ref)}/${action}`, body);
+    const undelivered = action === 'task' && notificationFailure(done?.notification);
+    if (undelivered) noticeKind.value = 'warn';
+    notice.value = action === 'task' ? `Задача создана${undelivered}`
       : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю'
         : 'Обращение возвращено к разбору';
     delete selection[item.ref];
@@ -555,7 +582,7 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
-      <p v-if="notice" class="banner good" role="status">{{ notice }}</p>
+      <p v-if="notice" class="banner" :class="noticeKind" role="status">{{ notice }}</p>
       <p v-if="automationNotice" class="banner" :class="automationNotice.kind"
          data-state="automation-notice" role="status">
         {{ automationNotice.text }}

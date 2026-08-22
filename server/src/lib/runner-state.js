@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
+import { normalizedMetaUsage } from './meta-usage.js';
 import { parsePipeline } from './pipeline-parse.js';
 
 const PROVIDER_ID = /^[a-z][a-z0-9_-]*$/;
@@ -143,22 +144,28 @@ export function activeRunnerReason(runner, attempts = []) {
   return active.reason || reasons[previous?.result] || runner.reason || null;
 }
 
+function legacyNumber(value) {
+  if (typeof value !== 'string' || !/^\d+(?:\.\d+)?$/u.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
 /**
- * Расход токенов запуска. Пишет его runner-launcher методом `usage` раннера, и
- * метод этот опциональный: у kimi ACP-мост расхода не публикует вовсе. Поэтому
- * отсутствие ключей означает «не знаем», а не «ход был бесплатным», и наружу
- * уходит null — нулями такую разницу не выразить.
+ * Schema-2 блок `meta.env` уже разобран в `lib/meta-usage.js`. Здесь нет второй
+ * token/cost арифметики: exact strings сохраняются для нового web, а прежние number
+ * поля остаются только как bounded rolling-upgrade fallback для старого bundle.
  */
 function runAttemptTokens(meta) {
-  const num = (value) => (/^\d+$/.test(value || '') ? Number(value) : null);
-  const tokens = {
-    in: num(meta.TOKENS_IN),
-    out: num(meta.TOKENS_OUT),
-    cacheRead: num(meta.TOKENS_CACHE_READ),
-    cacheWrite: num(meta.TOKENS_CACHE_WRITE),
-    costUsd: /^\d+(\.\d+)?$/.test(meta.COST_USD || '') ? Number(meta.COST_USD) : null,
+  const exact = normalizedMetaUsage(meta);
+  if (exact === null) return null;
+  return {
+    in: legacyNumber(exact.in),
+    out: legacyNumber(exact.out),
+    cacheRead: legacyNumber(exact.cacheRead),
+    cacheWrite: legacyNumber(exact.cacheWrite),
+    costUsd: legacyNumber(exact.costUsd),
+    exact,
   };
-  return Object.values(tokens).some((value) => value != null) ? tokens : null;
 }
 
 /**

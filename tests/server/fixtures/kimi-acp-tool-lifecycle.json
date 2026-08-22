@@ -1,0 +1,224 @@
+{
+  "description": "Санитизированный ACP lifecycle Kimi: pending, sparse deltas, canonical edit и terminal result",
+  "verifiedVersions": [
+    "0.31.1",
+    "0.33.0"
+  ],
+  "events": [
+    {
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "kimi-edit-1",
+        "status": "pending",
+        "title": "Edit files",
+        "kind": "edit",
+        "rawInput": {
+          "patch": "update src/alpha.js and src/beta.js"
+        }
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-1",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Preparing patch"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-1",
+        "status": "in_progress"
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-1",
+        "status": "in_progress",
+        "title": "Edit files",
+        "kind": "edit",
+        "rawInput": {
+          "patch": "update src/alpha.js and src/beta.js"
+        },
+        "locations": [
+          {
+            "path": "src/alpha.js"
+          },
+          {
+            "path": "src/beta.js"
+          }
+        ],
+        "content": [
+          {
+            "type": "diff",
+            "path": "src/alpha.js",
+            "oldText": "const value = 1;\n",
+            "newText": "const value = 2;\n"
+          },
+          {
+            "type": "diff",
+            "path": "src/beta.js",
+            "oldText": "export const beta = false;\n",
+            "newText": "export const beta = true;\n"
+          }
+        ]
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-1",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Updated 2 files"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "toolCallId": "kimi-edit-1",
+    "files": [
+      "src/alpha.js",
+      "src/beta.js"
+    ],
+    "changes": [
+      {
+        "path": "src/alpha.js",
+        "kind": "update",
+        "old": "const value = 1;\n",
+        "new": "const value = 2;\n"
+      },
+      {
+        "path": "src/beta.js",
+        "kind": "update",
+        "old": "export const beta = false;\n",
+        "new": "export const beta = true;\n"
+      }
+    ],
+    "result": "Updated 2 files"
+  },
+  "downgradeEvents": [
+    {
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "kimi-edit-downgrade-1",
+        "status": "pending",
+        "title": "Edit guarded file",
+        "kind": "edit",
+        "rawInput": {
+          "path": "src/guarded.js"
+        },
+        "locations": [
+          {
+            "path": "src/guarded.js"
+          }
+        ],
+        "content": [
+          {
+            "type": "diff",
+            "path": "src/guarded.js",
+            "oldText": "const stable = true;\nconst value = 'old';\n",
+            "newText": "const stable = true;\nconst value = 'new';\n"
+          }
+        ]
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-downgrade-1",
+        "status": "in_progress",
+        "title": "other",
+        "kind": "other",
+        "rawInput": {
+          "fragment": "}"
+        }
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-downgrade-1",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Updated guarded file"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "downgradeExpected": {
+    "toolCallId": "kimi-edit-downgrade-1",
+    "file": "src/guarded.js",
+    "old": "const stable = true;\nconst value = 'old';\n",
+    "new": "const stable = true;\nconst value = 'new';\n",
+    "result": "Updated guarded file"
+  },
+  "kindDowngradeEvents": [
+    {
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "kimi-edit-kind-only-1",
+        "status": "pending",
+        "title": "Edit kind-only file",
+        "kind": "edit",
+        "rawInput": {
+          "path": "src/kind-only.js"
+        }
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-kind-only-1",
+        "status": "in_progress",
+        "title": "other",
+        "kind": "other",
+        "rawInput": {
+          "fragment": "}"
+        }
+      }
+    },
+    {
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "kimi-edit-kind-only-1",
+        "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Updated kind-only file"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "kindDowngradeExpected": {
+    "toolCallId": "kimi-edit-kind-only-1",
+    "file": "src/kind-only.js",
+    "result": "Updated kind-only file"
+  }
+}

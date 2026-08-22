@@ -1,7 +1,7 @@
 // Модуль chat — интерактивное обсуждение с CLI-агентом прямо из кокпита.
 // Два режима:
 //   • по задаче  — выбранный executor в worktree задачи, контекст через его sessionId;
-//   • без задачи — свободный вопрос в корне фабрики (страница Agents переопределяет cwd).
+//   • без задачи — свободный вопрос в корне репозитория Cockpit.
 // Интерактивные права реализованы Claude executor-ом через permission-prompt-tool
 // (lib/chat/permission-mcp.js): запрос показывается всплывашкой в браузере.
 import fp from 'fastify-plugin';
@@ -10,10 +10,16 @@ import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeCompanionSettings } from '../../lib/companion-settings.js';
 import { getExecutor } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { resolveRequestedEffort } from '../../lib/model-effort.js';
-import { ChatHistoryStore } from '../../lib/chat/history-store.js';
+import {
+  ChatHistoryError,
+  ChatHistoryStore,
+  companionLogicalIdentity,
+  normalizeCompanionTaskId,
+} from '../../lib/chat/history-store.js';
 import { ChatSessionBindingStore } from '../../lib/chat/session-binding-store.js';
 import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
@@ -21,6 +27,11 @@ import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
 import { autoDecision } from '../../lib/chat/auto-approve.js';
 import { normalizeContextCache } from '../../lib/chat/context-cache.js';
 import { MAX_CHAT_STEPS } from '../../lib/chat/stream-steps.js';
+import {
+  contextPrefix,
+  normalizeUiContext,
+  pageHint,
+} from '../../lib/chat/ui-context.js';
 import { DISCUSSION_SECTION_TITLE, stripDiscussionSection } from '../../lib/telegram/discussion.js';
 import {
   KIMI_AUTH_PROFILE_ID,
@@ -48,6 +59,7 @@ const PERM_MCP_PATH = fileURLToPath(new URL('../../lib/chat/permission-mcp.js', 
 const SPEECH_STREAM_START_MAX_BYTES = 4 * 1024;
 const SPEECH_STREAM_START_TIMEOUT_MS = 10_000;
 const SPEECH_STREAM_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SPEECH_SAFE_STEP_KINDS = new Set(['start', 'text', 'think']);
 const SPEECH_STREAM_PUBLIC_ERRORS = Object.freeze({
   speech_model_missing: 'Локальная модель речи не установлена.',
   speech_unavailable: 'Локальное распознавание сейчас недоступно.',
@@ -149,6 +161,87 @@ async function chatModule(fastify, opts) {
     : SPEECH_STREAM_START_TIMEOUT_MS;
   const modelsRegistry = opts.modelsRegistry || ((cfg) => getModelsRegistry(cfg));
   const executorResolver = opts.executorResolver || getExecutor;
+  const taskExistsResolver = typeof opts.taskExists === 'function'
+    ? opts.taskExists
+    : async (taskId) => {
+      if (typeof factoryState?.readRegistry !== 'function') return false;
+      try { await factoryState.readRegistry(taskId); return true; }
+      catch { return false; }
+    };
+  // Несколько вкладок могут одновременно запросить одну логическую идентичность. Проверка задачи
+  // способна обратиться к живому трекеру, поэтому объединяем только текущую проверку без устаревающего кэша.
+  const taskVerificationJobs = new Map();
+
+  async function companionTaskExists(taskId) {
+    if (taskId == null) return true;
+    const key = String(taskId);
+    if (taskVerificationJobs.has(key)) return taskVerificationJobs.get(key);
+    const job = Promise.resolve()
+      .then(() => taskExistsResolver(key))
+      .then((exists) => exists === true, () => false);
+    taskVerificationJobs.set(key, job);
+    job.finally(() => {
+      if (taskVerificationJobs.get(key) === job) taskVerificationJobs.delete(key);
+    });
+    return job;
+  }
+
+  async function companionTaskSandbox(taskId) {
+    if (!taskId || typeof factoryState?.readRegistry !== 'function'
+      || typeof factoryState?.readTrustedAttempt !== 'function'
+      || typeof factoryState?.readEnv !== 'function'
+      || typeof factoryState?.verifyTrustedEnvironment !== 'function') return null;
+    try {
+      // Существующей задачи Б24 достаточно для владения долгой историей, но быстрый ход
+      // компаньона не должен переходить в корень Cockpit при отсутствии точного рабочего дерева.
+      // `.pipeline` и `.env` — доступные провайдеру для записи проекции; исполняемые пути берутся
+      // только из неизменяемого журнала попытки после точной проверки окружения.
+      const { registry } = await factoryState.readRegistry(taskId);
+      const trusted = await factoryState.readTrustedAttempt(taskId, registry);
+      const env = await factoryState.readEnv(taskId);
+      factoryState.verifyTrustedEnvironment(trusted, env);
+      const repositories = Array.isArray(trusted?.repositories) ? trusted.repositories : [];
+      if (!repositories.length || !['isolated', 'shared'].includes(trusted?.workspaceMode)) return null;
+      const repos = repositories.map((repo) => ({
+        name: repo?.name,
+        path: repo?.workspace,
+        branch: repo?.branch,
+      }));
+      if (repos.some((repo) => typeof repo.name !== 'string' || !repo.name
+        || typeof repo.path !== 'string' || !path.isAbsolute(repo.path)
+        || /[\u0000\r\n\t]/u.test(repo.path)
+        || typeof repo.branch !== 'string' || !repo.branch)) return null;
+      // Ledger задаёт доверенный путь, но не доказывает, что worktree всё ещё существует.
+      // Непосредственно перед ходом канонизируем каждый репозиторий: удалённый worktree
+      // и не-каталог дают fail-closed, а executor получает canonical path без symlink-алиаса.
+      const canonicalRepos = await Promise.all(repos.map(async (repo) => {
+        const declaredStat = await fs.lstat(repo.path);
+        if (declaredStat.isSymbolicLink() || !declaredStat.isDirectory()) {
+          throw new Error('доверенный worktree должен быть непосредственным каталогом');
+        }
+        const canonicalPath = await fs.realpath(repo.path);
+        const stat = await fs.stat(canonicalPath);
+        if (!stat.isDirectory() || canonicalPath !== path.resolve(repo.path)) {
+          throw new Error('доверенный worktree перенаправлен через symlink');
+        }
+        return { ...repo, path: canonicalPath };
+      }));
+      return { kind: 'generic', workspaceMode: trusted.workspaceMode, repos: canonicalRepos };
+    } catch {
+      return null;
+    }
+  }
+
+  function sameCompanionTaskSandbox(left, right) {
+    if (!left || !right || left.kind !== right.kind
+      || left.workspaceMode !== right.workspaceMode
+      || !Array.isArray(left.repos) || !Array.isArray(right.repos)
+      || left.repos.length !== right.repos.length) return false;
+    return left.repos.every((repo, index) => {
+      const other = right.repos[index];
+      return repo.name === other?.name && repo.path === other?.path && repo.branch === other?.branch;
+    });
+  }
 
   // История является server-owned источником surface/modelRef. Binding лежит отдельно:
   // никакой PUT чата не может назначить Kimi resume id или его generation.
@@ -163,41 +256,39 @@ async function chatModule(fastify, opts) {
     dir: config.chatBindingsDir || path.join(config.chatsDir, '.bindings'),
   });
   const turnLocks = new ChatTurnLocks();
+  // Приём хода и DELETE согласуются синхронно до первого await. Так история не исчезнет,
+  // пока ход ещё только проходит strict preflight и потому не виден ни activeRuns,
+  // ни turnLocks.
+  const acceptedTurns = new Map(); // chatKey -> число preflight/queued/locked/running ходов
+  const savingChats = new Map(); // chatKey -> число принятых point/full PUT
+  const deletingChats = new Set();
 
-  /**
-   * Режим страницы по UI-контексту: подсказка агенту о том, что открыто, и —
-   * для страницы агентов — право реально править файлы базы (cwd = agents/,
-   * acceptEdits). Просьба «поправь этого агента» выполняется правкой <id>.md.
-   */
-  function pageMode(context, hasTask) {
-    const p = context?.path || '';
-    if (p.startsWith('/agents')) {
-      const mode = hasTask ? {} : { cwd: config.agentsDir, permissionMode: 'acceptEdits' };
-      return { ...mode, hint: `Открыта библиотека ШАБЛОНОВ агентов конвейера: каждый агент — файл <id>.md (frontmatter с метаданными + заготовка промпта) в ${config.agentsDir}. Просьбу «поправить агента» выполняй правкой соответствующего файла. Боевые промпты этапов живут не здесь, а в схемах: routes/<проект>/<маршрут>/<этап>.md.` };
-    }
-    if (p.startsWith('/routes')) return { hint: `Открыты маршруты конвейера фабрики (${config.factoryHome}): графы стадий по типам задач. Промпт каждого узла схемы — сайдкар routes/<проект>/<маршрут>/<этап>.md в кокпите.` };
-    if (p.startsWith('/board')) return { hint: 'Открыта доска задач Битрикс24.' };
-    if (p.startsWith('/pipeline')) return { hint: 'Открыт конвейер фабрики — задачи в работе и их стадии.' };
-    if (p.startsWith('/settings')) return { hint: 'Открыты настройки кокпита.' };
-    return {};
+  function beginAcceptedTurn(chatKey) {
+    if (!chatKey) return () => {};
+    acceptedTurns.set(chatKey, (acceptedTurns.get(chatKey) || 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (acceptedTurns.get(chatKey) || 1) - 1;
+      if (remaining > 0) acceptedTurns.set(chatKey, remaining);
+      else acceptedTurns.delete(chatKey);
+    };
   }
 
-  /**
-   * Префикс с UI-контекстом перед сообщением пользователя. Явно говорим агенту:
-   * контекст задействовать только если просьба к нему относится — свободные
-   * вопросы отвечаются как обычно.
-   */
-  function contextPrefix(context, hint) {
-    if (!context?.path) return '';
-    const lines = [
-      `Сообщение отправлено из веб-интерфейса кокпита, открыта страница «${context.page || context.path}» (${context.path}).`,
-    ];
-    if (hint) lines.push(hint);
-    if (context.details && Object.keys(context.details).length) {
-      lines.push(`Детали страницы: ${JSON.stringify(context.details)}`);
-    }
-    lines.push('Используй этот контекст, только если просьба к нему относится («здесь», «этот агент», «на этой странице»). На отвлечённые вопросы отвечай как обычно, без упоминания контекста.');
-    return `[Контекст кокпита]\n${lines.join('\n')}\n[/Контекст]\n\n`;
+  function beginChatSaves(chatIds) {
+    const ids = [...new Set(chatIds.filter(Boolean).map(String))];
+    for (const id of ids) savingChats.set(id, (savingChats.get(id) || 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const id of ids) {
+        const remaining = (savingChats.get(id) || 1) - 1;
+        if (remaining > 0) savingChats.set(id, remaining);
+        else savingChats.delete(id);
+      }
+    };
   }
 
   // Потолок описания в конверте: поле ticket.description допускает до 100 000 символов
@@ -462,12 +553,52 @@ async function chatModule(fastify, opts) {
     });
   }
 
+  /**
+   * Шапка чата для висящего спроса: название и задача. Своего стора у окна кокпита
+   * достаточно, но у ВНЕШНИХ потребителей (телеграм-пульт) истории нет вовсе, и вопрос
+   * «Что именно выпиливаем?» без имени чата не отвечаем — их у человека несколько.
+   * Кэш короткий: `/api/chat/waiting` зовёт каждое окно на каждый `hello`, а чтение
+   * файла на этом пути не должно дорожать от числа окон.
+   */
+  const waitingChatInfo = new Map(); // chatKey → { at, title, taskId }
+  const WAITING_INFO_TTL_MS = 30_000;
+  async function chatHeadOf(chatKey) {
+    if (!chatKey) return { title: '', taskId: null };
+    const cached = waitingChatInfo.get(chatKey);
+    if (cached && Date.now() - cached.at < WAITING_INFO_TTL_MS) return cached;
+    let head = { at: Date.now(), title: '', taskId: null };
+    try {
+      const chat = await history.peek(chatKey);
+      if (chat) {
+        head = {
+          at: Date.now(),
+          title: typeof chat.title === 'string' ? chat.title : '',
+          taskId: chat.taskId == null ? null : String(chat.taskId),
+        };
+      }
+    } catch (error) {
+      fastify.log.warn({ err: error.message }, 'шапка чата для висящего спроса не прочиталась');
+    }
+    waitingChatInfo.set(chatKey, head);
+    if (waitingChatInfo.size > 200) {
+      for (const [key, value] of waitingChatInfo) {
+        if (Date.now() - value.at >= WAITING_INFO_TTL_MS) waitingChatInfo.delete(key);
+      }
+    }
+    return head;
+  }
+
   // Что сейчас ждёт человека — чтобы окно после F5 (и второе окно) подняло всплывашки:
   // SSE доставляет событие один раз, а запрос висит, пока на него не ответят.
   fastify.get('/api/chat/waiting', async () => ({
-    waiting: [...pendingPerms.entries()].map(([pid, p]) => ({
-      pid, chatKey: p.chatKey, at: p.at,
-      ...(p.isQuestion ? { questions: p.input?.questions || [] } : { tool: p.tool, input: p.input }),
+    waiting: await Promise.all([...pendingPerms.entries()].map(async ([pid, p]) => {
+      const head = await chatHeadOf(p.chatKey);
+      return {
+        pid, chatKey: p.chatKey, at: p.at,
+        chatTitle: head.title,
+        taskId: head.taskId,
+        ...(p.isQuestion ? { questions: p.input?.questions || [] } : { tool: p.tool, input: p.input }),
+      };
     })),
   }));
 
@@ -502,6 +633,11 @@ async function chatModule(fastify, opts) {
   // пока пользователь не нажмёт кнопку во всплывашке / не ответит на вопрос (или таймаут).
   fastify.post('/api/chat/permission-request', async (request, reply) => {
     const { tool_name, input, chatKey } = request.body || {};
+    // MCP разрешений Claude — отдельный локальный HTTP-канал, поэтому он обходит
+    // runArgs.onPermission. Небезопасный след закрепляем за ходом до ожидания человека:
+    // поздний скользящий хвост из 400 шагов не должен его стереть.
+    const permissionRun = activeRuns.get(chatKey);
+    if (permissionRun) permissionRun.speechSafe = false;
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     // Вопрос агента — не разрешение, а диалог: показываем варианты, а не «разрешить/отклонить».
     const isQuestion = tool_name === 'AskUserQuestion';
@@ -617,10 +753,14 @@ async function chatModule(fastify, opts) {
    * Ответ на HTTP-запрос приходит по завершении СВОЕГО хода — клиенту ждать дольше,
    * зато сообщение не теряется и агент видит его в правильном порядке.
    */
-  async function resolveRunTarget(opts) {
+  /** Model/chat identity без side effects binding-а: strict companion gate использует
+   * этот срез до очереди и до любого session state. */
+  async function resolveModelTarget(opts, knownRecord = undefined) {
     const registry = await modelsRegistry(config);
     const chatKey = String(opts.chatKey || '');
-    const record = chatKey ? await history.readOne(chatKey) : null;
+    const record = knownRecord === undefined
+      ? (chatKey ? await history.readOne(chatKey) : null)
+      : knownRecord;
     if (chatKey && !record) {
       return { ok: false, error: 'unknown_chat', message: 'чат ещё не сохранён на сервере' };
     }
@@ -655,6 +795,22 @@ async function chatModule(fastify, opts) {
       };
     }
     const provider = resolution.modelRef.provider;
+    return {
+      ok: true,
+      record,
+      provider,
+      model: resolution.modelRef.model,
+      modelInfo: resolution.model,
+    };
+  }
+
+  async function resolveRunTarget(opts, modelTarget = null) {
+    const resolved = modelTarget || await resolveModelTarget(opts);
+    if (!resolved.ok) return resolved;
+    const {
+      record, provider, model, modelInfo,
+    } = resolved;
+    const chatKey = String(opts.chatKey || '');
     let binding = null;
     let sessionId = opts.sessionId || null;
     if (provider === 'kimi') {
@@ -676,35 +832,199 @@ async function chatModule(fastify, opts) {
       record,
       binding,
       provider,
-      model: resolution.modelRef.model,
-      modelInfo: resolution.model,
+      model,
+      modelInfo,
       sessionId,
     };
   }
 
-  async function runChat(reply, request, opts) {
-    const chatKey = opts.chatKey || '';
-    const target = await resolveRunTarget(opts);
-    if (!target.ok) return reply.code(400).send({ error: target.error, message: target.message });
-    const scope = { chatKey, provider: target.provider, sessionId: target.sessionId };
-    const queued = turnLocks.isBusy(scope);
-    if (queued) {
-      fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
-      // Второму окну (и своему же, если оно захочет показать «в очереди») — сигнал.
-      fastify.sse.broadcast('chat-queued', { chatKey, at: Date.now() });
+  function companionFailure(error, message, statusCode = 409) {
+    return { ok: false, statusCode, error, message };
+  }
+
+  /**
+   * Restrictive marker не является полномочием: он принимается только для durable
+   * server-created companion identity и exact route scope. Каталог plan читается
+   * свежим и fail-closed ДО Kimi binding, turnLocks и activeRuns.
+   */
+  async function strictCompanionPreflight(opts) {
+    const chatKey = String(opts.chatKey || '');
+    const record = chatKey ? await history.readOne(chatKey) : null;
+    let recordTaskId;
+    let expectedIdentity = '';
+    if (record?.purpose === 'companion') {
+      try {
+        recordTaskId = normalizeCompanionTaskId(record.taskId);
+        expectedIdentity = companionLogicalIdentity(recordTaskId);
+      } catch { /* повреждённая запись не становится execution identity */ }
+      if (!expectedIdentity || record.logicalIdentity !== expectedIdentity) {
+        return companionFailure(
+          'companion_chat_required',
+          'Chat key не принадлежит корректной server-owned companion identity.',
+        );
+      }
+      let routeTaskId;
+      try { routeTaskId = normalizeCompanionTaskId(opts.id); }
+      catch {
+        return companionFailure('companion_scope_mismatch', 'Маршрут хода не совпадает со scope companion-чата.');
+      }
+      if (routeTaskId !== recordTaskId) {
+        return companionFailure('companion_scope_mismatch', 'Маршрут хода не совпадает со scope companion-чата.');
+      }
     }
-    return turnLocks.run(scope, () => runChatTurn(reply, request, {
-      ...opts,
-      model: target.model,
-      sessionId: target.sessionId,
-      target,
-      queued,
-    }));
+
+    // Durable companion identity определяет task route даже на полной странице /chats.
+    // Только дополнительные ограничения быстрого bubble-turn зависят от marker-а.
+    if (opts.companionTurn !== true) return { ok: true, record };
+    if (!chatKey || record?.purpose !== 'companion' || !expectedIdentity) {
+      return companionFailure('companion_chat_required', 'Companion turn требует сохранённый companion-чат.');
+    }
+    if (opts.mode !== 'plan') {
+      return companionFailure('companion_plan_required', 'Companion turn допускает только точный режим plan.');
+    }
+    if (opts.attachments != null || opts.slashCommand != null) {
+      return companionFailure(
+        'companion_turn_unsupported',
+        'Companion turn v1 принимает только typed/voice text без вложений и slash-команд.',
+      );
+    }
+    let taskSandbox = null;
+    if (recordTaskId) {
+      if (!await companionTaskExists(recordTaskId)) {
+        return companionFailure(
+          'companion_task_unavailable',
+          'Задача больше не подтверждается server-owned реестром.',
+        );
+      }
+      taskSandbox = await companionTaskSandbox(recordTaskId);
+      if (!taskSandbox) {
+        return companionFailure(
+          'companion_task_sandbox_unavailable',
+          'Для задачи ещё нет подтверждённого worktree; продолжите в полном чате или запустите конвейер.',
+        );
+      }
+    }
+
+    const modelTarget = await resolveModelTarget(opts, record);
+    if (!modelTarget.ok) return modelTarget;
+    let executor = null;
+    let planDeclared = false;
+    try {
+      executor = await executorResolver(modelTarget.provider);
+      if (typeof executor?.modes === 'function') {
+        const catalog = await Promise.resolve(executor.modes(config));
+        planDeclared = Array.isArray(catalog) && catalog.some((mode) => mode?.id === 'plan');
+      }
+    } catch { /* любой сбой каталога означает fail-closed */ }
+    if (!planDeclared) {
+      return companionFailure(
+        'companion_plan_unavailable',
+        `Исполнитель ${modelTarget.provider} не подтвердил безопасный режим plan.`,
+      );
+    }
+    return {
+      ok: true, record, modelTarget, executor, taskSandbox,
+    };
+  }
+
+  async function runChat(reply, request, opts) {
+    const chatKey = String(opts.chatKey || '');
+    // DELETE ставит marker до первого filesystem await; новый ход не имеет права
+    // вклиниться между busy-check и удалением durable identity.
+    if (chatKey && deletingChats.has(chatKey)) {
+      return reply.code(409).send({
+        error: 'chat_busy',
+        message: 'Чат сейчас удаляется; повторите действие после синхронизации истории.',
+      });
+    }
+    const releaseAcceptedTurn = beginAcceptedTurn(chatKey);
+    try {
+      const strict = await strictCompanionPreflight(opts);
+      if (!strict.ok) {
+        return reply.code(strict.statusCode || 400).send({
+          error: strict.error,
+          message: strict.message,
+        });
+      }
+      // Client context — только bounded prompt data. Нормализуем ровно один раз до
+      // очереди хода; contextPrefix узнаёт созданный здесь объект и повторно его не читает.
+      const droppedContext = [];
+      const normalizedContext = normalizeUiContext(opts.context, {
+        onDrop({ code, key = '' }) {
+          if (droppedContext.length >= 16) return;
+          const item = `${code}:${key}`;
+          if (!droppedContext.includes(item)) droppedContext.push(item);
+        },
+      });
+      if (droppedContext.length) {
+        fastify.log.warn({ dropped: droppedContext }, 'часть UI-контекста чата отброшена');
+      }
+      const modelTarget = strict.modelTarget || await resolveModelTarget(opts, strict.record);
+      const target = await resolveRunTarget(opts, modelTarget);
+      if (!target.ok) return reply.code(400).send({ error: target.error, message: target.message });
+      if (strict.executor) {
+        target.strictExecutor = strict.executor;
+        target.strictPermissionMode = 'plan';
+      }
+      const scope = { chatKey, provider: target.provider, sessionId: target.sessionId };
+      const queued = turnLocks.isBusy(scope);
+      if (queued) {
+        fastify.log.info({ chatKey }, 'чат: ход уже идёт — сообщение поставлено в очередь');
+        // Второму окну (и своему же, если оно захочет показать «в очереди») — сигнал.
+        fastify.sse.broadcast('chat-queued', { chatKey, at: Date.now() });
+      }
+      const result = await turnLocks.run(scope, async () => {
+        let lockedStrict = strict;
+        let lockedSandbox = strict.taskSandbox || null;
+        if (opts.companionTurn === true) {
+          // За время в очереди могли измениться каталог, durable identity или attempt.
+          // Повторяем проверку внутри chat lock до binding/activeRuns/executor spawn.
+          lockedStrict = await strictCompanionPreflight(opts);
+          if (!lockedStrict.ok) {
+            return reply.code(lockedStrict.statusCode || 400).send({
+              error: lockedStrict.error,
+              message: lockedStrict.message,
+            });
+          }
+          if (lockedStrict.modelTarget.provider !== target.provider
+            || lockedStrict.modelTarget.model !== target.model) {
+            return reply.code(409).send({
+              error: 'companion_target_changed',
+              message: 'Исполнитель companion-чата изменился во время ожидания; повторите ход.',
+            });
+          }
+          // После свежего modes() ещё раз читаем sandbox, чтобы между authoritative
+          // snapshot и передачей cwd в runChatTurn не было другого await.
+          lockedSandbox = opts.id ? await companionTaskSandbox(opts.id) : null;
+          if (opts.id && !lockedSandbox) {
+            return reply.code(409).send({
+              error: 'companion_task_sandbox_unavailable',
+              message: 'Worktree задачи изменился или исчез во время ожидания; ход не запущен.',
+            });
+          }
+          target.strictExecutor = lockedStrict.executor;
+          target.strictPermissionMode = 'plan';
+        }
+        return runChatTurn(reply, request, {
+          ...opts,
+          context: normalizedContext,
+          model: target.model,
+          sessionId: target.sessionId,
+          target,
+          companionTaskSandbox: lockedSandbox,
+          queued,
+        });
+      });
+      return result;
+    } finally {
+      releaseAcceptedTurn();
+    }
   }
 
   async function runChatTurn(reply, request, {
     id, message, model, effort, mode: wantMode, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target,
+    companionTaskSandbox: trustedCompanionSandbox, companionTurn,
   }) {
     // Клиент фиксирует момент нажатия «отправить» до durable save. Он нужен только
     // страховочной записи pending: если окно закрылось и вопрос пришлось восстановить,
@@ -726,8 +1046,8 @@ async function chatModule(fastify, opts) {
     // без рестарта сервера и без изменения глобальных конфигов конкретных CLI.
     const extraDirs = [...(prefs?.read().trustedDirectories || [])];
     if (id) {
-      const env = await factoryState.readEnv(id);
-      const parsed = parseSandboxRepositories(env);
+      const parsed = trustedCompanionSandbox
+        || parseSandboxRepositories(await factoryState.readEnv(id));
       if (parsed.kind === 'invalid') {
         return reply.code(409).send({
           error: 'invalid_sandbox_env',
@@ -740,40 +1060,6 @@ async function chatModule(fastify, opts) {
         extraDirs.push(...repos.slice(1).map((repo) => repo.path));
       }
     }
-    const mode = pageMode(context, !!id);
-    if (mode.cwd) cwd = mode.cwd;
-
-    // Kimi session принадлежит не браузеру, а sidecar-у Cockpit. Под фактическим
-    // chat lock перечитываем binding, вращаем его при смене cwd/model/profile и
-    // резервируем generation ещё до session/new.
-    let kimiBinding = null;
-    let kimiIdentity = null;
-    if (target.provider === 'kimi') {
-      const cwdRealpath = await fs.realpath(cwd);
-      kimiIdentity = {
-        chatKey,
-        provider: 'kimi',
-        cwdRealpath,
-        model,
-        authProfileId: KIMI_AUTH_PROFILE_ID,
-        securityProfile: kimiSecurityProfile(config),
-      };
-      const current = await bindingStore.read(chatKey);
-      const identityMatches = current
-        && ['provider', 'cwdRealpath', 'model', 'authProfileId', 'securityProfile']
-          .every((field) => current[field] === kimiIdentity[field]);
-      if (!current || !identityMatches) {
-        kimiBinding = await bindingStore.rotate(kimiIdentity, current?.generation ?? null);
-      } else {
-        kimiBinding = current;
-      }
-      sessionId = kimiBinding.sessionId || null;
-      if (sessionId) {
-        await bindingStore.assertResumeOwner({ chatKey, provider: 'kimi', sessionId });
-      }
-      cwd = cwdRealpath;
-    }
-
     // Вложения: клиент присылает имена файлов, ранее загруженных через /api/chat/upload.
     // Пути строим сами (только внутри attachDir) и открываем агенту доступ через --add-dir.
     let attachBlock = '';
@@ -793,7 +1079,7 @@ async function chatModule(fastify, opts) {
     // Target уже разрешён строго по сохранённому modelRef до взятия locks. Никакого
     // fallback к Claude здесь больше нет.
     const info = { provider: target.provider, model: target.modelInfo };
-    const executor = await executorResolver(target.provider);
+    const executor = target.strictExecutor || await executorResolver(target.provider);
 
     // Служебный слэш-ход провайдерской команды (меню «/» в чате). Признак принимаем
     // строго: команда обязана быть в списке commands() исполнителя с run:'prompt', а
@@ -840,14 +1126,13 @@ async function chatModule(fastify, opts) {
     const fullMessage = plan
       ? (plan.kind === 'native' ? plan.message : SUMMARY_PROMPT)
       : withChatTitleHook(
-        contextPrefix(context, mode.hint) + ticket + attachBlock
+        contextPrefix(context, pageHint(context?.path)) + ticket + attachBlock
         + (stoppedBrief ? `${stoppedBrief}\n\n` : '') + (message || 'Посмотри вложения.'),
         wantsTitle,
       );
-    // Режим прав выбирает пользователь в чате; страница даёт лишь дефолт для своих
-    // сценариев (например «Агенты» — правки без спроса). Значение сверяем со списком
-    // самого CLI: неизвестное он не принимает, а падает с ошибкой валидации.
-    const permissionMode = (await allowedMode(executor, wantMode)) || mode.permissionMode;
+    // Режим прав выбирает только пользователь в чате. UI-context не является
+    // authorization surface и не даёт ни cwd, ни fallback permission mode.
+    const permissionMode = target.strictPermissionMode || await allowedMode(executor, wantMode);
     if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
 
     // Уровень эффорта CLI не прощает: неизвестное значение приводит к ошибке
@@ -863,6 +1148,60 @@ async function chatModule(fastify, opts) {
       });
     }
     const runEffort = resolvedEffort.effort;
+
+    // Подготовка prompt/ticket/provider выше могла ждать произвольный I/O. Перед первой
+    // мутацией binding/activeRuns/executor ещё раз подтверждаем физический exact worktree:
+    // ранний canonical-снимок не даёт права запускаться по уже удалённому пути.
+    if (companionTurn === true && id) {
+      const currentSandbox = await companionTaskSandbox(id);
+      if (!sameCompanionTaskSandbox(trustedCompanionSandbox, currentSandbox)) {
+        return reply.code(409).send({
+          error: 'companion_task_sandbox_unavailable',
+          message: 'Worktree задачи изменился во время подготовки хода; ход не запущен.',
+        });
+      }
+    }
+
+    // Kimi session принадлежит не браузеру, а sidecar-у Cockpit. Все медленные части
+    // prompt уже готовы; только теперь перечитываем binding и резервируем generation.
+    let kimiBinding = null;
+    let kimiIdentity = null;
+    if (target.provider === 'kimi') {
+      const cwdRealpath = trustedCompanionSandbox ? cwd : await fs.realpath(cwd);
+      kimiIdentity = {
+        chatKey,
+        provider: 'kimi',
+        cwdRealpath,
+        model,
+        authProfileId: KIMI_AUTH_PROFILE_ID,
+        securityProfile: kimiSecurityProfile(config),
+      };
+      const current = await bindingStore.read(chatKey);
+      const identityMatches = current
+        && ['provider', 'cwdRealpath', 'model', 'authProfileId', 'securityProfile']
+          .every((field) => current[field] === kimiIdentity[field]);
+      if (!current || !identityMatches) {
+        kimiBinding = await bindingStore.rotate(kimiIdentity, current?.generation ?? null);
+      } else {
+        kimiBinding = current;
+      }
+      sessionId = kimiBinding.sessionId || null;
+      if (sessionId) {
+        await bindingStore.assertResumeOwner({ chatKey, provider: 'kimi', sessionId });
+      }
+      cwd = cwdRealpath;
+      // Binding I/O тоже могло занять время. Не запускаем executor со stale cwd даже
+      // после уже созданного recoverable sidecar-а.
+      if (companionTurn === true && id) {
+        const currentSandbox = await companionTaskSandbox(id);
+        if (!sameCompanionTaskSandbox(trustedCompanionSandbox, currentSandbox)) {
+          return reply.code(409).send({
+            error: 'companion_task_sandbox_unavailable',
+            message: 'Worktree задачи исчез до запуска исполнителя; ход не запущен.',
+          });
+        }
+      }
+    }
 
     // Разрешения (claude): default-режим, на действия агент спрашивает через
     // наш MCP-инструмент → всплывашка в браузере.
@@ -893,7 +1232,15 @@ async function chatModule(fastify, opts) {
     // кольцом контекста. Флаг обязан быть здесь, а не только в затеявшем окне: у родного
     // компакта нет ни шагов, ни прогресса (см. ниже), так что второму устройству
     // догадаться о сжатии больше неоткуда.
-    const runRec = { startedAt: Date.now(), tokens: 0, steps: [], ac, compact: !!plan };
+    const runRec = {
+      startedAt: Date.now(),
+      tokens: 0,
+      steps: [],
+      ac,
+      compact: !!plan,
+      speechSafe: companionTurn === true,
+      speechTraceSeen: false,
+    };
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
       // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
@@ -949,6 +1296,7 @@ async function chatModule(fastify, opts) {
         // ACP, ollama из своего цикла инструментов). Выдаётся всем: не поддерживающий
         // его executor просто не вызовет колбэк, а вендорной ветки в ядре не остаётся.
         onPermission: (presentation) => {
+          runRec.speechSafe = false;
           // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
           // в default), а на безопасные запросы отвечает общий классификатор.
           // Деструктивные и неизвестные формы по-прежнему уходят человеку во всплывашку.
@@ -980,6 +1328,14 @@ async function chatModule(fastify, opts) {
         // Лента хода (размышления, инструменты, их результаты) — живьём в окно.
         // Копия в activeRuns: перезагрузка страницы посреди хода не теряет показанное.
         onStep: chatKey ? (step) => {
+          // Эта аттестация монотонна и намеренно выполняется до фильтрации заголовка и
+          // ограниченного хранения шагов. Озвучиваемый ход дают только допустимые нормализованные
+          // виды; свидетельство ошибки, неизвестного вида или действия нельзя забывать.
+          const speechKind = isPlainObject(step) && typeof step.k === 'string' && step.k
+            ? step.k
+            : null;
+          if (speechKind) runRec.speechTraceSeen = true;
+          if (!speechKind || !SPEECH_SAFE_STEP_KINDS.has(speechKind)) runRec.speechSafe = false;
           // Служебный маркер заголовка не показываем ни в живой ленте, ни после F5.
           const visibleStep = visibleChatTitleStep(step, wantsTitle);
           if (!visibleStep) return;
@@ -1057,19 +1413,28 @@ async function chatModule(fastify, opts) {
       }
       // Актуальный id разговора: с ним пойдут сообщения, ждущие в очереди этого чата.
       if (chatKey && out?.sessionId) lastSession.set(chatKey, out.sessionId);
+      // Окончательный вердикт при последней записи принадлежит серверу: исполнитель не может
+      // сам подтвердить это поле, а ограниченный хвост `out.steps` не доказывает отсутствие раннего действия.
+      const speechSafe = companionTurn === true
+        && runRec.speechSafe === true
+        && runRec.speechTraceSeen === true
+        && !plan
+        && !slash
+        && !out?.note;
       // Клиент не дождался (перезагрузка/закрытие вкладки) — ответ в pending, подберётся при загрузке.
       if (request.socket.destroyed && chatKey) {
         // userText — страховка от гонки last-write-wins: если вопрос пользователя
         // не успел сохраниться в стор, клиент восстановит его перед ответом.
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
           chatKey, role: out?.note ? 'note' : 'assistant', ...out, model: model || null, effort: runEffort || null,
+          speechSafe,
           ...orphanUser, at: Date.now() });
         fastify.sse.broadcast('chat-orphan', { chatKey });
         return reply;
       }
       // model — что просили, actualModel — чем CLI отработал (алиас он резолвит сам),
       // effort — что реально ушло в запуск. По этой тройке в UI видно любой рассинхрон.
-      return { ...out, model: model || null, effort: runEffort || null };
+      return { ...out, model: model || null, effort: runEffort || null, speechSafe };
     } catch (err) {
       // Остановка по кнопке — не ошибка: отдаём обычный ответ с уже показанной лентой,
       // чтобы в истории осталось, что агент успел сделать до стопа.
@@ -1102,7 +1467,7 @@ async function chatModule(fastify, opts) {
           fastify.sse.broadcast('chat-orphan', { chatKey });
           return reply;
         }
-        return stoppedOut;
+        return { ...stoppedOut, speechSafe: false };
       }
       if (request.socket.destroyed && chatKey) {
         await writeOrphan({ id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
@@ -1551,22 +1916,26 @@ async function chatModule(fastify, opts) {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
     const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
+      requestTitle, sentAt, slashCommand, companionTurn,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
+      id, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
+      requestTitle, sentAt, slashCommand, companionTurn,
     });
   });
 
   // Свободный чат без задачи (корень фабрики).
   fastify.post('/api/chat', async (request, reply) => {
     const {
-      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
+      message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
+      requestTitle, sentAt, slashCommand, companionTurn,
     } = request.body || {};
     if (!(message || '').trim() && !attachments?.length) return reply.code(400).send({ error: 'empty_message' });
     return runChat(reply, request, {
-      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey, requestTitle, sentAt, slashCommand,
+      id: null, message, model, modelRef, effort, mode, sessionId, context, attachments, chatKey,
+      requestTitle, sentAt, slashCommand, companionTurn,
     });
   });
 
@@ -1607,6 +1976,9 @@ async function chatModule(fastify, opts) {
     return {
       ...(await history.read()),
       compactWindow: Math.max(0, Number(prefs?.read()?.chatAutoCompactWindow) || 0),
+      // Чем уходит быстрый ход компаньона. Едет тем же путём, что порог сжатия: модель
+      // резолвит браузер перед отправкой, а настройка server-owned и общая для окон.
+      companion: normalizeCompanionSettings(prefs?.read()?.companion),
       speech: {
         ...publicSpeech,
         revision: speechSettingsRevision(settings, storedRevision),
@@ -1614,12 +1986,83 @@ async function chatModule(fastify, opts) {
     };
   });
 
+  // Атомарное создание или восстановление по логической идентичности, принадлежащей серверу. Тело намеренно
+  // не является заготовкой записи чата: id/model/cwd/mode и details здесь не читаются.
+  fastify.post('/api/chat/store/ensure', async (request, reply) => {
+    const { purpose, taskId = null, origin = '' } = request.body || {};
+    try {
+      // Назначение и каноническая область задачи проверяются до серверного резолвера: сырой
+      // taskId, похожий на путь, не должен становиться аргументом поиска в файловой системе или трекере.
+      if (purpose !== 'companion') {
+        return reply.code(400).send({
+          error: 'bad_chat_purpose',
+          message: 'Поддерживается только purpose companion.',
+        });
+      }
+      const canonicalTaskId = normalizeCompanionTaskId(taskId);
+      if (canonicalTaskId && !await companionTaskExists(canonicalTaskId)) {
+        return reply.code(404).send({
+          error: 'companion_task_not_found',
+          message: 'Задача не найдена в server-owned реестре.',
+        });
+      }
+      const result = await history.ensureByPurpose({ purpose, taskId: canonicalTaskId });
+      if (result.created || result.restored) {
+        fastify.sse.broadcast('chat-store', {
+          id: result.chat.id,
+          archived: false,
+          origin: String(origin || ''),
+          at: Date.now(),
+          ensured: true,
+        });
+      }
+      return {
+        chat: result.chat,
+        created: result.created,
+        restored: result.restored,
+      };
+    } catch (error) {
+      if (!(error instanceof ChatHistoryError)) throw error;
+      return reply.code(error.statusCode || 409).send({
+        error: error.code,
+        message: error.message,
+        ...(error.conflicts?.length ? {
+          conflicts: error.conflicts,
+          chatIds: error.conflicts.map((chat) => chat.id),
+        } : {}),
+      });
+    }
+  });
+
   // Полная запись стора. Осталась для миграции со старой схемы и восстановления
   // из браузерного снимка; в обычной работе клиент ею НЕ пользуется — с ростом истории
   // тело перерастало лимит запроса, сервер отвечал 413, и переписка не сохранялась вообще.
-  fastify.put('/api/chat/store', async (request) => {
-    await history.save(request.body || {});
-    return { ok: true };
+  fastify.put('/api/chat/store', async (request, reply) => {
+    const body = request.body || {};
+    const chatIds = [
+      ...(Array.isArray(body.sessions) ? body.sessions : []),
+      ...(Array.isArray(body.archived) ? body.archived : []),
+    ].map((chat) => String(chat?.id || '')).filter(Boolean);
+    if (chatIds.some((id) => deletingChats.has(id))) {
+      return reply.code(409).send({
+        error: 'chat_busy',
+        message: 'Один из чатов сейчас удаляется; перечитайте историю перед сохранением.',
+      });
+    }
+    // PUT и DELETE объявляют намерение синхронно до первого await. Если PUT принят
+    // первым, DELETE вернёт chat_busy; если DELETE — поздний PUT не воскресит файл.
+    const releaseChatSaves = beginChatSaves(chatIds);
+    try {
+      try {
+        await history.save(body);
+        return { ok: true };
+      } catch (error) {
+        if (!(error instanceof ChatHistoryError)) throw error;
+        return reply.code(error.statusCode || 409).send({ error: error.code, message: error.message });
+      }
+    } finally {
+      releaseChatSaves();
+    }
   });
 
   // ── Точечное сохранение: одно тело — один чат ──
@@ -1633,38 +2076,57 @@ async function chatModule(fastify, opts) {
   fastify.put('/api/chat/store/chat', async (request, reply) => {
     const { chat, archived, origin } = request.body || {};
     if (!chat?.id) return reply.code(400).send({ error: 'bad_chat' });
-    const { written, restored, dropped, stale, chat: saved } = await history.saveOne(chat, !!archived);
-    // Ничего не изменилось — молчим: лишний persist не повод будить остальные окна.
-    if (written) {
-      fastify.sse.broadcast('chat-store', {
-        id: chat.id, archived: !!archived, origin: origin || '', at: Date.now(),
+    const chatId = String(chat.id);
+    if (deletingChats.has(chatId)) {
+      return reply.code(409).send({
+        error: 'chat_busy',
+        message: 'Чат сейчас удаляется; перечитайте историю перед сохранением.',
       });
     }
-    // Окно прислало отставшую копию, сервер дописал в неё недостающее (см. merge-chat.js) —
-    // значит у самого окна лента неполная и перечитать её должно и оно. Своё эхо оно
-    // пропускает по `origin`, поэтому шлём второе событие уже НИЧЬИМ. С задержкой: без неё
-    // событие обгоняет ответ на этот же PUT, окно считает свою копию неотправленной
-    // («грязной») и отказывается принимать серверную.
-    if (restored || dropped) {
-      fastify.log.warn({ chat: chat.id, restored, dropped }, 'история чата слита с серверной копией');
-      setTimeout(() => {
+    const releaseChatSave = beginChatSaves([chatId]);
+    try {
+      let result;
+      try {
+        result = await history.saveOne(chat, !!archived);
+      } catch (error) {
+        if (!(error instanceof ChatHistoryError)) throw error;
+        return reply.code(error.statusCode || 409).send({ error: error.code, message: error.message });
+      }
+      const { written, restored, dropped, stale, chat: saved } = result;
+      // Ничего не изменилось — молчим: лишний persist не повод будить остальные окна.
+      if (written) {
         fastify.sse.broadcast('chat-store', {
-          id: chat.id, archived: !!archived, origin: '', at: Date.now(), merged: true,
+          id: chat.id, archived: !!archived, origin: origin || '', at: Date.now(),
         });
-      }, 500).unref?.();
+      }
+      // Окно прислало отставшую копию, сервер дописал в неё недостающее (см. merge-chat.js) —
+      // значит у самого окна лента неполная и перечитать её должно и оно. Своё эхо оно
+      // пропускает по `origin`, поэтому шлём второе событие уже НИЧЬИМ. С задержкой: без неё
+      // событие обгоняет ответ на этот же PUT, окно считает свою копию неотправленной
+      // («грязной») и отказывается принимать серверную.
+      if (restored || dropped) {
+        fastify.log.warn({ chat: chat.id, restored, dropped }, 'история чата слита с серверной копией');
+        setTimeout(() => {
+          fastify.sse.broadcast('chat-store', {
+            id: chat.id, archived: !!archived, origin: '', at: Date.now(), merged: true,
+          });
+        }, 500).unref?.();
+      }
+      return {
+        ok: true,
+        written,
+        restored,
+        dropped,
+        stale,
+        revision: saved?.revision ?? null,
+        schema: saved?.schema ?? null,
+        surface: saved?.surface ?? null,
+        modelRef: saved?.modelRef ?? null,
+        modelRefState: saved?.modelRefState ?? null,
+      };
+    } finally {
+      releaseChatSave();
     }
-    return {
-      ok: true,
-      written,
-      restored,
-      dropped,
-      stale,
-      revision: saved?.revision ?? null,
-      schema: saved?.schema ?? null,
-      surface: saved?.surface ?? null,
-      modelRef: saved?.modelRef ?? null,
-      modelRefState: saved?.modelRefState ?? null,
-    };
   });
 
   fastify.get('/api/chat/store/chat/:id', async (request, reply) => {
@@ -1673,25 +2135,39 @@ async function chatModule(fastify, opts) {
     return { chat };
   });
 
-  fastify.delete('/api/chat/store/chat/:id', async (request) => {
+  fastify.delete('/api/chat/store/chat/:id', async (request, reply) => {
     const id = String(request.params.id);
-    const removed = await history.remove(id);
-    // origin в query: DELETE у нас без тела (см. shared/api-client.js).
-    if (removed) {
-      fastify.sse.broadcast('chat-store', {
-        id, gone: true, origin: String(request.query?.origin || ''), at: Date.now(),
+    // Проверка и marker выполняются без await: ход либо уже принят и блокирует DELETE,
+    // либо увидит deletingChats и не сможет стартовать по удаляемой durable identity.
+    if ((acceptedTurns.get(id) || 0) > 0 || (savingChats.get(id) || 0) > 0 || deletingChats.has(id)
+      || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id })) {
+      return reply.code(409).send({
+        error: 'chat_busy',
+        message: 'Нельзя удалить чат, пока идёт его сохранение, ожидание или ход.',
       });
     }
-    // Sidecar сохраняется до retention deadline: удаление истории не должно неожиданно
-    // удалять vendor session, а случайно удалённый чат остаётся recoverable.
-    if (removed) {
-      const state = await history.read();
-      const activeChatKeys = [...state.sessions, ...state.archived].map((chat) => chat.id);
-      await bindingStore.cleanup({ activeChatKeys }).catch((error) => {
-        fastify.log.warn({ err: error.message }, 'cleanup session bindings не выполнен');
-      });
+    deletingChats.add(id);
+    try {
+      const removed = await history.remove(id);
+      // origin в query: DELETE у нас без тела (см. shared/api-client.js).
+      if (removed) {
+        fastify.sse.broadcast('chat-store', {
+          id, gone: true, origin: String(request.query?.origin || ''), at: Date.now(),
+        });
+      }
+      // Sidecar сохраняется до retention deadline: удаление истории не должно неожиданно
+      // удалять vendor session, а случайно удалённый чат остаётся recoverable.
+      if (removed) {
+        const state = await history.read();
+        const activeChatKeys = [...state.sessions, ...state.archived].map((chat) => chat.id);
+        await bindingStore.cleanup({ activeChatKeys }).catch((error) => {
+          fastify.log.warn({ err: error.message }, 'cleanup session bindings не выполнен');
+        });
+      }
+      return { ok: true, removed };
+    } finally {
+      deletingChats.delete(id);
     }
-    return { ok: true, removed };
   });
 
   // Мета отдельно: переключение вкладки не тащит за собой переписку.

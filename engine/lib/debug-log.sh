@@ -45,7 +45,12 @@ _debug_log_field_valid() {
 
 _debug_log_meta_once() {
   local key=$1 value=$2 meta="$DEBUG_LOG_RUN_DIR/meta.env"
-  [[ -f "$meta" ]] || return 0
+  # Schema 2 — целиком записываемое host-зеркало, публикуемое через удерживаемый
+  # дескриптор run-dir. Диагностическая трассировка не должна дописывать его и не должна
+  # переходить по созданному провайдером symlink/FIFO. Launcher включает текущее debug-
+  # состояние при атомарной публикации начального и финального зеркал.
+  [[ -f "$meta" && ! -L "$meta" ]] || return 0
+  grep -qx 'SCHEMA=2' "$meta" 2>/dev/null && return 0
   grep -q "^${key}=" "$meta" 2>/dev/null && return 0
   printf '%s=%s\n' "$key" "$value" >>"$meta" 2>/dev/null || true
   chmod 600 "$meta" 2>/dev/null || true

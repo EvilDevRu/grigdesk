@@ -11,7 +11,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture({ updates = [], enabled = () => true, call = null } = {}) {
+function fixture({ updates = [], enabled = () => true, call = null, onMessage = null } = {}) {
   const appended = [];
   const writes = [];
   const changed = [];
@@ -44,6 +44,7 @@ function fixture({ updates = [], enabled = () => true, call = null } = {}) {
     isEnabled: enabled,
     now: () => 1_800_000_000_000,
     onChanged: (event) => changed.push(event),
+    onMessage,
     timeoutSec: 0,
     log: { warn() {}, error() {} },
   });
@@ -64,6 +65,33 @@ test('disabled Telegram poller не берёт lease и не читает сет
   });
   assert.deepEqual(await poller.tick(), { polled: false, reason: 'plugin_disabled' });
   assert.equal(acquired, 0);
+});
+
+test('поллер передаёт id автора сообщения, на которое ответил владелец', async () => {
+  const delivered = [];
+  const f = fixture({
+    onMessage: async (message) => delivered.push(message),
+    updates: [{
+      update_id: 8,
+      message: {
+        message_id: 4,
+        date: 1_780_000_000,
+        chat: { id: 555001, type: 'private', first_name: 'Аня' },
+        from: { id: 555001, first_name: 'Аня' },
+        text: 'свой ответ',
+        reply_to_message: {
+          message_id: 3,
+          from: { id: 8123456789, first_name: 'Кокпит', is_bot: true },
+          text: 'карточка вопроса',
+        },
+      },
+    }],
+  });
+  await f.poller.tick();
+  assert.deepEqual(
+    { replyToMessageId: delivered[0]?.replyToMessageId, replyToFromId: delivered[0]?.replyToFromId },
+    { replyToMessageId: 3, replyToFromId: 8123456789 },
+  );
 });
 
 test('poller пишет update и offset только в захваченный account context', async () => {

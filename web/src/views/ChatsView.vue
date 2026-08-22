@@ -1,7 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useChatStore } from '../stores/chat.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
+import { useDockViewport } from '../shared/tools/viewport.js';
 import ChatList from './chat/ChatList.vue';
 import ChatSession from './chat/ChatSession.vue';
 
@@ -14,6 +16,22 @@ const { activeId } = storeToRefs(chat);
 // источник правды о ширине экрана рассинхронизируется на поворотах и ресайзе.
 // Стартуем со списка — как в мессенджерах на телефоне.
 const pane = ref('list');
+const { dockCapable } = useDockViewport();
+const chatsContext = useUiContextSource('chats', { layer: 'page', active: false });
+watch(activeId, (chatId) => {
+  if (chatId) chatsContext.focus({ details: { chatId } });
+  else chatsContext.blur();
+}, { immediate: true });
+
+// CSS скрывает detail-pane на телефоне, но компонент остаётся mounted. Регистрируем
+// фактическую поверхность тем же breakpoint-контрактом, чтобы скрытый чат не гасил
+// unread и не подавлял уведомление.
+const pageSurface = chat.registerSurface('chats-page', { chatId: null, visible: false });
+watch([activeId, dockCapable, pane], ([chatId, wide, currentPane]) => {
+  const visible = Boolean(chatId) && (wide || currentPane === 'chat');
+  pageSurface.update({ chatId: chatId || null, visible });
+  if (visible) chat.markRead(chatId);
+}, { immediate: true });
 onMounted(() => { chat.ensure(); chat.loadConveyor(); });
 
 // ── Ширина списка чатов ─────────────────────────────────────────────────────────
@@ -129,7 +147,10 @@ onMounted(() => {
     hostObserver.observe(host.value);
   }
 });
-onBeforeUnmount(() => { hostObserver?.disconnect?.(); hostObserver = null; });
+onBeforeUnmount(() => {
+  hostObserver?.disconnect?.(); hostObserver = null;
+  pageSurface.dispose();
+});
 </script>
 
 <template>
@@ -146,7 +167,7 @@ onBeforeUnmount(() => { hostObserver?.disconnect?.(); hostObserver = null; });
       <span></span>
     </div>
     <div class="stage">
-      <ChatSession v-if="activeId" :key="activeId" :sid="activeId" variant="page" @back="pane = 'list'" />
+      <ChatSession v-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
     </div>
   </div>
 </template>

@@ -83,6 +83,11 @@ def main() -> None:
     )
     parser.set_defaults(condition_on_previous_text=True)
     parser.add_argument('--vad-silence-ms', default=500, type=int, help='минимальная пауза VAD, мс')
+    parser.add_argument(
+        '--initial-prompt',
+        default=None,
+        help='стилевая подсказка первому окну: задаёт пунктуацию, регистр и разбивку на предложения',
+    )
     parser.add_argument('--progress-file', default=None, help='куда писать прогресс {done,total} по ходу распознавания')
     args = parser.parse_args()
 
@@ -94,12 +99,20 @@ def main() -> None:
     hotwords_measure = measure_hotwords(model, args.hotwords)
 
     language = None if args.lang == 'auto' else args.lang
+    initial_prompt = args.initial_prompt or None
+    # Связка обязательна и проверена замером на этой же модели: голый initial_prompt
+    # при condition_on_previous_text уводит модель в петлю — она повторяет текст самой
+    # подсказки вместо речи (три одинаковых сегмента на 79 секунд записи). Выравнивание
+    # по словам включает подавление повторов и снимает петлю. Поэтому word_timestamps
+    # не отдельная настройка, а следствие промпта: разорвать пару нечем.
     segments, info = model.transcribe(
         args.audio,
         language=language,
         beam_size=args.beam_size,
         hotwords=args.hotwords,
         condition_on_previous_text=args.condition_on_previous_text,
+        initial_prompt=initial_prompt,
+        word_timestamps=bool(initial_prompt),
         vad_filter=True,                                   # отсекаем тишину/паузы
         vad_parameters={'min_silence_duration_ms': args.vad_silence_ms},
     )

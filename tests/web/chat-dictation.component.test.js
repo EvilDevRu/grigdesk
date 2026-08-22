@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -28,8 +29,12 @@ async function compileChatSession() {
     .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
     .replace("import { api } from '../../shared/api-client.js';", 'const api = globalThis.__dictationApi;')
     .replace(
-      "import { createSpeechStream } from '../../shared/speech-stream.js';",
-      'const createSpeechStream = globalThis.__dictationCreateSpeechStream;',
+      "import { useDictationController } from '../../features/speech/provider.js';",
+      'const useDictationController = globalThis.__dictationUseController;',
+    )
+    .replace(
+      "import { contextFill } from '../../shared/chat-context.js';",
+      'const contextFill = globalThis.__sharedChatContextFill;',
     )
     .replace(
       "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
@@ -140,7 +145,13 @@ async function mountChat(t, {
 } = {}) {
   const browser = await installBrowser(t);
   configureBrowser?.(browser);
-  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+  const [
+    { reactive, watch },
+    { createDictationController, speechExecutionFingerprint },
+  ] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/src/features/speech/controller.js'),
+  ]);
   const chatStore = reactive(makeChatStore(speech));
   const posts = [];
   const uploads = [];
@@ -165,11 +176,23 @@ async function mountChat(t, {
     },
   };
   globalThis.__dictationChatStore = () => chatStore;
-  globalThis.__dictationCreateSpeechStream = streamFactory || (async () => {
-    const error = new Error('AudioWorklet недоступен в тесте');
-    error.code = 'speech_stream_unsupported';
-    throw error;
+  const controller = createDictationController({
+    settings: {
+      read: () => chatStore.speech,
+      apply: (payload) => chatStore.setSpeechSnapshot(payload),
+    },
+    apiClient: globalThis.__dictationApi,
+    localStream: {
+      supported: () => typeof streamFactory === 'function',
+      open: streamFactory || (async () => null),
+    },
   });
+  const stopSettingsWatch = watch(
+    () => speechExecutionFingerprint(chatStore.speech),
+    () => controller.syncSettings(chatStore.speech),
+    { flush: 'sync' },
+  );
+  globalThis.__dictationUseController = () => controller;
   globalThis.__dictationProvidersStore = () => ({
     providers: [], load() {}, visibleModels: () => [], modesOf: () => [],
     modelOf: () => ({ id: '', model: null, provider: null }),
@@ -180,13 +203,15 @@ async function mountChat(t, {
   ]);
   const wrapper = mount(ChatSession, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { sid: 'dictation-chat', variant: 'page' },
+    props: { sid: 'dictation-chat' },
   });
   t.after(() => {
     wrapper.unmount();
+    stopSettingsWatch();
+    void controller.dispose();
     delete globalThis.__dictationApi;
     delete globalThis.__dictationChatStore;
-    delete globalThis.__dictationCreateSpeechStream;
+    delete globalThis.__dictationUseController;
     delete globalThis.__dictationProvidersStore;
   });
   await flushPromises();

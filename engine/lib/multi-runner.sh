@@ -233,6 +233,25 @@ _multi_request_matches() {
      "$(_run_state_get "$request" EPOCH)" == "$epoch" ]]
 }
 
+# Ручной switch решается только после затихания точной сессии провайдера, но до закрытия
+# runner_finished/usage/meta. Launcher вызывает этот хук, пока всё ещё владеет удерживаемым
+# дескриптором run-каталога, поэтому RESULT_CLASS не нужно небезопасно дописывать или
+# переоткрывать после атомарного финального зеркала.
+_multi_postamble_reclassify_v2() {
+  local task=$1 stage=$2 run_id=$3 epoch=$4 current=$5
+  local request_id target
+  RUNNER_POSTAMBLE_RESULT_CLASS=$current
+  _multi_request_matches "$task" "$stage" "$run_id" "$epoch" || return 0
+  request_id=$(_run_state_get "$(_runtime_switch_file "$task" "$stage")" REQUEST_ID)
+  target=$(runtime_switch_consume "$task" "$stage" "$run_id" "$epoch" "$request_id") || {
+    MULTI_SWITCH_CONSUME_FAILED=1
+    RUNNER_POSTAMBLE_RESULT_CLASS=unknown
+    return 0
+  }
+  MULTI_MANUAL_TARGET=$target
+  RUNNER_POSTAMBLE_RESULT_CLASS=manual_switch
+}
+
 _multi_invoke() {
   local provider=$1 family=$2 model=$3
   local run_id epoch token run_dir rc result request_id target fanout_count active_reason
@@ -259,6 +278,9 @@ _multi_invoke() {
   run_id=$(_multi_new_id)
   token=$(_multi_new_token)
   run_dir="$STATE_DIR/logs/runs/t${MULTI_TASK}/${MULTI_STAGE}/${run_id}"
+  MULTI_LAST_RUN_ID=$run_id
+  MULTI_LAST_RUN_EPOCH=$epoch
+  MULTI_LAST_RUNNER=$provider
   run_state_begin "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$token" || {
     DISPATCH_INVOKE_RESULT=unknown
     DISPATCH_INVOKE_STARTED=0
@@ -357,19 +379,13 @@ tests — дефект/неполнота теста; environment —
   [[ "$fanout_count" =~ ^[0-9]+$ ]] || fanout_count=0
   set_st "$MULTI_TASK" "FANOUT_${MULTI_STAGE}" "$fanout_count"
 
-  if _multi_request_matches "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch"; then
-    request_id=$(_run_state_get "$(_runtime_switch_file "$MULTI_TASK" "$MULTI_STAGE")" REQUEST_ID)
-    target=$(runtime_switch_consume "$MULTI_TASK" "$MULTI_STAGE" "$run_id" "$epoch" "$request_id") || {
-      DISPATCH_INVOKE_RESULT=unknown
-      DISPATCH_INVOKE_STARTED=1
-      return 0
-    }
-    # runner-launcher уже записал classifier результата завершённого процесса. При
-    # operator switch это не crash/unknown: последняя запись выигрывает в env-parser-е
-    # и честно объясняет attempt в Cockpit.
-    printf 'RESULT_CLASS=manual_switch\n' >>"$run_dir/meta.env"
-    MULTI_MANUAL_TARGET=$target
+  if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
     DISPATCH_INVOKE_RESULT=manual_switch
+    DISPATCH_INVOKE_STARTED=1
+    return 0
+  fi
+  if [[ "${MULTI_SWITCH_CONSUME_FAILED:-0}" == 1 ]]; then
+    DISPATCH_INVOKE_RESULT=unknown
     DISPATCH_INVOKE_STARTED=1
     return 0
   fi
@@ -421,6 +437,12 @@ multi_runner_run() {
   MULTI_PROMPT=$prompt
   MULTI_TIMEOUT=$timeout_s
   MULTI_MANUAL_TARGET=""
+  MULTI_SWITCH_CONSUME_FAILED=0
+  MULTI_LAST_RUN_ID=""
+  MULTI_LAST_RUN_EPOCH=""
+  MULTI_LAST_RUNNER=""
+  MULTI_DISPATCH_ORDINAL=0
+  MULTI_DISPATCH_SOURCE_OVERRIDE=""
   MULTI_CATALOG_REVISION=""
   declare -gA MULTI_PROBE_READY=()
   declare -gA MULTI_PROBE_VERSION=()
@@ -448,6 +470,8 @@ multi_runner_run() {
       MULTI_MANUAL_TARGET=""
       manual_count=$((manual_count + 1))
       switched=1
+      MULTI_DISPATCH_ORDINAL=$((MULTI_DISPATCH_ORDINAL + 1))
+      MULTI_DISPATCH_SOURCE_OVERRIDE=manual-switch
       continue
     fi
     set_st "$task" "RUNNER_ACTUAL_${stage}" "${DISPATCH_RESULT_RUNNER:-$primary}" \

@@ -11,6 +11,7 @@ import { buildDiscussion } from '../../lib/telegram/discussion.js';
 import { isBotTokenShape, maskToken } from '../../lib/telegram/token.js';
 import { parseTelegramLinks } from '../../lib/telegram/links.js';
 import { resolveText } from '../../lib/telegram/resolve.js';
+import { pultReplyKeyboard } from '../../lib/telegram/pult/format.js';
 
 const EMPTY = () => ({ links: [], text: '', quotes: 0, truncated: false });
 
@@ -26,6 +27,7 @@ const PUBLIC_MESSAGES = Object.freeze({
   telegram_unreachable: 'До Telegram сейчас не достучаться.',
   telegram_rejected: 'Telegram отклонил token или операцию.',
   telegram_rules_invalid: 'Правила Telegram не соответствуют контракту.',
+  telegram_rules_stale: 'Правила Telegram уже изменились. Перечитайте их перед сохранением.',
   telegram_failed: 'Операция Telegram временно не выполнена.',
 });
 
@@ -238,6 +240,18 @@ async function telegramModule(fastify, opts) {
   const PULT_CODE_ATTEMPTS = 5;
   /** accountRef → { botId, chatId, code, expiresAtMs, attempts } */
   const pultPending = new Map();
+  /** accountRef → последний использованный код: disable честно называет его погашенным. */
+  const pultLastCode = new Map();
+
+  // Команды и постоянная клавиатура пульта существуют только в личке владельца:
+  // бот обслуживает ещё и Входящие, поэтому всё ставится со scope конкретного
+  // чата, без default-scope — посторонние команды пульта видеть не должны.
+  const PULT_COMMANDS = Object.freeze([
+    { command: 'start', description: 'Открыть пульт' },
+    { command: 'status', description: 'Сводка конвейера' },
+    { command: 'help', description: 'Что умеет пульт' },
+    { command: 'clean', description: 'Убрать сообщения пульта' },
+  ]);
   const emptyPult = () => ({
     configured: false, confirmed: false, pending: false, chatTitle: '', chatHint: '',
   });
@@ -338,21 +352,21 @@ async function telegramModule(fastify, opts) {
   fastify.get('/api/telegram/rules', run(async () => {
     const lease = await acquire();
     try {
-      const rules = await checked(lease, (context) => context.rules.read());
+      const snapshot = await checked(lease, (context) => context.rules.readPolicySnapshot());
       const projects = await listProjects();
       if (!lease.isCurrent()) throw accountChanged();
-      return { rules, projects };
+      return { ...snapshot, projects };
     } finally { await lease.release(); }
   }));
 
   fastify.put('/api/telegram/rules', run(async (request, reply) => {
-    const body = exactBody(request.body, ['botId', 'rules']);
+    const body = exactBody(request.body, ['botId', 'policyFingerprint', 'rules']);
     let expectedBotId = null;
     try { expectedBotId = normalizeTelegramBotId(body?.botId); } catch { /* invalid client CAS */ }
     if (!body || expectedBotId === null) {
       return reply.code(400).send({
         error: 'invalid_request',
-        message: 'Ожидались ровно canonical botId и rules.',
+        message: 'Ожидались ровно canonical botId, policyFingerprint и rules.',
       });
     }
     const lease = await acquireWritable(reply);
@@ -374,9 +388,12 @@ async function telegramModule(fastify, opts) {
       if (liveBotId !== expectedBotId) throw accountChanged();
       const projects = await listProjects();
       if (!lease.isCurrent()) throw accountChanged();
-      const rules = await checked(lease, (context) => context.rules.write(body.rules, { projects }));
+      const snapshot = await checked(lease, (context) => context.rules.writeHumanCas(body.rules, {
+        expectedPolicyFingerprint: body.policyFingerprint,
+        projects,
+      }));
       changed('rules');
-      return { ok: true, rules };
+      return { ok: true, ...snapshot };
     } catch (error) {
       if (!error?.code && error instanceof Error) {
         error.code = 'telegram_rules_invalid';
@@ -385,6 +402,23 @@ async function telegramModule(fastify, opts) {
       throw error;
     } finally { await lease.release(); }
   }));
+
+  fastify.put('/api/telegram/rules/agent-search', run(async (request, reply) => (
+    withCasLease(
+      request,
+      reply,
+      ['botId', 'enabled', 'expectedPolicyFingerprint', 'rule'],
+      async ({ lease, body }) => {
+        const snapshot = await checked(lease, (context) => context.rules.setAgentSearch({
+          rule: body.rule,
+          enabled: body.enabled,
+          expectedPolicyFingerprint: body.expectedPolicyFingerprint,
+        }));
+        changed('rules-agent-search');
+        return { ok: true, ...snapshot };
+      },
+    )
+  )));
 
   fastify.post('/api/telegram/connect', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -534,6 +568,19 @@ async function telegramModule(fastify, opts) {
         userId: pending.chatId,
         confirmedAtMs: now(),
       }));
+      // Доступ уже записан durable — теперь команды и постоянная клавиатура,
+      // и только в этой личке: scope chat, default-scope не трогаем.
+      const confirmToken = lease.context.credentials?.token || '';
+      await checked(lease, (context) => context.botApi.callBotApi(confirmToken, 'setMyCommands', {
+        scope: { type: 'chat', chat_id: pending.chatId },
+        commands: PULT_COMMANDS,
+      }, { timeoutMs: 15_000 }));
+      await checked(lease, (context) => context.botApi.callBotApi(confirmToken, 'sendMessage', {
+        chat_id: pending.chatId,
+        text: 'Пульт включён. Разделы всегда под рукой на клавиатуре внизу; /help — что умеет пульт.',
+        reply_markup: pultReplyKeyboard(),
+      }, { timeoutMs: 15_000 }));
+      pultLastCode.set(lease.accountRef, pending.code);
       return { ok: true, pult: await pultViewFromLease(lease) };
     })
   )));
@@ -549,6 +596,21 @@ async function telegramModule(fastify, opts) {
         userId: settings.pultUserId ?? null,
         confirmedAtMs: null,
       }));
+      // Доступ уже закрыт локально — теперь чистка в Bot API тем же scope чата.
+      // Личка сохранена в namespace бота, поэтому повторный disable безопасно
+      // повторяет очистку; без настроенной лички чистить нечего.
+      if (settings.pultChatId != null) {
+        const disableToken = lease.context.credentials?.token || '';
+        await checked(lease, (context) => context.botApi.callBotApi(disableToken, 'deleteMyCommands', {
+          scope: { type: 'chat', chat_id: settings.pultChatId },
+        }, { timeoutMs: 15_000 }));
+        const lastCode = pultLastCode.get(lease.accountRef);
+        await checked(lease, (context) => context.botApi.callBotApi(disableToken, 'sendMessage', {
+          chat_id: settings.pultChatId,
+          text: `Пульт выключен, клавиатура убрана.${lastCode ? ` Код ${lastCode} погашен.` : ''} Для нового включения запроси код в кокпите.`,
+          reply_markup: { remove_keyboard: true },
+        }, { timeoutMs: 15_000 }));
+      }
       return { ok: true, pult: await pultViewFromLease(lease) };
     })
   )));

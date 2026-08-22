@@ -5,6 +5,8 @@ export {
   speechModel,
 } from './catalog.js';
 export {
+  DEFAULT_VIDEO_INITIAL_PROMPT,
+  INITIAL_PROMPT_MAX_CHARS,
   SPEECH_PRESETS,
   SPEECH_SCENARIOS,
   normalizeSpeechOptions,

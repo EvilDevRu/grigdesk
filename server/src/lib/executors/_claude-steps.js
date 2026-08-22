@@ -21,14 +21,15 @@ function describeTool(name, input = {}) {
     case 'Read':
       return { title: base(i.file_path), sub: i.file_path || '' };
     case 'Write':
-      return { title: base(i.file_path), sub: i.file_path || '', preview: cut(i.content, STEP_DIFF_LIMIT), lines: lineCount(i.content) };
+      return { title: base(i.file_path), sub: i.file_path || '', preview: cut(i.content, STEP_DIFF_LIMIT), lines: lineCount(i.content), files: i.file_path ? [String(i.file_path)] : [] };
     case 'Edit':
       return {
         title: base(i.file_path), sub: i.file_path || '',
         diff: { old: cut(i.old_string, STEP_DIFF_LIMIT), new: cut(i.new_string, STEP_DIFF_LIMIT), all: !!i.replace_all },
+        files: i.file_path ? [String(i.file_path)] : [],
       };
     case 'NotebookEdit':
-      return { title: base(i.notebook_path), sub: i.notebook_path || '' };
+      return { title: base(i.notebook_path), sub: i.notebook_path || '', files: i.notebook_path ? [String(i.notebook_path)] : [] };
     case 'Glob':
       return { title: i.pattern || '', sub: i.path || '' };
     case 'Grep':

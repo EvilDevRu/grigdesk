@@ -1,11 +1,10 @@
-// Срез M телеграм-пульта: мутации (план, §4 «M» и §5.3 «Мутации (фаза 3)»).
+// Срез M телеграм-пульта: мутации.
 //
-// Три правила мутаций:
-//  - всё, что стоит времени/денег, подтверждается ВТОРЫМ тапом с TTL 10 минут;
-//    протухшее подтверждение — «запрос устарел», inject-а нет;
-//  - индекс в callback_data — не источник истины: снимок списка живёт на сервере,
-//    перед inject сверяется с живым состоянием (catalogHash, состав active);
-//  - /task создаёт задачу только после предпросмотра; «Отмена» — ноль вызовов B24.
+// Мутаций осталось две, и обе про ВСТАВШИЙ прогон — resume и пересборка стенда.
+// Постановка задач, запуск прогона и остановка ходов из пульта сняты (дублировали
+// Входящие, кокпит и мобильный Битрикс), поэтому здесь проверяется одно правило:
+// всё, что стоит времени, подтверждается ВТОРЫМ тапом с TTL 10 минут; протухшее
+// подтверждение — «запрос устарел», inject-а нет.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -81,6 +80,7 @@ async function fixture() {
     botCalls,
     answers: () => botCalls.filter((c) => c.method === 'answerCallbackQuery'),
     edits: () => botCalls.filter((c) => c.method === 'editMessageText'),
+    deletes: () => botCalls.filter((c) => c.method === 'deleteMessage'),
     sends: () => botCalls.filter((c) => c.method === 'sendMessage'),
     tap: (data, over = {}) => withLease((lease) => actions.onCallback({
       id: 'cb1',
@@ -108,7 +108,7 @@ async function fixture() {
 
 // -------------------------------------------------------------------- resume
 
-test('resume: первый тап — вопрос без inject, «Да» — inject, итог в карточке', async () => {
+test('resume: первый тап — вопрос без inject, «Да» — inject, итог всплывашкой, карточка удалена', async () => {
   const f = await fixture();
   await f.tap('r:4187');
   assert.equal(f.cockpit.calls.length, 0, 'первый тап ничего не запускает');
@@ -119,7 +119,10 @@ test('resume: первый тап — вопрос без inject, «Да» — i
   f.cockpit.set('POST', '/api/tasks/4187/resume', { statusCode: 200, body: { ok: true, outcome: 'launched' } });
   await f.tap('r:4187:y');
   assert.deepEqual(f.cockpit.calls[0], { method: 'POST', url: '/api/tasks/4187/resume', payload: {} });
-  assert.match(f.edits()[1].body.text, /прогон продолжен/u);
+  assert.match(f.answers().at(-1).body.text, /прогон продолжен/u, 'итог показан всплывашкой');
+  assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42],
+    'решённая карточка удаляется, а не правится в «✓ решено»');
+  assert.equal(f.edits().length, 1, 'правок решённой карточки больше нет');
   assert.deepEqual(f.forgotten, ['stall:4187']);
 });
 
@@ -148,20 +151,23 @@ test('resume: типизированный отказ движка доезжа�
   });
   await f.tap('r:4187:y');
   assert.match(f.edits()[1].body.text, /прогон не поехал: исполнители недоступны: claude/u);
+  assert.equal(f.deletes().length, 0, 'отказ ручки карточку не удаляет: причина остаётся видимой');
 });
 
-test('«Отмена» на подтверждении гасит его: последующее «Да» уже не запускает', async () => {
+test('«Отмена» на подтверждении гасит его и удаляет карточку: последующее «Да» уже не запускает', async () => {
   const f = await fixture();
   await f.tap('r:4187');
   await f.tap('x');
-  assert.match(f.edits()[1].body.text, /Отменено/u);
+  assert.match(f.answers().at(-1).body.text, /Отменено/u, 'итог отмены — всплывашкой');
+  assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42],
+    'карточка подтверждения удаляется, а не остаётся текстом «Отменено»');
   await f.tap('r:4187:y');
   assert.equal(f.cockpit.calls.length, 0);
 });
 
 // -------------------------------------------------------------- sandbox retry
 
-test('sandbox retry: подтверждение → inject, downOutput доезжает текстом', async () => {
+test('sandbox retry: подтверждение → inject, итог и downOutput доезжают всплывашкой, карточка удалена', async () => {
   const f = await fixture();
   await f.tap('sb:4188');
   assert.match(f.edits()[0].body.text, /снести остатки песочницы #4188/iu);
@@ -171,8 +177,10 @@ test('sandbox retry: подтверждение → inject, downOutput доез�
   });
   await f.tap('sb:4188:y');
   assert.equal(f.cockpit.calls[0].url, '/api/tasks/4188/sandbox/retry');
-  assert.match(f.edits()[1].body.text, /остатки снесены, прогон продолжен/u);
-  assert.match(f.edits()[1].body.text, /схема db_t4188 удалена/u);
+  assert.match(f.answers().at(-1).body.text, /остатки снесены, прогон продолжен/u);
+  assert.match(f.answers().at(-1).body.text, /схема db_t4188 удалена/u, 'downOutput доезжает во всплывашке');
+  assert.deepEqual(f.deletes().map((c) => c.body.message_id), [42],
+    'решённая карточка удаляется, а не правится в «✓ решено»');
 });
 
 test('sandbox retry: отказ (например shared workspace) доезжает словами вместе со сносом', async () => {
@@ -184,183 +192,10 @@ test('sandbox retry: отказ (например shared workspace) доезжа
   });
   await f.tap('sb:4188:y');
   assert.match(f.edits()[1].body.text, /Общий checkout нельзя сносить/u);
+  assert.equal(f.deletes().length, 0, 'отказ ручки карточку не удаляет: причина остаётся видимой');
 });
 
-// --------------------------------------------------------------------- /task
-
-test('/task: предпросмотр, «Создать» — inject в B24, ответ с номером', async () => {
-  const f = await fixture();
-  await f.say('/task Починить экспорт CSV\nВыгрузка падает на файлах больше 10 МБ, в консоли TypeError');
-  assert.equal(f.cockpit.calls.length, 0, 'предпросмотр не ходит в B24');
-  const preview = f.sends()[0].body;
-  assert.match(preview.text, /«Починить экспорт CSV»/u);
-  assert.match(preview.text, /Создать\?/u);
-
-  f.cockpit.set('POST', '/api/b24/tasks', { statusCode: 200, body: { id: 4201 } });
-  await f.tap('tk:y', { messageId: 901 });
-  assert.deepEqual(f.cockpit.calls[0].payload, {
-    title: 'Починить экспорт CSV',
-    description: 'Выгрузка падает на файлах больше 10 МБ, в консоли TypeError',
-    priority: 1,
-  });
-  assert.match(f.edits()[0].body.text, /✓ Задача #4201 создана/u);
-});
-
-test('/task: «Отмена» — ни одного вызова B24', async () => {
-  const f = await fixture();
-  await f.say('/task Черновик недописанного');
-  await f.tap('tk:n', { messageId: 901 });
-  assert.equal(f.cockpit.calls.length, 0);
-  assert.match(f.edits()[0].body.text, /не создана/u);
-});
-
-test('/task без заголовка — подсказка формата, без предпросмотра', async () => {
-  const f = await fixture();
-  await f.say('/task');
-  assert.equal(f.sends().length, 1);
-  assert.match(f.sends()[0].body.text, /Заголовок/u);
-  assert.equal(f.cockpit.calls.length, 0);
-});
-
-// -------------------------------------------------------------------- /launch
-
-const LAUNCH_OPTIONS = {
-  statusCode: 200,
-  body: {
-    task: '4201',
-    profile: 'proj',
-    onConveyor: false,
-    running: false,
-    routes: ['feature', 'hunt'],
-    defaultRoute: 'feature',
-    catalogHash: 'hash-1',
-  },
-};
-
-test('/launch: маршруты из опубликованного каталога, выбор по индексу сверяется со снимком', async () => {
-  const f = await fixture();
-  f.cockpit.set('GET', '/api/tasks/4201/launch-options', LAUNCH_OPTIONS);
-  await f.say('/launch 4201');
-  const menu = f.sends()[0].body;
-  assert.match(menu.text, /каким маршрутом/u);
-  const routeButtons = menu.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
-  assert.deepEqual(routeButtons, ['l:4201:0', 'l:4201:1', 'x']);
-
-  await f.tap('l:4201:1', { messageId: 901 });
-  assert.match(f.edits()[0].body.text, /Запустить #4201 маршрутом hunt\?/u);
-  assert.match(f.edits()[0].body.text, /20–25 минут/u);
-
-  f.cockpit.set('GET', '/api/b24/task/4201', {
-    statusCode: 200,
-    body: { title: 'Починить экспорт CSV', description: '<p>Выгрузка падает</p>' },
-  });
-  f.cockpit.set('POST', '/api/tasks/4201/launch', (payload) => ({
-    statusCode: 200, body: { outcome: 'launched', profile: payload.profile, route: payload.route },
-  }));
-  await f.tap('l:4201:1:y', { messageId: 901 });
-  const launch = f.cockpit.posts().at(-1);
-  assert.equal(launch.url, '/api/tasks/4201/launch');
-  assert.equal(launch.payload.route, 'hunt');
-  assert.equal(launch.payload.profile, 'proj');
-  assert.equal(launch.payload.title, 'Починить экспорт CSV');
-  assert.equal(launch.payload.description, 'Выгрузка падает');
-  assert.match(f.edits().at(-1).body.text, /запущено маршрутом hunt/u);
-});
-
-test('/launch: разъехавшийся каталог — «изменился, открой заново», inject-а нет', async () => {
-  const f = await fixture();
-  f.cockpit.set('GET', '/api/tasks/4201/launch-options', LAUNCH_OPTIONS);
-  await f.say('/launch 4201');
-  await f.tap('l:4201:1', { messageId: 901 });
-
-  // Между подтверждением и запуском каталог переиздали: hash сменился.
-  f.cockpit.set('GET', '/api/tasks/4201/launch-options', {
-    statusCode: 200,
-    body: { ...LAUNCH_OPTIONS.body, routes: ['bug', 'feature', 'hunt'], catalogHash: 'hash-2' },
-  });
-  await f.tap('l:4201:1:y', { messageId: 901 });
-  assert.equal(f.cockpit.posts().length, 0, 'запуск не случился');
-  assert.match(f.edits().at(-1).body.text, /каталог маршрутов изменился/iu);
-});
-
-test('/launch по задаче уже на конвейере — честный отказ без списка', async () => {
-  const f = await fixture();
-  f.cockpit.set('GET', '/api/tasks/4201/launch-options', {
-    statusCode: 200, body: { ...LAUNCH_OPTIONS.body, onConveyor: true, running: true },
-  });
-  await f.say('/launch 4201');
-  assert.match(f.sends()[0].body.text, /уже на конвейере/u);
-});
-
-// ---------------------------------------------------------------------- /stop
-
-test('/stop: список из chat/active, выбор через снимок, подтверждение — стоп', async () => {
-  const f = await fixture();
-  f.cockpit.set('GET', '/api/chat/active', {
-    statusCode: 200,
-    body: { active: [{ chatKey: 'chat-alpha-1', startedAt: T0, tokens: 1500 }] },
-  });
-  await f.say('/stop');
-  const menu = f.sends()[0].body;
-  assert.match(menu.text, /Какой ход остановить/u);
-  assert.equal(menu.reply_markup.inline_keyboard[0][0].callback_data, 'st:0');
-
-  await f.tap('st:0', { messageId: 901 });
-  assert.match(f.edits()[0].body.text, /Остановить ход агента/u);
-
-  f.cockpit.set('POST', '/api/chat/stop', { statusCode: 200, body: { ok: true } });
-  await f.tap('st:0:y', { messageId: 901 });
-  const stop = f.cockpit.posts().at(-1);
-  assert.equal(stop.url, '/api/chat/stop');
-  assert.deepEqual(stop.payload, { chatKey: 'chat-alpha-1' });
-  assert.match(f.edits().at(-1).body.text, /⏹/u);
-});
-
-test('/stop: ход успел завершиться — «уже завершился», стоп не уезжает', async () => {
-  const f = await fixture();
-  f.cockpit.set('GET', '/api/chat/active', {
-    statusCode: 200,
-    body: { active: [{ chatKey: 'chat-alpha-1', startedAt: T0, tokens: 1500 }] },
-  });
-  await f.say('/stop');
-  await f.tap('st:0', { messageId: 901 });
-  f.cockpit.set('GET', '/api/chat/active', { statusCode: 200, body: { active: [] } });
-  await f.tap('st:0:y', { messageId: 901 });
-  assert.equal(f.cockpit.posts().length, 0);
-  assert.match(f.edits().at(-1).body.text, /уже завершился/u);
-});
-
-test('/stop при пустом списке — «сейчас никто не идёт»', async () => {
-  const f = await fixture();
-  f.cockpit.set('GET', '/api/chat/active', { statusCode: 200, body: { active: [] } });
-  await f.say('/stop');
-  assert.match(f.sends()[0].body.text, /ни один агент.*не идёт/iu);
-});
-
-// ------------------------------------------------------------- таймер и B24
-
-test('/timer, /complete, /renew: парсинг и inject в ручки B24; ошибка — словами', async () => {
-  const f = await fixture();
-  f.cockpit.set('POST', '/api/b24/task/4201/timer/start', { statusCode: 200, body: { ok: true } });
-  await f.say('/timer 4201 start');
-  assert.equal(f.cockpit.posts()[0].url, '/api/b24/task/4201/timer/start');
-  assert.match(f.sends()[0].body.text, /✓ #4201: таймер — start/u);
-
-  await f.say('/timer 4201 dance');
-  assert.match(f.sends()[1].body.text, /start\|pause\|stop/u);
-
-  f.cockpit.set('POST', '/api/b24/task/4201/complete', {
-    statusCode: 502, body: { error: 'telegram_unreachable', message: 'портал не ответил' },
-  });
-  await f.say('/complete 4201');
-  assert.match(f.sends()[2].body.text, /⚠ #4201: портал не ответил/u);
-
-  f.cockpit.set('POST', '/api/b24/task/4201/renew', { statusCode: 200, body: { ok: true } });
-  await f.say('/renew 4201');
-  assert.match(f.sends()[3].body.text, /возобновлена/u);
-});
-
-// ----------------------------------------------------------------- owner-гейт
+// ------------------------------------------------------------------- owner-гейт
 
 test('мутация от не-владельца — молча ноль вызовов (общий owner-гейт)', async () => {
   const f = await fixture();

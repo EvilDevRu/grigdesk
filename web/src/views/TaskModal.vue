@@ -3,6 +3,7 @@ import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
 import { registerLayer } from '../shared/ui/layer-stack.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
@@ -47,6 +48,11 @@ const boardTask = computed(() => {
   }
   return null;
 });
+const taskContext = useUiContextSource('task', { layer: 'overlay', active: false });
+function taskContextDetails(id) {
+  const title = detail.value?.title || boardTask.value?.title || '';
+  return { taskId: String(id), ...(title ? { title } : {}) };
+}
 const running = computed(() => !!boardTask.value?.timerRunning);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 
@@ -395,22 +401,36 @@ function changeLaunchRoute() {
   launchForm.value.instrumentationFiles = (launchOpts.value?.instrumentationSuggestions || [])
     .slice(0, 1).join('\n');
 }
-function doLaunch(payload) {
-  return act('launch', async () => {
+function launchErrorText(e) {
+  const code = e?.data?.error;
+  const known = {
+    catalog_changed: 'Каталог маршрутов изменился. Перечитай параметры и поставь задачу заново.',
+    run_exists: 'У задачи уже есть незакрытый прогон. Продолжи или закрой его на странице конвейера.',
+  };
+  return known[code] || e?.data?.message || e?.message || 'Не удалось запустить задачу.';
+}
+async function doLaunch(payload) {
+  if (busy.value) return;
+  busy.value = 'launch';
+  err.value = null;
+  try {
     const r = await tasks.launch(taskId.value, payload);
     launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
       : r.outcome === 'launched' ? `Запущено (профиль ${r.profile}${r.route ? `, маршрут ${r.route}` : ''}${r.attempt ? `, попытка ${r.attempt.slice(0, 10)}…` : ''})`
       : r.note || 'Отправлено';
     await loadConveyor();
-  });
+  } catch (e) {
+    err.value = launchErrorText(e);
+  } finally {
+    busy.value = null;
+  }
 }
-const launchSelected = () => {
-  if (launchValidationError.value) return;
+function launchPayload() {
   const instrumentationFiles = launchNeedsInstrumentation.value
     ? launchForm.value.instrumentationFiles.split('\n').map((s) => s.trim()).filter(Boolean)
     : [];
-  return doLaunch({
+  return {
     profile: launchForm.value.profile,
     route: launchForm.value.route,
     title: detail.value?.title || '',
@@ -425,7 +445,16 @@ const launchSelected = () => {
     // Исполнитель — только при явном выборе: пустое значение значит «по профилю»,
     // и сервер не должен получать лишний ключ.
     ...(launchForm.value.runner ? { runnerPrimary: launchForm.value.runner } : {}),
-  });
+    // Старт pin-ит тот каталог, который человек видел в форме: между её открытием и
+    // запуском профиль мог опубликовать новый, и молча уехать по нему нельзя.
+    ...(launchOpts.value?.catalogHash
+      ? { expectedCatalogHash: launchOpts.value.catalogHash }
+      : {}),
+  };
+}
+const launchSelected = () => {
+  if (launchValidationError.value) return;
+  return doLaunch(launchPayload());
 };
 const sendComment = () => act('comment', async () => {
   await tasks.comment(taskId.value, commentText.value);
@@ -439,6 +468,10 @@ const toggleFavorite = () => favorites.toggle(taskId.value);
 watch(taskId, (id) => {
   if (id) {
     detail.value = null; launchMsg.value = null; sandboxMsg.value = null;
+    taskContext.focus({
+      routingScope: { kind: 'task', taskId: String(id) },
+      details: taskContextDetails(id),
+    });
     launchForm.value = null; launchOpts.value = null;
     launchOptionsRequest += 1; launchOptionsBusy.value = false;
     triage.value = null; showNote.value = false;
@@ -453,10 +486,18 @@ watch(taskId, (id) => {
     loadTriage();
     if (!ticker) ticker = setInterval(() => { now.value = Date.now(); }, 1000);
   } else {
+    taskContext.blur();
     if (ticker) { clearInterval(ticker); ticker = null; }
     if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
   }
 }, { immediate: true });
+// Заголовок может приехать после открытия карточки. Обновляем bounded details, но не
+// focus revision: открытый позже Pipeline/Task overlay должен остаться верхним.
+watch(
+  () => [taskId.value, detail.value?.title || '', boardTask.value?.title || ''],
+  ([id]) => { if (id) taskContext.update({ details: taskContextDetails(id) }); },
+  { immediate: true },
+);
 watch(() => ui.launchRequested, (requested) => {
   if (!requested || !taskId.value) return;
   ui.consumeTaskLaunch();
@@ -705,7 +746,9 @@ watch(taskId, (id) => {
               {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
                  : conveyor.daemonAlive ? '🏭 Идёт на конвейере' : '🏭 Уже на конвейере' }} →
             </button>
-            <button v-else class="btn launch" :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm" @click="openLaunch" title="Запустить фабрику по задаче">
+            <button v-else type="button" class="btn launch"
+                    :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm"
+                    @click="openLaunch" title="Открыть параметры запуска фабрики по задаче">
               {{ busy === 'launch' || launchOptionsBusy ? '…' : '🏭 На конвейер' }}
             </button>
             <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
@@ -732,6 +775,7 @@ watch(taskId, (id) => {
             <div class="lrow">
               <label class="llbl" for="launch-route">Маршрут</label>
               <select id="launch-route" v-model="launchForm.route" class="lsel"
+                      :disabled="launchOptionsBusy || busy === 'launch'"
                       @change="changeLaunchRoute">
                 <option v-for="r in launchOpts.routes" :key="r" :value="r">{{ r }}</option>
               </select>
@@ -810,9 +854,10 @@ watch(taskId, (id) => {
             </details>
             <p v-if="launchValidationError" class="lerror">{{ launchValidationError }}</p>
             <div class="lbtns">
-              <button class="btn" @click="launchForm = null">Отмена</button>
-              <button class="btn primary"
-                      :disabled="busy === 'launch' || launchOptionsBusy || !!launchOpts.error || !!launchValidationError"
+              <button type="button" class="btn" :disabled="!!busy" @click="launchForm = null">Отмена</button>
+              <button type="button" class="btn primary"
+                      aria-label="Запустить задачу"
+                      :disabled="!!busy || launchOptionsBusy || !!launchOpts.error || !!launchValidationError"
                       @click="launchSelected">
                 {{ busy === 'launch' ? 'Запускаю…' : '🏭 Запустить' }}
               </button>
@@ -822,7 +867,7 @@ watch(taskId, (id) => {
             <b>{{ conveyor.stall.title }}</b>
             <span>{{ conveyor.stall.hint }}</span>
           </div>
-          <span v-if="launchMsg" class="lmsg">{{ launchMsg }}</span>
+          <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
       </footer>
       </div>

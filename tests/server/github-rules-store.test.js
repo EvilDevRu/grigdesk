@@ -39,8 +39,10 @@ test('новый account закрыт пустым allowlist, а новое пр
     kind: 'bug',
     b24: { responsibleId: null, groupId: null, priority: 1 },
     autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
+    agentSearch: false,
   });
   assert.equal((await store.ruleFor(REPOSITORY)).autoTask.enabled, false);
+  assert.equal((await store.ruleFor(REPOSITORY)).agentSearch, false);
   assert.equal(await store.ruleFor('778'), null);
 });
 
@@ -66,9 +68,87 @@ test('rules сохраняют exact owner, читаются cold и пишут�
   assert.equal(raw.accountRef, ACCOUNT);
   assert.equal(raw.repositoryId, REPOSITORY);
   assert.equal(raw.rules[0].autoTask.enabled, true);
+  assert.equal(raw.rules[0].agentSearch, false);
 
   const cold = new GitHubRulesStore({ file, accountRef: ACCOUNT, repositoryId: REPOSITORY });
-  assert.deepEqual(await cold.read(), [configured]);
+  assert.deepEqual(await cold.read(), [{ ...configured, agentSearch: false }]);
+});
+
+test('legacy rule без agentSearch читается default-deny и получает canonical fingerprint', async (t) => {
+  const { file } = await fixture(t);
+  await writeFile(file, `${JSON.stringify({
+    schemaVersion: 1,
+    channel: 'github',
+    accountRef: ACCOUNT,
+    repositoryId: REPOSITORY,
+    updatedAtMs: 100,
+    rules: [{
+      repositoryId: REPOSITORY,
+      project: 'demo',
+      kind: 'bug',
+      b24: { responsibleId: null, groupId: null, priority: 1 },
+      autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
+    }],
+  })}\n`, { mode: 0o600 });
+
+  const store = new GitHubRulesStore({ file, accountRef: ACCOUNT, repositoryId: REPOSITORY });
+  const policy = await store.readPolicy();
+  assert.equal(policy.rules[0].agentSearch, false);
+  assert.match(policy.policyFingerprint, /^ghpol1:[0-9a-f]{64}$/u);
+
+  const cold = new GitHubRulesStore({ file, accountRef: ACCOUNT, repositoryId: REPOSITORY });
+  assert.equal((await cold.readPolicy()).policyFingerprint, policy.policyFingerprint);
+});
+
+test('agentSearch меняется только отдельным CAS и входит в policy fingerprint', async (t) => {
+  const { file } = await fixture(t);
+  let now = 100;
+  const store = new GitHubRulesStore({
+    file,
+    accountRef: ACCOUNT,
+    repositoryId: REPOSITORY,
+    now: () => now++,
+  });
+  await store.write([rule()]);
+  const before = await store.readPolicy();
+
+  const enabled = await store.setAgentSearch({
+    enabled: true,
+    expectedPolicyFingerprint: before.policyFingerprint,
+  });
+  assert.equal(enabled.rules[0].agentSearch, true);
+  assert.notEqual(enabled.policyFingerprint, before.policyFingerprint);
+
+  await assert.rejects(
+    () => store.setAgentSearch({
+      enabled: false,
+      expectedPolicyFingerprint: before.policyFingerprint,
+    }),
+    (err) => err.code === 'github_rules_stale_policy' && err.statusCode === 409,
+  );
+  assert.equal((await store.ruleFor(REPOSITORY)).agentSearch, true);
+
+  await store.write([rule({ kind: 'wish' })]);
+  const afterHumanEdit = await store.readPolicy();
+  assert.equal(afterHumanEdit.rules[0].agentSearch, true, 'обычная форма не снимает и не включает opt-in');
+  assert.notEqual(afterHumanEdit.policyFingerprint, enabled.policyFingerprint);
+
+  await store.write([rule({ project: 'other' })], { projects: ['demo', 'other'] });
+  assert.equal(
+    (await store.ruleFor(REPOSITORY)).agentSearch,
+    false,
+    'project move не должен молча переносить opt-in на агентов другого проекта',
+  );
+});
+
+test('обычный rules write не принимает agentSearch из untrusted payload', async (t) => {
+  const { file } = await fixture(t);
+  const store = new GitHubRulesStore({ file, accountRef: ACCOUNT, repositoryId: REPOSITORY, now: () => 100 });
+  await assert.rejects(
+    () => store.write([rule({ agentSearch: true })]),
+    (err) => err.code === 'github_rules_invalid',
+  );
+  assert.deepEqual(await store.read(), []);
 });
 
 test('другой account/repository не может прочитать или записать чужой allowlist', async (t) => {

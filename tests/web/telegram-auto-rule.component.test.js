@@ -95,6 +95,8 @@ const BOT = {
   connectedAt: 0,
   serviceChatId: null,
 };
+const POLICY_FINGERPRINT = `telegram-rules-v1:${'3'.repeat(64)}`;
+const NEXT_POLICY_FINGERPRINT = `telegram-rules-v1:${'4'.repeat(64)}`;
 
 /** Правило как его отдаёт сервер: половина автомата уже нормализована. */
 function rule(extra = {}) {
@@ -120,7 +122,13 @@ async function mountTelegram(t, { rules = [rule()] } = {}) {
     async get(url) {
       if (url === '/api/telegram/status') return { bot: BOT, poll: { running: true } };
       if (url === '/api/telegram/chats') return { chats: [{ id: -100123, title: 'Баги пользователей', type: 'supergroup' }] };
-      if (url === '/api/telegram/rules') return { rules: JSON.parse(JSON.stringify(rules)), projects: ['demo'] };
+      if (url === '/api/telegram/rules') {
+        return {
+          rules: JSON.parse(JSON.stringify(rules)),
+          projects: ['demo'],
+          policyFingerprint: POLICY_FINGERPRINT,
+        };
+      }
       if (url === '/api/b24/users') return { users: [] };
       if (url === '/api/b24/groups') return { groups: [] };
       return {};
@@ -129,7 +137,10 @@ async function mountTelegram(t, { rules = [rule()] } = {}) {
     async put(url, body) {
       puts.push(JSON.parse(JSON.stringify(body)));
       // Сервер отвечает нормализованными правилами — форма берёт их, а не свою копию.
-      return { rules: JSON.parse(JSON.stringify(body.rules)) };
+      return {
+        rules: JSON.parse(JSON.stringify(body.rules)),
+        policyFingerprint: NEXT_POLICY_FINGERPRINT,
+      };
     },
   };
   globalThis.__tgStores = {
@@ -191,6 +202,7 @@ test('тумблер и числа уезжают на сервер', async (t) 
 
   assert.equal(puts.length, 1);
   assert.equal(puts[0].botId, 42, 'provider identity служит CAS старой формы');
+  assert.equal(puts[0].policyFingerprint, POLICY_FINGERPRINT, 'policy content тоже служит CAS');
   assert.deepEqual(puts[0].rules[0].autoTask, { enabled: true, minConfidence: 0.85, maxPerDay: 3 });
 });
 

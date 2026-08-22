@@ -33,8 +33,9 @@ assert_eq '[]' "$(jq -c '.used' <<<"$slots")" \
 assert_eq '[]' "$(jq -c '.free' <<<"$slots")" \
   "unsupported slots return an empty free set"
 
-"$NODE_BIN" "$publisher" "$routes" null >/dev/null
+published_initial=$("$NODE_BIN" "$publisher" "$routes" null)
 assert_rc 0 "$?" "route source publishes for launcher contract"
+catalog_initial=$(jq -r '.catalogHash' <<<"$published_initial")
 
 for route in debug consilium-debug feature trivial hunt; do
   output=$("$tool" check --profile "$profile_id" --route "$route" --routes-dir "$routes")
@@ -60,6 +61,57 @@ for route in debug consilium-debug feature trivial hunt; do
   esac
 done
 
+expected_check=$("$tool" check --profile "$profile_id" --route feature \
+  --expected-catalog-hash "$catalog_initial" --routes-dir "$routes")
+assert_rc 0 "$?" "check accepts a matching expected catalog as a fast-fail guard"
+assert_contains "$expected_check" "catalog=$catalog_initial" \
+  "check reports the exact expected catalog it verified"
+stale_catalog=$(printf '0%.0s' {1..64})
+stale_check=$("$tool" check --profile "$profile_id" --route feature \
+  --expected-catalog-hash "$stale_catalog" --routes-dir "$routes" 2>&1)
+assert_rc 75 "$?" "check rejects a stale expected catalog without lifecycle mutation"
+assert_contains "$stale_check" \
+  "FACTORY_ERROR=catalog_changed EXPECTED=$stale_catalog ACTUAL=$catalog_initial" \
+  "check mismatch exposes the stable catalog_changed marker"
+
+dispatch_id=00000000-0000-4000-8000-000000000002
+dispatch_on_check=$("$tool" check --profile "$profile_id" --route feature \
+  --queue-dispatch-id "$dispatch_id" --routes-dir "$routes" 2>&1)
+assert_rc 78 "$?" "queue dispatch id is not accepted by side-effect-free check"
+assert_contains "$dispatch_on_check" '--queue-dispatch-id допустим только при start' \
+  "check rejection names the start-only dispatch boundary"
+dispatch_without_expected=$("$tool" "$fixture_task" start --profile "$profile_id" \
+  --route feature --queue-dispatch-id "$dispatch_id" --routes-dir "$routes" 2>&1)
+assert_rc 78 "$?" "start rejects queue dispatch without an expected catalog"
+assert_contains "$dispatch_without_expected" \
+  '--queue-dispatch-id требует --expected-catalog-hash' \
+  "dispatch rejection names the catalog guard dependency"
+invalid_dispatch=$("$tool" "$fixture_task" start --profile "$profile_id" \
+  --route feature --expected-catalog-hash "$catalog_initial" \
+  --queue-dispatch-id not-a-uuid \
+  --routes-dir "$routes" 2>&1)
+assert_rc 78 "$?" "start rejects a non-RFC dispatch UUID before lifecycle mutation"
+assert_contains "$invalid_dispatch" 'queue-dispatch-id: нужен UUID' \
+  "invalid UUID rejection is explicit"
+
+uppercase_dispatch=00000000-0000-4000-8000-00000000000A
+uppercase_state="$TEST_ROOT/uppercase-dispatch-state"
+uppercase_control="$TEST_ROOT/uppercase-dispatch-control"
+uppercase_dispatch_error=$("$tool" "$fixture_task" start --profile "$profile_id" \
+  --route feature --expected-catalog-hash "$catalog_initial" \
+  --queue-dispatch-id "$uppercase_dispatch" \
+  --routes-dir "$routes" \
+  --state-dir "$uppercase_state" \
+  --control-dir "$uppercase_control" 2>&1)
+assert_rc 78 "$?" "start rejects uppercase dispatch UUID before lifecycle mutation"
+assert_contains "$uppercase_dispatch_error" \
+  'queue-dispatch-id: нужен UUID в нижнем регистре' \
+  "uppercase UUID rejection names the lowercase contract"
+assert_file_missing "$uppercase_state" \
+  "uppercase dispatch UUID creates no route state"
+assert_file_missing "$uppercase_control" \
+  "uppercase dispatch UUID creates no trusted control state"
+
 source_text=$(cat "$tool")
 case "$source_text" in
   *factory-canary*|*canary-no-publish*|*FACTORY_CANARY*)
@@ -71,8 +123,9 @@ case "$source_text" in
 esac
 assert_contains "$source_text" '--runner-primary)' \
   "launcher accepts an explicit task-level runner override"
-assert_contains "$source_text" 'RUNNER_OVERRIDE_PRIMARY "$RUNNER_PRIMARY_OVERRIDE"' \
-  "task-level override reaches the registry only from the explicit flag"
+assert_contains "$source_text" \
+  'RUNNER_OVERRIDE_PRIMARY "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"' \
+  "task-level override reaches the registry only from trusted attempt identity"
 assert_contains "$source_text" "profile_runner_host_preflight" \
   "launcher verifies the configured provider chain"
 assert_contains "$source_text" "for action in commit push pull-request" \
@@ -219,7 +272,13 @@ profile_workspace_mode() { printf '%s\n' "\${FIXTURE_WORKSPACE_MODE:-shared}"; }
 profile_repositories() { printf 'app\\t%s\\t%s\\n' '$shared_repo' '$shared_repo'; }
 profile_source_branch() { printf 'shared-main\\n'; }
 profile_container() { printf 'fixture-stand\\n'; }
-profile_stand_alive() { return 0; }
+profile_stand_alive() {
+  if [[ -n "\${FIXTURE_STAND_BARRIER:-}" ]]; then
+    : >"\${FIXTURE_STAND_BARRIER}.ready"
+    while [[ ! -e "\${FIXTURE_STAND_BARRIER}.release" ]]; do sleep 0.02; done
+  fi
+  return 0
+}
 profile_project_context() { printf '%s\\n' '{"stack":["fixture"],"guardrails":[]}'; }
 profile_service_ports() { printf '8830\\t8830\\n'; }
 profile_exclusive_resources() {
@@ -300,11 +359,133 @@ assert_contains "$blocked_start" 'FACTORY_ERROR=runner_preflight_unavailable RUN
 assert_file_missing "$shared_state/t${preflight_task}.pipeline" \
   "failed runner preflight creates no route projection"
 
+# Отдельное окно той же TOCTOU: current был валиден на fast check, но исчез до
+# authoritative begin. Это доказанный catalog transition в `none`, а не generic
+# integrity failure, поэтому очередь может безопасно классифицировать отказ.
+missing_task=9005
+missing_ticket="$TEST_ROOT/ticket-${missing_task}.json"
+sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$missing_task\"/" \
+  "$ticket" >"$missing_ticket"
+missing_barrier="$TEST_ROOT/catalog-missing-barrier"
+missing_output="$TEST_ROOT/catalog-missing.out"
+missing_rc_file="$TEST_ROOT/catalog-missing.rc"
+missing_dispatch=00000000-0000-4000-8000-000000000004
+(
+  FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+    FIXTURE_STAND_BARRIER="$missing_barrier" \
+    FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$missing_task" start --profile "$profile_id" \
+      --route feature \
+      --ticket-json "$missing_ticket" \
+      --runner-primary alpha \
+      --expected-catalog-hash "$catalog_initial" \
+      --queue-dispatch-id "$missing_dispatch" \
+      --delivery-target app=main \
+      --routes-dir "$routes" \
+      --state-dir "$shared_state" \
+      --control-dir "$shared_control" >"$missing_output" 2>&1
+  printf '%s\n' "$?" >"$missing_rc_file"
+) &
+missing_pid=$!
+for _ in {1..500}; do
+  [[ -e "${missing_barrier}.ready" ]] && break
+  sleep 0.02
+done
+assert_file_exists "${missing_barrier}.ready" \
+  "missing-current race reaches the window after fast check"
+current_pointer="$routes/$profile_id/catalog/current.json"
+current_saved="$TEST_ROOT/current.saved.json"
+mv -- "$current_pointer" "$current_saved"
+: >"${missing_barrier}.release"
+wait "$missing_pid"
+mv -- "$current_saved" "$current_pointer"
+assert_eq 75 "$(cat "$missing_rc_file")" \
+  "authoritative begin types an absent current as catalog_changed"
+assert_contains "$(cat "$missing_output")" \
+  "FACTORY_ERROR=catalog_changed EXPECTED=$catalog_initial ACTUAL=none" \
+  "absent current keeps the stable engine marker"
+assert_file_missing "$shared_state/t${missing_task}.pipeline" \
+  "absent current leaves no task registry"
+missing_root="$shared_control/protocol-v2/tasks/t${missing_task}"
+assert_eq 0 \
+  "$(find "$missing_root/attempts" -mindepth 1 -maxdepth 1 -type d ! -name '.new.*' | wc -l | tr -d ' ')" \
+  "absent current leaves no attempt or pins"
+lease_dir="$shared_control/protocol-v2/shared-leases"
+assert_eq 0 \
+  "$(find "$lease_dir" -maxdepth 1 -type f -name '*.owner' | wc -l | tr -d ' ')" \
+  "absent current releases its pending shared leases"
+
+# EC-02: start уже сделал fast check catalog A, затем остановился внутри
+# side-effect-free stand health до authoritative attempt begin. Публикуем B в
+# этом окне: begin обязан увидеть B под task lock, вернуть typed CAS mismatch и
+# не оставить registry/attempt/pins/durable lease.
+cas_task=9004
+cas_ticket="$TEST_ROOT/ticket-${cas_task}.json"
+sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$cas_task\"/" \
+  "$ticket" >"$cas_ticket"
+cas_barrier="$TEST_ROOT/catalog-cas-barrier"
+cas_output="$TEST_ROOT/catalog-cas.out"
+cas_rc_file="$TEST_ROOT/catalog-cas.rc"
+(
+  FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
+    FIXTURE_STAND_BARRIER="$cas_barrier" \
+    FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+    "$tool" "$cas_task" start --profile "$profile_id" \
+      --route feature \
+      --ticket-json "$cas_ticket" \
+      --runner-primary alpha \
+      --expected-catalog-hash "$catalog_initial" \
+      --queue-dispatch-id "$dispatch_id" \
+      --delivery-target app=main \
+      --routes-dir "$routes" \
+      --state-dir "$shared_state" \
+      --control-dir "$shared_control" >"$cas_output" 2>&1
+  printf '%s\n' "$?" >"$cas_rc_file"
+) &
+cas_pid=$!
+for _ in {1..500}; do
+  [[ -e "${cas_barrier}.ready" ]] && break
+  sleep 0.02
+done
+assert_file_exists "${cas_barrier}.ready" \
+  "catalog race reaches the window after fast check and pending lease claim"
+flip_publisher="$FACTORY_TESTS_HOME/fixtures/routes-publish.mjs"
+published_flip=$("$NODE_BIN" "$flip_publisher" "$routes" 'Catalog CAS flip' "$catalog_initial")
+assert_rc 0 "$?" "catalog B is published inside the start race window"
+catalog_flip=$(jq -r '.catalogHash' <<<"$published_flip")
+: >"${cas_barrier}.release"
+wait "$cas_pid"
+assert_eq 75 "$(cat "$cas_rc_file")" \
+  "authoritative begin rejects a catalog flipped after the early check"
+assert_contains "$(cat "$cas_output")" \
+  "FACTORY_ERROR=catalog_changed EXPECTED=$catalog_initial ACTUAL=$catalog_flip" \
+  "late catalog flip keeps the typed engine marker"
+assert_file_missing "$shared_state/t${cas_task}.pipeline" \
+  "catalog CAS mismatch leaves no task registry"
+cas_root="$shared_control/protocol-v2/tasks/t${cas_task}"
+assert_eq 0 \
+  "$(find "$cas_root/attempts" -mindepth 1 -maxdepth 1 -type d ! -name '.new.*' | wc -l | tr -d ' ')" \
+  "catalog CAS mismatch leaves no attempt or pins"
+lease_dir="$shared_control/protocol-v2/shared-leases"
+assert_eq 0 \
+  "$(find "$lease_dir" -maxdepth 1 -type f -name '*.owner' | wc -l | tr -d ' ')" \
+  "catalog CAS mismatch releases its pending shared leases"
+
+# Возвращаем исходный полный catalog для остальных launcher-contract сценариев.
+published_restored=$("$NODE_BIN" "$publisher" "$routes" "$catalog_flip")
+assert_rc 0 "$?" "full catalog is restored after the CAS race fixture"
+assert_eq "$catalog_initial" "$(jq -r '.catalogHash' <<<"$published_restored")" \
+  "content-addressed catalog A is reused after republish"
+
+dispatch_started=00000000-0000-4000-8000-000000000003
 shared_start=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" start --profile "$profile_id" \
     --route feature \
     --ticket-json "$ticket" \
+    --runner-primary alpha \
+    --expected-catalog-hash "$catalog_initial" \
+    --queue-dispatch-id "$dispatch_started" \
     --delivery-target app=main \
     --routes-dir "$routes" \
     --state-dir "$shared_state" \
@@ -325,8 +506,24 @@ assert_file_missing "$TEST_ROOT/shared-up-called" \
   "shared start never calls profile up lifecycle"
 attempt=$(awk -F= '$1=="ATTEMPT_ID"{print $2}' "$shared_state/t${fixture_task}.pipeline")
 assert_contains "$attempt" 'a_' "shared run publishes its exact attempt id"
-assert_eq "" "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
-  "shared run without --runner-primary leaves provider selection to runners.env"
+attempt_json="$shared_control/protocol-v2/tasks/t${fixture_task}/attempts/$attempt/attempt.json"
+assert_eq 2 "$(jq -r '.schema' "$attempt_json")" \
+  "launcher publishes the strict launch identity attempt schema"
+assert_eq "$catalog_initial" "$(jq -r '.catalogHash' "$attempt_json")" \
+  "attempt identity pins the authoritative catalog selected under task lock"
+assert_eq "$dispatch_started" "$(jq -r '.queueDispatchId' "$attempt_json")" \
+  "attempt identity pins the exact queue dispatch"
+assert_eq alpha "$(jq -r '.runnerPrimaryOverride' "$attempt_json")" \
+  "attempt identity pins the exact primary runner override"
+assert_eq "$catalog_initial" \
+  "$(awk -F= '$1=="CATALOG_HASH"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "registry projects catalog identity only from the trusted attempt"
+assert_eq "$dispatch_started" \
+  "$(awk -F= '$1=="QUEUE_DISPATCH_ID"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "registry projects the trusted dispatch identity"
+assert_eq alpha \
+  "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "registry projects the trusted runner override"
 lease_dir="$shared_control/protocol-v2/shared-leases"
 assert_eq 3 "$(find "$lease_dir" -maxdepth 1 -type f -name '*.owner' | wc -l | tr -d ' ')" \
   "workspace, stand and GPU leases persist after foreground exit at a gate"
@@ -360,6 +557,15 @@ legacy_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_RESULT=done \
 assert_rc 0 "$?" "active attempt with a legacy repo manifest survives launcher upgrade"
 assert_eq waiting "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "legacy manifest resume preserves the exact paused cursor"
+assert_eq "$catalog_initial" \
+  "$(awk -F= '$1=="CATALOG_HASH"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "resume preserves the trusted catalog projection"
+assert_eq "$dispatch_started" \
+  "$(awk -F= '$1=="QUEUE_DISPATCH_ID"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "resume preserves the predecessor dispatch projection"
+assert_eq alpha \
+  "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "resume preserves the trusted runner projection"
 
 # Уход shared checkout с закреплённой ветки — это не предупреждение: агент работал бы
 # не в том дереве, которое зафиксировал контракт попытки.
@@ -632,6 +838,95 @@ assert_file_missing "$TEST_ROOT/shared-down-called" \
   "shared abandon never calls profile down lifecycle"
 assert_eq baseline "$(cat "$shared_repo/tracked.txt")" \
   "shared checkout remains intact after start, gate and abandon"
+
+# Recover — это новый run, поэтому он берёт fresh current catalog и сохраняет
+# runner policy задачи, но никогда не наследует queue dispatch предшественницы.
+recovery_output=$(FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" recover --profile "$profile_id" \
+    --attempt "$attempt" \
+    --reason 'fixture queue provenance recovery' \
+    --route feature \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+recovery_rc=$?
+if (( recovery_rc != 0 )); then
+  test_note "queue provenance recovery: $recovery_output"
+fi
+assert_rc 0 "$recovery_rc" "recover creates a distinct run after queued predecessor"
+recovery_attempt=$(tail -n 1 <<<"$recovery_output")
+assert_contains "$recovery_attempt" 'a_' "recover reports the new exact attempt id"
+recovery_json="$shared_control/protocol-v2/tasks/t${fixture_task}/attempts/$recovery_attempt/attempt.json"
+assert_eq "$dispatch_started" "$(jq -r '.queueDispatchId' "$attempt_json")" \
+  "recovery does not mutate predecessor queue provenance"
+assert_eq null "$(jq -r '.queueDispatchId' "$recovery_json")" \
+  "recovery has no queue dispatch provenance"
+assert_eq alpha "$(jq -r '.runnerPrimaryOverride' "$recovery_json")" \
+  "recovery preserves the trusted task-level runner override"
+assert_eq "$catalog_initial" "$(jq -r '.catalogHash' "$recovery_json")" \
+  "recovery pins fresh current catalog in its own trusted identity"
+assert_eq "$catalog_initial" \
+  "$(awk -F= '$1=="CATALOG_HASH"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "recovery registry projects its own trusted catalog"
+assert_eq "" \
+  "$(awk -F= '$1=="QUEUE_DISPATCH_ID"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "recovery registry clears stale queue provenance"
+assert_eq alpha \
+  "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
+  "recovery registry retains the trusted runner override"
+
+FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" abandon --profile "$profile_id" \
+    --attempt "$recovery_attempt" \
+    --reason 'recovery fixture cleanup' \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" >/dev/null 2>&1
+assert_rc 0 "$?" "recovery fixture releases its exact shared leases"
+assert_eq 0 "$(find "$lease_dir" -maxdepth 1 -type f -name '*.owner' | wc -l | tr -d ' ')" \
+  "recovery cleanup leaves no durable resource lease"
+
+# Попытка, начатая до появления lifecycle-журнала, не имеет в нём НИ ОДНОГО события.
+# Первым событием журнала обязан идти route_selected, поэтому открытая на abandon сессия
+# со scoped route identity отвергалась схемой («scoped route identity appears before
+# route_selected»), и operator-действия старой попытки — снос стенда, resume, goto —
+# падали кодом 78 детерминированно: у человека переставала работать кнопка.
+legacy_output=$(FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" recover --profile "$profile_id" \
+    --attempt "$recovery_attempt" \
+    --reason 'fixture attempt without lifecycle ledger' \
+    --route feature \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+legacy_rc=$?
+if (( legacy_rc != 0 )); then
+  test_note "legacy lifecycle recover: $legacy_output"
+fi
+assert_rc 0 "$legacy_rc" "recover creates the attempt used for the pre-ledger case"
+legacy_attempt=$(tail -n 1 <<<"$legacy_output")
+legacy_dir="$shared_control/protocol-v2/tasks/t${fixture_task}/attempts/$legacy_attempt"
+rm -rf "$legacy_dir/lifecycle"
+
+legacy_abandon=$(FACTORY_FORBID_LIVE=0 \
+  FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
+  "$tool" "$fixture_task" abandon --profile "$profile_id" \
+    --attempt "$legacy_attempt" \
+    --reason 'pre-ledger fixture cleanup' \
+    --routes-dir "$routes" \
+    --state-dir "$shared_state" \
+    --control-dir "$shared_control" 2>&1)
+legacy_rc=$?
+if (( legacy_rc != 0 )); then
+  test_note "legacy lifecycle abandon: $legacy_abandon"
+fi
+assert_rc 0 "$legacy_rc" "abandon closes an attempt that predates the lifecycle ledger"
+assert_eq 0 \
+  "$(cat "$legacy_dir"/lifecycle/segments/*.ndjson 2>/dev/null | wc -l | tr -d ' ')" \
+  "a pre-ledger attempt gets no invented lifecycle history"
 
 assert_file_missing "$FACTORY_HOME/bin/factory-canary" \
   "obsolete special launcher is removed"

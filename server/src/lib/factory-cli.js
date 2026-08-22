@@ -2,6 +2,7 @@
 // Cockpit меняет попытку только через exact route commands единственного движка.
 import fs from 'node:fs';
 import path from 'node:path';
+import { JOURNAL_FRESH_SEC } from '../../../web/src/shared/agent-activity.js';
 import { parseStagesLog } from './stages-parse.js';
 
 export function readInstruction({ stateDir, task }) {
@@ -128,7 +129,7 @@ export function readActivity({ stateDir, task, registry }) {
   const journalAgeSec = silence ? silence.sec : (journalMtimeMs == null
     ? null
     : Math.max(0, Math.floor((Date.now() - journalMtimeMs) / 1000)));
-  journalFresh = journalAgeSec != null && journalAgeSec < 60;
+  journalFresh = journalAgeSec != null && journalAgeSec < JOURNAL_FRESH_SEC;
   return {
     tail,
     journalFresh,

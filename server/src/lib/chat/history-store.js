@@ -16,9 +16,77 @@ import {
 
 const SERVER_CHAT_KEYS = new Set([
   'schema', 'surface', 'revision', 'modelRefState', 'sessionBindingState',
+  'logicalIdentity',
   // Binding не должен оказаться в chat JSON даже под выдуманным клиентом именем.
   'binding', 'bindingGeneration', 'sessionBinding',
 ]);
+
+const COMPANION_PURPOSE = 'companion';
+const COMPANION_TASK_RE = /^[1-9][0-9]{0,18}$/;
+
+export class ChatHistoryError extends Error {
+  constructor(code, message, { statusCode = 409, conflicts = [] } = {}) {
+    super(message);
+    this.name = 'ChatHistoryError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.conflicts = conflicts;
+  }
+}
+
+export function normalizeCompanionTaskId(value) {
+  if (value == null) return null;
+  const taskId = typeof value === 'number' && Number.isSafeInteger(value)
+    ? String(value)
+    : value;
+  if (typeof taskId !== 'string' || !COMPANION_TASK_RE.test(taskId)) {
+    throw new ChatHistoryError(
+      'bad_companion_task_id',
+      'Нужен канонический положительный номер задачи.',
+      { statusCode: 400 },
+    );
+  }
+  return taskId;
+}
+
+export function companionLogicalIdentity(taskId = null) {
+  const canonical = normalizeCompanionTaskId(taskId);
+  return canonical ? `companion:task:${canonical}` : 'companion:global';
+}
+
+function companionIdentity(chat) {
+  if (chat?.purpose !== COMPANION_PURPOSE) return null;
+  let taskId;
+  try { taskId = normalizeCompanionTaskId(chat.taskId); }
+  catch { return { valid: false, taskId: chat.taskId ?? null, key: '' }; }
+  const key = companionLogicalIdentity(taskId);
+  return { valid: chat.logicalIdentity === key, taskId, key };
+}
+
+function conflictView(chat) {
+  return {
+    id: String(chat?.id || ''),
+    title: String(chat?.title || ''),
+    archived: !!chat?.archived,
+    createdAt: chat?.createdAt || null,
+    updatedAt: chat?.updatedAt || null,
+  };
+}
+
+function identityConflict(conflicts = []) {
+  return new ChatHistoryError(
+    'companion_chat_conflict',
+    'Найдено несколько или повреждённых companion-чатов с одной logical identity.',
+    { conflicts: conflicts.map(conflictView) },
+  );
+}
+
+function rebindError() {
+  return new ChatHistoryError(
+    'chat_identity_rebind',
+    'Обычный save не может создать или изменить server-owned identity чата.',
+  );
+}
 
 function stableJson(value) {
   return JSON.stringify(value);
@@ -59,6 +127,9 @@ export class ChatHistoryStore {
     this.migrationPromise = null;
     // id чата → хвост очереди его сохранений (см. withChatLock).
     this.locks = new Map();
+    // Логическая идентичность → хвост атомарного создания или восстановления. Блокировки по id недостаточно:
+    // до появления первого файла у двух окон ещё нет общего id чата.
+    this.logicalLocks = new Map();
   }
 
   /**
@@ -73,6 +144,29 @@ export class ChatHistoryStore {
   fileOf(chat) {
     const month = new Date(chat.createdAt || chat.updatedAt || Date.now()).toISOString().slice(0, 7);
     return path.join(this.dir, month, `${chat.id}.json`);
+  }
+
+  /**
+   * Точечное чтение одного чата по id, без полного `scan()`.
+   *
+   * Месяц в пути — свойство `createdAt`, поэтому каталог заранее неизвестен: перебираем
+   * месяцы от свежих к старым и пробуем ровно один файл в каждом. Нужно тем, кому хватает
+   * шапки чата (название, задача) и кому дорого читать всю историю: `readOne` тянет с
+   * диска ВСЕ чат-файлы, а карточка вопроса в телеграм-пульте спрашивает про один.
+   */
+  async peek(id) {
+    if (!id) return null;
+    const chatId = String(id);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(chatId)) return null; // id из чужого ввода в путь не клеим
+    let months = [];
+    try { months = await fs.readdir(this.dir); } catch { return null; }
+    for (const month of months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse()) {
+      try {
+        const chat = JSON.parse(await fs.readFile(path.join(this.dir, month, `${chatId}.json`), 'utf8'));
+        if (chat?.id === chatId) return chat;
+      } catch { /* нет в этом месяце или файл битый — ищем дальше */ }
+    }
+    return null;
   }
 
   /**
@@ -126,23 +220,35 @@ export class ChatHistoryStore {
   }
 
   /**
-   * Перед первой schema-v2 миграцией сохраняем исходные байты. Backup не участвует
-   * в обычном чтении и остаётся пригодным для явного recovery/проверки rollback.
+   * Исходные байты того, что сейчас будет перезаписано. История чатов нигде больше
+   * не хранится (папка под самогитигнором), а мигратор переписывает файлы сам при
+   * старте — без копии ошибка в нём стёрла бы переписку молча и безвозвратно.
+   *
+   * Копируются ТОЛЬКО перезаписываемые файлы. Прежняя полная копия всей истории на
+   * каждое расхождение защиты не добавляла (нетронутые файлы и так лежат целыми,
+   * а откат возвращает ровно затёртое), зато набрала 268 МБ за три недели: рутинный
+   * перерезолв моделей после обновления каталога стоил 7,5 МБ на каждый перезапуск.
+   * Настоящая смена схемы трогает все файлы и поэтому копируется целиком сама собой.
+   *
+   * @param {Array<{path: string, json: string}>} sources — файлы и их байты ДО записи
+   * @param {object|null} meta — прежняя мета, если её тоже перезаписывают
    */
-  async backupMigration(entries, meta, label = 'chat-schema-v2') {
+  async backupMigration(sources, meta, label = 'chat-schema-v2') {
     const backupDir = path.join(
       this.dir,
       '.migration-backups',
       `${this.now()}-${label}-${randomUUID()}`,
     );
     await fs.mkdir(backupDir, { recursive: true, mode: 0o700 });
-    for (const { path: source, json } of entries.values()) {
+    let chats = 0;
+    for (const { path: source, json } of sources) {
       const rel = path.relative(this.dir, source);
       const target = path.join(backupDir, rel);
       await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       await fs.writeFile(target, json, { mode: 0o600, flag: 'wx' });
+      chats += 1;
     }
-    if (Object.keys(meta || {}).length) {
+    if (meta && Object.keys(meta).length) {
       await fs.writeFile(
         path.join(backupDir, 'meta.json'),
         stableJson(meta),
@@ -153,7 +259,7 @@ export class ChatHistoryStore {
       schema: 1,
       targetSchema: CHAT_SCHEMA,
       createdAt: new Date(this.now()).toISOString(),
-      chats: entries.size,
+      chats,
     }, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
     return backupDir;
   }
@@ -174,14 +280,19 @@ export class ChatHistoryStore {
         : 0;
       migrated.sessionBindingState = legacySessionState(entry.chat);
       const json = stableJson(migrated);
-      if (json !== entry.json) changes.push({ ...entry, migrated, json });
+      // originalJson именно отдельным полем: спред entry кладёт исходные байты в
+      // `json`, а следом их затирает мигрированный — копировать было бы уже нечего.
+      if (json !== entry.json) changes.push({ ...entry, migrated, json, originalJson: entry.json });
     }
     const { meta: migratedMeta } = migrateDefaultModel(meta, registry);
     migratedMeta.schema = CHAT_SCHEMA;
     const metaChanged = stableJson(migratedMeta) !== stableJson(meta);
     if (!changes.length && !metaChanged) return { changed: false, backupDir: null };
 
-    const backupDir = await this.backupMigration(entries, meta);
+    const backupDir = await this.backupMigration(
+      changes.map((change) => ({ path: change.path, json: change.originalJson })),
+      metaChanged ? meta : null,
+    );
     for (const change of changes) await this.writeAtomic(change.path, change.json);
     if (metaChanged) await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(migratedMeta));
     return { changed: true, backupDir };
@@ -237,7 +348,12 @@ export class ChatHistoryStore {
       await this.saveOne(c, !!c.archived);
     }
     for (const [id, v] of existing) {
-      if (!seen.has(id)) await fs.rm(v.path, { force: true });
+      // Полный PUT остался миграционным compatibility endpoint-ом. Server-created
+      // companion нельзя удалить устаревшим снимком всего стора; для явного удаления
+      // есть точечный DELETE.
+      if (!seen.has(id) && v.chat?.purpose !== COMPANION_PURPOSE) {
+        await this.remove(id);
+      }
     }
     await this.saveMeta({
       activeId: body.activeId ?? null,
@@ -263,7 +379,7 @@ export class ChatHistoryStore {
    *   written — файл изменился (false — на диске уже лежит ровно это, частый случай
    *   лишнего persist); restored/dropped — что дало слияние, см. merge-chat.js.
    */
-  async saveOne(chat, archived = false) {
+  async saveOne(chat, archived = false, { serverIdentity = '' } = {}) {
     if (!chat?.id) return { written: false, restored: 0, dropped: 0 };
     await this.ensureMigrated();
     return this.withChatLock(chat.id, async () => {
@@ -277,6 +393,34 @@ export class ChatHistoryStore {
       // но server-owned выбор модели уже не откатываем.
       const stale = !!prev && incomingRevision !== currentRevision;
       const clean = clientChat(chat);
+      const previousIdentity = companionIdentity(prev?.chat);
+      let identity = null;
+      if (serverIdentity) {
+        let taskId;
+        try { taskId = normalizeCompanionTaskId(chat.taskId); } catch { throw rebindError(); }
+        const expected = companionLogicalIdentity(taskId);
+        if (chat.purpose !== COMPANION_PURPOSE || serverIdentity !== expected) throw rebindError();
+        identity = { valid: true, taskId, key: expected };
+      } else if (prev?.chat?.purpose === COMPANION_PURPOSE) {
+        if (!previousIdentity?.valid) throw identityConflict([prev.chat]);
+        if (Object.hasOwn(chat, 'purpose') && chat.purpose !== COMPANION_PURPOSE) throw rebindError();
+        if (Object.hasOwn(chat, 'taskId')) {
+          let taskId;
+          try { taskId = normalizeCompanionTaskId(chat.taskId); } catch { throw rebindError(); }
+          if (taskId !== previousIdentity.taskId) throw rebindError();
+        }
+        if (Object.hasOwn(chat, 'logicalIdentity')
+          && chat.logicalIdentity !== previousIdentity.key) throw rebindError();
+        identity = previousIdentity;
+      } else if (chat.purpose === COMPANION_PURPOSE
+        || Object.hasOwn(chat, 'logicalIdentity')) {
+        throw rebindError();
+      }
+      if (identity) {
+        clean.purpose = COMPANION_PURPOSE;
+        clean.taskId = identity.taskId;
+        clean.logicalIdentity = identity.key;
+      }
       const surface = CHAT_SURFACES.has(prev?.chat?.surface)
         ? prev.chat.surface
         : this.defaultSurface;
@@ -291,7 +435,11 @@ export class ChatHistoryStore {
       } else {
         prepared = migrateChatModelRecord(clean, registry, { surface }).chat;
       }
-      const { chat: merged, restored, dropped } = mergeChat(prev?.chat || null, prepared);
+      const { chat: merged, restored, dropped } = mergeChat(
+        prev?.chat || null,
+        prepared,
+        { allowClear: !stale },
+      );
       const c = {
         ...merged,
         schema: CHAT_SCHEMA,
@@ -333,6 +481,82 @@ export class ChatHistoryStore {
     return next;
   }
 
+  /** Та же очередь, но до появления физического chat id — по logical identity. */
+  async withLogicalLock(key, fn) {
+    const prev = this.logicalLocks.get(key) || Promise.resolve();
+    const next = prev.then(fn, fn);
+    this.logicalLocks.set(key, next.then(() => {}, () => {}));
+    const done = this.logicalLocks.get(key);
+    done.then(() => { if (this.logicalLocks.get(key) === done) this.logicalLocks.delete(key); });
+    return next;
+  }
+
+  /**
+   * Атомарно найти, создать или восстановить обычный chat record по server-owned
+   * purpose/task scope. Сейчас единственный разрешённый purpose — companion.
+   */
+  async ensureByPurpose({ purpose, taskId = null } = {}) {
+    if (purpose !== COMPANION_PURPOSE) {
+      throw new ChatHistoryError(
+        'bad_chat_purpose',
+        'Поддерживается только purpose companion.',
+        { statusCode: 400 },
+      );
+    }
+    const canonicalTaskId = normalizeCompanionTaskId(taskId);
+    const key = companionLogicalIdentity(canonicalTaskId);
+    await this.ensureMigrated();
+    return this.withLogicalLock(key, async () => {
+      await this.ensureDir();
+      const entries = await this.scan();
+      const candidates = [...entries.values()]
+        .map((entry) => entry.chat)
+        .filter((chat) => {
+          if (chat?.purpose !== COMPANION_PURPOSE) return false;
+          // Берём объединение canonical scope и уже объявленного key. Иначе запись
+          // `{taskId: 2, logicalIdentity: task:1}` была бы невидима ensure(task:1),
+          // и сервер создал бы второй файл с тем же logical identity.
+          if (chat.logicalIdentity === key) return true;
+          try { return normalizeCompanionTaskId(chat.taskId) === canonicalTaskId; }
+          catch { return false; }
+        });
+      if (candidates.length !== 1 && candidates.length !== 0) throw identityConflict(candidates);
+      if (candidates.length === 1) {
+        const current = candidates[0];
+        const identity = companionIdentity(current);
+        if (!identity?.valid || identity.key !== key) throw identityConflict(candidates);
+        if (!current.archived) {
+          return { chat: current, created: false, restored: false, written: false };
+        }
+        const saved = await this.saveOne(current, false, { serverIdentity: key });
+        return {
+          ...saved,
+          chat: saved.chat,
+          created: false,
+          restored: true,
+        };
+      }
+
+      const at = this.now();
+      const saved = await this.saveOne({
+        id: randomUUID(),
+        title: canonicalTaskId ? `Компаньон · задача #${canonicalTaskId}` : 'Компаньон',
+        purpose: COMPANION_PURPOSE,
+        taskId: canonicalTaskId,
+        logicalIdentity: key,
+        messages: [],
+        createdAt: at,
+        updatedAt: at,
+      }, false, { serverIdentity: key });
+      return {
+        ...saved,
+        chat: saved.chat,
+        created: true,
+        restored: false,
+      };
+    });
+  }
+
   /**
    * Один чат по id — точечная досинхронизация окон: по событию `chat-store` окно тянет
    * ровно изменившийся чат, а не всю историю (она растёт, а меняется всегда один чат).
@@ -348,10 +572,23 @@ export class ChatHistoryStore {
   async remove(id) {
     if (!id) return false;
     await this.ensureMigrated();
-    const prev = (await this.scan()).get(id);
-    if (!prev) return false;
-    await fs.rm(prev.path, { force: true });
-    return true;
+    const chatId = String(id);
+    // Companion ensure держит logical lock, а внутри него берёт per-id lock. DELETE
+    // соблюдает тот же порядок, чтобы конкурентный ensure был линейным и без deadlock.
+    const initial = (await this.scan()).get(chatId);
+    const identity = companionIdentity(initial?.chat);
+    const removeUnderChatLock = () => this.withChatLock(chatId, async () => {
+      // Перечитываем файл уже под тем же per-id lock, что использует saveOne. DELETE,
+      // начавшийся во время atomic PUT, удалит его результат, а не позволит позднему
+      // rename воскресить durable companion identity.
+      const prev = (await this.scan()).get(chatId);
+      if (!prev) return false;
+      await fs.rm(prev.path, { force: true });
+      return true;
+    });
+    return identity?.valid
+      ? this.withLogicalLock(identity.key, removeUnderChatLock)
+      : removeUnderChatLock();
   }
 
   /**

@@ -22,16 +22,83 @@ import {
   planPages,
   stallCard,
   silenceCard,
-  resolvedCard,
   statusListCard,
+  statusListKeyboard,
   taskNodesCard,
+  taskNodesKeyboard,
   taskNodesPage,
   taskStatusCard,
+  taskStatusKeyboard,
+  planPageKeyboard,
+  activityLine,
+  chatSubject,
+  questionKeyboard,
+  finishedCard,
+  formatDuration,
+  liveCard,
+  liveSignature,
+  runResult,
   gateKeyboard,
   cbData,
   encodeCb,
   parseCallback,
 } from '../../server/src/lib/telegram/pult/format.js';
+
+import * as format from '../../server/src/lib/telegram/pult/format.js';
+
+test('постоянная клавиатура содержит четыре точные подписи навигации', () => {
+  const markup = format.pultReplyKeyboard?.();
+  assert.deepEqual(markup?.keyboard, [
+    [{ text: '📋 Конвейер' }, { text: '💬 Агент' }],
+    [{ text: '📥 Задачи' }, { text: '⚙️ Ещё' }],
+  ]);
+});
+
+test('постоянная клавиатура остаётся раскрытой и компактной', () => {
+  const markup = format.pultReplyKeyboard?.();
+  assert.deepEqual(
+    { is_persistent: markup?.is_persistent, resize_keyboard: markup?.resize_keyboard },
+    { is_persistent: true, resize_keyboard: true },
+  );
+});
+
+test('итог без правок не выдумывает число файлов', () => {
+  assert.equal(format.turnSummary?.({ files: [], tokens: 12_400 }), '— 12.4k ток.');
+});
+
+test('пустой итог не оставляет разделитель', () => {
+  assert.equal(format.turnSummary?.({}), '');
+});
+
+test('итог склоняет только фактически изменённые файлы', () => {
+  assert.deepEqual([1, 2, 5].map((count) => format.turnSummary?.({
+    files: Array.from({ length: count }, (_, index) => `src/${index}.js`),
+  })), [
+    '— 1 файл',
+    '— 2 файла',
+    '— 5 файлов',
+  ]);
+});
+
+test('порог автосжатия становится знаменателем заполненности контекста', () => {
+  assert.equal(format.turnSummary?.({
+    contextTokens: 165_172,
+    contextWindow: 1_000_000,
+    compactWindow: 200_000,
+  }), '— контекст 83%');
+});
+
+test('без автосжатия заполненность считается до 80% проверенного окна', () => {
+  assert.equal(format.turnSummary?.({
+    contextTokens: 165_172,
+    contextWindow: 1_000_000,
+    compactWindow: 0,
+  }), '— контекст 21%');
+});
+
+test('без проверенного окна процент контекста не показывается', () => {
+  assert.equal(format.turnSummary?.({ contextTokens: 165_172 }), '');
+});
 
 // ---------------------------------------------------------------- схлопывание
 
@@ -70,10 +137,10 @@ test('карточка ворот: длинная причина режется,
 
 test('карточка вопроса: свой лимит 1500 и схлопнутый текст вопроса', () => {
   const text = questionCard({ subject: '#4187', question: 'Какой\nспособ\tвыбрать?' });
-  assert.equal(text, '❓ #4187, вопрос агента\nКакой способ выбрать?');
+  assert.equal(text, '❓ #4187 — вопрос агента\nКакой способ выбрать?');
   const long = questionCard({ subject: '#4187', question: 'в'.repeat(4000) });
   assert.equal([...long].length <= LIMITS.question, true);
-  assert.equal(long.startsWith('❓ #4187, вопрос агента\n'), true);
+  assert.equal(long.startsWith('❓ #4187 — вопрос агента\n'), true);
 });
 
 test('карточка разрешения: имя инструмента, превью ~300 и отсылка в кокпит', () => {
@@ -82,7 +149,7 @@ test('карточка разрешения: имя инструмента, пр
     tool: 'Bash',
     preview: 'npm run build && bash tests/run-all.sh',
   });
-  assert.equal(text.startsWith('🔐 #4187, агент просит разрешение\n'), true);
+  assert.equal(text.startsWith('🔐 #4187 — агент просит разрешение\n'), true);
   assert.equal(text.includes('Bash: npm run build && bash tests/run-all.sh'), true);
   assert.equal(text.includes('кокпит'), true);
 
@@ -101,15 +168,10 @@ test('карточка затыка: этап в шапке не отбрасы�
   assert.equal(long.endsWith(' (SANDBOX)'), true);
 });
 
-test('карточка молчания и «решено»', () => {
+test('карточка молчания: схлопнутый текст с именем висящего вызова', () => {
   assert.equal(
     silenceCard({ subject: '#4189', text: 'build: молчит 28 мин, висит mcp__playwright__browser_click' }),
     '💤 #4189: build: молчит 28 мин, висит mcp__playwright__browser_click',
-  );
-  assert.equal(resolvedCard({ subject: '#4187' }), '✓ #4187: решено');
-  assert.equal(
-    resolvedCard({ subject: '#4187', note: 'принято, прогон продолжен' }),
-    '✓ #4187: принято, прогон продолжен',
   );
 });
 
@@ -208,17 +270,12 @@ test('callback_data всех форм ≤ 64 байт на предельных 
     cbData.resumeYes(task),
     cbData.sandboxRetry(task),
     cbData.sandboxRetryYes(task),
-    cbData.launchPick(task, 12),
-    cbData.launchYes(task, 12),
-    cbData.stopPick(12),
-    cbData.stopYes(12),
     cbData.statusList(1234),
     cbData.statusTask(task, 1234),
     cbData.statusNodes(task, 1234, 1234),
+    cbData.statusNodesNew(task),
     cbData.planOpen(task),
     cbData.planPage(task, 1234),
-    cbData.taskCreate(),
-    cbData.taskCancel(),
     cbData.dismiss(),
   ];
   for (const data of forms) {
@@ -252,10 +309,6 @@ test('parseCallback: круговой разбор всех форм', () => {
   assert.deepEqual(parseCallback('r:4187:n'), { kind: 'resume', taskId: '4187', step: 'no' });
   assert.deepEqual(parseCallback('sb:4188'), { kind: 'sandbox-retry', taskId: '4188', step: 'ask' });
   assert.deepEqual(parseCallback('sb:4188:y'), { kind: 'sandbox-retry', taskId: '4188', step: 'yes' });
-  assert.deepEqual(parseCallback('l:4201:3'), { kind: 'launch', taskId: '4201', index: 3, step: 'ask' });
-  assert.deepEqual(parseCallback('l:4201:3:y'), { kind: 'launch', taskId: '4201', index: 3, step: 'yes' });
-  assert.deepEqual(parseCallback('st:0'), { kind: 'stop', index: 0, step: 'ask' });
-  assert.deepEqual(parseCallback('st:0:y'), { kind: 'stop', index: 0, step: 'yes' });
   assert.deepEqual(parseCallback('sl:2'), { kind: 'status-list', page: 2 });
   assert.deepEqual(parseCallback('sd:4187:2'), { kind: 'status-task', taskId: '4187', page: 2 });
   assert.deepEqual(parseCallback('sn:4187:2'), {
@@ -264,22 +317,208 @@ test('parseCallback: круговой разбор всех форм', () => {
   assert.deepEqual(parseCallback('sn:4187:2:3'), {
     kind: 'status-nodes', taskId: '4187', page: 2, nodePage: 3,
   });
+  assert.deepEqual(parseCallback('sm:4187'), { kind: 'status-nodes-new', taskId: '4187' });
   assert.deepEqual(parseCallback('po:4187'), { kind: 'plan-open', taskId: '4187' });
   assert.deepEqual(parseCallback('pp:4187:3'), { kind: 'plan-page', taskId: '4187', page: 3 });
-  assert.deepEqual(parseCallback('tk:y'), { kind: 'task-create', confirmed: true });
-  assert.deepEqual(parseCallback('tk:n'), { kind: 'task-create', confirmed: false });
   assert.deepEqual(parseCallback('x'), { kind: 'dismiss' });
 });
 
 test('parseCallback: мусор, чужие формы и сверхдлинное — null, без исключений', () => {
   const bad = [
     '', 'unknown', 'g:abc:GATE_PLAN:a', 'g:4187:gate_plan:a', 'g:4187:GATE_PLAN:zz',
-    'q:пид:1', 'p:x y:a', 'r:', 'l:4201:x', 'st:-1', 'sl:-1', 'sd:4187:x',
-    'sn:abc:0', 'sn:4187:0:x', 'po:abc', 'pp:4187:x', 'tk:maybe',
-    'g:4187:GATE_PLAN:a:extra', 'x:extra', 'q:' + 'a'.repeat(80) + ':1',
+    'q:пид:1', 'p:x y:a', 'r:', 'sl:-1', 'sd:4187:x',
+    'sn:abc:0', 'sn:4187:0:x', 'po:abc', 'pp:4187:x', 'sm:abc',
+    // Снятые формы мусорных команд: старая кнопка обязана стать неизвестной,
+    // а не запустить прогон или создать задачу.
+    'l:4201:3', 'l:4201:3:y', 'st:0', 'st:0:y', 'tk:y', 'tk:n',
+    'g:4187:GATE_PLAN:a:extra', 'x:extra', 'sc:extra', 'q:' + 'a'.repeat(80) + ':1',
     null, undefined, 42,
   ];
   for (const data of bad) {
     assert.equal(parseCallback(data), null, `должен быть null: ${String(data)}`);
   }
+});
+
+// --------------------------------------- экран навигации: кнопка закрытия (t91001)
+
+test('cbData.screenClose: форма sc разбирается в закрытие экрана', () => {
+  assert.deepEqual(parseCallback(cbData.screenClose()), { kind: 'screen-close' });
+});
+
+const hasCloseButton = (rows) => (rows || []).flat()
+  .some((button) => button.callback_data === 'sc' && button.text === '✕ Закрыть');
+
+test('клавиатура списка задач несёт кнопку закрытия экрана', () => {
+  assert.equal(hasCloseButton(statusListKeyboard([{ task: '4187' }], 0, 1)), true);
+});
+
+test('клавиатура карточки задачи несёт кнопку закрытия экрана', () => {
+  assert.equal(hasCloseButton(taskStatusKeyboard('4187', 0)), true);
+});
+
+test('клавиатура страниц узлов несёт кнопку закрытия экрана', () => {
+  assert.equal(hasCloseButton(taskNodesKeyboard('4187', 0, 0, 1)), true);
+});
+
+test('клавиатура страниц плана несёт кнопку закрытия экрана', () => {
+  assert.equal(hasCloseButton(planPageKeyboard('4187', 0, 1)), true);
+});
+
+test('helpKeyboard: подсказка закрывается одной кнопкой', () => {
+  assert.deepEqual(format.helpKeyboard?.(), [[{ text: '✕ Закрыть', callback_data: 'sc' }]]);
+});
+
+test('resolvedCard больше не экспортируется: итог — всплывашка, карточка удаляется', () => {
+  assert.equal(format.resolvedCard, undefined);
+});
+
+// ------------------------------------------------- живая карточка и исход прогона
+
+const liveTask = (over = {}) => ({
+  task: '4190',
+  title: 'Экспорт CSV',
+  daemonAlive: true,
+  silence: { stage: 'BUILD', sec: 12, tool: null },
+  graph: {
+    route: 'feature',
+    pos: { plan: [0, 0], build: [1, 0] },
+    nodes: { plan: ['agent', '📋 План'], build: ['agent', '🔨 Сборка'] },
+    statuses: { plan: 'done', build: 'run' },
+    progress: { done: 1, total: 2, current: 'build' },
+    timing: { workSec: 4_200, approximate: true },
+  },
+  ...over,
+});
+
+test('activityLine: правило «пишет или висит» берётся из общего agent-activity', () => {
+  assert.equal(activityLine(liveTask()), 'Агент: агент пишет');
+  assert.equal(
+    activityLine(liveTask({ silence: { stage: 'BUILD', sec: 1_680, tool: 'mcp__playwright__browser_click' } })),
+    'Агент: нет событий 28 мин (mcp__playwright__browser_click)',
+    'имя висящего вызова важнее цифры: сборка и мёртвый браузер выглядят по-разному',
+  );
+  assert.equal(activityLine(liveTask({ silence: null })), '', 'активного хода нет — строки нет, а не «0 мин»');
+});
+
+test('formatDuration: секунды, минуты и часы словами', () => {
+  assert.equal(formatDuration(45), '45 с');
+  assert.equal(formatDuration(12 * 60), '12 мин');
+  assert.equal(formatDuration(4_200), '1 ч 10 мин');
+  assert.equal(formatDuration(7_200), '2 ч');
+  assert.equal(formatDuration(-5), '0 с', 'мусорный замер не превращается в отрицательное время');
+});
+
+test('runResult: терминальные исходы названы поимённо, незнакомый не выдумывается', () => {
+  assert.equal(runResult('completed').text, 'маршрут завершён');
+  assert.equal(runResult('abandoned').text, 'попытка закрыта');
+  assert.equal(runResult(''), null);
+  assert.equal(runResult('какой-то\nновый').text, 'какой-то новый', 'незнакомый код схлопывается, но не теряется');
+});
+
+test('liveCard: узел, прогресс, активность и приписка про самообновление', () => {
+  const text = liveCard(liveTask());
+  assert.match(text, /🔵 #4190 — Экспорт CSV/u);
+  assert.match(text, /Маршрут: feature/u);
+  assert.match(text, /Сейчас: 🔨 Сборка · выполняется/u);
+  assert.match(text, /Прогресс маршрута: 1\/2 · 50%/u);
+  assert.match(text, /Работа: ≈1 ч 10 мин/u, 'приблизительный замер помечен, а не выдан за точный');
+  assert.match(text, /Карточка обновляется сама\./u);
+});
+
+test('liveCard завершённого прогона — это уже итог, а не состояние', () => {
+  const text = liveCard(liveTask({ result: 'completed', daemonAlive: false }));
+  assert.match(text, /✅ #4190 — Экспорт CSV: маршрут завершён/u);
+  assert.equal(/Карточка обновляется сама/u.test(text), false);
+});
+
+test('finishedCard: исход, маршрут, пройденные узлы и время работы', () => {
+  const text = finishedCard(liveTask({
+    result: 'completed',
+    daemonAlive: false,
+    graph: { ...liveTask().graph, progress: { done: 2, total: 2, current: null } },
+  }));
+  assert.match(text, /✅ #4190 — Экспорт CSV: маршрут завершён/u);
+  assert.match(text, /Прошло узлов: 2\/2 · 100%/u);
+  assert.match(text, /Работа: ≈1 ч 10 мин/u);
+});
+
+test('liveSignature: смена узла/статуса/исхода значима, тикающие секунды — нет', () => {
+  const base = liveSignature(liveTask());
+  assert.equal(
+    liveSignature(liveTask({ silence: { stage: 'BUILD', sec: 900, tool: 'Bash' } })),
+    base,
+    'молчание в подпись не входит: иначе каждая минута била бы правкой в Telegram',
+  );
+  assert.notEqual(liveSignature(liveTask({ result: 'completed' })), base);
+  assert.notEqual(liveSignature(liveTask({ stall: { stage: 'BUILD', title: 'встал' } })), base);
+  assert.notEqual(
+    liveSignature(liveTask({
+      graph: { ...liveTask().graph, progress: { done: 2, total: 2, current: 'build' } },
+    })),
+    base,
+  );
+});
+
+test('taskStatusCard показывает ту же активность, что живая карточка', () => {
+  assert.match(taskStatusCard(liveTask()), /Агент: агент пишет/u);
+});
+
+// ------------------------------------------------- контекст вопроса из чата
+
+test('chatSubject: имя разговора и задача вместо безымянного «чат»', () => {
+  assert.equal(chatSubject({ chatTitle: 'Телеграм-пульт мусор' }), 'Телеграм-пульт мусор');
+  assert.equal(chatSubject({ taskId: '4187' }), '#4187');
+  assert.equal(chatSubject({ chatTitle: 'Экспорт CSV', taskId: '4187' }), '#4187 — Экспорт CSV');
+  assert.equal(chatSubject({}), 'чат', 'нечего показать — честное «чат», а не выдуманное имя');
+  assert.equal(chatSubject(null), 'чат', 'закрытый спрос не роняет карточку');
+  assert.equal(
+    chatSubject({ chatTitle: 'до\nпосле' }), 'до после',
+    'название чата — недоверенный текст: схлопывается в строку',
+  );
+});
+
+test('карточка вопроса несёт тему и пояснения вариантов под номерами кнопок', () => {
+  const options = [
+    { label: 'Контракт + фикстуры, план оставить', description: 'Убираем только контрактные тесты.' },
+    { label: 'Всё, включая план и критику', description: 'Полное удаление вместе с разделом плана.' },
+    { label: 'Только ссылки в документации' },
+  ];
+  const text = questionCard({
+    subject: 'Телеграм-пульт мусор',
+    header: 'Объём',
+    question: 'Что именно выпиливаем?',
+    options,
+  });
+  assert.match(text, /❓ Телеграм-пульт мусор — вопрос агента/u);
+  assert.match(text, /Тема: Объём/u, 'header AskUserQuestion ради этого и существует');
+  assert.match(text, /Что именно выпиливаем\?/u);
+  assert.match(text, /1\) Контракт \+ фикстуры, план оставить\n {3}Убираем только контрактные тесты\./u);
+  assert.match(text, /3\) Только ссылки в документации/u, 'вариант без пояснения остаётся строкой');
+
+  const buttons = questionKeyboard('p1', options).flat().map((b) => b.text);
+  assert.equal(buttons[0].startsWith('1) '), true, 'номер кнопки совпадает с номером пояснения');
+  assert.equal(buttons[2].startsWith('3) '), true);
+  assert.equal(buttons.at(-1), '✍ Свой ответ');
+});
+
+test('карточка вопроса без вариантов и темы не выдумывает пустых строк', () => {
+  assert.equal(
+    questionCard({ subject: 'чат', question: 'Продолжать?' }),
+    '❓ чат — вопрос агента\nПродолжать?',
+  );
+  // Варианты отделены от вопроса пустой строкой: без неё список слипается с текстом.
+  assert.match(
+    questionCard({ subject: 'чат', question: 'Как?', options: [{ label: 'Так' }] }),
+    /Как\?\n\n1\) Так/u,
+  );
+});
+
+test('длинные пояснения вариантов не выносят карточку за лимит вопроса', () => {
+  const options = Array.from({ length: 8 }, (_, i) => ({
+    label: `вариант ${i + 1} ${'д'.repeat(200)}`,
+    description: 'о'.repeat(1000),
+  }));
+  const text = questionCard({ subject: '#1', header: 'т'.repeat(200), question: 'в'.repeat(500), options });
+  assert.equal([...text].length <= LIMITS.question, true);
+  assert.equal(text.startsWith('❓ #1 — вопрос агента\n'), true, 'шапка не отбрасывается никогда');
 });

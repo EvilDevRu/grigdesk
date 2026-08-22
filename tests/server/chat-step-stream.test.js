@@ -9,7 +9,67 @@ import {
 } from '../../server/src/lib/chat/stream-steps.js';
 import { toClaudeSteps } from '../../server/src/lib/executors/_claude-steps.js';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codex-steps.js';
+import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimi-steps.js';
+import { createToolbox } from '../../server/src/lib/executors/_ollama-tools.js';
 import codex from '../../server/src/lib/executors/codex.js';
+
+test('Claude Write объявляет изменяемый файл в нейтральном шаге', () => {
+  const steps = toClaudeSteps({
+    type: 'assistant',
+    message: {
+      content: [{
+        type: 'tool_use', id: 'write-1', name: 'Write',
+        input: { file_path: 'src/new.js', content: 'export default 1;' },
+      }],
+    },
+  });
+  assert.deepEqual(steps[0]?.files, ['src/new.js']);
+});
+
+test('Codex file_change сохраняет все пути одного вызова', () => {
+  const normalize = createCodexStepNormalizer();
+  const steps = normalize({
+    type: 'item.started',
+    item: {
+      id: 'change-1',
+      type: 'file_change',
+      changes: [
+        { path: 'src/a.js', kind: 'update' },
+        { path: 'src/b.js', kind: 'create' },
+      ],
+    },
+  });
+  assert.deepEqual(steps.find((step) => step.k === 'tool')?.files, ['src/a.js', 'src/b.js']);
+});
+
+test('Kimi edit объявляет путь независимо от текста превью', () => {
+  const normalizer = createKimiStepNormalizer();
+  const steps = normalizer({ update: {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'edit-1',
+    kind: 'edit',
+    status: 'in_progress',
+    title: 'Edit file',
+    rawInput: { path: 'src/kimi.js', old_string: 'a', new_string: 'b' },
+  } });
+  assert.deepEqual(steps.find((step) => step.k === 'tool')?.files, ['src/kimi.js']);
+});
+
+test('Ollama Write сообщает путь в tool-step и успешный результат отдельно', async (t) => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ollama-step-files-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const steps = [];
+  const toolbox = await createToolbox({
+    cwd,
+    permissionMode: 'acceptEdits',
+    sink: { emit: (step) => steps.push(step) },
+  });
+  await toolbox.call({ name: 'write_file', args: { path: 'src/ollama.js', content: 'ok\n' } });
+  assert.deepEqual(steps.map((step) => ({ k: step.k, files: step.files, ok: step.ok })), [
+    { k: 'tool', files: ['src/ollama.js'], ok: undefined },
+    { k: 'res', files: undefined, ok: true },
+  ]);
+});
 
 test('нейтральный sink ставит время, хранит хвост и транслирует ВСЕ шаги', () => {
   const sent = [];

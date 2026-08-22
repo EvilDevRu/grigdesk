@@ -142,6 +142,15 @@ async function settle(flushPromises, cycles = 5) {
   for (let i = 0; i < cycles; i += 1) await flushPromises();
 }
 
+/** Заголовки групп изменений: имя группы, подпись и счётчик файлов рядом с ней. */
+function groupHeads(wrapper) {
+  return wrapper.findAll('.subhead[data-group]').map((node) => ({
+    group: node.attributes('data-group'),
+    title: node.findAll('span')[0].text(),
+    count: node.find('.cnt').exists() ? node.find('.cnt').text() : '',
+  }));
+}
+
 async function waitFor(check, message) {
   for (let i = 0; i < 40; i += 1) {
     if (check()) return;
@@ -916,4 +925,180 @@ test('intent open-file открывает точную рабочую копию
   assert.deepEqual(editor.revealed, [12]);
   assert.deepEqual(editor.position, { lineNumber: 12, column: 1 });
   assert.deepEqual(wrapper.emitted('consume-intent'), [[1]]);
+});
+
+test('Git показывает индекс и рабочее дерево разными группами с независимыми дифами', async (t) => {
+  const git = {
+    branch: 'main',
+    staged: [
+      { path: 'src/a.js', status: 'M', add: 1, del: 0, group: 'staged', oldContent: 'head a', newContent: 'index a' },
+      { path: 'only-staged.js', status: 'M', add: 2, del: 2, group: 'staged', oldContent: 'head', newContent: 'index' },
+    ],
+    files: [
+      { path: 'src/a.js', status: 'M', add: 3, del: 0, group: 'work', oldContent: 'index a', newContent: 'work a' },
+    ],
+    log: [],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  // Две группы с собственными заголовками; переключатель вида один на панель.
+  assert.deepEqual(groupHeads(wrapper), [
+    { group: 'staged', title: 'В индексе', count: '2' },
+    { group: 'work', title: 'В рабочем дереве', count: '1' },
+  ]);
+  assert.equal(wrapper.findAll('[role="group"][aria-label="Вид изменений"]').length, 1);
+
+  // Один и тот же путь есть в обеих группах и выбирается независимо: у файла в индексе
+  // и в рабочем дереве разные стороны дифа, и подменять их друг другом нельзя.
+  const staged = wrapper.get('button.git-file[data-group="staged"][data-path="src/a.js"]');
+  const work = wrapper.get('button.git-file[data-group="work"][data-path="src/a.js"]');
+  await staged.trigger('click');
+  await settle(flushPromises);
+  assert.equal(staged.classes().includes('sel'), true);
+  assert.equal(work.classes().includes('sel'), false);
+  assert.equal(monacoState.diffEditors[0].model.original.content, 'head a');
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'index a');
+  assert.match(wrapper.get('.ehead').text(), /src\/a\.js.*в индексе/s);
+
+  await work.trigger('click');
+  await settle(flushPromises);
+  assert.equal(work.classes().includes('sel'), true);
+  assert.equal(staged.classes().includes('sel'), false);
+  assert.equal(monacoState.diffEditors[0].model.original.content, 'index a');
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'work a');
+  assert.match(wrapper.get('.ehead').text(), /src\/a\.js.*в рабочем дереве/s);
+
+  // Оверлей «изменений нет» относится к обеим группам сразу: при чистом рабочем
+  // дереве и непустом индексе диф выбранного файла существует и закрывать его нечем.
+  assert.equal(wrapper.find('.ebody .overlay').exists(), false);
+
+  // Каталоги групп раскрываются порознь.
+  await wrapper.get('button.git-dir[data-group="staged"][data-path="src"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.find('button.git-file[data-group="staged"][data-path="src/a.js"]').exists(), false);
+  assert.equal(wrapper.find('button.git-file[data-group="work"][data-path="src/a.js"]').exists(), true);
+});
+
+test('пустой индекс оставляет прежний одиночный список «Не в коммите»', async (t) => {
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) {
+        return {
+          branch: 'main',
+          staged: [],
+          files: [{ path: 'a.js', status: 'M', add: 1, del: 1, oldContent: 'x', newContent: 'y' }],
+          log: [],
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.deepEqual(groupHeads(wrapper), [{ group: 'work', title: 'Не в коммите', count: '1' }]);
+  // Пока вариант ровно один, называть группу в шапке нечего — подпись была бы шумом.
+  assert.equal(wrapper.find('.ehead .scope').exists(), false);
+});
+
+test('чистое рабочее дерево при непустом индексе показывает диф, а не «изменений нет»', async (t) => {
+  // Всё лежит в индексе (обычное состояние перед коммитом): `files` пуст, и оверлей,
+  // завязанный на одну эту группу, закрывал бы существующий диф собой.
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) {
+        return {
+          branch: 'master',
+          staged: [{ path: 'src/jobResult.ts', status: 'M', add: 23, del: 6, oldContent: 'head', newContent: 'index' }],
+          files: [],
+          log: [],
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.deepEqual(groupHeads(wrapper), [{ group: 'staged', title: 'В индексе', count: '1' }]);
+  assert.equal(wrapper.find('.ebody .overlay').exists(), false);
+  assert.equal(monacoState.diffEditors[0].model.original.content, 'head');
+  assert.equal(monacoState.diffEditors[0].model.modified.content, 'index');
+});
+
+test('лесенка дерева: у файла зарезервировано место под шеврон, глубина едет в CSS', async (t) => {
+  const entries = {
+    '': [{ name: 'src', dir: true }, { name: 'README.md', dir: false }],
+    src: [{ name: 'deep', dir: true }, { name: 'a.js', dir: false }],
+    'src/deep': [{ name: 'b.js', dir: false }],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: entries[query(url).get('dir') || ''] || [] };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+  await wrapper.get('button[data-dir-path="src"]').trigger('click');
+  await settle(flushPromises);
+  await wrapper.get('button[data-dir-path="src/deep"]').trigger('click');
+  await settle(flushPromises);
+
+  // Глубина уезжает в CSS переменной, а не готовыми пикселями: шаг лесенки обязан
+  // сходиться с положением направляющей, и держать его в двух местах нельзя.
+  assert.equal(wrapper.get('button[data-dir-path="src/deep"]').attributes('style'), '--depth: 1;');
+  assert.equal(wrapper.get('button[data-file-path="src/deep/b.js"]').attributes('style'), '--depth: 2;');
+
+  // У файла место под шеврон занято пустым спейсером: без него имя уезжало влево на
+  // ширину стрелки и вставало вровень с каталогом уровнем выше.
+  const fileChevron = wrapper.get('button[data-file-path="src/deep/b.js"] .chev');
+  assert.equal(fileChevron.text(), '');
+  assert.equal(fileChevron.attributes('aria-hidden'), 'true');
+  assert.equal(wrapper.get('button[data-dir-path="src/deep"] .chev').text(), '▾');
+});
+
+test('шаг лесенки и направляющие живут в стилях панели', async () => {
+  const source = await readFile(VIEW_PATH, 'utf8');
+  const styles = source.slice(source.indexOf('<style'));
+
+  // happy-dom раскладку не считает, поэтому правило стережём статически: живой замер
+  // ширины остаётся ручным шагом в браузере.
+  assert.match(styles, /--tree-step:\s*\d+px/);
+  assert.match(styles, /padding-left:\s*calc\(var\(--tree-lead\)\s*\+\s*var\(--depth,\s*0\)\s*\*\s*var\(--tree-step\)\)/);
+  assert.match(styles, /background-image:\s*repeating-linear-gradient\(to right, var\(--tree-guide\)/);
+  // Фон наведения и выделения — только background-color: shorthand стёр бы направляющие.
+  assert.match(styles, /\.trow:hover\s*\{\s*background-color:/);
+  assert.match(styles, /\.frow\.sel\s*\{\s*background-color:/);
 });

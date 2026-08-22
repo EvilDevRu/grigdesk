@@ -394,6 +394,7 @@ export function startIngestJob(opts, deps = {}) {
         hotwords: opts.hotwords,
         vadSilenceMs: opts.vadSilenceMs,
         conditionOnPreviousText: opts.conditionOnPreviousText,
+        initialPrompt: opts.initialPrompt,
     }, 'video');
     const job = encodeIngestJob({
         jobId,
@@ -429,10 +430,14 @@ export function startIngestJob(opts, deps = {}) {
  * Извлекает кадры в КОНКРЕТНЫЕ секунды видео (для скриншотов под задачи).
  * Всё локально (ffmpeg в том же окружении) — видео не покидает сервер.
  *
- * @param {{filePath: string, seconds: number[], destDir: string}} opts
+ * `prefix` нужен, когда в один каталог пишут кадры РАЗНЫХ файлов: у встречи из
+ * нескольких частей секунды локальные, и одинаковая секунда второй части затирала бы
+ * кадр первой.
+ *
+ * @param {{filePath: string, seconds: number[], destDir: string, prefix?: string}} opts
  * @returns {Promise<Array<{seconds: number, path: string}>>}
  */
-export async function extractFramesAt({ filePath, seconds, destDir }, deps = {}) {
+export async function extractFramesAt({ filePath, seconds, destDir, prefix = 'frame-' }, deps = {}) {
     if (!existsSync(filePath)) {
         throw new Error(`Файл не найден: ${filePath}`);
     }
@@ -440,7 +445,7 @@ export async function extractFramesAt({ filePath, seconds, destDir }, deps = {})
     const out = [];
     for (const sec of seconds) {
         const tag = String(Math.round(sec)).padStart(5, '0');
-        const dst = join(destDir, `frame-${tag}s.jpg`);
+        const dst = join(destDir, `${prefix}${tag}s.jpg`);
         // -ss до -i = быстрый input-seek; один кадр, даунскейл до 1280.
         await (deps.runProcess || runProcess)('ffmpeg', [
             '-y', '-ss', String(sec), '-i', filePath,

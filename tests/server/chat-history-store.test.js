@@ -78,3 +78,30 @@ test('readOne отдаёт один чат и молчит про несущес
   assert.equal(await store.readOne('chat-404'), null);
   assert.equal(await store.readOne(''), null);
 });
+
+test('peek читает один чат по id, не поднимая всю историю с диска', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-peek-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
+
+  // Месяц в пути задаёт createdAt, поэтому чаты лежат в разных каталогах.
+  await store.saveOne({
+    id: 'chat-old', title: 'Прошлый месяц', messages: [],
+    createdAt: Date.UTC(2026, 5, 1), updatedAt: Date.UTC(2026, 5, 1),
+  }, false);
+  await store.saveOne({
+    id: 'chat-new', title: 'Экспорт CSV', taskId: '4187', messages: [],
+    createdAt: Date.UTC(2026, 7, 19), updatedAt: Date.UTC(2026, 7, 19),
+  }, false);
+
+  const found = await store.peek('chat-new');
+  assert.equal(found.title, 'Экспорт CSV');
+  assert.equal(found.taskId, '4187');
+  assert.equal((await store.peek('chat-old')).title, 'Прошлый месяц', 'старые месяцы тоже находятся');
+  assert.equal(await store.peek('chat-missing'), null);
+  assert.equal(await store.peek(''), null);
+
+  // id приходит из чужого канала (chatKey висящего спроса) — в путь его клеить нельзя.
+  assert.equal(await store.peek('../../../etc/passwd'), null);
+  assert.equal(await store.peek('chat/../../secret'), null);
+});

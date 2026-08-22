@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, watchEffect, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../shared/api-client.js';
 import { confirmDialog } from '../shared/ui/confirm.js';
-import { useUiContextStore } from '../stores/ui-context.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import ProjectSwitcher from '../shared/ui/ProjectSwitcher.vue';
@@ -31,9 +31,13 @@ const report = ref(null);        // сырой ответ публикатора
 const HELP_PANEL = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes/), здесь только проверка, публикация и откат.';
 const HELP_REVISIONS = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие останутся на своей.';
 
-const ui = useUiContextStore();
-watchEffect(() => { if (profile.value) ui.set('routes', { project: profile.value, route: selectedRoute.value || null }); });
-onUnmounted(() => ui.clear('routes'));
+const routesContext = useUiContextSource('routes', { layer: 'page', active: false });
+watch([profile, selectedRoute], ([project, route], [previousProject] = []) => {
+  if (!project) { routesContext.blur(); return; }
+  const next = { details: { project, route: route || null } };
+  if (project !== previousProject) routesContext.focus(next);
+  else routesContext.update(next);
+}, { immediate: true });
 
 const currentRevision = computed(() => revisions.value.find((r) => r.isCurrent) || null);
 // Состав каталога: id маршрута → хеш его ревизии (пины каталога).

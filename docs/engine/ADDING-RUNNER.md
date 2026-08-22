@@ -31,8 +31,8 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
 |---|---|
 | `probe` | Доступность CLI и наблюдаемая версия. Нет CLI — `return 4`. Политика совместимости принадлежит адаптеру: semver-пин допустим, но раннер с доказанным version-agnostic fail-closed контрактом не обязан отвергать обновление только из-за номера. |
 | `catalog` | models.tsv на stdout (id, провайдер, family, версия, …) или `return 4`. Pinned-список допустим и предпочтителен для провайдеров без читаемого локального каталога. Последние поля — min/max runtime; `*` означает явно выбранную совместимость по контракту без semver-границы. |
-| `capabilities` | Слова из `status status_request status_fd sandbox tools structured_output fanout`. Заявлять только доказанное: `status_fd` — если fd 7 проверен, `sandbox` — только при реальной границе. |
-| `run` | Сигнатура `(task, prompt, stage, model, effort, timeout_s, run_dir)`. Запуск под `timeout -k 30 "$timeout_s"` (TERM без KILL оставляет провайдера жить с занятым слотом — `codex.sh:149-150`). stdout — только событийный поток в диалекте CLI: он попадает в `events.jsonl`, любой шум обёртки ломает classify. Мост допустим (`kimi.sh` подмешивает события субагентов, невидимые в потоке CLI), но обязан быть ЕДИНСТВЕННЫМ писателем — труба, а не второй параллельный писатель в тот же fd: строки CLI бывают в десятки килобайт, то есть много больше PIPE_BUF, и атомарность append не гарантируется. Исход хода берётся у CLI (`PIPESTATUS[0]`), сбой моста не имеет права стать отказом стадии. add-dirs — из env `RUNNER_<ID>_ADD_DIRS` (проводка в `core.sh:380-404`). |
+| `capabilities` | Слова из `status status_request status_fd sandbox tools structured_output fanout native_resume_v1`. Заявлять только доказанное: `status_fd` — если fd 7 проверен, `sandbox` — только при реальной границе, `native_resume_v1` — только при exact provider scope и fail-closed resume-контракте ниже. |
+| `run` | Сигнатура `(task, prompt, stage, model, effort, timeout_s, run_dir)`. Запуск под `timeout -k 30 "$timeout_s"` (TERM без KILL оставляет провайдера жить с занятым слотом — `codex.sh:149-150`). stdout — только событийный поток в диалекте CLI: он попадает в host-safe-open `events.jsonl`, любой шум обёртки ломает classify и usage normalization. Мост допустим (`kimi.sh` подмешивает события субагентов, невидимые в потоке CLI), но обязан быть ЕДИНСТВЕННЫМ писателем — труба, а не второй параллельный писатель в тот же fd: строки CLI бывают в десятки килобайт, то есть много больше PIPE_BUF, и атомарность append не гарантируется. Исход хода берётся у CLI (`PIPESTATUS[0]`), сбой моста не имеет права стать отказом стадии. add-dirs — из env `RUNNER_<ID>_ADD_DIRS` (проводка в `core.sh:380-404`). До входа в adapter `runner-bridge.sh` держит child на launch barrier; adapter не создаёт обходной provider process до снятия барьера. |
 | `classify` | См. отдельный раздел ниже. |
 | `fanout_count` | Сигнатура `(run_dir)`, число делегирований за ход в `FANOUT_<STAGE>`. Источник ищется в таком порядке: событийный поток (`claude.sh` — `Agent`/`Task`; `codex.sh` — разные треды-получатели `collab_tool_call`), затем собственная телеметрия CLI, если в поток он делегирования не публикует (`kimi.sh` читает `wire.jsonl` per-run home). Разбором JSON, а не грепом по имени инструмента: снимок доступных инструментов содержит его ОПИСАНИЕ, и греп даст ненулевой счёт на ходе без единого делегирования. **Константа `0` источником не является**: на прогонах без делегирования она неотличима от замера, а первое же делегирование она молча пропустит — вернуть `0` должен код, который посмотрел и не нашёл. |
 | `dialect` | Однострочное описание формата потока CLI. |
@@ -62,23 +62,27 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
   не понимает «Aug 8th, 2026»). Разбор чужого текста ошибается, поэтому границы срока
   раннера не касаются: потолок и отбрасывание прошедшей даты сделаны в `breaker_record` —
   см. [MULTI-AI.md](MULTI-AI.md), «Предохранитель».
-- `usage` — сигнатура `(run_dir)`, расход завершённого хода строками `KEY=VALUE` на stdout:
-  `TOKENS_IN`, `TOKENS_OUT`, `TOKENS_CACHE_READ`, `TOKENS_CACHE_WRITE` (целые) и
-  необязательный `COST_USD`. Набор ключей ОБЩИЙ для всех раннеров: перевод с вендорских
-  слов принадлежит раннеру, иначе кокпиту пришлось бы знать, кто как называет свой расход.
-  Вызывается после `classify` (`_runner_launch_record_usage` в `runner-launcher.sh`), только
-  если объявлен, и дописывается в `meta.env` того же запуска — оттуда цену попытки читает
-  кокпит. Значения проверяются лаунчером, а не берутся на веру: `meta.env` парсят и awk
-  движка, и сервер.
+- **Runtime usage dialect.** После quiescence launcher разбирает retained original
+  `events.jsonl` и пишет расход в schema-2 блок `meta.env` — см.
+  [ENGINE.md](ENGINE.md#retained-fd-usage-и-diagnostic-meta-mirror). Для нового provider
+  нужно зарегистрировать exact versioned dialect в `_runner_runtime_usage_dialect` и
+  добавить raw fixtures. Неизвестный dialect или отсутствие доказуемых counters даёт
+  `missing`/`unavailable`, а НЕ ноль: «не сообщил» и «потратил ноль» — разные состояния.
 
-  Два места, где легко ошибиться. Первое: у codex `turn.completed.usage` **накопительный**
-  по всему thread — каждый вызов инструмента снова прибавляет весь вход, поэтому берётся
-  ПОСЛЕДНЕЕ событие, а не сумма. Второе: оборванный ход (timeout, KILL) финального события
-  не оставляет вовсе, а токены уже потрачены — `claude.sh` в этом случае складывает usage
-  assistant-событий, потому что именно такой ход и есть самый дорогой.
-
-  Данных нет — метод не объявляют (ACP-мост kimi расхода не публикует). Прочерк в интерфейсе
-  честнее нуля: «не знаем цену» и «ход был бесплатным» разные утверждения.
+  Два типичных drift-а диалект обязан закрыть тестом. Cumulative provider counters
+  (у Codex это `turn.completed`, у Claude — повторы assistant-usage) складывать нельзя:
+  расход — дельта к предыдущему принятому снимку, иначе цифра растёт кратно. Cache write
+  сохраняется раздельно как 5m, 1h и unknown TTL — у них разный тариф, и смешанный
+  `TOKENS_CACHE_WRITE` для показа цены не годится. Оборванный ход без terminal snapshot
+  остаётся partial согласно доказуемым samples, а не превращается в бесплатный.
+- **Native resume.** Capability `native_resume_v1` разрешён только если adapter различает
+  `FACTORY_PROVIDER_SESSION_MODE=fresh|resume`. В `fresh` он обязан запустить новую provider
+  session, даже если рабочий каталог содержит старые hints. В `resume` он обязан передать
+  CLI ровно `FACTORY_PROVIDER_RESUME_SCOPE`; отсутствие/отказ этого binding — named failure,
+  а не fallback на fresh. `FACTORY_PROVIDER_LINEAGE_GENERATION` и
+  `FACTORY_PROVIDER_PARENT_USAGE_REF` — read-only provenance; adapter не резервирует, не
+  продвигает и не чинит lineage. Обычный `factory resume` не даёт права самостоятельно
+  возобновить provider thread.
 
 ## classify: fail-closed и ничего лишнего
 
@@ -142,6 +146,8 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
 - [ ] `lib/runners/<id>.sh` — адаптер по контракту выше.
 - [ ] `lib/executor.sh` — `<id>|<id>-*` в OFFLINE_GUARD.
 - [ ] `lib/core.sh` — экспорт `RUNNER_<ID>_ADD_DIRS` в `run_agent`.
+- [ ] `lib/runner-launcher.sh` — exact versioned runtime usage dialect; неизвестная версия
+      остаётся unsupported, а не заимствует semantics соседней.
 - [ ] `tests/engine/fakes/bin/<id>` — tripwire `exit 97` (случайный живой вызов в
       offline-suite не должен проходить незамеченным).
 - [ ] Явная регистрация в `tests/engine/contract/runner-contract.sh` и
@@ -149,6 +155,8 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
 - [ ] `profiles/<test>/runners.env` — тестовая цепочка (`PROJECT_RUNNER_FAILOVER`)
       и модельная политика (`MODEL_DEFAULT_<ID>_*`, при необходимости
       `MODEL_<STAGE>_<ID>_*`); после правки — свежий host preflight.
+- [ ] Если заявлен `native_resume_v1`: adapter wiring exact provider scope и contract-cases
+      fresh/resume/mismatch/missing checkpoint; lineage store пишет только host.
 - [ ] `web/src/shared/runner-display.js` — label в PROVIDER_LABELS; проверить
       `attemptResultLabel` на новых классах исходов; тесты web.
 
@@ -160,6 +168,12 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
 - [ ] `tests/engine/integration/symmetric-failover.sh` — цепочки в обе стороны:
       limited/permanent переключает, transient/413/unknown — нет.
 - [ ] Interrupt/manual switch на fake-дереве — сирот нет.
+- [ ] Учёт потребления runtime: raw-фикстуры complete/partial/interrupted, неподдерживаемый
+      dialect, подмена пути при удерживаемом FD и неизменяемая публикация одинаковых байтов/
+      разных хешей.
+- [ ] При `native_resume_v1`: несовпадение document/scope/checkpoint предшественника
+      закрывается fail-closed, сбои launch-barrier не запускают provider, а ошибка после
+      старта не переиспользует предшественника.
 - [ ] При наличии sandbox-обёртки — аналог `sandboxed-status-contract.sh`
       (статусный канал через границу).
 - [ ] Web: кейсы `runner-display`.

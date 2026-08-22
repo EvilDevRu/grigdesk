@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramPultWatch } from '../../server/src/lib/telegram/pult/watch.js';
+import { CARD_UI_VERSION, TelegramPultWatch } from '../../server/src/lib/telegram/pult/watch.js';
 import { TelegramPultStateStore } from '../../server/src/lib/telegram/pult/state-store.js';
 import { PultSendQueue } from '../../server/src/lib/telegram/pult/send-queue.js';
 import {
@@ -40,6 +40,28 @@ const gateGraph = () => ({
   statuses: { plan: 'done', gate_plan: 'wait' },
   nodes: { gate_plan: ['human', '📝 Ворота плана', ''] },
   keys: { gate_plan: 'GATE_PLAN' },
+});
+
+/** Идущий маршрут: есть текущий узел, прогресс и замер работы. */
+const runningGraph = (overrides = {}) => ({
+  route: 'feature',
+  pos: { plan: [0, 0], build: [1, 0] },
+  statuses: { plan: 'done', build: 'run' },
+  nodes: { plan: ['agent', '📋 План', ''], build: ['agent', '🔨 Сборка', ''] },
+  keys: {},
+  progress: { done: 1, total: 2, current: 'build' },
+  timing: { workSec: 4_200, approximate: true },
+  ...overrides,
+});
+
+/** Идущая задача в ответе /api/tasks: attempt обязателен — по нему ключуется карточка. */
+const runningTask = (overrides = {}) => ({
+  task: 4190,
+  title: 'Экспорт CSV',
+  daemonAlive: true,
+  attempt: 'a_0123456789abcdef',
+  silence: { stage: 'BUILD', sec: 12, tool: null },
+  ...overrides,
 });
 
 /** Мутируемая картина мира: тесты меняют поля между обходами. */
@@ -73,13 +95,15 @@ function fakeApi(world) {
   };
 }
 
-async function fixture(t, { confirmed = true, stateFile = null } = {}) {
+async function fixture(t, { confirmed = true, stateFile = null, liveEditMinMs } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tg-pult-watch-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
 
   const sends = [];
   let failSends = false;
   let unchangedEdits = false;
+  let failDeletes = false;
+  let notFoundDeletes = false;
   const botApi = {
     getMe: async () => ({ id: BOT_ID, username: 'example_pult_bot' }),
     callBotApi: async (token, method, body) => {
@@ -87,6 +111,12 @@ async function fixture(t, { confirmed = true, stateFile = null } = {}) {
       sends.push({ token, method, body });
       if (unchangedEdits && method === 'editMessageText') {
         throw Object.assign(new Error('Bad Request: message is not modified'), { kind: 'telegram' });
+      }
+      if (notFoundDeletes && method === 'deleteMessage') {
+        throw Object.assign(new Error('Bad Request: message to delete not found'), { kind: 'telegram' });
+      }
+      if (failDeletes && method === 'deleteMessage') {
+        throw Object.assign(new Error('telegram down'), { kind: 'transport' });
       }
       return { message_id: 100 + sends.length };
     },
@@ -108,6 +138,7 @@ async function fixture(t, { confirmed = true, stateFile = null } = {}) {
   }
   await seed.release();
 
+  let clock = T0;
   const world = worldOf();
   const api = fakeApi(world);
   const file = stateFile || path.join(dir, 'pult-state.json');
@@ -118,8 +149,9 @@ async function fixture(t, { confirmed = true, stateFile = null } = {}) {
     callApi: api.callApi,
     stateStoreFor: () => store,
     queue: new PultSendQueue({ pauseMs: 0 }),
-    now: () => T0,
+    now: () => clock,
     log: silent,
+    ...(liveEditMinMs === undefined ? {} : { liveEditMinMs }),
   });
 
   return {
@@ -128,18 +160,22 @@ async function fixture(t, { confirmed = true, stateFile = null } = {}) {
     store,
     file,
     connection,
-    ownerKey: `${accountRef}:${OWNER_CHAT}:${T0}`,
+    ownerKey: `${accountRef}:${T0}:${OWNER_CHAT}`,
     accountRef,
     sends,
+    advance: (ms) => { clock += ms; },
     setFailSends: (value) => { failSends = value; },
     setUnchangedEdits: (value) => { unchangedEdits = value; },
+    setFailDeletes: (value) => { failDeletes = value; },
+    setNotFoundDeletes: (value) => { notFoundDeletes = value; },
     messages: () => sends.filter((c) => c.method === 'sendMessage'),
     edits: () => sends.filter((c) => c.method === 'editMessageText'),
+    deletes: () => sends.filter((c) => c.method === 'deleteMessage'),
   };
 }
 
 test('переход «не ждала → ждёт»: ровно одна карточка, повтор без изменений — ноль', async (t) => {
-  const { world, watch, messages } = await fixture(t);
+  const { world, watch, store, messages } = await fixture(t);
   await watch.check(); // первый снимок пустого мира — silent и пустой
   assert.equal(messages().length, 0);
 
@@ -156,6 +192,9 @@ test('переход «не ждала → ждёт»: ровно одна ка�
   assert.deepEqual(buttons.map((b) => b.callback_data), [
     'po:4187', 'g:4187:GATE_PLAN:a', 'g:4187:GATE_PLAN:r',
   ]);
+  assert.deepEqual((await store.read()).cards['wait:4187'].replyAction, {
+    kind: 'gate-reject', taskId: '4187', gateKey: 'GATE_PLAN',
+  });
 
   await watch.check();
   await watch.check();
@@ -173,7 +212,7 @@ test('первый снимок silent: уже ждущие ворота зап�
   assert.equal(saved.cards['wait:4187'].messageId, null);
 });
 
-test('рестарт: новый инстанс не шлёт повторно, а ушедший повод редактирует по сохранённому message_id', async (t) => {
+test('рестарт: новый инстанс не шлёт повторно, а карточка ушедшего повода удаляется по сохранённому message_id', async (t) => {
   const first = await fixture(t);
   await first.watch.check(); // прайм пустого мира
   first.world.tasks = [{ task: 4187, daemonAlive: false }];
@@ -189,19 +228,18 @@ test('рестарт: новый инстанс не шлёт повторно, 
   await second.watch.check();
   assert.equal(second.messages().length, 0, 'о воротах уже сказано до рестарта');
 
-  // Повод ушёл (решили из браузера) — карточка гаснет по сохранённому message_id.
+  // Повод ушёл (решили из браузера) — карточка удаляется по сохранённому message_id.
   second.world.graphs['4187'] = { ...gateGraph(), statuses: { plan: 'done', gate_plan: 'done' } };
   await second.watch.check();
-  const edits = second.edits();
-  assert.equal(edits.length, 1);
-  assert.equal(edits[0].body.message_id, sentId);
-  assert.equal(edits[0].body.chat_id, OWNER_CHAT);
-  assert.match(edits[0].body.text, /✓/u);
-  assert.deepEqual(edits[0].body.reply_markup, { inline_keyboard: [] }, 'кнопки сняты');
+  const deletes = second.deletes();
+  assert.equal(deletes.length, 1);
+  assert.equal(deletes[0].body.message_id, sentId);
+  assert.equal(deletes[0].body.chat_id, OWNER_CHAT);
+  assert.equal(second.edits().length, 0, 'карточка не правится в «✓ решено» — она удаляется');
 });
 
 test('молчание ключуется задача:этап и подчиняется порогу из ответа /api/tasks', async (t) => {
-  const { world, watch, messages, edits } = await fixture(t);
+  const { world, watch, messages, deletes } = await fixture(t);
   await watch.check();
 
   // Ниже порога — карточки нет.
@@ -220,12 +258,12 @@ test('молчание ключуется задача:этап и подчин�
   await watch.check();
   assert.equal(messages().length, 1);
 
-  // Следующий этап завис — это новая беда: старая карточка гаснет, приходит новая.
+  // Следующий этап завис — это новая беда: старая карточка удаляется, приходит новая.
   world.tasks = [{ task: 4189, daemonAlive: true, silence: { sec: 400, stage: 'TESTS', tool: 'Bash' } }];
   await watch.check();
   assert.equal(messages().length, 2);
   assert.match(messages()[1].body.text, /tests/u);
-  assert.equal(edits().length, 1, 'карточка BUILD отредактирована в решено');
+  assert.equal(deletes().length, 1, 'карточка BUILD удалена, а не отредактирована в решено');
 });
 
 test('затык даёт карточку с кнопкой восстановления по виду затыка', async (t) => {
@@ -243,8 +281,8 @@ test('затык даёт карточку с кнопкой восстанов�
   assert.equal(byTask['4187'].reply_markup.inline_keyboard[0][0].callback_data, 'r:4187');
 });
 
-test('чат: вопрос из /api/chat/waiting даёт карточку с вариантами, фантом гаснет', async (t) => {
-  const { world, watch, messages, edits } = await fixture(t);
+test('чат: вопрос из /api/chat/waiting даёт карточку с вариантами, фантом удаляется', async (t) => {
+  const { world, watch, store, messages, deletes } = await fixture(t);
   await watch.check();
   world.waiting = [{
     pid: 'p1abc',
@@ -263,16 +301,19 @@ test('чат: вопрос из /api/chat/waiting даёт карточку с �
   assert.match(card.text, /Какой способ миграции выбрать\?/u);
   const rows = card.reply_markup.inline_keyboard;
   assert.deepEqual(rows.map((r) => r[0].callback_data), ['q:p1abc:0', 'q:p1abc:1', 'q:p1abc:txt']);
+  assert.deepEqual((await store.read()).cards['q:p1abc'].replyAction, {
+    kind: 'question-text', pid: 'p1abc',
+  });
 
-  // Ответили из браузера (или сервер рестартовал и pendingPerms умерли) — карточка гаснет.
+  // Ответили из браузера (или сервер рестартовал и pendingPerms умерли) — карточка удаляется.
   world.waiting = [];
   await watch.check();
-  assert.equal(edits().length, 1);
-  assert.match(edits()[0].body.text, /✓/u);
+  assert.equal(deletes().length, 1);
+  assert.equal(deletes()[0].body.message_id, 101, 'удаляется карточка вопроса по сохранённому message_id');
 });
 
 test('чат: запрос разрешения показывает инструмент и превью команды', async (t) => {
-  const { world, watch, messages } = await fixture(t);
+  const { world, watch, store, messages } = await fixture(t);
   await watch.check();
   world.waiting = [{
     pid: 'p2xyz', chatKey: 'c1', at: T0, tool: 'Bash', input: { command: 'npm run build && bash tests/run-all.sh' },
@@ -283,6 +324,9 @@ test('чат: запрос разрешения показывает инстр�
   assert.match(card.text, /Bash: npm run build/u);
   const flat = card.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
   assert.deepEqual(flat, ['p:p2xyz:a', 'p:p2xyz:d', 'p:p2xyz:c']);
+  assert.deepEqual((await store.read()).cards['perm:p2xyz'].replyAction, {
+    kind: 'perm-deny', pid: 'p2xyz',
+  });
 });
 
 test('отказ Telegram не роняет вотчер и не портит state: карточка уходит следующим обходом', async (t) => {
@@ -372,7 +416,7 @@ test('старая сохранённая карточка получает но
     edits()[0].body.reply_markup.inline_keyboard.flat().map((button) => button.callback_data),
     ['po:4187', 'g:4187:GATE_PLAN:a', 'g:4187:GATE_PLAN:r'],
   );
-  assert.equal((await store.read()).cards['wait:4187'].uiVersion, 2);
+  assert.equal((await store.read()).cards['wait:4187'].uiVersion, CARD_UI_VERSION);
 });
 
 test('неизменившаяся старая карточка помечается обновлённой и не ретраится вечно', async (t) => {
@@ -388,7 +432,7 @@ test('неизменившаяся старая карточка помечае�
 
   await watch.check();
   assert.equal(edits().length, 1);
-  assert.equal((await store.read()).cards['wait:4187'].uiVersion, 2);
+  assert.equal((await store.read()).cards['wait:4187'].uiVersion, CARD_UI_VERSION);
 
   await watch.check();
   assert.equal(edits().length, 1, 'версия сохранена, повторной миграции нет');
@@ -399,7 +443,7 @@ test('смена привязки не редактирует message_id из л
   await store.write({
     cards: {
       'wait:4187': {
-        messageId: 77, kind: 'gate', subject: '#4187', at: T0, ownerKey, uiVersion: 2,
+        messageId: 77, kind: 'gate', subject: '#4187', at: T0, ownerKey, uiVersion: CARD_UI_VERSION,
       },
     },
   });
@@ -418,5 +462,310 @@ test('смена привязки не редактирует message_id из л
   assert.equal(edits().length, 0, 'старое сообщение в новом chat_id не трогаем');
   const card = (await store.read()).cards['wait:4187'];
   assert.equal(card.messageId, null, 'для новой привязки это silent-снимок');
-  assert.equal(card.ownerKey, `${accountRef}:${reboundChat}:${reboundAt}`);
+  assert.equal(card.ownerKey, `${accountRef}:${reboundAt}:${reboundChat}`);
+});
+
+// --------------------------------------------------- живая карточка и исход прогона
+
+test('живая карточка прогона: тихое сообщение с узлом, прогрессом и активностью', async (t) => {
+  const { world, watch, messages } = await fixture(t);
+  await watch.check(); // первый снимок пустого мира — silent
+
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+
+  assert.equal(messages().length, 1, 'идущий прогон даёт ровно одну карточку');
+  const card = messages()[0].body;
+  assert.equal(card.disable_notification, true, 'живая карточка не будит телефон');
+  assert.equal('parse_mode' in card, false);
+  assert.match(card.text, /🔵 #4190 — Экспорт CSV/u);
+  assert.match(card.text, /Сейчас: 🔨 Сборка · выполняется/u);
+  assert.match(card.text, /Прогресс маршрута: 1\/2 · 50%/u);
+  assert.match(card.text, /Агент: агент пишет/u, 'свежий журнал читается как работа');
+  assert.match(card.text, /Работа: ≈1 ч 10 мин/u);
+  assert.deepEqual(
+    card.reply_markup.inline_keyboard.flat().map((b) => b.callback_data),
+    ['sm:4190', 'po:4190'],
+    'узлы и план открываются новым сообщением: живую карточку правит вотчер',
+  );
+});
+
+test('живая карточка: смена узла правит на месте, неизменное состояние молчит', async (t) => {
+  const { world, watch, messages, edits } = await fixture(t);
+  await watch.check();
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+  assert.equal(messages().length, 1);
+
+  await watch.check();
+  assert.equal(edits().length, 0, 'ничего не изменилось — правки нет');
+
+  world.graphs['4190'] = runningGraph({
+    statuses: { plan: 'done', build: 'done', verify: 'run' },
+    pos: { plan: [0, 0], build: [1, 0], verify: [2, 0] },
+    nodes: {
+      plan: ['agent', '📋 План', ''],
+      build: ['agent', '🔨 Сборка', ''],
+      verify: ['agent', '🔍 Проверка', ''],
+    },
+    progress: { done: 2, total: 3, current: 'verify' },
+  });
+  await watch.check();
+  assert.equal(edits().length, 1, 'смена узла правится немедленно, не дожидаясь таймера');
+  assert.equal(messages().length, 1, 'второго сообщения не появилось');
+  assert.match(edits()[0].body.text, /Сейчас: 🔍 Проверка/u);
+});
+
+test('живая карточка: тикающие минуты молчания правятся не чаще остывания', async (t) => {
+  const { world, watch, edits, advance } = await fixture(t, { liveEditMinMs: 60_000 });
+  await watch.check();
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+
+  // Узел тот же, изменилась только цифра молчания — правка ждёт остывания.
+  world.tasks = [runningTask({ silence: { stage: 'BUILD', sec: 300, tool: 'Bash' } })];
+  await watch.check();
+  assert.equal(edits().length, 0, 'пока таймер не остыл, в Telegram не ходим');
+
+  advance(61_000);
+  await watch.check();
+  assert.equal(edits().length, 1, 'после остывания карточка догоняет реальность');
+  assert.match(edits()[0].body.text, /Агент: нет событий 5 мин \(Bash\)/u);
+});
+
+test('исход прогона: done звонит отдельным сообщением, живая карточка удаляется', async (t) => {
+  const { world, watch, messages, edits, deletes } = await fixture(t);
+  await watch.check();
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+  assert.equal(messages().length, 1);
+  const liveId = 101; // первый message_id фейка — живая карточка
+
+  world.tasks = [runningTask({
+    daemonAlive: false,
+    result: 'completed',
+    silence: null,
+  })];
+  world.graphs['4190'] = runningGraph({
+    statuses: { plan: 'done', build: 'done' },
+    progress: { done: 2, total: 2, current: null },
+  });
+  await watch.check();
+
+  const finish = messages()[1];
+  assert.ok(finish, 'исход приходит новым сообщением: правка push не даёт');
+  assert.equal(finish.body.disable_notification, undefined, 'доехавший маршрут звонит');
+  assert.match(finish.body.text, /✅ #4190 — Экспорт CSV: маршрут завершён/u);
+  assert.match(finish.body.text, /Прошло узлов: 2\/2 · 100%/u);
+
+  assert.deepEqual(deletes().map((c) => c.body.message_id), [liveId],
+    'живая карточка удаляется: рядом уже стоит done: с тем же итогом');
+  assert.equal(edits().length, 0, 'живая карточка не правится в исход — она удаляется');
+  assert.equal(deletes().some((c) => c.body.message_id === 102), false,
+    'карточка исхода done: неприкосновенна');
+});
+
+test('служебный исход не будит: recovered и human-rewind приходят тихо', async (t) => {
+  const { world, watch, messages } = await fixture(t);
+  await watch.check();
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+
+  world.tasks = [runningTask({ daemonAlive: false, result: 'human-rewind', silence: null })];
+  await watch.check();
+  const finish = messages()[1];
+  assert.equal(finish.body.disable_notification, true, 'возврат сделал сам человек — звонить незачем');
+  assert.match(finish.body.text, /возврат человеком/u);
+});
+
+test('архивация задачи не затирает исход общим «✓ решено»', async (t) => {
+  const { world, watch, edits, deletes, store } = await fixture(t);
+  await watch.check();
+  world.tasks = [runningTask({ daemonAlive: false, result: 'completed', silence: null })];
+  world.graphs['4190'] = runningGraph({ progress: { done: 2, total: 2, current: null } });
+  await watch.check();
+  const afterFinish = edits().length;
+  const deletesAfterFinish = deletes().length;
+
+  world.tasks = [];
+  world.graphs = {};
+  await watch.check();
+  assert.equal(edits().length, afterFinish, 'липкие карточки просто забываются');
+  assert.equal(deletes().length, deletesAfterFinish, 'архивация ничего не удаляет: done: остаётся в чате');
+  const saved = await store.read();
+  assert.equal(Object.keys(saved.cards).length, 0, 'ушедшая задача не копится в state');
+});
+
+test('прогон без attempt живой карточки не получает: ключевать её нечем', async (t) => {
+  const { world, watch, messages } = await fixture(t);
+  await watch.check();
+  world.tasks = [{ task: 4187, title: 'Исторический реестр', daemonAlive: true }];
+  world.graphs['4187'] = runningGraph();
+  await watch.check();
+  assert.equal(messages().length, 0);
+});
+
+test('карточка вопроса называет чат и раскрывает варианты, а не голое «чат»', async (t) => {
+  const { world, watch, messages } = await fixture(t);
+  await watch.check();
+  world.waiting = [{
+    pid: 'p9zz',
+    chatKey: 'c9',
+    chatTitle: 'Телеграм-пульт мусор',
+    taskId: null,
+    at: T0,
+    questions: [{
+      header: 'Объём',
+      question: 'Что именно выпиливаем?',
+      multiSelect: false,
+      options: [
+        { label: 'Контракт + фикстуры', description: 'План оставить как есть.' },
+        { label: 'Всё, включая план' },
+      ],
+    }],
+  }];
+  await watch.check();
+
+  const card = messages()[0].body;
+  assert.match(card.text, /❓ Телеграм-пульт мусор — вопрос агента/u, 'без имени чата вопрос неотвечаем');
+  assert.match(card.text, /Тема: Объём/u);
+  assert.match(card.text, /1\) Контракт \+ фикстуры\n {3}План оставить как есть\./u);
+  assert.equal(card.reply_markup.inline_keyboard[0][0].text.startsWith('1) '), true);
+});
+
+test('карточка разрешения тоже называет чат, а задача — номером', async (t) => {
+  const { world, watch, messages } = await fixture(t);
+  await watch.check();
+  world.waiting = [{
+    pid: 'p8yy',
+    chatKey: 'c8',
+    chatTitle: 'Починить экспорт',
+    taskId: '4187',
+    at: T0,
+    tool: 'Bash',
+    input: { command: 'rm -rf dist' },
+  }];
+  await watch.check();
+  assert.match(messages()[0].body.text, /🔐 #4187 — Починить экспорт — агент просит разрешение/u);
+});
+
+// ------------------------------------- удаление решённых карточек и live/done (t91001)
+
+test('отказ deleteMessage ушедшего повода не роняет обход: ключ сохраняется до следующего', async (t) => {
+  const { world, watch, store, deletes, setFailDeletes } = await fixture(t);
+  await watch.check();
+  world.tasks = [{ task: 4187, daemonAlive: false }];
+  world.graphs['4187'] = gateGraph();
+  await watch.check();
+
+  world.graphs['4187'] = { ...gateGraph(), statuses: { plan: 'done', gate_plan: 'done' } };
+  setFailDeletes(true);
+  await watch.check(); // не бросает
+  assert.equal(deletes().length, 1, 'попытка удаления была');
+  assert.equal('wait:4187' in (await store.read()).cards, true,
+    'не удалено — не записано как успех: карточка остаётся в state для повтора');
+
+  setFailDeletes(false);
+  await watch.check();
+  assert.equal('wait:4187' in (await store.read()).cards, false, 'после удаления ключ забыт');
+});
+
+test('удаление «message to delete not found» — человек уже удалил сам: ключ забывается', async (t) => {
+  const { world, watch, store, deletes, setNotFoundDeletes } = await fixture(t);
+  await watch.check();
+  world.tasks = [{ task: 4187, daemonAlive: false }];
+  world.graphs['4187'] = gateGraph();
+  await watch.check();
+
+  world.graphs['4187'] = { ...gateGraph(), statuses: { plan: 'done', gate_plan: 'done' } };
+  setNotFoundDeletes(true);
+  await watch.check();
+  assert.equal(deletes().length, 1);
+  assert.equal('wait:4187' in (await store.read()).cards, false, 'повторно удалять нечего — ключ забыт');
+});
+
+test('после удаления живая карточка не воскресает: в чате ровно одно итоговое сообщение', async (t) => {
+  const { world, watch, store, messages, deletes } = await fixture(t);
+  await watch.check();
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+
+  world.tasks = [runningTask({ daemonAlive: false, result: 'completed', silence: null })];
+  world.graphs['4190'] = runningGraph({
+    statuses: { plan: 'done', build: 'done' },
+    progress: { done: 2, total: 2, current: null },
+  });
+  await watch.check();
+  const sendsAfterFinish = messages().length;
+  const saved = await store.read();
+  assert.equal(saved.cards['live:4190:a_0123456789abcdef'].messageId, null,
+    'удалённая живая карточка хранится надгробием без message_id');
+
+  await watch.check();
+  assert.equal(messages().length, sendsAfterFinish, 'повторной отправки live нет');
+  assert.equal(deletes().length, 1, 'и повторного удаления нет');
+});
+
+test('прогон доехал, пока сервер лежал: silent done не удаляет живую карточку — она правится в исход', async (t) => {
+  const first = await fixture(t);
+  await first.watch.check();
+  first.world.tasks = [runningTask()];
+  first.world.graphs['4190'] = runningGraph();
+  await first.watch.check();
+  assert.equal(first.messages().length, 1, 'живая карточка отправлена до «падения»');
+
+  // «Сервер лежал»: прогон доехал без вотчера. Новый инстанс на том же state,
+  // первый обход — silent-снимок: done: известен только ключом, сообщения нет.
+  const second = await fixture(t, { stateFile: first.file });
+  second.world.tasks = [runningTask({ daemonAlive: false, result: 'completed', silence: null })];
+  second.world.graphs['4190'] = runningGraph({
+    statuses: { plan: 'done', build: 'done' },
+    progress: { done: 2, total: 2, current: null },
+  });
+  await second.watch.check();
+  assert.equal(second.deletes().length, 0,
+    'done: не отправлен (messageId: null) — живую карточку удалять нельзя, она единственная запись об исходе');
+  assert.equal(second.messages().length, 0, 'silent-снимок ничего не отправляет');
+  assert.equal(second.edits().length, 1,
+    'но живая карточка правится в исход: замороженное «прогон идёт» исходом не считается');
+  const edit = second.edits()[0].body;
+  assert.equal(edit.message_id, 101);
+  assert.match(edit.text, /✅ #4190 — Экспорт CSV: маршрут завершён/u);
+  assert.deepEqual(edit.reply_markup.inline_keyboard, [], 'кнопок у исхода нет');
+  const saved = await second.store.read();
+  assert.equal(saved.cards['live:4190:a_0123456789abcdef'].messageId, 101,
+    'живая карточка сохраняет свой message_id');
+
+  await second.watch.check();
+  assert.equal(second.edits().length, 1, 'следующий обход не правит исход повторно');
+});
+
+test('отказ deleteMessage для live не роняет обход: повтор следующим обходом', async (t) => {
+  const { world, watch, store, deletes, setFailDeletes } = await fixture(t);
+  await watch.check();
+  world.tasks = [runningTask()];
+  world.graphs['4190'] = runningGraph();
+  await watch.check();
+
+  world.tasks = [runningTask({ daemonAlive: false, result: 'completed', silence: null })];
+  world.graphs['4190'] = runningGraph({
+    statuses: { plan: 'done', build: 'done' },
+    progress: { done: 2, total: 2, current: null },
+  });
+  setFailDeletes(true);
+  await watch.check(); // не бросает
+  assert.equal(deletes().length, 1, 'попытка удаления live была');
+  assert.equal((await store.read()).cards['live:4190:a_0123456789abcdef'].messageId, 101,
+    'не удалено — live остаётся нетронутым');
+
+  setFailDeletes(false);
+  await watch.check();
+  assert.equal(deletes().length, 2, 'следующий обход повторил удаление');
+  assert.equal((await store.read()).cards['live:4190:a_0123456789abcdef'].messageId, null);
 });

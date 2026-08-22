@@ -33,7 +33,9 @@ const message = (over = {}) => ({
   ...over,
 });
 
-async function fixture(t, { credentialLease = { botId: BOT_ID, token: TOKEN } } = {}) {
+async function fixture(t, {
+  credentialLease = { accountRef: ACCOUNT_REF, botId: BOT_ID, token: TOKEN },
+} = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tg-context-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   let nowMs = 1_800_000_000_000;
@@ -74,7 +76,19 @@ test('credential snapshot обязан принадлежать verified bot', a
     () => factory({
       accountRef: ACCOUNT_REF,
       botId: BOT_ID,
-      credentialLease: { botId: '9123456789', token: TOKEN },
+      credentialLease: { accountRef: ACCOUNT_REF, botId: '9123456789', token: TOKEN },
+    }),
+    (error) => error.code === 'telegram_account_context_invalid',
+  );
+  await assert.rejects(
+    () => factory({
+      accountRef: ACCOUNT_REF,
+      botId: BOT_ID,
+      credentialLease: {
+        accountRef: 'acc_telegram_context_other',
+        botId: BOT_ID,
+        token: TOKEN,
+      },
     }),
     (error) => error.code === 'telegram_account_context_invalid',
   );
@@ -177,7 +191,7 @@ test('sequenced archive после cold restart восстанавливает h
   const restarted = await accountContextFor({
     accountRef: ACCOUNT_REF,
     botId: BOT_ID,
-    credentialLease: { botId: BOT_ID, token: TOKEN },
+    credentialLease: { accountRef: ACCOUNT_REF, botId: BOT_ID, token: TOKEN },
   });
   assert.equal(await restarted.archive.head(), 3);
   const positions = await restarted.archive.listInboxPositions({ afterSeq: 0, limit: 10 });
@@ -202,7 +216,7 @@ test('partial sequence journal после cold restart fail-closed', async (t) =
   const restarted = await accountContextFor({
     accountRef: ACCOUNT_REF,
     botId: BOT_ID,
-    credentialLease: { botId: BOT_ID, token: TOKEN },
+    credentialLease: { accountRef: ACCOUNT_REF, botId: BOT_ID, token: TOKEN },
   });
   await assert.rejects(
     () => restarted.archive.head(),

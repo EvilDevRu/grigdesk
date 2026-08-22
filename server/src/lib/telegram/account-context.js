@@ -304,9 +304,18 @@ export class TelegramPollStateStore {
   }
 }
 
-function credentialsSnapshot(value, botId) {
+function credentialsSnapshot(value, botId, accountRef) {
   if (value === null || value === undefined) return null;
   if (!isPlainObject(value)) fail('telegram_account_context_invalid', 'credentialLease должен быть объектом.');
+  const keys = Object.keys(value).sort();
+  if (keys.length !== 3
+      || keys[0] !== 'accountRef' || keys[1] !== 'botId' || keys[2] !== 'token') {
+    fail('telegram_account_context_invalid', 'credentialLease имеет неверные поля.');
+  }
+  let credentialAccountRef;
+  try { credentialAccountRef = assertAccountRef(value.accountRef, 'credentialLease.accountRef'); } catch (err) {
+    fail('telegram_account_context_invalid', 'credentialLease.accountRef невалиден.', err);
+  }
   let credentialBotId;
   try { credentialBotId = normalizeTelegramBotId(value.botId, 'credentialLease.botId'); } catch (err) {
     fail('telegram_account_context_invalid', 'credentialLease.botId невалиден.', err);
@@ -314,8 +323,9 @@ function credentialsSnapshot(value, botId) {
   const token = typeof value.token === 'string' ? value.token.trim() : '';
   const tokenBotId = token.split(':', 1)[0];
   if (!token || token.length > 16 * 1024 || /[\0\r\n\s]/u.test(token)
+      || credentialAccountRef !== accountRef
       || credentialBotId !== botId || tokenBotId !== botId) {
-    fail('telegram_account_context_invalid', 'Credential snapshot не совпадает с verified bot identity.');
+    fail('telegram_account_context_invalid', 'Credential snapshot не совпадает с verified account/bot identity.');
   }
   return Object.freeze({ botId, token });
 }
@@ -371,7 +381,13 @@ export function createTelegramAccountContextFactory({
       botId: trustedBotId,
       paths,
       archive,
-      rules: new TelegramRulesStore({ dir: accountDir, log, strictRead: true }),
+      rules: new TelegramRulesStore({
+        dir: accountDir,
+        accountRef: trustedAccountRef,
+        botId: trustedBotId,
+        log,
+        strictRead: true,
+      }),
       botSettings: new TelegramBotSettingsStore({
         file: paths.botSettingsFile,
         accountRef: trustedAccountRef,
@@ -386,7 +402,7 @@ export function createTelegramAccountContextFactory({
         refCodec,
         activationCodec: telegramActivationCodec,
       }),
-      credentials: credentialsSnapshot(credentialLease, trustedBotId),
+      credentials: credentialsSnapshot(credentialLease, trustedBotId, trustedAccountRef),
       botApi: api,
       async createActivationMarker({ nowMs, occurredAt = null } = {}) {
         const afterSeq = await archive.head();

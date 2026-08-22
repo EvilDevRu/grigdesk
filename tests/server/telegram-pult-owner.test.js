@@ -80,6 +80,10 @@ async function fixture({ confirmed = true, enabled = true, summary = null } = {}
       const lease = connection.acquireLease();
       try { await actions.onMessage(m, type, lease); } finally { await lease.release(); }
     },
+    tap: async (callback) => {
+      const lease = connection.acquireLease();
+      try { await actions.onCallback(callback, lease); } finally { await lease.release(); }
+    },
   };
 }
 
@@ -94,21 +98,34 @@ test('/status от владельца отвечает сводкой в ту ж
   assert.equal('parse_mode' in calls[0].body, false);
 });
 
-test('/help отвечает списком возможностей; незнакомый текст — подсказкой', async () => {
+test('/help отвечает списком возможностей', async () => {
   const { calls, deliver } = await fixture();
   await deliver(msg({ text: '/help' }));
   assert.equal(calls.length, 1);
   assert.match(String(calls[0].body.text), /\/status/u);
-
-  await deliver(msg({ text: 'привет, бот', messageId: 2 }));
-  assert.equal(calls.length, 2);
-  assert.match(String(calls[1].body.text), /\/help/u);
 });
 
-test('чужие сообщения — молча ноль исходящих (бот не оракул)', async () => {
-  const { calls, deliver, summaryCalls } = await fixture();
+test('чужие text, slash, кнопка, voice и Стоп — молча ноль исходящих', async () => {
+  const { calls, deliver, tap, summaryCalls } = await fixture();
   // не тот пользователь в той же личке (пересланный аккаунт, чужая сессия)
-  await deliver(msg({ from: { id: 999, name: 'Некто', username: '' } }));
+  for (const [index, text] of ['/status', 'свободный текст', '💬 Агент'].entries()) {
+    await deliver(msg({
+      messageId: 10 + index,
+      text,
+      from: { id: 999, name: 'Некто', username: '' },
+    }));
+  }
+  await deliver(msg({
+    messageId: 20,
+    text: '',
+    media: [{ kind: 'voice', fileId: 'foreign-voice' }],
+    from: { id: 999, name: 'Некто', username: '' },
+  }));
+  await tap({
+    id: 'foreign-stop', data: 'ts:foreign',
+    from: { id: 999, name: 'Некто', username: '' },
+    chatId: OWNER_CHAT, chatType: 'private', messageId: 30,
+  });
   // не та личка
   await deliver(msg({ chatId: 777333, from: { id: 777333, name: 'Некто', username: '' } }));
   // группа, даже со «своим» пользователем

@@ -37,6 +37,10 @@ async function compilePipelineView() {
       'const useSse = () => {};',
     )
     .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
+    )
+    .replace(
       "import { useUiStore } from '../stores/ui.js';",
       'const useUiStore = globalThis.__pipelineRunnerUiStore;',
     )
@@ -49,8 +53,8 @@ async function compilePipelineView() {
       'const useBoardStore = globalThis.__pipelineRunnerBoardStore;',
     )
     .replace(
-      "import { useChatStore } from '../stores/chat.js';",
-      'const useChatStore = globalThis.__pipelineRunnerChatStore;',
+      "import { useCompanionStore } from '../stores/companion.js';",
+      'const useCompanionStore = globalThis.__pipelineRunnerCompanionStore;',
     )
     .replace(
       "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
@@ -214,8 +218,8 @@ async function mountPipeline(t, {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineRunnerChatStore = defineStore('pipeline-runner-chat', {
-    actions: { openFor() {} },
+  globalThis.__pipelineRunnerCompanionStore = defineStore('pipeline-runner-companion', {
+    actions: { openForTask() {} },
   });
 
   const wrapper = mount(await compilePipelineView(), {
@@ -233,7 +237,7 @@ async function mountPipeline(t, {
       '__pipelineRunnerUiStore',
       '__pipelineRunnerTasksStore',
       '__pipelineRunnerBoardStore',
-      '__pipelineRunnerChatStore',
+      '__pipelineRunnerCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

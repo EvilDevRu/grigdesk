@@ -823,6 +823,8 @@ test('channel confirmation идёт после durable decision и одинак�
   // карточки название — единственный способ различить свои задачи.
   assert.equal(manual.calls.notifications[0].title, 'Починить выгрузку остатков');
 
+  assert.deepEqual(result.notification, { enabled: true, sent: true, reason: '' });
+
   const auto = fixture({ notifyTaskCreated: true });
   await auto.service.task(auto.itemRef, {
     revision: REVISION,
@@ -834,6 +836,27 @@ test('channel confirmation идёт после durable decision и одинак�
   });
   assert.deepEqual(auto.calls.events.slice(0, 3), ['b24', 'decision', 'notification']);
   assert.equal(auto.calls.notifications.length, 1);
+
+  // Чат без галки ответа не ждал: это не неудача и предупреждать не о чем.
+  const silent = fixture({ notifyTaskCreated: () => ({ enabled: false, sent: false }) });
+  const quiet = await silent.service.task(silent.itemRef, {
+    revision: REVISION,
+    messageRefs: [silent.messageRef],
+  });
+  assert.deepEqual(quiet.notification, { enabled: false, sent: false, reason: '' });
+
+  // Сорт отказа различим: «связь оборвалась» повторится сама, «канал отказал» — нет.
+  for (const [thrown, reason] of [
+    [Object.assign(new Error('нет ответа за 15 с'), { kind: 'transport' }), 'unreachable'],
+    [Object.assign(new Error('chat not found'), { kind: 'telegram' }), 'rejected'],
+  ]) {
+    const broken = fixture({ notifyTaskCreated() { throw thrown; } });
+    const outcome = await broken.service.task(broken.itemRef, {
+      revision: REVISION,
+      messageRefs: [broken.messageRef],
+    });
+    assert.deepEqual(outcome.notification, { enabled: true, sent: false, reason });
+  }
 });
 
 test('отказ channel confirmation не отменяет задачу и не запускается до commit', async () => {
@@ -852,6 +875,9 @@ test('отказ channel confirmation не отменяет задачу и не
   assert.equal(failedDelivery.calls.notifications.length, 1);
   assert.equal(failedDelivery.calls.warnings.length, 1);
   assert.equal(JSON.stringify(failedDelivery.calls.warnings).includes('secret'), false);
+  // Провал доставки обязан доехать до человека: автоповтора у ответа нет, и
+  // сообщить в чат придётся ему. Раньше это знал только журнал сервера.
+  assert.deepEqual(result.notification, { enabled: true, sent: false, reason: 'failed' });
 
   for (const blocked of [
     fixture({ b24Error: 'portal down', notifyTaskCreated: true }),

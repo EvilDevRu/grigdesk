@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { apiError, mountTelegramView, settle } from './helpers/telegram-view.js';
 
 const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TelegramView.vue', import.meta.url));
+const GLOBAL_STYLES_PATH = fileURLToPath(new URL('../../web/src/styles.css', import.meta.url));
 
 process.env.NODE_ENV = 'test';
 
@@ -135,7 +136,10 @@ test('неверный код: текст сервера виден словам
 test('контролы форм одной высоты, селект стилизованный — статическая проверка стилей', async () => {
   // Живого замера в офлайне нет (happy-dom раскладку не считает) — правило
   // стережётся чтением <style scoped>, как TG-UI-05 у разворота ссылок.
-  const source = await readFile(VIEW_PATH, 'utf8');
+  const [source, globalStyles] = await Promise.all([
+    readFile(VIEW_PATH, 'utf8'),
+    readFile(GLOBAL_STYLES_PATH, 'utf8'),
+  ]);
   const style = source.slice(source.indexOf('<style'));
   // Селектор ищется с начала строки: голый indexOf('.sel {') совпадает внутри
   // общего правила `.inp, .sel {` и проверяет не тот блок.
@@ -144,11 +148,12 @@ test('контролы форм одной высоты, селект стили
     assert.ok(at > 0, `в <style scoped> нет правила ${selector}`);
     return style.slice(at, style.indexOf('}', at));
   };
-  // Одна высота у селектов, инпутов и кнопок — переменной, а не совпадением padding-ов.
-  assert.match(rule('.tg'), /--ctl-h:\s*\d+px/);
-  assert.match(rule('.inp, .sel'), /height:\s*var\(--ctl-h\)/);
-  assert.match(rule('.btn'), /min-height:\s*var\(--ctl-h\)/);
-  assert.match(rule('.code-input'), /height:\s*var\(--ctl-h\)/);
+  // Одна высота у селектов, инпутов и кнопок — глобальным токеном, а не совпадением padding-ов.
+  assert.match(globalStyles, /--control-height:\s*36px/);
+  assert.doesNotMatch(rule('.tg'), /--ctl-h/);
+  assert.match(rule('.inp, .sel'), /height:\s*var\(--control-height\)/);
+  assert.match(rule('.btn'), /height:\s*var\(--control-height\)/);
+  assert.match(rule('.code-input'), /height:\s*var\(--control-height\)/);
   // Селект стилизованный, не нативный (правило проекта): свой шеврон с фиксированным
   // отступом от края, а не системная стрелка вплотную к рамке.
   assert.match(rule('.sel'), /appearance:\s*none/);

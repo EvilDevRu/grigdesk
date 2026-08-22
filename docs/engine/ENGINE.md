@@ -35,6 +35,8 @@
 | `lib/core.sh` | stage loop, gates, retries, readonly guard |
 | `lib/route-runtime.sh` | доверенный диспетчер agent/command v2: pin, рендер, fanout policy, evidence, ретраи и переходы |
 | `lib/attempt-stage-state.sh` | курсор, append-only hash-chain, findings projection и no-progress guard |
+| `lib/attempt-lifecycle-state.{sh,py}` | host-owned segmented lifecycle ledger, manifest generations и recovery хвоста |
+| `lib/runtime-analytics.{sh,py}` | typed lifecycle spans/reasons, stable identity и writable reconciliation |
 | `lib/workspace-guard.sh` | точный snapshot source roots без автоматического отката |
 | `lib/instrumentation-transaction.sh` | scoped временные правки и CAS cleanup |
 | `lib/attempt-state.sh` | изолированные pin/CAS/terminal-файлы попытки route protocol v2 |
@@ -42,6 +44,8 @@
 | `lib/multi-runner.sh` | model policy, dispatcher, telemetry |
 | `lib/dispatcher.sh` | классификация попыток/failover/breaker |
 | `lib/executor.sh`, `lib/runner-launcher.sh` | запуск adapter-а и run capability |
+| `lib/provider-lineage-state.{sh,py}` | durable CAS authority native provider resume по exact provider scope |
+| `lib/runtime-usage.mjs` | retained-FD sealing, immutable usage publish и diagnostic `meta.env` mirror |
 | `lib/runners/*.sh` | provider adapters/catalog/probe (реестр грузит только `*.sh`, вспомогательные файлы рядом безопасны) |
 | `lib/runners/kimi-wire.py` | мост телеметрии kimi: субагентов нет в stream-json CLI ([KIMI.md](KIMI.md)) |
 | `lib/profile-config.sh` | schema, validation, revision CAS, atomic writer |
@@ -56,6 +60,7 @@
 | `profiles/<name>/profile.sh` | project-specific hooks/prompts |
 | `profiles/<name>/runners.env` | canonical runner/model policy |
 | `profiles/<name>/graph.json` | UI graph |
+| `schemas/analytics/*.schema.json` | общий closed contract lifecycle, provider lineage и usage document |
 | `tests/engine/` | unit/contract/integration/profile checks |
 
 ## Запуск этапа
@@ -212,6 +217,29 @@ route hash: новый каталог для этого не нужен. Ист�
 не покупает ещё один автоматический проход. Это консервативно и для настоящей регрессии после
 исправления: ledger не умеет доказать её причинность, поэтому расширение сначала видит человек.
 Пропущенная ранее идея остаётся follow-up.
+
+**Открытые находки доезжают до автора служебным блоком, а не через `requiredContext`.**
+`_stage_open_findings_block` собирает `evidence.findings.open` (id, `sourceNode`, summary)
+и `run_agent` приписывает его после черновика хода, но ПЕРЕД словом человека: указание
+человека сильнее машинных находок. Источник — контекст, уже построенный для узла
+(`_route_v2_open_findings_from_context`), а не повторное чтение журнала: диспетчер держит
+task lock, и `attempt_stage_state_findings_v2` в этой точке встал бы на нём. Показываются
+только `open`: `closed` — история, `deferred` адресованы человеку на воротах.
+
+Почему это инвариант движка, а не поле схемы: `render_node` вклеивает в промпт ровно те
+секции, что перечислены в `prompt.requiredContext`, поэтому узел без `evidence` замечаний
+своего критика не видел вовсе. Профили объявляли `evidence` вразнобой — замер 22.08.2026
+по всем локальным профилям: узел плана слеп везде, узлы автора тестов и реализации —
+через один, причём один профиль чинил свой узел точечно, не заведя общего правила. Цикл
+«критик отклонил → автор не увидел причину → те же дефекты → `no-progress`» стоил двух
+кругов по 25 минут на живом прогоне. Валидатором маршрута это чинить нельзя:
+`validate_machine` работает и на ЧТЕНИИ бандла, поэтому новое требование сделало бы
+невалидными все уже опубликованные каталоги посреди идущих прогонов. Блок вместо этого
+действует и для попыток, закрепивших старый route hash, — как `_stage_scope_block`.
+
+Пустой список, повреждённый JSON и отсутствующая секция дают отсутствие блока, а не отказ:
+находки усиливают промпт, но не являются условием исполнения узла. Сторож —
+`tests/engine/unit/stage-open-findings.sh`.
 
 **Исключение — первый проход по новому артефакту.** Ремонт замкнутого набора сам создаёт
 файлы: закрыть «сценарий не покрыт» нельзя, не написав тест. Замечание по такому файлу — не
@@ -433,17 +461,6 @@ TASK/STAGE/RUN_ID/EPOCH/RUNNER/PID/PGID/SESSION/STARTTIME/STATE). Публика
 `factory <task> runner switch` читает ТОЛЬКО этот файл — provider-writable `meta.env`
 сохраняет PID/PGID/STARTTIME лишь как диагностику и перенаправить сигнал не может.
 
-**Цена запуска в `meta.env`.** После `classify` лаунчер дописывает туда расход хода —
-`TOKENS_IN`, `TOKENS_OUT`, `TOKENS_CACHE_READ`, `TOKENS_CACHE_WRITE` и, если CLI его
-называет, `COST_USD`. Считает опциональный метод `usage` раннера
-([ADDING-RUNNER.md](ADDING-RUNNER.md)); данные и раньше лежали в `events.jsonl` каждого
-запуска, но никто их не складывал, поэтому вопрос «какой узел маршрута дорогой» решался
-на глаз. Телеметрия показала, что один заход браузерной приёмки может накопить миллионы токенов кэш-чтения
-и ощутимую стоимость. Кэш-чтение и кэш-запись остаются отдельными полями — тарифицируются
-они по-разному, и без этого длинный, но целиком прочитанный из кэша ход неотличим от
-дорогого. Стоимость нельзя выводить из `TOKENS_IN` или порога размера: нужны фактические
-read/write/uncached и тариф конкретного provider-а. Отсутствие ключей означает «CLI расход
-не публикует», а не нулевую цену.
 Гашение — всегда СЕССИЯ раннера целиком (TERM → CONT → grace → KILL по каждой
 группе процессов сессии) с re-check идентичности. Порядок TERM → CONT, а не
 наоборот: остановленному на барьере раннеру сигнал ставится в очередь и
@@ -484,6 +501,201 @@ TOCTOU: `stat` подтверждал один inode, а `mapfile` читал д
 обязан отвечать успехом. Пока это считалось ошибкой, CLI отчитывался о провале
 состоявшегося переключения, а launcher ловил `group_rc` и подменял результат
 этапа на 76 (`core-multi-runner` краснел под нагрузкой 5 прогонов из 24).
+
+## Lifecycle, provider lineage и runtime usage
+
+### Authority и иерархия
+
+Для каждой immutable route-attempt движок ведёт host-owned lifecycle под
+`${FACTORY_CONTROL_ROOT}/protocol-v2/tasks/t<TASK>/attempts/<ATTEMPT_ID>/lifecycle/`.
+Provider-writable `events.jsonl`, run-каталог и `meta.env` не являются authority причин,
+spans, связей или usage. Каноническая вложенность одинакова для engine, server и export:
+
+```text
+Task
+  RouteAttempt
+    OrchestratorSession
+    NodeVisit
+      NodeExecution
+        Dispatch
+          RunnerRun
+      GateWait
+      HumanIntervention
+    SandboxSpan
+    BootstrapSpan
+    CleanupSpan
+```
+
+Новый `NodeVisit` создаётся на каждый вход cursor в узел. Его `visitReason` — ровно одно
+из `initial`, `forward_transition`, `route_rewind`, `gate_rejected`, `human_rewind`,
+`recovery`. Product retry остаётся в том же visit, но создаёт новый `NodeExecution` с
+`executionReason`: `initial`, `no_result`, `product_failure` или `manual_resume`. Один
+execution может иметь несколько dispatch/run; реально стартовавший provider process
+получает `runReason`: `primary`, `provider_failover`, `model_fallback` или
+`manual_switch`. Пропущенный dispatcher candidate — событие dispatch, но не `RunnerRun`.
+
+Started/finished одной сущности используют один `spanId`; длительность того же процесса и
+boot считается monotonic clock, допустимое восстановление помечается `wall`/`derived`.
+Причины и исходы — closed enums из
+[`lifecycle-event.schema.json`](../../schemas/analytics/lifecycle-event.schema.json).
+Свободный prompt, комментарий или reason в ledger не копируется: при необходимости событие
+содержит bounded code и SHA-256 исходного evidence. Provider result не подменяет trusted
+`NodeExecution.productOutcome`.
+
+Stage ledger остаётся authority перехода cursor. Lifecycle ссылается на exact
+`stageEventHash` и stable `transitionId`; writable start/resume вызывает
+`runtime_lifecycle_reconcile_routing_v2`, который после полной проверки stage chain
+добавляет пропущенный `routing_transition_reconciled` с исходным временем и
+`clock.fidelity=derived`. Process span из такого перехода не выдумывается.
+
+### Сегментированный lifecycle-журнал
+
+`manifest.json` выбирает ровно одну generation: последовательность immutable sealed
+segments и один `segments/active-<generation>.ndjson`. `tail.json` — проверяемая быстрая
+проекция, не отдельный источник истины; `quarantine/` хранит content-addressed torn bytes,
+`usage/` — immutable usage documents. Каталоги принадлежат host user и имеют mode 0700,
+файлы состояния — 0600; symlink, лишняя hardlink, non-canonical path и mixed writer
+отвергаются fail-closed.
+
+Каждая canonical NDJSON-запись проходит общую schema и hash chain
+`sequence → previousEventHash → eventHash`. `eventId` даёт идемпотентный append только при
+тех же canonical bytes; та же identity с другим payload — конфликт. Initial publication и
+rotation соблюдают полный durability barrier:
+
+```text
+fsync(segment) → fsync(segments directory) → fsync(manifest temp)
+→ rename manifest → fsync(lifecycle directory)
+```
+
+Manifest не выбирает generation до durable directory entry сегмента. Reader никогда не
+чинит состояние: torn active tail возвращает 74. Следующий exclusive writable append
+сохраняет повреждённые bytes в `quarantine/`, публикует новую generation и первым событием
+фиксирует `lifecycle_tail_recovered`; полностью подтверждённые события не теряются и не
+дублируются.
+
+Стабильная shell API ledger-а:
+
+```text
+attempt_lifecycle_init_v2 TASK ATTEMPT_ID
+attempt_lifecycle_append_v2 TASK ATTEMPT_ID EVENT_DRAFT_JSON
+attempt_lifecycle_read_v2 TASK ATTEMPT_ID
+attempt_lifecycle_validate_v2 TASK ATTEMPT_ID
+attempt_lifecycle_canonical_v2 INPUT_JSON
+attempt_lifecycle_event_hash_v2 EVENT_JSON
+```
+
+Первые четыре операции — production storage API; последние две — conformance helpers.
+Draft уже содержит весь common envelope и exact per-kind `details`, кроме writer-owned
+`sequence`, `previousEventHash`, `eventHash`; успешный append печатает принятый hash.
+Host-модули не собирают envelope вручную: они задают context через
+`runtime_lifecycle_set_context_v2`/`runtime_lifecycle_set_route_v2` и вызывают typed
+begin/finish helpers из `runtime-analytics.sh`. Восстановление crash gaps имеет отдельные
+идемпотентные границы `runtime_lifecycle_previous_open_session_v2`,
+`runtime_lifecycle_reconcile_routing_v2` и `runtime_lifecycle_reconcile_usage_v2`.
+
+**Попытка старше самого ledger-а не получает историю задним числом.** Первым событием
+журнала обязан идти `route_selected`: до него схема запрещает любое событие со scoped
+route identity. Поэтому `resume`, `goto` и `abandon` попытки, у которой в журнале нет
+ни одного события, открывали бы сессию заведомо невалидной и падали кодом 78
+детерминированно, то есть человек терял и продолжение прогона, и снос стенда.
+`v2_lifecycle_begin_session` в режиме `resume` такую попытку распознаёт
+(`v2_lifecycle_ledger_empty`: `rc=0` и ноль строк — пусто, ошибка чтения остаётся
+ошибкой) и просто не открывает сессию: все typed-события стоят за
+`runtime_lifecycle_enabled_v2`, поэтому невыставленный context означает «не пишем
+ничего», а не «половина журнала». Придумывать `route_selected` с несуществующим
+временем выбора запрещено — выдуманная аналитика хуже отсутствующей.
+
+### Provider lineage и launch barrier
+
+Native resume имеет отдельную CAS authority под
+`${FACTORY_CONTROL_ROOT}/protocol-v2/provider-lineage/schema-1/<PROVIDER>/<SCOPE_SHA256>.json`.
+Raw provider scope никогда не становится частью пути. Canonical record проходит состояния:
+
+```text
+advanced → reserved_before_start → started → advanced
+                              ↘ cancelled_before_start
+                                      started → blocked_after_start
+```
+
+`cancelled_before_start` разрешён только с доказательствами `neverReleased` и quiescence.
+После `started` predecessor checkpoint считается потреблённым: ни сбой child, ни повтор
+команды не разрешает использовать его ещё раз. Полный eligible child checkpoint переводит
+lineage в следующую `advanced` generation; иначе запись становится
+`blocked_after_start` и требует явного разрешения причины.
+
+CAS API принимает strict request JSON из
+[`provider-lineage.schema.json`](../../schemas/analytics/provider-lineage.schema.json):
+
+```text
+provider_lineage_initialize_advanced_v1 REQUEST_JSON
+provider_lineage_reserve_v1 REQUEST_JSON
+provider_lineage_mark_started_v1 REQUEST_JSON
+provider_lineage_advance_v1 REQUEST_JSON
+provider_lineage_cancel_v1 REQUEST_JSON
+provider_lineage_block_v1 REQUEST_JSON
+provider_lineage_read_v1 PROVIDER THREAD_ID
+provider_lineage_validate_v1 PROVIDER THREAD_ID
+provider_lineage_scope_canonical_v1 PROVIDER THREAD_ID
+provider_lineage_scope_hash_v1 PROVIDER THREAD_ID
+provider_lineage_record_path_v1 PROVIDER THREAD_ID
+```
+
+`runner-launcher.sh` не запускает provider до trusted commit. Для native resume порядок
+неизменен: проверить exact predecessor usage/checkpoint и CAS-записать
+`reserved_before_start` → fork child в новой setsid-сессии, остановленной `SIGSTOP` до
+adapter-а → проверить/publish PID, PGID, session и starttime → append+fsync
+`runner_started` → CAS `started` → `SIGCONT`. Fresh invocation проходит тот же identity и
+lifecycle barrier без reservation. Любая ошибка до `SIGCONT` quiesce-ит ещё остановленную
+сессию; после durable `runner_started` она дополнительно получает `runner_abandoned`.
+`runner_finished` допустим только после доказанной quiescence всей process session.
+
+`factory ... resume` возобновляет route orchestration и сам по себе не означает provider
+resume. Adapter вправе объявить capability `native_resume_v1` только если его `run`
+fail-closed соблюдает `FACTORY_PROVIDER_SESSION_MODE=fresh|resume` и при `resume` передаёт
+CLI exact `FACTORY_PROVIDER_RESUME_SCOPE`. Generation и immutable parent citation приходят
+в `FACTORY_PROVIDER_LINEAGE_GENERATION` и `FACTORY_PROVIDER_PARENT_USAGE_REF`; adapter их
+не меняет и не пишет lineage store. Текущие Codex/Claude adapters capability не объявляют
+и всегда фиксируются как `fresh`; resume-ветка становится достижимой только вместе с
+отдельно проверенным invocation contract конкретного CLI.
+
+### Retained-FD usage и diagnostic meta mirror
+
+До fork launcher через retained run dirfd создаёт новый `events.jsonl` с
+`O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600 и `nlink=1`, затем до конца run удерживает исходные
+read/write descriptors. После quiescence host fsync-ит retained write fd, bounded-читает
+тот же inode через retained read fd, считает SHA-256 и повторно сверяет fstat обоих fd и
+lstat имени. Finalizer никогда не reopen-ит provider-writable path. Подмена имени,
+symlink/FIFO, mutation, oversize или identity mismatch дают named conflict и не позволяют
+прочитать новый target как расход старого запуска.
+
+Внутренний launcher-only bridge `runtime-usage.mjs` имеет точные операции:
+
+```text
+prepare CONTEXT_JSON                         # retained events fds 7/8 и run dirfd 9
+invalidate PREPARED_JSON DIAGNOSTIC_CODE
+publish CONTEXT_JSON PREPARED_JSON           # run dirfd 9
+reconcile-plan CONTROL_ROOT TASK ATTEMPT LIFECYCLE_NDJSON [RUN_ID]
+meta CONTEXT_JSON initial                    # run dirfd 9
+meta CONTEXT_JSON final [PREPARED_JSON|-] [RESULT_CLASS]  # run dirfd 9
+```
+
+Нормализованный документ публикуется по адресу
+`lifecycle/usage/<RUN_ID>.json` настоящей операцией publish-if-absent: одинаковые
+канонические байты идемпотентны, разные байты/хеш — конфликт неизменяемости, перезапись
+запрещена. Порядок коммита:
+`runner_scope_bound` → долговечный `runner_finished` → неизменяемый usage-документ →
+`runner_usage_recorded` (либо закрывающий разрыв после падения `runner_usage_reconciled`) →
+продвижение lineage → диагностическое зеркало. Документ сохраняет точную идентичность
+всей цепочки, запрошенную/разрешённую модель, отпечаток источника, полноту/происхождение,
+scope сессии провайдера, неизменяемый `parentUsageRef`, пригодность checkpoint/resume и
+отдельные usage-сегменты.
+
+`meta.env` публикуется последним целиком через retained dirfd: unique 0600 temp, fsync,
+rename и directory fsync. Symlink/FIFO target не открывается и не изменяется. Его
+`USAGE_SCHEMA=2`, token/cost-поля и process identity — только удобная diagnostic projection
+для старых readers; authority usage — immutable document плюс lifecycle link. Отсутствие
+usage означает missing, не ноль. Cache read, 5-minute write, 1-hour write и write с
+неизвестным TTL не сливаются в одно тарифицируемое число.
 
 ## Бандлы маршрутов v2
 

@@ -1,0 +1,1245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cockpit.local/schemas/analytics/lifecycle-event.schema.json",
+  "title": "Доверенное событие жизненного цикла Factory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "protocolVersion",
+    "eventId",
+    "sequence",
+    "at",
+    "previousEventHash",
+    "eventHash",
+    "taskId",
+    "attemptId",
+    "profile",
+    "routeId",
+    "routeHash",
+    "orchestratorSessionId",
+    "nodeVisitId",
+    "nodeExecutionId",
+    "nodeId",
+    "runKey",
+    "dispatchId",
+    "runId",
+    "epoch",
+    "spanId",
+    "kind",
+    "writerVersion",
+    "clock",
+    "details"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "protocolVersion": { "const": 2 },
+    "eventId": { "$ref": "#/$defs/eventId" },
+    "sequence": { "$ref": "#/$defs/positiveSafeInteger" },
+    "at": { "$ref": "#/$defs/utcMilliseconds" },
+    "previousEventHash": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/sha256" }
+      ]
+    },
+    "eventHash": { "$ref": "#/$defs/sha256" },
+    "taskId": { "$ref": "#/$defs/taskId" },
+    "attemptId": { "$ref": "#/$defs/attemptId" },
+    "profile": { "$ref": "#/$defs/profile" },
+    "routeId": { "$ref": "#/$defs/nullableRouteId" },
+    "routeHash": { "$ref": "#/$defs/nullableSha256" },
+    "orchestratorSessionId": { "$ref": "#/$defs/orchestratorSessionId" },
+    "nodeVisitId": { "$ref": "#/$defs/nullableNodeVisitId" },
+    "nodeExecutionId": { "$ref": "#/$defs/nullableNodeExecutionId" },
+    "nodeId": { "$ref": "#/$defs/nullableNodeId" },
+    "runKey": { "$ref": "#/$defs/nullableRunKey" },
+    "dispatchId": { "$ref": "#/$defs/nullableDispatchId" },
+    "runId": { "$ref": "#/$defs/nullableRunId" },
+    "epoch": { "$ref": "#/$defs/nullablePositiveSafeInteger" },
+    "spanId": { "$ref": "#/$defs/nullableSpanId" },
+    "kind": { "$ref": "#/$defs/lifecycleKind" },
+    "writerVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "clock": { "$ref": "#/$defs/clock" },
+    "details": {}
+  },
+  "allOf": [
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "orchestrator_session_started", "orchestrator_session_finished",
+        "sandbox_started", "sandbox_finished", "bootstrap_started", "bootstrap_finished",
+        "cleanup_started", "cleanup_finished"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/attemptSpanIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "lifecycle_tail_recovered", "attempt_started", "attempt_interrupted",
+        "attempt_resumed", "attempt_terminal_recorded", "shared_lease_released"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/attemptInstantIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "route_selected", "routing_transition_reconciled"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/routeInstantIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "node_visit_started", "node_visit_finished", "gate_wait_started", "gate_decided",
+        "human_intervention_started", "human_intervention_resolved"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/visitSpanIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "node_execution_started", "node_execution_finished", "command_started", "command_finished"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/executionSpanIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": ["dispatch_started", "dispatch_finished"] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/dispatchSpanIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "dispatch_candidate_selected", "dispatch_candidate_skipped"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/dispatchInstantIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "runner_started", "runner_finished", "runner_abandoned"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/runnerSpanIdentity" }
+    },
+    {
+      "if": { "type": "object", "properties": { "kind": { "enum": [
+        "runner_scope_bound", "runner_usage_recorded", "runner_usage_reconciled",
+        "failover_selected", "runner_switch_requested", "runner_switch_consumed",
+        "runner_switch_rejected"
+      ] } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/runnerInstantIdentity" }
+    }
+  ],
+  "oneOf": [
+    { "$ref": "#/$defs/orchestratorSessionStartedEvent" },
+    { "$ref": "#/$defs/orchestratorSessionFinishedEvent" },
+    { "$ref": "#/$defs/lifecycleTailRecoveredEvent" },
+    { "$ref": "#/$defs/attemptStartedEvent" },
+    { "$ref": "#/$defs/attemptInterruptedEvent" },
+    { "$ref": "#/$defs/attemptResumedEvent" },
+    { "$ref": "#/$defs/attemptTerminalRecordedEvent" },
+    { "$ref": "#/$defs/routeSelectedEvent" },
+    { "$ref": "#/$defs/routingTransitionReconciledEvent" },
+    { "$ref": "#/$defs/sandboxStartedEvent" },
+    { "$ref": "#/$defs/sandboxFinishedEvent" },
+    { "$ref": "#/$defs/bootstrapStartedEvent" },
+    { "$ref": "#/$defs/bootstrapFinishedEvent" },
+    { "$ref": "#/$defs/nodeVisitStartedEvent" },
+    { "$ref": "#/$defs/nodeVisitFinishedEvent" },
+    { "$ref": "#/$defs/nodeExecutionStartedEvent" },
+    { "$ref": "#/$defs/nodeExecutionFinishedEvent" },
+    { "$ref": "#/$defs/commandStartedEvent" },
+    { "$ref": "#/$defs/commandFinishedEvent" },
+    { "$ref": "#/$defs/dispatchStartedEvent" },
+    { "$ref": "#/$defs/dispatchCandidateSelectedEvent" },
+    { "$ref": "#/$defs/dispatchCandidateSkippedEvent" },
+    { "$ref": "#/$defs/dispatchFinishedEvent" },
+    { "$ref": "#/$defs/runnerStartedEvent" },
+    { "$ref": "#/$defs/runnerScopeBoundEvent" },
+    { "$ref": "#/$defs/runnerFinishedEvent" },
+    { "$ref": "#/$defs/runnerUsageRecordedEvent" },
+    { "$ref": "#/$defs/runnerUsageReconciledEvent" },
+    { "$ref": "#/$defs/runnerAbandonedEvent" },
+    { "$ref": "#/$defs/failoverSelectedEvent" },
+    { "$ref": "#/$defs/runnerSwitchRequestedEvent" },
+    { "$ref": "#/$defs/runnerSwitchConsumedEvent" },
+    { "$ref": "#/$defs/runnerSwitchRejectedEvent" },
+    { "$ref": "#/$defs/gateWaitStartedEvent" },
+    { "$ref": "#/$defs/gateDecidedEvent" },
+    { "$ref": "#/$defs/humanInterventionStartedEvent" },
+    { "$ref": "#/$defs/humanInterventionResolvedEvent" },
+    { "$ref": "#/$defs/cleanupStartedEvent" },
+    { "$ref": "#/$defs/cleanupFinishedEvent" },
+    { "$ref": "#/$defs/sharedLeaseReleasedEvent" }
+  ],
+  "$defs": {
+    "safeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positiveSafeInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "nullablePositiveSafeInteger": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/positiveSafeInteger" }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableSha256": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/sha256" }
+      ]
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^t[1-9][0-9]{0,18}$"
+    },
+    "attemptId": {
+      "type": "string",
+      "pattern": "^a_[a-f0-9]{32}$"
+    },
+    "orchestratorSessionId": {
+      "type": "string",
+      "pattern": "^os_[a-f0-9]{32}$"
+    },
+    "nodeVisitId": {
+      "type": "string",
+      "pattern": "^nv_[a-f0-9]{32}$"
+    },
+    "nullableNodeVisitId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/nodeVisitId" }
+      ]
+    },
+    "nodeExecutionId": {
+      "type": "string",
+      "pattern": "^ne_[a-f0-9]{32}$"
+    },
+    "nullableNodeExecutionId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/nodeExecutionId" }
+      ]
+    },
+    "dispatchId": {
+      "type": "string",
+      "pattern": "^d_[a-f0-9]{32}$"
+    },
+    "nullableDispatchId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/dispatchId" }
+      ]
+    },
+    "spanId": {
+      "type": "string",
+      "pattern": "^sp_[a-f0-9]{32}$"
+    },
+    "nullableSpanId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/spanId" }
+      ]
+    },
+    "eventId": {
+      "type": "string",
+      "pattern": "^ev_[a-f0-9]{32}$"
+    },
+    "profile": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "routeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,40}$"
+    },
+    "nullableRouteId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/routeId" }
+      ]
+    },
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,40}$"
+    },
+    "nullableNodeId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/nodeId" }
+      ]
+    },
+    "runKey": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "nullableRunKey": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/runKey" }
+      ]
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "nullableRunId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/runId" }
+      ]
+    },
+    "utcMilliseconds": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+    },
+    "canonicalUnsignedDecimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "clockFidelity": {
+      "enum": ["monotonic", "wall", "derived"]
+    },
+    "completeness": {
+      "enum": ["complete", "partial", "missing", "conflict"]
+    },
+    "visitReason": {
+      "enum": [
+        "initial",
+        "forward_transition",
+        "route_rewind",
+        "gate_rejected",
+        "human_rewind",
+        "recovery"
+      ]
+    },
+    "executionReason": {
+      "enum": ["initial", "no_result", "product_failure", "manual_resume"]
+    },
+    "runReason": {
+      "enum": ["primary", "provider_failover", "model_fallback", "manual_switch"]
+    },
+    "provider": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "modelId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$"
+    },
+    "nullableModelId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/modelId" }
+      ]
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
+    "nullableCode": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/code" }
+      ]
+    },
+    "providerScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$"
+    },
+    "nullableProviderScope": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/providerScope" }
+      ]
+    },
+    "nullableAttemptId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/attemptId" }
+      ]
+    },
+    "nullableOrchestratorSessionId": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/orchestratorSessionId" }
+      ]
+    },
+    "nullableSafeInteger": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/safeInteger" }
+      ]
+    },
+    "nullablePositiveSafeIntegerValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/positiveSafeInteger" }
+      ]
+    },
+    "durationFidelity": {
+      "enum": ["monotonic", "wall", "derived"]
+    },
+    "spanStatus": {
+      "enum": ["succeeded", "failed", "interrupted", "abandoned"]
+    },
+    "spanReasonCode": {
+      "enum": [
+        "normal", "attempt_terminal", "process_exit", "signal", "timeout", "crash",
+        "recovery", "policy_rejected", "no_result", "product_failure", "manual_resume",
+        "manual_switch", "exhausted", "unavailable", "denied", "conflict", "cleanup_failed"
+      ]
+    },
+    "productOutcome": {
+      "enum": ["done", "skipped", "failed", "exhausted", "approved", "rejected"]
+    },
+    "nullableProductOutcome": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/productOutcome" }
+      ]
+    },
+    "runnerResultClass": {
+      "enum": [
+        "ok", "limited", "unavailable_preflight", "route_unavailable", "manual_switch",
+        "agent_failed", "provider_unavailable", "missing_status", "denied", "timeout",
+        "transient", "invalid_config", "context_overflow", "crashed", "unknown"
+      ]
+    },
+    "nullableSignal": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 1, "maximum": 64 }
+      ]
+    },
+    "nullableExitCode": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0, "maximum": 255 }
+      ]
+    },
+    "attemptSpanIdentity": {
+      "type": "object",
+      "properties": {
+        "nodeVisitId": { "type": "null" },
+        "nodeExecutionId": { "type": "null" },
+        "nodeId": { "type": "null" },
+        "runKey": { "type": "null" },
+        "dispatchId": { "type": "null" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "$ref": "#/$defs/spanId" }
+      }
+    },
+    "attemptInstantIdentity": {
+      "type": "object",
+      "properties": {
+        "nodeVisitId": { "type": "null" },
+        "nodeExecutionId": { "type": "null" },
+        "nodeId": { "type": "null" },
+        "runKey": { "type": "null" },
+        "dispatchId": { "type": "null" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "type": "null" }
+      }
+    },
+    "routeInstantIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "type": "null" },
+        "nodeExecutionId": { "type": "null" },
+        "nodeId": { "type": "null" },
+        "runKey": { "type": "null" },
+        "dispatchId": { "type": "null" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "type": "null" }
+      }
+    },
+    "visitSpanIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+        "nodeExecutionId": { "type": "null" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "runKey": { "$ref": "#/$defs/runKey" },
+        "dispatchId": { "type": "null" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "$ref": "#/$defs/spanId" }
+      }
+    },
+    "executionSpanIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+        "nodeExecutionId": { "$ref": "#/$defs/nodeExecutionId" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "runKey": { "$ref": "#/$defs/runKey" },
+        "dispatchId": { "type": "null" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "$ref": "#/$defs/spanId" }
+      }
+    },
+    "dispatchSpanIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+        "nodeExecutionId": { "$ref": "#/$defs/nodeExecutionId" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "runKey": { "$ref": "#/$defs/runKey" },
+        "dispatchId": { "$ref": "#/$defs/dispatchId" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "$ref": "#/$defs/spanId" }
+      }
+    },
+    "dispatchInstantIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+        "nodeExecutionId": { "$ref": "#/$defs/nodeExecutionId" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "runKey": { "$ref": "#/$defs/runKey" },
+        "dispatchId": { "$ref": "#/$defs/dispatchId" },
+        "runId": { "type": "null" },
+        "epoch": { "type": "null" },
+        "spanId": { "type": "null" }
+      }
+    },
+    "runnerSpanIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+        "nodeExecutionId": { "$ref": "#/$defs/nodeExecutionId" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "runKey": { "$ref": "#/$defs/runKey" },
+        "dispatchId": { "$ref": "#/$defs/dispatchId" },
+        "runId": { "$ref": "#/$defs/runId" },
+        "epoch": { "$ref": "#/$defs/positiveSafeInteger" },
+        "spanId": { "$ref": "#/$defs/spanId" }
+      }
+    },
+    "runnerInstantIdentity": {
+      "type": "object",
+      "properties": {
+        "routeId": { "$ref": "#/$defs/routeId" },
+        "routeHash": { "$ref": "#/$defs/sha256" },
+        "nodeVisitId": { "$ref": "#/$defs/nodeVisitId" },
+        "nodeExecutionId": { "$ref": "#/$defs/nodeExecutionId" },
+        "nodeId": { "$ref": "#/$defs/nodeId" },
+        "runKey": { "$ref": "#/$defs/runKey" },
+        "dispatchId": { "$ref": "#/$defs/dispatchId" },
+        "runId": { "$ref": "#/$defs/runId" },
+        "epoch": { "$ref": "#/$defs/positiveSafeInteger" },
+        "spanId": { "type": "null" }
+      }
+    },
+    "lifecycleKind": {
+      "enum": [
+        "orchestrator_session_started",
+        "orchestrator_session_finished",
+        "lifecycle_tail_recovered",
+        "attempt_started",
+        "attempt_interrupted",
+        "attempt_resumed",
+        "attempt_terminal_recorded",
+        "route_selected",
+        "routing_transition_reconciled",
+        "sandbox_started",
+        "sandbox_finished",
+        "bootstrap_started",
+        "bootstrap_finished",
+        "node_visit_started",
+        "node_visit_finished",
+        "node_execution_started",
+        "node_execution_finished",
+        "command_started",
+        "command_finished",
+        "dispatch_started",
+        "dispatch_candidate_selected",
+        "dispatch_candidate_skipped",
+        "dispatch_finished",
+        "runner_started",
+        "runner_scope_bound",
+        "runner_finished",
+        "runner_usage_recorded",
+        "runner_usage_reconciled",
+        "runner_abandoned",
+        "failover_selected",
+        "runner_switch_requested",
+        "runner_switch_consumed",
+        "runner_switch_rejected",
+        "gate_wait_started",
+        "gate_decided",
+        "human_intervention_started",
+        "human_intervention_resolved",
+        "cleanup_started",
+        "cleanup_finished",
+        "shared_lease_released"
+      ]
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bootId", "monotonicNs", "fidelity"],
+      "properties": {
+        "bootId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+        },
+        "monotonicNs": { "$ref": "#/$defs/canonicalUnsignedDecimal" },
+        "fidelity": { "$ref": "#/$defs/clockFidelity" }
+      }
+    },
+    "tailRecoveryDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceSegmentSha256",
+        "validBytes",
+        "discardedBytes",
+        "lastValidEventHash"
+      ],
+      "properties": {
+        "sourceSegmentSha256": { "$ref": "#/$defs/sha256" },
+        "validBytes": { "$ref": "#/$defs/safeInteger" },
+        "discardedBytes": { "$ref": "#/$defs/positiveSafeInteger" },
+        "lastValidEventHash": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "processIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "processGroupId", "sessionId", "startTimeTicks"],
+      "properties": {
+        "pid": { "$ref": "#/$defs/positiveSafeInteger" },
+        "processGroupId": { "$ref": "#/$defs/positiveSafeInteger" },
+        "sessionId": { "$ref": "#/$defs/positiveSafeInteger" },
+        "startTimeTicks": { "$ref": "#/$defs/canonicalUnsignedDecimal" }
+      }
+    },
+    "parentUsageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "attemptId", "runId", "documentSha256", "checkpointHash"],
+      "properties": {
+        "taskId": { "$ref": "#/$defs/taskId" },
+        "attemptId": { "$ref": "#/$defs/attemptId" },
+        "runId": { "$ref": "#/$defs/runId" },
+        "documentSha256": { "$ref": "#/$defs/sha256" },
+        "checkpointHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "coverageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linkCoverage", "acceptedSegmentCount", "rejectedSampleCount", "diagnosticCodes"],
+      "properties": {
+        "linkCoverage": { "enum": ["exact", "reconciled", "dual_write_gap", "conflict"] },
+        "acceptedSegmentCount": { "$ref": "#/$defs/safeInteger" },
+        "rejectedSampleCount": { "$ref": "#/$defs/safeInteger" },
+        "diagnosticCodes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/code" }
+        }
+      }
+    },
+    "basicSpanFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "orchestratorSessionStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionReason", "previousSessionId", "process"],
+      "properties": {
+        "sessionReason": { "enum": ["initial", "resume", "recovery"] },
+        "previousSessionId": { "$ref": "#/$defs/nullableOrchestratorSessionId" },
+        "process": { "$ref": "#/$defs/processIdentity" }
+      }
+    },
+    "attemptStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "previousAttemptId", "recoveryReasonSha256", "attemptRecordSha256"],
+      "properties": {
+        "origin": { "enum": ["fresh", "recovery"] },
+        "previousAttemptId": { "$ref": "#/$defs/nullableAttemptId" },
+        "recoveryReasonSha256": { "$ref": "#/$defs/nullableSha256" },
+        "attemptRecordSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "attemptInterruptedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reasonCode", "evidenceSha256"],
+      "properties": {
+        "reasonCode": { "enum": ["signal", "host_shutdown", "crash_detected", "operator_abandon", "integrity_failure"] },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "attemptResumedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resumeReason", "previousSessionId", "evidenceSha256"],
+      "properties": {
+        "resumeReason": { "enum": ["operator", "automatic_recovery"] },
+        "previousSessionId": { "$ref": "#/$defs/orchestratorSessionId" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "attemptTerminalRecordedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalState", "terminalReasonCode", "terminalReasonSha256", "terminalRecordSha256", "closedAt"],
+      "properties": {
+        "terminalState": { "enum": ["finished", "abandoned"] },
+        "terminalReasonCode": { "enum": ["completed", "operator_abandon", "recovery_replaced", "launch_failed", "route_stopped", "cleanup_failed", "integrity_conflict"] },
+        "terminalReasonSha256": { "$ref": "#/$defs/nullableSha256" },
+        "terminalRecordSha256": { "$ref": "#/$defs/sha256" },
+        "closedAt": { "$ref": "#/$defs/utcMilliseconds" }
+      }
+    },
+    "routeSelectedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalogHash", "routePinSha256", "selectedAt", "selectionSource"],
+      "properties": {
+        "catalogHash": { "$ref": "#/$defs/sha256" },
+        "routePinSha256": { "$ref": "#/$defs/sha256" },
+        "selectedAt": { "$ref": "#/$defs/utcMilliseconds" },
+        "selectionSource": { "enum": ["profile_default", "queue_override", "task_override", "operator_override"] }
+      }
+    },
+    "routingTransitionReconciledDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transitionId", "stageEventHash", "stageAt", "action", "targetNodeId", "reasonCode"],
+      "properties": {
+        "transitionId": { "$ref": "#/$defs/code" },
+        "stageEventHash": { "$ref": "#/$defs/sha256" },
+        "stageAt": { "$ref": "#/$defs/utcMilliseconds" },
+        "action": { "enum": ["next", "rewind", "stop"] },
+        "targetNodeId": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/nodeId" }
+          ]
+        },
+        "reasonCode": { "const": "crash_gap" }
+      }
+    },
+    "sandboxStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sandboxMode", "workspaceIdentitySha256", "policySha256"],
+      "properties": {
+        "sandboxMode": { "enum": ["isolated", "shared"] },
+        "workspaceIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "policySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "bootstrapStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bootstrapId", "catalogHash"],
+      "properties": {
+        "bootstrapId": { "$ref": "#/$defs/code" },
+        "catalogHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "nodeVisitStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visitReason", "cursorOrdinal", "transitionId", "stageEventHash"],
+      "properties": {
+        "visitReason": { "$ref": "#/$defs/visitReason" },
+        "cursorOrdinal": { "$ref": "#/$defs/safeInteger" },
+        "transitionId": { "$ref": "#/$defs/nullableCode" },
+        "stageEventHash": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "nodeVisitFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "exitKind", "transitionId", "stageEventHash"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "exitKind": { "enum": ["forward_transition", "route_rewind", "gate_rejected", "human_rewind", "attempt_interrupted", "attempt_terminal"] },
+        "transitionId": { "$ref": "#/$defs/nullableCode" },
+        "stageEventHash": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "nodeExecutionStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executionReason", "retryOrdinal", "retryBudgetBefore", "executorKind"],
+      "properties": {
+        "executionReason": { "$ref": "#/$defs/executionReason" },
+        "retryOrdinal": { "$ref": "#/$defs/safeInteger" },
+        "retryBudgetBefore": { "$ref": "#/$defs/safeInteger" },
+        "executorKind": { "enum": ["agent", "command"] }
+      }
+    },
+    "nodeExecutionFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "retryBudgetAfter", "productOutcome", "productOutcomeSource", "productVerdictHash", "finalRunId"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "retryBudgetAfter": { "$ref": "#/$defs/safeInteger" },
+        "productOutcome": { "$ref": "#/$defs/nullableProductOutcome" },
+        "productOutcomeSource": { "enum": ["typed_verdict", "command_verdict", "none"] },
+        "productVerdictHash": { "$ref": "#/$defs/nullableSha256" },
+        "finalRunId": { "$ref": "#/$defs/nullableRunId" }
+      }
+    },
+    "commandStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commandKind", "commandContractSha256"],
+      "properties": {
+        "commandKind": { "const": "profile_hook" },
+        "commandContractSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "commandFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "exitCode", "signal", "verdictSha256"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "exitCode": { "$ref": "#/$defs/nullableExitCode" },
+        "signal": { "$ref": "#/$defs/nullableSignal" },
+        "verdictSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "dispatchStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policySource", "policySha256", "candidateCount"],
+      "properties": {
+        "policySource": { "enum": ["task-stage", "task", "profile-stage", "profile-project", "manual-switch"] },
+        "policySha256": { "$ref": "#/$defs/sha256" },
+        "candidateCount": { "$ref": "#/$defs/positiveSafeInteger" }
+      }
+    },
+    "dispatchCandidateSelectedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateOrdinal", "provider", "requestedModel", "resolvedModel", "effort", "family", "policySource", "breakerResult", "preflightResult", "selectionReason"],
+      "properties": {
+        "candidateOrdinal": { "$ref": "#/$defs/safeInteger" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "requestedModel": { "$ref": "#/$defs/modelId" },
+        "resolvedModel": { "$ref": "#/$defs/nullableModelId" },
+        "effort": { "$ref": "#/$defs/nullableCode" },
+        "family": { "$ref": "#/$defs/nullableCode" },
+        "policySource": { "enum": ["task-stage", "task", "profile-stage", "profile-project", "manual-switch"] },
+        "breakerResult": { "enum": ["closed", "half_open", "not_applicable"] },
+        "preflightResult": { "enum": ["available", "unknown", "not_applicable"] },
+        "selectionReason": { "$ref": "#/$defs/runReason" }
+      }
+    },
+    "dispatchCandidateSkippedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateOrdinal", "provider", "requestedModel", "resolvedModel", "effort", "family", "policySource", "breakerResult", "preflightResult", "skipReason", "evidenceSha256"],
+      "properties": {
+        "candidateOrdinal": { "$ref": "#/$defs/safeInteger" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "requestedModel": { "$ref": "#/$defs/modelId" },
+        "resolvedModel": { "$ref": "#/$defs/nullableModelId" },
+        "effort": { "$ref": "#/$defs/nullableCode" },
+        "family": { "$ref": "#/$defs/nullableCode" },
+        "policySource": { "enum": ["task-stage", "task", "profile-stage", "profile-project", "manual-switch"] },
+        "breakerResult": { "enum": ["open", "closed", "half_open", "not_applicable"] },
+        "preflightResult": { "enum": ["available", "unavailable", "unknown", "not_applicable"] },
+        "skipReason": { "enum": ["breaker_open", "preflight_unavailable", "policy_rejected", "family_incompatible", "model_unavailable", "provider_unavailable"] },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "dispatchFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "outcome", "selectedCandidateOrdinal", "selectedRunId"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "outcome": { "enum": ["selected", "exhausted", "interrupted"] },
+        "selectedCandidateOrdinal": { "$ref": "#/$defs/nullableSafeInteger" },
+        "selectedRunId": { "$ref": "#/$defs/nullableRunId" }
+      }
+    },
+    "runnerStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateOrdinal", "provider", "requestedModel", "resolvedModel", "effort", "family", "runReason", "providerSessionMode", "invocationContractRevision", "requestedProviderScope", "parentUsageRef", "reservationId", "lineageGeneration", "process", "launchBarrier"],
+      "properties": {
+        "candidateOrdinal": { "$ref": "#/$defs/safeInteger" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "requestedModel": { "$ref": "#/$defs/modelId" },
+        "resolvedModel": { "$ref": "#/$defs/nullableModelId" },
+        "effort": { "$ref": "#/$defs/nullableCode" },
+        "family": { "$ref": "#/$defs/nullableCode" },
+        "runReason": { "$ref": "#/$defs/runReason" },
+        "providerSessionMode": { "enum": ["fresh", "resume"] },
+        "invocationContractRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "requestedProviderScope": { "$ref": "#/$defs/nullableProviderScope" },
+        "parentUsageRef": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/parentUsageRef" }
+          ]
+        },
+        "reservationId": { "$ref": "#/$defs/nullableCode" },
+        "lineageGeneration": { "$ref": "#/$defs/nullablePositiveSafeIntegerValue" },
+        "process": { "$ref": "#/$defs/processIdentity" },
+        "launchBarrier": { "const": "held" }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "providerSessionMode": { "const": "fresh" } }, "required": ["providerSessionMode"] },
+          "then": {
+            "type": "object",
+            "properties": {
+              "requestedProviderScope": { "type": "null" },
+              "parentUsageRef": { "type": "null" },
+              "reservationId": { "type": "null" },
+              "lineageGeneration": { "type": "null" }
+            }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "requestedProviderScope": { "$ref": "#/$defs/providerScope" },
+              "parentUsageRef": { "$ref": "#/$defs/parentUsageRef" },
+              "reservationId": { "$ref": "#/$defs/code" },
+              "lineageGeneration": { "$ref": "#/$defs/positiveSafeInteger" }
+            }
+          }
+        }
+      ]
+    },
+    "runnerScopeBoundDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "observedProviderScope", "invocationContractRevision", "scopeMatch", "scopeEvidenceSha256"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/provider" },
+        "observedProviderScope": { "$ref": "#/$defs/nullableProviderScope" },
+        "invocationContractRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "scopeMatch": { "enum": ["matched", "mismatched", "not_applicable"] },
+        "scopeEvidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "runnerFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "resultClass", "processOutcome", "exitCode", "signal", "quiescedAt", "processSessionQuiesced", "quiescenceEvidenceSha256"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "resultClass": { "$ref": "#/$defs/runnerResultClass" },
+        "processOutcome": { "enum": ["exited", "signalled", "timed_out", "launch_failed"] },
+        "exitCode": { "$ref": "#/$defs/nullableExitCode" },
+        "signal": { "$ref": "#/$defs/nullableSignal" },
+        "quiescedAt": { "$ref": "#/$defs/utcMilliseconds" },
+        "processSessionQuiesced": { "const": true },
+        "quiescenceEvidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "usageRecordedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentSha256", "documentSizeBytes", "source", "completeness", "coverage", "checkpointHash", "resumeEligible"],
+      "properties": {
+        "documentSha256": { "$ref": "#/$defs/sha256" },
+        "documentSizeBytes": { "$ref": "#/$defs/positiveSafeInteger" },
+        "source": { "enum": ["provider_final", "provider_partial", "unavailable"] },
+        "completeness": { "$ref": "#/$defs/completeness" },
+        "coverage": { "$ref": "#/$defs/coverageSummary" },
+        "checkpointHash": { "$ref": "#/$defs/nullableSha256" },
+        "resumeEligible": { "type": "boolean" }
+      }
+    },
+    "usageReconciledDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentSha256", "documentSizeBytes", "source", "completeness", "coverage", "checkpointHash", "resumeEligible", "reasonCode", "observedAt", "runnerFinishedEventHash"],
+      "properties": {
+        "documentSha256": { "$ref": "#/$defs/sha256" },
+        "documentSizeBytes": { "$ref": "#/$defs/positiveSafeInteger" },
+        "source": { "enum": ["provider_final", "provider_partial", "unavailable"] },
+        "completeness": { "$ref": "#/$defs/completeness" },
+        "coverage": { "$ref": "#/$defs/coverageSummary" },
+        "checkpointHash": { "$ref": "#/$defs/nullableSha256" },
+        "resumeEligible": { "type": "boolean" },
+        "reasonCode": { "const": "crash_gap" },
+        "observedAt": { "$ref": "#/$defs/utcMilliseconds" },
+        "runnerFinishedEventHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runnerAbandonedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "abandonmentReason", "quiescedAt", "processSessionQuiesced", "quiescenceEvidenceSha256"],
+      "properties": {
+        "status": { "const": "abandoned" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "abandonmentReason": { "enum": ["pre_release_failure", "signal", "timeout", "manual_switch", "host_shutdown", "lineage_blocked"] },
+        "quiescedAt": { "$ref": "#/$defs/utcMilliseconds" },
+        "processSessionQuiesced": { "const": true },
+        "quiescenceEvidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "failoverSelectedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromRunId", "fromProvider", "toProvider", "reasonCode", "breakerScope", "evidenceSha256"],
+      "properties": {
+        "fromRunId": { "$ref": "#/$defs/runId" },
+        "fromProvider": { "$ref": "#/$defs/provider" },
+        "toProvider": { "$ref": "#/$defs/provider" },
+        "reasonCode": { "enum": ["limited", "provider_unavailable", "preflight_unavailable", "route_unavailable", "breaker_open", "manual_switch"] },
+        "breakerScope": { "enum": ["provider", "family", "model", "none"] },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "runnerSwitchRequestedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "sourceRunId", "sourceEpoch", "targetProvider", "requestRecordSha256"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/code" },
+        "sourceRunId": { "$ref": "#/$defs/runId" },
+        "sourceEpoch": { "$ref": "#/$defs/positiveSafeInteger" },
+        "targetProvider": { "$ref": "#/$defs/provider" },
+        "requestRecordSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runnerSwitchConsumedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "sourceRunId", "sourceEpoch", "targetProvider", "requestRecordSha256", "consumeEvidenceSha256"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/code" },
+        "sourceRunId": { "$ref": "#/$defs/runId" },
+        "sourceEpoch": { "$ref": "#/$defs/positiveSafeInteger" },
+        "targetProvider": { "$ref": "#/$defs/provider" },
+        "requestRecordSha256": { "$ref": "#/$defs/sha256" },
+        "consumeEvidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runnerSwitchRejectedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestId", "sourceRunId", "sourceEpoch", "targetProvider", "requestRecordSha256", "reasonCode", "evidenceSha256"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/code" },
+        "sourceRunId": { "$ref": "#/$defs/runId" },
+        "sourceEpoch": { "$ref": "#/$defs/positiveSafeInteger" },
+        "targetProvider": { "$ref": "#/$defs/provider" },
+        "requestRecordSha256": { "$ref": "#/$defs/sha256" },
+        "reasonCode": { "enum": ["stale_epoch", "duplicate", "invalid_target", "run_not_active", "lineage_blocked", "integrity_conflict"] },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "gateWaitStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateKey", "cursorRevision", "stageEventHash"],
+      "properties": {
+        "gateKey": { "$ref": "#/$defs/code" },
+        "cursorRevision": { "$ref": "#/$defs/positiveSafeInteger" },
+        "stageEventHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "gateDecidedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "gateKey", "decision", "decisionRecordSha256", "feedbackSha256", "transitionId", "stageEventHash"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "gateKey": { "$ref": "#/$defs/code" },
+        "decision": { "enum": ["approved", "rejected"] },
+        "decisionRecordSha256": { "$ref": "#/$defs/sha256" },
+        "feedbackSha256": { "$ref": "#/$defs/nullableSha256" },
+        "transitionId": { "$ref": "#/$defs/code" },
+        "stageEventHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "humanInterventionStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reasonCode", "evidenceSha256"],
+      "properties": {
+        "reasonCode": { "enum": ["manual_resume_required", "lineage_blocked", "cleanup_conflict", "rewind_limit", "no_progress", "operator_requested"] },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "humanInterventionResolvedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "resolutionCode", "resolutionEvidenceSha256"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "resolutionCode": { "enum": ["resume", "abandon", "retry", "goto", "operator_override"] },
+        "resolutionEvidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "cleanupStartedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cleanupKind", "targetIdentitySha256"],
+      "properties": {
+        "cleanupKind": { "enum": ["attempt_resources", "instrumentation_transaction", "runner_process_session", "sandbox", "shared_leases"] },
+        "targetIdentitySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "cleanupFinishedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "reasonTextSha256", "durationMs", "durationFidelity", "evidenceSha256", "cleanupKind", "releasedTargetCount", "retainedTargetCount"],
+      "properties": {
+        "status": { "$ref": "#/$defs/spanStatus" },
+        "reasonCode": { "$ref": "#/$defs/spanReasonCode" },
+        "reasonTextSha256": { "$ref": "#/$defs/nullableSha256" },
+        "durationMs": { "$ref": "#/$defs/safeInteger" },
+        "durationFidelity": { "$ref": "#/$defs/durationFidelity" },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" },
+        "cleanupKind": { "enum": ["attempt_resources", "instrumentation_transaction", "runner_process_session", "sandbox", "shared_leases"] },
+        "releasedTargetCount": { "$ref": "#/$defs/safeInteger" },
+        "retainedTargetCount": { "$ref": "#/$defs/safeInteger" }
+      }
+    },
+    "sharedLeaseReleasedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leaseKind", "leaseIdentitySha256", "result", "evidenceSha256"],
+      "properties": {
+        "leaseKind": { "enum": ["profile", "workspace", "stand", "gpu"] },
+        "leaseIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "result": { "enum": ["released", "already_released"] },
+        "evidenceSha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "orchestratorSessionStartedEvent": { "type": "object", "properties": { "kind": { "const": "orchestrator_session_started" }, "details": { "$ref": "#/$defs/orchestratorSessionStartedDetails" } }, "required": ["kind", "details"] },
+    "orchestratorSessionFinishedEvent": { "type": "object", "properties": { "kind": { "const": "orchestrator_session_finished" }, "details": { "$ref": "#/$defs/basicSpanFinishedDetails" } }, "required": ["kind", "details"] },
+    "lifecycleTailRecoveredEvent": { "type": "object", "properties": { "kind": { "const": "lifecycle_tail_recovered" }, "details": { "$ref": "#/$defs/tailRecoveryDetails" } }, "required": ["kind", "details"] },
+    "attemptStartedEvent": { "type": "object", "properties": { "kind": { "const": "attempt_started" }, "details": { "$ref": "#/$defs/attemptStartedDetails" } }, "required": ["kind", "details"] },
+    "attemptInterruptedEvent": { "type": "object", "properties": { "kind": { "const": "attempt_interrupted" }, "details": { "$ref": "#/$defs/attemptInterruptedDetails" } }, "required": ["kind", "details"] },
+    "attemptResumedEvent": { "type": "object", "properties": { "kind": { "const": "attempt_resumed" }, "details": { "$ref": "#/$defs/attemptResumedDetails" } }, "required": ["kind", "details"] },
+    "attemptTerminalRecordedEvent": { "type": "object", "properties": { "kind": { "const": "attempt_terminal_recorded" }, "details": { "$ref": "#/$defs/attemptTerminalRecordedDetails" } }, "required": ["kind", "details"] },
+    "routeSelectedEvent": { "type": "object", "properties": { "kind": { "const": "route_selected" }, "details": { "$ref": "#/$defs/routeSelectedDetails" } }, "required": ["kind", "details"] },
+    "routingTransitionReconciledEvent": { "type": "object", "properties": { "kind": { "const": "routing_transition_reconciled" }, "details": { "$ref": "#/$defs/routingTransitionReconciledDetails" } }, "required": ["kind", "details"] },
+    "sandboxStartedEvent": { "type": "object", "properties": { "kind": { "const": "sandbox_started" }, "details": { "$ref": "#/$defs/sandboxStartedDetails" } }, "required": ["kind", "details"] },
+    "sandboxFinishedEvent": { "type": "object", "properties": { "kind": { "const": "sandbox_finished" }, "details": { "$ref": "#/$defs/basicSpanFinishedDetails" } }, "required": ["kind", "details"] },
+    "bootstrapStartedEvent": { "type": "object", "properties": { "kind": { "const": "bootstrap_started" }, "details": { "$ref": "#/$defs/bootstrapStartedDetails" } }, "required": ["kind", "details"] },
+    "bootstrapFinishedEvent": { "type": "object", "properties": { "kind": { "const": "bootstrap_finished" }, "details": { "$ref": "#/$defs/basicSpanFinishedDetails" } }, "required": ["kind", "details"] },
+    "nodeVisitStartedEvent": { "type": "object", "properties": { "kind": { "const": "node_visit_started" }, "details": { "$ref": "#/$defs/nodeVisitStartedDetails" } }, "required": ["kind", "details"] },
+    "nodeVisitFinishedEvent": { "type": "object", "properties": { "kind": { "const": "node_visit_finished" }, "details": { "$ref": "#/$defs/nodeVisitFinishedDetails" } }, "required": ["kind", "details"] },
+    "nodeExecutionStartedEvent": { "type": "object", "properties": { "kind": { "const": "node_execution_started" }, "details": { "$ref": "#/$defs/nodeExecutionStartedDetails" } }, "required": ["kind", "details"] },
+    "nodeExecutionFinishedEvent": { "type": "object", "properties": { "kind": { "const": "node_execution_finished" }, "details": { "$ref": "#/$defs/nodeExecutionFinishedDetails" } }, "required": ["kind", "details"] },
+    "commandStartedEvent": { "type": "object", "properties": { "kind": { "const": "command_started" }, "details": { "$ref": "#/$defs/commandStartedDetails" } }, "required": ["kind", "details"] },
+    "commandFinishedEvent": { "type": "object", "properties": { "kind": { "const": "command_finished" }, "details": { "$ref": "#/$defs/commandFinishedDetails" } }, "required": ["kind", "details"] },
+    "dispatchStartedEvent": { "type": "object", "properties": { "kind": { "const": "dispatch_started" }, "details": { "$ref": "#/$defs/dispatchStartedDetails" } }, "required": ["kind", "details"] },
+    "dispatchCandidateSelectedEvent": { "type": "object", "properties": { "kind": { "const": "dispatch_candidate_selected" }, "details": { "$ref": "#/$defs/dispatchCandidateSelectedDetails" } }, "required": ["kind", "details"] },
+    "dispatchCandidateSkippedEvent": { "type": "object", "properties": { "kind": { "const": "dispatch_candidate_skipped" }, "details": { "$ref": "#/$defs/dispatchCandidateSkippedDetails" } }, "required": ["kind", "details"] },
+    "dispatchFinishedEvent": { "type": "object", "properties": { "kind": { "const": "dispatch_finished" }, "details": { "$ref": "#/$defs/dispatchFinishedDetails" } }, "required": ["kind", "details"] },
+    "runnerStartedEvent": { "type": "object", "properties": { "kind": { "const": "runner_started" }, "details": { "$ref": "#/$defs/runnerStartedDetails" } }, "required": ["kind", "details"] },
+    "runnerScopeBoundEvent": { "type": "object", "properties": { "kind": { "const": "runner_scope_bound" }, "details": { "$ref": "#/$defs/runnerScopeBoundDetails" } }, "required": ["kind", "details"] },
+    "runnerFinishedEvent": { "type": "object", "properties": { "kind": { "const": "runner_finished" }, "details": { "$ref": "#/$defs/runnerFinishedDetails" } }, "required": ["kind", "details"] },
+    "runnerUsageRecordedEvent": { "type": "object", "properties": { "kind": { "const": "runner_usage_recorded" }, "details": { "$ref": "#/$defs/usageRecordedDetails" } }, "required": ["kind", "details"] },
+    "runnerUsageReconciledEvent": { "type": "object", "properties": { "kind": { "const": "runner_usage_reconciled" }, "details": { "$ref": "#/$defs/usageReconciledDetails" } }, "required": ["kind", "details"] },
+    "runnerAbandonedEvent": { "type": "object", "properties": { "kind": { "const": "runner_abandoned" }, "details": { "$ref": "#/$defs/runnerAbandonedDetails" } }, "required": ["kind", "details"] },
+    "failoverSelectedEvent": { "type": "object", "properties": { "kind": { "const": "failover_selected" }, "details": { "$ref": "#/$defs/failoverSelectedDetails" } }, "required": ["kind", "details"] },
+    "runnerSwitchRequestedEvent": { "type": "object", "properties": { "kind": { "const": "runner_switch_requested" }, "details": { "$ref": "#/$defs/runnerSwitchRequestedDetails" } }, "required": ["kind", "details"] },
+    "runnerSwitchConsumedEvent": { "type": "object", "properties": { "kind": { "const": "runner_switch_consumed" }, "details": { "$ref": "#/$defs/runnerSwitchConsumedDetails" } }, "required": ["kind", "details"] },
+    "runnerSwitchRejectedEvent": { "type": "object", "properties": { "kind": { "const": "runner_switch_rejected" }, "details": { "$ref": "#/$defs/runnerSwitchRejectedDetails" } }, "required": ["kind", "details"] },
+    "gateWaitStartedEvent": { "type": "object", "properties": { "kind": { "const": "gate_wait_started" }, "details": { "$ref": "#/$defs/gateWaitStartedDetails" } }, "required": ["kind", "details"] },
+    "gateDecidedEvent": { "type": "object", "properties": { "kind": { "const": "gate_decided" }, "details": { "$ref": "#/$defs/gateDecidedDetails" } }, "required": ["kind", "details"] },
+    "humanInterventionStartedEvent": { "type": "object", "properties": { "kind": { "const": "human_intervention_started" }, "details": { "$ref": "#/$defs/humanInterventionStartedDetails" } }, "required": ["kind", "details"] },
+    "humanInterventionResolvedEvent": { "type": "object", "properties": { "kind": { "const": "human_intervention_resolved" }, "details": { "$ref": "#/$defs/humanInterventionResolvedDetails" } }, "required": ["kind", "details"] },
+    "cleanupStartedEvent": { "type": "object", "properties": { "kind": { "const": "cleanup_started" }, "details": { "$ref": "#/$defs/cleanupStartedDetails" } }, "required": ["kind", "details"] },
+    "cleanupFinishedEvent": { "type": "object", "properties": { "kind": { "const": "cleanup_finished" }, "details": { "$ref": "#/$defs/cleanupFinishedDetails" } }, "required": ["kind", "details"] },
+    "sharedLeaseReleasedEvent": { "type": "object", "properties": { "kind": { "const": "shared_lease_released" }, "details": { "$ref": "#/$defs/sharedLeaseReleasedDetails" } }, "required": ["kind", "details"] }
+  }
+}

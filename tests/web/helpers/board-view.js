@@ -94,6 +94,10 @@ export async function compileBoardView(prefix = 'board') {
       'const useSse = () => ({});',
     )
     .replace(
+      "import { confirmDialog } from '../shared/ui/confirm.js';",
+      'const confirmDialog = async () => false;',
+    )
+    .replace(
       "from '../shared/board-task-list.js'",
       `from "${LIST_URL}"`,
     );
@@ -114,6 +118,8 @@ export async function installBrowser(t) {
     location: browser.location,
     localStorage: browser.localStorage,
     Node: browser.Node,
+    Document: browser.Document,
+    ShadowRoot: browser.ShadowRoot,
     Element: browser.Element,
     HTMLElement: browser.HTMLElement,
     SVGElement: browser.SVGElement,
@@ -145,10 +151,15 @@ const DEFAULT_TASKS = [
 export async function mountBoardView(t, {
   prefix = 'board',
   tasks = DEFAULT_TASKS,
+  toReview = [],
+  created = [],
+  analysis = {},
   favorites = {},
   seen = {},
+  triagePrefs,
 } = {}) {
   const browser = await installBrowser(t);
+  if (triagePrefs !== undefined) browser.localStorage.setItem('board.triage', triagePrefs);
   const [{ mount, flushPromises }, { createPinia, defineStore }] = await Promise.all([
     import(TEST_UTILS),
     import(PINIA_URL),
@@ -165,8 +176,8 @@ export async function mountBoardView(t, {
           month: { hours: 0, norm: 1 },
           charts: {},
           tasks,
-          toReview: [],
-          created: [],
+          toReview,
+          created,
         },
         error: null,
         loading: false,
@@ -175,7 +186,7 @@ export async function mountBoardView(t, {
     }),
     ui: defineStore(`board-view-ui-${nonce}`, { actions: { openTask() {} } }),
     analysis: defineStore(`board-view-analysis-${nonce}`, {
-      state: () => ({ byTask: {} }),
+      state: () => ({ byTask: analysis }),
       actions: { startPolling() {}, async analyze() {} },
     }),
     favorites: defineStore(`board-view-favorites-${nonce}`, {

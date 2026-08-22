@@ -2,10 +2,11 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/api-client.js';
 import { useSse } from '../composables/useSse.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
-import { useChatStore } from '../stores/chat.js';
+import { useCompanionStore } from '../stores/companion.js';
 import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';
@@ -29,7 +30,7 @@ import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
 const ui = useUiStore();
-const chat = useChatStore();
+const companion = useCompanionStore();
 const taskStore = useTasksStore();
 const board = useBoardStore();
 
@@ -81,8 +82,13 @@ function elapsedTitle(t) {
 }
 
 let ticker = null;
-onMounted(() => { ticker = setInterval(() => { now.value = Date.now(); }, 1000); });
-onUnmounted(() => { if (ticker) clearInterval(ticker); clearInterval(actPoll); });
+onMounted(() => {
+  ticker = setInterval(() => { now.value = Date.now(); }, 1000);
+});
+onUnmounted(() => {
+  if (ticker) clearInterval(ticker);
+  clearInterval(actPoll);
+});
 
 // Тумблеры (переживают перезагрузку — как в старом дашборде).
 const compact = ref(localStorage.getItem('cockpit-compact') === '1');
@@ -129,6 +135,7 @@ const stageActivity = ref(null);
 const stageDoc = ref('');       // документ этапа (план/разведнота/диагноз…) — рендерится в модалке
 const stageDocOpen = ref(true);
 const stageLogOpen = ref(false);
+const pipelineContext = useUiContextSource('pipeline', { layer: 'overlay', active: false });
 const liveFeed = ref(null);
 const stageDocLoading = ref(false);
 let actPoll = null;
@@ -148,6 +155,31 @@ const NODE_DOC = {
   // было: документ существовал и не открывался нигде.
   review: 'review',
 };
+function pipelineContextDetails() {
+  if (!stage.value) return null;
+  const document = stageDocOpen.value ? NODE_DOC[stage.value.id] || null : null;
+  const tab = stageLogOpen.value ? 'activity' : document ? 'document' : 'overview';
+  const details = { taskId: String(stage.value.task), stageId: String(stage.value.id), tab };
+  return { ...details, ...(document ? { document } : {}) };
+}
+const pipelineContextIdentity = computed(() => (
+  stage.value ? `${stage.value.task}:${stage.value.id}` : ''
+));
+watch(pipelineContextIdentity, (identity, previous) => {
+  if (!identity) { pipelineContext.blur(); return; }
+  const taskId = String(stage.value.task);
+  const next = {
+    routingScope: { kind: 'task', taskId },
+    details: pipelineContextDetails(),
+  };
+  if (identity !== previous) pipelineContext.focus(next);
+  else pipelineContext.update(next);
+}, { immediate: true });
+watch(
+  () => [pipelineContextIdentity.value, stageDocOpen.value, stageLogOpen.value],
+  () => { if (stage.value) pipelineContext.update({ details: pipelineContextDetails() }); },
+  { immediate: true },
+);
 const STAGE_HINT = {
   done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
   skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
@@ -546,7 +578,6 @@ async function load() {
   }
 }
 load();
-useSse((name) => { if (name === 'state-change') load(); });
 
 // Класс полосы прогресса по текущему статусу.
 function progressClass(g) {
@@ -960,7 +991,7 @@ function cardState(g) {
         <footer class="sactions">
           <span class="sactions-context"><b class="mono">#{{ stage.task }}</b> · действия с задачей</span>
           <div class="sactions-buttons">
-            <button class="btn" @click="chat.openFor(stage.task, title(stage.task)); closeStage()">💬 Обсудить с агентом</button>
+            <button class="btn" @click="companion.openForTask(stage.task); closeStage()">💬 Обсудить с агентом</button>
             <OpenDiffButton :task-id="stage.task" />
           </div>
         </footer>
@@ -986,6 +1017,10 @@ function cardState(g) {
 .pchip b { color: var(--ink); margin-left: 4px; }
 .pchip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .pchip.on b { color: #fff; }
+
+/* Очередь и слоты не входят в графы: у каждого блока собственные loading/error и
+   последний удачный снимок. Поэтому визуально это одна операционная полоса, но не
+   одна карточка с общим условием отображения. */
 .chev { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 13px; padding: 0 2px; flex: none; }
 .chev:hover { color: var(--ink); }
 .waitme { margin: 6px 0 0; font-size: 12.5px; color: var(--warn);

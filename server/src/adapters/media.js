@@ -68,4 +68,20 @@ export class MediaAdapter {
     const destDir = path.join(this.mediaDir, `frames-${name || Date.now()}`);
     return extractFramesAt({ filePath, seconds, destDir });
   }
+
+  /** Корень кадров встреч. Наружу отдаётся имя внутри него, а не путь. */
+  get framesRoot() { return path.join(this.mediaDir, 'meeting-frames'); }
+
+  /**
+   * Кадры одного разбора встречи. Все части пишут в общий каталог разбора, поэтому
+   * имя несёт номер части: у частей секунды локальные и совпадают между собой.
+   */
+  meetingFrames({ filePath, seconds, run, part = 0 }) {
+    return extractFramesAt({
+      filePath,
+      seconds,
+      destDir: path.join(this.framesRoot, run),
+      prefix: `p${part}-`,
+    });
+  }
 }

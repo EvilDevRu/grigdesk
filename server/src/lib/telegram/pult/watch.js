@@ -14,31 +14,50 @@
 // Оповещение — только на переходе «не ждала → ждёт». Первый снимок после
 // старта/включения — silent (правило notify-watch), state и message_id карточек
 // переживают рестарт в pult-state.json.
+import { createHash } from 'node:crypto';
 import { waitingReason } from '../../../../../web/src/shared/pipeline-wait.js';
 import { silenceReason } from '../../../../../web/src/shared/agent-activity.js';
 import {
+  chatSubject,
   clipText,
   collapseLine,
+  finishedCard,
   gateCard,
   gateKeyboard,
+  liveCard,
+  liveKeyboard,
+  liveSignature,
   permissionCard,
   permissionKeyboard,
   questionCard,
   questionKeyboard,
-  resolvedCard,
   silenceCard,
   stallCard,
   stallKeyboard,
 } from './format.js';
 import { PultSendQueue } from './send-queue.js';
+import { encodePultOwnerKey, pultOwnerKeyMatches } from './state-store.js';
 
 const CALL_TIMEOUT_MS = 15_000;
 // Меняем при несовместимой разметке карточек: существующее сообщение best-effort
 // обновится после рестарта, не дожидаясь, пока повод исчезнет и возникнет снова.
-const CARD_UI_VERSION = 2;
+export const CARD_UI_VERSION = 4;
+
+/**
+ * Исходы, о которых будить не надо. `human-rewind` человек сделал сам, `recovered`
+ * означает лишь, что маршрут поехал новой попыткой — её карточка придёт своим ходом.
+ * Доехавший маршрут и закрытая попытка, наоборот, звонят: их и ждут с телефона.
+ */
+const QUIET_RESULTS = new Set(['recovered', 'human-rewind']);
+
+/** Отпечаток текста карточки: хранить в state весь текст дорого, сравнить надо точно. */
+const textHash = (text) => createHash('sha1').update(String(text ?? '')).digest('hex').slice(0, 16);
 
 /** Telegram считает правку тем же текстом/кнопками ошибкой, но миграция уже выполнена. */
 const isUnchangedEdit = (error) => /message is not modified/iu.test(String(error?.message || ''));
+
+/** Сообщения уже нет в чате (удалил человек): удалять нечего, ключ забывается. */
+const isMissingMessage = (error) => /not found/iu.test(String(error?.message || ''));
 
 /** Превью запроса разрешения: команда сильнее пути, путь сильнее описания. */
 export function permissionPreview(input) {
@@ -62,6 +81,7 @@ export class TelegramPultWatch {
     debounceMs = 3_000,
     chatDebounceMs = 500,
     intervalMs = 120_000,
+    liveEditMinMs = 60_000,
   } = {}) {
     if (typeof acquireLease !== 'function' || typeof isEnabled !== 'function'
         || typeof callApi !== 'function' || typeof stateStoreFor !== 'function'
@@ -79,6 +99,10 @@ export class TelegramPultWatch {
     this.debounceMs = debounceMs;
     this.chatDebounceMs = chatDebounceMs;
     this.intervalMs = intervalMs;
+    // Живая карточка правится сразу на смене узла/статуса, а тикающие минуты
+    // молчания — не чаще этого интервала: иначе каждое `state-change` идущего
+    // прогона превращалось бы в editMessageText и выбирало лимит Bot API.
+    this.liveEditMinMs = liveEditMinMs;
 
     this._ownerKey = null;
     this._store = null;
@@ -133,9 +157,9 @@ export class TelegramPultWatch {
   }
 
   /**
-   * Забыть карточку БЕЗ правки сообщения: действие пульта уже отредактировало её
-   * само (точным итогом вроде «принято, прогон продолжен»), и общий «✓ решено»
-   * следующего обхода затёр бы более конкретный текст.
+   * Забыть карточку БЕЗ удаления сообщения: действие пульта уже удалило её само
+   * (итог человек увидел всплывашкой или эфемерным «✓ …»), и повторное удаление
+   * следующего обхода было бы лишним вызовом.
    */
   forget(key) {
     if (!this._state?.cards || !(key in this._state.cards)) return;
@@ -149,7 +173,8 @@ export class TelegramPultWatch {
     if (snapshot === this._persisted) return;
     this._persisted = snapshot;
     try {
-      await this._store.write(this._state);
+      // Merge-запись: screen/sent действий пульта это не трогает.
+      await this._store.write({ cards: this._state.cards });
     } catch (error) {
       this.log.warn?.({ code: error?.code }, 'telegram-pult: state не записался');
     }
@@ -203,7 +228,11 @@ export class TelegramPultWatch {
       const token = lease.context.credentials?.token || '';
       if (!token) return;
 
-      const ownerKey = `${lease.accountRef}:${settings.pultChatId}:${settings.pultConfirmedAtMs}`;
+      const ownerKey = encodePultOwnerKey(
+        lease.accountRef,
+        settings.pultConfirmedAtMs,
+        settings.pultChatId,
+      );
       let silentSnapshot = false;
       if (this._ownerKey !== ownerKey) {
         // Первый снимок после старта процесса или включения пульта: state
@@ -215,9 +244,15 @@ export class TelegramPultWatch {
         // message_id уникален только внутри конкретного чата. Состояние прежней
         // привязки нельзя применять к новому владельцу даже при совпавшем номере
         // сообщения: неизвестные legacy-карточки тоже безопасно забываем.
-        const sameOwner = Object.values(loaded.cards)
-          .every((card) => card.ownerKey === ownerKey);
-        this._state = sameOwner ? loaded : { cards: {} };
+        const sameOwner = Object.values(loaded.cards).every((card) => pultOwnerKeyMatches(
+          card.ownerKey,
+          lease.accountRef,
+          settings.pultConfirmedAtMs,
+          settings.pultChatId,
+        ));
+        this._state = sameOwner ? loaded : {
+          cards: {}, screen: null, sent: [], turns: loaded.turns || [],
+        };
         // При смене owner persisted оставляем от загруженного состояния, чтобы
         // пустой/новый снимок гарантированно перезаписал старые message_id.
         this._persisted = JSON.stringify(loaded.cards);
@@ -233,15 +268,37 @@ export class TelegramPultWatch {
 
       for (const [key, want] of desired) {
         const have = cards[key];
+        // Живая карточка доехавшего прогона в исход НЕ правится: рядом уходит
+        // done: с тем же итогом, а сама live удаляется отдельным проходом ниже —
+        // в истории остаётся ровно одно сообщение о результате прогона.
+        if (have && want.live === true && desired.has(`done:${key.slice(5)}`)) {
+          next[key] = have;
+          continue;
+        }
+        const meta = {
+          kind: want.kind,
+          subject: want.subject,
+          ownerKey,
+          uiVersion: CARD_UI_VERSION,
+          sticky: want.sticky === true,
+          sig: want.sig ?? null,
+          hash: textHash(want.text),
+          ...(want.replyAction ? { replyAction: want.replyAction } : {}),
+        };
         if (have) {
-          if (!have.messageId || have.uiVersion === CARD_UI_VERSION) {
-            next[key] = {
-              ...have,
-              kind: want.kind,
-              subject: want.subject,
-              ownerKey,
-              uiVersion: CARD_UI_VERSION,
-            };
+          // Править нечего у silent-карточки (сообщения не было). Иначе поводов два:
+          // миграция разметки после обновления кокпита и живая карточка, чьё
+          // содержимое реально изменилось.
+          const stale = have.hash !== meta.hash;
+          const cooled = !have.editedAt || (this.now() - have.editedAt) >= this.liveEditMinMs;
+          const shouldEdit = Boolean(have.messageId) && (
+            have.uiVersion !== CARD_UI_VERSION
+            || (want.live === true && stale && (have.sig !== meta.sig || cooled))
+          );
+          if (!shouldEdit) {
+            // Хэш и подпись сохраняем прежними: содержимое на экране не менялось,
+            // и переписать их значило бы соврать следующему обходу про остывание.
+            next[key] = { ...have, ...meta, sig: have.sig ?? meta.sig, hash: have.hash ?? meta.hash };
             continue;
           }
           try {
@@ -252,40 +309,22 @@ export class TelegramPultWatch {
               link_preview_options: { is_disabled: true },
               reply_markup: { inline_keyboard: want.keyboard || [] },
             }, { timeoutMs: CALL_TIMEOUT_MS }));
-            next[key] = {
-              ...have,
-              kind: want.kind,
-              subject: want.subject,
-              ownerKey,
-              uiVersion: CARD_UI_VERSION,
-            };
+            next[key] = { ...have, ...meta, editedAt: this.now() };
           } catch (error) {
             if (isUnchangedEdit(error)) {
-              next[key] = {
-                ...have,
-                kind: want.kind,
-                subject: want.subject,
-                ownerKey,
-                uiVersion: CARD_UI_VERSION,
-              };
+              // Текст на экране и так этот: правка не нужна, состояние актуально.
+              next[key] = { ...have, ...meta, editedAt: this.now() };
               continue;
             }
-            // Версию не повышаем: следующий обход ещё раз попробует обновить
+            // Версию и хэш не повышаем: следующий обход ещё раз попробует обновить
             // старую карточку с прежними кнопками.
             next[key] = have;
-            this.log.warn?.({ code: error?.code }, 'telegram-pult: старая карточка не обновилась');
+            this.log.warn?.({ code: error?.code }, 'telegram-pult: карточка не обновилась');
           }
           continue;
         }
         if (silentSnapshot) {
-          next[key] = {
-            messageId: null,
-            kind: want.kind,
-            subject: want.subject,
-            at: this.now(),
-            ownerKey,
-            uiVersion: CARD_UI_VERSION,
-          };
+          next[key] = { messageId: null, at: this.now(), ...meta };
           continue;
         }
         try {
@@ -293,16 +332,17 @@ export class TelegramPultWatch {
             chat_id: chatId,
             text: want.text,
             link_preview_options: { is_disabled: true },
+            // Живая карточка и служебный исход не будят телефон: звонить имеет
+            // право только то, что действительно стоит на человеке.
+            ...(want.silent === true ? { disable_notification: true } : {}),
             ...(want.keyboard ? { reply_markup: { inline_keyboard: want.keyboard } } : {}),
           }, { timeoutMs: CALL_TIMEOUT_MS }));
           const messageId = Number(sent?.message_id);
           next[key] = {
             messageId: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null,
-            kind: want.kind,
-            subject: want.subject,
             at: this.now(),
-            ownerKey,
-            uiVersion: CARD_UI_VERSION,
+            editedAt: this.now(),
+            ...meta,
           };
         } catch (error) {
           // Best effort, at most once: не записываем как отправленное — карточка
@@ -311,24 +351,88 @@ export class TelegramPultWatch {
         }
       }
 
-      // Повод ушёл: карточка гаснет в «✓ решено» по сохранённому message_id.
+      // Повод ушёл: карточка удаляется из чата по сохранённому message_id.
       for (const [key, card] of Object.entries(cards)) {
         if (desired.has(key)) continue;
         if (!card.messageId) continue; // silent-карточка: сообщений не было, забыть достаточно
+        // Липкая карточка — единственная запись об исходе прогона: удалить её
+        // значило бы стереть, чем всё кончилось. Уход из desired для неё значит
+        // лишь «задачу заархивировали» — ключ забывается, сообщение остаётся.
+        if (card.sticky) continue;
         try {
-          await this.queue.push(() => lease.context.botApi.callBotApi(token, 'editMessageText', {
+          await this.queue.push(() => lease.context.botApi.callBotApi(token, 'deleteMessage', {
             chat_id: chatId,
             message_id: card.messageId,
-            text: resolvedCard({ subject: card.subject || 'карточка' }),
-            reply_markup: { inline_keyboard: [] },
           }, { timeoutMs: CALL_TIMEOUT_MS }));
         } catch (error) {
-          // Уборка — косметика: кнопки на старом сообщении всё равно безопасны (CAS).
-          this.log.warn?.({ code: error?.code }, 'telegram-pult: карточка не погасилась (best effort)');
+          if (isMissingMessage(error)) continue; // человек уже удалил сам — забыть достаточно
+          // Не удалилось — не записываем как успех: карточка остаётся в state
+          // и удаление повторится следующим обходом. Обход это не роняет.
+          next[key] = card;
+          this.log.warn?.({ code: error?.code }, 'telegram-pult: карточка не удалилась, повторит следующий обход');
         }
       }
 
-      this._state = { cards: next };
+      // Прогон доехал: done: ушёл отдельным сообщением, и живая карточка рядом —
+      // дубль того же итога. Удаляем её, но ТОЛЬКО когда done: реально отправлен.
+      for (const [key, card] of Object.entries(next)) {
+        if (!key.startsWith('done:')) continue;
+        const liveKey = `live:${key.slice(5)}`;
+        const live = next[liveKey];
+        if (!live?.messageId) continue;
+        if (!card.messageId) {
+          // done: не отправлен — прогон доехал, пока сервер лежал, и первый
+          // снимок был silent. Живое сообщение тогда единственная запись об
+          // исходе: правим её в итог, иначе она навсегда осталась бы
+          // замороженной на «прогон идёт», а исхода человек не увидел бы нигде.
+          // kind 'done' — отметка, что правка уже сделана: без неё каждый
+          // следующий обход слал бы ту же правку заново.
+          if (live.kind === 'done') continue;
+          const want = desired.get(key);
+          if (!want) continue;
+          try {
+            await this.queue.push(() => lease.context.botApi.callBotApi(token, 'editMessageText', {
+              chat_id: chatId,
+              message_id: live.messageId,
+              text: want.text,
+              link_preview_options: { is_disabled: true },
+              reply_markup: { inline_keyboard: [] },
+            }, { timeoutMs: CALL_TIMEOUT_MS }));
+            next[liveKey] = { ...live, kind: 'done', sig: null, hash: textHash(want.text), editedAt: this.now() };
+          } catch (error) {
+            if (isUnchangedEdit(error)) {
+              next[liveKey] = { ...live, kind: 'done', sig: null, hash: textHash(want.text), editedAt: this.now() };
+              continue;
+            }
+            if (isMissingMessage(error)) {
+              // Сообщения уже нет: исход человек убрал сам, повторять нечего.
+              next[liveKey] = { ...live, messageId: null };
+              continue;
+            }
+            // Прочий отказ не роняет обход: live остаётся, правка повторится
+            // следующим обходом.
+            this.log.warn?.({ code: error?.code }, 'telegram-pult: живая карточка не обновилась до исхода, повторит следующий обход');
+          }
+          continue;
+        }
+        try {
+          await this.queue.push(() => lease.context.botApi.callBotApi(token, 'deleteMessage', {
+            chat_id: chatId,
+            message_id: live.messageId,
+          }, { timeoutMs: CALL_TIMEOUT_MS }));
+          // Надгробие: messageId null — повторной отправки и правки не будет.
+          next[liveKey] = { ...live, messageId: null };
+        } catch (error) {
+          if (isMissingMessage(error)) {
+            next[liveKey] = { ...live, messageId: null };
+            continue;
+          }
+          // Прочий отказ: live остаётся нетронутым, удаление повторит следующий обход.
+          this.log.warn?.({ code: error?.code }, 'telegram-pult: живая карточка не удалилась, повторит следующий обход');
+        }
+      }
+
+      this._state = { ...this._state, cards: next };
       await this._persistState();
     } finally {
       await lease?.release?.();
@@ -347,16 +451,60 @@ export class TelegramPultWatch {
       const id = String(t.task);
       const title = clipText(collapseLine(t.title), 160);
       const subject = `#${id}${title ? ` — ${title}` : ''}`;
+      const attempt = String(t.attempt || '');
+      const terminal = String(t.result || '').trim();
       const taskSummary = {
         task: id,
         title,
         daemonAlive: Boolean(t.daemonAlive),
+        attempt,
+        result: terminal,
         stall: t.stall || null,
+        // Сырой замер молчания нужен карточке целиком: из него считается и «агент
+        // пишет», и «нет событий N мин», а `quiet` — только перешагнутый порог.
+        silence: t.silence || null,
         quiet: null,
         graph: null,
       };
       summary.tasks.push(taskSummary);
       if (t.daemonAlive) summary.running.push({ task: id });
+      taskSummary.quiet = silenceReason(t, silenceWindow);
+
+      let graph = null;
+      try { graph = await this._api('GET', `/api/tasks/${id}/graph`); } catch {
+        // Граф недоступен — карточка так и скажет; терять из-за этого задачу
+        // целиком нельзя, иначе прогон молча пропадает с пульта.
+      }
+      taskSummary.graph = graph;
+
+      // Живая карточка прогона: одно сообщение на попытку, которое вотчер держит
+      // актуальным правкой. Ключ включает attempt — новый прогон той же задачи
+      // получает свою карточку, а не переписывает историю прошлого.
+      if (attempt) {
+        desired.set(`live:${id}:${attempt}`, {
+          kind: 'live',
+          subject,
+          live: true,
+          silent: true,
+          sticky: true,
+          sig: liveSignature(taskSummary),
+          text: liveCard(taskSummary),
+          keyboard: terminal ? null : this._keyboard(() => liveKeyboard(id)),
+        });
+        // Исход прогона — отдельное сообщение: правка живой карточки push не даёт,
+        // а «доехало или упало» с телефона ждут именно звонком.
+        if (terminal) {
+          desired.set(`done:${id}:${attempt}`, {
+            kind: 'done',
+            subject,
+            sticky: true,
+            silent: QUIET_RESULTS.has(terminal),
+            text: finishedCard(taskSummary),
+            keyboard: null,
+          });
+        }
+      }
+
       if (t.stall) {
         const stage = t.stall.stage || '';
         summary.stalled.push({ task: id, title: t.stall.title || 'конвейер встал' });
@@ -367,27 +515,23 @@ export class TelegramPultWatch {
           keyboard: this._keyboard(() => stallKeyboard(id, stage)),
         });
       }
-      const quiet = silenceReason(t, silenceWindow);
-      taskSummary.quiet = quiet;
-      if (quiet) {
-        summary.silent.push({ task: id, text: quiet.text });
-        desired.set(`silence:${id}:${quiet.stage}`, {
+      if (taskSummary.quiet) {
+        summary.silent.push({ task: id, text: taskSummary.quiet.text });
+        desired.set(`silence:${id}:${taskSummary.quiet.stage}`, {
           kind: 'silence',
           subject,
-          text: silenceCard({ subject, text: quiet.text }),
+          text: silenceCard({ subject, text: taskSummary.quiet.text }),
           keyboard: null, // кнопки нет намеренно: зависшие ходы кокпит не глушит
         });
       }
-      let graph = null;
-      try { graph = await this._api('GET', `/api/tasks/${id}/graph`); } catch { continue; }
-      taskSummary.graph = graph;
-      const wait = waitingReason(graph);
+      const wait = graph ? waitingReason(graph) : null;
       if (!wait) continue;
       summary.waiting.push({ task: id, text: wait.text });
       const gateKey = graph?.keys?.[wait.node] || String(wait.node || '').toUpperCase();
       desired.set(`wait:${id}`, {
         kind: 'gate',
         subject,
+        replyAction: { kind: 'gate-reject', taskId: id, gateKey },
         text: gateCard({ subject, reason: wait.text }),
         keyboard: this._keyboard(() => gateKeyboard(id, gateKey)),
       });
@@ -398,6 +542,9 @@ export class TelegramPultWatch {
       for (const item of Array.isArray(waitingBody?.waiting) ? waitingBody.waiting : []) {
         const pid = String(item?.pid || '');
         if (!pid) continue;
+        // Кто спрашивает: имя разговора приходит вместе с ожиданием. Без него карточка
+        // сообщает вопрос, на который нечем ответить, — чатов у человека несколько.
+        const subject = chatSubject(item);
         if (Array.isArray(item.questions)) {
           const first = item.questions[0] || {};
           const note = [
@@ -411,17 +558,25 @@ export class TelegramPultWatch {
           summary.chat.push({ pid, text: first.question || 'вопрос агента' });
           desired.set(`q:${pid}`, {
             kind: 'question',
-            subject: 'чат',
-            text: questionCard({ subject: 'чат', question: first.question || '…', note }),
+            subject,
+            replyAction: { kind: 'question-text', pid },
+            text: questionCard({
+              subject,
+              header: first.header || '',
+              question: first.question || '…',
+              options: first.options || [],
+              note,
+            }),
             keyboard: this._keyboard(() => questionKeyboard(pid, first.options || [])),
           });
         } else {
           summary.chat.push({ pid, text: item.tool || 'разрешение' });
           desired.set(`perm:${pid}`, {
             kind: 'perm',
-            subject: 'чат',
+            subject,
+            replyAction: { kind: 'perm-deny', pid },
             text: permissionCard({
-              subject: 'чат',
+              subject,
               tool: item.tool || 'Действие агента',
               preview: permissionPreview(item.input),
             }),

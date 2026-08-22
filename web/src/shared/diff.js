@@ -41,6 +41,61 @@ export function lineDiff(oldText, newText) {
 }
 
 /**
+ * Разбирает unified patch одного файла в тот же нейтральный набор строк, который
+ * возвращает lineDiff. Заголовки файла и границы hunks не являются строками кода;
+ * между несколькими hunks оставляем контекстный разделитель, чтобы splitRows не
+ * склеил удаление из одного фрагмента с добавлением из следующего.
+ *
+ * @returns {{ rows: Array<{t:'ctx'|'del'|'add', text:string}>, added:number, removed:number }}
+ */
+export function unifiedDiff(patch) {
+  const lines = String(patch ?? '').split('\n').map((line) => (
+    line.endsWith('\r') ? line.slice(0, -1) : line
+  ));
+  const hasHunks = lines.some((line) => line.startsWith('@@'));
+  const rows = [];
+  let inHunk = !hasHunks;
+  let added = 0;
+  let removed = 0;
+
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      if (inHunk && rows.length && rows.at(-1)?.text !== '…') {
+        rows.push({ t: 'ctx', text: '…' });
+      }
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || line === '\\ No newline at end of file') continue;
+
+    // У patch без @@ всё ещё могут присутствовать стандартные заголовки файла.
+    if (!hasHunks && (
+      line.startsWith('diff --git ')
+      || line.startsWith('index ')
+      || line.startsWith('new file mode ')
+      || line.startsWith('deleted file mode ')
+      || line.startsWith('similarity index ')
+      || line.startsWith('rename from ')
+      || line.startsWith('rename to ')
+      || line.startsWith('--- ')
+      || line.startsWith('+++ ')
+    )) continue;
+
+    if (line.startsWith('-')) {
+      rows.push({ t: 'del', text: line.slice(1) });
+      removed++;
+    } else if (line.startsWith('+')) {
+      rows.push({ t: 'add', text: line.slice(1) });
+      added++;
+    } else if (line.startsWith(' ')) {
+      rows.push({ t: 'ctx', text: line.slice(1) });
+    }
+  }
+
+  return { rows, added, removed };
+}
+
+/**
  * Те же строки, но парами для показа в две колонки: слева убранное, справа добавленное.
  * Идущие подряд del/add ставятся друг напротив друга (как в split-виде дифф-просмотрщиков),
  * лишние строки одной из сторон получают пустого соседа.

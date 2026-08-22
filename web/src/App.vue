@@ -4,9 +4,10 @@ import AppShell from './shared/layout/AppShell.vue';
 import LoginView from './views/LoginView.vue';
 import UpdateBanner from './shared/ui/UpdateBanner.vue';
 import TaskModal from './views/TaskModal.vue';
-import ChatPanel from './views/ChatPanel.vue';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';
+import CompanionHost from './features/companion/CompanionHost.vue';
+import { SpeechProvider } from './features/speech/provider.js';
 import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
@@ -26,6 +27,9 @@ function startPolling() {
 }
 
 onMounted(async () => {
+  // Одноразовая best-effort уборка настройки удалённой плавающей панели. Ключ
+  // полноразмерного composer-а не трогаем: его высота по-прежнему нужна /chats.
+  try { localStorage.removeItem('cockpit-chat-panel-composer-h'); } catch { /* storage может быть недоступен */ }
   auth.watchUnauthorized();
   await auth.load();
   if (auth.authenticated) startPolling();
@@ -53,16 +57,18 @@ watch(() => auth.authenticated, (on, was) => {
 
   <template v-if="auth.ready">
     <LoginView v-if="!auth.authenticated" />
-    <template v-else>
+    <!-- Provider существует только в authenticated-ветке: logout размонтирует его
+         вместе с единственным mic-controller и немедленно отзывает browser resources. -->
+    <SpeechProvider v-else>
       <AppShell>
         <router-view v-slot="{ Component }">
           <component :is="Component" />
         </router-view>
       </AppShell>
       <TaskModal />
-      <ChatPanel />
+      <CompanionHost />
       <DiffModal />
       <DocumentModal />
-    </template>
+    </SpeechProvider>
   </template>
 </template>

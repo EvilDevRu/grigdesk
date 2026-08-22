@@ -131,10 +131,22 @@ export function gitDirectoryPaths(tree) {
   return paths;
 }
 
-function fileRow(node, depth) {
+/**
+ * Ключ строки в пределах всей панели. Один и тот же путь законно присутствует и в
+ * индексе, и в рабочем дереве с РАЗНЫМИ дифами, поэтому выбор адресуется парой
+ * «группа + путь», а не путём. Группа — фиксированное слово без двоеточий, поэтому
+ * разбор однозначен даже у пути с двоеточием внутри.
+ */
+export function gitRef(group, path) {
+  return group ? `${group}:${path}` : String(path);
+}
+
+function fileRow(node, depth, group) {
   return {
     kind: 'file',
-    key: `file:${node.path}`,
+    key: group ? `${group}:file:${node.path}` : `file:${node.path}`,
+    ref: gitRef(group, node.path),
+    group: group || '',
     name: node.name,
     path: node.path,
     depth,
@@ -142,7 +154,7 @@ function fileRow(node, depth) {
   };
 }
 
-export function flattenGitTree(tree, openDirs) {
+export function flattenGitTree(tree, openDirs, group = '') {
   const rows = [];
   const open = openDirs instanceof Set ? openDirs : new Set();
   const walk = (node, depth) => {
@@ -150,21 +162,73 @@ export function flattenGitTree(tree, openDirs) {
     const directories = children.filter((child) => child.children.size);
     const files = children.filter((child) => !child.children.size && child.file);
     for (const child of directories) {
+      const ref = gitRef(group, child.path);
       rows.push({
         kind: 'dir',
-        key: `dir:${child.path}`,
+        key: group ? `${group}:dir:${child.path}` : `dir:${child.path}`,
+        ref,
+        group: group || '',
         name: child.name,
         path: child.path,
         depth,
       });
       // Файл мог быть удалён и заменён одноимённым каталогом (или наоборот).
-      if (child.file) rows.push(fileRow(child, depth));
-      if (open.has(child.path)) walk(child, depth + 1);
+      if (child.file) rows.push(fileRow(child, depth, group));
+      if (open.has(ref)) walk(child, depth + 1);
     }
-    for (const child of files) rows.push(fileRow(child, depth));
+    for (const child of files) rows.push(fileRow(child, depth, group));
   };
   if (tree) walk(tree, 0);
   return rows;
+}
+
+/**
+ * Группы изменений панели «Код» — как Source Control в VS Code: сначала индекс,
+ * затем рабочее дерево. Пустая группа не рисуется вовсе.
+ *
+ * Заголовок второй группы зависит от наличия первой намеренно: пока индекс пуст
+ * (обычное состояние прогонов фабрики — она ничего не индексирует), делить нечего
+ * и привычное «Не в коммите» остаётся точным. Как только индекс не пуст, «не в
+ * коммите» верно уже для обеих групп, и разделяющим становится сам индекс.
+ */
+export function buildGitGroups(payload, openDirs) {
+  const staged = Array.isArray(payload?.staged) ? payload.staged : [];
+  const work = Array.isArray(payload?.files) ? payload.files : [];
+  const sources = [
+    {
+      id: 'staged',
+      files: staged,
+      title: 'В индексе',
+      hint: 'git add уже забрал эти правки — они уедут в следующий коммит',
+    },
+    {
+      id: 'work',
+      files: work,
+      title: staged.length ? 'В рабочем дереве' : 'Не в коммите',
+      hint: staged.length
+        ? 'правки поверх индекса: в коммит они пока не попадут'
+        : 'несохранённые правки рабочего дерева',
+    },
+  ];
+  const groups = sources
+    .filter((source) => source.files.length)
+    .map((source) => {
+      const tree = buildGitTree(source.files);
+      return { ...source, tree, rows: flattenGitTree(tree, openDirs, source.id) };
+    });
+  if (groups.length) return groups;
+  // Чистое дерево: одна пустая группа остаётся, чтобы панели было куда поставить
+  // заголовок, переключатель вида и честное «изменений нет».
+  return [{ ...sources[1], tree: buildGitTree([]), rows: [] }];
+}
+
+/** Все каталоги обеих групп — ключами «группа:путь», как их видит `gitOpenDirs`. */
+export function gitGroupDirectoryPaths(payload) {
+  const paths = new Set();
+  for (const group of buildGitGroups(payload, new Set())) {
+    for (const dir of gitDirectoryPaths(group.tree)) paths.add(gitRef(group.id, dir));
+  }
+  return paths;
 }
 
 export function reconcileGitOpenDirs(nextDirs, previousOpen, previousDirs) {

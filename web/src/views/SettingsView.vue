@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue';
 import { api } from '../shared/api-client.js';
 import { useProvidersStore } from '../stores/providers.js';
-import { useUiContextStore } from '../stores/ui-context.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { useToolLauncher } from '../shared/tools/launcher.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import AccessOverview from './settings/AccessOverview.vue';
@@ -11,6 +11,8 @@ import NumberField from '../shared/ui/NumberField.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
+import { normalizeCompanionRun } from '../shared/companion-run.js';
+import { useCompanionStore } from '../stores/companion.js';
 import { usePwaStore } from '../stores/pwa.js';
 import {
   blockReasonLabel,
@@ -90,12 +92,115 @@ function setTab(id) {
 }
 
 // Репортим открытый таб в UI-контекст — чат с агентом знает, что открыто.
-const ui = useUiContextStore();
-watchEffect(() => ui.set('settings', { tab: TABS.find((t) => t.id === tab.value)?.label || tab.value }));
-onUnmounted(() => ui.clear('settings'));
+const settingsContext = useUiContextSource('settings', {
+  layer: 'page',
+  details: { tab: currentTab.value.label },
+});
+watchEffect(() => settingsContext.update({ details: { tab: currentTab.value.label } }));
 
 // ── Приложение (настройки именно этого окна/устройства) ──
 const pwa = usePwaStore();
+const companion = useCompanionStore();
+const companionOutputPrefs = computed(() => ({
+  ttsEnabled: false,
+  ttsConsent: false,
+  voiceURI: '',
+  rate: 1,
+  volume: 1,
+  ...(companion.outputState?.prefs || {}),
+}));
+const companionOutputAvailable = computed(() => companion.outputState?.available === true);
+const companionOutputVoices = computed(() => (Array.isArray(companion.outputState?.voices)
+  ? companion.outputState.voices
+  : []));
+const companionTtsEnabled = computed(() => companionOutputPrefs.value.ttsEnabled === true
+  && companionOutputPrefs.value.ttsConsent === true);
+function setCompanionTtsEnabled(value) {
+  companion.setTtsEnabled?.(value === true);
+}
+function setCompanionOutputPref(key, value) {
+  companion.setOutputPrefs?.({ [key]: value });
+}
+
+// ── Чем отвечает компаньон (настройка СЕРВЕРНАЯ, в отличие от тумблеров выше) ──
+// История компаньона server-owned и одна на все окна, поэтому и модель у неё одна:
+// иначе один разговор шёл бы с компьютера и планшета разными моделями. Тем же она
+// отличается от выбора в чате — там модель принадлежит конкретному разговору.
+const companionRunMsg = ref(null);
+const companionRunBusy = ref(false);
+const companionRun = computed(() => normalizeCompanionRun(prefs.value?.companion));
+/** Сохранённая пара → значение опции «исполнитель:модель»; пусто — не выбрана. */
+const companionModelValue = computed(() => {
+  const ref_ = companionRun.value.modelRef;
+  return ref_ ? `${ref_.provider}:${ref_.model}` : '';
+});
+/** Выбор есть, а такой модели в реестре нет — вернём его подписью, иначе `null`. */
+const companionModelLost = computed(() => {
+  const ref_ = companionRun.value.modelRef;
+  if (!ref_) return null;
+  const { provider, model } = prov.modelOf(ref_);
+  return provider && model ? null : `${ref_.provider}:${ref_.model}`;
+});
+/** Уровни эффорта выбранной модели; пусто — своей лестницы у неё нет, контрола не будет. */
+const companionEffortLevels = computed(() => {
+  const ref_ = companionRun.value.modelRef;
+  if (!ref_) return [];
+  const { model } = prov.modelOf(ref_);
+  return Array.isArray(model?.efforts) ? model.efforts : [];
+});
+/** Сохранённый уровень, которого у модели больше нет: показываем, а не прячем. */
+const companionEffortLost = computed(() => {
+  const effort = companionRun.value.effort;
+  if (!effort) return null;
+  return companionEffortLevels.value.includes(effort) ? null : effort;
+});
+const companionRunLabel = computed(() => {
+  const { model } = prov.modelOf(companionRun.value.modelRef || '');
+  if (!model) return '';
+  return [model.name || model.id, companionRun.value.effort].filter(Boolean).join(' · ');
+});
+
+async function saveCompanionRun(next) {
+  companionRunMsg.value = null;
+  companionRunBusy.value = true;
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { companion: next });
+    // Ход резолвит модель в браузере, а настройку стор получает вместе с историей —
+    // значит новое значение отдаём ему сразу, а не до следующего F5.
+    chatStore.companion = normalizeCompanionRun(prefs.value?.companion);
+    companionRunMsg.value = {
+      type: 'ok',
+      text: companionRunLabel.value
+        ? `Следующий ход компаньона уйдёт: ${companionRunLabel.value}.`
+        : 'Компаньон будет ходить моделью по умолчанию из реестра исполнителей.',
+    };
+  } catch (e) {
+    companionRunMsg.value = { type: 'err', text: e.message };
+  } finally {
+    companionRunBusy.value = false;
+  }
+}
+
+function setCompanionModel(value) {
+  // id исполнителя двоеточий не содержит, а id модели содержит сплошь и рядом
+  // (`qwen3.6:latest`) — режем по первому.
+  const at = String(value || '').indexOf(':');
+  if (at <= 0) return saveCompanionRun({ modelRef: null, effort: '' });
+  const modelRef = { provider: value.slice(0, at), model: value.slice(at + 1) };
+  // Эффорт переносим, только если новая модель такой уровень объявляет: у моделей
+  // разные лестницы, и `xhigh` на модели без него роняет запуск CLI, а не игнорируется.
+  const { model } = prov.modelOf(modelRef);
+  const levels = Array.isArray(model?.efforts) ? model.efforts : [];
+  const effort = companionRun.value.effort;
+  return saveCompanionRun({ modelRef, effort: levels.includes(effort) ? effort : '' });
+}
+
+function setCompanionEffort(value) {
+  const modelRef = companionRun.value.modelRef;
+  if (!modelRef) return null;
+  return saveCompanionRun({ modelRef, effort: String(value || '') });
+}
+
 const wakeLockNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;
 const notificationNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;
 
@@ -108,7 +213,7 @@ const speechMsg = ref(null);
 const speech = ref({
   engine: 'browser', browserProcessing: 'auto', browserAutoConsent: false,
   language: 'auto', dictionary: '', local: { ready: false, reason: '' }, revision: '',
-  quality: 'balanced', videoQuality: 'balanced', model: null, videoModel: null,
+  quality: 'balanced', videoQuality: 'balanced', videoInitialPrompt: '', model: null, videoModel: null,
   device: 'auto', computeType: null, beamSize: null, vadSilenceMs: 500,
   conditionOnPreviousText: true,
 });
@@ -144,8 +249,8 @@ const COCKPIT_DICTIONARY = 'кокпит\nконвейер\nworktree\nпесоч
 const TERMINAL_SPEECH_JOBS = new Set(['done', 'failed', 'cancelled', 'interrupted']);
 const SPEECH_EDITABLE_FIELDS = [
   'engine', 'browserProcessing', 'language', 'dictionary', 'quality', 'videoQuality',
-  'model', 'videoModel', 'device', 'computeType', 'beamSize', 'vadSilenceMs',
-  'conditionOnPreviousText',
+  'videoInitialPrompt', 'model', 'videoModel', 'device', 'computeType', 'beamSize',
+  'vadSilenceMs', 'conditionOnPreviousText',
 ];
 
 function validNullable(value, allowed, fallback = null) {
@@ -275,6 +380,8 @@ function applySpeechSnapshot(payload, { preserveDirty = true } = {}) {
     dictionary: typeof raw.dictionary === 'string' ? raw.dictionary : previous.dictionary,
     quality: ['fast', 'balanced', 'accurate'].includes(raw.quality) ? raw.quality : previous.quality,
     videoQuality: ['fast', 'balanced', 'accurate'].includes(raw.videoQuality) ? raw.videoQuality : previous.videoQuality,
+    videoInitialPrompt: typeof raw.videoInitialPrompt === 'string'
+      ? raw.videoInitialPrompt : previous.videoInitialPrompt,
     model: validNullable(raw.model, SPEECH_MODELS.map((model) => model.id), previous.model),
     videoModel: validNullable(raw.videoModel, SPEECH_MODELS.map((model) => model.id), previous.videoModel),
     device: ['auto', 'cpu', 'cuda'].includes(raw.device) ? raw.device : previous.device,
@@ -359,6 +466,15 @@ async function refreshSpeechCapabilities() {
   } finally {
     speechRefreshing.value = false;
   }
+}
+
+/**
+ * Сброс шлёт null, а не текст: дефолт живёт на сервере, и вторая копия промпта во фронте
+ * разошлась бы с ней при первой же правке.
+ */
+async function resetVideoInitialPrompt() {
+  speech.value.videoInitialPrompt = null;
+  await saveSpeech();
 }
 
 async function saveSpeech() {
@@ -1354,6 +1470,30 @@ function gwManualToTerminal(entry) {
 // ── Плагины ──
 const pluginsStore = usePluginsStore();
 const plugMsg = ref(null);
+const pluginStats = computed(() => {
+  const list = Array.isArray(pluginsStore.list) ? pluginsStore.list : [];
+  return {
+    enabled: list.filter((plugin) => plugin.enabled).length,
+    configurable: list.filter((plugin) => plugin.settings?.length).length,
+    custom: list.filter((plugin) => !plugin.system).length,
+  };
+});
+
+// Иконка относится к назначению плагина, а не к его происхождению. Встроенные
+// повторяют навигацию Cockpit; неизвестному пользовательскому модулю достаётся
+// нейтральный знак плагина — манифест не получает права передавать произвольный SVG.
+const PLUGIN_ICON_PATHS = {
+  video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
+  code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
+  inbox: 'M4 4h16v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4z M4 13h4l2 3h4l2-3h4',
+  telegram: 'M20.4 5.2 4 11.6l5.3 2 1.7 5.2 2.5-3 4.1 3.1z M9.3 13.6 20.4 5.2 13.5 15.8',
+  github: 'M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z',
+  plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
+};
+function pluginIconPath(plugin) {
+  return PLUGIN_ICON_PATHS[plugin?.nav?.icon] || PLUGIN_ICON_PATHS[plugin?.id] || PLUGIN_ICON_PATHS.plugin;
+}
+
 async function savePlugin(p) {
   await pluginsStore.saveSettings(p.id, p.values);
   plugMsg.value = p.id;
@@ -1388,9 +1528,36 @@ function setPluginModel(p, key, value) {
   // id исполнителя двоеточий не содержит, а id модели содержит сплошь и рядом
   // (`qwen3.6:latest`) — режем по первому.
   const at = String(value || '').indexOf(':');
-  p.values[key] = at > 0
-    ? { provider: value.slice(0, at), model: value.slice(at + 1) }
-    : null;
+  if (at <= 0) { p.values[key] = null; return; }
+  const next = { provider: value.slice(0, at), model: value.slice(at + 1) };
+  // Эффорт переносим, только если новая модель такой уровень объявляет: у моделей
+  // разные лестницы, и `xhigh` на модели без него роняет запуск CLI, а не игнорируется.
+  const effort = p.values[key]?.effort;
+  if (effort && pluginEffortLevels(next).includes(effort)) next.effort = effort;
+  p.values[key] = next;
+}
+
+/** Уровни эффорта выбранной модели; пусто — своей лестницы у неё нет, контрола не будет. */
+function pluginEffortLevels(saved) {
+  if (!saved || typeof saved !== 'object') return [];
+  const { model } = prov.modelOf(saved);
+  return Array.isArray(model?.efforts) ? model.efforts : [];
+}
+
+/** Сохранённый уровень, которого у модели больше нет: показываем, а не прячем. */
+function pluginEffortLost(p, key) {
+  const saved = p.values?.[key];
+  const effort = saved?.effort;
+  if (!effort) return null;
+  return pluginEffortLevels(saved).includes(effort) ? null : effort;
+}
+
+function setPluginEffort(p, key, value) {
+  const saved = p.values?.[key];
+  if (!saved || typeof saved !== 'object') return;
+  const effort = String(value || '');
+  if (effort) p.values[key] = { ...saved, effort };
+  else { const { effort: _drop, ...rest } = saved; p.values[key] = rest; }
 }
 
 // ── Сервер (режим запуска и перезапуск) ──
@@ -1659,6 +1826,177 @@ onMounted(() => {
             Разрешение спрашивается только по этой кнопке — автоматический запрос PWA браузер блокирует.
           </p>
         </div>
+
+      </div>
+
+      <!-- Компаньон — своя карточка, а не строка в «Экране устройства»: у него три разных
+           решения (показывать ли, чем отвечает, озвучивать ли), и два из них device-local,
+           а одно общее для всех окон. Область каждого блока названа пилюлей: без этого
+           непонятно, почему смена модели видна на планшете, а тумблер — нет. -->
+      <div class="card companion-card" data-testid="companion-settings">
+        <div class="card-head">
+          <div>
+            <h3>Голосовой компаньон</h3>
+            <p class="muted small">
+              Компактный аватар поверх страниц: быстрый вопрос голосом или текстом в том же
+              разговоре, что открыт на странице «Чаты».
+            </p>
+          </div>
+          <span class="status-pill" :class="{ ok: companion.deviceEnabled }"
+                data-testid="companion-connection-state">
+            <span class="dot"></span>
+            {{ companion.deviceEnabled ? 'Подключён' : 'Отключён' }}
+          </span>
+        </div>
+
+        <div class="mode" data-testid="companion-device-setting">
+          <ToggleSwitch
+            :model-value="companion.deviceEnabled"
+            label="Показывать компаньона на этом устройстве"
+            @update:model-value="companion.setDeviceEnabled"
+          />
+          <p class="muted small">
+            Скрывает только аватар и компактное окно на этом устройстве. Полная страница
+            «Чаты», история и настройки речи продолжают работать; вернуть компаньона можно здесь.
+          </p>
+        </div>
+
+        <!-- Единственная СЕРВЕРНАЯ настройка компаньона: разговор у него один на все окна,
+             поэтому и модель одна. Здесь же — единственное место, где её меняют: селекты
+             в самом companion-чате неактивны, иначе правд стало бы две. -->
+        <div class="mode companion-run-setting" data-testid="companion-run-setting">
+          <div class="companion-run-head">
+            <div>
+              <b>Чем отвечает</b>
+              <p class="muted small">
+                Исполнитель, модель и усилие быстрого хода. Настройка общая для всех окон и
+                для всех разговоров компаньона — и общего, и привязанных к задачам.
+                Режим у него всегда «план»: быстрый ход только читает и отвечает.
+              </p>
+            </div>
+            <span class="scope-pill">Все окна</span>
+          </div>
+          <div class="plug-model-grid"
+               :class="{ solo: !(companionEffortLevels.length || companionEffortLost) }">
+            <div class="plugrow wide">
+              <label for="companion-model">Модель</label>
+              <select id="companion-model" class="inp" data-testid="companion-model-select"
+                      :disabled="companionRunBusy"
+                      :value="companionModelValue"
+                      @change="setCompanionModel($event.target.value)">
+                <option value="">— по умолчанию из реестра —</option>
+                <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит). Молча
+                     показать «по умолчанию» нельзя: в настройках он остался, и ход
+                     компаньона сейчас вообще не уйдёт. -->
+                <option v-if="companionModelLost" :value="companionModelValue">
+                  {{ companionModelLost }} — нет в реестре
+                </option>
+                <optgroup v-for="g in modelGroups" :key="g.id"
+                          :label="g.name + (g.available ? '' : ' — недоступен')">
+                  <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
+                    {{ m.name }}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
+            <div v-if="companionEffortLevels.length || companionEffortLost" class="plugrow effort-row">
+              <label for="companion-effort">Усилие</label>
+              <select id="companion-effort" class="inp" data-testid="companion-effort-select"
+                      :disabled="companionRunBusy"
+                      :value="companionRun.effort"
+                      @change="setCompanionEffort($event.target.value)">
+                <option value="">по умолчанию исполнителя</option>
+                <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем его
+                     прямо: перед ходом реестр такой уровень снимет, и человек должен
+                     видеть, что выбор больше не действует. -->
+                <option v-if="companionEffortLost" :value="companionEffortLost">
+                  {{ companionEffortLost }} — нет у этой модели
+                </option>
+                <option v-for="e in companionEffortLevels" :key="e" :value="e">{{ e }}</option>
+              </select>
+            </div>
+          </div>
+          <p v-if="companionModelLost" class="msg warn" data-testid="companion-model-lost">
+            Этой модели нет в реестре исполнителей — ход компаньона не уйдёт, пока выбор не сменят.
+          </p>
+          <p v-if="companionRunMsg" class="msg" :class="companionRunMsg.type">{{ companionRunMsg.text }}</p>
+        </div>
+
+        <div class="mode companion-audio-setting" data-testid="companion-audio-setting">
+          <ToggleSwitch
+            :model-value="companionTtsEnabled"
+            label="Озвучивать прямые голосовые ответы"
+            @update:model-value="setCompanionTtsEnabled"
+          />
+          <p class="muted small">
+            Выключено по умолчанию. Голос браузера или операционной системы может использовать
+            внешний облачный сервис; ему передаётся только сокращённый текст ответа на ваш
+            текущий голосовой запрос. Настройка хранится лишь на этом устройстве.
+          </p>
+          <p v-if="!companionOutputAvailable" class="msg warn" data-testid="companion-tts-unavailable">
+            Этот браузер не предоставляет speechSynthesis — ответ останется текстом.
+            Выбор сохранится на устройстве и применится, когда API станет доступен.
+          </p>
+          <div
+            v-if="companion.ttsConsentPrompt"
+            class="companion-tts-consent"
+            role="group"
+            aria-labelledby="settings-companion-tts-consent"
+            data-testid="settings-companion-tts-consent"
+          >
+            <b id="settings-companion-tts-consent">Разрешить браузерную озвучку на этом устройстве?</b>
+            <div class="row">
+              <button type="button" class="primary" @click="companion.confirmTtsConsent?.()">Разрешить</button>
+              <button type="button" @click="companion.dismissTtsConsent?.()">Не сейчас</button>
+            </div>
+          </div>
+          <div class="companion-audio-grid">
+            <label>
+              Голос
+              <select
+                class="settings-select"
+                data-testid="companion-voice-select"
+                :value="companionOutputPrefs.voiceURI"
+                @change="setCompanionOutputPref('voiceURI', $event.target.value)"
+              >
+                <option value="">Автоматически по языку</option>
+                <option
+                  v-for="voice in companionOutputVoices"
+                  :key="voice.voiceURI"
+                  :value="voice.voiceURI"
+                >{{ voice.name || voice.voiceURI }}{{ voice.lang ? ` · ${voice.lang}` : '' }}</option>
+              </select>
+            </label>
+            <label>
+              Скорость · {{ Number(companionOutputPrefs.rate).toFixed(1) }}×
+              <input
+                type="range"
+                data-testid="companion-rate"
+                min="0.7"
+                max="1.3"
+                step="0.1"
+                :value="companionOutputPrefs.rate"
+                @input="setCompanionOutputPref('rate', Number($event.target.value))"
+              />
+            </label>
+            <label>
+              Громкость · {{ Math.round(Number(companionOutputPrefs.volume) * 100) }}%
+              <input
+                type="range"
+                data-testid="companion-volume"
+                min="0"
+                max="1"
+                step="0.05"
+                :value="companionOutputPrefs.volume"
+                @input="setCompanionOutputPref('volume', Number($event.target.value))"
+              />
+            </label>
+          </div>
+          <p class="muted small companion-window-mute">
+            Быстрое выключение звука в окне компаньона действует только до закрытия этой вкладки
+            и не меняет настройку устройства.
+          </p>
+        </div>
       </div>
     </section>
 
@@ -1734,6 +2072,24 @@ onMounted(() => {
               </label>
             </div>
             <p v-if="speech.videoModel" class="msg info">Модель видео переопределена: {{ speechModelLabel(speech.videoModel) }}.</p>
+            <label class="speech-field">Стилевая подсказка
+              <textarea v-model="speech.videoInitialPrompt" rows="3" maxlength="600"
+                        data-testid="speech-video-prompt"
+                        placeholder="Пусто — расшифровка выйдет сплошным потоком без знаков препинания"></textarea>
+            </label>
+            <div class="speech-field-actions">
+              <button type="button" data-testid="speech-video-prompt-reset"
+                      @click="resetVideoInitialPrompt">Вернуть стандартную</button>
+              <span class="muted small">{{ [...(speech.videoInitialPrompt || '')].length }} / 600 символов</span>
+            </div>
+            <p class="muted small">
+              Задаёт стиль первому окну распознавания: с подсказкой модель ставит знаки препинания,
+              без неё выдаёт сплошной поток слов до конца записи. Пишите <b>короткий заголовок</b>
+              («Стенограмма рабочей встречи.»), а не указание модели: подсказку она считает уже
+              сказанным текстом и продолжает его — из фразы «реплики записаны с пунктуацией»
+              получается расшифровка, где эта фраза повторяется вместо разговора. Это не словарь
+              терминов, для них есть поле ниже.
+            </p>
           </div>
           <button type="button" class="speech-advanced-toggle" data-testid="speech-advanced-toggle"
                   :aria-expanded="speechAdvanced" @click="speechAdvanced = !speechAdvanced">
@@ -1798,6 +2154,7 @@ onMounted(() => {
           </label>
           <label class="speech-field">Термины проекта
             <textarea v-model="speech.dictionary" rows="6" maxlength="800"
+                      data-testid="speech-dictionary"
                       placeholder="По одному термину или фразе на строку&#10;Fastify&#10;worktree&#10;Битрикс24"></textarea>
           </label>
           <div class="speech-field-actions">
@@ -2238,7 +2595,7 @@ onMounted(() => {
             таймаута зависшего MCP. <b>0</b> — не звать.
             Кокпит только оповещает: остановить ход и решить, что с ним делать, — твоё.
           </p>
-          <p v-if="prefsMsg" class="msg" :class="prefsMsg.type">{{ prefsMsg.text }}</p>
+          <p v-if="prefsMsg" class="msg" :class="prefsMsg.type" aria-live="polite">{{ prefsMsg.text }}</p>
         </template>
       </div>
       <div class="card">
@@ -2283,62 +2640,133 @@ onMounted(() => {
     <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
          папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера. -->
     <section v-else-if="tab === 'plugins'">
-      <p class="section-note">
-        Плагин — отключаемый раздел кокпита: пункт в сайдбаре (под разделителем), свои API и настройки.
-        Свой плагин — папка <code>plugins/&lt;id&gt;/</code> с манифестом <code>plugin.json</code>
-        (+ опционально <code>server.js</code>), появится здесь после рестарта сервера.
-      </p>
-      <div v-if="!pluginsStore.loaded" class="muted">Загрузка…</div>
+      <div class="plugin-overview">
+        <p class="section-note">
+          Здесь включаются самостоятельные возможности Cockpit. Пользовательский модуль —
+          папка <code>plugins/&lt;id&gt;/</code> с <code>plugin.json</code>; серверная часть
+          подключается после рестарта.
+        </p>
+        <div v-if="pluginsStore.loaded" class="plugin-stats" aria-label="Сводка по плагинам">
+          <span><b>{{ pluginStats.enabled }}</b><small>включено</small></span>
+          <span><b>{{ pluginStats.configurable }}</b><small>с настройками</small></span>
+          <span><b>{{ pluginStats.custom }}</b><small>пользовательских</small></span>
+        </div>
+      </div>
+      <div v-if="!pluginsStore.loaded" class="plugin-loading muted">
+        <span class="spin"></span> Загружаю плагины…
+      </div>
       <div v-else class="plugcards">
         <!-- Плашка с раскрытыми настройками идёт во всю ширину: условие то же, что
              у блока .plugset ниже, иначе класс и содержимое разъедутся. -->
         <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard"
-             :class="{ wide: p.enabled && p.settings.length }">
+             :class="{ wide: p.enabled && p.settings.length, off: !p.enabled }">
           <div class="plughead">
-            <div>
-              <b>{{ p.name }}</b>
-              <span class="plugver">v{{ p.version }}</span>
-              <span class="plugtag" :class="{ user: !p.system }">{{ p.system ? 'системный' : 'пользовательский' }}</span>
-            </div>
-            <ToggleSwitch :model-value="p.enabled" label="" @update:model-value="(v) => pluginsStore.toggle(p.id, v)" />
-          </div>
-          <p class="muted small">{{ p.description }}</p>
-          <p v-if="p.needsRestart" class="muted small">Серверная часть подключается на старте — вкл/выкл подействует после рестарта кокпита.</p>
-          <div v-if="p.enabled && p.settings.length" class="plugset">
-            <template v-for="s in p.settings" :key="s.key">
-              <div class="plugrow" :class="{ wide: s.type === 'model' }">
-                <label>{{ s.label }}</label>
-                <select v-if="s.type === 'select'" v-model="p.values[s.key]" class="inp">
-                  <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
-                </select>
-                <!-- Модель берётся из общего реестра исполнителей — того же, что рисует
-                     селект в чате. Значение хранится парой «исполнитель + модель»:
-                     склеенной строкой её не разобрать, у локальных исполнителей id
-                     модели сам бывает со слэшами и двоеточиями (`hf.co/user/repo:tag`). -->
-                <select v-else-if="s.type === 'model'" class="inp"
-                        :value="pluginModelValue(p, s.key)"
-                        @change="setPluginModel(p, s.key, $event.target.value)">
-                  <option value="">— не выбрана —</option>
-                  <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит).
-                       Молча показать «не выбрана» нельзя: в настройках он остался,
-                       и сервер всё ещё ходит именно этой моделью. -->
-                  <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
-                    {{ pluginModelLost(p, s.key) }} — нет в реестре
-                  </option>
-                  <optgroup v-for="g in modelGroups" :key="g.id"
-                            :label="g.name + (g.available ? '' : ' — недоступен')">
-                    <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
-                      {{ m.name }}
-                    </option>
-                  </optgroup>
-                </select>
-                <input v-else-if="s.type === 'checkbox'" v-model="p.values[s.key]" type="checkbox" />
-                <input v-else v-model="p.values[s.key]" class="inp" type="text" />
+            <div class="plugidentity">
+              <span class="plugicon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path :d="pluginIconPath(p)" />
+                </svg>
+              </span>
+              <div class="plugtitle">
+                <div class="plugname">
+                  <b>{{ p.name }}</b>
+                  <span class="plugver">v{{ p.version }}</span>
+                </div>
+                <div class="plugmeta">
+                  <span class="plugtag" :class="{ user: !p.system }">{{ p.system ? 'системный' : 'пользовательский' }}</span>
+                  <span v-if="p.nav?.label" class="plugplace">раздел «{{ p.nav.label }}»</span>
+                </div>
               </div>
-              <p v-if="s.hint" class="muted small plughint">{{ s.hint }}</p>
+            </div>
+            <div class="plug-switch" :class="{ on: p.enabled }">
+              <span>{{ p.enabled ? 'Включён' : 'Выключен' }}</span>
+              <ToggleSwitch :model-value="p.enabled" label="" @update:model-value="(v) => pluginsStore.toggle(p.id, v)" />
+            </div>
+          </div>
+          <p class="plugdesc">{{ p.description }}</p>
+          <p v-if="p.needsRestart" class="plugrestart">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" />
+            </svg>
+            Изменение серверной части применится после рестарта Cockpit.
+          </p>
+          <div v-if="p.enabled && p.settings.length" class="plugset">
+            <div class="plugset-head">
+              <div>
+                <span>Параметры</span>
+                <b>Настройки плагина</b>
+              </div>
+            </div>
+            <template v-for="s in p.settings" :key="s.key">
+              <label v-if="s.type === 'checkbox'" class="plugrow plugcheck">
+                <input v-model="p.values[s.key]" type="checkbox" />
+                <span>
+                  <b>{{ s.label }}</b>
+                  <small v-if="s.hint">{{ s.hint }}</small>
+                </span>
+              </label>
+              <template v-else>
+                <div v-if="s.type === 'model'" class="plug-model-grid"
+                     :class="{ solo: !(pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)) }">
+                  <!-- Модель берётся из общего реестра исполнителей — того же, что рисует
+                       селект в чате. Значение хранится парой «исполнитель + модель»:
+                       склеенной строкой её не разобрать, у локальных исполнителей id
+                       модели сам бывает со слэшами и двоеточиями (`hf.co/user/repo:tag`). -->
+                  <div class="plugrow wide">
+                    <label>{{ s.label }}</label>
+                    <select class="inp"
+                            :value="pluginModelValue(p, s.key)"
+                            @change="setPluginModel(p, s.key, $event.target.value)">
+                      <option value="">— не выбрана —</option>
+                      <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит).
+                           Молча показать «не выбрана» нельзя: в настройках он остался,
+                           и сервер всё ещё ходит именно этой моделью. -->
+                      <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
+                        {{ pluginModelLost(p, s.key) }} — нет в реестре
+                      </option>
+                      <optgroup v-for="g in modelGroups" :key="g.id"
+                                :label="g.name + (g.available ? '' : ' — недоступен')">
+                        <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
+                          {{ m.name }}
+                        </option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <!-- Усилие — свойство ЗАПУСКА, а не модели. Поэтому контрол остаётся
+                       отдельным, но визуально стоит с моделью в одной строке: это одна
+                       настройка запуска. На узком экране сетка складывается в колонку. -->
+                  <div v-if="pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)"
+                       class="plugrow effort-row">
+                    <label>Усилие</label>
+                    <select class="inp" :value="p.values[s.key]?.effort || ''"
+                            @change="setPluginEffort(p, s.key, $event.target.value)">
+                      <option value="">по умолчанию исполнителя</option>
+                      <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем
+                           его прямо: сервер такой уровень снимет и пойдёт на умолчании,
+                           и человек должен видеть, что выбор больше не действует. -->
+                      <option v-if="pluginEffortLost(p, s.key)" :value="pluginEffortLost(p, s.key)">
+                        {{ pluginEffortLost(p, s.key) }} — нет у этой модели
+                      </option>
+                      <option v-for="e in pluginEffortLevels(p.values[s.key])" :key="e" :value="e">{{ e }}</option>
+                    </select>
+                  </div>
+                </div>
+                <div v-else class="plugrow">
+                  <label>{{ s.label }}</label>
+                  <select v-if="s.type === 'select'" v-model="p.values[s.key]" class="inp">
+                    <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
+                  </select>
+                  <input v-else v-model="p.values[s.key]" class="inp" type="text" />
+                </div>
+                <p v-if="s.hint" class="muted small plughint">{{ s.hint }}</p>
+              </template>
             </template>
-            <button class="btn" @click="savePlugin(p)">Сохранить</button>
-            <span v-if="plugMsg === p.id" class="msg ok">Сохранено</span>
+            <button class="btn plugin-save" :class="{ saved: plugMsg === p.id }" @click="savePlugin(p)">
+              <svg v-if="plugMsg === p.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12l4 4L19 6" />
+              </svg>
+              {{ plugMsg === p.id ? 'Сохранено' : 'Сохранить' }}
+            </button>
           </div>
         </div>
       </div>
@@ -3248,43 +3676,103 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .speech-benchmark { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding-top: 12px; border-top: 1px solid var(--line); }
 .speech-benchmark p { margin: 3px 0 0; }
-/* Карточки плагинов — горизонтальной линией, с переносом на узких экранах.
-   Без align-items: start — плашки в ряду тянутся до общей высоты (как у исполнителей). */
-.plugcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; }
-.plugcard { gap: 8px; }
-/* Плагин с раскрытыми настройками занимает обе колонки: он выше соседа в разы,
-   и выравнивание ряда по нему превращало бы соседнюю плашку в полупустую.
+/* Плагины читаются в три слоя: краткая сводка, идентичность модуля и отдельная
+   внутренняя панель его параметров. Так длинная подсказка модели не смешивается
+   с описанием самого плагина и тумблером его жизненного цикла. */
+.plugin-overview { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 14px; }
+.plugin-overview .section-note { max-width: none; }
+.plugin-stats { display: flex; align-items: stretch; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+.plugin-stats > span { min-width: 88px; display: grid; place-content: center; gap: 1px; padding: 9px 13px; border-left: 1px solid var(--line); text-align: center; }
+.plugin-stats > span:first-child { border-left: 0; }
+.plugin-stats b { font-size: 14px; font-weight: 670; }
+.plugin-stats small { color: var(--ink-mid); font-size: 9.5px; white-space: nowrap; }
+.plugin-loading { display: flex; align-items: center; gap: 9px; min-height: 88px; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+
+/* dense обязателен вместе с широкими плашками: без него обычная плашка, попавшая
+   между двумя широкими, остаётся одна в ряду. Замер на 1620 px: ряд с «Кодом» был
+   занят на 24%, три четверти пустовали. */
+.plugcards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  grid-auto-flow: dense; align-items: start; gap: 14px;
+}
+.plugcard {
+  position: relative;
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--surface) 96%, var(--accent)) 0%, var(--surface) 42%);
+}
+.plugcard::before { content: ''; position: absolute; inset: 0 0 auto; height: 2px; background: linear-gradient(90deg, var(--accent), transparent 70%); opacity: .72; }
+.plugcard.off::before { background: var(--line-2); opacity: .45; }
+/* Плагин с раскрытыми настройками занимает ДВЕ колонки, а не весь ряд: он выше соседа
+   в разы, и выравнивание ряда по нему превращало бы соседнюю плашку в полупустую,
+   но на широком экране целый ряд под одну плашку — это та же пустота с другой стороны.
    Текст и поля при этом держим в читаемой колонке, а не тянем на всю ширину. */
-.plugcard.wide { grid-column: 1 / -1; }
+.plugcard.wide { grid-column: span 2; }
 .plugcard.wide > p, .plugcard.wide .plugset > * { max-width: 760px; }
-.plugcard.wide .plugrow.wide .inp { max-width: 520px; }
-.plughead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.plugver { color: var(--mut); font-size: 12px; margin-left: 8px; }
-.plugtag { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; color: var(--mut); }
-.plugtag.user { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
-.plugcard .small { flex: 1; }
-.plugset { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--line); padding-top: 10px; }
-.plugrow { display: flex; align-items: center; gap: 10px; }
-.plugrow label { min-width: 140px; color: var(--mut); font-size: 13px; }
-.plugrow .inp { max-width: 220px; }
-.plugrow input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+.plugcard.wide .plugrow.wide .inp { max-width: 600px; }
+.plughead { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 19px 19px 0; }
+.plugidentity { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.plugicon { flex: none; display: grid; place-items: center; width: 43px; height: 43px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 9%, var(--ground)); color: var(--accent); box-shadow: inset 0 1px 0 #ffffff08; }
+.plugicon svg { width: 21px; height: 21px; }
+.plugcard.off .plugicon { border-color: var(--line); background: var(--ground); color: var(--ink-mid); }
+.plugtitle { min-width: 0; display: grid; gap: 5px; }
+.plugname { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.plugname b { overflow: hidden; font-size: 14px; font-weight: 670; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.plugver { flex: none; color: var(--ink-mid); font-family: var(--mono); font-size: 10.5px; }
+.plugmeta { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.plugtag { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-mid); font-size: 9.5px; line-height: 1.3; }
+.plugtag.user { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--accent); }
+.plugplace { overflow: hidden; color: var(--ink-mid); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.plug-switch { flex: none; display: flex; align-items: center; gap: 7px; padding-top: 5px; color: var(--ink-mid); font-size: 10.5px; }
+.plug-switch.on { color: var(--accent); }
+.plug-switch :deep(.tsw) { padding: 0; }
+.plugdesc { min-height: 42px; margin: 14px 19px 17px; color: var(--ink-mid); font-size: 12px; line-height: 1.5; }
+.plugcard.off .plugdesc { color: color-mix(in srgb, var(--ink-mid) 72%, transparent); }
+.plugrestart { display: flex; align-items: flex-start; gap: 7px; margin: -5px 19px 17px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--warn) 6%, var(--ground)); color: var(--ink-mid); font-size: 11px; line-height: 1.45; }
+.plugrestart svg { flex: none; width: 14px; height: 14px; margin-top: 1px; color: var(--warn); }
+
+.plugset { display: flex; flex-direction: column; gap: 10px; padding: 15px 19px 19px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--ground) 74%, transparent); }
+.plugset-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 2px; }
+.plugset-head > div { display: grid; gap: 1px; }
+.plugset-head span { color: var(--accent); font-size: 9px; font-weight: 740; letter-spacing: .09em; text-transform: uppercase; }
+.plugset-head b { font-size: 12.5px; font-weight: 650; }
+.plugset-head small { color: var(--ink-mid); font-size: 9.5px; }
+.plugrow { min-width: 0; display: grid; gap: 6px; }
+.plugrow label { color: var(--ink-mid); font-size: 11.5px; }
+.plugrow .inp { width: min(100%, 320px); max-width: 320px; }
 /* Нормальный селект вместо нативного: свой фон, рамка и шеврон. */
 .plugrow select.inp {
   appearance: none; -webkit-appearance: none;
-  background: var(--bg) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888da8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
-  border: 1px solid var(--line); border-radius: 8px; color: var(--ink);
-  padding: 6px 28px 6px 10px; font: inherit; font-size: 13px; cursor: pointer;
+  background: var(--surface) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a93a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
+  padding: 9px 31px 9px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
 }
 .plugrow select.inp:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.plugrow select.inp:focus { outline: none; border-color: var(--accent); }
+.plugrow select.inp:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 /* Раскрытый список рисует система, и фон от самого селекта он не наследует:
    без этого правила на тёмной теме он нечитаем (та же грабля, что в чате). */
 .plugrow select.inp option, .plugrow select.inp optgroup { background: var(--surface); color: var(--ink); }
 /* Выбор модели: подпись сверху, селект во всю карточку — названия моделей вместе
-   с именем исполнителя в 220 px не помещаются. */
-.plugrow.wide { flex-direction: column; align-items: stretch; gap: 5px; }
+   с именем исполнителя в узкой колонке не помещаются. */
+.plugrow.wide { align-items: stretch; }
 .plugrow.wide label, .plugrow.wide .inp { min-width: 0; max-width: none; }
-.plughint { margin: -3px 0 2px; }
+.plug-model-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(220px, .85fr); align-items: end; gap: 12px; }
+.plug-model-grid.solo { grid-template-columns: minmax(0, 1fr); }
+.plug-model-grid .plugrow .inp { width: 100%; max-width: none; }
+.plughint { max-width: 720px; margin: -2px 0 1px; color: var(--ink-mid); font-size: 11px; line-height: 1.5; }
+.effort-row { min-width: 0; }
+.plugcheck { grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 10px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); cursor: pointer; }
+.plugcheck input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
+.plugcheck > span { min-width: 0; display: grid; gap: 2px; }
+.plugcheck b { color: var(--ink); font-size: 12px; font-weight: 590; }
+.plugcheck small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.45; }
+/* Кнопка — по содержимому. Общий max-width делал её полосой во всю карточку. */
+.plugset > .btn { align-self: flex-start; }
+.plugin-save { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; padding: 8px 12px; border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); color: var(--accent); font-size: 12px; }
+.plugin-save:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface-2)); }
+.plugin-save.saved { border-color: color-mix(in srgb, var(--good) 38%, var(--line)); color: var(--good); }
+.plugin-save svg { width: 14px; height: 14px; }
 label { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
 input { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -3451,6 +3939,23 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .mode { display: grid; gap: 2px; }
 .mode > p { margin: 0 0 0 39px; }
 .mode + .mode { border-top: 1px solid var(--line); padding-top: 12px; }
+.companion-audio-setting { gap: 9px; }
+.companion-audio-setting > p { margin-left: 39px; }
+/* Блок «Чем отвечает» — единственный серверный в карточке, и тумблера у него нет:
+   отступ под переключатель (39px) здесь был бы отступом ни от чего. */
+.companion-run-setting { gap: 10px; }
+.companion-run-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.companion-run-head > div { min-width: 0; display: grid; gap: 2px; }
+.companion-run-head b { color: var(--ink); font-size: 13px; font-weight: 590; }
+.companion-run-head p { margin: 0; }
+.companion-run-setting .msg { margin: 0; }
+.companion-audio-grid { margin-left: 39px; display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) repeat(2, minmax(130px, 1fr)); gap: 10px; }
+.companion-audio-grid input[type="range"] { padding: 0; border: 0; accent-color: var(--accent); }
+.companion-tts-consent { margin-left: 39px; display: grid; gap: 8px; padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-radius: 9px; background: var(--ground); font-size: 13px; }
+.companion-tts-consent .row { justify-content: flex-start; }
 .notification-mode > p { margin-left: 0; }
 .notification-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .notification-line > div { display: grid; gap: 2px; }
@@ -3535,6 +4040,14 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .settings-workspace, .settings-workspace.wide { max-width: 920px; margin: 16px auto 0; }
 }
 
+@media (max-width: 760px) {
+  .plugin-overview { grid-template-columns: minmax(0, 1fr); }
+  .plugin-stats { width: 100%; }
+  .plugin-stats > span { flex: 1; min-width: 0; }
+  .plugcard.wide { grid-column: auto; }
+  .plug-model-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Мобильный: одна колонка без горизонтального переполнения и с крупными действиями. */
 @media (max-width: 639px) {
   .settings { gap: 12px; }
@@ -3562,10 +4075,20 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .speech-model-actions { justify-content: flex-start; }
   .speech-benchmark { align-items: stretch; flex-direction: column; }
   .pvcards, .plugcards { grid-template-columns: minmax(0, 1fr); }
+  /* В одну колонку `span 2` СОЗДАЁТ вторую, неявную: замер на 600 px давал
+     плашку в 30 px рядом с растянутой соседкой и ряд на 105% ширины. */
+  .plugcard.wide { grid-column: auto; }
+  .plugcard { padding: 0; }
+  .plughead { flex-wrap: wrap; gap: 12px; padding: 16px 16px 0; }
+  .plugidentity { width: 100%; }
+  .plug-switch { width: 100%; justify-content: space-between; padding-top: 0; }
+  .plugdesc { min-height: 0; margin: 13px 16px 15px; }
+  .plugrestart { margin-inline: 16px; }
+  .plugset { padding: 14px 16px 16px; }
+  .plugset-head { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .plugrow .inp { width: 100%; max-width: none; }
   .pvhead { align-items: flex-start; flex-wrap: wrap; }
   .pvstate { margin-left: 44px; }
-  .plughead { align-items: flex-start; }
-  .plugrow { align-items: stretch; flex-direction: column; gap: 5px; }
   .plugrow label, .plugrow .inp { min-width: 0; max-width: none; }
   .row { display: grid; grid-template-columns: minmax(0, 1fr); }
   .row > button { width: 100%; }
@@ -3577,6 +4100,8 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .debug-setting { align-items: stretch; flex-direction: column; }
   .debug-setting label { min-width: 0; }
   .mode > p { margin-left: 0; padding-left: 39px; }
+  .companion-audio-grid { margin-left: 0; padding-left: 39px; grid-template-columns: minmax(0, 1fr); }
+  .companion-tts-consent { margin-left: 0; }
   .notification-line { align-items: stretch; flex-direction: column; }
   .notification-line button { width: 100%; }
   .version-facts > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }

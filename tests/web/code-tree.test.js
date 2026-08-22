@@ -3,11 +3,14 @@ import test from 'node:test';
 
 import {
   buildCodeContexts,
+  buildGitGroups,
   buildGitTree,
   codeContextId,
   encodeStoredCodeContext,
   flattenGitTree,
   gitDirectoryPaths,
+  gitGroupDirectoryPaths,
+  gitRef,
   normalizeGitView,
   pickCodeContext,
   reconcileGitOpenDirs,
@@ -195,6 +198,53 @@ test('Git-дерево не теряет коллизии файла и одно
       ],
     );
   }
+});
+
+test('группы Git: индекс первым, пустая группа не рисуется, один путь живёт в обеих', () => {
+  const staged = [{ path: 'src/a.js', status: 'M', oldContent: 'head', newContent: 'index' }];
+  const work = [{ path: 'src/a.js', status: 'M', oldContent: 'index', newContent: 'worktree' }];
+
+  const both = buildGitGroups({ staged, files: work }, new Set(['staged:src', 'work:src']));
+  assert.deepEqual(both.map((group) => group.id), ['staged', 'work']);
+  // Второй заголовок зависит от наличия первого: пока индекс пуст, делить нечего.
+  assert.deepEqual(both.map((group) => group.title), ['В индексе', 'В рабочем дереве']);
+
+  // Ключи строк разведены по группам, поэтому выбор одного файла не выбирает второй.
+  const refs = both.map((group) => group.rows.find((row) => row.kind === 'file').ref);
+  assert.deepEqual(refs, ['staged:src/a.js', 'work:src/a.js']);
+  assert.equal(gitRef('staged', 'src/a.js'), 'staged:src/a.js');
+  assert.equal(both[0].rows.find((row) => row.kind === 'file').file.newContent, 'index');
+  assert.equal(both[1].rows.find((row) => row.kind === 'file').file.newContent, 'worktree');
+
+  const onlyWork = buildGitGroups({ staged: [], files: work }, new Set(['work:src']));
+  assert.deepEqual(onlyWork.map((group) => ({ id: group.id, title: group.title })), [
+    { id: 'work', title: 'Не в коммите' },
+  ]);
+
+  const onlyStaged = buildGitGroups({ staged, files: [] }, new Set());
+  assert.deepEqual(onlyStaged.map((group) => group.id), ['staged']);
+
+  // Совсем чистое дерево оставляет один пустой заголовок: панели нужно место под
+  // переключатель вида и «изменений нет».
+  const empty = buildGitGroups({ staged: [], files: [] }, new Set());
+  assert.deepEqual(empty.map((group) => ({ id: group.id, files: group.files, rows: group.rows })), [
+    { id: 'work', files: [], rows: [] },
+  ]);
+  assert.deepEqual(buildGitGroups(null, new Set()).map((group) => group.id), ['work']);
+});
+
+test('каталоги Git-групп раскрываются независимо друг от друга', () => {
+  const payload = {
+    staged: [{ path: 'src/a.js', status: 'M' }],
+    files: [{ path: 'src/b.js', status: 'M' }],
+  };
+  assert.deepEqual([...gitGroupDirectoryPaths(payload)], ['staged:src', 'work:src']);
+
+  const open = new Set(['staged:src']);
+  const [stagedGroup, workGroup] = buildGitGroups(payload, open);
+  assert.deepEqual(stagedGroup.rows.map((row) => row.path), ['src', 'src/a.js']);
+  // Одноимённый каталог соседней группы остаётся свёрнутым: наборы не пересекаются.
+  assert.deepEqual(workGroup.rows.map((row) => row.path), ['src']);
 });
 
 test('после Git refresh сохраняются старые состояния, новые каталоги раскрываются, удалённые исчезают', () => {

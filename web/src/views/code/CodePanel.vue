@@ -9,10 +9,10 @@ import { api } from '../../shared/api-client.js';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';
 import {
   buildCodeContexts,
-  buildGitTree,
+  buildGitGroups,
   encodeStoredCodeContext,
-  flattenGitTree,
-  gitDirectoryPaths,
+  gitGroupDirectoryPaths,
+  gitRef,
   normalizeGitView,
   pickCodeContext,
   reconcileGitOpenDirs,
@@ -66,10 +66,11 @@ const fileData = ref(null);      // { content, binary, tooBig, size }
 const fileLoading = ref(false);
 
 // ── Гит ──
-const git = ref(null);           // { branch, files, log }
+const git = ref(null);           // { branch, files, staged, log }
 const gitLoading = ref(false);
+// Выбор адресуется парой «группа:путь»: один и тот же файл законно лежит и в индексе,
+// и в рабочем дереве, и дифы у них разные.
 const gitSel = ref('');
-const gitFile = computed(() => git.value?.files.find((f) => f.path === gitSel.value) || null);
 // Для добавленного/удалённого файла одна сторона дифа заведомо пуста. В режиме
 // «рядом» она съедала половину редактора (особенно заметно в развёрнутом доке),
 // поэтому такие изменения всегда показываем одной колонкой.
@@ -93,9 +94,39 @@ const gitView = ref(normalizeGitView(localStorage.getItem('cockpit-code-git-view
 const gitOpenDirs = ref(new Set());
 const gitKnownDirs = ref(new Set());
 const gitDirsReady = ref(false);
-const gitTree = computed(() => buildGitTree(git.value?.files || []));
-const gitRows = computed(() => flattenGitTree(gitTree.value, gitOpenDirs.value));
+// Группы изменений, как Source Control в VS Code: индекс и рабочее дерево. Пустая
+// группа не рисуется, поэтому при чистом индексе панель выглядит ровно как раньше.
+const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value));
+const gitEntries = computed(() => {
+  const map = new Map();
+  for (const group of gitGroups.value) {
+    for (const file of group.files) map.set(gitRef(group.id, file.path), { file, group });
+  }
+  return map;
+});
+const gitEntry = computed(() => gitEntries.value.get(gitSel.value) || null);
+const gitFile = computed(() => gitEntry.value?.file || null);
 const STLABEL = { A: 'A', M: 'M', D: 'D', R: 'R' };
+// Шаг лесенки дерева задаётся в CSS (`--tree-step`), сюда приезжает только глубина:
+// иначе два числа — px в скрипте и отступ шеврона в стилях — разъезжаются при правке.
+function rowDepth(depth) { return { '--depth': depth }; }
+
+/** Первый файл первой непустой группы: индекс важнее рабочего дерева. */
+function firstGitRef() {
+  for (const group of gitGroups.value) {
+    if (group.files.length) return gitRef(group.id, group.files[0].path);
+  }
+  return '';
+}
+
+// Чей это диф, показываем только когда групп больше одной: при пустом индексе
+// вариант ровно один, и подпись была бы шумом.
+const gitScopeBadge = computed(() => {
+  if (gitGroups.value.length < 2 || !gitEntry.value) return null;
+  return gitEntry.value.group.id === 'staged'
+    ? { label: 'в индексе', hint: 'слева HEAD, справа индекс — это уедет в коммит' }
+    : { label: 'в рабочем дереве', hint: 'слева индекс, справа рабочее дерево — в коммит пока не попадёт' };
+});
 
 // ── Monaco: оба редактора живут под v-show, но модели очищаются при смене контекста. ──
 const fileHost = ref(null);
@@ -320,10 +351,10 @@ function toggleDiffLayout() {
   if (!oneSidedDiff.value) side.value = !side.value;
 }
 
-function toggleGitDir(path) {
+function toggleGitDir(ref) {
   const open = new Set(gitOpenDirs.value);
-  if (open.has(path)) open.delete(path);
-  else open.add(path);
+  if (open.has(ref)) open.delete(ref);
+  else open.add(ref);
   gitOpenDirs.value = open;
 }
 
@@ -369,7 +400,6 @@ const rows = computed(() => {
   walk('', 0);
   return out;
 });
-function indent(depth) { return `${depth * 13 + 8}px`; }
 
 async function openFile(rel, { silent = false, activation = null } = {}) {
   if (!activationIsCurrent(activation)) return;
@@ -426,9 +456,10 @@ async function loadGit(snapshot = captureContext(), { silent = false, activation
     const nextGit = {
       ...data,
       files: Array.isArray(data?.files) ? data.files : [],
+      staged: Array.isArray(data?.staged) ? data.staged : [],
       log: Array.isArray(data?.log) ? data.log : [],
     };
-    const nextDirs = gitDirectoryPaths(buildGitTree(nextGit.files));
+    const nextDirs = gitGroupDirectoryPaths(nextGit);
     gitOpenDirs.value = reconcileGitOpenDirs(
       nextDirs,
       gitDirsReady.value ? gitOpenDirs.value : null,
@@ -437,8 +468,8 @@ async function loadGit(snapshot = captureContext(), { silent = false, activation
     gitKnownDirs.value = nextDirs;
     gitDirsReady.value = true;
     git.value = nextGit;
-    if (gitSel.value && !git.value.files.some((f) => f.path === gitSel.value)) gitSel.value = '';
-    if (!gitSel.value && git.value.files.length) gitSel.value = git.value.files[0].path;
+    if (gitSel.value && !gitEntries.value.has(gitSel.value)) gitSel.value = '';
+    if (!gitSel.value) gitSel.value = firstGitRef();
     await nextTick();
     if (!activationIsCurrent(activation)
         || !contextIsCurrent(snapshot) || gitRequestId !== requestId) return;
@@ -455,11 +486,11 @@ async function loadGit(snapshot = captureContext(), { silent = false, activation
   }
 }
 
-async function selectGit(p) {
+async function selectGit(ref) {
   const snapshot = captureContext();
-  gitSel.value = p;
+  gitSel.value = ref;
   await nextTick();
-  if (contextIsCurrent(snapshot) && gitSel.value === p) showDiff(gitFile.value);
+  if (contextIsCurrent(snapshot) && gitSel.value === ref) showDiff(gitFile.value);
 }
 
 async function refresh({ silent = false, activation = null } = {}) {
@@ -673,7 +704,7 @@ async function activate({ preserve = false } = {}) {
       && previous?.contextId === contextId.value;
     if (sameContext && previous.tab === 'git') {
       await setTab('git');
-      if (previous.gitFile && git.value?.files.some((item) => item.path === previous.gitFile)) {
+      if (previous.gitFile && gitEntries.value.has(previous.gitFile)) {
         await selectGit(previous.gitFile);
       }
     } else if (sameContext && previous?.file) {
@@ -905,68 +936,81 @@ onBeforeUnmount(() => {
           Проверь пути в разделе <router-link to="/projects">«Проекты»</router-link>.
         </div>
 
-        <!-- Дерево файлов -->
-        <div v-if="tab === 'files'" class="scroll">
+        <!-- Дерево файлов. Место под шеврон занято и у файла (пустой .chev): без него
+             имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
+             уровнем выше — лесенка читалась рваной. -->
+        <div v-if="tab === 'files'" class="scroll tree">
           <template v-for="row in rows" :key="row.rel">
             <button v-if="row.dir" type="button" class="trow dir" :data-dir-path="row.rel"
-                    :aria-expanded="openDirs.has(row.rel)" :style="{ paddingLeft: indent(row.depth) }"
+                    :data-depth="row.depth"
+                    :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
                     @click="toggleDir(row.rel)">
               <span class="chev">{{ openDirs.has(row.rel) ? '▾' : '▸' }}</span>
               <span class="dname">{{ row.name }}</span>
             </button>
             <button v-else type="button" class="trow frow" :class="{ sel: fileSel === row.rel }"
-                    :data-file-path="row.rel"
-                    :style="{ paddingLeft: indent(row.depth) }" @click="openFile(row.rel)">
+                    :data-file-path="row.rel" :data-depth="row.depth"
+                    :style="rowDepth(row.depth)" @click="openFile(row.rel)">
+              <span class="chev" aria-hidden="true"></span>
               <span class="nm">{{ row.name }}</span>
             </button>
           </template>
         </div>
 
-        <!-- Гит: изменения + свежие коммиты -->
-        <div v-else class="scroll">
+        <!-- Гит: изменения группами (индекс, рабочее дерево) + свежие коммиты.
+             Группа с пустым индексом не рисуется вовсе, поэтому обычный прогон
+             фабрики выглядит как раньше — одним списком «Не в коммите». -->
+        <div v-else class="scroll tree">
           <div v-if="gitLoading && !git" class="pnote">Читаю гит…</div>
           <template v-if="git">
-            <div class="subhead">
-              <span>Не в коммите</span>
-              <span v-if="git.files.length" class="cnt mono">{{ git.files.length }}</span>
-              <span class="grow"></span>
-              <div class="git-view-toggle" role="group" aria-label="Вид изменений">
-                <button type="button" data-view="tree" title="Показать деревом" aria-label="Показать деревом"
-                        :aria-pressed="gitView === 'tree'" @click="setGitView('tree')">
-                  <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" /></svg>
-                </button>
-                <button type="button" data-view="list" title="Показать списком" aria-label="Показать списком"
-                        :aria-pressed="gitView === 'list'" @click="setGitView('list')">
-                  <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" /></svg>
-                </button>
+            <template v-for="(group, groupIndex) in gitGroups" :key="group.id">
+              <div class="subhead" :data-group="group.id">
+                <span :title="group.hint">{{ group.title }}</span>
+                <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
+                <span class="grow"></span>
+                <!-- Переключатель вида один на панель: он про способ показа, а не про группу. -->
+                <div v-if="groupIndex === 0" class="git-view-toggle" role="group" aria-label="Вид изменений">
+                  <button type="button" data-view="tree" title="Показать деревом" aria-label="Показать деревом"
+                          :aria-pressed="gitView === 'tree'" @click="setGitView('tree')">
+                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" /></svg>
+                  </button>
+                  <button type="button" data-view="list" title="Показать списком" aria-label="Показать списком"
+                          :aria-pressed="gitView === 'list'" @click="setGitView('list')">
+                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" /></svg>
+                  </button>
+                </div>
               </div>
-            </div>
-            <div v-if="!git.files.length" class="pnote">Несохранённых изменений нет.</div>
-            <template v-if="gitView === 'tree'">
-              <template v-for="row in gitRows" :key="row.key">
-                <button v-if="row.kind === 'dir'" type="button" class="trow dir git-row git-dir"
-                        :data-path="row.path" :aria-expanded="gitOpenDirs.has(row.path)"
-                        :style="{ paddingLeft: indent(row.depth) }" @click="toggleGitDir(row.path)">
-                  <span class="chev">{{ gitOpenDirs.has(row.path) ? '▾' : '▸' }}</span>
-                  <span class="dname" :title="row.path">{{ row.name }}</span>
-                </button>
-                <button v-else type="button" class="trow frow git-row git-file"
-                        :class="{ sel: gitSel === row.path }" :data-path="row.path"
-                        :style="{ paddingLeft: indent(row.depth) }" @click="selectGit(row.path)">
-                  <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
-                  <span class="nm mono" :title="row.path">{{ row.name }}</span>
-                  <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
+              <div v-if="!group.files.length" class="pnote">Несохранённых изменений нет.</div>
+              <template v-else-if="gitView === 'tree'">
+                <template v-for="row in group.rows" :key="row.key">
+                  <button v-if="row.kind === 'dir'" type="button" class="trow dir git-row git-dir"
+                          :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
+                          :aria-expanded="gitOpenDirs.has(row.ref)"
+                          :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
+                    <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
+                    <span class="dname" :title="row.path">{{ row.name }}</span>
+                  </button>
+                  <button v-else type="button" class="trow frow git-row git-file"
+                          :class="{ sel: gitSel === row.ref }" :data-path="row.path"
+                          :data-group="group.id" :data-depth="row.depth"
+                          :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
+                    <span class="chev" aria-hidden="true"></span>
+                    <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
+                    <span class="nm mono" :title="row.path">{{ row.name }}</span>
+                    <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
+                  </button>
+                </template>
+              </template>
+              <template v-else>
+                <button v-for="f in group.files" :key="`${group.id}:file:${f.path}`" type="button"
+                        class="trow frow git-row git-file" :class="{ sel: gitSel === gitRef(group.id, f.path) }"
+                        :data-path="f.path" :data-group="group.id"
+                        @click="selectGit(gitRef(group.id, f.path))">
+                  <span class="st" :class="f.status">{{ STLABEL[f.status] || f.status }}</span>
+                  <span class="nm mono" :title="f.path">{{ f.path }}</span>
+                  <span class="cnt mono"><i v-if="f.add" class="a">+{{ f.add }}</i><i v-if="f.del" class="d">−{{ f.del }}</i></span>
                 </button>
               </template>
-            </template>
-            <template v-else>
-              <button v-for="f in git.files" :key="`file:${f.path}`" type="button"
-                      class="trow frow git-row git-file" :class="{ sel: gitSel === f.path }"
-                      :data-path="f.path" @click="selectGit(f.path)">
-                <span class="st" :class="f.status">{{ STLABEL[f.status] || f.status }}</span>
-                <span class="nm mono" :title="f.path">{{ f.path }}</span>
-                <span class="cnt mono"><i v-if="f.add" class="a">+{{ f.add }}</i><i v-if="f.del" class="d">−{{ f.del }}</i></span>
-              </button>
             </template>
             <div class="subhead">Коммиты</div>
             <div v-for="c in git.log" :key="c.hash" class="commit" :title="c.when">
@@ -1000,6 +1044,8 @@ onBeforeUnmount(() => {
           <template v-else-if="tab === 'git' && gitFile">
             <span class="st" :class="gitFile.status">{{ STLABEL[gitFile.status] || gitFile.status }}</span>
             <span class="epath mono">{{ gitFile.path }}</span>
+            <!-- Пока индекс пуст, называть группу нечего: диф в панели ровно один. -->
+            <span v-if="gitScopeBadge" class="scope" :title="gitScopeBadge.hint">{{ gitScopeBadge.label }}</span>
             <span v-if="gitFile.binary" class="note">бинарный</span>
             <span v-else-if="gitFile.tooBig" class="note">слишком большой — превью отключено</span>
           </template>
@@ -1024,7 +1070,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
-          <div v-else-if="tab === 'git' && git && !git.files.length" class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
+          <!-- Пусто = нет изменений НИ В ОДНОЙ группе: при чистом рабочем дереве, но
+               непустом индексе, диф выбранного файла существует и закрывать его нечем. -->
+          <div v-else-if="tab === 'git' && git && !gitEntries.size" class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
         </div>
       </section>
     </div>
@@ -1122,16 +1170,29 @@ onBeforeUnmount(() => {
 .context-warning { display: flex; flex-direction: column; gap: 3px; }
 .unavailable-repo { color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scroll { flex: 1; min-width: 0; overflow: auto; padding: 6px 8px; }
+/* Лесенка дерева: шаг задан ОДИН раз здесь, скрипт присылает строке только --depth.
+   Держать шаг числом в JS нельзя — он должен сходиться с положением направляющей. */
+.tree { --tree-step: 14px; --tree-lead: 8px; --tree-guide: color-mix(in srgb, var(--line) 80%, transparent); }
 
 .trow { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none; border: none;
   color: var(--ink); padding: 4px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
-.trow:hover { background: var(--surface); }
+/* Фон меняем ТОЛЬКО background-color: shorthand `background` стирает направляющие. */
+.trow:hover { background-color: var(--surface); }
 .trow:focus-visible, .ritem:focus-visible, .git-view-toggle button:focus-visible, .act:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
 .trow.dir { color: var(--ink-mid); }
+/* Направляющие линии предков — по одной на уровень, ровно под шевроном родителя. */
+.tree .trow {
+  padding-left: calc(var(--tree-lead) + var(--depth, 0) * var(--tree-step));
+  background-image: repeating-linear-gradient(to right, var(--tree-guide) 0 1px, transparent 1px var(--tree-step));
+  background-repeat: no-repeat;
+  /* 5.5px = половина шеврона минус половина линии: направляющая идёт ровно по его центру. */
+  background-position: calc(var(--tree-lead) + 5.5px) 0;
+  background-size: calc(var(--depth, 0) * var(--tree-step)) 100%;
+}
 .chev { flex: none; width: 12px; font-size: 10px; color: var(--ink-mid); }
 .dname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.frow.sel { background-color: color-mix(in srgb, var(--accent) 16%, transparent); }
 .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st { flex: none; width: 16px; text-align: center; font-family: var(--mono); font-size: 11px; font-weight: 700; border-radius: 4px; }
 .st.A { color: var(--good); } .st.M { color: var(--warn); } .st.D { color: var(--bad); } .st.R { color: var(--accent); }
@@ -1157,6 +1218,8 @@ onBeforeUnmount(() => {
 .ehead { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--topbar); min-height: 37px; }
 .ehead .st { width: auto; padding: 0 5px; }
 .epath { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope { flex: none; font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
 .note { font-size: 11px; color: var(--warn); flex: none; }
 .grow { flex: 1; }
 .ebody { flex: 1; min-height: 0; position: relative; }

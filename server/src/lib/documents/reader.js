@@ -18,13 +18,13 @@ const ALLOWED_ASSET_EXTENSIONS = new Map([
   ['.webp', 'image/webp'],
 ]);
 
-const DEFAULT_MAX_BYTES = 1_500_000;
+const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_ASSET_BYTES = 5_000_000;
 const READ_CHUNK_BYTES = 64 * 1024;
 
 export class DocumentReadError extends Error {
-  constructor(code, message, statusCode) {
-    super(message);
+  constructor(code, message, statusCode, cause = null) {
+    super(message, cause ? { cause } : undefined);
     this.name = 'DocumentReadError';
     this.code = code;
     this.statusCode = statusCode;
@@ -40,12 +40,72 @@ function isInside(root, target) {
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
 }
 
+function assertMostSpecificOwner(roots, source, target) {
+  // roots() уже отсортирован от самого узкого пути к широкому. DocumentRef не
+  // имеет права назвать внешний source для файла, которым владеет вложенный root:
+  // иначе policy/label/project authority зависели бы от подменённого source id.
+  const owner = roots.find((root) => isInside(root.path, target));
+  if (!owner || owner.id !== source.id || owner.path !== source.path) {
+    fail('document_source_mismatch', 'Документ принадлежит другому источнику', 403);
+  }
+  return owner;
+}
+
 function formatOf(filePath) {
   return ALLOWED_EXTENSIONS.get(path.extname(filePath).toLowerCase()) || '';
 }
 
 function assetTypeOf(filePath) {
   return ALLOWED_ASSET_EXTENSIONS.get(path.extname(filePath).toLowerCase()) || '';
+}
+
+function byteLimit(value, fallback, { ceiling = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, ceiling);
+}
+
+function snapshotSize(stat) {
+  const size = Number(stat?.size);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    fail('document_unsafe_file', 'Не удалось подтвердить размер обычного файла', 403);
+  }
+  return size;
+}
+
+function snapshotRevision(stat, nanoseconds, milliseconds) {
+  return stat?.[nanoseconds] ?? stat?.[milliseconds];
+}
+
+function sameSnapshot(before, after) {
+  return before?.dev === after?.dev
+    && before?.ino === after?.ino
+    && before?.mode === after?.mode
+    && before?.nlink === after?.nlink
+    && before?.size === after?.size
+    && snapshotRevision(before, 'mtimeNs', 'mtimeMs') === snapshotRevision(after, 'mtimeNs', 'mtimeMs')
+    && snapshotRevision(before, 'ctimeNs', 'ctimeMs') === snapshotRevision(after, 'ctimeNs', 'ctimeMs');
+}
+
+function assertInitialSnapshot(stat, maxBytes, kind) {
+  if (!stat?.isFile?.()) fail('document_not_file', 'Путь не является обычным файлом', 415);
+  if (stat.nlink !== 1 && stat.nlink !== 1n) {
+    fail('document_unsafe_file', 'Файл с несколькими жёсткими ссылками запрещён', 403);
+  }
+  const size = snapshotSize(stat);
+  if (size > maxBytes) {
+    const label = kind === 'asset' ? 'Изображение' : 'Документ';
+    fail('document_too_large', `${label} больше ${maxBytes} байт`, 413);
+  }
+  return size;
+}
+
+function assertStableSnapshot(before, after, bytesRead) {
+  const afterSize = snapshotSize(after);
+  if (!after?.isFile?.() || (after.nlink !== 1 && after.nlink !== 1n)
+      || !sameSnapshot(before, after) || bytesRead !== afterSize) {
+    fail('document_changed', 'Файл изменился во время чтения', 409);
+  }
 }
 
 async function canonicalDirectory(entry) {
@@ -94,14 +154,47 @@ function publicReadError(error) {
   if (error?.code === 'ELOOP') {
     return new DocumentReadError('document_unsafe_path', 'Небезопасный путь к документу', 403);
   }
-  return error;
+  return new DocumentReadError(
+    'document_read_failed',
+    'Не удалось безопасно прочитать документ',
+    500,
+    error,
+  );
 }
 
 export class DocumentReader {
-  constructor({ rootProviders = [], maxBytes = DEFAULT_MAX_BYTES, maxAssetBytes = DEFAULT_MAX_ASSET_BYTES } = {}) {
+  constructor({
+    rootProviders = [],
+    maxBytes = DEFAULT_MAX_BYTES,
+    maxAssetBytes = DEFAULT_MAX_ASSET_BYTES,
+    deps = {},
+  } = {}) {
     this.rootProviders = [...rootProviders];
-    this.maxBytes = Math.max(1, Number(maxBytes) || DEFAULT_MAX_BYTES);
-    this.maxAssetBytes = Math.max(1, Number(maxAssetBytes) || DEFAULT_MAX_ASSET_BYTES);
+    // 16 MiB — общий верхний предел generic text adapter. Конкретный consumer может
+    // только сузить его; поднять границу через конфигурацию нельзя.
+    this.maxBytes = byteLimit(maxBytes, DEFAULT_MAX_BYTES, { ceiling: DEFAULT_MAX_BYTES });
+    this.maxAssetBytes = byteLimit(maxAssetBytes, DEFAULT_MAX_ASSET_BYTES);
+    this.resolveOpenedPath = deps.resolveOpenedPath
+      || ((handle) => fs.realpath(`/proc/self/fd/${handle.fd}`));
+    this.statOpenedFile = deps.statOpenedFile
+      || ((handle) => handle.stat({ bigint: true }));
+    if (typeof this.resolveOpenedPath !== 'function' || typeof this.statOpenedFile !== 'function') {
+      throw new TypeError('document reader deps must be functions');
+    }
+  }
+
+  async verifiedOpenedPath(handle, sourceRoot, expectedPath) {
+    let openedPath;
+    try {
+      openedPath = await this.resolveOpenedPath(handle);
+    } catch (error) {
+      fail('document_unsafe_path', 'Не удалось подтвердить путь открытого файла', 403);
+    }
+    if (typeof openedPath !== 'string' || !path.isAbsolute(openedPath)
+        || openedPath !== expectedPath || !isInside(sourceRoot, openedPath)) {
+      fail('document_unsafe_path', 'Путь изменился во время открытия', 403);
+    }
+    return openedPath;
   }
 
   /** Зарегистрировать ещё один источник корней на этапе сборки приложения. */
@@ -199,6 +292,7 @@ export class DocumentReader {
     if (!isInside(source.path, canonical)) {
       fail('document_outside_roots', 'Документ находится вне разрешённого корня', 403);
     }
+    assertMostSpecificOwner(roots, source, canonical);
     const format = formatOf(canonical);
     if (!format) fail('document_type_not_allowed', 'Целевой файл имеет неподдерживаемый тип', 415);
 
@@ -209,19 +303,19 @@ export class DocumentReader {
       // по fd — это ловит и подмену родительского symlink между realpath и open.
       const flags = FS.O_RDONLY | (FS.O_NOFOLLOW || 0) | (FS.O_NONBLOCK || 0);
       handle = await fs.open(canonical, flags);
-      const stat = await handle.stat();
-      if (!stat.isFile()) fail('document_not_file', 'Путь не является обычным файлом', 415);
-      if (stat.size > this.maxBytes) {
-        fail('document_too_large', `Документ больше ${this.maxBytes} байт`, 413);
-      }
-
-      let openedPath = canonical;
-      try { openedPath = await fs.realpath(`/proc/self/fd/${handle.fd}`); } catch { /* не-Linux: остаётся повторная проверка canonical */ }
-      if (!isInside(source.path, openedPath)) {
-        fail('document_unsafe_path', 'Путь изменился во время открытия', 403);
-      }
+      const stat = await this.statOpenedFile(handle);
+      assertInitialSnapshot(stat, this.maxBytes, 'document');
+      const openedPath = await this.verifiedOpenedPath(handle, source.path, canonical);
+      assertMostSpecificOwner(roots, source, openedPath);
 
       const buffer = await readLimited(handle, this.maxBytes);
+      const after = await this.statOpenedFile(handle);
+      assertStableSnapshot(stat, after, buffer.length);
+      assertMostSpecificOwner(
+        roots,
+        source,
+        await this.verifiedOpenedPath(handle, source.path, canonical),
+      );
       if (buffer.includes(0)) fail('document_binary', 'Бинарные файлы не поддерживаются', 415);
       let content;
       try { content = new TextDecoder('utf-8', { fatal: true }).decode(buffer); }
@@ -268,6 +362,7 @@ export class DocumentReader {
     if (!isInside(source.path, canonical)) {
       fail('document_outside_roots', 'Изображение находится вне разрешённого корня', 403);
     }
+    assertMostSpecificOwner(roots, source, canonical);
     const contentType = assetTypeOf(canonical);
     if (!contentType) fail('document_asset_type_not_allowed', 'Целевой файл имеет неподдерживаемый тип', 415);
 
@@ -275,17 +370,21 @@ export class DocumentReader {
     try {
       const flags = FS.O_RDONLY | (FS.O_NOFOLLOW || 0) | (FS.O_NONBLOCK || 0);
       handle = await fs.open(canonical, flags);
-      const stat = await handle.stat();
-      if (!stat.isFile()) fail('document_not_file', 'Путь не является обычным файлом', 415);
-      if (stat.size > this.maxAssetBytes) {
-        fail('document_too_large', `Изображение больше ${this.maxAssetBytes} байт`, 413);
-      }
-      let openedPath = canonical;
-      try { openedPath = await fs.realpath(`/proc/self/fd/${handle.fd}`); } catch { /* см. read() */ }
-      if (!isInside(source.path, openedPath)) {
-        fail('document_unsafe_path', 'Путь изменился во время открытия', 403);
-      }
+      const stat = await this.statOpenedFile(handle);
+      assertInitialSnapshot(stat, this.maxAssetBytes, 'asset');
+      assertMostSpecificOwner(
+        roots,
+        source,
+        await this.verifiedOpenedPath(handle, source.path, canonical),
+      );
       const content = await readLimited(handle, this.maxAssetBytes);
+      const after = await this.statOpenedFile(handle);
+      assertStableSnapshot(stat, after, content.length);
+      assertMostSpecificOwner(
+        roots,
+        source,
+        await this.verifiedOpenedPath(handle, source.path, canonical),
+      );
       return { content, contentType, size: content.length, modifiedAt: stat.mtime.toISOString() };
     } catch (error) {
       throw publicReadError(error);

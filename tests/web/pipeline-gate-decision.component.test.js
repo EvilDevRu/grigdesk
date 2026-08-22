@@ -35,6 +35,10 @@ async function compilePipelineView() {
       'const useSse = () => {};',
     )
     .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
+    )
+    .replace(
       "import { useUiStore } from '../stores/ui.js';",
       'const useUiStore = globalThis.__pipelineGateUiStore;',
     )
@@ -47,8 +51,8 @@ async function compilePipelineView() {
       'const useBoardStore = globalThis.__pipelineGateBoardStore;',
     )
     .replace(
-      "import { useChatStore } from '../stores/chat.js';",
-      'const useChatStore = globalThis.__pipelineGateChatStore;',
+      "import { useCompanionStore } from '../stores/companion.js';",
+      'const useCompanionStore = globalThis.__pipelineGateCompanionStore;',
     )
     .replace(
       "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
@@ -187,8 +191,8 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
-  globalThis.__pipelineGateChatStore = defineStore('pipeline-gate-chat', {
-    actions: { openFor() {} },
+  globalThis.__pipelineGateCompanionStore = defineStore('pipeline-gate-companion', {
+    actions: { openForTask() {} },
   });
 
   const wrapper = mount(await compilePipelineView(), {
@@ -202,7 +206,7 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
       '__pipelineGateApi', '__pipelineGateConfirm', '__pipelineGateAlert',
       '__pipelineGateWait', '__pipelineGateDisplay', '__pipelineGateFactoryGraph',
       '__pipelineGateUiStore', '__pipelineGateTasksStore', '__pipelineGateBoardStore',
-      '__pipelineGateChatStore',
+      '__pipelineGateCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();

@@ -203,6 +203,44 @@ test('ARGS-02: check не имеет побочных эффектов, gate в�
   assert.ok(!gate.includes('--comment'), 'пустой комментарий не передаётся');
 });
 
+test('EC-01: catalog hash проходит через check/start, queue dispatch — только через start', () => {
+  const catalogHash = 'c'.repeat(64);
+  const dispatchId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  assert.deepEqual(routeCheckArgs(CONFIG, {
+    profile: 'demo', route: 'feature', expectedCatalogHash: catalogHash,
+  }), [
+    'check', '--profile', 'demo', '--route', 'feature',
+    '--expected-catalog-hash', catalogHash,
+    '--routes-dir', CONFIG.routesDir,
+  ]);
+  const started = routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json',
+    expectedCatalogHash: catalogHash,
+    queueDispatchId: dispatchId,
+  });
+  assert.deepEqual(started.slice(8, 12), [
+    '--expected-catalog-hash', catalogHash, '--queue-dispatch-id', dispatchId,
+  ]);
+  assert.throws(() => routeCheckArgs(CONFIG, {
+    profile: 'demo', route: 'feature', expectedCatalogHash: 'ABC',
+  }), /sha256/);
+  assert.throws(() => routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json', queueDispatchId: dispatchId,
+  }), /expectedCatalogHash/);
+  assert.throws(() => routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json',
+    expectedCatalogHash: catalogHash, queueDispatchId: 'not-a-uuid',
+  }), /UUID/);
+  assert.throws(() => routeStartArgs(CONFIG, {
+    task: '8200', profile: 'demo', route: 'feature',
+    ticketFile: '/state/tickets/t8200.ticket.json',
+    expectedCatalogHash: catalogHash, queueDispatchId: dispatchId.toUpperCase(),
+  }), /UUID/);
+});
+
 test('ARGS-03: коды отказа движка объясняются человеку', () => {
   assert.match(routeMessage(78, 'die: маршрут не найден'), /контракт/);
   assert.match(routeMessage(73, ''), /занято/);
@@ -219,6 +257,17 @@ test('ARGS-03: коды отказа движка объясняются чел�
   assert.equal(routeFailure('обычная shell-ошибка с кодом 1'), null,
     'голый код 1 не выдаётся за preflight');
   assert.equal(routeMessage(0, ' готово \n'), 'готово');
+
+  const expectedCatalogHash = 'c'.repeat(64);
+  const actualCatalogHash = 'd'.repeat(64);
+  assert.deepEqual(routeFailure(
+    `FACTORY_ERROR=catalog_changed EXPECTED=${expectedCatalogHash} ACTUAL=${actualCatalogHash}`,
+  ), {
+    error: 'catalog_changed',
+    expectedCatalogHash,
+    actualCatalogHash,
+    message: 'опубликованный каталог изменился после выбора маршрута; поставь задачу заново',
+  });
 });
 
 test('ARGS-04: запуск подтверждается только полной и не stalled identity маршрута', () => {
@@ -249,4 +298,33 @@ test('ARGS-04: запуск подтверждается только полно
       profile: 'demo', route: 'hunt',
     }), null, JSON.stringify(patch));
   }
+});
+
+test('EC-04: queue launch требует точную catalog/dispatch/runner registry identity', () => {
+  const expectedCatalogHash = 'b'.repeat(64);
+  const dispatchId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const complete = {
+    ATTEMPT_ID: 'a_0123456789abcdef0123456789abcdef',
+    ROUTE_HASH: 'a'.repeat(64),
+    CATALOG_HASH: expectedCatalogHash,
+    QUEUE_DISPATCH_ID: dispatchId,
+    RUNNER_OVERRIDE_PRIMARY: 'codex',
+    ORCH_PID: '12345',
+    PROFILE: 'demo',
+    ROUTE: 'feature',
+    RUN_PROTOCOL: '2',
+    CATALOG_PROTOCOL: 'route-v2',
+    DELIVERY_MODE: 'disabled',
+    STALLED_HUMAN: '0',
+  };
+  const options = {
+    profile: 'demo', route: 'feature', expectedCatalogHash,
+    queueDispatchId: dispatchId, runnerPrimaryOverride: 'codex',
+  };
+  assert.ok(startRegistryIdentity(complete, options));
+  for (const patch of [
+    { CATALOG_HASH: 'c'.repeat(64) },
+    { QUEUE_DISPATCH_ID: '00000000-0000-4000-8000-000000000002' },
+    { RUNNER_OVERRIDE_PRIMARY: 'claude' },
+  ]) assert.equal(startRegistryIdentity({ ...complete, ...patch }, options), null);
 });

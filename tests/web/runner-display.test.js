@@ -102,6 +102,42 @@ test('attempt cost falls back to token total when the CLI never named a price', 
   );
 });
 
+test('schema-2 runner telemetry остаётся exact, различает partial и measured zero', () => {
+  const huge = {
+    tokens: {
+      exact: {
+        in: '9007199254740993', out: '7', cacheRead: '3', cacheWrite: '7',
+        costUsd: '2.9762492000000008', completeness: 'complete', provenance: 'exact',
+      },
+    },
+  };
+  assert.equal(attemptCostLabel(huge), '$2.98');
+  assert.match(attemptCostTitle(huge), /вход 9 007 199 254 740 993/u);
+  assert.match(attemptCostTitle(huge), /стоимость \$2\.9762/u);
+
+  const partial = {
+    tokens: {
+      exact: {
+        in: '20', out: '800', cacheRead: '90000', cacheWrite: '9000',
+        costUsd: null, completeness: 'partial', provenance: 'exact',
+      },
+    },
+  };
+  assert.equal(attemptCostLabel(partial), '≥100к ток.');
+  assert.match(attemptCostTitle(partial), /учтённая часть/u);
+
+  const zero = {
+    tokens: {
+      exact: {
+        in: '0', out: '0', cacheRead: '0', cacheWrite: '0',
+        costUsd: '0', completeness: 'complete', provenance: 'exact',
+      },
+    },
+  };
+  assert.equal(attemptCostLabel(zero), '$0.00');
+  assert.notEqual(attemptCostTitle(zero), '');
+});
+
 // Раннер без метода `usage` (ACP-мост kimi) расхода не публикует. Пустая метка
 // честнее нуля: «бесплатно» и «неизвестно» — разные утверждения.
 test('attempt without usage telemetry shows nothing', () => {

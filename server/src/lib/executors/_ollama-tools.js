@@ -185,6 +185,7 @@ const TOOLS = [
       sub: String(args.path || ''),
       preview: cut(String(args.content ?? '')),
       lines: lineCount(args.content),
+      files: args.path ? [String(args.path)] : [],
     }),
     permissionInput: (args) => ({ file_path: String(args.path || '') }),
     async run(args, { resolvePath }) {
@@ -219,6 +220,7 @@ const TOOLS = [
       title: base(args.path),
       sub: String(args.path || ''),
       diff: { old: String(args.old_string ?? ''), new: String(args.new_string ?? '') },
+      files: args.path ? [String(args.path)] : [],
     }),
     permissionInput: (args) => ({ file_path: String(args.path || '') }),
     async run(args, { resolvePath }) {

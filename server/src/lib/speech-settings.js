@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+import { DEFAULT_VIDEO_INITIAL_PROMPT, INITIAL_PROMPT_MAX_CHARS } from './speech/options.js';
+
 // Поля nullable — именно ручные override: null означает «возьми значение из пресета».
 // Дефолты хранятся рядом с валидатором, чтобы GET и запись не расходились.
 export const SPEECH_DEFAULTS = Object.freeze({
@@ -10,6 +12,7 @@ export const SPEECH_DEFAULTS = Object.freeze({
   dictionary: '',
   quality: 'balanced',
   videoQuality: 'balanced',
+  videoInitialPrompt: DEFAULT_VIDEO_INITIAL_PROMPT,
   model: null,
   videoModel: null,
   device: 'auto',
@@ -92,6 +95,23 @@ function dictionary(value) {
   return normalized;
 }
 
+/**
+ * Пустая строка допустима и означает «без подсказки»: очистка поля — осознанный выбор
+ * человека, и подставлять дефолт обратно нельзя, иначе поле не выключить.
+ */
+function initialPrompt(value) {
+  if (typeof value !== 'string') {
+    throw new SpeechSettingsInputError('speech.videoInitialPrompt должно быть строкой.');
+  }
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if ([...normalized].length > INITIAL_PROMPT_MAX_CHARS) {
+    throw new SpeechSettingsInputError(
+      `speech.videoInitialPrompt не может быть длиннее ${INITIAL_PROMPT_MAX_CHARS} символов.`,
+    );
+  }
+  return normalized;
+}
+
 function validateField(key, value, { stored = false } = {}) {
   switch (key) {
     case 'engine': return oneOf(value, ENGINES, key);
@@ -107,6 +127,10 @@ function validateField(key, value, { stored = false } = {}) {
     case 'dictionary': return dictionary(value);
     case 'quality':
     case 'videoQuality': return oneOf(value, QUALITIES, key);
+    // null — «вернуть стандартную подсказку». Так кнопка сброса в UI не обязана хранить
+    // вторую копию текста промпта и не разойдётся с серверной при правке.
+    case 'videoInitialPrompt':
+      return value === null ? DEFAULT_VIDEO_INITIAL_PROMPT : initialPrompt(value);
     case 'model':
     case 'videoModel': return nullableOneOf(value, MODELS, key);
     case 'device': return oneOf(value, DEVICES, key);

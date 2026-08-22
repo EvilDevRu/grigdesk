@@ -10,11 +10,41 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', import.meta.url));
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const PINIA_URL = pathToFileURL(PINIA_PATH).href;
+// Чистый модуль без Vue/pinia — подставляем настоящий, а не заглушку: правило
+// «полупустая ссылка = дефолт реестра» должно проверяться тем же кодом, что в бою.
+const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
+  new URL('../../../web/src/shared/companion-run.js', import.meta.url),
+)).href;
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
 export const apiHarness = {};
 globalThis.__chatApi = apiHarness;
 globalThis.__chatNotifications = [];
+globalThis.__chatVisibility = {
+  ids: new Set(),
+  isVisible(id) { return this.ids.has(id); },
+  register() { return { update() {}, dispose() {} }; },
+};
+globalThis.__chatUiContext = {
+  capture: () => ({ routingScope: null, promptContext: { page: '', path: '/chats' } }),
+};
+
+/** Реестр исполнителей по умолчанию: любая запрошенная модель существует, уровней нет. */
+function defaultProviders() {
+  return {
+    modelOf(value) {
+      const id = typeof value === 'object' && value ? value.model : (value || 'test-model');
+      const provider = typeof value === 'object' && value?.provider ? value.provider : 'test-provider';
+      return { id, model: { id }, provider: { id: provider } };
+    },
+  };
+}
+globalThis.__chatProviders = defaultProviders();
+
+/** Подменить реестр на время теста (модель с уровнями эффорта, пропавшая модель и т.п.). */
+export function setChatProviders(providers) {
+  globalThis.__chatProviders = providers || defaultProviders();
+}
 
 let patchedSource;
 let instance = 0;
@@ -28,13 +58,17 @@ function patch(source) {
       "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
       + ' const document = { hidden: false };',
     )
-    .replace("import { useUiContextStore } from './ui-context.js';", 'const useUiContextStore = () => ({ extra: {} });')
+    .replace(
+      "import { useUiContextStore } from './ui-context.js';",
+      'const useUiContextStore = () => globalThis.__chatUiContext;',
+    )
     .replace(
       "import { useProvidersStore } from './providers.js';",
-      'const useProvidersStore = () => ({ modelOf: (value) => {'
-      + ' const id = typeof value === "object" ? value.model : (value || "test-model");'
-      + ' const provider = typeof value === "object" && value.provider ? value.provider : "test-provider";'
-      + ' return { id, model: { id }, provider: { id: provider } }; } });',
+      'const useProvidersStore = () => globalThis.__chatProviders;',
+    )
+    .replace(
+      "import { normalizeCompanionRun } from '../shared/companion-run.js';",
+      `import { normalizeCompanionRun } from "${COMPANION_RUN_URL}";`,
     )
     .replace(
       "import { notify } from '../shared/notify.js';",
@@ -45,6 +79,10 @@ function patch(source) {
       'const sseSubscribe = (fn) => { globalThis.__chatSse = fn; return () => {}; };',
     )
     .replace("import { mdToText } from '../shared/md.js';", 'const mdToText = (x) => x;')
+    .replace(
+      "import { chatVisibility } from '../shared/chat-visibility.js';",
+      'const chatVisibility = globalThis.__chatVisibility;',
+    )
     .replace(
       /import \{[^}]*\} from '\.\.\/shared\/chat-title\.js';/,
       'const applyGeneratedChatTitle = (s) => s, firstMessageTitle = () => "",'
@@ -62,6 +100,12 @@ function patch(source) {
  */
 export async function chatStoreFixture(state = {}) {
   globalThis.__chatNotifications = [];
+  globalThis.__chatProviders = defaultProviders();
+  globalThis.__chatVisibility.ids.clear();
+  globalThis.__chatUiContext.capture = () => ({
+    routingScope: null,
+    promptContext: { page: '', path: '/chats' },
+  });
   if (!patchedSource) patchedSource = patch(await readFile(STORE_PATH, 'utf8'));
   const [{ createPinia, setActivePinia }, { useChatStore }] = await Promise.all([
     import(pathToFileURL(PINIA_PATH).href),
@@ -87,6 +131,15 @@ export async function chatStoreFixture(state = {}) {
 
 export function chatNotifications() {
   return globalThis.__chatNotifications;
+}
+
+export function setChatVisible(id, visible = true) {
+  if (visible) globalThis.__chatVisibility.ids.add(id);
+  else globalThis.__chatVisibility.ids.delete(id);
+}
+
+export function setChatContextCapture(capture) {
+  globalThis.__chatUiContext.capture = capture;
 }
 
 /** Обработчик SSE, который стор зарегистрировал через initPerms(). */

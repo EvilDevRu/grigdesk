@@ -9,6 +9,7 @@ import {
   apiHarness,
   chatNotifications,
   chatStoreFixture,
+  setChatVisible,
   sseOf,
 } from './helpers/chat-store.js';
 
@@ -29,6 +30,21 @@ function serveChat(chat) {
     return { chat };
   };
 }
+
+test('COMP-VIS-04: markRead и notifications используют exact registered surface', async () => {
+  const chat = await fixture({ unread: true });
+
+  chat.markRead('c1');
+  assert.equal(chat.sessions[0].unread, true, 'смонтированный, но скрытый чат не прочитан');
+
+  setChatVisible('other');
+  chat.markRead('c1');
+  assert.equal(chat.sessions[0].unread, true, 'видимость другого id не подходит');
+
+  setChatVisible('c1');
+  chat.markRead('c1');
+  assert.equal(chat.sessions[0].unread, false);
+});
 
 test('WEB-00: старые миллионы Codex не заполняют кольцо после миграции метрики', async () => {
   const chat = await fixture({

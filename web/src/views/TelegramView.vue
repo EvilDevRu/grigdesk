@@ -33,10 +33,17 @@ const providerReason = ref('');
 const chats = ref([]);    // что бот уже слышал
 const rules = ref([]);    // рабочая копия правил: правится на месте, уезжает целиком
 const savedRules = ref('[]'); // слепок того, что лежит на сервере — по нему видно несохранённое
+// CAS именно содержимого policy, а не времени загрузки и не mutable bot display.
+// Без него старая вкладка могла целиком перезаписать более новое разрешение.
+const rulesPolicyFingerprint = ref('');
+const POLICY_FINGERPRINT_RE = /^telegram-rules-v1:[0-9a-f]{64}$/u;
+// После ambiguous PUT старое значение agentSearch нельзя показывать как факт,
+// пока отдельный GET rules не подтвердил policy и её новый CAS fingerprint.
+const agentSearchStateKnown = ref(false);
 const projects = ref([]);
 const loading = ref(true);
 const token = ref('');
-const busy = ref('');     // '' | 'connect' | 'recheck' | 'disconnect' | 'rules' | 'service'
+const busy = ref('');     // '' | lifecycle | 'rules' | 'agent-search' | 'service' | 'pult'
 const error = ref('');
 const note = ref('');
 
@@ -326,12 +333,17 @@ function setCap(r, value) {
  */
 function payload() {
   return rules.value.map((r) => {
+    // agentSearch server-owned для обычного PUT: его меняет только отдельный
+    // opt-in endpoint. Иначе несвязанная правка B24 могла бы снять или выдать
+    // агентский доступ одним spread старой формы.
+    const humanRule = { ...r };
+    delete humanRule.agentSearch;
     const thread = Number(r.threadId);
     const chatId = Number(r.chatId);
     const b24 = r.b24 || {};
     const priority = Number(b24.priority);
     return {
-      ...r,
+      ...humanRule,
       project: String(r.project || '').trim(),
       chatId: r.chatId === null || r.chatId === '' || !Number.isSafeInteger(chatId) ? null : chatId,
       // Пустое поле имени — это «имя ещё не введено», а не имя из пустой строки.
@@ -490,6 +502,8 @@ function addRule() {
     b24: { responsibleId: null, groupId: null, priority: 1 },
     // Ответы выключены: включение — осознанное решение для конкретного чата/темы.
     notifyTaskCreated: false,
+    // Human allowlist не подразумевает право модели читать внешний источник.
+    agentSearch: false,
     // Автомат выключен у нового правила: сначала посмотри, что вообще прилетает
     // в этот чат, и только потом отдавай его роботу.
     autoTask: { ...AUTO_TASK },
@@ -498,29 +512,55 @@ function addRule() {
 
 async function loadRules() {
   try {
-    const res = await api.get('/api/telegram/rules');
-    rules.value = res.rules || [];
-    projects.value = res.projects || [];
-    savedRules.value = JSON.stringify(payload());
+    await readRulesSnapshot();
     await loadRuleTopics();
   } catch (e) {
     if (e.data?.error !== 'plugin_disabled') error.value = e.message;
   }
 }
 
+function applyRulesSnapshot(res) {
+  rules.value = Array.isArray(res?.rules) ? res.rules : [];
+  projects.value = Array.isArray(res?.projects) ? res.projects : [];
+  rulesPolicyFingerprint.value = POLICY_FINGERPRINT_RE.test(res?.policyFingerprint || '')
+    ? res.policyFingerprint
+    : '';
+  agentSearchStateKnown.value = Boolean(rulesPolicyFingerprint.value);
+  savedRules.value = JSON.stringify(payload());
+}
+
+async function readRulesSnapshot({ requireFingerprint = false } = {}) {
+  const res = await api.get('/api/telegram/rules');
+  applyRulesSnapshot(res);
+  if (requireFingerprint && !agentSearchStateKnown.value) {
+    throw new Error('Сервер не вернул достоверный policy fingerprint.');
+  }
+  return res;
+}
+
 async function saveRules() {
   if (busy.value || !providerWritable.value) return;
+  if (!POLICY_FINGERPRINT_RE.test(rulesPolicyFingerprint.value)) {
+    error.value = 'Не получен отпечаток правил. Перечитайте список перед сохранением.';
+    return;
+  }
   busy.value = 'rules';
   error.value = '';
   note.value = '';
   try {
     const res = await api.put('/api/telegram/rules', {
       botId: bot.value.botId,
+      policyFingerprint: rulesPolicyFingerprint.value,
       rules: payload(),
     });
     // Ответ сервера — уже нормализованные правила: берём их, а не свою копию,
     // иначе на экране осталась бы форма до проверки, а на диске другая.
+    if (!POLICY_FINGERPRINT_RE.test(res.policyFingerprint || '')) {
+      throw new Error('Сервер сохранил правила, но не вернул их новый отпечаток. Перечитайте список.');
+    }
     rules.value = res.rules || [];
+    rulesPolicyFingerprint.value = res.policyFingerprint;
+    agentSearchStateKnown.value = true;
     savedRules.value = JSON.stringify(payload());
     note.value = rules.value.length
       ? `Сохранено: ${rules.value.length} ${plural(rules.value.length, ['правило', 'правила', 'правил'])}.`
@@ -528,6 +568,97 @@ async function saveRules() {
   } catch (e) {
     // Текст валидатора уже человеческий и с номером правила — показываем как есть.
     error.value = e.message;
+  } finally {
+    busy.value = '';
+  }
+}
+
+function agentSearchRuleRef(r) {
+  return {
+    project: String(r.project || '').trim(),
+    chatId: r.chatId === null || r.chatId === undefined ? null : Number(r.chatId),
+    username: String(r.username ?? '').trim() || null,
+    threadId: toId(r.threadId),
+  };
+}
+
+async function setAgentSearch(r, event) {
+  const enabled = event.target.checked === true;
+  const requestedRule = agentSearchRuleRef(r);
+  // DOM уже переставил checkbox, но policy ещё не commit-нута. Возвращаем
+  // authoritative вид сразу и меняем его только ответом сервера.
+  event.target.checked = agentSearchStateKnown.value && r.agentSearch === true;
+  if (busy.value || !providerWritable.value) return;
+  if (dirty.value) {
+    error.value = 'Сначала сохраните обычные изменения правила, затем меняйте доступ агентов.';
+    return;
+  }
+  if (!agentSearchStateKnown.value || !POLICY_FINGERPRINT_RE.test(rulesPolicyFingerprint.value)) {
+    error.value = 'Не получен отпечаток правил. Перечитайте список перед изменением доступа.';
+    return;
+  }
+  if (enabled) {
+    const confirmed = await confirmDialog(
+      'Разрешить агентам искать сообщения этого Telegram-чата или темы? '
+        + 'Право относится только к этому правилу и по умолчанию всегда выключено.',
+      { okText: 'Разрешить' },
+    );
+    if (!confirmed) return;
+  }
+
+  busy.value = 'agent-search';
+  error.value = '';
+  note.value = '';
+  try {
+    const res = await api.put('/api/telegram/rules/agent-search', {
+      botId: bot.value.botId,
+      rule: requestedRule,
+      enabled,
+      expectedPolicyFingerprint: rulesPolicyFingerprint.value,
+    });
+    if (!POLICY_FINGERPRINT_RE.test(res.policyFingerprint || '')) {
+      throw new Error('Сервер изменил доступ, но не вернул новый отпечаток. Перечитайте список.');
+    }
+    rules.value = res.rules || [];
+    rulesPolicyFingerprint.value = res.policyFingerprint;
+    agentSearchStateKnown.value = true;
+    savedRules.value = JSON.stringify(payload());
+    note.value = enabled
+      ? 'Агентский поиск разрешён для выбранного правила.'
+      : 'Агентский поиск для выбранного правила запрещён.';
+  } catch (e) {
+    const mutationMessage = e?.message || 'Ответ изменения доступа не получен.';
+    try {
+      await readRulesSnapshot({ requireFingerprint: true });
+      const current = rules.value.find((candidate) => {
+        const ref = agentSearchRuleRef(candidate);
+        return ref.project === requestedRule.project
+          && ref.chatId === requestedRule.chatId
+          && ref.username === requestedRule.username
+          && ref.threadId === requestedRule.threadId;
+      });
+      if (!current) {
+        note.value = '';
+        error.value = `${mutationMessage} Повторная проверка подтвердила: правило больше не существует.`;
+      } else {
+        const actual = current.agentSearch === true;
+        if (actual === enabled) {
+          error.value = '';
+          note.value = `Повторная проверка подтвердила: агентский поиск ${actual ? 'разрешён' : 'закрыт'}.`;
+        } else {
+          note.value = '';
+          error.value = `${mutationMessage} Повторная проверка подтвердила: `
+            + `агентский поиск ${actual ? 'разрешён' : 'закрыт'}, `
+            + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
+        }
+      }
+    } catch (refreshError) {
+      rulesPolicyFingerprint.value = '';
+      agentSearchStateKnown.value = false;
+      note.value = '';
+      error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
+        + `${refreshError?.message || 'правила не удалось перечитать'}`;
+    }
   } finally {
     busy.value = '';
   }
@@ -869,9 +1000,10 @@ async function disconnect() {
               </div>
 
               <p class="muted sub">
-                Бот присылает в твою личку карточки, когда работа стоит на тебе — ворота,
-                вопрос агента, запрос разрешения, затык, — и принимает решения кнопками.
-                Команды: /status, /task, /launch, /timer, /stop.
+                Бот держит в твоей личке живую карточку каждого прогона — узел, прогресс и
+                чем занят агент, — звонит, когда маршрут доехал или работа встала на тебе
+                (ворота, вопрос агента, запрос разрешения, затык), и принимает решения
+                кнопками. Команды: /status и /status &lt;номер&gt;.
               </p>
 
               <template v-if="pult?.confirmed">
@@ -1084,6 +1216,25 @@ async function disconnect() {
                       Кокпит показывает темы, в которых бот уже видел сообщения.
                       «Вся переписка» разрешает весь чат; одна выбранная тема не открывает соседние.
                     </p>
+
+                    <label class="agent-search-option">
+                      <input
+                        type="checkbox"
+                        :checked="agentSearchStateKnown && r.agentSearch === true"
+                        :disabled="dirty || !providerWritable || !!busy || !agentSearchStateKnown || !rulesPolicyFingerprint"
+                        @change="setAgentSearch(r, $event)"
+                      />
+                      <span>
+                        <b>Разрешить агентам искать эту переписку</b>
+                        <small v-if="!agentSearchStateKnown" data-state="agent-search-unknown">
+                          Состояние доступа не подтверждено (неизвестно). Обновите правила.
+                        </small>
+                        <small v-else>
+                          Отдельный opt-in для knowledge_search. Обычный поиск человека и
+                          разворот ссылок работают по правилу независимо от этого тумблера.
+                        </small>
+                      </span>
+                    </label>
                   </section>
 
                   <section class="rule-part">
@@ -1337,8 +1488,6 @@ async function disconnect() {
 <style scoped>
 .tg {
   --tg-soft: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  /* Единая высота контролов строки: селект, инпут и кнопка обязаны совпадать. */
-  --ctl-h: 36px;
   width: min(1480px, 100%); margin: 0 auto; padding-bottom: 36px;
   display: flex; flex-direction: column; gap: 16px;
 }
@@ -1426,9 +1575,9 @@ async function disconnect() {
 .rules-card { grid-column: 1; grid-row: 2; }
 .pult-code { margin-top: 8px; }
 .code-input {
-  flex: 1; min-width: 0; height: var(--ctl-h); padding: 0 10px;
+  flex: 1; min-width: 0; height: var(--control-height); padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 8px; background: var(--surface-2); color: var(--ink);
+  border-radius: var(--control-radius); background: var(--surface-2); color: var(--ink);
   font-size: 15px; letter-spacing: .2em; font-variant-numeric: tabular-nums;
 }
 [id^='tg-'] { scroll-margin-top: 16px; }
@@ -1457,8 +1606,11 @@ async function disconnect() {
   border: 1px solid var(--line); color: var(--ink); background: var(--surface-2); cursor: pointer;
   transition: border-color .13s, background .13s, color .13s, transform .13s;
 }
-.btn { min-height: var(--ctl-h); padding: 8px 13px; border-radius: 9px; font-size: 13px; }
-.btn.compact { min-height: 31px; padding: 5px 10px; font-size: 12px; }
+.btn {
+  height: var(--control-height); min-height: var(--control-height); padding: 0 13px;
+  border-radius: var(--control-radius); font-size: 13px; white-space: nowrap;
+}
+.btn.compact { height: 31px; min-height: 31px; padding: 0 10px; font-size: 12px; }
 .btn:hover:not(:disabled), .icon-btn:hover:not(:disabled) { border-color: var(--line-2); background: color-mix(in srgb, var(--surface-2) 86%, #fff); }
 .btn.primary { border-color: var(--good); background: var(--good); color: #06210f; font-weight: 660; }
 .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--good) 88%, #fff); border-color: color-mix(in srgb, var(--good) 88%, #fff); }
@@ -1473,10 +1625,10 @@ async function disconnect() {
 
 /* Контролы форм — ОДНОЙ высоты с кнопками, и высота ЗАКРЕПЛЕНА переменной, а не
    выводится из padding: разнобой уже разъезжался в строках «селект + кнопка»
-   (селект ниже, инпут кода выше). Меняешь высоту — меняй --ctl-h, не padding. */
+   (селект ниже, инпут кода выше). Высота берётся из глобального токена, не из padding. */
 .inp, .sel {
-  width: 100%; min-width: 0; height: var(--ctl-h);
-  border: 1px solid var(--line); border-radius: 8px;
+  width: 100%; min-width: 0; height: var(--control-height);
+  border: 1px solid var(--line); border-radius: var(--control-radius);
   color: var(--ink); background: var(--ground); font-family: inherit; font-size: 13px;
 }
 .inp { padding: 0 11px; }
@@ -1589,16 +1741,16 @@ async function disconnect() {
 .manual-topic[open] summary { color: var(--ink); }
 .manual-topic-field { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
 .part-hint { margin-top: 10px; }
-.task-reply-option {
+.task-reply-option, .agent-search-option {
   display: flex; align-items: flex-start; gap: 8px; margin-top: 11px; padding: 10px 11px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); cursor: pointer;
 }
-.task-reply-option input {
+.task-reply-option input, .agent-search-option input {
   width: 15px; height: 15px; flex: none; margin-top: 2px; accent-color: var(--accent); cursor: pointer;
 }
-.task-reply-option span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.task-reply-option b { font-size: 12px; }
-.task-reply-option small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.4; }
+.task-reply-option span, .agent-search-option span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.task-reply-option b, .agent-search-option b { font-size: 12px; }
+.task-reply-option small, .agent-search-option small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.4; }
 .rrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .auto-panel { padding: 12px 14px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .auto-panel.enabled { background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }

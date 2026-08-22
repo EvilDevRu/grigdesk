@@ -14,6 +14,7 @@
 //     b24: { responsibleId, groupId, priority },
 //     draft: 'manual'|'auto',
 //     notifyTaskCreated: boolean,
+//     agentSearch: boolean,
 //     autoTask: { enabled, minConfidence, maxPerDay },
 //     autoLaunch: { enabled, route, minConfidence, maxPerDay, vetoMinutes } }
 //
@@ -21,18 +22,32 @@
 // несёт синтетический числовой id (`t.me/c/1000000042/42`), а на публичную — только имя
 // (`t.me/example_team/42`). Знать одну сторону и получить другую неоткуда: бота
 // добавляют в Телеграме, и до первого сообщения кокпит о чате не знает ничего.
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
-  lstat, readFile, mkdir, open, rename, stat, writeFile,
+  lstat, readFile, mkdir, open, realpath, rename, stat, writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 
-import { atomicWriteTelegramJson } from './account-bindings.js';
+import { assertAccountRef } from '../inbox/identity.js';
+import {
+  atomicWriteTelegramJson,
+  normalizeTelegramBotId,
+} from './account-bindings.js';
 
 const KINDS = ['bug', 'wish'];
 const DRAFTS = ['manual', 'auto'];
 // Имя чата: 5–32 знака, начинается с буквы — правило Телеграма (см. links.js).
 const USERNAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{4,31}$/;
+const POLICY_FINGERPRINT_PREFIX = 'telegram-rules-v1:';
+const POLICY_FINGERPRINT_RE = /^telegram-rules-v1:[0-9a-f]{64}$/u;
+const AGENT_SEARCH_TARGET_KEYS = ['project', 'chatId', 'username', 'threadId'];
+const OWNER_BOUND_SCHEMA_VERSION = 2;
+const MAX_RULES_BYTES = 1024 * 1024;
+const OWNER_BOUND_KEYS = [
+  'schemaVersion', 'channel', 'accountRef', 'botId', 'updatedAtMs', 'rules',
+];
+const STORE_QUEUES = new Map();
 
 // Автомат «услышал жалобу → завёл задачу». Выключен по умолчанию и настраивается
 // у КАЖДОГО правила отдельно: «Баги от пользователей» имеет смысл отдать автомату
@@ -126,6 +141,224 @@ function normalizeAutoLaunch(raw, where) {
   return out;
 }
 
+// JSON.stringify сохраняет порядок ключей входного объекта, поэтому сам по себе
+// не годится как canonical policy encoding: ручная перестановка полей не должна
+// менять CAS. Нормализация выше убирает неизвестные поля, а эта функция
+// рекурсивно фиксирует порядок известных ключей.
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+    )).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+const clone = (value) => structuredClone(value);
+
+/**
+ * Отпечаток всей нормализованной policy правила. Это честный CAS/fingerprint,
+ * но НЕ scope fence и НЕ монотонная epoch: эти механизмы добавляет search
+ * control-plane отдельно, когда сможет дренировать уже начатые ответы.
+ */
+export function telegramRulesPolicyFingerprint(rules, { accountRef = null } = {}) {
+  const owner = accountRef === null ? null : assertAccountRef(accountRef);
+  const canonical = canonicalJson({
+    accountRef: owner,
+    channel: 'telegram',
+    rules: normalizeRules(rules),
+    schemaVersion: 1,
+  });
+  return `${POLICY_FINGERPRINT_PREFIX}${createHash('sha256').update(canonical).digest('hex')}`;
+}
+
+export function isTelegramRulesPolicyFingerprint(value) {
+  return typeof value === 'string' && POLICY_FINGERPRINT_RE.test(value);
+}
+
+function codedError(code, message, statusCode) {
+  return Object.assign(new Error(message), { code, statusCode });
+}
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function exactObject(value, keys) {
+  if (!isPlainObject(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index]);
+}
+
+function legacyRulesDocument(data) {
+  if (Array.isArray(data)) return data;
+  if (isPlainObject(data) && !Object.hasOwn(data, 'schemaVersion') && Array.isArray(data.rules)) {
+    return data.rules;
+  }
+  throw new Error('Telegram rules не соответствуют legacy либо owner-bound schema.');
+}
+
+function ownerBoundRulesDocument(data, { accountRef, botId }) {
+  if (!exactObject(data, OWNER_BOUND_KEYS)
+      || data.schemaVersion !== OWNER_BOUND_SCHEMA_VERSION
+      || data.channel !== 'telegram'
+      || data.accountRef !== accountRef
+      || typeof data.botId !== 'string'
+      || normalizeTelegramBotId(data.botId, 'rules.botId') !== botId
+      || !Number.isSafeInteger(data.updatedAtMs)
+      || data.updatedAtMs <= 0
+      || !Array.isArray(data.rules)) {
+    throw new Error('Telegram rules owner/schema не совпадает с активным account.');
+  }
+  return data.rules;
+}
+
+// Persisted v2 — не form input. Он обязан быть уже canonical до байта semantics:
+// coercion строк/массивов и truthy "false" здесь означают corruption, а не удобство.
+function normalizeStoredRules(rawRules) {
+  const normalized = normalizeRules(rawRules);
+  if (canonicalJson(rawRules) !== canonicalJson(normalized)) {
+    throw new Error('Telegram rules v2 содержит неканоническое внутреннее правило.');
+  }
+  return normalized;
+}
+
+function canonicalSubset(raw, normalized) {
+  if (Array.isArray(raw)) {
+    return Array.isArray(normalized)
+      && raw.length === normalized.length
+      && raw.every((item, index) => canonicalSubset(item, normalized[index]));
+  }
+  if (isPlainObject(raw)) {
+    return isPlainObject(normalized)
+      && Object.keys(raw).every((key) => (
+        Object.hasOwn(normalized, key) && canonicalSubset(raw[key], normalized[key])
+      ));
+  }
+  return Object.is(raw, normalized);
+}
+
+function normalizeLegacyStoredRules(rawRules) {
+  const normalized = normalizeRules(rawRules);
+  if (!rawRules.every((rule, index) => canonicalSubset(rule, normalized[index]))) {
+    throw new Error('Legacy Telegram rules содержит неканоническое значение поля.');
+  }
+  return normalized.map((rule) => ({ ...rule, agentSearch: false }));
+}
+
+function sameFileSnapshot(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs
+    && left.nlink === right.nlink;
+}
+
+async function assertExistingPathComponentsNoSymlink(directory) {
+  const resolved = path.resolve(directory);
+  const parsed = path.parse(resolved);
+  const parts = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  let current = parsed.root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    let info;
+    try { info = await lstat(current); } catch (error) {
+      if (error?.code === 'ENOENT') return;
+      throw error;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error('Путь Telegram rules содержит небезопасный component.');
+    }
+  }
+}
+
+async function openStrictDirectory(directory) {
+  const resolved = path.resolve(directory);
+  await assertExistingPathComponentsNoSymlink(resolved);
+  let canonical;
+  try { canonical = await realpath(resolved); } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (canonical !== resolved) throw new Error('Каталог Telegram rules содержит symlink component.');
+  const atPath = await lstat(resolved);
+  if (atPath.isSymbolicLink() || !atPath.isDirectory()) {
+    throw new Error('Каталог Telegram rules небезопасен.');
+  }
+  const handle = await open(
+    resolved,
+    constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
+  );
+  try {
+    const opened = await handle.stat();
+    if (!opened.isDirectory() || opened.dev !== atPath.dev || opened.ino !== atPath.ino) {
+      throw new Error('Каталог Telegram rules изменился во время открытия.');
+    }
+    return { handle, resolved, dev: opened.dev, ino: opened.ino };
+  } catch (error) {
+    await handle.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function assertStrictDirectoryStable(directory) {
+  const [opened, atPath, canonical] = await Promise.all([
+    directory.handle.stat(),
+    lstat(directory.resolved),
+    realpath(directory.resolved),
+  ]);
+  if (canonical !== directory.resolved
+      || atPath.isSymbolicLink() || !atPath.isDirectory() || !opened.isDirectory()
+      || opened.dev !== directory.dev || opened.ino !== directory.ino
+      || atPath.dev !== directory.dev || atPath.ino !== directory.ino) {
+    throw new Error('Каталог Telegram rules изменился во время чтения.');
+  }
+}
+
+function staleRules(message = 'Telegram rules изменились после загрузки формы.') {
+  throw codedError('telegram_rules_stale', message, 409);
+}
+
+function policyScopeKey(rule) {
+  return canonicalJson({
+    project: rule.project,
+    chatId: rule.chatId,
+    username: rule.username,
+    threadId: rule.threadId,
+  });
+}
+
+function normalizeAgentSearchTarget(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw codedError('telegram_rules_invalid', 'agentSearch.rule должен быть объектом.', 400);
+  }
+  const actual = Object.keys(raw).sort();
+  const expected = [...AGENT_SEARCH_TARGET_KEYS].sort();
+  if (actual.length !== expected.length
+      || actual.some((key, index) => key !== expected[index])) {
+    throw codedError('telegram_rules_invalid', 'agentSearch.rule имеет неверные поля.', 400);
+  }
+  const [rule] = normalizeRules([raw]);
+  return {
+    project: rule.project,
+    chatId: rule.chatId,
+    username: rule.username,
+    threadId: rule.threadId,
+  };
+}
+
 /**
  * Список правил из формы → то, что можно положить на диск. Бросает `Error` с
  * человеческим текстом: он уезжает прямо в интерфейс, поэтому в нём всегда есть
@@ -193,6 +426,10 @@ export function normalizeRules(list, { projects = null } = {}) {
       // Ответ в исходный чат — явный opt-in каждого правила. Старые правила
       // остаются молчащими, а настройка темы не расползается на соседние темы.
       notifyTaskCreated: src.notifyTaskCreated === true,
+      // Human allowlist задаёт само наличие правила. Доступ model-operated
+      // knowledge_search шире не выводим из него: агент получает внешний текст
+      // только после отдельного явного opt-in.
+      agentSearch: src.agentSearch === true,
       autoTask: normalizeAutoTask(src.autoTask),
       autoLaunch: normalizeAutoLaunch(src.autoLaunch, where),
     };
@@ -234,21 +471,52 @@ export function matchRule(rules, target = {}) {
 
 export class TelegramRulesStore {
   /**
-   * @param {{dir: string, log?: object, strictRead?: boolean}} opts
+   * @param {{dir: string, accountRef?: string|null, botId?: string|number|null,
+   *   log?: object, strictRead?: boolean}} opts
    * `strictRead` используется account-aware Inbox: битый allowlist обязан
    * деградировать канал, а не выглядеть как осознанно пустой список.
    */
-  constructor({ dir, log = console, strictRead = false }) {
+  constructor({
+    dir,
+    accountRef = null,
+    botId = null,
+    log = console,
+    strictRead = false,
+  }) {
     this.file = path.join(dir, 'rules.json');
     this.log = log;
     this.strictRead = strictRead === true;
+    if (this.strictRead && (accountRef === null || botId === null)) {
+      throw new TypeError('Strict TelegramRulesStore требует accountRef и botId владельца policy.');
+    }
+    this.accountRef = accountRef === null ? null : assertAccountRef(accountRef);
+    this.botId = botId === null ? null : normalizeTelegramBotId(botId, 'rules owner botId');
     this.cache = null;
+    // Legacy rules не доказывают владельца файла. Human allowlist продолжает
+    // работать, но agentSearch на чтении принудительно закрывается до явного CAS,
+    // который перепишет policy в owner-bound schema v2.
+    this.ownerBound = this.strictRead;
     this.stamp = ''; // отпечаток файла, по которому решаем, перечитывать ли
+    this.queueKey = path.resolve(this.file);
+  }
+
+  _queued(operation) {
+    // Очередь общая для всех экземпляров того же physical store в процессе.
+    // Durable epoch/cross-process owner остаются отдельным release gate, но два
+    // overlapping account contexts уже не проходят один stale CAS одновременно.
+    const previous = STORE_QUEUES.get(this.queueKey) || Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.catch(() => {});
+    STORE_QUEUES.set(this.queueKey, tail);
+    tail.then(() => {
+      if (STORE_QUEUES.get(this.queueKey) === tail) STORE_QUEUES.delete(this.queueKey);
+    });
+    return result;
   }
 
   /** Правила с диска. Файла нет — пустой список: это «ничего не привязано», не ошибка. */
   async read() {
-    if (this.strictRead) return this._readStrict();
+    if (this.strictRead) return clone(await this._readStrict());
     let info;
     try {
       info = await stat(this.file);
@@ -258,19 +526,21 @@ export class TelegramRulesStore {
           code: 'telegram_rules_invalid',
         });
       }
-      this.cache = [];
+      this.cache = deepFreeze([]);
+      this.ownerBound = this.strictRead;
       this.stamp = '';
-      return this.cache;
+      return clone(this.cache);
     }
 
     // Кэш в памяти, но с проверкой отпечатка: правила правят и руками в файле,
     // а перечитывать крошечный json на каждый резолв ссылки незачем.
     const stamp = `${info.mtimeMs}:${info.size}`;
-    if (this.cache && stamp === this.stamp) return this.cache;
+    if (this.cache && stamp === this.stamp) return clone(this.cache);
 
     try {
       const data = JSON.parse(await readFile(this.file, 'utf8'));
-      this.cache = normalizeRules(Array.isArray(data) ? data : (data.rules || []));
+      this.cache = deepFreeze(normalizeRules(Array.isArray(data) ? data : (data.rules || [])));
+      this.ownerBound = false;
     } catch (err) {
       // Битый файл НЕ стираем и не чиним догадками: это данные человека. Раздел
       // покажет пустой список, правила вернутся, как только файл починят.
@@ -280,28 +550,53 @@ export class TelegramRulesStore {
           code: 'telegram_rules_invalid',
         });
       }
-      this.cache = [];
+      this.cache = deepFreeze([]);
+      this.ownerBound = false;
     }
     this.stamp = stamp;
-    return this.cache;
+    return clone(this.cache);
   }
 
-  /**
-   * Сохраняет весь список целиком (редактор правил присылает его так же).
-   * Проверка идёт ДО записи: отказ не имеет права испортить уже сохранённое.
-   */
-  async write(rules, opts = {}) {
-    const clean = normalizeRules(rules, opts);
-    const body = { updatedAt: Date.now(), rules: clean };
+  _policy(rules) {
+    return {
+      rules: clone(rules),
+      policyFingerprint: telegramRulesPolicyFingerprint(rules, { accountRef: this.accountRef }),
+      ownerBound: this.ownerBound,
+    };
+  }
+
+  /** Authoritative rules + canonical CAS, вычисленный из прочитанного store. */
+  async readPolicySnapshot() {
+    return this._policy(await this.read());
+  }
+
+  async _writeClean(clean) {
+    const nowMs = Date.now();
+    const body = this.strictRead
+      ? {
+          schemaVersion: OWNER_BOUND_SCHEMA_VERSION,
+          channel: 'telegram',
+          accountRef: this.accountRef,
+          botId: this.botId,
+          updatedAtMs: nowMs,
+          rules: clean,
+        }
+      : { updatedAt: nowMs, rules: clean };
     if (this.strictRead) {
+      const beforeDirectory = await openStrictDirectory(path.dirname(this.file));
+      await beforeDirectory?.handle.close();
       await atomicWriteTelegramJson(this.file, body);
+      const afterDirectory = await openStrictDirectory(path.dirname(this.file));
+      if (!afterDirectory) throw new Error('Каталог Telegram rules исчез после записи.');
+      await afterDirectory.handle.close();
     } else {
       await mkdir(path.dirname(this.file), { recursive: true });
       const tmp = `${this.file}.tmp`;
       await writeFile(tmp, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
       await rename(tmp, this.file);
     }
-    this.cache = clean;
+    this.cache = deepFreeze(clone(clean));
+    this.ownerBound = this.strictRead;
     try {
       const info = await stat(this.file);
       this.stamp = this.strictRead
@@ -310,7 +605,73 @@ export class TelegramRulesStore {
     } catch {
       this.stamp = '';
     }
-    return clean;
+    return clone(this.cache);
+  }
+
+  /**
+   * Сохраняет весь список целиком для доверенного внутреннего writer-а.
+   * HTTP/UI обязан использовать `writeHumanCas`/`setAgentSearch`, а не этот
+   * служебный путь начальной настройки и тестов.
+   * Проверка идёт ДО записи: отказ не имеет права испортить уже сохранённое.
+   */
+  async write(rules, opts = {}) {
+    const clean = normalizeRules(rules, opts);
+    return this._queued(() => this._writeClean(clean));
+  }
+
+  /**
+   * Обычный редактор human allowlist. Он не владеет agentSearch: поле во входе
+   * запрещено, а прежний opt-in сохраняется только у exact того же scope.
+   */
+  async writeHumanCas(rules, { expectedPolicyFingerprint, projects = null } = {}) {
+    if (!isTelegramRulesPolicyFingerprint(expectedPolicyFingerprint)) {
+      throw codedError('telegram_rules_invalid', 'Telegram rules CAS fingerprint имеет неверный формат.', 400);
+    }
+    if (Array.isArray(rules) && rules.some((rule) => (
+      rule && typeof rule === 'object' && Object.hasOwn(rule, 'agentSearch')
+    ))) {
+      throw codedError(
+        'telegram_rules_invalid',
+        'agentSearch меняется только отдельной CAS-операцией.',
+        400,
+      );
+    }
+    const clean = normalizeRules(rules, { projects });
+    return this._queued(async () => {
+      const current = await this.readPolicySnapshot();
+      if (current.policyFingerprint !== expectedPolicyFingerprint) {
+        staleRules();
+      }
+      const previous = new Map(current.rules.map((rule) => [policyScopeKey(rule), rule]));
+      const next = clean.map((rule) => ({
+        ...rule,
+        agentSearch: previous.get(policyScopeKey(rule))?.agentSearch === true,
+      }));
+      return this._policy(await this._writeClean(next));
+    });
+  }
+
+  /** Отдельный opt-in/out exact Telegram rule, всегда под policy CAS. */
+  async setAgentSearch({ rule, enabled, expectedPolicyFingerprint } = {}) {
+    if (typeof enabled !== 'boolean') {
+      throw codedError('telegram_rules_invalid', 'agentSearch.enabled должен быть boolean.', 400);
+    }
+    if (!isTelegramRulesPolicyFingerprint(expectedPolicyFingerprint)) {
+      throw codedError('telegram_rules_invalid', 'Telegram rules CAS fingerprint имеет неверный формат.', 400);
+    }
+    const target = normalizeAgentSearchTarget(rule);
+    return this._queued(async () => {
+      const current = await this.readPolicySnapshot();
+      if (current.policyFingerprint !== expectedPolicyFingerprint) staleRules();
+      const targetKey = policyScopeKey(target);
+      const index = current.rules.findIndex((candidate) => policyScopeKey(candidate) === targetKey);
+      if (index < 0) staleRules('Telegram rule для agentSearch больше не существует.');
+      if (current.rules[index].agentSearch === enabled) return current;
+      const next = current.rules.map((candidate, position) => (
+        position === index ? { ...candidate, agentSearch: enabled } : candidate
+      ));
+      return this._policy(await this._writeClean(next));
+    });
   }
 
   /** Разрешено ли читать это сообщение и по чьему правилу. */
@@ -319,42 +680,71 @@ export class TelegramRulesStore {
   }
 
   async _readStrict() {
-    let atPath;
-    try { atPath = await lstat(this.file); } catch (err) {
-      if (err?.code === 'ENOENT') {
-        this.cache = [];
+    let directory;
+    let handle;
+    try {
+      directory = await openStrictDirectory(path.dirname(this.file));
+      if (!directory) {
+        try {
+          await lstat(this.file);
+          throw new Error('rules.json существует без стабильного parent directory.');
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+        this.cache = deepFreeze([]);
+        this.ownerBound = true;
         this.stamp = '';
         return this.cache;
       }
-      throw Object.assign(new Error('Telegram allowlist metadata нельзя прочитать.', { cause: err }), {
-        code: 'telegram_rules_invalid',
-      });
-    }
-    if (atPath.isSymbolicLink() || !atPath.isFile() || atPath.size > 16 * 1024 * 1024) {
-      throw Object.assign(new Error('Telegram allowlist не является безопасным обычным файлом.'), {
-        code: 'telegram_rules_invalid',
-      });
-    }
-    const stamp = `${atPath.dev}:${atPath.ino}:${atPath.mtimeMs}:${atPath.size}`;
-    if (this.cache && stamp === this.stamp) return this.cache;
 
-    let handle;
-    try {
-      handle = await open(this.file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+      let atPath;
+      try { atPath = await lstat(this.file); } catch (error) {
+        if (error?.code === 'ENOENT') {
+          await assertStrictDirectoryStable(directory);
+          this.cache = deepFreeze([]);
+          this.ownerBound = true;
+          this.stamp = '';
+          return this.cache;
+        }
+        throw error;
+      }
+      if (atPath.isSymbolicLink() || !atPath.isFile()
+          || atPath.nlink !== 1 || atPath.size > MAX_RULES_BYTES) {
+        throw new Error('Telegram allowlist не является безопасным single-link файлом.');
+      }
+
+      // Открываем basename относительно уже закреплённого directory fd. Если
+      // pathname parent подменят, прочитанные bytes всё равно относятся к старому
+      // fd, а post-check не даст их опубликовать.
+      const anchoredFile = `/proc/self/fd/${directory.handle.fd}/${path.basename(this.file)}`;
+      handle = await open(anchoredFile, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
       const before = await handle.stat();
+      if (!before.isFile() || before.nlink !== 1 || before.size > MAX_RULES_BYTES
+          || !sameFileSnapshot(before, atPath)) {
+        throw new Error('Telegram allowlist identity не совпала при открытии.');
+      }
       const bytes = await handle.readFile();
-      const [after, current] = await Promise.all([handle.stat(), lstat(this.file)]);
+      const [after, current] = await Promise.all([
+        handle.stat(),
+        lstat(this.file),
+        assertStrictDirectoryStable(directory),
+      ]);
       if (!before.isFile() || current.isSymbolicLink() || !current.isFile()
-          || before.dev !== after.dev || before.ino !== after.ino
-          || after.dev !== current.dev || after.ino !== current.ino
-          || before.size !== after.size || after.size !== current.size
-          || before.mtimeMs !== after.mtimeMs || after.mtimeMs !== current.mtimeMs
+          || before.nlink !== 1 || after.nlink !== 1 || current.nlink !== 1
+          || !sameFileSnapshot(before, after) || !sameFileSnapshot(after, current)
           || bytes.length !== after.size) {
         throw new Error('allowlist изменился во время чтения');
       }
       const data = JSON.parse(bytes.toString('utf8'));
-      this.cache = normalizeRules(Array.isArray(data) ? data : data.rules);
-      this.stamp = stamp;
+      const ownerBound = isPlainObject(data) && Object.hasOwn(data, 'schemaVersion');
+      const rawRules = ownerBound
+        ? ownerBoundRulesDocument(data, { accountRef: this.accountRef, botId: this.botId })
+        : legacyRulesDocument(data);
+      this.cache = deepFreeze(ownerBound
+        ? normalizeStoredRules(rawRules)
+        : normalizeLegacyStoredRules(rawRules));
+      this.ownerBound = ownerBound;
+      this.stamp = `${after.dev}:${after.ino}:${after.ctimeMs}:${after.size}`;
       return this.cache;
     } catch (err) {
       this.log.warn?.({ err: err.message, file: this.file }, 'телеграм: правила не прочитались строго');
@@ -363,6 +753,7 @@ export class TelegramRulesStore {
       });
     } finally {
       await handle?.close();
+      await directory?.handle.close();
     }
   }
 }

@@ -16,6 +16,9 @@ const VUE_URL = pathToFileURL(fileURLToPath(
 const FACTORY_DEBUG_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/src/shared/factory-debug.js', import.meta.url),
 )).href;
+const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
+  new URL('../../web/src/shared/companion-run.js', import.meta.url),
+)).href;
 let compileNonce = 0;
 
 async function compileSettingsView() {
@@ -36,7 +39,10 @@ async function compileSettingsView() {
     .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
     .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__settingsApi;')
     .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
-    .replace("import { useUiContextStore } from '../stores/ui-context.js';", stubStore('useUiContextStore'))
+    .replace(
+      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
+      'const useUiContextSource = () => ({ update() {}, focus() {}, blur() {}, dispose() {} });',
+    )
     .replace(
       "import { useToolLauncher } from '../shared/tools/launcher.js';",
       'const useToolLauncher = () => ({ openTerminal() {} });',
@@ -60,6 +66,8 @@ async function compileSettingsView() {
     .replace("import { useAuthStore } from '../stores/auth.js';", stubStore('useAuthStore'))
     .replace("import { usePluginsStore } from '../stores/plugins.js';", stubStore('usePluginsStore'))
     .replace("import { useChatStore } from '../stores/chat.js';", stubStore('useChatStore'))
+    .replace("import { useCompanionStore } from '../stores/companion.js';", "const useCompanionStore = () => ({ deviceEnabled: true, setDeviceEnabled() {} });")
+    .replace("import { useCompanionStore } from '../stores/companion.js';", stubStore('useCompanionStore'))
     .replace("import { usePwaStore } from '../stores/pwa.js';", stubStore('usePwaStore'))
     .replace(
       /import \{\s*blockReasonLabel,\s*UPDATE_STAGE_LABELS,\s*useCockpitUpdateStore,\s*\} from '\.\.\/stores\/cockpit-update\.js';/,
@@ -74,7 +82,10 @@ async function compileSettingsView() {
       "import { useSse } from '../composables/useSse.js';",
       'const useSse = () => ({ connected: { value: false } });',
     )
-    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`);
+    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`)
+    // Чистый модуль без Vue/pinia: подставляем НАСТОЯЩИЙ по абсолютному URL, а не
+    // заглушку — иначе тест разошёлся бы с правилом «полупустая ссылка = дефолт».
+    .replace("from '../shared/companion-run.js';", `from "${COMPANION_RUN_URL}";`);
   const nonce = compileNonce++;
   return (await import(
     `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
@@ -172,6 +183,7 @@ async function mountSettings(t, { mcpByProvider } = {}) {
     useAuthStore: () => ({ login: 'me', async logoutAll() {} }),
     usePluginsStore: () => ({ loaded: true, list: [], enabled: () => true, async load() {}, async setEnabled() {} }),
     useChatStore: () => ({ compactWindow: 0 }),
+    useCompanionStore: () => ({ deviceEnabled: true, setDeviceEnabled() {} }),
     usePwaStore: () => ({ canInstall: false, wakeLock: false, async install() {} }),
     useCockpitUpdateStore: () => ({ state: null, async load() {} }),
   };

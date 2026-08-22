@@ -9,57 +9,77 @@
 // пульт — ещё одно окно кокпита, второй копии валидации и CAS здесь нет. Ошибки
 // ручек переводятся в человеческий текст в одном месте — тут.
 //
-// Мутации (фаза 3) добавляют три своих правила: подтверждение вторым тапом с TTL,
-// «индекс в callback_data — не источник истины» (снимок списка живёт на сервере и
-// сверяется перед inject) и предпросмотр /task.
+// Пульт смотрит, разблокирует и поручает работу общему companion-ассистенту.
+// Постановка задач принадлежит «Входящим», запуск прогона и деньги — кокпиту.
+//
+// Личка не копит мусор (t91001): вся навигация живёт в ОДНОМ сообщении-экране
+// (запись screen в pult-state.json) и правится на месте, решённые карточки
+// удаляются (итог — всплывашкой answerCallbackQuery, а на реплай-ветках, где
+// callback нет, — эфемерным сообщением «✓ …»), накопленное сносит /clean.
 import {
   STATUS_PAGE_SIZE,
+  agentCard,
+  agentKeyboard,
   cbData,
+  chatSubject,
   clipText,
   collapseLine,
   confirmKeyboard,
   gateRejectKeyboard,
-  htmlToPlainText,
+  helpKeyboard,
+  homeCard,
+  homeKeyboard,
   planPageCard,
   planPageKeyboard,
   planPages,
   parseCallback,
   permissionKeyboard,
+  pultReplyAction,
+  pultReplyKeyboard,
   questionKeyboard,
-  resolvedCard,
   statusListCard,
   statusListKeyboard,
   taskNodesKeyboard,
   taskNodesPage,
   taskStatusCard,
   taskStatusKeyboard,
+  tasksCard,
+  tasksKeyboard,
 } from './format.js';
+import { TelegramPultAssistant } from './assistant.js';
+import { encodePultOwnerKey, pultOwnerKeyMatches } from './state-store.js';
 import { PultSendQueue } from './send-queue.js';
 
 /** Потолок одного сообщения Bot API — 4096; берём с запасом под свои префиксы. */
 const MESSAGE_LIMIT = 4_000;
 /** Потолок текста answerCallbackQuery — 200 символов. */
 const ANSWER_LIMIT = 190;
-/** TTL ожиданий (реплай-пояснение, подтверждение вторым тапом, предпросмотр /task). */
+/** TTL ожиданий (реплай-пояснение, подтверждение вторым тапом, снимок плана). */
 const WAIT_TTL_MS = 10 * 60_000;
 const PLAN_VIEW_MAX = 32;
+/** Бот удаляет свои сообщения только моложе 48 часов; запас — на часы и задержки. */
+const DELETE_WINDOW_MS = 48 * 3_600_000 - 5 * 60_000;
+/** deleteMessages принимает до 100 message_id за вызов. */
+const DELETE_BATCH_SIZE = 100;
 
 const HELP_TEXT = [
-  'Пульт кокпита. Сам присылает карточки, когда работа стоит на тебе:',
+  'Пульт кокпита смотрит, разблокирует и поручает, но не заменяет полный кокпит.',
+  '',
+  'Сам присылает:',
+  '🔵 живую карточку прогона — обновляется на месте, пока маршрут идёт;',
+  '✅ исход прогона, когда маршрут доехал или попытку закрыли;',
   '⏳ ворота ждут решения · ❓ вопрос агента · 🔐 запрос разрешения · 🛑 конвейер встал · 💤 ход молчит.',
   '',
   'Команды:',
   '/status — задачи конвейера: названия, текущие узлы и прогресс',
   '/status <id> — подробная карточка одной задачи',
-  '/task Заголовок⏎описание — поставить задачу B24 (создаётся после предпросмотра)',
-  '/launch <id> — запустить прогон маршрутом из опубликованного каталога',
-  '/timer <id> start|pause|stop — таймер задачи B24',
-  '/complete <id> · /renew <id> — завершить/возобновить задачу B24',
-  '/stop — остановить ход агента в чате (список кнопками)',
+  '/clean — убрать из лички служебные сообщения пульта',
   '/help — эта подсказка',
   '',
-  'Всё, что стоит времени или денег, переспрашивается вторым тапом.',
-  'План можно открыть из карточки задачи. Дифы, произвольные файлы и деньги — только в кокпите.',
+  'Решения — кнопками на карточках; решённая карточка удаляется, итог виден всплывашкой.',
+  'Навигация (список, задача, узлы, план) живёт в одном сообщении-экране — закрывается кнопкой «✕ Закрыть».',
+  'Свободный текст и голос — обычный auto-ход ассистента в общем разговоре «Компаньон».',
+  'Постановка задач живёт во «Входящих», запуск прогонов, дифы и деньги — только в кокпите.',
 ].join('\n');
 
 function commandOf(text) {
@@ -70,12 +90,21 @@ function commandOf(text) {
 
 const taskIdOf = (args) => (String(args ?? '').trim().match(/^(\d{1,19})\b/u)?.[1] || '');
 
+/** Сообщения уже нет в чате (удалил человек): удалять нечего, это успех. */
+const isMissingMessage = (error) => /not found/iu.test(String(error?.message || ''));
+
 export class TelegramPultActions {
   constructor({
     isEnabled,
     callApi = null,
     summary = null,
     forget = () => {},
+    stateStoreFor = null,
+    acquireLease = null,
+    subscribe = null,
+    speechRuntime = null,
+    readSpeechPrefs = () => ({}),
+    readCompactWindow = () => 0,
     queue = new PultSendQueue(),
     now = Date.now,
     log = console,
@@ -89,13 +118,33 @@ export class TelegramPultActions {
     if (summary !== null && typeof summary !== 'function') {
       throw new TypeError('TelegramPultActions: summary должен быть функцией.');
     }
+    if (stateStoreFor !== null && typeof stateStoreFor !== 'function') {
+      throw new TypeError('TelegramPultActions: stateStoreFor должен быть функцией.');
+    }
     this.isEnabled = isEnabled;
     this.callApi = callApi;
     this.summary = summary;
     this.forget = forget;
+    // Та же фабрика, что у вотчера: экран навигации и реестр служебных ответов
+    // живут в pult-state.json рядом с карточками вотчера (merge-запись).
+    this.stateStoreFor = stateStoreFor;
     this.queue = queue;
     this.now = now;
     this.log = log;
+    this.assistant = callApi && stateStoreFor && acquireLease
+      ? new TelegramPultAssistant({
+        callApi,
+        stateStoreFor,
+        acquireLease,
+        subscribe,
+        speechRuntime,
+        readSpeechPrefs,
+        readCompactWindow,
+        queue,
+        now,
+        log,
+      })
+      : null;
 
     /** Ожидание реплая: messageId карточки → { kind, expiresAtMs, ... }. */
     this.replyWaits = new Map();
@@ -126,6 +175,22 @@ export class TelegramPultActions {
     return settings;
   }
 
+  /** Каноничный ключ владельца для экрана и реестра: accountRef:confirmedAtMs:chatId. */
+  _ownerKey(lease, settings) {
+    return encodePultOwnerKey(lease.accountRef, settings.pultConfirmedAtMs, settings.pultChatId);
+  }
+
+  /** State пульта в точке использования; не подключён — экран и /clean молча деградируют. */
+  _store(lease) {
+    if (!this.stateStoreFor) return null;
+    try {
+      return this.stateStoreFor(lease);
+    } catch (error) {
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: state пульта недоступен');
+      return null;
+    }
+  }
+
   async _bot(lease, method, body) {
     const token = lease.context.credentials?.token || '';
     if (!token) throw Object.assign(new Error('нет token'), { code: 'not_connected' });
@@ -134,17 +199,53 @@ export class TelegramPultActions {
     }));
   }
 
-  /** Ответ владельцу: очередь, plain text, «тихая» ссылка. Ошибка — warn, не throw. */
-  async _send(lease, chatId, text, keyboard = null) {
+  /** Служебный ответ уезжает в реестр sent: следующий /clean его снесёт. */
+  async _registerSent(lease, sent) {
+    const store = this._store(lease);
+    const messageId = Number(sent?.message_id);
+    if (!store || !Number.isSafeInteger(messageId) || messageId <= 0) return;
     try {
-      return await this._bot(lease, 'sendMessage', {
+      const state = await store.read();
+      await store.write({ sent: [...state.sent, { messageId, at: this.now() }] });
+    } catch (error) {
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: реестр служебных сообщений не записался');
+    }
+  }
+
+  /**
+   * Ответ владельцу: очередь, plain text, «тихая» ссылка. Ошибка — warn, не throw.
+   * Эфемерные ответы (по умолчанию все) регистрируются в sent для /clean;
+   * экран навигации в реестр не дублируется — он учтён своей записью screen.
+   */
+  async _send(lease, chatId, text, keyboard = null, { ephemeral = true } = {}) {
+    try {
+      const sent = await this._bot(lease, 'sendMessage', {
         chat_id: chatId,
         text: clipText(text, MESSAGE_LIMIT),
         link_preview_options: { is_disabled: true },
         ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
       });
+      if (ephemeral) await this._registerSent(lease, sent);
+      return sent;
     } catch (error) {
       this.log.warn?.({ code: error?.code }, 'telegram-pult: ответ не доставлен (best effort)');
+      return null;
+    }
+  }
+
+  /** ReplyKeyboardMarkup передаётся целиком, не как inline_keyboard. */
+  async _sendReplyKeyboard(lease, chatId, text) {
+    try {
+      const sent = await this._bot(lease, 'sendMessage', {
+        chat_id: chatId,
+        text: clipText(text, MESSAGE_LIMIT),
+        link_preview_options: { is_disabled: true },
+        reply_markup: pultReplyKeyboard(),
+      });
+      await this._registerSent(lease, sent);
+      return sent;
+    } catch (error) {
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: постоянная клавиатура не доставлена');
       return null;
     }
   }
@@ -164,6 +265,21 @@ export class TelegramPultActions {
     }
   }
 
+  /**
+   * Удаление сообщения — best effort, как всё в пульте: отказ Telegram логируется
+   * и НЕ роняет ни обработку нажатия, ни обход вотчера. «Уже удалено» — успех.
+   */
+  async _delete(lease, chatId, messageId) {
+    try {
+      await this._bot(lease, 'deleteMessage', { chat_id: chatId, message_id: messageId });
+      return true;
+    } catch (error) {
+      if (isMissingMessage(error)) return true;
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: сообщение не удалилось (best effort)');
+      return false;
+    }
+  }
+
   /** answerCallbackQuery обязателен на каждый принятый callback — иначе «часики». */
   async _answer(lease, callback, text = '') {
     try {
@@ -173,6 +289,70 @@ export class TelegramPultActions {
       });
     } catch (error) {
       this.log.warn?.({ code: error?.code }, 'telegram-pult: answerCallbackQuery не доставлен');
+    }
+  }
+
+  /**
+   * Единственный экран навигации пульта: правится на месте, второго сообщения не
+   * создаётся. Сохранённый экран удалён человеком или не правится — молча создаём
+   * новый и запоминаем его id вместо старого, без ошибки в чат. Чужой экран
+   * (другой ownerKey) не трогаем: message_id имеет смысл только у своей лички.
+   * Возвращает message_id экрана (им ключуются снимки плана) или null.
+   */
+  async _screenShow(lease, chatId, ownerKey, text, keyboard = null) {
+    const store = this._store(lease);
+    if (store) {
+      let screen = null;
+      try {
+        screen = (await store.read()).screen;
+      } catch (error) {
+        this.log.warn?.({ code: error?.code }, 'telegram-pult: экран не прочитался, показываю новый');
+      }
+      if (screen && screen.ownerKey === ownerKey) {
+        try {
+          await this._bot(lease, 'editMessageText', {
+            chat_id: chatId,
+            message_id: screen.messageId,
+            text: clipText(text, MESSAGE_LIMIT),
+            link_preview_options: { is_disabled: true },
+            reply_markup: { inline_keyboard: keyboard || [] },
+          });
+          return screen.messageId;
+        } catch {
+          // Любой отказ правки — молча создаём новый экран ниже.
+        }
+      }
+    }
+    const sent = await this._send(lease, chatId, text, keyboard, { ephemeral: false });
+    const messageId = Number(sent?.message_id);
+    if (store && Number.isSafeInteger(messageId) && messageId > 0) {
+      try {
+        await store.write({ screen: { messageId, at: this.now(), ownerKey } });
+      } catch (error) {
+        this.log.warn?.({ code: error?.code }, 'telegram-pult: экран не запомнился');
+      }
+      return messageId;
+    }
+    return null;
+  }
+
+  /** Кнопка «✕ Закрыть»: экран удаляется из чата и забывается. */
+  async _screenClose({ lease, callback, chatId }) {
+    const removed = await this._delete(lease, chatId, callback.messageId);
+    if (!removed) {
+      // Сообщение старше 48 часов Telegram удалить не даёт — это не «ошибка в чат»,
+      // а короткая всплывашка с причиной; запись в state остаётся.
+      await this._answer(lease, callback, 'Не вышло удалить: Telegram разрешает это только в первые 48 часов.');
+      return;
+    }
+    await this._answer(lease, callback, 'Экран закрыт.');
+    const store = this._store(lease);
+    if (!store) return;
+    try {
+      const state = await store.read();
+      if (state.screen?.messageId === callback.messageId) await store.write({ screen: null });
+    } catch (error) {
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: экран не забыт в state');
     }
   }
 
@@ -220,8 +400,25 @@ export class TelegramPultActions {
       if (!await this.isEnabled()) return;
       const settings = await this._owner(msg, lease);
       if (!settings) return;
-      if (msg.replyToMessageId && await this._reply(msg, lease)) return;
-      await this._command(msg, lease);
+      if (msg.replyToMessageId && await this._reply(msg, lease, settings)) return;
+      const navigation = pultReplyAction(msg.text);
+      if (navigation) {
+        await this._replyButton(msg, lease, settings, navigation);
+        return;
+      }
+      if (String(msg.text || '').trimStart().startsWith('/')) {
+        await this._command(msg, lease, settings);
+        return;
+      }
+      if (Array.isArray(msg.media) && msg.media.some((item) => item?.kind === 'voice')) {
+        if (this.assistant) await this.assistant.acceptVoice({ media: msg.media, lease, settings });
+        else await this._send(lease, msg.chatId, 'Чат с ассистентом пока не подключён. Используй /help.');
+        return;
+      }
+      if (String(msg.text || '').trim()) {
+        if (this.assistant) await this.assistant.acceptText({ text: msg.text, lease, settings });
+        else await this._send(lease, msg.chatId, 'Не понял. Команды пульта: /help');
+      }
     } catch (error) {
       this.log.warn?.({ code: error?.code }, 'telegram-pult: приём сообщения сорвался');
     }
@@ -242,7 +439,7 @@ export class TelegramPultActions {
         lease,
         callback,
         chatId: settings.pultChatId,
-        ownerKey: `${lease.accountRef}:${settings.pultConfirmedAtMs}:${settings.pultChatId}`,
+        ownerKey: this._ownerKey(lease, settings),
       };
       switch (action.kind) {
         case 'gate': await this._gate(ctx, action); break;
@@ -252,19 +449,51 @@ export class TelegramPultActions {
         case 'status-list': await this._statusList(ctx, action); break;
         case 'status-task': await this._statusTask(ctx, action); break;
         case 'status-nodes': await this._statusNodes(ctx, action); break;
+        case 'status-nodes-new': await this._statusNodesNew(ctx, action); break;
         case 'plan-open': await this._planOpen(ctx, action); break;
         case 'plan-page': await this._planPage(ctx, action); break;
         case 'resume': await this._resume(ctx, action); break;
         case 'sandbox-retry': await this._sandboxRetry(ctx, action); break;
-        case 'launch': await this._launch(ctx, action); break;
-        case 'stop': await this._stop(ctx, action); break;
-        case 'task-create': await this._taskCreate(ctx, action); break;
+        case 'screen-close': await this._screenClose(ctx); break;
+        case 'nav-home':
+          await this._answer(lease, callback);
+          await this._screenShow(lease, ctx.chatId, ctx.ownerKey, homeCard(), homeKeyboard());
+          break;
+        case 'agent-compact': {
+          const result = this.assistant
+            ? await this.assistant.compact({ lease, settings })
+            : { ok: false, text: 'Чат с ассистентом не подключён.' };
+          await this._answer(lease, callback, result.text);
+          break;
+        }
+        case 'agent-reset': {
+          const result = this.assistant
+            ? await this.assistant.reset({ lease, settings })
+            : { ok: false, text: 'Чат с ассистентом не подключён.' };
+          await this._answer(lease, callback, result.text);
+          break;
+        }
+        case 'turn-stop': {
+          const stopped = this.assistant && await this.assistant.handleStop({
+            turnId: action.turnId, callback, lease, settings,
+          });
+          if (stopped) await this._answer(lease, callback, 'Останавливаю ход.');
+          break;
+        }
         case 'dismiss': await this._dismiss(ctx); break;
         default: await this._answer(lease, callback, 'Кнопка устарела или неизвестна.');
       }
     } catch (error) {
       this.log.warn?.({ code: error?.code }, 'telegram-pult: обработка нажатия сорвалась');
     }
+  }
+
+  async start() {
+    await this.assistant?.reconcile();
+  }
+
+  stop() {
+    this.assistant?.stop();
   }
 
   // ------------------------------------------------------------ решения (ф. 2)
@@ -286,13 +515,17 @@ export class TelegramPultActions {
     }
     const res = await this._api('POST', `/api/tasks/${taskId}/gate/${gateKey.toLowerCase()}/${decision}`, {});
     if (res.statusCode < 400) {
-      let note = decision === 'approve' ? 'принято, прогон продолжен' : 'отклонено без пояснения';
-      // Пойманная в UI грабля: решение записано, а прогон не поехал. Молчать нельзя.
+      // Пойманная в UI грабля: решение записано, а прогон не поехал. По смыслу это
+      // отказ: причину человек обязан прочитать, поэтому карточка остаётся текстом.
       if (res.body?.resumed === false) {
-        note += `. Но прогон не поехал: ${res.body?.resumeError || 'причина в кокпите'}`;
+        const why = `решение записано, но прогон не поехал: ${res.body?.resumeError || 'причина в кокпите'}`;
+        await this._answer(lease, callback, why);
+        await this._edit(lease, chatId, callback.messageId, `⚠ ${subject}: ${why}`);
+      } else {
+        // Решено: итог — всплывашкой, сама карточка удаляется из чата.
+        await this._answer(lease, callback, decision === 'approve' ? 'Принято.' : 'Отклонено.');
+        await this._delete(lease, chatId, callback.messageId);
       }
-      await this._answer(lease, callback, decision === 'approve' ? 'Принято' : 'Отклонено');
-      await this._edit(lease, chatId, callback.messageId, resolvedCard({ subject, note }));
     } else {
       // CAS/terminal: называем фактическое состояние, карточку гасим — свежую
       // пришлёт следующий обход вотчера по реальному месту маршрута.
@@ -315,8 +548,9 @@ export class TelegramPultActions {
     const first = item?.questions?.[0];
     const option = first?.options?.[index];
     if (!item || !first || !option) {
+      // Повод уже ушёл — карточка удаляется наравне с решёнными.
       await this._answer(lease, callback, 'Этот вопрос уже закрыт.');
-      await this._edit(lease, chatId, callback.messageId, resolvedCard({ subject: 'чат', note: 'вопрос уже закрыт' }));
+      await this._delete(lease, chatId, callback.messageId);
       this.forget(`q:${pid}`);
       return;
     }
@@ -325,9 +559,7 @@ export class TelegramPultActions {
     });
     if (res.statusCode < 400) {
       await this._answer(lease, callback, 'Ответ отправлен.');
-      await this._edit(lease, chatId, callback.messageId, resolvedCard({
-        subject: 'чат', note: `ответ отправлен: ${collapseLine(option.label)}`,
-      }));
+      await this._delete(lease, chatId, callback.messageId);
     } else {
       await this._answer(lease, callback, TelegramPultActions.failText(res));
     }
@@ -340,29 +572,33 @@ export class TelegramPultActions {
       await this._answer(lease, callback, 'Этот вопрос уже закрыт.');
       return;
     }
-    this._remember(this.replyWaits, callback.messageId, { kind: 'question-text', pid, chatId });
+    const subject = chatSubject(item);
+    this._remember(this.replyWaits, callback.messageId, { kind: 'question-text', pid, chatId, subject });
     await this._answer(lease, callback, 'Ответь реплаем на это сообщение.');
     const first = item.questions?.[0] || {};
     await this._edit(
       lease, chatId, callback.messageId,
-      `❓ чат, вопрос агента\n${collapseLine(first.question || '…')}\n`
+      `❓ ${subject} — вопрос агента\n${collapseLine(first.question || '…')}\n`
       + 'Ответь РЕПЛАЕМ на это сообщение — текст уедет агенту дословно. Или выбери вариант:',
       questionKeyboard(pid, first.options || []),
     );
   }
 
   async _permission({ lease, callback, chatId }, { pid, action }) {
-    const subject = 'чат';
     if (action === 'deny-comment') {
-      if (!await this._waitingItem(pid)) {
+      const pending = await this._waitingItem(pid);
+      if (!pending) {
         await this._answer(lease, callback, 'Этот запрос уже закрыт.');
         return;
       }
-      this._remember(this.replyWaits, callback.messageId, { kind: 'perm-deny', pid, chatId });
+      const denySubject = chatSubject(pending);
+      this._remember(this.replyWaits, callback.messageId, {
+        kind: 'perm-deny', pid, chatId, subject: denySubject,
+      });
       await this._answer(lease, callback, 'Ответь реплаем — пояснение агенту.');
       await this._edit(
         lease, chatId, callback.messageId,
-        '🔐 чат, отказ с пояснением.\nОтветь РЕПЛАЕМ на это сообщение — пояснение уедет агенту. Или реши кнопкой:',
+        `🔐 ${denySubject} — отказ с пояснением.\nОтветь РЕПЛАЕМ на это сообщение — пояснение уедет агенту. Или реши кнопкой:`,
         permissionKeyboard(pid),
       );
       return;
@@ -371,12 +607,11 @@ export class TelegramPultActions {
     const res = await this._api('POST', `/api/chat/permission/${pid}`, { allow });
     if (res.statusCode < 400) {
       await this._answer(lease, callback, allow ? 'Разрешено.' : 'Отклонено.');
-      await this._edit(lease, chatId, callback.messageId, resolvedCard({
-        subject, note: allow ? 'разрешено' : 'отклонено',
-      }));
+      await this._delete(lease, chatId, callback.messageId);
     } else if (res.statusCode === 404) {
+      // Повод уже ушёл — карточка удаляется наравне с решёнными.
       await this._answer(lease, callback, 'Этот запрос уже закрыт.');
-      await this._edit(lease, chatId, callback.messageId, resolvedCard({ subject, note: 'запрос уже закрыт' }));
+      await this._delete(lease, chatId, callback.messageId);
     } else {
       await this._answer(lease, callback, TelegramPultActions.failText(res));
     }
@@ -385,10 +620,50 @@ export class TelegramPultActions {
 
   // ------------------------------------------------------------ реплаи (ф. 2)
 
-  /** Реплай владельца на карточку-ожидание. true — реплай обработан. */
-  async _reply(msg, lease) {
-    const wait = this._take(this.replyWaits, msg.replyToMessageId);
-    if (!wait) return false;
+  /**
+   * Реплай владельца на карточку-ожидание. true — реплай обработан.
+   * callback_query здесь НЕТ, поэтому всплывашка невозможна: итог успеха уходит
+   * эфемерным сообщением «✓ …» (его сносит /clean), а карточка удаляется.
+   */
+  async _reply(msg, lease, settings) {
+    let wait = this._take(this.replyWaits, msg.replyToMessageId);
+    if (!wait) {
+      const botId = Number(lease.context.botId ?? lease.context.credentials?.botId);
+      // Реплай на собственное сообщение владельца — обычный текст ассистенту.
+      // Fail-closed нужен только для карточки, автором которой был exact текущий бот.
+      if (!Number.isSafeInteger(botId) || Number(msg.replyToFromId) !== botId) return false;
+      const store = this._store(lease);
+      if (!store) {
+        await this._send(lease, msg.chatId, 'Карточка устарела. Открой свежую карточку и повтори решение.');
+        return true;
+      }
+      let state;
+      try {
+        state = await store.read();
+      } catch (error) {
+        this.log.warn?.({ code: error?.code }, 'telegram-pult: durable-маршрут реплая не прочитался');
+        await this._send(lease, msg.chatId, 'Карточка сейчас не читается. Открой свежую карточку и повтори решение.');
+        return true;
+      }
+      const card = Object.values(state.cards || {}).find((candidate) => (
+        candidate?.messageId === msg.replyToMessageId
+        && pultOwnerKeyMatches(
+          candidate.ownerKey,
+          lease.accountRef,
+          settings.pultConfirmedAtMs,
+          settings.pultChatId,
+        )
+      ));
+      if (!card?.replyAction) {
+        await this._send(lease, msg.chatId, 'Карточка устарела. Открой свежую карточку и повтори решение.');
+        return true;
+      }
+      wait = {
+        ...card.replyAction,
+        chatId: settings.pultChatId,
+        subject: card.subject || 'ассистент',
+      };
+    }
     const text = String(msg.text || '').trim();
     if (!text) {
       await this._send(lease, msg.chatId, 'Пустой реплай не уехал. Нажми кнопку на карточке ещё раз.');
@@ -401,11 +676,17 @@ export class TelegramPultActions {
         { comment: text },
       );
       if (res.statusCode < 400) {
-        let note = 'отклонено, замечание уехало агенту';
         if (res.body?.resumed === false) {
-          note += `. Но прогон не поехал: ${res.body?.resumeError || 'причина в кокпите'}`;
+          // Решение записано, но прогон не поехал — причину надо прочитать:
+          // карточка остаётся текстом, как при отказе ручки.
+          await this._edit(
+            lease, wait.chatId, msg.replyToMessageId,
+            `⚠ #${wait.taskId}: отклонено, но прогон не поехал: ${res.body?.resumeError || 'причина в кокпите'}`,
+          );
+        } else {
+          await this._delete(lease, wait.chatId, msg.replyToMessageId);
+          await this._send(lease, msg.chatId, `✓ #${wait.taskId}: отклонено, замечание уехало агенту`);
         }
-        await this._edit(lease, wait.chatId, msg.replyToMessageId, resolvedCard({ subject: `#${wait.taskId}`, note }));
         this.forget(`wait:${wait.taskId}`);
       } else {
         // Например gate_rejected «нельзя доставить»: возврат ведёт не к агенту.
@@ -415,17 +696,23 @@ export class TelegramPultActions {
     }
     if (wait.kind === 'question-text') {
       const res = await this._api('POST', `/api/chat/permission/${wait.pid}`, { answers: [{ text }] });
-      await (res.statusCode < 400
-        ? this._edit(lease, wait.chatId, msg.replyToMessageId, resolvedCard({ subject: 'чат', note: 'свой ответ уехал агенту' }))
-        : this._send(lease, msg.chatId, `⚠ ${TelegramPultActions.failText(res)}`));
+      if (res.statusCode < 400) {
+        await this._delete(lease, wait.chatId, msg.replyToMessageId);
+        await this._send(lease, msg.chatId, `✓ ${wait.subject || 'чат'}: свой ответ уехал агенту`);
+      } else {
+        await this._send(lease, msg.chatId, `⚠ ${TelegramPultActions.failText(res)}`);
+      }
       this.forget(`q:${wait.pid}`);
       return true;
     }
     if (wait.kind === 'perm-deny') {
       const res = await this._api('POST', `/api/chat/permission/${wait.pid}`, { allow: false, comment: text });
-      await (res.statusCode < 400
-        ? this._edit(lease, wait.chatId, msg.replyToMessageId, resolvedCard({ subject: 'чат', note: 'отклонено, пояснение уехало агенту' }))
-        : this._send(lease, msg.chatId, `⚠ ${TelegramPultActions.failText(res)}`));
+      if (res.statusCode < 400) {
+        await this._delete(lease, wait.chatId, msg.replyToMessageId);
+        await this._send(lease, msg.chatId, `✓ ${wait.subject || 'чат'}: отклонено, пояснение уехало агенту`);
+      } else {
+        await this._send(lease, msg.chatId, `⚠ ${TelegramPultActions.failText(res)}`);
+      }
       this.forget(`perm:${wait.pid}`);
       return true;
     }
@@ -465,7 +752,7 @@ export class TelegramPultActions {
     if (res.statusCode < 400) {
       const note = res.body?.outcome === 'already_running' ? 'уже идёт' : 'прогон продолжен';
       await this._answer(ctx.lease, ctx.callback, note);
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, resolvedCard({ subject: `#${taskId}`, note }));
+      await this._delete(ctx.lease, ctx.chatId, ctx.callback.messageId);
       this.forget(`stall:${taskId}`);
     } else {
       // Типизированные отказы движка (runner_preflight_unavailable, коды 73/75/78)
@@ -490,11 +777,8 @@ export class TelegramPultActions {
     const res = await this._api('POST', `/api/tasks/${taskId}/sandbox/retry`, {});
     const down = res.body?.downOutput ? `\nСнос: ${collapseLine(res.body.downOutput)}` : '';
     if (res.statusCode < 400) {
-      await this._answer(ctx.lease, ctx.callback, 'Стенд пересобирается.');
-      await this._edit(
-        ctx.lease, ctx.chatId, ctx.callback.messageId,
-        resolvedCard({ subject: `#${taskId}`, note: 'остатки снесены, прогон продолжен' }) + down,
-      );
+      await this._answer(ctx.lease, ctx.callback, `✓ #${taskId}: остатки снесены, прогон продолжен${down}`);
+      await this._delete(ctx.lease, ctx.chatId, ctx.callback.messageId);
       this.forget(`stall:${taskId}`);
     } else {
       const why = TelegramPultActions.failText(res);
@@ -503,137 +787,13 @@ export class TelegramPultActions {
     }
   }
 
-  async _launch(ctx, { taskId, index, step }) {
-    if (step === 'no') { await this._dismiss(ctx); return; }
-    const snapshot = this._peek(this.confirms, `l:${taskId}`);
-    if (!snapshot || !Array.isArray(snapshot.routes) || !snapshot.routes[index]) {
-      await this._answer(ctx.lease, ctx.callback, 'Список устарел — открой заново: /launch ' + taskId);
-      return;
-    }
-    const route = snapshot.routes[index];
-    if (step === 'ask') {
-      // Тот же снимок остаётся источником истины и на втором шаге; TTL обновляем.
-      this._remember(this.confirms, `l:${taskId}`, snapshot);
-      await this._answer(ctx.lease, ctx.callback);
-      await this._edit(
-        ctx.lease, ctx.chatId, ctx.callback.messageId,
-        `Запустить #${taskId} маршрутом ${route}? Стенд поднимется за ~20–25 минут.`,
-        confirmKeyboard(cbData.launchYes(taskId, index)),
-      );
-      return;
-    }
-    this.confirms.delete(`l:${taskId}`);
-    // Индекс — не источник истины: перед запуском каталог перечитывается и снимок
-    // сверяется по hash и маршруту. Разъехалось — отказ, а не запуск не того.
-    const live = await this._api('GET', `/api/tasks/${taskId}/launch-options`);
-    const fresh = live.statusCode < 400 ? live.body : null;
-    if (!fresh || fresh.error || fresh.catalogHash !== snapshot.catalogHash
-        || fresh.routes?.[index] !== route) {
-      await this._answer(ctx.lease, ctx.callback, 'Каталог изменился — открой список заново.');
-      await this._edit(
-        ctx.lease, ctx.chatId, ctx.callback.messageId,
-        `⚠ #${taskId}: каталог маршрутов изменился — открой список заново: /launch ${taskId}`,
-      );
-      return;
-    }
-    const b24 = await this._api('GET', `/api/b24/task/${taskId}`);
-    if (b24.statusCode >= 400) {
-      await this._answer(ctx.lease, ctx.callback, 'Задача B24 не прочиталась.');
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, `⚠ #${taskId}: ${TelegramPultActions.failText(b24)}`);
-      return;
-    }
-    const title = String(b24.body?.title || '').trim();
-    const description = htmlToPlainText(b24.body?.description) || title;
-    const res = await this._api('POST', `/api/tasks/${taskId}/launch`, {
-      profile: snapshot.profile,
-      route,
-      title,
-      description,
-      acceptanceCriteria: [],
-    });
-    if (res.statusCode < 400) {
-      const note = res.body?.outcome === 'already_running'
-        ? 'уже идёт на конвейере'
-        : `запущено маршрутом ${route}, стенд поднимется за ~20–25 минут`;
-      await this._answer(ctx.lease, ctx.callback, 'Запущено.');
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, resolvedCard({ subject: `#${taskId}`, note }));
-    } else {
-      const why = TelegramPultActions.failText(res);
-      await this._answer(ctx.lease, ctx.callback, why);
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, `⚠ #${taskId}: запуск не прошёл: ${why}`);
-    }
-  }
-
-  async _stop(ctx, { index, step }) {
-    if (step === 'no') { await this._dismiss(ctx); return; }
-    const snapshot = this._peek(this.confirms, 'st');
-    const run = snapshot?.runs?.[index];
-    if (!run) {
-      await this._answer(ctx.lease, ctx.callback, 'Список устарел — открой заново: /stop');
-      return;
-    }
-    if (step === 'ask') {
-      this._remember(this.confirms, 'st', snapshot);
-      await this._answer(ctx.lease, ctx.callback);
-      await this._edit(
-        ctx.lease, ctx.chatId, ctx.callback.messageId,
-        `Остановить ход агента (${run.label})? Сессия сохранится, изменения не откатываются.`,
-        confirmKeyboard(cbData.stopYes(index)),
-      );
-      return;
-    }
-    this.confirms.delete('st');
-    // Снимок сверяется с живым списком: индекс не должен убить другой ход.
-    const live = await this._api('GET', '/api/chat/active');
-    const alive = (live.body?.active || []).some((a) => a.chatKey === run.chatKey);
-    if (live.statusCode >= 400 || !alive) {
-      await this._answer(ctx.lease, ctx.callback, 'Этот ход уже завершился.');
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, `Ход (${run.label}) уже завершился сам.`);
-      return;
-    }
-    const res = await this._api('POST', '/api/chat/stop', { chatKey: run.chatKey });
-    if (res.statusCode < 400) {
-      await this._answer(ctx.lease, ctx.callback, 'Остановлен.');
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, `⏹ Ход агента (${run.label}) остановлен.`);
-    } else {
-      await this._answer(ctx.lease, ctx.callback, TelegramPultActions.failText(res));
-    }
-  }
-
-  async _taskCreate(ctx, { confirmed }) {
-    const draft = this._take(this.confirms, 'tk');
-    if (!confirmed) {
-      await this._answer(ctx.lease, ctx.callback, 'Отменено.');
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, 'Отменено — задача не создана.');
-      return;
-    }
-    if (!draft) {
-      await this._answer(ctx.lease, ctx.callback, 'Черновик устарел — отправь /task заново.');
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, 'Черновик устарел. Отправь /task заново.');
-      return;
-    }
-    const res = await this._api('POST', '/api/b24/tasks', {
-      title: draft.title,
-      description: draft.description,
-      priority: 1,
-    });
-    if (res.statusCode < 400 && res.body?.id) {
-      await this._answer(ctx.lease, ctx.callback, `Задача #${res.body.id} создана.`);
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, `✓ Задача #${res.body.id} создана: «${clipText(draft.title, 100)}»`);
-    } else {
-      const why = TelegramPultActions.failText(res);
-      await this._answer(ctx.lease, ctx.callback, why);
-      await this._edit(ctx.lease, ctx.chatId, ctx.callback.messageId, `⚠ Задача не создана: ${why}\nОтправь /task заново.`);
-    }
-  }
-
-  /** «Отмена» на любой карточке подтверждения. */
+  /** «Отмена» на любой карточке подтверждения: всплывашка + удаление карточки. */
   async _dismiss({ lease, callback, chatId }) {
     for (const [key, value] of this.confirms) {
       if (value.messageId === callback.messageId) this.confirms.delete(key);
     }
     await this._answer(lease, callback, 'Отменено.');
-    await this._edit(lease, chatId, callback.messageId, 'Отменено.');
+    await this._delete(lease, chatId, callback.messageId);
   }
 
   // -------------------------------------------------------- просмотр конвейера
@@ -679,90 +839,113 @@ export class TelegramPultActions {
     };
   }
 
-  async _commandStatus(msg, lease, taskId = '') {
+  async _commandStatus(msg, lease, settings, taskId = '') {
+    const ownerKey = this._ownerKey(lease, settings);
     let snapshot;
     try {
       snapshot = await this._statusSnapshot();
     } catch (error) {
       this.log.warn?.({ code: error?.code }, 'telegram-pult: подробный /status не собрался');
-      await this._send(lease, msg.chatId, 'Статус сейчас не собрался — попробуй ещё раз или загляни в кокпит.');
+      await this._screenShow(lease, msg.chatId, ownerKey, 'Статус сейчас не собрался — попробуй ещё раз или загляни в кокпит.');
       return;
     }
     // Совместимость с внешним/старым summary-провайдером: строка всё ещё честно
     // показывается, но production передаёт структурированный снимок вотчера.
     if (typeof snapshot === 'string') {
-      await this._send(lease, msg.chatId, snapshot);
+      await this._screenShow(lease, msg.chatId, ownerKey, snapshot);
       return;
     }
     if (!snapshot || typeof snapshot !== 'object') {
-      await this._send(lease, msg.chatId, 'Статус пока не собран — попробуй ещё раз через несколько секунд.');
+      await this._screenShow(lease, msg.chatId, ownerKey, 'Статус пока не собран — попробуй ещё раз через несколько секунд.');
       return;
     }
     if (taskId) {
       const task = TelegramPultActions._statusTask(snapshot, taskId);
       if (!task) {
-        await this._send(lease, msg.chatId, `#${taskId} сейчас нет на конвейере.`);
+        await this._screenShow(lease, msg.chatId, ownerKey, `#${taskId} сейчас нет на конвейере.`);
         return;
       }
-      await this._send(lease, msg.chatId, taskStatusCard(task), taskStatusKeyboard(taskId, 0));
+      await this._screenShow(lease, msg.chatId, ownerKey, taskStatusCard(task), taskStatusKeyboard(taskId, 0));
       return;
     }
     const payload = this._statusListPayload(snapshot, 0);
-    await this._send(lease, msg.chatId, payload.text, payload.keyboard);
+    await this._screenShow(lease, msg.chatId, ownerKey, payload.text, payload.keyboard);
   }
 
-  async _statusList({ lease, callback, chatId }, { page }) {
+  async _statusList({ lease, callback, chatId, ownerKey }, { page }) {
     await this._answer(lease, callback);
     let snapshot;
     try { snapshot = await this._statusSnapshot(); } catch { snapshot = null; }
     if (!snapshot || typeof snapshot === 'string') {
-      await this._edit(lease, chatId, callback.messageId, typeof snapshot === 'string'
+      await this._screenShow(lease, chatId, ownerKey, typeof snapshot === 'string'
         ? snapshot
         : 'Статус сейчас не собрался — попробуй /status ещё раз.');
       return;
     }
     const payload = this._statusListPayload(snapshot, page);
-    await this._edit(lease, chatId, callback.messageId, payload.text, payload.keyboard);
+    await this._screenShow(lease, chatId, ownerKey, payload.text, payload.keyboard);
   }
 
-  async _statusTask({ lease, callback, chatId }, { taskId, page }) {
+  async _statusTask({ lease, callback, chatId, ownerKey }, { taskId, page }) {
     await this._answer(lease, callback);
     let snapshot;
     try { snapshot = await this._statusSnapshot(); } catch { snapshot = null; }
     const task = TelegramPultActions._statusTask(snapshot, taskId);
     if (!task) {
-      await this._edit(
-        lease, chatId, callback.messageId,
+      await this._screenShow(
+        lease, chatId, ownerKey,
         `#${taskId} уже ушла с конвейера.`,
         [[{ text: '← К списку', callback_data: cbData.statusList(page) }]],
       );
       return;
     }
-    await this._edit(
-      lease, chatId, callback.messageId,
+    await this._screenShow(
+      lease, chatId, ownerKey,
       taskStatusCard(task),
       taskStatusKeyboard(taskId, page),
     );
   }
 
-  async _statusNodes({ lease, callback, chatId }, { taskId, page, nodePage = 0 }) {
+  async _statusNodes({ lease, callback, chatId, ownerKey }, { taskId, page, nodePage = 0 }) {
     await this._answer(lease, callback);
     let snapshot;
     try { snapshot = await this._statusSnapshot(); } catch { snapshot = null; }
     const task = TelegramPultActions._statusTask(snapshot, taskId);
     if (!task) {
-      await this._edit(
-        lease, chatId, callback.messageId,
+      await this._screenShow(
+        lease, chatId, ownerKey,
         `#${taskId} уже ушла с конвейера.`,
         [[{ text: '← К списку', callback_data: cbData.statusList(page) }]],
       );
       return;
     }
     const nodes = taskNodesPage(task, nodePage);
-    await this._edit(
-      lease, chatId, callback.messageId,
+    await this._screenShow(
+      lease, chatId, ownerKey,
       nodes.text,
       taskNodesKeyboard(taskId, page, nodes.page, nodes.totalPages),
+    );
+  }
+
+  /**
+   * Узлы из ЖИВОЙ карточки — на экране навигации. Нажатие пришло с живой карточки,
+   * но правится сохранённый экран: сама карточка принадлежит вотчеру, а экран —
+   * отдельная запись в state, и вотчер его не переписывает.
+   */
+  async _statusNodesNew({ lease, callback, chatId, ownerKey }, { taskId }) {
+    await this._answer(lease, callback);
+    let snapshot;
+    try { snapshot = await this._statusSnapshot(); } catch { snapshot = null; }
+    const task = TelegramPultActions._statusTask(snapshot, taskId);
+    if (!task) {
+      await this._screenShow(lease, chatId, ownerKey, `#${taskId} уже ушла с конвейера.`);
+      return;
+    }
+    const nodes = taskNodesPage(task, 0);
+    await this._screenShow(
+      lease, chatId, ownerKey,
+      nodes.text,
+      taskNodesKeyboard(taskId, 0, nodes.page, nodes.totalPages),
     );
   }
 
@@ -806,14 +989,13 @@ export class TelegramPultActions {
       return;
     }
     const card = planPageCard({ taskId, pages: plan.pages, page: 0 });
-    const sent = await this._send(
-      lease, chatId, card.text,
+    const screenId = await this._screenShow(
+      lease, chatId, ownerKey, card.text,
       planPageKeyboard(taskId, card.page, card.totalPages),
     );
-    const messageId = Number(sent?.message_id);
-    if (Number.isSafeInteger(messageId) && messageId > 0) {
-      this._rememberPlan(ownerKey, messageId, { taskId, pages: plan.pages });
-    }
+    // Снимок страниц ключуется messageId экрана: листание приходит нажатиями с
+    // него же. Пересозданный экран даёт новый id — старые снимки протухают по TTL.
+    if (screenId) this._rememberPlan(ownerKey, screenId, { taskId, pages: plan.pages });
   }
 
   async _planPage({ lease, callback, chatId, ownerKey }, { taskId, page }) {
@@ -821,8 +1003,8 @@ export class TelegramPultActions {
     const key = this._planViewKey(ownerKey, callback.messageId);
     const view = this._peek(this.planViews, key);
     if (!view || view.taskId !== taskId || !Array.isArray(view.pages) || !view.pages.length) {
-      await this._edit(
-        lease, chatId, callback.messageId,
+      await this._screenShow(
+        lease, chatId, ownerKey,
         `📄 #${taskId}: просмотр плана устарел. Открой план заново из карточки задачи.`,
       );
       return;
@@ -831,141 +1013,135 @@ export class TelegramPultActions {
     // даже если агент одновременно переписал plan.md.
     this._rememberPlan(ownerKey, callback.messageId, { taskId, pages: view.pages });
     const card = planPageCard({ taskId, pages: view.pages, page });
-    await this._edit(
-      lease, chatId, callback.messageId, card.text,
+    await this._screenShow(
+      lease, chatId, ownerKey, card.text,
       planPageKeyboard(taskId, card.page, card.totalPages),
     );
   }
 
   // ------------------------------------------------------------------ команды
 
-  async _command(msg, lease) {
+  async _replyButton(msg, lease, settings, action) {
+    const ownerKey = this._ownerKey(lease, settings);
+    if (action === 'pipeline') {
+      await this._commandStatus(msg, lease, settings);
+      return;
+    }
+    if (action === 'agent') {
+      await this._screenShow(lease, msg.chatId, ownerKey, agentCard(), agentKeyboard());
+      return;
+    }
+    if (action === 'tasks') {
+      await this._screenShow(lease, msg.chatId, ownerKey, tasksCard(), tasksKeyboard());
+      return;
+    }
+    await this._screenShow(lease, msg.chatId, ownerKey, homeCard(), homeKeyboard());
+  }
+
+  /**
+   * /clean: убирает из лички всё, что пульт наследил, — экран, не-sticky карточки
+   * поводов и служебные ответы. Липкие карточки прогонов (live:/done:) не трогаем:
+   * исход прогона — единственная запись о результате. Удаление пакетное
+   * (deleteMessages до 100 id); сообщения старше 48 часов Telegram удалить не
+   * даёт — они не пытаются и честно идут в «не удалось».
+   */
+  async _commandClean(msg, lease, settings) {
+    const chatId = msg.chatId;
+    const store = this._store(lease);
+    if (!store) {
+      await this._send(lease, chatId, 'Уборка недоступна: состояние пульта не подключено.');
+      return;
+    }
+    let state;
+    try {
+      state = await store.read();
+    } catch (error) {
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: state нечитаем, уборка отменена');
+      await this._send(lease, chatId, 'Уборка сейчас не собралась — попробуй ещё раз.');
+      return;
+    }
+    const ownerKey = this._ownerKey(lease, settings);
+    const candidates = new Map(); // messageId → { at, cardKey }
+    if (state.screen && state.screen.ownerKey === ownerKey) {
+      candidates.set(state.screen.messageId, { at: state.screen.at, cardKey: null });
+    }
+    for (const [key, card] of Object.entries(state.cards)) {
+      if (card.sticky || !card.messageId) continue;
+      candidates.set(card.messageId, { at: card.at, cardKey: key });
+    }
+    for (const entry of state.sent) {
+      if (!candidates.has(entry.messageId)) {
+        candidates.set(entry.messageId, { at: entry.at, cardKey: null });
+      }
+    }
+    const nowMs = this.now();
+    let deleted = 0;
+    let failed = 0;
+    const fresh = [];
+    for (const [messageId, info] of candidates) {
+      if (nowMs - info.at > DELETE_WINDOW_MS) failed += 1;
+      else fresh.push([messageId, info]);
+    }
+    const removedCardKeys = [];
+    for (let from = 0; from < fresh.length; from += DELETE_BATCH_SIZE) {
+      const batch = fresh.slice(from, from + DELETE_BATCH_SIZE);
+      const ids = batch.map(([messageId]) => messageId);
+      try {
+        await this._bot(lease, 'deleteMessages', { chat_id: chatId, message_ids: ids });
+        deleted += ids.length;
+        for (const [, info] of batch) if (info.cardKey) removedCardKeys.push(info.cardKey);
+      } catch (error) {
+        // Отказал вызов целиком (сеть, лимит) — обходим ЭТОТ пакет поштучно:
+        // что удаляется, удаляется; каждый отказ идёт в «не удалось».
+        this.log.warn?.({ code: error?.code }, 'telegram-pult: пакетное удаление не прошло, обхожу поштучно');
+        for (const [messageId, info] of batch) {
+          if (await this._delete(lease, chatId, messageId)) {
+            deleted += 1;
+            if (info.cardKey) removedCardKeys.push(info.cardKey);
+          } else {
+            failed += 1;
+          }
+        }
+      }
+    }
+    // Убранное забываем: карточки — по ключу (живой повод перевыпустит свежую
+    // карточку следующим обходом вотчера), экран и реестр — целиком. Записи,
+    // которые не удалось удалить (старше 48 часов), тоже стираем из state:
+    // мусор в файле не копим, повторно Telegram о них уже не спросит.
+    try {
+      const cards = { ...state.cards };
+      for (const key of removedCardKeys) delete cards[key];
+      await store.write({ cards, screen: null, sent: [] });
+    } catch (error) {
+      this.log.warn?.({ code: error?.code }, 'telegram-pult: state после уборки не записался');
+    }
+    for (const key of removedCardKeys) this.forget(key);
+    // Сам ответ /clean — тоже эфемерный: регистрируется в sent и сносится следующей уборкой.
+    await this._send(lease, chatId, `Уборка: удалено ${deleted}, не удалось ${failed}.`);
+  }
+
+  async _command(msg, lease, settings) {
     const command = commandOf(msg.text);
     const name = command?.name;
-    if (name === 'help' || name === 'start') {
-      await this._send(lease, msg.chatId, HELP_TEXT);
+    if (name === 'start') {
+      await this._screenShow(lease, msg.chatId, this._ownerKey(lease, settings), homeCard(), homeKeyboard());
+      await this._sendReplyKeyboard(lease, msg.chatId, 'Клавиатура пульта снова раскрыта.');
+      return;
+    }
+    if (name === 'help') {
+      await this._screenShow(lease, msg.chatId, this._ownerKey(lease, settings), HELP_TEXT, helpKeyboard());
       return;
     }
     if (name === 'status') {
-      await this._commandStatus(msg, lease, taskIdOf(command.args));
+      await this._commandStatus(msg, lease, settings, taskIdOf(command.args));
       return;
     }
-    if (name === 'task') { await this._commandTask(msg, lease, command.args); return; }
-    if (name === 'launch') { await this._commandLaunch(msg, lease, command.args); return; }
-    if (name === 'timer') { await this._commandTimer(msg, lease, command.args); return; }
-    if (name === 'complete' || name === 'renew') {
-      await this._commandB24Simple(msg, lease, name, command.args);
+    if (name === 'clean') {
+      await this._commandClean(msg, lease, settings);
       return;
     }
-    if (name === 'stop') { await this._commandStop(msg, lease); return; }
     // Незнакомый текст вне ожидания реплая — короткая подсказка (только владельцу).
     await this._send(lease, msg.chatId, 'Не понял. Команды пульта: /help');
-  }
-
-  /** /task: первая строка — заголовок, остальное — описание; создание после предпросмотра. */
-  async _commandTask(msg, lease, args) {
-    const [firstLine, ...rest] = String(args || '').split('\n');
-    const title = collapseLine(firstLine);
-    const description = rest.join('\n').trim();
-    if (!title) {
-      await this._send(lease, msg.chatId, 'Так: /task Заголовок⏎описание (описание — со второй строки).');
-      return;
-    }
-    const preview = [
-      `📝 Задача B24: «${clipText(title, 200)}»`,
-      description ? clipText(description, 800) : '(без описания)',
-      'Создать?',
-    ].join('\n');
-    const sent = await this._send(lease, msg.chatId, preview, [[
-      { text: 'Создать', callback_data: cbData.taskCreate() },
-      { text: 'Отмена', callback_data: cbData.taskCancel() },
-    ]]);
-    if (sent) this._remember(this.confirms, 'tk', { title, description, messageId: sent.message_id });
-  }
-
-  /** /launch <id>: маршруты — только из опубликованного каталога, снимок на сервере. */
-  async _commandLaunch(msg, lease, args) {
-    const taskId = taskIdOf(args);
-    if (!taskId) {
-      await this._send(lease, msg.chatId, 'Так: /launch <номер задачи>');
-      return;
-    }
-    const res = await this._api('GET', `/api/tasks/${taskId}/launch-options`);
-    const body = res.statusCode < 400 ? res.body : null;
-    if (!body || body.error) {
-      await this._send(lease, msg.chatId, `⚠ #${taskId}: ${TelegramPultActions.failText(res) === 'undefined' ? 'запуск недоступен' : (body?.message || TelegramPultActions.failText(res))}`);
-      return;
-    }
-    if (body.onConveyor) {
-      await this._send(lease, msg.chatId, `#${taskId} уже на конвейере${body.running ? ' и идёт' : ''} — продолжить можно с карточки затыка или из кокпита.`);
-      return;
-    }
-    const routes = Array.isArray(body.routes) ? body.routes : [];
-    if (!routes.length) {
-      await this._send(lease, msg.chatId, `⚠ #${taskId}: каталог маршрутов не опубликован — публикует человек из «Маршрутов».`);
-      return;
-    }
-    const keyboard = routes.map((route, index) => ([{
-      text: route === body.defaultRoute ? `${route} (по умолчанию)` : route,
-      callback_data: cbData.launchPick(taskId, index),
-    }]));
-    keyboard.push([{ text: 'Отмена', callback_data: cbData.dismiss() }]);
-    const sent = await this._send(
-      lease, msg.chatId,
-      `🚀 #${taskId}: каким маршрутом? (профиль ${body.profile})`,
-      keyboard,
-    );
-    if (sent) {
-      this._remember(this.confirms, `l:${taskId}`, {
-        routes, catalogHash: body.catalogHash, profile: body.profile, messageId: sent.message_id,
-      });
-    }
-  }
-
-  async _commandTimer(msg, lease, args) {
-    const taskId = taskIdOf(args);
-    const action = String(args || '').trim().split(/\s+/u)[1] || '';
-    if (!taskId || !['start', 'pause', 'stop'].includes(action)) {
-      await this._send(lease, msg.chatId, 'Так: /timer <номер> start|pause|stop');
-      return;
-    }
-    const res = await this._api('POST', `/api/b24/task/${taskId}/timer/${action}`, {});
-    await this._send(lease, msg.chatId, res.statusCode < 400
-      ? `✓ #${taskId}: таймер — ${action}`
-      : `⚠ #${taskId}: ${TelegramPultActions.failText(res)}`);
-  }
-
-  async _commandB24Simple(msg, lease, name, args) {
-    const taskId = taskIdOf(args);
-    if (!taskId) {
-      await this._send(lease, msg.chatId, `Так: /${name} <номер задачи>`);
-      return;
-    }
-    const res = await this._api('POST', `/api/b24/task/${taskId}/${name}`, {});
-    await this._send(lease, msg.chatId, res.statusCode < 400
-      ? `✓ #${taskId}: ${name === 'complete' ? 'завершена' : 'возобновлена'}`
-      : `⚠ #${taskId}: ${TelegramPultActions.failText(res)}`);
-  }
-
-  /** /stop: только ходы агентов ЧАТОВ. Этапы конвейера пульт не глушит — как кокпит. */
-  async _commandStop(msg, lease) {
-    const res = await this._api('GET', '/api/chat/active');
-    const active = res.statusCode < 400 && Array.isArray(res.body?.active) ? res.body.active : [];
-    if (!active.length) {
-      await this._send(lease, msg.chatId, 'Сейчас ни один агент в чатах не идёт.');
-      return;
-    }
-    const runs = active.map((run) => ({
-      chatKey: String(run.chatKey || ''),
-      label: `${String(run.chatKey || '').slice(0, 12)}… · ${Number(run.tokens) || 0} ток.`,
-    }));
-    const keyboard = runs.slice(0, 10).map((run, index) => ([{
-      text: `⏹ ${run.label}`,
-      callback_data: cbData.stopPick(index),
-    }]));
-    keyboard.push([{ text: 'Отмена', callback_data: cbData.dismiss() }]);
-    const sent = await this._send(lease, msg.chatId, 'Какой ход остановить?', keyboard);
-    if (sent) this._remember(this.confirms, 'st', { runs, messageId: sent.message_id });
   }
 }
 

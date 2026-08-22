@@ -8,6 +8,8 @@ const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ROUTE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 const TASK_RE = /^[1-9][0-9]{0,18}$/;
 const TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const DISPATCH_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const RUNNER_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 
 export class FactoryLedgerIntegrityError extends Error {
   constructor(message) {
@@ -93,11 +95,15 @@ async function contentAddressedJson(dir, prefix, { required = true } = {}) {
 }
 
 function validateAttempt(value, task, attempt) {
-  exactKeys(value, [
+  const baseKeys = [
     'schema', 'protocolVersion', 'attemptId', 'taskId', 'profile', 'createdAt',
     'routesDir', 'catalogHash', 'origin', 'previousAttemptId', 'recoveryReason',
-  ], 'attempt');
-  if (value.schema !== 1 || value.protocolVersion !== 2
+  ];
+  if (value?.schema === 1) exactKeys(value, baseKeys, 'attempt');
+  else if (value?.schema === 2) {
+    exactKeys(value, [...baseKeys, 'queueDispatchId', 'runnerPrimaryOverride'], 'attempt');
+  } else fail('attempt: unexpected schema');
+  if (value.protocolVersion !== 2
       || value.taskId !== task || value.attemptId !== attempt
       || !PROFILE_RE.test(value.profile || '') || !HASH_RE.test(value.catalogHash || '')
       || typeof value.routesDir !== 'string' || !path.isAbsolute(value.routesDir)
@@ -115,9 +121,23 @@ function validateAttempt(value, task, attempt) {
         || value.recoveryReason.length > 500 || /[\u0000-\u001f\u007f]/.test(value.recoveryReason)) {
       fail('attempt: invalid recovery origin');
     }
+    if (value.schema === 2 && value.queueDispatchId !== null) {
+      fail('attempt: recovery cannot inherit queue dispatch');
+    }
   } else {
     fail('attempt: invalid origin');
   }
+  if (value.schema === 2
+      && (value.queueDispatchId !== null && !DISPATCH_ID_RE.test(value.queueDispatchId || '')
+        || typeof value.runnerPrimaryOverride !== 'string'
+        || (value.runnerPrimaryOverride !== '' && !RUNNER_RE.test(value.runnerPrimaryOverride)))) {
+    fail('attempt: invalid launch provenance');
+  }
+  return {
+    schema: value.schema,
+    queueDispatchId: value.schema === 2 ? value.queueDispatchId : null,
+    runnerPrimaryOverride: value.schema === 2 ? value.runnerPrimaryOverride : null,
+  };
 }
 
 function validatePins(value, attemptState) {
@@ -148,6 +168,16 @@ function validateRoutePin(value, attemptState) {
   exactTimestamp(value.selectedAt, 'route pin');
 }
 
+// Границы terminal-причины ОБЯЗАНЫ совпадать с движком (`reason()` в
+// engine/lib/attempt-state.sh): до 20 000 символов, перевод строки разрешён, прочие
+// управляющие запрещены. Здесь стояло 500 без переносов — ридер не догнали, когда
+// движку ослабили лимит ради многострочных замечаний человека. Расхождение не даёт
+// ошибку при записи: `factory abandon` принимает длинную причину и отвечает успехом,
+// а потом кокпит не может прочитать СВОЮ ЖЕ попытку — `attempt_integrity_failed`,
+// карточка не закрывается кнопкой и висит на экране навсегда. Ловится только живым
+// прогоном: тесты писали короткие причины.
+const TERMINAL_REASON_LIMIT = 20000;
+
 function validateTerminal(value, task, attempt) {
   exactKeys(value, [
     'schema', 'protocolVersion', 'attemptId', 'taskId', 'state', 'closedAt', 'reason',
@@ -161,7 +191,8 @@ function validateTerminal(value, task, attempt) {
   if (value.state === 'finished') {
     if (value.reason !== null) fail('terminal: finished reason must be null');
   } else if (typeof value.reason !== 'string' || value.reason.length < 1
-      || value.reason.length > 500 || /[\u0000-\u001f\u007f]/.test(value.reason)) {
+      || value.reason.length > TERMINAL_REASON_LIMIT
+      || /[\u0000-\u0009\u000b-\u001f\u007f]/.test(value.reason)) {
     fail('terminal: invalid abandon reason');
   }
 }
@@ -371,7 +402,7 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     path.join(attemptDir, 'attempt.sha256'),
     'attempt',
   );
-  validateAttempt(attemptState, task, attempt);
+  const launchProvenance = validateAttempt(attemptState, task, attempt);
   const pins = await checkedJson(
     path.join(attemptDir, 'pins.json'),
     path.join(attemptDir, 'pins.sha256'),
@@ -425,10 +456,23 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     }
   }
 
+  const projectedTerminal = projectionTerminal(registry.RESULT);
+  // terminal.*.json — надёжный источник истины; он фиксируется раньше доступной
+  // провайдеру для записи проекции реестра. Сбой в этом окне может оставить RESULT
+  // нетерминальным. Обратный случай всегда небезопасен: без доверенной терминальной
+  // записи терминальная проекция не доказана, а конфликтующая проекция обязана дать отказ.
+  const terminalProjectionDisagrees = terminal === null
+    ? projectedTerminal !== null
+    : projectedTerminal !== null && projectedTerminal !== terminal;
   if (registry.PROFILE !== attemptState.profile || registry.ROUTE !== routePin.routeId
-      || registry.ROUTE_HASH !== routePin.routeHash
-      || projectionTerminal(registry.RESULT) !== terminal) {
+      || registry.ROUTE_HASH !== routePin.routeHash || terminalProjectionDisagrees) {
     fail('pipeline projection disagrees with trusted attempt ledger');
+  }
+  if (launchProvenance.schema === 2
+      && (registry.CATALOG_HASH !== attemptState.catalogHash
+        || (registry.QUEUE_DISPATCH_ID || null) !== launchProvenance.queueDispatchId
+        || (registry.RUNNER_OVERRIDE_PRIMARY || '') !== launchProvenance.runnerPrimaryOverride)) {
+    fail('pipeline projection disagrees with trusted launch provenance');
   }
 
   return {
@@ -437,6 +481,10 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
     createdAt: attemptState.createdAt,
     profile: attemptState.profile,
     catalogHash: attemptState.catalogHash,
+    origin: attemptState.origin,
+    previousAttemptId: attemptState.previousAttemptId,
+    queueDispatchId: launchProvenance.queueDispatchId,
+    runnerPrimaryOverride: launchProvenance.runnerPrimaryOverride,
     route: routePin.routeId,
     routeHash: routePin.routeHash,
     terminal,

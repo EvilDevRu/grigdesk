@@ -3,9 +3,10 @@
 // Проект — это то же имя, что профиль фабрики и папка базы маршрутов (routes/<id>).
 // Пути фабричного проекта показываются из его bash-профиля (единственный источник,
 // тут они read-only); у кокпитного проекта пути редактируются здесь и живут в prefs.
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
+import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { alertDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import { useToolLauncher } from '../shared/tools/launcher.js';
@@ -19,6 +20,13 @@ const newId = ref('');
 const creating = ref(false);
 // Редактор путей: { id, repos: [{key, dir}], saving, msg } — открыт для одного проекта.
 const edit = ref(null);
+const projectsContext = useUiContextSource('projects', { layer: 'page', active: false });
+watch(() => edit.value?.id || '', (project) => {
+  // Карточки не имеют выбранного repository: публикуем только реально открытый editor,
+  // не первый путь и не абсолютные `dir` из формы.
+  if (project) projectsContext.focus({ details: { project } });
+  else projectsContext.blur();
+}, { immediate: true });
 
 const HELP = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код». У проекта фабрики пути задаёт его профиль (PROFILE_TRIAGE_REPOS); у проекта, заведённого здесь, пути хранятся в кокпите.';
 

@@ -11,7 +11,12 @@ import path from 'node:path';
 import { KIMI_RETRY_CONTRACT } from '../chat/retry-contract.js';
 import { kimiSeedModels, KIMI_MODELS, KIMI_SECURITY_PROFILE } from '../kimi/profile.js';
 import { runContainedKimi } from '../kimi/runtime.js';
-import { classifyKimiUsageResponse, requestKimiManagedUsage } from '../kimi/usage.js';
+import {
+  classifyKimiUsageResponse,
+  kimiUsageIsRetryable,
+  requestKimiManagedUsage,
+} from '../kimi/usage.js';
+import { withRetry } from '../retry.js';
 
 function probe(bin) {
   return new Promise((resolve) => {
@@ -152,8 +157,16 @@ export default {
    * server самого Kimi. Cockpit не открывает OAuth credential file и не создаёт
    * model session/turn.
    */
-  async usage(config) {
-    return classifyKimiUsageResponse(await requestKimiManagedUsage(config));
+  async usage(config, deps = {}) {
+    // Две попытки, а не три: каждая заново поднимает локальный брокер, и запрос из шапки
+    // не имеет права висеть дольше своего минутного кэша. Что именно повторяем — решает
+    // за это отвечает `kimiUsageIsRetryable`.
+    const outcome = await withRetry(() => requestKimiManagedUsage(config), {
+      attempts: 2,
+      retryWhen: kimiUsageIsRetryable,
+      ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    });
+    return classifyKimiUsageResponse(outcome);
   },
 
   run(options) { return runContainedKimi(options); },
