@@ -619,6 +619,7 @@ export function runCodexAppServer({
     let threadId = sessionId || null;
     let turnId = null;
     let reply = '';
+    let lastCommentary = '';
     let actualModel = '';
     let totalInputTokens = 0;
     let cachedInputTokens = 0;
@@ -696,6 +697,10 @@ export function runCodexAppServer({
 
     async function finishSuccess() {
       if (settled) return;
+      // Ход, завершившийся без `final_answer`, всё равно нёс работу: его итог остался
+      // в последнем commentary. Дубль в ленте дешевле потерянного ответа, а отказ
+      // «codex не вернул ответ» на нормально закрытом turn читается как поломка.
+      if (!reply.trim() && lastCommentary.trim()) reply = lastCommentary;
       if (!reply.trim()) {
         finishError(new Error('codex не вернул ответ'));
         return;
@@ -776,6 +781,8 @@ export function runCodexAppServer({
         // либо legacy-модель без phase, где последняя agentMessage была ответом.
         if (item.phase === 'final_answer' || item.phase == null) {
           if (text.trim()) reply = text;
+        } else if (text.trim()) {
+          lastCommentary = text;
         }
       } else if (method === 'thread/tokenUsage/updated') {
         rememberUsage(params);
@@ -913,7 +920,12 @@ export function runCodexAppServer({
     async function bootstrap() {
       await request('initialize', {
         clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
-        capabilities: null,
+        // `experimentalApi` открывает `runtimeWorkspaceRoots`: без него app-server
+        // отвечает «requires experimentalApi capability», и рабочим корнем остаётся
+        // один cwd (в схеме: «Omitted defaults to cwd»). `requestAttestation` —
+        // строго false: он включает server request `attestation/generate`, а любой
+        // server request кокпит завершает fail-closed, то есть уронил бы ход.
+        capabilities: { experimentalApi: true, requestAttestation: false },
       });
       send({ method: 'initialized' });
 
@@ -922,6 +934,10 @@ export function runCodexAppServer({
         cwd,
         approvalPolicy: 'never',
         sandbox: 'workspace-write',
+        // Доверенные каталоги «Настройки → Исполнители» обязаны быть рабочими корнями,
+        // а не только writable-песочницей: `codex exec --add-dir` давал агенту именно
+        // рабочую область, и после переезда на app-server она сузилась до cwd.
+        runtimeWorkspaceRoots: roots,
         config: codexAppServerConfig(compactWindow),
       };
       const opened = sessionId

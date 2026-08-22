@@ -144,6 +144,17 @@ test('Codex run использует app-server и не теряет rich events
     'ClientNotification 0.149 — ровно { method: "initialized" }, без params',
   );
 
+  // `runtimeWorkspaceRoots` живёт за experimentalApi: без объявленной capability
+  // app-server отвечает «requires experimentalApi capability». `requestAttestation`
+  // обязан оставаться false — он включает server request, который кокпит завершает
+  // fail-closed, то есть ход упал бы на ровном месте.
+  for (const init of client.filter((message) => message.method === 'initialize')) {
+    assert.deepEqual(init.params.capabilities, {
+      experimentalApi: true,
+      requestAttestation: false,
+    });
+  }
+
   const start = client.find((message) => message.method === 'thread/start');
   assert.equal(start.params.cwd, f.dir);
   assert.equal(start.params.model, 'gpt-contract-0.149');
@@ -157,6 +168,13 @@ test('Codex run использует app-server и не теряет rich events
   assert.equal(resume.params.cwd, f.dir);
   assert.equal(resume.params.sandbox, 'workspace-write');
   assert.equal(resume.params.approvalPolicy, 'never');
+
+  // Доверенные каталоги «Настройки → Исполнители» — рабочая область агента, а не
+  // только writable-песочница: `codex exec --add-dir` давал именно это, и без явного
+  // поля app-server сужает рабочие корни до одного cwd.
+  for (const opened of [start, resume]) {
+    assert.deepEqual(opened.params.runtimeWorkspaceRoots, [f.dir, path.join(f.dir, 'shared')]);
+  }
 
   const turns = client.filter((message) => message.method === 'turn/start');
   assert.deepEqual(turns.map((message) => message.params.input[0].text), [
@@ -178,6 +196,19 @@ test('Codex run использует app-server и не теряет rich events
       excludeSlashTmp: false,
     });
   }
+});
+
+test('ход без final_answer отдаёт последний commentary, а не ошибку «нет ответа»', async (t) => {
+  const f = await fixture(t, 'commentary-only');
+  const steps = [];
+  const result = await codex.run(runOptions(f, { onStep: (step) => steps.push(step) }));
+
+  assert.equal(result.reply, 'Прогнал тесты, все зелёные; продолжаю по плану.');
+  assert.equal(result.sessionId, '00000000-0000-7000-8000-000000000049');
+  assert.ok(
+    steps.some((step) => step.k === 'text' && step.text === result.reply),
+    'сам commentary остаётся в ленте: ответ его дублирует, но не подменяет',
+  );
 });
 
 test('AbortSignal прерывает app-server ход через turn/interrupt и сохраняет sessionId со steps', async (t) => {

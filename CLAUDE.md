@@ -494,7 +494,8 @@
   `POST /api/settings/trusted-directories` (хранятся в prefs; поддержку объявляет сам
   адаптер полем `trustedDirectories`, поэтому UI берёт актуальные имена из `/api/providers`
   без хардкода; Claude применяет через `--add-dir`, Codex — через
-  `turn/start.sandboxPolicy.writableRoots`, Ollama — как корни файловых инструментов,
+  `turn/start.sandboxPolicy.writableRoots` И `thread/*.runtimeWorkspaceRoots` (право писать
+  и рабочая область — разные поля app-server), Ollama — как корни файловых инструментов,
   Kimi — только в contained-режиме; глобальные конфиги CLI не меняются);
   исполнитель и усилие голосового компаньона — prefs `companion: {modelRef, effort}`
   (карточка «Приложение → Голосовой компаньон»; нормализация — `lib/companion-settings.js`,

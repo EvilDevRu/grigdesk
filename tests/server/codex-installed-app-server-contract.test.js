@@ -1,10 +1,11 @@
 // Сторож на обновление установленного Codex: схема app-server генерируется локально,
 // без запуска модели, и фиксирует ровно тот transport, на который опирается Cockpit.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
@@ -162,6 +163,11 @@ test('установленный Codex сохраняет необходимый
 
   assertField(initializeParams, 'capabilities', 'InitializeCapabilities | null', version,
     'InitializeParams');
+  const initializeCapabilities = await schema('InitializeCapabilities.ts');
+  assertField(initializeCapabilities, 'experimentalApi', 'boolean', version,
+    'InitializeCapabilities');
+  assertField(initializeCapabilities, 'requestAttestation', 'boolean', version,
+    'InitializeCapabilities');
   for (const [source, name] of [
     [threadStartParams, 'ThreadStartParams'],
     [threadResumeParams, 'ThreadResumeParams'],
@@ -219,4 +225,79 @@ test('установленный Codex сохраняет необходимый
     );
   }
   assertField(threadItem, 'changes', 'Array<FileUpdateChange>', version, 'ThreadItem.fileChange');
+});
+
+// `runtimeWorkspaceRoots` — experimental-поле: generate-ts его не печатает, поэтому
+// схемный сторож выше его не увидит. Проверяем живым handshake, без model call:
+// тред эфемерный, turn не запускается, аккаунт не нужен.
+function startThread({ capabilities, params }) {
+  return new Promise((resolve) => {
+    const child = spawn(CODEX_BIN, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const lines = createInterface({ input: child.stdout });
+    let stderr = '';
+    const timer = setTimeout(() => finish({ timeout: true }), 25_000);
+
+    function finish(value) {
+      clearTimeout(timer);
+      try { lines.close(); } catch { /* уже закрыт */ }
+      try { child.kill(); } catch { /* уже завершён */ }
+      resolve(value);
+    }
+
+    const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-2_000); });
+    child.once('error', (error) => finish({ spawnError: error }));
+    lines.on('line', (line) => {
+      let message;
+      try { message = JSON.parse(line); } catch { return; }
+      if (message.id === 1) {
+        send({ method: 'initialized' });
+        send({ method: 'thread/start', id: 2, params });
+      } else if (message.id === 2) {
+        finish({ error: message.error ?? null, thread: message.result?.thread ?? null, stderr });
+      }
+    });
+    send({ method: 'initialize', id: 1, params: {
+      clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+      capabilities,
+    } });
+  });
+}
+
+test('установленный Codex принимает runtimeWorkspaceRoots только с experimentalApi', {
+  timeout: 60_000,
+}, async (t) => {
+  const params = {
+    cwd: os.tmpdir(),
+    approvalPolicy: 'never',
+    sandbox: 'workspace-write',
+    ephemeral: true,
+    serviceName: 'cockpit',
+    runtimeWorkspaceRoots: [os.tmpdir(), path.join(os.tmpdir(), 'cockpit-contract-root')],
+  };
+
+  const declared = await startThread({
+    capabilities: { experimentalApi: true, requestAttestation: false },
+    params,
+  });
+  if (declared.spawnError?.code === 'ENOENT') {
+    return t.skip(`Codex CLI не установлен (${CODEX_BIN})`);
+  }
+  assert.equal(declared.timeout, undefined, 'app-server не ответил на thread/start');
+  assert.equal(
+    declared.error,
+    null,
+    `Codex больше не принимает runtimeWorkspaceRoots: ${JSON.stringify(declared.error)}`,
+  );
+  assert.ok(declared.thread?.id, 'thread/start вернул тред');
+
+  // Негатив закрепляет причину: без capability поле не игнорируется молча, а отвергается,
+  // и рабочим корнем остаётся один cwd — ровно тот регресс, ради которого capability и есть.
+  const silent = await startThread({ capabilities: null, params });
+  assert.equal(silent.timeout, undefined, 'app-server не ответил на thread/start без capability');
+  assert.match(
+    String(silent.error?.message || ''),
+    /experimentalApi/,
+    'без experimentalApi app-server обязан отказать, а не принять поле тихо',
+  );
 });

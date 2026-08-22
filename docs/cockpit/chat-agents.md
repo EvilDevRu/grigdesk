@@ -20,12 +20,18 @@ coverage и error policy; он описан в [multi-AI контракте дв
   корневые AGENTS.md/CLAUDE.md); страница «Агенты» переопределяет его на `agents/`.
   Codex работает с `approvalPolicy: "never"` и sandbox `workspaceWrite`: cwd и `extraDirs`
   перечисляются в `turn/start.sandboxPolicy.writableRoots`, полный доступ к хосту не выдаётся,
-  сеть включена для `gh`, `git` и пакетных менеджеров.
+  сеть включена для `gh`, `git` и пакетных менеджеров. **Те же пути идут вторым, независимым
+  полем `runtimeWorkspaceRoots` в `thread/start`/`thread/resume`**: writableRoots — это только
+  право писать, а рабочей ОБЛАСТЬЮ агента без этого поля остаётся один cwd («Omitted defaults
+  to cwd» в схеме app-server). Поле экспериментальное, поэтому `initialize` объявляет
+  `capabilities: {experimentalApi: true, requestAttestation: false}`; почему второй флаг
+  обязан быть выключен и как это отличалось у `codex exec` — [грабли](gotchas.md).
 - **Доверенные каталоги** задаются один раз в «Настройки → Исполнители» и хранятся в
   `prefs.trustedDirectories`. Сервер проверяет realpath каждого существующего абсолютного
   каталога, не разрешает `/`, убирает дубли и перед каждым новым ходом добавляет список в
   `extraDirs`. Claude превращает его в `--add-dir`, Codex — в
-  `turn/start.sandboxPolicy.writableRoots`. У `kimi acp` такого флага нет.
+  `turn/start.sandboxPolicy.writableRoots` **и** `thread/*.runtimeWorkspaceRoots` (право
+  писать и рабочая область — два разных поля, см. выше). У `kimi acp` такого флага нет.
   Запуск Kimi имеет два режима (`config.kimiLaunchMode`, умолчание `host`): в host-режиме
   Kimi — прямой хост-процесс (parity с claude: host fs/config/credentials, permission-система
   самого CLI), и `extraDirs` ему недоступны — доступ за пределами cwd идёт через

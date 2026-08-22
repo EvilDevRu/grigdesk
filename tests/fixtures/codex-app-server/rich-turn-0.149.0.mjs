@@ -198,6 +198,37 @@ function runFixture() {
     setTimeout(() => process.exit(0), 20);
   }
 
+  // Ход, где модель отчиталась только commentary и закрыла turn без final_answer.
+  // Так заканчиваются ходы с делегированием суб-агентам: работа сделана, итог есть,
+  // а явного финального сообщения нет.
+  function emitCommentaryOnlyTurn() {
+    const text = 'Прогнал тесты, все зелёные; продолжаю по плану.';
+    send({ method: 'item/started', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_100,
+      item: {
+        type: 'agentMessage', id: 'commentary-only-1', text: '', phase: 'commentary',
+        memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'item/agentMessage/delta', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, itemId: 'commentary-only-1', delta: text,
+    } });
+    send({ method: 'item/completed', params: {
+      threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_200,
+      item: {
+        type: 'agentMessage', id: 'commentary-only-1', text, phase: 'commentary',
+        memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId: THREAD_ID,
+      turn: {
+        ...runningTurn, status: 'completed', completedAt: 1_700_000_002, durationMs: 1_000,
+      },
+    } });
+    setTimeout(() => process.exit(0), 20);
+  }
+
   function emitInterruptibleTurn() {
     send({ method: 'item/started', params: {
       threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_100,
@@ -294,6 +325,7 @@ function runFixture() {
       send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
       phase = scenario === 'interrupt' ? 'interrupt' : 'complete';
       if (scenario === 'interrupt') emitInterruptibleTurn();
+      else if (scenario === 'commentary-only') emitCommentaryOnlyTurn();
       else emitRichTurn();
       return;
     }
