@@ -4,7 +4,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { router } from './router.js';
 import { usePwaStore } from './stores/pwa.js';
 import App from './App.vue';
-import './styles.css';
+import './styles/index.css';
 
 const pinia = createPinia();
 createApp(App).use(pinia).use(router).mount('#app');

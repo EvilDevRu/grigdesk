@@ -1,7 +1,232 @@
-<script setup>
+<template>
+  <main class="inbox-page">
+    <header class="page-head">
+      <div>
+        <h1>Входящие</h1>
+        <p>Общая очередь Telegram, GitHub и других подключённых каналов.</p>
+      </div>
+      <UiButton class="btn" :loading="loading" loading-label="Обновляю" @click="load">Обновить</UiButton>
+    </header>
+
+    <section v-if="unavailable" class="state-card" data-state="plugin-disabled">
+      <h2>Входящие недоступны</h2>
+      <p>Включите системный плагин «Входящие» в разделе «Настройки → Плагины».</p>
+    </section>
+
+    <template v-else>
+      <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
+      <p v-if="notice" class="banner" :class="noticeKind" role="status">{{ notice }}</p>
+      <p v-if="automationNotice" class="banner" :class="automationNotice.kind"
+         data-state="automation-notice" role="status">
+        {{ automationNotice.text }}
+        <a v-if="automationNotice.settings" href="#/settings" class="inline-link"
+           @click="rememberPluginsTab">Выбрать модель</a>
+      </p>
+      <p v-if="payload.truncated" class="banner warn">Показана только часть очереди: достигнут лимит ответа.</p>
+
+      <section class="channels" aria-label="Каналы Inbox">
+        <article v-for="channel in payload.channels" :key="channel.id" class="channel-card"
+                 :data-channel="channel.id">
+          <div class="channel-main">
+            <strong>{{ channel.label }}</strong>
+            <span v-if="channel.plugin === 'disabled'" class="pill off">Плагин выключен</span>
+          </div>
+          <dl class="channel-state">
+            <div>
+              <dt>Подключение</dt>
+              <dd><span class="pill" :class="channel.connection">{{ connectionLabel(channel.connection) }}</span></dd>
+            </div>
+            <div>
+              <dt>Приём новых</dt>
+              <dd><span class="pill" :class="channel.participation">{{ participationLabel(channel.participation) }}</span></dd>
+            </div>
+          </dl>
+          <p v-if="channel.participation === 'never_activated'">
+            Приём ещё не начат. Старая история не будет импортирована.
+          </p>
+          <p v-else-if="channel.participation === 'deactivated'" class="gap-warning">
+            Сообщения за время паузы не появятся после возобновления.
+          </p>
+          <p v-else>Новые обращения сразу попадают в очередь.</p>
+          <p v-if="channel.connection !== 'connected'" class="read-only">
+            Ранее принятые обращения доступны только для чтения до переподключения.
+          </p>
+          <div class="channel-actions">
+            <UiActionLink v-if="channelSettingsHref(channel.id)" class="btn" :href="channelSettingsHref(channel.id)">
+              Подключение и настройки
+            </UiActionLink>
+            <UiButton v-if="channel.participation !== 'active'" class="btn accent" tone="accent"
+                    :disabled="channel.readOnly || !Number.isSafeInteger(channel.activationVersion) || !!busy"
+                    @click="changeParticipation(channel, 'activate')">
+              {{ channel.participation === 'deactivated' ? 'Возобновить приём новых' : 'Начать принимать новые' }}
+            </UiButton>
+            <UiButton v-else class="btn"
+                    :disabled="channel.readOnly || !Number.isSafeInteger(channel.activationVersion) || !!busy"
+                    @click="changeParticipation(channel, 'deactivate')">Остановить приём</UiButton>
+          </div>
+        </article>
+        <div v-if="!payload.channels.length && !loading" class="state-card">
+          <h2>Каналов пока нет</h2>
+          <p>Включите и подключите хотя бы один канал.</p>
+        </div>
+      </section>
+
+      <section v-if="payload.errors.length" class="channel-errors" aria-label="Ошибки каналов">
+        <p v-for="entry in payload.errors" :key="`${entry.channel}:${entry.code}`" class="banner bad">
+          {{ entry.channel }}: {{ entry.message }}
+        </p>
+      </section>
+
+      <div v-if="loading" class="state-card"><UiSpinner decorative /> Загружаю очередь…</div>
+      <template v-else-if="payload.items.length">
+        <section class="queue-head" aria-labelledby="inbox-items-title">
+          <h2 id="inbox-items-title">Обращения</h2>
+          <UiTabs v-model="activeSection" class="section-tabs" label="Разделы входящих">
+            <UiTab class="section-tab" value="review" data-section="review">
+              К разбору <span>{{ reviewItems.length }}</span>
+            </UiTab>
+            <UiTab class="section-tab" value="history" data-section="history">
+              История <span>{{ historyItems.length }}</span>
+            </UiTab>
+          </UiTabs>
+        </section>
+        <section v-if="visibleItems.length" class="items" aria-label="Очередь входящих">
+          <article v-for="item in visibleItems" :key="item.ref" class="item-card" :data-status="item.status">
+          <header class="item-head">
+            <span class="channel-label">{{ item.channel.label }}</span>
+            <a v-if="item.source.url" class="source" :href="item.source.url" target="_blank" rel="noreferrer">
+              {{ item.source.title }}
+            </a>
+            <span v-else class="source">{{ item.source.title }}</span>
+            <span class="status" :class="item.status">{{ itemStatusLabel(item) }}</span>
+          </header>
+          <h2>{{ item.title }}</h2>
+          <p v-if="item.description" class="description">{{ item.description }}</p>
+          <p class="meta">{{ item.project }} · {{ item.kind }} · {{ formatTime(item.firstAt) }}</p>
+          <div v-if="autoTaskState(item)" class="auto-state" :class="autoTaskState(item).kind">
+            <p>
+              <UiSpinner v-if="autoTaskState(item).kind === 'judging'" decorative />
+              {{ autoTaskState(item).text }}
+            </p>
+            <ul v-if="autoTaskState(item).attachments?.length" class="blocked-attachments">
+              <li v-for="(attachment, blockedIndex) in autoTaskState(item).attachments"
+                  :key="`${item.ref}:blocked:${blockedIndex}`">
+                <strong>{{ attachment.label }}</strong>
+                <span v-if="attachment.reason"> — {{ attachment.reason }}</span>
+              </li>
+            </ul>
+          </div>
+          <p v-if="item.status === 'mixed'" class="mixed-note">
+            <template v-if="pendingMessages(item).length">
+              Часть сообщений уже разобрана. Выберите новые сообщения для задачи или ранее
+              пропущенные, чтобы вернуть их к разбору.
+            </template>
+
+            <template v-else>
+              Обращение разобрано по частям: у сообщений разные решения. Пропущенные можно
+              вернуть к разбору, выбрав их ниже.
+            </template>
+          </p>
+          <p v-if="itemReadOnly(item)" class="read-only item-read-only">
+            Канал отключён: это обращение доступно только для чтения.
+          </p>
+          <div v-if="itemAlerts[item.ref]" class="item-alert" :class="itemAlerts[item.ref].kind"
+               :role="itemAlerts[item.ref].kind === 'bad' ? 'alert' : 'status'">
+            <span>{{ itemAlerts[item.ref].text }}</span>
+          </div>
+
+          <div class="messages">
+            <div v-for="message in item.messages" :key="message.messageRef" class="message"
+                 :class="{ decided: !!message.decision }">
+              <UiCheckbox v-if="selectable(message)"
+                          :disabled="itemReadOnly(item) || !!busy"
+                          :checked="selectedRefs(item).includes(message.messageRef)"
+                          :aria-label="`Выбрать сообщение ${message.author.name}`"
+                          @update:checked="toggleMessage(item, message.messageRef, $event)" />
+              <span v-else class="selection-placeholder" aria-hidden="true">✓</span>
+              <span class="message-body">
+                <span class="message-head"><strong>{{ message.author.name }}</strong>
+                  <time>{{ formatTime(message.occurredAt) }}</time>
+                  <span v-if="message.decision" class="decision">{{ statusLabel(message.decision.status) }}</span>
+                </span>
+                <span class="message-text">{{ message.text || 'Без текста' }}</span>
+                <span v-if="message.attachments?.length" class="attachments">
+                  <span class="attachment-list">
+                    <span v-for="(attachment, attachmentIndex) in message.attachments"
+                          :key="`${message.messageRef}:${attachmentIndex}`"
+                          class="attachment-chip" :data-analysis="attachmentAnalysis(attachment, item).status">
+                      <span>{{ attachmentLabel(attachment) }}</span>
+                      <small>{{ attachmentAnalysis(attachment, item).label }}</small>
+                    </span>
+                  </span>
+                  <span class="attachment-note">
+                    Перед задачей Cockpit проверит содержимое. Без полного разбора
+                    автозадача не создастся, а вручную задача ставится с вашим пояснением.
+                  </span>
+                  <span v-for="(attachment, attachmentIndex) in message.attachments"
+                        :key="`${message.messageRef}:transcript:${attachmentIndex}`">
+                    <span v-if="attachmentAnalysis(attachment, item).text" class="attachment-transcript">
+                      {{ attachmentAnalysis(attachment, item).text }}
+                    </span>
+                  </span>
+                </span>
+              </span>
+            </div>
+          </div>
+
+          <footer class="actions">
+            <span v-if="item.messages.some(selectable)" class="selected-count">
+              Выбрано: {{ selectedRefs(item).length }}
+            </span>
+            <UiActionLink v-for="link in taskLinks(item)" :key="link.url" class="btn task-link"
+                          :href="link.url" target="_blank" rel="noreferrer">{{ link.label }}</UiActionLink>
+            <template v-if="selectionMode(item) === 'new'">
+              <UiButton class="btn accent" tone="accent" :loading="busy === `${item.ref}:task`"
+                        :disabled="itemReadOnly(item) || (!!busy && busy !== `${item.ref}:task`)"
+                        loading-label="Разбираю и создаю" @click="mutateItem(item, 'task')">Создать задачу</UiButton>
+              <UiButton class="btn" :disabled="itemReadOnly(item) || !!busy"
+                        @click="mutateItem(item, 'dismiss')">Пропустить</UiButton>
+            </template>
+            <template v-else-if="selectionMode(item) === 'skipped'">
+              <span class="action-help">
+                Вернёт выбранные сообщения в «К разбору». Созданные задачи не изменятся.
+              </span>
+              <UiButton class="btn" :disabled="itemReadOnly(item) || !!busy"
+                        @click="mutateItem(item, 'reset')">Вернуть на разбор</UiButton>
+            </template>
+            <span v-else-if="item.messages.some(selectable)" class="action-help">
+              Выберите сообщения для действия.
+            </span>
+          </footer>
+          </article>
+        </section>
+        <section v-else class="state-card section-empty" data-state="section-empty">
+          <h2>{{ activeSection === 'review' ? 'Всё разобрано' : 'История пуста' }}</h2>
+          <p v-if="activeSection === 'review'">Новых и частично разобранных обращений нет.</p>
+          <p v-else>Здесь появятся пропущенные обращения и созданные задачи.</p>
+        </section>
+      </template>
+      <section v-else-if="payload.channels.length" class="state-card">
+        <h2>Очередь пуста</h2>
+        <p>Новых и ранее разобранных обращений пока нет.</p>
+      </section>
+    </template>
+  </main>
+</template>
+
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { api } from '../shared/api-client.js';
-import { confirmDialog, promptDialog } from '../shared/ui/confirm.js';
+import {
+  UiActionLink,
+  UiButton,
+  UiCheckbox,
+  UiSpinner,
+  UiTab,
+  UiTabs,
+  confirmDialog,
+  promptDialog,
+} from '../ui';
 import { useSse } from '../composables/useSse.js';
 
 // Inbox показывает только public projection общего API. Provider identity,
@@ -247,7 +472,7 @@ function itemReadOnly(item) {
   return channelsById.value.get(item.channel?.id)?.readOnly !== false;
 }
 
-const NOTIFICATION_REASONS = Object.freeze({
+const notificationReasons = Object.freeze({
   unreachable: 'связь с Telegram оборвалась',
   rejected: 'канал отклонил отправку',
   plugin_disabled: 'канал выключен',
@@ -263,7 +488,7 @@ const NOTIFICATION_REASONS = Object.freeze({
  */
 function notificationFailure(notification) {
   if (!notification || notification.enabled === false || notification.sent === true) return '';
-  const why = NOTIFICATION_REASONS[notification.reason];
+  const why = notificationReasons[notification.reason];
   return `, но ответ в исходный чат не отправлен${why ? ` (${why})` : ''} — сообщите там сами`;
 }
 
@@ -565,229 +790,6 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<template>
-  <main class="inbox-page">
-    <header class="page-head">
-      <div>
-        <h1>Входящие</h1>
-        <p>Общая очередь Telegram, GitHub и других подключённых каналов.</p>
-      </div>
-      <button class="btn" type="button" :disabled="loading" @click="load">Обновить</button>
-    </header>
-
-    <section v-if="unavailable" class="state-card" data-state="plugin-disabled">
-      <h2>Входящие недоступны</h2>
-      <p>Включите системный плагин «Входящие» в разделе «Настройки → Плагины».</p>
-    </section>
-
-    <template v-else>
-      <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
-      <p v-if="notice" class="banner" :class="noticeKind" role="status">{{ notice }}</p>
-      <p v-if="automationNotice" class="banner" :class="automationNotice.kind"
-         data-state="automation-notice" role="status">
-        {{ automationNotice.text }}
-        <a v-if="automationNotice.settings" href="#/settings" class="inline-link"
-           @click="rememberPluginsTab">Выбрать модель</a>
-      </p>
-      <p v-if="payload.truncated" class="banner warn">Показана только часть очереди: достигнут лимит ответа.</p>
-
-      <section class="channels" aria-label="Каналы Inbox">
-        <article v-for="channel in payload.channels" :key="channel.id" class="channel-card"
-                 :data-channel="channel.id">
-          <div class="channel-main">
-            <strong>{{ channel.label }}</strong>
-            <span v-if="channel.plugin === 'disabled'" class="pill off">Плагин выключен</span>
-          </div>
-          <dl class="channel-state">
-            <div>
-              <dt>Подключение</dt>
-              <dd><span class="pill" :class="channel.connection">{{ connectionLabel(channel.connection) }}</span></dd>
-            </div>
-            <div>
-              <dt>Приём новых</dt>
-              <dd><span class="pill" :class="channel.participation">{{ participationLabel(channel.participation) }}</span></dd>
-            </div>
-          </dl>
-          <p v-if="channel.participation === 'never_activated'">
-            Приём ещё не начат. Старая история не будет импортирована.
-          </p>
-          <p v-else-if="channel.participation === 'deactivated'" class="gap-warning">
-            Сообщения за время паузы не появятся после возобновления.
-          </p>
-          <p v-else>Новые обращения сразу попадают в очередь.</p>
-          <p v-if="channel.connection !== 'connected'" class="read-only">
-            Ранее принятые обращения доступны только для чтения до переподключения.
-          </p>
-          <div class="channel-actions">
-            <a v-if="channelSettingsHref(channel.id)" class="btn" :href="channelSettingsHref(channel.id)">
-              Подключение и настройки
-            </a>
-            <button v-if="channel.participation !== 'active'" class="btn accent" type="button"
-                    :disabled="channel.readOnly || !Number.isSafeInteger(channel.activationVersion) || !!busy"
-                    @click="changeParticipation(channel, 'activate')">
-              {{ channel.participation === 'deactivated' ? 'Возобновить приём новых' : 'Начать принимать новые' }}
-            </button>
-            <button v-else class="btn" type="button"
-                    :disabled="channel.readOnly || !Number.isSafeInteger(channel.activationVersion) || !!busy"
-                    @click="changeParticipation(channel, 'deactivate')">Остановить приём</button>
-          </div>
-        </article>
-        <div v-if="!payload.channels.length && !loading" class="state-card">
-          <h2>Каналов пока нет</h2>
-          <p>Включите и подключите хотя бы один канал.</p>
-        </div>
-      </section>
-
-      <section v-if="payload.errors.length" class="channel-errors" aria-label="Ошибки каналов">
-        <p v-for="entry in payload.errors" :key="`${entry.channel}:${entry.code}`" class="banner bad">
-          {{ entry.channel }}: {{ entry.message }}
-        </p>
-      </section>
-
-      <div v-if="loading" class="state-card"><span class="spin"></span> Загружаю очередь…</div>
-      <template v-else-if="payload.items.length">
-        <section class="queue-head" aria-labelledby="inbox-items-title">
-          <h2 id="inbox-items-title">Обращения</h2>
-          <div class="section-tabs" role="tablist" aria-label="Разделы входящих">
-            <button class="section-tab" type="button" role="tab" data-section="review"
-                    :aria-selected="activeSection === 'review'"
-                    :class="{ active: activeSection === 'review' }"
-                    @click="activeSection = 'review'">
-              К разбору <span>{{ reviewItems.length }}</span>
-            </button>
-            <button class="section-tab" type="button" role="tab" data-section="history"
-                    :aria-selected="activeSection === 'history'"
-                    :class="{ active: activeSection === 'history' }"
-                    @click="activeSection = 'history'">
-              История <span>{{ historyItems.length }}</span>
-            </button>
-          </div>
-        </section>
-        <section v-if="visibleItems.length" class="items" aria-label="Очередь входящих">
-          <article v-for="item in visibleItems" :key="item.ref" class="item-card" :data-status="item.status">
-          <header class="item-head">
-            <span class="channel-label">{{ item.channel.label }}</span>
-            <a v-if="item.source.url" class="source" :href="item.source.url" target="_blank" rel="noreferrer">
-              {{ item.source.title }}
-            </a>
-            <span v-else class="source">{{ item.source.title }}</span>
-            <span class="status" :class="item.status">{{ itemStatusLabel(item) }}</span>
-          </header>
-          <h2>{{ item.title }}</h2>
-          <p v-if="item.description" class="description">{{ item.description }}</p>
-          <p class="meta">{{ item.project }} · {{ item.kind }} · {{ formatTime(item.firstAt) }}</p>
-          <div v-if="autoTaskState(item)" class="auto-state" :class="autoTaskState(item).kind">
-            <p>
-              <span v-if="autoTaskState(item).kind === 'judging'" class="spin" aria-hidden="true"></span>
-              {{ autoTaskState(item).text }}
-            </p>
-            <ul v-if="autoTaskState(item).attachments?.length" class="blocked-attachments">
-              <li v-for="(attachment, blockedIndex) in autoTaskState(item).attachments"
-                  :key="`${item.ref}:blocked:${blockedIndex}`">
-                <strong>{{ attachment.label }}</strong>
-                <span v-if="attachment.reason"> — {{ attachment.reason }}</span>
-              </li>
-            </ul>
-          </div>
-          <p v-if="item.status === 'mixed'" class="mixed-note">
-            <template v-if="pendingMessages(item).length">
-              Часть сообщений уже разобрана. Выберите новые сообщения для задачи или ранее
-              пропущенные, чтобы вернуть их к разбору.
-            </template>
-            <template v-else>
-              Обращение разобрано по частям: у сообщений разные решения. Пропущенные можно
-              вернуть к разбору, выбрав их ниже.
-            </template>
-          </p>
-          <p v-if="itemReadOnly(item)" class="read-only item-read-only">
-            Канал отключён: это обращение доступно только для чтения.
-          </p>
-          <div v-if="itemAlerts[item.ref]" class="item-alert" :class="itemAlerts[item.ref].kind"
-               :role="itemAlerts[item.ref].kind === 'bad' ? 'alert' : 'status'">
-            <span>{{ itemAlerts[item.ref].text }}</span>
-          </div>
-
-          <div class="messages">
-            <label v-for="message in item.messages" :key="message.messageRef" class="message"
-                   :class="{ decided: !!message.decision }">
-              <input v-if="selectable(message)" type="checkbox"
-                     :disabled="itemReadOnly(item) || !!busy"
-                     :checked="selectedRefs(item).includes(message.messageRef)"
-                     :aria-label="`Выбрать сообщение ${message.author.name}`"
-                     @change="toggleMessage(item, message.messageRef, $event.target.checked)">
-              <span v-else class="selection-placeholder" aria-hidden="true">✓</span>
-              <span class="message-body">
-                <span class="message-head"><strong>{{ message.author.name }}</strong>
-                  <time>{{ formatTime(message.occurredAt) }}</time>
-                  <span v-if="message.decision" class="decision">{{ statusLabel(message.decision.status) }}</span>
-                </span>
-                <span class="message-text">{{ message.text || 'Без текста' }}</span>
-                <span v-if="message.attachments?.length" class="attachments">
-                  <span class="attachment-list">
-                    <span v-for="(attachment, attachmentIndex) in message.attachments"
-                          :key="`${message.messageRef}:${attachmentIndex}`"
-                          class="attachment-chip" :data-analysis="attachmentAnalysis(attachment, item).status">
-                      <span>{{ attachmentLabel(attachment) }}</span>
-                      <small>{{ attachmentAnalysis(attachment, item).label }}</small>
-                    </span>
-                  </span>
-                  <span class="attachment-note">
-                    Перед задачей Cockpit проверит содержимое. Без полного разбора
-                    автозадача не создастся, а вручную задача ставится с вашим пояснением.
-                  </span>
-                  <span v-for="(attachment, attachmentIndex) in message.attachments"
-                        :key="`${message.messageRef}:transcript:${attachmentIndex}`">
-                    <span v-if="attachmentAnalysis(attachment, item).text" class="attachment-transcript">
-                      {{ attachmentAnalysis(attachment, item).text }}
-                    </span>
-                  </span>
-                </span>
-              </span>
-            </label>
-          </div>
-
-          <footer class="actions">
-            <span v-if="item.messages.some(selectable)" class="selected-count">
-              Выбрано: {{ selectedRefs(item).length }}
-            </span>
-            <a v-for="link in taskLinks(item)" :key="link.url" class="btn task-link"
-               :href="link.url" target="_blank" rel="noreferrer">{{ link.label }}</a>
-            <template v-if="selectionMode(item) === 'new'">
-              <button class="btn accent" type="button" :disabled="itemReadOnly(item) || !!busy"
-                      @click="mutateItem(item, 'task')">
-                <span v-if="busy === `${item.ref}:task`" class="spin" aria-hidden="true"></span>
-                {{ busy === `${item.ref}:task` ? 'Разбираю и создаю…' : 'Создать задачу' }}
-              </button>
-              <button class="btn" type="button" :disabled="itemReadOnly(item) || !!busy"
-                      @click="mutateItem(item, 'dismiss')">Пропустить</button>
-            </template>
-            <template v-else-if="selectionMode(item) === 'skipped'">
-              <span class="action-help">
-                Вернёт выбранные сообщения в «К разбору». Созданные задачи не изменятся.
-              </span>
-              <button class="btn" type="button" :disabled="itemReadOnly(item) || !!busy"
-                      @click="mutateItem(item, 'reset')">Вернуть на разбор</button>
-            </template>
-            <span v-else-if="item.messages.some(selectable)" class="action-help">
-              Выберите сообщения для действия.
-            </span>
-          </footer>
-          </article>
-        </section>
-        <section v-else class="state-card section-empty" data-state="section-empty">
-          <h2>{{ activeSection === 'review' ? 'Всё разобрано' : 'История пуста' }}</h2>
-          <p v-if="activeSection === 'review'">Новых и частично разобранных обращений нет.</p>
-          <p v-else>Здесь появятся пропущенные обращения и созданные задачи.</p>
-        </section>
-      </template>
-      <section v-else-if="payload.channels.length" class="state-card">
-        <h2>Очередь пуста</h2>
-        <p>Новых и ранее разобранных обращений пока нет.</p>
-      </section>
-    </template>
-  </main>
-</template>
-
 <style scoped>
 .inbox-page { height: 100%; overflow: auto; padding: 22px; background: var(--ground); }
 .page-head { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; max-width: 1160px; margin: 0 auto 18px; }
@@ -806,9 +808,9 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 16px; margin: 0 0 8px; }
 .channel-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }.state-card { padding: 20px; margin-top: 14px; }.banner { padding: 10px 13px; border: 1px solid currentColor; border-radius: 9px; }
 .good { color: var(--good); }.items { display: grid; gap: 12px; }.item-card { padding: 16px; }
 .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; margin-bottom: 10px; }.queue-head h2 { margin: 0; }
-.section-tabs { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-.section-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 5px 10px; border: 0; border-radius: 7px; color: var(--ink-mid); background: transparent; cursor: pointer; }
-.section-tab span { min-width: 19px; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); font-size: 11px; }.section-tab.active { color: var(--ink); background: color-mix(in srgb, var(--accent) 20%, var(--surface-2)); }
+.section-tabs { display: inline-flex; }
+.section-tab { gap: 7px; }
+.section-tab span { min-width: 19px; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); font-size: 11px; }
 .inline-link { color: currentColor; font-weight: 650; margin-left: 6px; }
 .item-head .source { color: var(--accent); font-weight: 650; }.item-head .status { margin-left: auto; }.item-card h2 { margin-top: 12px; }
 .description { white-space: pre-wrap; }.meta, .selected-count { color: var(--ink-mid); font-size: 12px; }.mixed-note, .item-read-only, .item-alert { padding: 8px 10px; background: var(--surface-2); border-radius: 8px; }
@@ -816,17 +818,15 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 16px; margin: 0 0 8px; }
 .item-alert.bad { border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent); }.item-alert.warn { border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); }
 .auto-state { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
 .auto-state.waiting, .auto-state.queued, .auto-state.judging { color: var(--accent); }.auto-state.blocked { color: var(--warn); }.auto-state.off { color: var(--ink-mid); }
-.auto-state .spin, .btn .spin { margin-right: 6px; }
 .auto-state p { margin: 0; }
 .blocked-attachments { margin: 6px 0 0; padding-left: 18px; color: var(--ink-mid); font-size: 12px; }
 .blocked-attachments strong { color: var(--ink); font-weight: 500; }
 .messages { display: grid; gap: 7px; margin: 14px 0; }.message { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; }
-.message input { margin-top: 4px; }.selection-placeholder { color: var(--good); text-align: center; }.message-body { display: grid; gap: 5px; min-width: 0; }
+.selection-placeholder { color: var(--good); text-align: center; }.message-body { display: grid; gap: 5px; min-width: 0; }
 .message-head time { color: var(--ink-mid); font-size: 12px; }.message-text { white-space: pre-wrap; overflow-wrap: anywhere; }.attachments { display: grid; gap: 6px; color: var(--ink-mid); font-size: 12px; }
 .attachment-list { display: flex; flex-wrap: wrap; gap: 6px; }.attachment-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); }
 .attachment-chip small { color: var(--accent); }.attachment-chip[data-analysis="ready"] small, .attachment-chip[data-analysis="completed"] small, .attachment-chip[data-analysis="done"] small { color: var(--good); }.attachment-chip[data-analysis="failed"] small, .attachment-chip[data-analysis="error"] small { color: var(--bad); }
 .attachment-note { font-size: 11px; }.attachment-transcript { display: block; padding: 7px 9px; border-left: 2px solid var(--accent); white-space: pre-wrap; color: var(--ink-mid); }
-.actions { justify-content: flex-end; }.selected-count { margin-right: auto; }.action-help { flex: 1 1 260px; color: var(--ink-mid); font-size: 12px; text-align: right; }.btn { min-height: 34px; display: inline-flex; align-items: center; padding: 6px 11px; border: 1px solid var(--line-2); border-radius: 8px; color: var(--ink); background: var(--surface-2); cursor: pointer; text-decoration: none; }
-.btn:hover:not(:disabled) { border-color: var(--accent); }.btn.accent { background: color-mix(in srgb, var(--accent) 24%, var(--surface)); border-color: var(--accent); }.btn:disabled { opacity: .45; cursor: default; }
+.actions { justify-content: flex-end; }.selected-count { margin-right: auto; }.action-help { flex: 1 1 260px; color: var(--ink-mid); font-size: 12px; text-align: right; }
 @media (max-width: 680px) { .inbox-page { padding: 14px; }.page-head, .queue-head { align-items: center; }.queue-head { align-items: stretch; flex-direction: column; }.section-tabs { display: flex; }.section-tab { flex: 1; justify-content: center; }.actions .btn { flex: 1 1 130px; }.selected-count { flex-basis: 100%; }.action-help { flex-basis: 100%; text-align: left; } }
 </style>

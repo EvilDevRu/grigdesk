@@ -1,3 +1,30 @@
+<template>
+  <!-- Стоит в ряду исполнителей и обёрнут точками: компаньон — «ещё один
+       исполнитель» по языку топбара, поэтому и знак, и разделители те же. -->
+  <template v-if="visible">
+    <HelpTip align="right" class="companion-tb-tip" :text="tip">
+      <UiPressable
+        class="companion-tb"
+        :class="[`is-${companion.interaction}`, `attention-${attentionKind}`]"
+        :data-interaction="companion.interaction"
+        :data-attention="attentionKind"
+        :aria-label="tip"
+        :aria-expanded="onChats ? undefined : expanded"
+        :aria-controls="expanded ? BUBBLE_ID : undefined"
+        @click="activate"
+      >
+        <CompanionRobot
+          class="companion-tb-art"
+          variant="mark"
+          :interaction="companion.interaction"
+          :attention="attentionKind"
+        />
+      </UiPressable>
+    </HelpTip>
+    <span class="sep" aria-hidden="true">·</span>
+  </template>
+</template>
+
 <script setup>
 // Дубль компаньона в топбаре. Нужен потому, что на /chats плавающая фигурка
 // намеренно не показывается (полная страница остаётся единственным композером),
@@ -7,6 +34,7 @@ import { useRoute } from 'vue-router';
 import { useCompanionStore } from '../../stores/companion.js';
 import HelpTip from '../../shared/ui/HelpTip.vue';
 import CompanionRobot from './CompanionRobot.vue';
+import { UiPressable } from '../../ui';
 
 const BUBBLE_ID = 'cockpit-companion-bubble';
 const route = useRoute();
@@ -42,34 +70,6 @@ function activate() {
   else companion.toggleBubble();
 }
 </script>
-
-<template>
-  <!-- Стоит в ряду исполнителей и обёрнут точками: компаньон — «ещё один
-       исполнитель» по языку топбара, поэтому и знак, и разделители те же. -->
-  <template v-if="visible">
-    <HelpTip align="right" class="companion-tb-tip" :text="tip">
-      <button
-        type="button"
-        class="companion-tb"
-        :class="[`is-${companion.interaction}`, `attention-${attentionKind}`]"
-        :data-interaction="companion.interaction"
-        :data-attention="attentionKind"
-        :aria-label="tip"
-        :aria-expanded="onChats ? undefined : expanded"
-        :aria-controls="expanded ? BUBBLE_ID : undefined"
-        @click="activate"
-      >
-        <CompanionRobot
-          class="companion-tb-art"
-          variant="mark"
-          :interaction="companion.interaction"
-          :attention="attentionKind"
-        />
-      </button>
-    </HelpTip>
-    <span class="sep" aria-hidden="true">·</span>
-  </template>
-</template>
 
 <style scoped>
 /* Тот же обвес, что у знаков исполнителей: без кнопочного контейнера и с нулевой

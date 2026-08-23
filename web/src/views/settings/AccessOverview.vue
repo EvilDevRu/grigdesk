@@ -1,6 +1,157 @@
-<script setup>
+<template>
+  <div class="access-overview">
+    <div class="access-overview-head">
+      <div>
+        <h3 id="access-paths-title">Пути подключения</h3>
+        <p>
+          Это три отдельные точки входа. Изменение одной не переключает и не отключает остальные.
+        </p>
+      </div>
+      <span class="independent-pill">Независимые способы</span>
+    </div>
+
+    <div class="access-route-grid" aria-labelledby="access-paths-title">
+      <article class="access-route-card" data-testid="access-route-computer">
+        <div class="access-route-head">
+          <span class="access-route-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="13" rx="2" />
+              <path d="M8 21h8M12 17v4" />
+            </svg>
+          </span>
+          <span class="access-status ok"><i></i>Доступен на мозге</span>
+        </div>
+        <div class="access-route-copy">
+          <span class="access-route-kicker">На самом мозге</span>
+          <h4>Прямой вход на мозге</h4>
+          <p>Этот адрес работает только в браузере, запущенном на машине-мозге.</p>
+        </div>
+        <code class="access-route-url">http://localhost:{{ httpPort }}</code>
+        <p class="access-route-note">Соединение не выходит в сеть, поэтому браузер считает localhost защищённым.</p>
+      </article>
+
+      <article class="access-route-card" data-testid="access-route-home">
+        <div class="access-route-head">
+          <span class="access-route-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 11.5a10 10 0 0 1 14 0M8.5 15a5 5 0 0 1 7 0M12 19h.01" />
+            </svg>
+          </span>
+          <span class="access-status" :class="localStatus.kind" role="status" aria-live="polite">
+            <i></i>{{ localStatus.label }}
+          </span>
+        </div>
+        <div class="access-route-copy">
+          <span class="access-route-kicker">В домашней сети</span>
+          <h4>Напрямую к мозгу</h4>
+          <p>Планшет и рабочий компьютер заходят по локальному адресу машины.</p>
+        </div>
+        <code class="access-route-url" :title="localUrl">{{ localUrl }}</code>
+        <div class="access-route-control">
+          <UiSwitch
+            :model-value="localControlOn"
+            :disabled="localHttpsBusy || localHttpsManagedExternally || tlsState !== 'ready'"
+            @update:model-value="emit('set-local-https', $event)"
+          >{{ localHttpsManagedExternally
+              ? 'HTTPS управляется системой'
+              : 'Защищать подключение по HTTPS' }}</UiSwitch>
+          <p>{{ localExplanation }}</p>
+          <p
+            v-if="localMessage"
+            class="access-inline-message"
+            :class="localMessage.type"
+            :role="localMessage.type === 'err' ? 'alert' : 'status'"
+            aria-live="polite"
+          >
+            {{ localMessage.text }}
+          </p>
+          <UiButton
+            v-if="tlsState === 'error'"
+            class="route-action"
+            data-testid="tls-retry"
+            @click="emit('reload-tls')"
+          >
+            Повторить проверку
+          </UiButton>
+          <UiDisclosureButton
+            v-else-if="localDetailsAvailable"
+            class="route-action"
+            data-testid="local-details-toggle"
+            :open="localDetailsOpen"
+            controls="local-https-settings"
+            @click="emit('toggle-details', 'local')"
+          >
+            {{ localDetailsOpen ? 'Скрыть настройки' : 'Сертификат и устройства' }}
+          </UiDisclosureButton>
+        </div>
+      </article>
+
+      <article class="access-route-card" data-testid="access-route-internet">
+        <div class="access-route-head">
+          <span class="access-route-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+            </svg>
+          </span>
+          <span class="access-status" :class="gatewayStatus.kind" role="status" aria-live="polite">
+            <i></i>{{ gatewayStatus.label }}
+          </span>
+        </div>
+        <div class="access-route-copy">
+          <span class="access-route-kicker">Из интернета</span>
+          <h4>Через VPS-шлюз</h4>
+          <p>Публичный домен ведёт в отдельные обратные туннели кокпита и стендов.</p>
+        </div>
+        <code class="access-route-url" :title="`https://${gatewayDomain}`">https://{{ gatewayDomain }}</code>
+        <div class="access-route-control gateway-control">
+          <UiDisclosureButton
+            class="route-action"
+            data-testid="gateway-details-toggle"
+            :open="activeDetails === 'gateway'"
+            controls="gateway-settings"
+            :disabled="gatewayState === 'loading'"
+            @click="emit('toggle-details', 'gateway')"
+          >
+            {{ gatewayAction }}
+          </UiDisclosureButton>
+          <p>
+            <template v-if="gatewayJob?.state === 'running'">
+              Настраиваем <code>{{ gatewayJob.domain }}</code>. Действующий внешний путь от этого пока не отключается.
+            </template>
+
+            <template v-else-if="gatewayJob?.state === 'failed'">
+              Последняя настройка сорвалась. Ранее работавший внешний путь автоматически не отключался.
+            </template>
+            <template v-else-if="gatewayRestartPending">
+              Новый домен <code>{{ desiredGatewayDomain }}</code> включится после перезапуска.
+              <template v-if="gatewayPublicDomain">Сейчас активен <code>{{ gatewayPublicDomain }}</code>.</template>
+            </template>
+            <template v-else-if="gatewayState === 'loading'">
+              Сверяем сохранённую установку с доменом, который использует сервер.
+            </template>
+            <template v-else-if="gatewayState === 'error'">
+              Состояние шлюза не удалось прочитать<span v-if="gatewayError">: {{ gatewayError }}</span>.
+            </template>
+            <template v-else-if="gatewayVerified">
+              Внешний путь проверен. Скрытие настроек не останавливает шлюз.
+            </template>
+            <template v-else-if="gatewayConfigured">
+              Настройка сохранена, но доступность нужно проверить. Скрытие панели шлюз не останавливает.
+            </template>
+            <template v-else>
+              Нужны VPS и домен. Домашний способ подключения останется как был.
+            </template>
+          </p>
+        </div>
+      </article>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
 import { computed } from 'vue';
-import ToggleSwitch from '../../shared/ui/ToggleSwitch.vue';
+import { UiButton, UiDisclosureButton, UiSwitch } from '../../ui';
 
 const props = defineProps({
   localHttpsEnabled: { type: Boolean, default: false },
@@ -144,160 +295,6 @@ const localDetailsAvailable = computed(() => props.tlsState === 'ready'
   && !!(props.localHttpsEnabled || props.tls?.leaf?.exists || props.tls?.ca?.exists));
 </script>
 
-<template>
-  <div class="access-overview">
-    <div class="access-overview-head">
-      <div>
-        <h3 id="access-paths-title">Пути подключения</h3>
-        <p>
-          Это три отдельные точки входа. Изменение одной не переключает и не отключает остальные.
-        </p>
-      </div>
-      <span class="independent-pill">Независимые способы</span>
-    </div>
-
-    <div class="access-route-grid" aria-labelledby="access-paths-title">
-      <article class="access-route-card" data-testid="access-route-computer">
-        <div class="access-route-head">
-          <span class="access-route-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="13" rx="2" />
-              <path d="M8 21h8M12 17v4" />
-            </svg>
-          </span>
-          <span class="access-status ok"><i></i>Доступен на мозге</span>
-        </div>
-        <div class="access-route-copy">
-          <span class="access-route-kicker">На самом мозге</span>
-          <h4>Прямой вход на мозге</h4>
-          <p>Этот адрес работает только в браузере, запущенном на машине-мозге.</p>
-        </div>
-        <code class="access-route-url">http://localhost:{{ httpPort }}</code>
-        <p class="access-route-note">Соединение не выходит в сеть, поэтому браузер считает localhost защищённым.</p>
-      </article>
-
-      <article class="access-route-card" data-testid="access-route-home">
-        <div class="access-route-head">
-          <span class="access-route-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 11.5a10 10 0 0 1 14 0M8.5 15a5 5 0 0 1 7 0M12 19h.01" />
-            </svg>
-          </span>
-          <span class="access-status" :class="localStatus.kind" role="status" aria-live="polite">
-            <i></i>{{ localStatus.label }}
-          </span>
-        </div>
-        <div class="access-route-copy">
-          <span class="access-route-kicker">В домашней сети</span>
-          <h4>Напрямую к мозгу</h4>
-          <p>Планшет и рабочий компьютер заходят по локальному адресу машины.</p>
-        </div>
-        <code class="access-route-url" :title="localUrl">{{ localUrl }}</code>
-        <div class="access-route-control">
-          <ToggleSwitch
-            :model-value="localControlOn"
-            :disabled="localHttpsBusy || localHttpsManagedExternally || tlsState !== 'ready'"
-            :label="localHttpsManagedExternally
-              ? 'HTTPS управляется системой'
-              : 'Защищать подключение по HTTPS'"
-            @update:model-value="emit('set-local-https', $event)"
-          />
-          <p>{{ localExplanation }}</p>
-          <p
-            v-if="localMessage"
-            class="access-inline-message"
-            :class="localMessage.type"
-            :role="localMessage.type === 'err' ? 'alert' : 'status'"
-            aria-live="polite"
-          >
-            {{ localMessage.text }}
-          </p>
-          <button
-            v-if="tlsState === 'error'"
-            type="button"
-            class="route-action"
-            data-testid="tls-retry"
-            @click="emit('reload-tls')"
-          >
-            Повторить проверку
-          </button>
-          <button
-            v-else-if="localDetailsAvailable"
-            type="button"
-            class="route-action"
-            data-testid="local-details-toggle"
-            :aria-expanded="localDetailsOpen"
-            aria-controls="local-https-settings"
-            @click="emit('toggle-details', 'local')"
-          >
-            {{ localDetailsOpen ? 'Скрыть настройки' : 'Сертификат и устройства' }}
-          </button>
-        </div>
-      </article>
-
-      <article class="access-route-card" data-testid="access-route-internet">
-        <div class="access-route-head">
-          <span class="access-route-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
-            </svg>
-          </span>
-          <span class="access-status" :class="gatewayStatus.kind" role="status" aria-live="polite">
-            <i></i>{{ gatewayStatus.label }}
-          </span>
-        </div>
-        <div class="access-route-copy">
-          <span class="access-route-kicker">Из интернета</span>
-          <h4>Через VPS-шлюз</h4>
-          <p>Публичный домен ведёт в отдельные обратные туннели кокпита и стендов.</p>
-        </div>
-        <code class="access-route-url" :title="`https://${gatewayDomain}`">https://{{ gatewayDomain }}</code>
-        <div class="access-route-control gateway-control">
-          <button
-            type="button"
-            class="route-action"
-            data-testid="gateway-details-toggle"
-            :aria-expanded="activeDetails === 'gateway'"
-            aria-controls="gateway-settings"
-            :disabled="gatewayState === 'loading'"
-            @click="emit('toggle-details', 'gateway')"
-          >
-            {{ gatewayAction }}
-          </button>
-          <p>
-            <template v-if="gatewayJob?.state === 'running'">
-              Настраиваем <code>{{ gatewayJob.domain }}</code>. Действующий внешний путь от этого пока не отключается.
-            </template>
-            <template v-else-if="gatewayJob?.state === 'failed'">
-              Последняя настройка сорвалась. Ранее работавший внешний путь автоматически не отключался.
-            </template>
-            <template v-else-if="gatewayRestartPending">
-              Новый домен <code>{{ desiredGatewayDomain }}</code> включится после перезапуска.
-              <template v-if="gatewayPublicDomain">Сейчас активен <code>{{ gatewayPublicDomain }}</code>.</template>
-            </template>
-            <template v-else-if="gatewayState === 'loading'">
-              Сверяем сохранённую установку с доменом, который использует сервер.
-            </template>
-            <template v-else-if="gatewayState === 'error'">
-              Состояние шлюза не удалось прочитать<span v-if="gatewayError">: {{ gatewayError }}</span>.
-            </template>
-            <template v-else-if="gatewayVerified">
-              Внешний путь проверен. Скрытие настроек не останавливает шлюз.
-            </template>
-            <template v-else-if="gatewayConfigured">
-              Настройка сохранена, но доступность нужно проверить. Скрытие панели шлюз не останавливает.
-            </template>
-            <template v-else>
-              Нужны VPS и домен. Домашний способ подключения останется как был.
-            </template>
-          </p>
-        </div>
-      </article>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .access-overview { container-type: inline-size; display: grid; gap: 12px; }
 .access-overview-head {
@@ -402,28 +399,11 @@ const localDetailsAvailable = computed(() => props.tlsState === 'ready'
   padding-top: 11px;
   border-top: 1px solid var(--line);
 }
-.access-route-control :deep(.tsw) {
-  min-height: 40px;
-  justify-self: start;
-  margin: -4px -2px 0;
-  font-family: inherit;
-}
+.access-route-control > :first-child { justify-self: start; }
 .gateway-control { gap: 7px; }
 .route-action {
   justify-self: start;
-  min-height: 40px;
-  padding: 7px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
-  color: var(--ink);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
 }
-.route-action:hover { border-color: color-mix(in srgb, var(--accent) 70%, var(--line)); }
-.route-action:disabled { cursor: wait; opacity: .55; }
-.route-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @container (min-width: 530px) and (max-width: 799px) {
   .access-route-card:last-child { grid-column: 1 / -1; }

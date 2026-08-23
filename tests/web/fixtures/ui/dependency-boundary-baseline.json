@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "legacyDeepImports": [
+    "web/src/shared/ui/HelpTip.vue -> ../../types/uiOverlays",
+    "web/src/shared/ui/confirm.js -> ../../services/dialogs.ts",
+    "web/src/shared/ui/layer-stack.js -> ../../services/layers/stack.ts"
+  ]
+}

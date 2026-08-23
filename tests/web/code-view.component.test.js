@@ -584,7 +584,7 @@ test('повторное открытие обновляет Code без пус�
   assert.equal(originalModel.content, 'before');
 
   const assertSnapshotVisible = (stage) => {
-    assert.equal(wrapper.get('.lay').element, layout, `${stage}: layout заменён`);
+    assert.equal(wrapper.get('.lay').element === layout, true, `${stage}: layout заменён`);
     assert.equal(wrapper.get('button[data-file-path="keep.js"]').exists(), true,
       `${stage}: дерево очистилось`);
     assert.equal(editor.model, originalModel, `${stage}: Monaco потерял исходную модель`);
@@ -615,7 +615,7 @@ test('повторное открытие обновляет Code без пус�
 
   nextFile.resolve({ content: 'after', binary: false, tooBig: false, size: 5 });
   await settle(flushPromises);
-  assert.equal(wrapper.get('.lay').element, layout);
+  assert.equal(wrapper.get('.lay').element === layout, true);
   assert.equal(editor.model.content, 'after');
   assert.notEqual(editor.model, originalModel);
   assert.equal(editor.setCalls.includes(null), false);
@@ -816,8 +816,8 @@ test('compact Code оставляет дерево слева и хранит ш
   const separator = wrapper.get('.code-split');
   assert.equal(separator.attributes('aria-orientation'), 'vertical');
   assert.equal(separator.attributes('aria-valuenow'), '260');
-  assert.equal(wrapper.get('.panel').element.nextElementSibling, separator.element);
-  assert.equal(separator.element.nextElementSibling, wrapper.get('.editorwrap').element);
+  assert.equal(wrapper.get('.panel').element.nextElementSibling === separator.element, true);
+  assert.equal(separator.element.nextElementSibling === wrapper.get('.editorwrap').element, true);
 
   await separator.trigger('keydown', { key: 'End' });
   await settle(flushPromises);

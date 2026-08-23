@@ -8,7 +8,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test ../tests/web/*.test.js"
+    "typecheck:ui": "vue-tsc -p tsconfig.ui.json --noEmit",
+    "check:readability": "node scripts/check-code-readability.mjs",
+    "check:sfc": "node scripts/check-vue-sfc-order.mjs",
+    "check:ui": "node scripts/check-ui-boundary.mjs",
+    "test:components": "node --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
+    "test": "npm run typecheck:ui && npm run check:sfc && npm run check:ui && npm run check:readability && npm run test:components"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -21,9 +26,14 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/compiler-sfc": "^3.5.40",
     "@vue/test-utils": "^2.4.11",
+    "esbuild": "^0.25.12",
     "happy-dom": "^18.0.1",
+    "postcss": "^8.5.26",
+    "typescript": "^5.9.3",
     "vite": "^6.0.5",
-    "vite-plugin-pwa": "^1.3.0"
+    "vite-plugin-pwa": "^1.3.0",
+    "vue-tsc": "^2.2.12"
   }
 }

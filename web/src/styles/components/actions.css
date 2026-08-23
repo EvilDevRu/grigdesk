@@ -1,0 +1,316 @@
+.ui-button,
+.ui-action-link,
+.ui-icon-button,
+.ui-command-button,
+.ui-toggle-button,
+.ui-disclosure-button {
+  --ui-action-tone: var(--control-text);
+  --ui-action-solid: var(--surface-2);
+  --ui-action-solid-text: var(--control-text);
+  --ui-action-soft: color-mix(in srgb, var(--ink-mid) 10%, transparent);
+  --ui-action-background: var(--control-background);
+  --ui-action-background-hover: var(--control-background-hover);
+  --ui-action-border: var(--control-border);
+  --ui-action-color: var(--control-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--control-height);
+  min-height: var(--control-height);
+  border: 1px solid var(--ui-action-border);
+  border-radius: var(--control-radius);
+  background: var(--ui-action-background);
+  color: var(--ui-action-color);
+  cursor: pointer;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing),
+    box-shadow var(--control-motion-duration) var(--control-motion-easing);
+  white-space: nowrap;
+}
+
+.ui-button,
+.ui-action-link,
+.ui-command-button,
+.ui-toggle-button,
+.ui-disclosure-button {
+  padding: 0 13px;
+}
+
+.ui-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-action-link:hover:not([aria-disabled='true']),
+.ui-icon-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-command-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-toggle-button:hover:not(:disabled):not([aria-disabled='true']),
+.ui-disclosure-button:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: color-mix(in srgb, var(--ui-action-tone) 48%, var(--control-border-hover));
+  background: var(--ui-action-background-hover);
+}
+
+.ui-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-action-link:active:not([aria-disabled='true']),
+.ui-icon-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-command-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-toggle-button:active:not(:disabled):not([aria-disabled='true']),
+.ui-disclosure-button:active:not(:disabled):not([aria-disabled='true']) {
+  filter: brightness(0.92);
+}
+
+.ui-button--accent,
+.ui-button[data-tone='accent'],
+.ui-action-link[data-tone='accent'],
+.ui-icon-button[data-tone='accent'],
+.ui-command-button[data-tone='accent'],
+.ui-toggle-button[data-tone='accent'],
+.ui-disclosure-button[data-tone='accent'] {
+  --ui-action-tone: var(--accent);
+  --ui-action-solid: var(--accent);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ui-button--success,
+.ui-button[data-tone='success'],
+.ui-action-link[data-tone='success'],
+.ui-icon-button[data-tone='success'],
+.ui-command-button[data-tone='success'],
+.ui-toggle-button[data-tone='success'],
+.ui-disclosure-button[data-tone='success'] {
+  --ui-action-tone: var(--good);
+  --ui-action-solid: var(--good);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--good) 12%, transparent);
+}
+
+.ui-button--warning,
+.ui-button[data-tone='warning'],
+.ui-action-link[data-tone='warning'],
+.ui-icon-button[data-tone='warning'],
+.ui-command-button[data-tone='warning'],
+.ui-toggle-button[data-tone='warning'],
+.ui-disclosure-button[data-tone='warning'] {
+  --ui-action-tone: var(--warn);
+  --ui-action-solid: var(--warn);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.ui-button--danger,
+.ui-button[data-tone='danger'],
+.ui-action-link[data-tone='danger'],
+.ui-icon-button[data-tone='danger'],
+.ui-command-button[data-tone='danger'],
+.ui-toggle-button[data-tone='danger'],
+.ui-disclosure-button[data-tone='danger'] {
+  --ui-action-tone: var(--bad);
+  --ui-action-solid: var(--bad);
+  --ui-action-solid-text: var(--ground);
+  --ui-action-soft: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+
+.ui-button--neutral,
+.ui-button[data-tone='neutral'],
+.ui-action-link[data-tone='neutral'],
+.ui-icon-button[data-tone='neutral'],
+.ui-command-button[data-tone='neutral'],
+.ui-toggle-button[data-tone='neutral'],
+.ui-disclosure-button[data-tone='neutral'] {
+  --ui-action-tone: var(--ink-mid);
+  --ui-action-solid: var(--surface-2);
+  --ui-action-solid-text: var(--ink);
+  --ui-action-soft: color-mix(in srgb, var(--ink-mid) 10%, transparent);
+}
+
+.ui-button--solid,
+.ui-button[data-variant='solid'],
+.ui-action-link[data-variant='solid'],
+.ui-icon-button[data-variant='solid'],
+.ui-command-button[data-variant='solid'],
+.ui-toggle-button[data-variant='solid'],
+.ui-disclosure-button[data-variant='solid'] {
+  --ui-action-background: var(--ui-action-solid);
+  --ui-action-background-hover: color-mix(in srgb, var(--ui-action-solid) 86%, var(--ink));
+  --ui-action-border: var(--ui-action-solid);
+  --ui-action-color: var(--ui-action-solid-text);
+}
+
+.ui-button--outline,
+.ui-button[data-variant='outline'],
+.ui-action-link[data-variant='outline'],
+.ui-icon-button[data-variant='outline'],
+.ui-command-button[data-variant='outline'],
+.ui-toggle-button[data-variant='outline'],
+.ui-disclosure-button[data-variant='outline'] {
+  --ui-action-background: var(--control-background);
+  --ui-action-background-hover: var(--ui-action-soft);
+  --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 44%, var(--control-border));
+  --ui-action-color: var(--ui-action-tone);
+}
+
+.ui-button--ghost,
+.ui-button[data-variant='ghost'],
+.ui-action-link[data-variant='ghost'],
+.ui-icon-button[data-variant='ghost'],
+.ui-command-button[data-variant='ghost'],
+.ui-toggle-button[data-variant='ghost'],
+.ui-disclosure-button[data-variant='ghost'],
+.ui-button--text,
+.ui-button[data-variant='text'],
+.ui-action-link[data-variant='text'],
+.ui-icon-button[data-variant='text'],
+.ui-command-button[data-variant='text'],
+.ui-toggle-button[data-variant='text'],
+.ui-disclosure-button[data-variant='text'] {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: var(--ui-action-soft);
+  --ui-action-border: transparent;
+  --ui-action-color: var(--ui-action-tone);
+}
+
+.ui-button {
+  position: relative;
+}
+
+.ui-button--block,
+.ui-button[data-block='true'] {
+  width: 100%;
+}
+
+.ui-button__content,
+.ui-button__loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ui-button__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-button__leading,
+.ui-button__trailing {
+  display: inline-flex;
+  flex: none;
+}
+
+.ui-disclosure-button > .ui-button__content {
+  flex: 1;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.ui-disclosure-button .ui-button__label {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  text-align: left;
+}
+
+.ui-disclosure-button .ui-button__trailing {
+  margin-left: auto;
+}
+
+.ui-button__loading {
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ui-button.is-loading .ui-button__content,
+.ui-button[aria-busy='true'] .ui-button__content {
+  visibility: hidden;
+}
+
+.ui-button.is-loading .ui-button__loading,
+.ui-button[aria-busy='true'] .ui-button__loading {
+  opacity: 1;
+}
+
+.ui-button.is-pressed,
+.ui-button[aria-pressed='true'],
+.ui-toggle-button.is-pressed,
+.ui-toggle-button[aria-pressed='true'] {
+  --ui-action-background: var(--ui-action-soft);
+  --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 62%, var(--control-border));
+  --ui-action-color: var(--ui-action-tone);
+}
+
+.ui-icon-button {
+  flex: none;
+  width: var(--control-height);
+  padding: 0;
+}
+
+.ui-icon-button--peer,
+.ui-icon-button[data-role='peer'] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+}
+
+.ui-icon-button--embedded,
+.ui-icon-button[data-role='embedded'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border-radius: 7px;
+}
+
+.ui-icon-button--rail,
+.ui-icon-button[data-role='rail'] {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border-radius: 7px;
+}
+
+.ui-icon-button--stepper,
+.ui-icon-button[data-role='stepper'] {
+  width: 24px;
+  height: 17px;
+  min-height: 17px;
+  border-radius: 5px;
+}
+
+.ui-pressable,
+.ui-svg-pressable {
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ui-pressable {
+  padding: 0;
+}
+
+.ui-command-button {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.ui-disclosure-button__icon,
+.ui-disclosure-button__chevron {
+  display: inline-flex;
+  flex: none;
+  transition: transform var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__icon,
+.ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__chevron {
+  transform: rotate(90deg);
+}

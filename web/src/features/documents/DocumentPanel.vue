@@ -1,3 +1,36 @@
+<template>
+  <section class="document-panel">
+    <div v-if="loading" class="state"><UiSpinner decorative /> Открываю документ…</div>
+    <div v-else-if="error" class="state error">
+      <b>Документ не открыт</b>
+      <span>{{ error }}</span>
+      <UiButton @click="load">Повторить</UiButton>
+    </div>
+    <div v-else-if="document" class="document-shell">
+      <div class="document-meta">
+        <span class="source">{{ document.source.label }}</span>
+        <span class="path mono">{{ document.displayPath }}</span>
+        <span class="size">{{ formatSize(document.size) }}</span>
+        <span v-if="formatTime(document.modifiedAt)" class="modified">{{ formatTime(document.modifiedAt) }}</span>
+        <span v-if="line > 0" class="line">строка {{ line }}</span>
+        <UiButton v-if="document.format === 'markdown'" variant="ghost" :pressed="showSource"
+                  @click="showSource = !showSource">
+          {{ showSource ? 'Предпросмотр' : 'Исходник' }}
+        </UiButton>
+      </div>
+      <article v-if="document.format === 'markdown' && !showSource" ref="contentEl"
+               class="document-body markdown" v-html="markdown"></article>
+      <pre v-else-if="document.format === 'markdown' || line > 0" ref="contentEl"
+           class="document-body plain numbered"><code><span
+        v-for="(value, index) in textLines" :key="index" class="text-line"
+        :class="{ selected: index + 1 === line }" :data-line="index + 1"
+      >{{ value || ' ' }}</span></code></pre>
+      <pre v-else ref="contentEl" class="document-body plain"><code>{{ document.content }}</code></pre>
+    </div>
+    <div v-else class="state">Документ не выбран.</div>
+  </section>
+</template>
+
 <script setup>
 // Переиспользуемое ядро viewer-а: route-страница — лишь одна оболочка. Компонент
 // получает стабильный DocumentRef, читает API и не сохраняет содержимое в store/localStorage.
@@ -5,6 +38,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { api } from '../../shared/api-client.js';
 import { mdToHtml } from '../../shared/md.js';
 import { documentRefAssetHref, documentRefRouteHref } from './links.js';
+import { UiButton, UiSpinner } from '../../ui';
 
 const props = defineProps({
   source: { type: String, default: '' },
@@ -117,47 +151,12 @@ function formatTime(value) {
 }
 </script>
 
-<template>
-  <section class="document-panel">
-    <div v-if="loading" class="state"><span class="spin"></span> Открываю документ…</div>
-    <div v-else-if="error" class="state error">
-      <b>Документ не открыт</b>
-      <span>{{ error }}</span>
-      <button type="button" @click="load">Повторить</button>
-    </div>
-    <div v-else-if="document" class="document-shell">
-      <div class="document-meta">
-        <span class="source">{{ document.source.label }}</span>
-        <span class="path mono">{{ document.displayPath }}</span>
-        <span class="size">{{ formatSize(document.size) }}</span>
-        <span v-if="formatTime(document.modifiedAt)" class="modified">{{ formatTime(document.modifiedAt) }}</span>
-        <span v-if="line > 0" class="line">строка {{ line }}</span>
-        <button v-if="document.format === 'markdown'" class="mode" type="button"
-                @click="showSource = !showSource">
-          {{ showSource ? 'Предпросмотр' : 'Исходник' }}
-        </button>
-      </div>
-      <article v-if="document.format === 'markdown' && !showSource" ref="contentEl"
-               class="document-body markdown" v-html="markdown"></article>
-      <pre v-else-if="document.format === 'markdown' || line > 0" ref="contentEl"
-           class="document-body plain numbered"><code><span
-        v-for="(value, index) in textLines" :key="index" class="text-line"
-        :class="{ selected: index + 1 === line }" :data-line="index + 1"
-      >{{ value || ' ' }}</span></code></pre>
-      <pre v-else ref="contentEl" class="document-body plain"><code>{{ document.content }}</code></pre>
-    </div>
-    <div v-else class="state">Документ не выбран.</div>
-  </section>
-</template>
-
 <style scoped>
 .document-panel { min-width: 0; min-height: 0; height: 100%; overflow: auto; background: var(--ground); }
 .state { min-height: 240px; display: flex; align-items: center; justify-content: center; gap: 8px;
   color: var(--ink-mid); padding: 24px; }
 .state.error { flex-direction: column; text-align: center; color: var(--bad); }
 .state.error span { color: var(--ink-mid); }
-.state button { margin-top: 6px; border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 12px;
-  background: var(--surface); color: var(--ink); cursor: pointer; }
 .document-shell { min-height: 100%; }
 .document-meta { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
   min-height: 36px; padding: 7px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--ground) 94%, transparent);
@@ -165,9 +164,6 @@ function formatTime(value) {
 .document-meta > span + span::before { content: '·'; margin-right: 8px; color: var(--line-2); }
 .document-meta .source { color: var(--ink); font-weight: 600; }
 .document-meta .path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.document-meta .mode { flex: none; border: 1px solid var(--line-2); border-radius: 7px; padding: 4px 8px;
-  background: var(--surface); color: var(--ink-mid); font-size: 11px; cursor: pointer; }
-.document-meta .mode:hover { color: var(--ink); background: var(--surface-2); }
 .document-body { box-sizing: border-box; width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 30px 24px 72px;
   color: var(--ink); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
 .plain { white-space: pre-wrap; tab-size: 4; font: 13px/1.62 var(--mono, monospace); }

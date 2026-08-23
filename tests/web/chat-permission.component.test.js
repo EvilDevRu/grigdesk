@@ -104,7 +104,7 @@ test('«Доработать» открывает модалку, пояснен
   browser.document.querySelector('.cfm-overlay .cfm-ok').click();
   await flushPromises();
   assert.deepEqual(wrapper.emitted('answer'), [[false, false, 'убери лишний шаг', '']]);
-  assert.equal(browser.document.querySelector('.cfm-overlay'), null, 'модалка закрылась');
+  assert.equal(Boolean(browser.document.querySelector('.cfm-overlay')), false, 'модалка закрылась');
 });
 
 test('Esc в модалке — отказа нет, карточка остаётся висеть', async (t) => {
@@ -115,14 +115,14 @@ test('Esc в модалке — отказа нет, карточка остаё
   browser.document.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Escape' }));
   await flushPromises();
   assert.equal(wrapper.emitted('answer'), undefined);
-  assert.equal(browser.document.querySelector('.cfm-overlay'), null, 'модалка закрылась');
+  assert.equal(Boolean(browser.document.querySelector('.cfm-overlay')), false, 'модалка закрылась');
 });
 
 test('«Утвердить» отвечает сразу, без модалки', async (t) => {
   const { browser, wrapper } = await mountPermission(t);
   await wrapper.find('.p-ok').trigger('click');
   assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
-  assert.equal(browser.document.querySelector('.cfm-overlay'), null);
+  assert.equal(Boolean(browser.document.querySelector('.cfm-overlay')), false);
 });
 
 // Запрос Kimi раньше показывался голым JSON: человек не мог прочитать ни команду,

@@ -1,3 +1,259 @@
+<template>
+  <div class="code-panel" :class="{ compact }" :aria-busy="loading ? 'true' : undefined">
+    <header ref="panelHeader" class="code-head" tabindex="-1">
+      <strong>Код</strong>
+      <span v-if="context" class="tlabel mono">{{ project }} · {{ context.label }}</span>
+      <span class="grow"></span>
+      <UiButton v-if="compact" class="navigator-toggle" variant="ghost"
+                :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
+                :title="navigatorCollapsed ? 'Показать дерево' : 'Скрыть дерево'"
+                @click="navigatorCollapsed = !navigatorCollapsed">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.5" y="3" width="15" height="14" rx="2" />
+          <path d="M7 3v14" />
+        </svg>
+        <span>Дерево</span>
+      </UiButton>
+    </header>
+
+    <!-- Холодный запуск сразу занимает финальную сетку. Без этого сначала был
+         короткий пустой экран «Загрузка…», а затем вся рабочая область прыгала. -->
+    <div v-if="loading" ref="layHost" class="lay code-loading"
+         :class="{ compact, 'navigator-collapsed': navigatorCollapsed }"
+         :style="compactStyle">
+      <aside class="rail" aria-hidden="true">
+        <span class="loading-rail-item"></span>
+        <span class="loading-rail-item"></span>
+      </aside>
+      <aside class="panel loading-panel" aria-hidden="true">
+        <div class="loading-selects">
+          <span class="loading-caption"></span><span class="loading-field"></span>
+          <span class="loading-caption short"></span><span class="loading-field"></span>
+        </div>
+        <div class="loading-tree">
+          <span v-for="index in 7" :key="index" class="loading-row"
+                :style="{ '--loading-row': `${48 + ((index * 17) % 38)}%` }"></span>
+        </div>
+      </aside>
+      <div v-if="compact && !navigatorCollapsed" class="code-split loading-split" aria-hidden="true">
+        <span></span>
+      </div>
+      <section class="editorwrap loading-editor" aria-hidden="true">
+        <div class="ehead"><span class="loading-path"></span></div>
+        <div class="ebody"><span class="loading-status">Загрузка кода…</span></div>
+      </section>
+    </div>
+    <div v-else-if="!projects.length" class="empty">
+      Проектов пока нет — заведи в разделе <router-link to="/projects">«Проекты»</router-link>.
+    </div>
+
+    <div v-else ref="layHost" class="lay" :class="{ compact, 'navigator-collapsed': navigatorCollapsed }"
+         :style="compactStyle">
+      <!-- Рейка режимов, как activity bar в VS Code -->
+      <aside class="rail">
+        <UiIconButton class="ritem" role="rail" :pressed="tab === 'files'"
+                      title="Код: дерево файлов" label="Код" @click="setTab('files')">
+          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z M14 3v4h4" /></svg>
+        </UiIconButton>
+        <UiIconButton class="ritem" role="rail" :pressed="tab === 'git'"
+                      title="Гит: несохранённые изменения и коммиты" label="Git" @click="setTab('git')">
+          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9" /></svg>
+        </UiIconButton>
+      </aside>
+
+      <!-- Панель: проект + единая рабочая копия, затем дерево файлов или изменения -->
+      <aside class="panel">
+        <div class="sels">
+          <div class="sel-field">
+            <label for="code-project">Проект</label>
+            <UiSelect id="code-project" :model-value="project" @change="setProject($event.target.value)">
+              <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
+            </UiSelect>
+          </div>
+          <div v-if="contexts.length > 1" class="sel-field">
+            <label for="code-context">Рабочая копия</label>
+            <UiSelect id="code-context" :model-value="contextId" @change="setContext($event.target.value)">
+              <template v-if="contextGroups.length > 1">
+                <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
+                  <option v-for="item in group.items" :key="item.id" :value="item.id" :title="item.treePath">
+                    {{ item.label }}
+                  </option>
+                </optgroup>
+              </template>
+              <template v-else>
+                <option v-for="item in contexts" :key="item.id" :value="item.id" :title="item.treePath">
+                  {{ item.label }}
+                </option>
+              </template>
+            </UiSelect>
+          </div>
+          <div v-else-if="context" class="context-static" :title="context.treePath">
+            Рабочая копия: {{ context.label }}
+          </div>
+          <div v-if="contextLoading" class="context-loading">Загружаю рабочую копию…</div>
+        </div>
+
+        <div v-if="error" class="perr">{{ error }}</div>
+        <div v-if="!projectHasRepos" class="pnote">
+          Пути репозиториев не заданы — раздел <router-link to="/projects">«Проекты»</router-link>.
+        </div>
+        <div v-if="unavailableRepos.length" class="pnote context-warning">
+          <span>Недоступные репозитории:</span>
+          <span v-for="item in unavailableRepos" :key="item.repoKey" class="unavailable-repo mono">
+            {{ item.repoKey }} — {{ item.repoDir }}
+          </span>
+          Проверь пути в разделе <router-link to="/projects">«Проекты»</router-link>.
+        </div>
+
+        <!-- Дерево файлов. Место под шеврон занято и у файла (пустой .chev): без него
+             имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
+             уровнем выше — лесенка читалась рваной. -->
+        <div v-if="tab === 'files'" class="scroll tree">
+          <template v-for="row in rows" :key="row.rel">
+            <UiPressable v-if="row.dir" class="trow dir" :data-dir-path="row.rel"
+                         :data-depth="row.depth"
+                         :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
+                         @click="toggleDir(row.rel)">
+              <span class="chev">{{ openDirs.has(row.rel) ? '▾' : '▸' }}</span>
+              <span class="dname">{{ row.name }}</span>
+            </UiPressable>
+            <UiPressable v-else class="trow frow" :class="{ sel: fileSel === row.rel }"
+                         :pressed="fileSel === row.rel" :data-file-path="row.rel" :data-depth="row.depth"
+                         :style="rowDepth(row.depth)" @click="openFile(row.rel)">
+              <span class="chev" aria-hidden="true"></span>
+              <span class="nm">{{ row.name }}</span>
+            </UiPressable>
+          </template>
+        </div>
+
+        <!-- Гит: изменения группами (индекс, рабочее дерево) + свежие коммиты.
+             Группа с пустым индексом не рисуется вовсе, поэтому обычный прогон
+             фабрики выглядит как раньше — одним списком «Не в коммите». -->
+        <div v-else class="scroll tree">
+          <div v-if="gitLoading && !git" class="pnote">Читаю гит…</div>
+          <template v-if="git">
+            <template v-for="(group, groupIndex) in gitGroups" :key="group.id">
+              <div class="subhead" :data-group="group.id">
+                <span :title="group.hint">{{ group.title }}</span>
+                <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
+                <span class="grow"></span>
+                <!-- Переключатель вида один на панель: он про способ показа, а не про группу. -->
+                <div v-if="groupIndex === 0" class="git-view-toggle" role="group" aria-label="Вид изменений">
+                  <UiIconButton class="git-view-action" role="embedded" data-view="tree"
+                                title="Показать деревом" label="Показать деревом"
+                                :pressed="gitView === 'tree'" @click="setGitView('tree')">
+                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" /></svg>
+                  </UiIconButton>
+                  <UiIconButton class="git-view-action" role="embedded" data-view="list"
+                                title="Показать списком" label="Показать списком"
+                                :pressed="gitView === 'list'" @click="setGitView('list')">
+                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" /></svg>
+                  </UiIconButton>
+                </div>
+              </div>
+              <div v-if="!group.files.length" class="pnote">Несохранённых изменений нет.</div>
+              <template v-else-if="gitView === 'tree'">
+                <template v-for="row in group.rows" :key="row.key">
+                  <UiPressable v-if="row.kind === 'dir'" class="trow dir git-row git-dir"
+                               :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
+                               :aria-expanded="gitOpenDirs.has(row.ref)"
+                               :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
+                    <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
+                    <span class="dname" :title="row.path">{{ row.name }}</span>
+                  </UiPressable>
+                  <UiPressable v-else class="trow frow git-row git-file"
+                               :class="{ sel: gitSel === row.ref }" :pressed="gitSel === row.ref"
+                               :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
+                               :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
+                    <span class="chev" aria-hidden="true"></span>
+                    <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
+                    <span class="nm mono" :title="row.path">{{ row.name }}</span>
+                    <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
+                  </UiPressable>
+                </template>
+              </template>
+              <template v-else>
+                <UiPressable v-for="f in group.files" :key="`${group.id}:file:${f.path}`"
+                             class="trow frow git-row git-file"
+                             :class="{ sel: gitSel === gitRef(group.id, f.path) }"
+                             :pressed="gitSel === gitRef(group.id, f.path)"
+                             :data-path="f.path" :data-group="group.id"
+                             @click="selectGit(gitRef(group.id, f.path))">
+                  <span class="st" :class="f.status">{{ STLABEL[f.status] || f.status }}</span>
+                  <span class="nm mono" :title="f.path">{{ f.path }}</span>
+                  <span class="cnt mono"><i v-if="f.add" class="a">+{{ f.add }}</i><i v-if="f.del" class="d">−{{ f.del }}</i></span>
+                </UiPressable>
+              </template>
+            </template>
+            <div class="subhead">Коммиты</div>
+            <div v-for="c in git.log" :key="c.hash" class="commit" :title="c.when">
+              <span class="hash mono">{{ c.hash }}</span>
+              <span class="subj">{{ c.subject }}</span>
+            </div>
+          </template>
+        </div>
+      </aside>
+
+      <div v-if="compact && !navigatorCollapsed" class="code-split" role="separator"
+           aria-orientation="vertical" tabindex="0"
+           :aria-valuemin="NAVIGATOR_MIN_WIDTH" :aria-valuemax="Math.round(navigatorMaxWidth)"
+           :aria-valuenow="Math.round(navigatorWidth)"
+           @pointerdown.prevent="startNavigatorResize" @pointermove.prevent="moveNavigatorResize"
+           @pointerup.prevent="finishNavigatorResize" @pointercancel.prevent="finishNavigatorResize"
+           @keydown="navigatorResizeKey">
+        <span aria-hidden="true"></span>
+      </div>
+
+      <!-- Просмотр: файл или диф -->
+      <section class="editorwrap">
+        <div class="ehead">
+          <template v-if="tab === 'files' && fileSel">
+            <span class="epath mono">{{ fileSel }}</span>
+            <span v-if="showsImage" class="note img-note">изображение</span>
+            <span v-else-if="fileData?.binary" class="note">бинарный</span>
+            <span v-else-if="fileData?.tooBig" class="note">слишком большой — превью отключено</span>
+            <span v-if="fileLoading" class="note">читаю…</span>
+          </template>
+          <template v-else-if="tab === 'git' && gitFile">
+            <span class="st" :class="gitFile.status">{{ STLABEL[gitFile.status] || gitFile.status }}</span>
+            <span class="epath mono">{{ gitFile.path }}</span>
+            <!-- Пока индекс пуст, называть группу нечего: диф в панели ровно один. -->
+            <span v-if="gitScopeBadge" class="scope" :title="gitScopeBadge.hint">{{ gitScopeBadge.label }}</span>
+            <span v-if="gitFile.binary" class="note">бинарный</span>
+            <span v-else-if="gitFile.tooBig" class="note">слишком большой — превью отключено</span>
+          </template>
+          <span class="grow"></span>
+          <UiButton v-if="tab === 'git'" class="diff-layout" variant="ghost"
+                    :pressed="renderSideBySide" :aria-disabled="oneSidedDiff"
+                    :title="oneSidedDiff ? 'Новый или удалённый файл показывается одной колонкой' : (renderSideBySide ? 'Показать в одну колонку' : 'Показать рядом')"
+                    @click="toggleDiffLayout">
+            {{ oneSidedDiff ? '≡ одна колонка' : (renderSideBySide ? '⇆ рядом' : '≡ в строку') }}
+          </UiButton>
+          <UiIconButton role="embedded" label="Обновить" title="Обновить"
+                        :loading="gitLoading || fileLoading" @click="refresh">↻</UiIconButton>
+        </div>
+        <div class="ebody" data-escape-owner="monaco">
+          <div v-show="tab === 'files' && !imageSrc" ref="fileHost" class="editor"></div>
+          <div v-show="tab === 'git'" ref="diffHost" class="editor"></div>
+          <!-- Картинка вместо пустого редактора: сырые байты отдаёт raw-роут «Кода». -->
+          <div v-if="tab === 'files' && imageSrc" class="imgwrap">
+            <img v-if="!imageError" :src="imageSrc" :alt="fileSel" @error="imageError = 'Не удалось загрузить изображение'">
+            <div v-else class="imgerr">
+              {{ imageError }}<br>
+              <span class="muted">Возможно, файл больше 10 МБ или его формат не поддерживается предпросмотром.</span>
+            </div>
+          </div>
+          <div v-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
+          <!-- Пусто = нет изменений НИ В ОДНОЙ группе: при чистом рабочем дереве, но
+               непустом индексе, диф выбранного файла существует и закрывать его нечем. -->
+          <div v-else-if="tab === 'git' && git && !gitEntries.size" class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>
+
 <script setup>
 // Плагин «Код» — просмотр кода и гита проектов, как в VS Code, но только чтение:
 // слева рейка режимов (код | гит), дальше панель (дерево файлов или изменения),
@@ -17,6 +273,9 @@ import {
   pickCodeContext,
   reconcileGitOpenDirs,
 } from '../../shared/code-tree.js';
+import {
+  UiButton, UiIconButton, UiPressable, UiSelect,
+} from '../../ui';
 
 const props = defineProps({
   active: { type: Boolean, default: true },
@@ -827,258 +1086,6 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<template>
-  <div class="code-panel" :class="{ compact }" :aria-busy="loading ? 'true' : undefined">
-    <header ref="panelHeader" class="code-head" tabindex="-1">
-      <strong>Код</strong>
-      <span v-if="context" class="tlabel mono">{{ project }} · {{ context.label }}</span>
-      <span class="grow"></span>
-      <button v-if="compact" type="button" class="act navigator-toggle"
-              :class="{ on: !navigatorCollapsed }"
-              :aria-expanded="!navigatorCollapsed"
-              :title="navigatorCollapsed ? 'Показать дерево' : 'Скрыть дерево'"
-              @click="navigatorCollapsed = !navigatorCollapsed">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="2.5" y="3" width="15" height="14" rx="2" />
-          <path d="M7 3v14" />
-        </svg>
-        <span>Дерево</span>
-      </button>
-    </header>
-
-    <!-- Холодный запуск сразу занимает финальную сетку. Без этого сначала был
-         короткий пустой экран «Загрузка…», а затем вся рабочая область прыгала. -->
-    <div v-if="loading" ref="layHost" class="lay code-loading"
-         :class="{ compact, 'navigator-collapsed': navigatorCollapsed }"
-         :style="compactStyle">
-      <aside class="rail" aria-hidden="true">
-        <span class="loading-rail-item"></span>
-        <span class="loading-rail-item"></span>
-      </aside>
-      <aside class="panel loading-panel" aria-hidden="true">
-        <div class="loading-selects">
-          <span class="loading-caption"></span><span class="loading-field"></span>
-          <span class="loading-caption short"></span><span class="loading-field"></span>
-        </div>
-        <div class="loading-tree">
-          <span v-for="index in 7" :key="index" class="loading-row"
-                :style="{ '--loading-row': `${48 + ((index * 17) % 38)}%` }"></span>
-        </div>
-      </aside>
-      <div v-if="compact && !navigatorCollapsed" class="code-split loading-split" aria-hidden="true">
-        <span></span>
-      </div>
-      <section class="editorwrap loading-editor" aria-hidden="true">
-        <div class="ehead"><span class="loading-path"></span></div>
-        <div class="ebody"><span class="loading-status">Загрузка кода…</span></div>
-      </section>
-    </div>
-    <div v-else-if="!projects.length" class="empty">
-      Проектов пока нет — заведи в разделе <router-link to="/projects">«Проекты»</router-link>.
-    </div>
-
-    <div v-else ref="layHost" class="lay" :class="{ compact, 'navigator-collapsed': navigatorCollapsed }"
-         :style="compactStyle">
-      <!-- Рейка режимов, как activity bar в VS Code -->
-      <aside class="rail">
-        <button type="button" class="ritem" :class="{ on: tab === 'files' }" title="Код: дерево файлов"
-                aria-label="Код" @click="setTab('files')">
-          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z M14 3v4h4" /></svg>
-        </button>
-        <button type="button" class="ritem" :class="{ on: tab === 'git' }"
-                title="Гит: несохранённые изменения и коммиты" aria-label="Git" @click="setTab('git')">
-          <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9" /></svg>
-        </button>
-      </aside>
-
-      <!-- Панель: проект + единая рабочая копия, затем дерево файлов или изменения -->
-      <aside class="panel">
-        <div class="sels">
-          <div class="sel-field">
-            <label for="code-project">Проект</label>
-            <select id="code-project" :value="project" @change="setProject($event.target.value)">
-              <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
-            </select>
-          </div>
-          <div v-if="contexts.length > 1" class="sel-field">
-            <label for="code-context">Рабочая копия</label>
-            <select id="code-context" :value="contextId" @change="setContext($event.target.value)">
-              <template v-if="contextGroups.length > 1">
-                <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
-                  <option v-for="item in group.items" :key="item.id" :value="item.id" :title="item.treePath">
-                    {{ item.label }}
-                  </option>
-                </optgroup>
-              </template>
-              <template v-else>
-                <option v-for="item in contexts" :key="item.id" :value="item.id" :title="item.treePath">
-                  {{ item.label }}
-                </option>
-              </template>
-            </select>
-          </div>
-          <div v-else-if="context" class="context-static" :title="context.treePath">
-            Рабочая копия: {{ context.label }}
-          </div>
-          <div v-if="contextLoading" class="context-loading">Загружаю рабочую копию…</div>
-        </div>
-
-        <div v-if="error" class="perr">{{ error }}</div>
-        <div v-if="!projectHasRepos" class="pnote">
-          Пути репозиториев не заданы — раздел <router-link to="/projects">«Проекты»</router-link>.
-        </div>
-        <div v-if="unavailableRepos.length" class="pnote context-warning">
-          <span>Недоступные репозитории:</span>
-          <span v-for="item in unavailableRepos" :key="item.repoKey" class="unavailable-repo mono">
-            {{ item.repoKey }} — {{ item.repoDir }}
-          </span>
-          Проверь пути в разделе <router-link to="/projects">«Проекты»</router-link>.
-        </div>
-
-        <!-- Дерево файлов. Место под шеврон занято и у файла (пустой .chev): без него
-             имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
-             уровнем выше — лесенка читалась рваной. -->
-        <div v-if="tab === 'files'" class="scroll tree">
-          <template v-for="row in rows" :key="row.rel">
-            <button v-if="row.dir" type="button" class="trow dir" :data-dir-path="row.rel"
-                    :data-depth="row.depth"
-                    :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
-                    @click="toggleDir(row.rel)">
-              <span class="chev">{{ openDirs.has(row.rel) ? '▾' : '▸' }}</span>
-              <span class="dname">{{ row.name }}</span>
-            </button>
-            <button v-else type="button" class="trow frow" :class="{ sel: fileSel === row.rel }"
-                    :data-file-path="row.rel" :data-depth="row.depth"
-                    :style="rowDepth(row.depth)" @click="openFile(row.rel)">
-              <span class="chev" aria-hidden="true"></span>
-              <span class="nm">{{ row.name }}</span>
-            </button>
-          </template>
-        </div>
-
-        <!-- Гит: изменения группами (индекс, рабочее дерево) + свежие коммиты.
-             Группа с пустым индексом не рисуется вовсе, поэтому обычный прогон
-             фабрики выглядит как раньше — одним списком «Не в коммите». -->
-        <div v-else class="scroll tree">
-          <div v-if="gitLoading && !git" class="pnote">Читаю гит…</div>
-          <template v-if="git">
-            <template v-for="(group, groupIndex) in gitGroups" :key="group.id">
-              <div class="subhead" :data-group="group.id">
-                <span :title="group.hint">{{ group.title }}</span>
-                <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
-                <span class="grow"></span>
-                <!-- Переключатель вида один на панель: он про способ показа, а не про группу. -->
-                <div v-if="groupIndex === 0" class="git-view-toggle" role="group" aria-label="Вид изменений">
-                  <button type="button" data-view="tree" title="Показать деревом" aria-label="Показать деревом"
-                          :aria-pressed="gitView === 'tree'" @click="setGitView('tree')">
-                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" /></svg>
-                  </button>
-                  <button type="button" data-view="list" title="Показать списком" aria-label="Показать списком"
-                          :aria-pressed="gitView === 'list'" @click="setGitView('list')">
-                    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" /></svg>
-                  </button>
-                </div>
-              </div>
-              <div v-if="!group.files.length" class="pnote">Несохранённых изменений нет.</div>
-              <template v-else-if="gitView === 'tree'">
-                <template v-for="row in group.rows" :key="row.key">
-                  <button v-if="row.kind === 'dir'" type="button" class="trow dir git-row git-dir"
-                          :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
-                          :aria-expanded="gitOpenDirs.has(row.ref)"
-                          :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
-                    <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
-                    <span class="dname" :title="row.path">{{ row.name }}</span>
-                  </button>
-                  <button v-else type="button" class="trow frow git-row git-file"
-                          :class="{ sel: gitSel === row.ref }" :data-path="row.path"
-                          :data-group="group.id" :data-depth="row.depth"
-                          :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
-                    <span class="chev" aria-hidden="true"></span>
-                    <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
-                    <span class="nm mono" :title="row.path">{{ row.name }}</span>
-                    <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
-                  </button>
-                </template>
-              </template>
-              <template v-else>
-                <button v-for="f in group.files" :key="`${group.id}:file:${f.path}`" type="button"
-                        class="trow frow git-row git-file" :class="{ sel: gitSel === gitRef(group.id, f.path) }"
-                        :data-path="f.path" :data-group="group.id"
-                        @click="selectGit(gitRef(group.id, f.path))">
-                  <span class="st" :class="f.status">{{ STLABEL[f.status] || f.status }}</span>
-                  <span class="nm mono" :title="f.path">{{ f.path }}</span>
-                  <span class="cnt mono"><i v-if="f.add" class="a">+{{ f.add }}</i><i v-if="f.del" class="d">−{{ f.del }}</i></span>
-                </button>
-              </template>
-            </template>
-            <div class="subhead">Коммиты</div>
-            <div v-for="c in git.log" :key="c.hash" class="commit" :title="c.when">
-              <span class="hash mono">{{ c.hash }}</span>
-              <span class="subj">{{ c.subject }}</span>
-            </div>
-          </template>
-        </div>
-      </aside>
-
-      <div v-if="compact && !navigatorCollapsed" class="code-split" role="separator"
-           aria-orientation="vertical" tabindex="0"
-           :aria-valuemin="NAVIGATOR_MIN_WIDTH" :aria-valuemax="Math.round(navigatorMaxWidth)"
-           :aria-valuenow="Math.round(navigatorWidth)"
-           @pointerdown.prevent="startNavigatorResize" @pointermove.prevent="moveNavigatorResize"
-           @pointerup.prevent="finishNavigatorResize" @pointercancel.prevent="finishNavigatorResize"
-           @keydown="navigatorResizeKey">
-        <span aria-hidden="true"></span>
-      </div>
-
-      <!-- Просмотр: файл или диф -->
-      <section class="editorwrap">
-        <div class="ehead">
-          <template v-if="tab === 'files' && fileSel">
-            <span class="epath mono">{{ fileSel }}</span>
-            <span v-if="showsImage" class="note img-note">изображение</span>
-            <span v-else-if="fileData?.binary" class="note">бинарный</span>
-            <span v-else-if="fileData?.tooBig" class="note">слишком большой — превью отключено</span>
-            <span v-if="fileLoading" class="note">читаю…</span>
-          </template>
-          <template v-else-if="tab === 'git' && gitFile">
-            <span class="st" :class="gitFile.status">{{ STLABEL[gitFile.status] || gitFile.status }}</span>
-            <span class="epath mono">{{ gitFile.path }}</span>
-            <!-- Пока индекс пуст, называть группу нечего: диф в панели ровно один. -->
-            <span v-if="gitScopeBadge" class="scope" :title="gitScopeBadge.hint">{{ gitScopeBadge.label }}</span>
-            <span v-if="gitFile.binary" class="note">бинарный</span>
-            <span v-else-if="gitFile.tooBig" class="note">слишком большой — превью отключено</span>
-          </template>
-          <span class="grow"></span>
-          <button v-if="tab === 'git'" class="act" :class="{ on: renderSideBySide }"
-                  :aria-disabled="oneSidedDiff"
-                  :title="oneSidedDiff ? 'Новый или удалённый файл показывается одной колонкой' : (renderSideBySide ? 'Показать в одну колонку' : 'Показать рядом')"
-                  @click="toggleDiffLayout">
-            {{ oneSidedDiff ? '≡ одна колонка' : (renderSideBySide ? '⇆ рядом' : '≡ в строку') }}
-          </button>
-          <button class="act" :disabled="gitLoading || fileLoading" title="Обновить" @click="refresh">↻</button>
-        </div>
-        <div class="ebody" data-escape-owner="monaco">
-          <div v-show="tab === 'files' && !imageSrc" ref="fileHost" class="editor"></div>
-          <div v-show="tab === 'git'" ref="diffHost" class="editor"></div>
-          <!-- Картинка вместо пустого редактора: сырые байты отдаёт raw-роут «Кода». -->
-          <div v-if="tab === 'files' && imageSrc" class="imgwrap">
-            <img v-if="!imageError" :src="imageSrc" :alt="fileSel" @error="imageError = 'Не удалось загрузить изображение'">
-            <div v-else class="imgerr">
-              {{ imageError }}<br>
-              <span class="muted">Возможно, файл больше 10 МБ или его формат не поддерживается предпросмотром.</span>
-            </div>
-          </div>
-          <div v-if="tab === 'files' && !fileSel" class="overlay">Выбери файл слева</div>
-          <!-- Пусто = нет изменений НИ В ОДНОЙ группе: при чистом рабочем дереве, но
-               непустом индексе, диф выбранного файла существует и закрывать его нечем. -->
-          <div v-else-if="tab === 'git' && git && !gitEntries.size" class="overlay">Несохранённых изменений нет — рабочее дерево чистое</div>
-        </div>
-      </section>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .code-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .code-head {
@@ -1146,10 +1153,6 @@ onBeforeUnmount(() => {
 /* Рейка режимов */
 .rail { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; align-items: center;
   background: var(--sidebar); border-right: 1px solid var(--line); }
-.ritem { background: none; border: none; color: var(--ink-mid); width: 34px; height: 34px; border-radius: 8px;
-  display: grid; place-items: center; cursor: pointer; }
-.ritem:hover { background: var(--surface); color: var(--ink); }
-.ritem.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .ic { width: 19px; height: 19px; }
 
 /* Панель */
@@ -1157,10 +1160,6 @@ onBeforeUnmount(() => {
 .sels { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
 .sel-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .sel-field label { color: var(--ink-mid); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
-.sels select { width: 100%; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line-2);
-  background: var(--surface-2); color: var(--ink); font-size: 12px; }
-.sels select:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  outline-offset: 1px; border-color: var(--accent); }
 .context-static { min-width: 0; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-2);
   border-radius: 8px; padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
@@ -1178,7 +1177,7 @@ onBeforeUnmount(() => {
   color: var(--ink); padding: 4px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
 /* Фон меняем ТОЛЬКО background-color: shorthand `background` стирает направляющие. */
 .trow:hover { background-color: var(--surface); }
-.trow:focus-visible, .ritem:focus-visible, .git-view-toggle button:focus-visible, .act:focus-visible {
+.trow:focus-visible, .ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
 .trow.dir { color: var(--ink-mid); }
 /* Направляющие линии предков — по одной на уровень, ровно под шевроном родителя. */
@@ -1201,13 +1200,7 @@ onBeforeUnmount(() => {
 
 .subhead { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-mid); padding: 10px 8px 5px; display: flex; align-items: center; gap: 7px; }
-.git-view-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.git-view-toggle button { display: grid; place-items: center; width: 25px; height: 23px; padding: 4px; border: 0;
-  border-right: 1px solid var(--line); background: var(--surface-2); color: var(--ink-mid); cursor: pointer; }
-.git-view-toggle button:last-child { border-right: 0; }
-.git-view-toggle button:hover { color: var(--ink); }
-.git-view-toggle button[aria-pressed="true"] { color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.git-view-toggle { display: inline-flex; gap: 2px; }
 .git-view-toggle svg { width: 15px; height: 15px; fill: currentColor; }
 .commit { display: flex; align-items: baseline; gap: 8px; padding: 3px 8px; font-size: 12px; min-width: 0; }
 .hash { flex: none; color: var(--accent); font-size: 11px; }
@@ -1242,12 +1235,7 @@ onBeforeUnmount(() => {
 .imgerr .muted { color: var(--ink-mid); font-size: 12px; }
 .note.img-note { color: var(--ink-mid); }
 
-.act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
-  padding: 4px 10px; font-size: 12.5px; cursor: pointer; flex: none; }
-.act:hover { color: var(--ink); border-color: var(--line-2); }
-.act.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.act:disabled { opacity: .5; cursor: default; }
-.act[aria-disabled="true"] { opacity: .65; cursor: default; color: var(--ink-mid); }
+.diff-layout { flex: none; }
 
 /* Full-page на небольшом десктопе: компактный режим задаёт ToolHost явно. */
 @media (min-width: 900px) and (max-width: 1099px) {

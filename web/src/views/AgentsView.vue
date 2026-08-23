@@ -1,11 +1,161 @@
-<script setup>
+<template>
+  <div class="agents-page">
+    <!-- Список -->
+    <aside class="list">
+      <div class="list-head">
+        <span class="ttl">База агентов</span>
+        <!-- toggle: на планшете ховера нет, а объяснение раздела длинное — его читают, а не задевают мышью -->
+        <HelpTip class="page-tip" toggle align="left" :tip-style="{ maxWidth: '330px' }">
+          <template #tip>
+            <span class="doc">
+              <b class="doc-ttl">Библиотека ролей конвейера</b>
+              <span v-for="(p, i) in helpPage" :key="i" class="doc-p">{{ p }}</span>
+            </span>
+          </template>
+
+        </HelpTip>
+        <span class="grow"></span>
+        <UiButton class="btn" :loading="installing"
+                title="Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются"
+                loading-label="Устанавливаю набор" @click="install">⇩ Набор</UiButton>
+        <UiButton class="btn accent" tone="accent" @click="createNew">+ Новый</UiButton>
+      </div>
+      <p class="list-sub">Заготовки ролей для схем конвейера. На запуск не влияют: боевой промпт и модель живут в маршруте проекта.</p>
+      <p v-if="installNotice" class="list-sub" :class="{ bad: installNotice.startsWith('Ошибка') }">{{ installNotice }}</p>
+      <div v-if="loading && !agents.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
+      <div v-else-if="error && !agents.length" class="pad bad">{{ error }}</div>
+      <div v-else-if="!agents.length" class="pad empty-list">
+        <p class="muted">Библиотека пуста. На свежей установке это нормально: наполнение агентов — данные машины и не едет с репозиторием.</p>
+        <UiButton class="btn accent" tone="accent" :loading="installing"
+                  loading-label="Устанавливаю набор" @click="install">Установить стандартный набор</UiButton>
+      </div>
+      <template v-for="g in groups" :key="g.v">
+        <div class="grp-ttl">{{ g.label }}</div>
+        <UiSelectableRow v-for="a in g.items" :key="a.id" class="item"
+                         :selected="a.id === selectedId && !isNew" @select="select(a.id)">
+          <span class="item-content">
+            <span class="ic" :class="`k-${a.kind}`">{{ kindIcon[a.kind] }}</span>
+            <span class="item-main">
+              <span class="nm" :title="a.label || a.id">{{ a.label || a.id }}</span>
+              <span v-if="a.tier || a.effort" class="advice" :title="adviceTitle(a)">
+                <span v-if="a.tier" class="chip tier-chip">{{ tierLabel[a.tier] || a.tier }}</span>
+                <span v-if="a.effort" class="chip effort-chip mono">{{ a.effort }}</span>
+              </span>
+            </span>
+          </span>
+        </UiSelectableRow>
+      </template>
+    </aside>
+
+    <!-- Редактор -->
+    <section v-if="form" class="editor">
+      <header class="ehead">
+        <template v-if="isNew">
+          <UiInput v-model.trim="form.id" class="fld idfld mono" placeholder="id (латиница, напр. my_agent)" spellcheck="false" />
+        </template>
+        <template v-else>
+          <span class="eid mono">{{ selectedId }}</span>
+        </template>
+        <span class="grow"></span>
+        <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
+        <UiSwitch v-model="pro"
+                  title="Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги">профи</UiSwitch>
+        <UiButton v-if="!isNew" class="btn danger" tone="danger" @click="del">Удалить</UiButton>
+        <UiButton class="btn accent" tone="accent" :loading="saving"
+                  :disabled="!dirty || (isNew && !form.id)" loading-label="Сохраняю" @click="save">Сохранить</UiButton>
+      </header>
+
+      <!-- Обычные настройки -->
+      <div class="fields">
+        <label class="f f-label">
+          <span class="lbl">Подпись <HelpTip :text="help.label" align="left" /></span>
+          <UiInput v-model="form.label" class="fld" placeholder="Название блока на схеме" />
+        </label>
+        <label class="f">
+          <span class="lbl">Форма блока <HelpTip :text="help.kind" /></span>
+          <UiSelect v-model="form.kind" class="fld">
+            <option v-for="k in kinds" :key="k.v" :value="k.v">{{ k.label }}</option>
+          </UiSelect>
+        </label>
+        <label class="f">
+          <span class="lbl">Класс модели <HelpTip :text="help.tier" /></span>
+          <UiSelect v-model="form.tier" class="fld">
+            <option value="">без рекомендации</option>
+            <option v-for="t in tiers" :key="t.v" :value="t.v">{{ t.label }}</option>
+          </UiSelect>
+        </label>
+        <label class="f">
+          <span class="lbl">Рекомендация effort <HelpTip :text="help.effort" /></span>
+          <UiSelect v-model="form.effort" class="fld">
+            <option value="">без рекомендации</option>
+            <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
+          </UiSelect>
+        </label>
+      </div>
+
+      <!-- Профи-настройки -->
+      <div v-if="pro" class="fields pro">
+        <label class="f">
+          <span class="lbl">Сноска <HelpTip :text="help.sub" align="left" /></span>
+          <UiInput v-model="form.sub" class="fld" placeholder="под блоком (напр. lint · tests)" />
+        </label>
+        <label class="f">
+          <span class="lbl">Ключ реестра <HelpTip :text="help.key" /></span>
+          <UiInput v-model="form.key" class="fld mono" placeholder="SCOUT" spellcheck="false" />
+        </label>
+        <label class="f">
+          <span class="lbl">Таймаут, сек <HelpTip :text="help.timeout" /></span>
+          <UiNumberField :model-value="form.timeout" :min="0" :step="60" placeholder="0 = дефолт"
+                         @update:model-value="form.timeout = typeof $event === 'number' ? $event : 0" />
+        </label>
+        <label class="f">
+          <span class="lbl">Бюджет <HelpTip :text="help.budget" /></span>
+          <UiNumberField :model-value="form.budget" :min="0" placeholder="0 = нет"
+                         @update:model-value="form.budget = typeof $event === 'number' ? $event : 0" />
+        </label>
+        <div class="f">
+          <span class="lbl">Флаги <HelpTip :text="help.flags" /></span>
+          <div class="row">
+            <UiToggleButton v-model="form.readonly" class="tag"
+                    title="Советовать запрет записи в репозиторий: этап только смотрит и отчитывается"
+                    >read-only</UiToggleButton>
+            <UiToggleButton v-model="form.optional" class="tag"
+                    title="Советовать разрешить пропуск: конвейер идёт дальше, если этап нечего делать"
+                    >optional</UiToggleButton>
+          </div>
+        </div>
+      </div>
+
+      <div class="prompt-wrap">
+        <div class="lbl prompt-lbl">Заготовка задания <HelpTip :text="help.prompt" align="left" /> <span class="muted sm">— основа для промпта этапа; боевой текст живёт в маршруте проекта</span></div>
+        <UiTextarea v-model="form.prompt" class="prompt mono" spellcheck="false"
+                    :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'" />
+      </div>
+    </section>
+
+    <section v-else class="editor empty">
+      <p class="muted">Выбери роль слева или заведи новую</p>
+    </section>
+  </div>
+</template>
+
+<script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../shared/api-client.js';
+import {
+  UiButton,
+  UiInput,
+  UiNumberField,
+  UiSelect,
+  UiSelectableRow,
+  UiSpinner,
+  UiSwitch,
+  UiTextarea,
+  UiToggleButton,
+  confirmDialog,
+} from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
-import { confirmDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
-import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
-import NumberField from '../shared/ui/NumberField.vue';
 
 // База агентов (ролей конвейера): слева список, справа редактор карточки.
 // Агент — заготовка роли: метаданные + начало задания. Ни одно поле не исполняется:
@@ -32,25 +182,25 @@ watch(selectedId, (agentId) => {
   else agentsContext.blur();
 }, { immediate: true });
 
-const KINDS = [
+const kinds = [
   { v: 'agent', label: '🤖 Агент' },
   { v: 'human', label: '👤 Человек' },
   { v: 'code', label: '</> Код' },
 ];
-const KIND_ICON = { agent: '🤖', human: '👤', code: '</>' };
+const kindIcon = { agent: '🤖', human: '👤', code: '</>' };
 // Класс модели, а не семейство: база агентов общая для всех проектов, а проекты
 // живут на разных исполнителях. Какое семейство закрывает класс — дело runners.env.
-const TIERS = [
+const tiers = [
   { v: 'reasoning', label: 'Рассуждающая — сложный анализ' },
   { v: 'balanced', label: 'Сбалансированная — рутина по спецификации' },
   { v: 'cheap', label: 'Экономная — механика и проверки' },
 ];
-const TIER_LABEL = Object.fromEntries(TIERS.map((t) => [t.v, t.label.split(' — ')[0]]));
+const tierLabel = Object.fromEntries(tiers.map((t) => [t.v, t.label.split(' — ')[0]]));
 // Чипы в списке — это рекомендации, а не то, чем этап реально пойдёт: пишем это прямо
 // в подсказке, иначе они читаются как «вот на чём он запустится».
 function adviceTitle(a) {
   const parts = [];
-  if (a.tier) parts.push(`модель класса «${TIER_LABEL[a.tier] || a.tier}»`);
+  if (a.tier) parts.push(`модель класса «${tierLabel[a.tier] || a.tier}»`);
   if (a.effort) parts.push(`effort ${a.effort}`);
   return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет — модель и effort берутся из runners.env проекта.`;
 }
@@ -58,7 +208,7 @@ function adviceTitle(a) {
 const providers = ref([]);
 
 // Описания настроек для тултипов — языком человека, не движка.
-const HELP = {
+const help = {
   label: 'Как этап будет подписан на схеме конвейера — текст внутри блока. Например «Разведка» или «Приёмка кода».',
   kind: 'Кто делает этап: 🤖 агент — работает ИИ; 👤 человек — конвейер останавливается и ждёт решения человека; </> код — выполняется команда на хосте. Здесь это заготовка для нового блока: у этапов уже собранной схемы форма задана самой схемой.',
   tier: 'Насколько сильная модель нужна этапу: рассуждающая — для сложного анализа, сбалансированная — для рутины по готовой спецификации, экономная — для механики и проверок. Конкретную модель (opus, sonnet…) здесь не выбирают: база агентов общая для всех проектов, а какой моделью закрыть класс — решает runners.env проекта. Это пометка человеку, который собирает маршрут; запуск её не читает.',
@@ -73,7 +223,7 @@ const HELP = {
 
 // Что это за раздел вообще — главный вопрос к нему. Держим ответ в трёх абзацах:
 // что здесь лежит, чего оно НЕ делает и зачем тогда нужно.
-const HELP_PAGE = [
+const helpPage = [
   'Агент здесь — описание роли конвейера: как этап подписан на схеме, какого класса модель ему нужна и с чего начинается его задание.',
   'Это библиотека, а не настройки запуска. Прогон задачи отсюда не читает ничего: боевой промпт этапа лежит в маршруте проекта (profiles/<проект>/routes/<маршрут>/prompts/), а модель, effort и лимиты — в runners.env профиля. Правка карточки не трогает ни собранные маршруты, ни бегущие задачи.',
   'Смысл — держать формулировку роли в одном месте: описать её один раз и переносить в маршруты проектов, а не выдумывать заново под каждый. Все поля карточки — рекомендации автору маршрута.',
@@ -81,7 +231,7 @@ const HELP_PAGE = [
 
 watch(pro, (v) => localStorage.setItem('cockpit-agents-pro', v ? '1' : '0'));
 
-const groups = computed(() => KINDS
+const groups = computed(() => kinds
   .map((k) => ({ ...k, items: agents.value.filter((a) => a.kind === k.v) }))
   .filter((g) => g.items.length));
 
@@ -173,145 +323,6 @@ async function install() {
 onMounted(load);
 </script>
 
-<template>
-  <div class="agents-page">
-    <!-- Список -->
-    <aside class="list">
-      <div class="list-head">
-        <span class="ttl">База агентов</span>
-        <!-- toggle: на планшете ховера нет, а объяснение раздела длинное — его читают, а не задевают мышью -->
-        <HelpTip class="page-tip" toggle align="left" :tip-style="{ maxWidth: '330px' }">
-          <template #tip>
-            <span class="doc">
-              <b class="doc-ttl">Библиотека ролей конвейера</b>
-              <span v-for="(p, i) in HELP_PAGE" :key="i" class="doc-p">{{ p }}</span>
-            </span>
-          </template>
-        </HelpTip>
-        <span class="grow"></span>
-        <button class="btn" :disabled="installing"
-                title="Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются"
-                @click="install">
-          <span v-if="installing" class="spin"></span>⇩ Набор
-        </button>
-        <button class="btn accent" @click="createNew">+ Новый</button>
-      </div>
-      <p class="list-sub">Заготовки ролей для схем конвейера. На запуск не влияют: боевой промпт и модель живут в маршруте проекта.</p>
-      <p v-if="installNotice" class="list-sub" :class="{ bad: installNotice.startsWith('Ошибка') }">{{ installNotice }}</p>
-      <div v-if="loading && !agents.length" class="pad muted"><span class="spin"></span> Загружаю…</div>
-      <div v-else-if="error && !agents.length" class="pad bad">{{ error }}</div>
-      <div v-else-if="!agents.length" class="pad empty-list">
-        <p class="muted">Библиотека пуста. На свежей установке это нормально: наполнение агентов — данные машины и не едет с репозиторием.</p>
-        <button class="btn accent" :disabled="installing" @click="install">
-          <span v-if="installing" class="spin"></span> Установить стандартный набор
-        </button>
-      </div>
-      <template v-for="g in groups" :key="g.v">
-        <div class="grp-ttl">{{ g.label }}</div>
-        <button v-for="a in g.items" :key="a.id" class="item" :class="{ sel: a.id === selectedId && !isNew }" @click="select(a.id)">
-          <span class="ic" :class="`k-${a.kind}`">{{ KIND_ICON[a.kind] }}</span>
-          <span class="item-main">
-            <span class="nm" :title="a.label || a.id">{{ a.label || a.id }}</span>
-            <span v-if="a.tier || a.effort" class="advice" :title="adviceTitle(a)">
-              <span v-if="a.tier" class="chip tier-chip">{{ TIER_LABEL[a.tier] || a.tier }}</span>
-              <span v-if="a.effort" class="chip effort-chip mono">{{ a.effort }}</span>
-            </span>
-          </span>
-        </button>
-      </template>
-    </aside>
-
-    <!-- Редактор -->
-    <section v-if="form" class="editor">
-      <header class="ehead">
-        <template v-if="isNew">
-          <input v-model.trim="form.id" class="fld idfld mono" placeholder="id (латиница, напр. my_agent)" spellcheck="false" />
-        </template>
-        <template v-else>
-          <span class="eid mono">{{ selectedId }}</span>
-        </template>
-        <span class="grow"></span>
-        <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
-        <ToggleSwitch v-model="pro" label="профи"
-                      title="Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги" />
-        <button v-if="!isNew" class="btn danger" @click="del">Удалить</button>
-        <button class="btn accent" :disabled="saving || !dirty || (isNew && !form.id)" @click="save">
-          <span v-if="saving" class="spin"></span> Сохранить
-        </button>
-      </header>
-
-      <!-- Обычные настройки -->
-      <div class="fields">
-        <label class="f f-label">
-          <span class="lbl">Подпись <HelpTip :text="HELP.label" align="left" /></span>
-          <input v-model="form.label" class="fld" placeholder="Название блока на схеме" />
-        </label>
-        <label class="f">
-          <span class="lbl">Форма блока <HelpTip :text="HELP.kind" /></span>
-          <select v-model="form.kind" class="fld">
-            <option v-for="k in KINDS" :key="k.v" :value="k.v">{{ k.label }}</option>
-          </select>
-        </label>
-        <label class="f">
-          <span class="lbl">Класс модели <HelpTip :text="HELP.tier" /></span>
-          <select v-model="form.tier" class="fld">
-            <option value="">без рекомендации</option>
-            <option v-for="t in TIERS" :key="t.v" :value="t.v">{{ t.label }}</option>
-          </select>
-        </label>
-        <label class="f">
-          <span class="lbl">Рекомендация effort <HelpTip :text="HELP.effort" /></span>
-          <select v-model="form.effort" class="fld">
-            <option value="">без рекомендации</option>
-            <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
-          </select>
-        </label>
-      </div>
-
-      <!-- Профи-настройки -->
-      <div v-if="pro" class="fields pro">
-        <label class="f">
-          <span class="lbl">Сноска <HelpTip :text="HELP.sub" align="left" /></span>
-          <input v-model="form.sub" class="fld" placeholder="под блоком (напр. lint · tests)" />
-        </label>
-        <label class="f">
-          <span class="lbl">Ключ реестра <HelpTip :text="HELP.key" /></span>
-          <input v-model="form.key" class="fld mono" placeholder="SCOUT" spellcheck="false" />
-        </label>
-        <label class="f">
-          <span class="lbl">Таймаут, сек <HelpTip :text="HELP.timeout" /></span>
-          <NumberField v-model="form.timeout" :step="60" placeholder="0 = дефолт" />
-        </label>
-        <label class="f">
-          <span class="lbl">Бюджет <HelpTip :text="HELP.budget" /></span>
-          <NumberField v-model="form.budget" placeholder="0 = нет" />
-        </label>
-        <div class="f">
-          <span class="lbl">Флаги <HelpTip :text="HELP.flags" /></span>
-          <div class="row">
-            <button class="tag" :class="{ on: form.readonly }"
-                    title="Советовать запрет записи в репозиторий: этап только смотрит и отчитывается"
-                    @click="form.readonly = !form.readonly">read-only</button>
-            <button class="tag" :class="{ on: form.optional }"
-                    title="Советовать разрешить пропуск: конвейер идёт дальше, если этап нечего делать"
-                    @click="form.optional = !form.optional">optional</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="prompt-wrap">
-        <div class="lbl prompt-lbl">Заготовка задания <HelpTip :text="HELP.prompt" align="left" /> <span class="muted sm">— основа для промпта этапа; боевой текст живёт в маршруте проекта</span></div>
-        <textarea v-model="form.prompt" class="prompt mono" spellcheck="false"
-                  :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'"></textarea>
-      </div>
-    </section>
-
-    <section v-else class="editor empty">
-      <p class="muted">Выбери роль слева или заведи новую</p>
-    </section>
-  </div>
-</template>
-
 <style scoped>
 .agents-page { height: 100%; display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
 
@@ -328,10 +339,8 @@ onMounted(load);
 .doc-p { display: block; }
 .grp-ttl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-mid); padding: 10px 6px 4px; }
-.item { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; width: 100%; text-align: left; background: none;
-  border: none; color: var(--ink); padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
-.item:hover { background: var(--surface); }
-.item.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.item { width: 100%; margin-bottom: 4px; }
+.item-content { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; width: 100%; min-width: 0; }
 .item .ic { width: 20px; margin-top: 2px; font-size: 12px; text-align: center; }
 .ic.k-code { color: var(--node-code); font-weight: 700; font-size: 10px; }
 .item-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; width: 100%; }
@@ -362,29 +371,15 @@ onMounted(load);
 .f-label { grid-column: span 2; }
 .lbl { font-size: 11px; font-weight: 600; color: var(--ink-mid); text-transform: uppercase; letter-spacing: .04em;
   display: inline-flex; align-items: center; gap: 5px; }
-.fld { background: var(--surface); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
-  padding: 7px 10px; font-size: 13px; font-family: inherit; width: 100%; }
-.fld:focus { outline: none; border-color: var(--line-2); }
-select.fld { cursor: pointer; }
+.fld { width: 100%; }
 
 .row { display: flex; gap: 6px; flex-wrap: wrap; }
-.tag { background: var(--surface); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
-  padding: 6px 11px; font-size: 12px; cursor: pointer; font-family: var(--mono); }
-.tag.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.tag { font-family: var(--mono); }
 
 .prompt-wrap { flex: 1; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
 .prompt-lbl .sm { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 11px; }
-.prompt { flex: 1; min-height: 180px; resize: none; background: var(--ground); border: 1px solid var(--line);
-  color: var(--ink); border-radius: 10px; padding: 12px 14px; font-size: 12.5px; line-height: 1.55; }
-.prompt:focus { outline: none; border-color: var(--line-2); }
+.prompt { flex: 1; min-height: 180px; resize: none; line-height: 1.55; }
 
-.btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
-  padding: 7px 13px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-.btn:hover { border-color: var(--line-2); }
-.btn:disabled { opacity: .45; cursor: default; }
-.btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 .bad { color: var(--bad); }
 .sm { font-size: 11px; }
 

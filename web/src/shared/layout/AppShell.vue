@@ -17,6 +17,7 @@ import { useDockStore } from '../../stores/dock.js';
 import { providerUsageView } from '../provider-usage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
+import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../ProviderUsageResources.vue';
 import AttentionAlerts from './AttentionAlerts.vue';
@@ -398,6 +399,7 @@ const { connected } = useSse((name) => {
       </div>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
+      <UpdateBanner />
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
@@ -558,9 +560,6 @@ const { connected } = useSse((name) => {
         <ToolsGrid :items="toolsNav" :badges="badges" @select="closeTools()" />
       </section>
     </Teleport>
-
-    <!-- Баннер обновления живёт в App.vue: он нужен и на экране входа, куда оболочка
-         не доходит (см. shared/ui/UpdateBanner.vue). -->
 
     <!-- Установка на устройство. Появляется только когда браузер сам счёл приложение
          устанавливаемым (https + иконки + живой SW) — по http-адресу кнопки не будет. -->

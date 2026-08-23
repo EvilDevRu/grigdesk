@@ -1,0 +1,626 @@
+{
+  "legacySharedUiFiles": [
+    "web/src/shared/ui/HelpTip.vue",
+    "web/src/shared/ui/NumberField.vue",
+    "web/src/shared/ui/ProjectSwitcher.vue",
+    "web/src/shared/ui/ToggleSwitch.vue",
+    "web/src/shared/ui/confirm.js",
+    "web/src/shared/ui/layer-stack.js"
+  ],
+  "nativeTemplateControls": {
+    "web/src/features/companion/CompanionBubble.vue": {
+      "button": {
+        "count": 14,
+        "fingerprints": {
+          "<button :aria-label=\"!outputAvailable ? 'Озвучка недоступна в этом браузере' : (muted ? 'Включить озвучку ответов' : 'Выключить озвучку ответов')\" :aria-pressed=\"outputAvailable ? muted : true\" :disabled=\"!outputAvailable\" :title=\"outputAvailable ? 'Озвучка средствами браузера' : 'Озвучка недоступна в этом браузере'\" @click=\"emit('mute')\" class=\"icon-control\" data-testid=\"companion-mute\" type=\"button\">": 1,
+          "<button :aria-label=\"speechBusy ? 'Остановить диктовку' : 'Начать диктовку'\" :class=\"{ active: speechBusy }\" :disabled=\"transcribing || thinking\" @click=\"emit('mic')\" class=\"round-control mic\" data-testid=\"companion-mic\" type=\"button\">": 1,
+          "<button :disabled=\"!canSend\" @click=\"emit('send')\" class=\"text-control primary grow\" data-testid=\"companion-send\" type=\"button\" v-else>": 1,
+          "<button :disabled=\"stopping\" @click=\"emit('stop')\" class=\"text-control danger grow\" data-testid=\"companion-stop\" type=\"button\" v-if=\"thinking\">": 1,
+          "<button @click=\"emit('cancel')\" class=\"text-control\" data-testid=\"companion-cancel\" type=\"button\" v-if=\"speechBusy\">": 1,
+          "<button @click=\"emit('close')\" aria-label=\"Закрыть компаньона\" class=\"icon-control close\" type=\"button\">": 1,
+          "<button @click=\"emit('confirm-tts')\" class=\"text-control primary\" data-testid=\"companion-tts-confirm\" type=\"button\">": 1,
+          "<button @click=\"emit('consent-browser')\" class=\"text-control primary\" type=\"button\">": 1,
+          "<button @click=\"emit('dismiss-tts')\" class=\"text-control\" type=\"button\">": 1,
+          "<button @click=\"emit('install-browser')\" class=\"text-control primary\" type=\"button\">": 1,
+          "<button @click=\"emit('open-chat')\" class=\"open-full\" data-testid=\"companion-open-chat\" type=\"button\">": 1,
+          "<button @click=\"emit('use-whisper')\" class=\"text-control\" type=\"button\">": 2,
+          "<button @click=\"emit(attentionDestination === 'chats' ? 'open-chat' : 'open-pipeline')\" class=\"text-control open-wait\" type=\"button\">": 1
+        }
+      },
+      "textarea": {
+        "count": 1,
+        "fingerprints": {
+          "<textarea :aria-describedby=\"statusId\" :value=\"draft\" @input=\"updateDraft\" @keydown=\"composerKey\" data-testid=\"companion-composer\" placeholder=\"Спроси о текущем экране…\" ref=\"composer\" rows=\"3\">": 1
+        }
+      }
+    },
+    "web/src/shared/layout/AppShell.vue": {
+      "button": {
+        "count": 7,
+        "fingerprints": {
+          "<button :aria-expanded=\"toolsOpen\" :class=\"{ active: toolsActive }\" @click=\"toggleTools\" aria-haspopup=\"true\" class=\"navitem tools-trigger\" ref=\"toolsTrigger\" title=\"Инструменты\" type=\"button\">": 1,
+          "<button :title=\"collapsed ? 'Развернуть' : 'Свернуть'\" @click=\"toggleSidebar\" class=\"collapse-btn\">": 1,
+          "<button @click.stop=\"runUsageAction(usageOf(p).action)\" type=\"button\" v-if=\"usageOf(p).action\">": 1,
+          "<button @click=\"pwa.install()\">": 1,
+          "<button @click=\"pwa.installPrompt = null\" class=\"ghost\">": 1,
+          "<button @click=\"toCockpitSettings\" type=\"button\">": 1,
+          "<button @click=\"toProviders\" type=\"button\">": 1
+        }
+      }
+    },
+    "web/src/shared/layout/AttentionAlerts.vue": {
+      "button": {
+        "count": 4,
+        "fingerprints": {
+          "<button :disabled=\"busy === 'all'\" @click=\"dismissAll\" class=\"allbtn dim\">": 1,
+          "<button :disabled=\"busy === 'all'\" @click=\"restartAll\" class=\"allbtn\" v-if=\"items.length > 1\">": 1,
+          "<button :disabled=\"busy === i.task\" @click=\"dismiss(i.task)\" class=\"act\" title=\"Скрыть (не перезапускать)\">": 1,
+          "<button :disabled=\"busy === i.task\" @click=\"restart(i.task)\" class=\"act\" title=\"Перезапустить оценку\">": 1
+        }
+      }
+    },
+    "web/src/shared/ui/ProjectSwitcher.vue": {
+      "button": {
+        "count": 2,
+        "fingerprints": {
+          "<button :class=\"{ on: p === modelValue }\" :key=\"p\" @click=\"emit('update:modelValue', p)\" class=\"pchip mono\" v-for=\"p in profiles\">": 1,
+          "<button :disabled=\"creating\" @click=\"addProject\" class=\"pchip padd\" title=\"Новый проект\">": 1
+        }
+      }
+    },
+    "web/src/views/BoardView.vue": {
+      "button": {
+        "count": 16,
+        "fingerprints": {
+          "<button :aria-expanded=\"String(filtersOpen)\" :class=\"{ on: activeFilterCount }\" @click=\"filtersOpen = !filtersOpen\" aria-controls=\"board-task-filters\" class=\"filter-toggle\" type=\"button\">": 1,
+          "<button :aria-label=\"`Оценить все задачи без оценки: ${unrated.length}`\" @click=\"analyzeAllUnrated\" class=\"batch-action triage-all\" title=\"Поставить все задачи без оценки в очередь триажа\" type=\"button\">": 1,
+          "<button :aria-pressed=\"String(favoriteOnly)\" :class=\"{ on: favoriteOnly }\" :disabled=\"!favorites.loaded || favorites.loading\" :title=\"favorites.loaded ? 'Только избранные задачи' : 'Избранное загружается'\" @click=\"favoriteOnly = !favoriteOnly\" class=\"trif trif-ic favfilter\" type=\"button\">": 1,
+          "<button :aria-pressed=\"String(newOnly)\" :class=\"{ on: newOnly }\" :disabled=\"!seen.ready || seen.loading\" :title=\"seen.ready ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'\" @click=\"newOnly = !newOnly\" class=\"trif trif-ic newfilter\" type=\"button\">": 1,
+          "<button :aria-pressed=\"String(onlyNeedsInfo)\" :class=\"{ on: onlyNeedsInfo }\" @click=\"triageMode = 'needs-info'\" class=\"trif needs-info-filter\" type=\"button\">": 1,
+          "<button :aria-pressed=\"String(onlyUnrated)\" :class=\"{ on: onlyUnrated }\" @click=\"triageMode = 'unrated'\" class=\"trif unrated-filter\" type=\"button\">": 1,
+          "<button :aria-pressed=\"String(triageMode === 'all')\" :class=\"{ on: triageMode === 'all' }\" @click=\"triageMode = 'all'\" class=\"trif\" type=\"button\">": 1,
+          "<button :class=\"{ on: period === p }\" :key=\"p\" @click=\"period = p\" v-for=\"p in ['day','week','month']\">": 1,
+          "<button :disabled=\"favorites.loading\" @click=\"favorites.load(true)\" type=\"button\">": 1,
+          "<button :disabled=\"seen.loading\" @click=\"seen.load(true)\" type=\"button\">": 1,
+          "<button @click=\"q = ''\" aria-label=\"Очистить поиск\" class=\"clr\" title=\"Очистить поиск\" type=\"button\" v-if=\"q\">": 1,
+          "<button @click=\"resetTaskFilters\" class=\"trif filter-reset\" title=\"Вернуть порядок B24 и показать все задачи\" type=\"button\" v-if=\"activeFilterCount\">": 1,
+          "<button @click=\"ui.openTask(activeTask.id)\" class=\"atitle\">": 1,
+          "<button @click=\"ui.openTask(t.id)\" class=\"ttext\">": 3
+        }
+      },
+      "input": {
+        "count": 1,
+        "fingerprints": {
+          "<input aria-label=\"Поиск по задачам\" placeholder=\"Поиск по задачам…\" v-model=\"q\">": 1
+        }
+      },
+      "select": {
+        "count": 1,
+        "fingerprints": {
+          "<select class=\"trisort\" v-model=\"sortBy\">": 1
+        }
+      }
+    },
+    "web/src/views/DiffModal.vue": {
+      "button": {
+        "count": 1,
+        "fingerprints": {
+          "<button @click=\"diff.close()\" class=\"dm-x\" title=\"Закрыть (Esc)\">": 1
+        }
+      }
+    },
+    "web/src/views/DocumentModal.vue": {
+      "button": {
+        "count": 1,
+        "fingerprints": {
+          "<button @click=\"preview.close()\" aria-label=\"Закрыть\" class=\"document-close\" title=\"Закрыть (Esc)\" type=\"button\">": 1
+        }
+      }
+    },
+    "web/src/views/PipelineView.vue": {
+      "button": {
+        "count": 24,
+        "fingerprints": {
+          "<button :aria-pressed=\"id === stageRunnerActive\" :class=\"{ on: id === stageRunnerActive, busy: runnerPending === id }\" :disabled=\"stageBusy === 'runner-override'\" :key=\"id\" @click=\"pickStageRunner(id)\" class=\"runner-pick\" v-for=\"id in stageRunnerOptions\">": 1,
+          "<button :class=\"{ busy: sandboxBusy.has(t.task) }\" :disabled=\"sandboxBusy.has(t.task)\" @click=\"closeTask(t)\" class=\"sbdown sbclose\" v-if=\"canCloseTask(t)\">": 1,
+          "<button :class=\"{ busy: sandboxBusy.has(t.task) }\" :disabled=\"sandboxBusy.has(t.task)\" @click=\"resumeRun(t.task)\" class=\"sbresume\" v-if=\"canResume(t)\">": 1,
+          "<button :class=\"{ busy: sandboxBusy.has(t.task) }\" :disabled=\"sandboxBusy.has(t.task)\" @click=\"resumeRun(t.task)\" class=\"sbretry\" v-else>": 1,
+          "<button :class=\"{ busy: sandboxBusy.has(t.task) }\" :disabled=\"sandboxBusy.has(t.task)\" @click=\"sandboxDown(t.task)\" class=\"sbdown\" v-if=\"t.graph.fePort && canDestroySandbox(t)\">": 1,
+          "<button :class=\"{ busy: sandboxBusy.has(t.task) }\" :disabled=\"sandboxBusy.has(t.task)\" @click=\"sandboxRetry(t.task)\" class=\"sbretry\" v-if=\"canRetrySandbox(t)\">": 1,
+          "<button :class=\"{ busy: sandboxBusy.has(t.task) }\" :disabled=\"sandboxBusy.has(t.task)\" @click=\"stopRun(t.task)\" class=\"sbstop\" v-if=\"canStop(t)\">": 1,
+          "<button :class=\"{ on: activeProject === 'all' }\" @click=\"setProject('all')\" class=\"pchip\">": 1,
+          "<button :class=\"{ on: activeProject === p }\" :key=\"p\" @click=\"setProject(p)\" class=\"pchip\" v-for=\"p in projects\">": 1,
+          "<button :class=\"{ on: compact }\" @click=\"toggleCompact\">": 1,
+          "<button :class=\"{ on: loopsOn }\" @click=\"toggleLoops\">": 1,
+          "<button :disabled=\"stageBusy === 'force'\" @click=\"forceStatus('running')\" class=\"btn play\">": 1,
+          "<button :disabled=\"stageBusy === 'gate'\" @click=\"cancelGateReject()\" class=\"btn\">": 1,
+          "<button :disabled=\"stageBusy === 'gate'\" @click=\"gateDecide('approve')\" class=\"btn good\">": 1,
+          "<button :disabled=\"stageBusy === 'gate'\" @click=\"gateDecide('reject')\" class=\"btn bad\">": 1,
+          "<button :disabled=\"stageBusy === 'gate'\" @click=\"startGateReject()\" class=\"btn bad\">": 1,
+          "<button :disabled=\"stageBusy === 'runner-override'\" @click=\"setStageRunner('')\" class=\"btn small runner-reset\" v-if=\"stage.meta.runner.source === 'task-stage'\">": 1,
+          "<button :disabled=\"stageBusy === 'runner-switch'\" :key=\"id\" @click=\"switchRunner(id)\" class=\"btn runner-switch\" v-for=\"id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)\">": 1,
+          "<button :title=\"isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'\" @click=\"toggleCard(t.task)\" class=\"chev\" v-if=\"!compact\">": 1,
+          "<button :title=\"title(t)\" @click=\"ui.openTask(t.task)\" class=\"ctitle\" v-if=\"b24Title(t.task)\">": 1,
+          "<button @click=\"closeStage()\" aria-label=\"Закрыть\" class=\"sx\" title=\"Закрыть\" type=\"button\">": 1,
+          "<button @click=\"companion.openForTask(stage.task); closeStage()\" class=\"btn\">": 1,
+          "<button @click=\"toggleCard(t.task)\" class=\"task mono\" title=\"Свернуть/развернуть\">": 1,
+          "<button @click=\"ui.openTask(t.id)\" class=\"otitle\">": 1
+        }
+      },
+      "textarea": {
+        "count": 2,
+        "fingerprints": {
+          "<textarea id=\"gate-note\" placeholder=\"Что не так и что сделать иначе\" ref=\"gateNoteEl\" rows=\"6\" v-model=\"gateComment\">": 1,
+          "<textarea placeholder=\"Указание агенту — что сделать иначе (необязательно)\" rows=\"6\" v-model=\"rewindComment\">": 1
+        }
+      }
+    },
+    "web/src/views/SettingsView.vue": {
+      "button": {
+        "count": 41,
+        "fingerprints": {
+          "<button :aria-current=\"tab === item.id ? 'page' : undefined\" :class=\"{ active: tab === item.id }\" :data-settings-tab=\"item.id\" :key=\"item.id\" @click=\"setTab(item.id)\" class=\"settings-nav-item\" type=\"button\" v-for=\"item in group.items\">": 1,
+          "<button :aria-expanded=\"speechAdvanced\" @click=\"speechAdvanced = !speechAdvanced\" class=\"speech-advanced-toggle\" data-testid=\"speech-advanced-toggle\" type=\"button\">": 1,
+          "<button :class=\"{ hot: p.updateAvailable }\" :disabled=\"!!updating\" @click=\"updateProvider(p)\" class=\"upd\" title=\"Обновить CLI исполнителя. После обновления каталог моделей перечитается.\" v-if=\"p.installed && p.canUpdate\">": 1,
+          "<button :class=\"{ saved: plugMsg === p.id }\" @click=\"savePlugin(p)\" class=\"btn plugin-save\">": 1,
+          "<button :data-testid=\"`speech-cancel-${model.modelId}`\" @click=\"cancelSpeechJob(modelJob(model.modelId))\" class=\"speech-cancel\" type=\"button\" v-if=\"speechJobActive(modelJob(model.modelId))\">": 1,
+          "<button :data-testid=\"`speech-copy-${model.modelId}`\" :disabled=\"speechJobActive(modelJob(model.modelId)) || speechStarting[`copy:${model.modelId}`]\" @click=\"startSpeechJob('copy', model.modelId)\" type=\"button\" v-if=\"!model.cached\">": 1,
+          "<button :data-testid=\"`speech-download-${model.modelId}`\" :disabled=\"model.cached || speechJobActive(modelJob(model.modelId)) || speechStarting[`download:${model.modelId}`]\" @click=\"startSpeechJob('download', model.modelId)\" type=\"button\">": 1,
+          "<button :disabled=\"!cockpitStatus.canApplyCheckout || cockpitUpdate.actionBusy\" @click=\"startCockpitAction('apply')\">": 1,
+          "<button :disabled=\"!cockpitStatus.canInstallRelease || cockpitUpdate.actionBusy\" @click=\"startCockpitAction('update')\" class=\"primary\" v-if=\"cockpitStatus.latest\">": 1,
+          "<button :disabled=\"!gwCanStart\" @click=\"gwStart\" class=\"primary\">": 1,
+          "<button :disabled=\"accBusy || !acc.currentPassword || !acc.password\" @click=\"saveAccount\" class=\"primary\">": 1,
+          "<button :disabled=\"checking\" @click=\"checkUpdates\" title=\"Кокпит и сам проверяет раз в 6 часов; обновление никогда не запускается автоматически\">": 1,
+          "<button :disabled=\"cockpitUpdate.checking || cockpitUpdate.active\" @click=\"cockpitUpdate.check\">": 1,
+          "<button :disabled=\"gwBusy || gwRunning || !gw.gateway.trim()\" @click=\"gwProbeHost\">": 1,
+          "<button :disabled=\"gwBusy || gwRunning || (!gwSaved && !gw.domain.trim())\" @click=\"gwVerify\">": 1,
+          "<button :disabled=\"mcpOf(p)?.loading\" @click=\"loadMcpFor(p, true)\" class=\"mcpbtn\">": 1,
+          "<button :disabled=\"pwa.notificationBusy || !pwa.notificationSupported\" @click=\"pwa.testNotification\">": 1,
+          "<button :disabled=\"rebuilding || restarting\" @click=\"rebuildWeb\" class=\"btn\">": 1,
+          "<button :disabled=\"refreshing\" @click=\"refreshProv\">": 1,
+          "<button :disabled=\"restarting || rebuilding\" @click=\"restartServer\" class=\"btn\">": 1,
+          "<button :disabled=\"saving || !form.login || !form.password\" @click=\"save\" class=\"primary\">": 1,
+          "<button :disabled=\"speechJobActive(benchmarkJob()) || !benchmarkAvailable || (speech.device === 'cuda' && !cudaReady)\" @click=\"startBenchmark\" data-testid=\"speech-benchmark\" type=\"button\">": 1,
+          "<button :disabled=\"speechRefreshing\" @click=\"refreshSpeechCapabilities\" data-testid=\"speech-refresh\" type=\"button\">": 1,
+          "<button :disabled=\"speechSaving\" @click=\"saveSpeech\" class=\"primary\" data-testid=\"speech-save\" type=\"button\">": 1,
+          "<button :disabled=\"testing || !configured\" @click=\"testAuth\">": 1,
+          "<button :disabled=\"tlsBusy || !tlsPicked.length || !tls.openssl\" @click=\"generateTls\" class=\"primary\">": 1,
+          "<button :disabled=\"tlsBusy\" @click=\"dropTlsCertificate\" class=\"danger-ghost\" v-if=\"tls.enabled\">": 1,
+          "<button :disabled=\"trustedDirectoriesBusy || !trustedDirectoryInput.trim()\" @click=\"addTrustedDirectory\" type=\"button\">": 1,
+          "<button :disabled=\"trustedDirectoriesBusy\" @click=\"applyTrustedDirectories\" class=\"primary\" type=\"button\">": 1,
+          "<button :disabled=\"trustedDirectoriesBusy\" @click=\"removeTrustedDirectory(index)\" type=\"button\">": 1,
+          "<button @click=\"auth.doLogout()\">": 1,
+          "<button @click=\"cancelSpeechJob(benchmarkJob())\" class=\"speech-cancel\" data-testid=\"speech-benchmark-cancel\" type=\"button\" v-if=\"speechJobActive(benchmarkJob())\">": 1,
+          "<button @click=\"companion.confirmTtsConsent?.()\" class=\"primary\" type=\"button\">": 1,
+          "<button @click=\"companion.dismissTtsConsent?.()\" type=\"button\">": 1,
+          "<button @click=\"fillCockpitDictionary\" data-testid=\"speech-dictionary-template\" type=\"button\">": 1,
+          "<button @click=\"gwManualToTerminal(m)\">": 1,
+          "<button @click=\"logoutAll\" class=\"danger-ghost\">": 1,
+          "<button @click=\"resetVideoInitialPrompt\" data-testid=\"speech-video-prompt-reset\" type=\"button\">": 1,
+          "<button @click=\"saveCompactWindow\" class=\"btn\">": 1,
+          "<button @click=\"saveSilenceWindow\" class=\"btn\">": 1,
+          "<button @click=\"saveStageCompactWindow\" class=\"btn\">": 1
+        }
+      },
+      "input": {
+        "count": 33,
+        "fingerprints": {
+          "<input :checked=\"tlsPicked.includes(a.address)\" @change=\"toggleTlsAddress(a.address, $event.target.checked)\" type=\"checkbox\">": 1,
+          "<input :disabled=\"gwRunning\" autocomplete=\"off\" placeholder=\"оставь пустым — дадим команду для терминала\" type=\"password\" v-model=\"gw.sudoPassword\">": 1,
+          "<input :disabled=\"gwRunning\" autocomplete=\"off\" placeholder=\"пароль из письма хостера\" type=\"password\" v-model=\"gw.sshPassword\">": 1,
+          "<input :disabled=\"gwRunning\" autocomplete=\"off\" placeholder=\"токен с Zone:Read и DNS:Edit\" type=\"password\" v-model=\"gw.cloudflareToken\">": 1,
+          "<input :disabled=\"gwRunning\" max=\"65535\" min=\"1\" type=\"number\" v-model.number=\"gw.sshPort\">": 1,
+          "<input :disabled=\"gwRunning\" placeholder=\"203.0.113.10\" v-model=\"gw.gateway\">": 1,
+          "<input :disabled=\"gwRunning\" placeholder=\"cockpit.example.com\" v-model=\"gw.domain\">": 1,
+          "<input :disabled=\"gwRunning\" placeholder=\"root\" v-model=\"gw.sshUser\">": 1,
+          "<input :disabled=\"gwRunning\" placeholder=\"для писем об истечении сертификата\" v-model=\"gw.acmeEmail\">": 1,
+          "<input :disabled=\"gwRunning\" type=\"checkbox\" v-model=\"gwHostOk\">": 1,
+          "<input :disabled=\"s.disabled === true\" :max=\"s.max\" :min=\"s.min\" :step=\"s.step || 1\" :value=\"s.value\" @change=\"(e) => saveProviderSetting(p, s, Number(e.target.value))\" class=\"pvsetrange\" type=\"range\">": 1,
+          "<input :disabled=\"s.disabled === true\" :min=\"s.kind === 'text' ? undefined : (Number(s.min) || 512)\" :type=\"s.kind === 'range' ? 'number' : s.kind\" :value=\"s.value\" @blur=\"(e) => commitProviderSetting(p, s, e)\" @keydown.enter.prevent=\"(e) => { commitProviderSetting(p, s, e); e.target.blur(); }\" class=\"pvsetinput\">": 1,
+          "<input :disabled=\"trustedDirectoriesBusy\" @keyup.enter=\"addTrustedDirectory\" aria-label=\"Абсолютный путь к доверенному каталогу\" placeholder=\"/home/user/Workspace\" v-model=\"trustedDirectoryInput\">": 1,
+          "<input :placeholder=\"configured ? '•••••• (задан, введите новый для замены)' : 'пароль портала'\" autocomplete=\"current-password\" type=\"password\" v-model=\"form.password\">": 1,
+          "<input :value=\"companionOutputPrefs.rate\" @input=\"setCompanionOutputPref('rate', Number($event.target.value))\" data-testid=\"companion-rate\" max=\"1.3\" min=\"0.7\" step=\"0.1\" type=\"range\">": 1,
+          "<input :value=\"companionOutputPrefs.volume\" @input=\"setCompanionOutputPref('volume', Number($event.target.value))\" data-testid=\"companion-volume\" max=\"1\" min=\"0\" step=\"0.05\" type=\"range\">": 1,
+          "<input :value=\"preset.id\" type=\"radio\" v-model=\"speech.quality\">": 1,
+          "<input :value=\"preset.id\" type=\"radio\" v-model=\"speech.videoQuality\">": 1,
+          "<input :value=\"speech.beamSize ?? ''\" @input=\"setNullableInteger('beamSize', $event.target.value, 1, 10)\" max=\"10\" min=\"1\" placeholder=\"Как в пресете\" type=\"number\">": 1,
+          "<input autocomplete=\"current-password\" type=\"password\" v-model=\"acc.currentPassword\">": 1,
+          "<input autocomplete=\"new-password\" placeholder=\"минимум 8 символов\" type=\"password\" v-model=\"acc.password\">": 1,
+          "<input autocomplete=\"new-password\" type=\"password\" v-model=\"acc.password2\">": 1,
+          "<input autocomplete=\"username\" placeholder=\"user@example.com\" v-model=\"form.login\">": 1,
+          "<input autocomplete=\"username\" placeholder=\"необязательно\" v-model=\"acc.login\">": 1,
+          "<input class=\"inp\" type=\"text\" v-else v-model=\"p.values[s.key]\">": 1,
+          "<input max=\"5000\" min=\"100\" step=\"100\" type=\"number\" v-model.number=\"speech.vadSilenceMs\">": 1,
+          "<input placeholder=\"https://ваш-портал.bitrix24.ru\" v-model=\"form.baseUrl\">": 1,
+          "<input type=\"checkbox\" v-model=\"p.values[s.key]\">": 1,
+          "<input type=\"checkbox\" v-model=\"speech.conditionOnPreviousText\">": 1,
+          "<input type=\"radio\" v-model=\"speech.browserProcessing\" value=\"auto\">": 1,
+          "<input type=\"radio\" v-model=\"speech.browserProcessing\" value=\"local\">": 1,
+          "<input type=\"radio\" v-model=\"speech.engine\" value=\"browser\">": 1,
+          "<input type=\"radio\" v-model=\"speech.engine\" value=\"whisper\">": 1
+        }
+      },
+      "select": {
+        "count": 12,
+        "fingerprints": {
+          "<select :disabled=\"companionRunBusy\" :value=\"companionModelValue\" @change=\"setCompanionModel($event.target.value)\" class=\"inp\" data-testid=\"companion-model-select\" id=\"companion-model\">": 1,
+          "<select :disabled=\"companionRunBusy\" :value=\"companionRun.effort\" @change=\"setCompanionEffort($event.target.value)\" class=\"inp\" data-testid=\"companion-effort-select\" id=\"companion-effort\">": 1,
+          "<select :disabled=\"factoryDebugBusy\" :value=\"factoryDebug?.effective || 'off'\" @change=\"saveFactoryDebug($event.target.value)\" class=\"settings-select\">": 1,
+          "<select :value=\"companionOutputPrefs.voiceURI\" @change=\"setCompanionOutputPref('voiceURI', $event.target.value)\" class=\"settings-select\" data-testid=\"companion-voice-select\">": 1,
+          "<select :value=\"p.values[s.key]?.effort || ''\" @change=\"setPluginEffort(p, s.key, $event.target.value)\" class=\"inp\">": 1,
+          "<select :value=\"pluginModelValue(p, s.key)\" @change=\"setPluginModel(p, s.key, $event.target.value)\" class=\"inp\">": 1,
+          "<select :value=\"speech.computeType || ''\" @change=\"speech.computeType = $event.target.value || null\" class=\"speech-select\">": 1,
+          "<select :value=\"speech.model || ''\" @change=\"speech.model = $event.target.value || null\" class=\"speech-select\">": 1,
+          "<select :value=\"speech.videoModel || ''\" @change=\"speech.videoModel = $event.target.value || null\" class=\"speech-select\">": 1,
+          "<select class=\"inp\" v-if=\"s.type === 'select'\" v-model=\"p.values[s.key]\">": 1,
+          "<select class=\"speech-select\" data-testid=\"speech-device\" v-model=\"speech.device\">": 1,
+          "<select class=\"speech-select\" v-model=\"speech.language\">": 1
+        }
+      },
+      "textarea": {
+        "count": 2,
+        "fingerprints": {
+          "<textarea data-testid=\"speech-dictionary\" maxlength=\"800\" placeholder=\"По одному термину или фразе на строку\\nFastify\\nworktree\\nБитрикс24\" rows=\"6\" v-model=\"speech.dictionary\">": 1,
+          "<textarea data-testid=\"speech-video-prompt\" maxlength=\"600\" placeholder=\"Пусто — расшифровка выйдет сплошным потоком без знаков препинания\" rows=\"3\" v-model=\"speech.videoInitialPrompt\">": 1
+        }
+      }
+    },
+    "web/src/views/TaskModal.vue": {
+      "button": {
+        "count": 16,
+        "fingerprints": {
+          "<button :class=\"running ? 'warn' : 'primary'\" :disabled=\"busy === 'timer'\" @click=\"toggleTimer\" class=\"btn\">": 1,
+          "<button :class=\"{ active: mtab === 'comments' }\" @click=\"mtab = 'comments'\" class=\"mtab\">": 1,
+          "<button :class=\"{ active: mtab === 'triage' }\" @click=\"mtab = 'triage'\" class=\"mtab\">": 1,
+          "<button :class=\"{ busy: sandboxBusy }\" :disabled=\"sandboxBusy\" :title=\"`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`\" @click=\"sandboxDown\" class=\"btn sbdown\" v-if=\"sandbox\">": 1,
+          "<button :class=\"{ stalled: conveyor.stall }\" :title=\"conveyor.stall ? `${conveyor.stall.title} — ${conveyor.stall.hint}` : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`\" @click=\"openConveyor\" class=\"btn onconv\" v-if=\"conveyor\">": 1,
+          "<button :disabled=\"!!busy || launchOptionsBusy || !!launchOpts.error || !!launchValidationError\" @click=\"launchSelected\" aria-label=\"Запустить задачу\" class=\"btn primary\" type=\"button\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"launchForm = null\" class=\"btn\" type=\"button\">": 1,
+          "<button :disabled=\"busy === 'clarify' || triageBusy || clarifyUploading || (!clarifyText.trim() && !clarifyAtts.length)\" @click=\"sendClarify\" class=\"btn tbtn\">": 1,
+          "<button :disabled=\"busy === 'comment' || !commentText.trim()\" @click=\"sendComment\" class=\"btn\">": 1,
+          "<button :disabled=\"busy === 'complete'\" @click=\"complete\" class=\"btn good\">": 1,
+          "<button :disabled=\"busy === 'launch' || launchOptionsBusy || !!launchForm\" @click=\"openLaunch\" class=\"btn launch\" title=\"Открыть параметры запуска фабрики по задаче\" type=\"button\" v-else>": 1,
+          "<button :disabled=\"triageBusy || busy === 'analyze'\" @click=\"analyzeNow\" class=\"btn tbtn\">": 1,
+          "<button @click=\"dropClarifyAtt(a.file)\" class=\"attx\" title=\"Убрать\">": 1,
+          "<button @click=\"refresh\" aria-label=\"Обновить задачу\" class=\"icon\" title=\"Обновить\">": 1,
+          "<button @click=\"showNote = !showNote\" class=\"tnote-toggle\" v-if=\"triage.note\">": 1,
+          "<button @click=\"ui.close()\" aria-label=\"Закрыть задачу\" class=\"icon\" title=\"Закрыть\">": 1
+        }
+      },
+      "input": {
+        "count": 2,
+        "fingerprints": {
+          "<input @change=\"onClarifyFiles\" accept=\"image/*\" hidden multiple type=\"file\">": 1,
+          "<input autocomplete=\"off\" class=\"linp\" id=\"launch-diagnosis-signal\" maxlength=\"200\" placeholder=\"Коротко: что именно воспроизводится\" v-model=\"launchForm.diagnosisSignal\">": 1
+        }
+      },
+      "select": {
+        "count": 4,
+        "fingerprints": {
+          "<select :disabled=\"launchOptionsBusy || busy === 'launch'\" @change=\"changeLaunchProfile\" class=\"lsel\" id=\"launch-profile\" v-model=\"launchForm.profile\">": 1,
+          "<select :disabled=\"launchOptionsBusy || busy === 'launch'\" @change=\"changeLaunchRoute\" class=\"lsel\" id=\"launch-route\" v-model=\"launchForm.route\">": 1,
+          "<select :disabled=\"launchOptionsBusy || busy === 'launch'\" class=\"lsel\" id=\"launch-runner\" v-model=\"launchForm.runner\">": 1,
+          "<select class=\"lsel\" id=\"launch-diagnosis-kind\" v-model=\"launchForm.diagnosisKind\">": 1
+        }
+      },
+      "textarea": {
+        "count": 4,
+        "fingerprints": {
+          "<textarea @keydown.ctrl.enter.prevent=\"sendClarify\" @paste=\"onClarifyPaste\" placeholder=\"Ответ на вопросы — сохранится локально для агентов, в B24 не уйдёт… (Ctrl+V — скрин, Ctrl+Enter — отправить)\" rows=\"2\" v-model=\"clarifyText\">": 1,
+          "<textarea class=\"mono\" id=\"launch-instrumentation\" placeholder=\"service:src/path/file.ext\" rows=\"3\" spellcheck=\"false\" v-model=\"launchForm.instrumentationFiles\">": 1,
+          "<textarea placeholder=\"Добавить комментарий…\" rows=\"2\" v-model=\"commentText\">": 1,
+          "<textarea placeholder=\"Например: экспорт не падает на выборке 10 000 строк\\nв отчёте появилась колонка «Менеджер»\" rows=\"2\" v-model=\"launchForm.criteria\">": 1
+        }
+      }
+    },
+    "web/src/views/TelegramView.vue": {
+      "button": {
+        "count": 14,
+        "fingerprints": {
+          "<button :disabled=\"!!busy\" @click=\"addRule\" class=\"btn primary\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"addRule\" class=\"btn\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"disconnect\" class=\"btn danger disconnect\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"loadRules\" class=\"btn\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"pultDisable\" class=\"btn danger\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"recheck\" class=\"btn\">": 1,
+          "<button :disabled=\"!!busy\" @click=\"saveRules\" class=\"btn primary\">": 1,
+          "<button :disabled=\"!canConnect || !token.trim() || !!busy\" @click=\"connect\" class=\"btn primary connect-btn\">": 1,
+          "<button :disabled=\"!pultChoice\" @click=\"pultRequest\" class=\"btn primary\">": 1,
+          "<button :disabled=\"!pultCode.trim()\" @click=\"pultConfirm\" class=\"btn primary\">": 1,
+          "<button :disabled=\"loading\" @click=\"loadChats\" class=\"btn compact\">": 1,
+          "<button :disabled=\"topicsBusy(r)\" @click=\"loadTopicsForRule(r, true)\" class=\"link-btn\" type=\"button\" v-if=\"ruleChatId(r)\">": 1,
+          "<button @click=\"rules.splice(i, 1)\" class=\"icon-btn danger x\" title=\"Убрать правило\">": 1,
+          "<button @click=\"saveService\" class=\"btn primary\" v-if=\"serviceDirty\">": 1
+        }
+      },
+      "input": {
+        "count": 9,
+        "fingerprints": {
+          "<input :checked=\"agentSearchStateKnown && r.agentSearch === true\" :disabled=\"dirty || !providerWritable || !!busy || !agentSearchStateKnown || !rulesPolicyFingerprint\" @change=\"setAgentSearch(r, $event)\" type=\"checkbox\">": 1,
+          "<input :checked=\"autoOf(r).enabled\" @change=\"setAuto(r, 'enabled', $event.target.checked)\" type=\"checkbox\">": 1,
+          "<input :value=\"autoOf(r).maxPerDay\" @change=\"setCap(r, $event.target.value)\" class=\"inp num-f\">": 1,
+          "<input :value=\"pctOf(r)\" @change=\"setPct(r, $event.target.value)\" class=\"inp num-f\">": 1,
+          "<input @keydown.enter=\"connect\" autocomplete=\"off\" class=\"inp\" placeholder=\"8123456789:AA…\" spellcheck=\"false\" type=\"password\" v-model=\"token\">": 1,
+          "<input @keyup.enter=\"pultConfirm\" class=\"code-input\" inputmode=\"numeric\" maxlength=\"6\" placeholder=\"код из лички\" v-model=\"pultCode\">": 1,
+          "<input class=\"inp thin\" inputmode=\"numeric\" placeholder=\"тема: например 42\" v-model=\"r.threadId\">": 1,
+          "<input class=\"inp thin\" placeholder=\"имя_чата\" spellcheck=\"false\" v-model=\"r.username\">": 1,
+          "<input type=\"checkbox\" v-model=\"r.notifyTaskCreated\">": 1
+        }
+      },
+      "select": {
+        "count": 9,
+        "fingerprints": {
+          "<select :disabled=\"!ruleChatId(r)\" :value=\"topicChoice(r)\" @change=\"setThread(r, $event.target.value)\" @focus=\"loadTopicsForRule(r, true)\" class=\"sel thin topic-select\">": 1,
+          "<select :value=\"chatMode(r)\" @change=\"setChat(r, $event.target.value)\" class=\"sel chat-select\">": 1,
+          "<select class=\"sel project-select\" v-model=\"r.project\">": 1,
+          "<select class=\"sel thin b24-group-select\" v-model=\"r.b24.groupId\">": 1,
+          "<select class=\"sel thin\" v-model.number=\"r.b24.priority\">": 1,
+          "<select class=\"sel thin\" v-model=\"r.kind\">": 1,
+          "<select class=\"sel\" v-model=\"pultChoice\">": 1,
+          "<select class=\"sel\" v-model=\"r.b24.responsibleId\">": 1,
+          "<select class=\"sel\" v-model=\"serviceChoice\">": 1
+        }
+      }
+    },
+    "web/src/views/VideoView.vue": {
+      "button": {
+        "count": 13,
+        "fingerprints": {
+          "<button :aria-expanded=\"showTranscript\" @click=\"showTranscript = !showTranscript\" class=\"fold\">": 1,
+          "<button :class=\"{ on: view === 'text' }\" @click=\"view = 'text'\" class=\"tab\">": 1,
+          "<button :class=\"{ on: view === 'turns' }\" @click=\"view = 'turns'\" class=\"tab\">": 1,
+          "<button :disabled=\"creating\" @click=\"createAll\" class=\"btn\">": 1,
+          "<button :disabled=\"d.creating || creating || !d.title.trim()\" @click=\"createOne(d)\" class=\"btn success small\">": 1,
+          "<button :disabled=\"planning\" @click=\"planTasks\" class=\"btn primary analyze\">": 1,
+          "<button @click=\"addDraft\" class=\"btn icon-btn\">": 1,
+          "<button @click=\"copyText\" class=\"btn\">": 1,
+          "<button @click=\"d.editing = !d.editing\" class=\"btn small\">": 1,
+          "<button @click=\"d.frameOff = !d.frameOff\" class=\"btn small\" v-if=\"!d.createdId\">": 1,
+          "<button @click=\"downloadText\" class=\"btn\">": 1,
+          "<button @click=\"removeDraft(i)\" aria-label=\"Удалить черновик\" class=\"del\" title=\"удалить\" v-if=\"!d.createdId\">": 1,
+          "<button @click=\"useFullText\" class=\"btn\">": 1
+        }
+      },
+      "input": {
+        "count": 3,
+        "fingerprints": {
+          "<input :disabled=\"!!d.createdId\" class=\"dtitle\" placeholder=\"Заголовок задачи\" v-model=\"d.title\">": 1,
+          "<input :disabled=\"planning\" class=\"hint\" placeholder=\"Что учесть при разборе (необязательно)\" v-model=\"planHint\">": 1,
+          "<input :disabled=\"uploading || (job && job.status === 'running')\" @change=\"onFile\" accept=\"video/*,audio/*\" multiple type=\"file\">": 1
+        }
+      },
+      "select": {
+        "count": 8,
+        "fingerprints": {
+          "<select :disabled=\"!!d.createdId\" class=\"mini\" title=\"исполнитель\" v-model=\"d.responsibleId\">": 1,
+          "<select :disabled=\"!!d.createdId\" class=\"mini\" title=\"постановщик — от кого задача\" v-model=\"d.createdById\">": 1,
+          "<select :disabled=\"!!d.createdId\" class=\"mini\" title=\"приоритет\" v-model.number=\"d.priority\">": 1,
+          "<select :disabled=\"!!d.createdId\" class=\"mini\" title=\"проект\" v-model=\"d.groupId\">": 1,
+          "<select v-model.number=\"defPriority\">": 1,
+          "<select v-model=\"defCreator\">": 1,
+          "<select v-model=\"defGroup\">": 1,
+          "<select v-model=\"defResponsible\">": 1
+        }
+      },
+      "textarea": {
+        "count": 1,
+        "fingerprints": {
+          "<textarea :disabled=\"!!d.createdId\" placeholder=\"Описание (клик по реплике добавит её текст)\" rows=\"5\" v-model=\"d.description\">": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatList.vue": {
+      "button": {
+        "count": 4,
+        "fingerprints": {
+          "<button :aria-label=\"r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'\" :class=\"{ danger: r.archived }\" :title=\"r.archived ? 'Удалить навсегда' : 'Переместить в архив'\" @click.stop=\"del(r)\">": 1,
+          "<button @click.stop=\"restore(r)\" aria-label=\"Достать чат из архива\" class=\"restore\" title=\"Достать из архива\" v-if=\"r.archived\">": 1,
+          "<button @click.stop=\"startEdit(r)\" title=\"Переименовать\">": 1,
+          "<button @click=\"newChat\" class=\"new\" title=\"Новый чат\">": 1
+        }
+      },
+      "input": {
+        "count": 2,
+        "fingerprints": {
+          "<input :placeholder=\"showArchived ? 'Поиск в архиве' : 'Поиск'\" class=\"q\" v-model=\"q\">": 1,
+          "<input @blur=\"commitEdit\" @click.stop @keydown.enter=\"commitEdit\" @keydown.esc=\"editId = null\" class=\"edit\" ref=\"editEl\" v-if=\"editId === r.id\" v-model=\"editVal\">": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatPermission.vue": {
+      "button": {
+        "count": 3,
+        "fingerprints": {
+          "<button :class=\"isAllowChoice(c) ? 'p-ok' : 'p-no'\" :key=\"c.id\" @click=\"choose(c)\" v-for=\"c in choices\">": 1,
+          "<button @click=\"emit('answer', true, remember)\" class=\"p-ok\">": 1,
+          "<button @click=\"reject()\" class=\"p-no\">": 1
+        }
+      },
+      "input": {
+        "count": 1,
+        "fingerprints": {
+          "<input type=\"checkbox\" v-model=\"remember\">": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatQuestion.vue": {
+      "button": {
+        "count": 4,
+        "fingerprints": {
+          "<button :class=\"{ on: isPicked(qi, o.label) }\" :key=\"o.label\" @click=\"pick(qi, o.label)\" class=\"q-opt\" v-for=\"o in q.options || []\">": 1,
+          "<button :class=\"{ on: state[qi].own }\" @click=\"state[qi].own = !state[qi].own\" class=\"q-opt own\" v-if=\"freeText(q)\">": 1,
+          "<button :disabled=\"!ready\" @click=\"submit\" class=\"q-ok\">": 1,
+          "<button @click=\"emit('skip')\" class=\"q-no\">": 1
+        }
+      },
+      "input": {
+        "count": 1,
+        "fingerprints": {
+          "<input @keydown.enter.prevent=\"ready && submit()\" class=\"q-own\" placeholder=\"напиши своими словами\" v-if=\"freeText(q) && state[qi].own\" v-model=\"state[qi].text\">": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatSession.vue": {
+      "button": {
+        "count": 18,
+        "fingerprints": {
+          "<button :aria-disabled=\"ctxRingDisabled ? 'true' : undefined\" :aria-label=\"ctxTitle\" :class=\"[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]\" @click=\"onCtxClick\" class=\"ctx-ring\">": 1,
+          "<button :aria-label=\"recording ? 'Остановить диктовку' : 'Начать диктовку'\" :aria-pressed=\"recording\" :class=\"{ rec: recording, wait: transcribing || preparingSpeech || browserInstalling || drainingSpeech }\" :disabled=\"transcribing || drainingSpeech\" @click=\"toggleMic\" class=\"tool mic\">": 1,
+          "<button :class=\"{ done: copiedIdx === i }\" :title=\"copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'\" @click=\"copyMsg(m, i)\" class=\"copy\" v-if=\"m.text\">": 1,
+          "<button :class=\"{ on: item.nav >= 0 && item.nav === cmdIndex, off: item.run === 'none' }\" :disabled=\"item.run === 'none'\" @click=\"runCommand(item)\" @mouseenter=\"item.nav >= 0 && (cmdIndex = item.nav)\" class=\"cmd\" v-else>": 1,
+          "<button :class=\"{ onconv: onConveyor }\" :disabled=\"frozen\" @click=\"toConveyor\" class=\"act\" v-if=\"sess.messages?.length\">": 1,
+          "<button :disabled=\"frozen || debugOpening\" @click=\"openDebug\" class=\"act debug-act\">": 1,
+          "<button :disabled=\"frozen || speechBusy || (!input.trim() && !pending.length)\" :title=\"speechBusy ? 'Сначала заверши диктовку' : frozen ? frozenHint : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'\" @click=\"submit\" class=\"send\">": 1,
+          "<button :disabled=\"sess.stopping\" :title=\"sess.stopping ? 'Останавливаю…' : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'\" @click=\"chat.stop(sid)\" class=\"send stop\" v-if=\"sess.sending || sess.compacting\">": 1,
+          "<button @click=\"confirmBrowserConsent\" class=\"speech-primary\" data-testid=\"speech-consent-browser\" type=\"button\">": 1,
+          "<button @click=\"emit('back')\" aria-label=\"К списку чатов\" class=\"back\" title=\"К списку чатов\">": 1,
+          "<button @click=\"fileInput.click()\" class=\"tool\" title=\"Приложить файл (или перетащи/вставь из буфера)\">": 1,
+          "<button @click=\"installBrowserLanguage\" class=\"speech-primary\" data-testid=\"speech-install-browser\" type=\"button\">": 1,
+          "<button @click=\"removePending(i)\" class=\"x\" title=\"Убрать\">": 1,
+          "<button @click=\"startTitleEdit\" aria-label=\"Переименовать чат\" class=\"tedit\" title=\"Переименовать чат\">": 1,
+          "<button @click=\"stopSpeech({ cancel: true })\" type=\"button\">": 2,
+          "<button @click=\"useWhisperFromPrompt\" data-testid=\"speech-consent-whisper\" type=\"button\">": 1,
+          "<button @click=\"useWhisperFromPrompt\" data-testid=\"speech-install-whisper\" type=\"button\">": 1
+        }
+      },
+      "input": {
+        "count": 2,
+        "fingerprints": {
+          "<input @blur=\"commitTitle\" @keydown.enter=\"commitTitle\" @keydown.esc=\"editingTitle = false\" class=\"ctitle-edit\" ref=\"titleEl\" v-if=\"editingTitle\" v-model=\"titleVal\">": 1,
+          "<input @change=\"onPick\" hidden multiple ref=\"fileInput\" type=\"file\">": 1
+        }
+      },
+      "select": {
+        "count": 3,
+        "fingerprints": {
+          "<select :disabled=\"frozen || isCompanion\" :title=\"currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` + (currentModel.contextUnverified ? ' · окно не подтверждено' : '') : 'Модель'\" :value=\"modelId\" @change=\"onModelChange\">": 1,
+          "<select :disabled=\"frozen || sess.purpose === 'companion'\" :value=\"sess.taskId || ''\" @change=\"onTaskChange\">": 1,
+          "<select :disabled=\"frozen\" :title=\"modeHint\" :value=\"currentMode\" @change=\"chat.setMode(sid, $event.target.value)\">": 1
+        }
+      },
+      "textarea": {
+        "count": 1,
+        "fingerprints": {
+          "<textarea :placeholder=\"recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'\" @keydown=\"onKey\" @paste=\"onPaste\" ref=\"taEl\" rows=\"2\" v-model=\"input\">": 1
+        }
+      }
+    }
+  },
+  "nonSemanticActivations": {
+    "web/src/views/DiffModal.vue": {
+      "click:div": {
+        "count": 1,
+        "fingerprints": {
+          "<div @click.self=\"diff.close()\" class=\"dm-overlay\" v-if=\"diff.open\">": 1
+        }
+      }
+    },
+    "web/src/views/DocumentModal.vue": {
+      "click:div": {
+        "count": 1,
+        "fingerprints": {
+          "<div @click.self=\"preview.close()\" class=\"document-overlay\" v-if=\"preview.visible\">": 1
+        }
+      }
+    },
+    "web/src/views/PipelineView.vue": {
+      "click:div": {
+        "count": 3,
+        "fingerprints": {
+          "<div @click.self=\"closeStage()\" class=\"soverlay\" v-if=\"stage\">": 1,
+          "<div @click=\"stageDocOpen = !stageDocOpen\" class=\"secth doct\">": 1,
+          "<div @click=\"stageLogOpen = !stageLogOpen\" class=\"secth doct\">": 1
+        }
+      }
+    },
+    "web/src/views/SettingsView.vue": {
+      "click:code": {
+        "count": 1,
+        "fingerprints": {
+          "<code @click=\"installInTerminal(p)\" class=\"click\" title=\"Кликни — откроется терминал с введённой командой\">": 1
+        }
+      }
+    },
+    "web/src/views/TaskModal.vue": {
+      "click:div": {
+        "count": 1,
+        "fingerprints": {
+          "<div @click.self=\"ui.close()\" class=\"overlay\" v-if=\"taskId\">": 1
+        }
+      }
+    },
+    "web/src/views/VideoView.vue": {
+      "click:div": {
+        "count": 1,
+        "fingerprints": {
+          "<div :key=\"i\" @click=\"appendSegment(s)\" class=\"seg\" title=\"добавить в черновик задачи\" v-for=\"(s, i) in segments\">": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatList.vue": {
+      "click:div": {
+        "count": 1,
+        "fingerprints": {
+          "<div :class=\"{ cur: r.id === chat.activeId, wait: r.waiting }\" :key=\"r.id\" @click=\"select(r)\" @dblclick=\"startEdit(r)\" class=\"row\" v-for=\"r in rows\">": 1
+        }
+      },
+      "dblclick:div": {
+        "count": 1,
+        "fingerprints": {
+          "<div :class=\"{ cur: r.id === chat.activeId, wait: r.waiting }\" :key=\"r.id\" @click=\"select(r)\" @dblclick=\"startEdit(r)\" class=\"row\" v-for=\"r in rows\">": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatSession.vue": {
+      "dblclick:span": {
+        "count": 1,
+        "fingerprints": {
+          "<span :title=\"chat.tabLabel(sess)\" @dblclick=\"startTitleEdit\" class=\"ctitle\">": 1
+        }
+      }
+    },
+    "web/src/views/pipeline/FactoryGraph.vue": {
+      "click:g": {
+        "count": 1,
+        "fingerprints": {
+          "<g :class=\"[`ns-${n.status}`, `nt-${n.kind}`, { clickable: interactive || !reference }]\" :key=\"n.nid\" @click=\"(interactive || !reference) && emit('node', n, $event)\" class=\"ng\" v-for=\"n in nodeEls\">": 1
+        }
+      }
+    }
+  },
+  "scriptControls": {
+    "web/src/shared/ui/ProjectSwitcher.vue": {
+      "system:prompt": {
+        "count": 1,
+        "fingerprints": {
+          "prompt('id нового проекта (строчные латиница/цифры/-/_):')": 1
+        }
+      }
+    },
+    "web/src/views/SettingsView.vue": {
+      "system:confirm": {
+        "count": 1,
+        "fingerprints": {
+          "confirm('Разлогинить все устройства, включая это?')": 1
+        }
+      }
+    },
+    "web/src/views/VideoView.vue": {
+      "createElement:textarea": {
+        "count": 1,
+        "fingerprints": {
+          "document.createElement('textarea')": 1
+        }
+      }
+    },
+    "web/src/views/chat/ChatSession.vue": {
+      "createElement:textarea": {
+        "count": 1,
+        "fingerprints": {
+          "document.createElement('textarea')": 1
+        }
+      }
+    }
+  },
+  "version": 1
+}

@@ -304,7 +304,7 @@ test('consent перед start, prefixed API, interim/final и generation пос
   assert.equal(textarea.element.value, 'ручной текст', 'interim не затирает ввод');
   const interim = wrapper.get('[data-testid="speech-interim"]');
   assert.match(interim.text(), /промежуток/);
-  assert.equal(interim.element.nextElementSibling, wrapper.get('.composer').element,
+  assert.equal(interim.element.nextElementSibling === wrapper.get('.composer').element, true,
     'растущая строка «Слышу» остаётся над полем ввода');
 
   const finalEvent = { resultIndex: 0, results: [recognitionResult('финал', true)] };

@@ -204,7 +204,7 @@ test('HelpTip не добавляет второй Tab-stop составному
   // Подсказка телепортирована в <body>: искать её в поддереве компонента нельзя,
   // зато её не обрежет ни один скролл-контейнер страницы.
   const tip = browser.document.querySelector('[role="tooltip"]');
-  assert.equal(tip.parentElement, browser.document.body);
+  assert.equal(tip.parentElement === browser.document.body, true);
   assert.equal(tip.textContent.trim(), 'Полное название задачи');
   await wrapper.find('.ht').trigger('mouseenter');
   assert.equal(tip.classList.contains('on'), true);

@@ -1,38 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
-const STEP_LIST_PATH = fileURLToPath(new URL('../../web/src/views/chat/StepList.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const DIFF_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/diff.js', import.meta.url),
-)).href;
+const STEP_LIST_PATH = webFile('src/views/chat/StepList.vue');
+const ACTION_STYLES_PATH = webFile('src/styles/components/actions.css');
 
 async function compileStepList() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(STEP_LIST_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: STEP_LIST_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, {
-    id: 'data-v-step-list-test',
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace(
-      "from '../../shared/diff.js'",
-      `from "${DIFF_URL}"`,
-    );
-
-  const moduleUrl = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
-  return (await import(moduleUrl)).default;
+  return compileVue(STEP_LIST_PATH);
 }
 
 test('StepList раскрывает Bash-команду целиком, не ограничиваясь заголовком', async () => {
@@ -73,4 +50,28 @@ test('StepList раскрывает Bash-команду целиком, не о�
   assert.equal(wrapper.find('.ttl').attributes('title'), command);
   await wrapper.find('.head').trigger('click');
   assert.equal(wrapper.find('.body.command').text(), command);
+});
+
+test('StepList сохраняет полноширинную компактную строку внутри UiDisclosureButton', async () => {
+  const [component, actions] = await Promise.all([
+    readFile(STEP_LIST_PATH, 'utf8'),
+    readFile(ACTION_STYLES_PATH, 'utf8'),
+  ]);
+
+  assert.match(
+    actions,
+    /\.ui-disclosure-button\s*>\s*\.ui-button__content\s*\{[^}]*width:\s*100%/s,
+  );
+  assert.match(
+    actions,
+    /\.ui-disclosure-button\s+\.ui-button__label\s*\{[^}]*display:\s*inline-flex/s,
+  );
+  assert.match(component, /\.head\s*\{[^}]*min-height:\s*0[^}]*padding:\s*3px 4px/s);
+});
+
+test('StepList не схлопывает пункты обновлённого плана в одну строку', async () => {
+  const component = await readFile(STEP_LIST_PATH, 'utf8');
+
+  assert.match(component, /\.note\s*\{[^}]*white-space:\s*pre-line/s);
+  assert.match(component, /\.note\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 });

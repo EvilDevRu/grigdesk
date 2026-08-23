@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Window } from '../../web/node_modules/happy-dom/lib/index.js';
+import { compileModule, webFile } from './helpers/compile-vue.js';
 
 const browser = new Window({ url: 'http://cockpit.test/' });
 for (const [key, value] of Object.entries({
@@ -15,7 +16,9 @@ for (const [key, value] of Object.entries({
   Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
 }
 
-const { activeLayerId, registerLayer } = await import('../../web/src/shared/ui/layer-stack.js');
+const { activeLayerId, registerLayer } = await compileModule(
+  webFile('src/shared/ui/layer-stack.js'),
+);
 
 function escape(target = document.body) {
   const event = new browser.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });

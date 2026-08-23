@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "allowJs": false,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "types": ["vite/client"]
+  },
+  "include": [
+    "src/ui.ts",
+    "src/components/**/*.vue",
+    "src/composables/**/*.ts",
+    "src/services/**/*.ts",
+    "src/types/**/*.ts",
+    "dev/ui-gallery/**/*.vue",
+    "dev/ui-gallery/**/*.ts"
+  ]
+}

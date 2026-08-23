@@ -1,7 +1,69 @@
+<template>
+  <div class="diff-core">
+    <div v-if="showLoading" class="state"><UiSpinner role="large" label="Считаю диф" /><p class="muted">Считаю диф…</p></div>
+    <div v-else-if="error && !repos.length" class="state"><p class="bad">{{ error }}</p><UiButton variant="solid" tone="accent" @click="load">Повторить</UiButton></div>
+    <div v-else-if="!files.length" class="state">
+      <p>Несохранённых изменений нет</p>
+      <p class="muted sm">Правки задачи уже закоммичены — смотри их в PR.</p>
+    </div>
+
+    <div v-else class="split">
+      <!-- Дерево изменённых файлов (иерархия папок, как в VS Code) -->
+      <aside class="filelist">
+        <div v-for="r in treeRepos" :key="r.name" class="grp">
+          <div class="grphead">
+            <span class="badge" :class="r.name">{{ r.name === 'be' ? 'Бэкенд' : 'Фронт' }}</span>
+            <span class="branch mono">{{ r.branch }}</span>
+          </div>
+          <template v-for="row in r.rows" :key="(row.type === 'dir' ? 'd:' + row.key : 'f:' + r.name + ':' + row.file.path)">
+            <UiPressable v-if="row.type === 'dir'" class="trow dir"
+                         :style="{ paddingLeft: indent(row.depth) }"
+                         :aria-expanded="String(!collapsedDirs.has(row.key))"
+                         @click="toggleDir(row.key)">
+              <span class="chev">{{ collapsedDirs.has(row.key) ? '▸' : '▾' }}</span>
+              <span class="dname">{{ row.name }}</span>
+            </UiPressable>
+            <UiPressable v-else class="trow frow" :class="{ sel: selectedKey === `${r.name}:${row.file.path}` }"
+                         :pressed="selectedKey === `${r.name}:${row.file.path}`"
+                         :style="{ paddingLeft: indent(row.depth) }" @click="selectedKey = `${r.name}:${row.file.path}`">
+              <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
+              <span class="nm">{{ row.name }}</span>
+              <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
+            </UiPressable>
+          </template>
+        </div>
+      </aside>
+
+      <!-- Диф-редактор -->
+      <section class="editorwrap">
+        <div class="ehead">
+          <template v-if="selected">
+            <span class="st" :class="selected.status">{{ STLABEL[selected.status] || selected.status }}</span>
+            <span class="epath mono">{{ selected.path }}</span>
+            <span v-if="selected.binary" class="note">бинарный</span>
+            <span v-else-if="selected.tooBig" class="note">слишком большой — превью отключено</span>
+          </template>
+          <span class="grow"></span>
+          <UiToggleButton v-model="sideBySide" class="layout-toggle"
+                          :title="sideBySide ? 'Рядом' : 'В строку'">
+            {{ sideBySide ? '⇆ рядом' : '≡ в строку' }}
+          </UiToggleButton>
+          <UiIconButton role="embedded" label="Обновить" title="Обновить"
+                        :loading="loading" @click="load">↻</UiIconButton>
+        </div>
+        <div ref="host" class="editor"></div>
+      </section>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';
 import { api } from '../../shared/api-client.js';
+import {
+  UiButton, UiIconButton, UiPressable, UiSpinner, UiToggleButton,
+} from '../../ui';
 
 // Ядро дифа задачи (дерево файлов + Monaco). Переиспользуется на роуте /diff и в модале.
 // Обвязка Monaco (воркер, тема, языки) — общая с плагином «Код»: shared/monaco.js.
@@ -124,66 +186,12 @@ watch(tid, () => { selectedKey.value = ''; load(); });
 onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(); });
 </script>
 
-<template>
-  <div class="diff-core">
-    <div v-if="showLoading" class="state"><span class="spin big"></span><p class="muted">Считаю диф…</p></div>
-    <div v-else-if="error && !repos.length" class="state"><p class="bad">{{ error }}</p><button class="act big" @click="load">Повторить</button></div>
-    <div v-else-if="!files.length" class="state">
-      <p>Несохранённых изменений нет</p>
-      <p class="muted sm">Правки задачи уже закоммичены — смотри их в PR.</p>
-    </div>
-
-    <div v-else class="split">
-      <!-- Дерево изменённых файлов (иерархия папок, как в VS Code) -->
-      <aside class="filelist">
-        <div v-for="r in treeRepos" :key="r.name" class="grp">
-          <div class="grphead">
-            <span class="badge" :class="r.name">{{ r.name === 'be' ? 'Бэкенд' : 'Фронт' }}</span>
-            <span class="branch mono">{{ r.branch }}</span>
-          </div>
-          <template v-for="row in r.rows" :key="(row.type === 'dir' ? 'd:' + row.key : 'f:' + r.name + ':' + row.file.path)">
-            <div v-if="row.type === 'dir'" class="trow dir" :style="{ paddingLeft: indent(row.depth) }" @click="toggleDir(row.key)">
-              <span class="chev">{{ collapsedDirs.has(row.key) ? '▸' : '▾' }}</span>
-              <span class="dname">{{ row.name }}</span>
-            </div>
-            <button v-else class="trow frow" :class="{ sel: selectedKey === `${r.name}:${row.file.path}` }"
-                    :style="{ paddingLeft: indent(row.depth) }" @click="selectedKey = `${r.name}:${row.file.path}`">
-              <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
-              <span class="nm">{{ row.name }}</span>
-              <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
-            </button>
-          </template>
-        </div>
-      </aside>
-
-      <!-- Диф-редактор -->
-      <section class="editorwrap">
-        <div class="ehead">
-          <template v-if="selected">
-            <span class="st" :class="selected.status">{{ STLABEL[selected.status] || selected.status }}</span>
-            <span class="epath mono">{{ selected.path }}</span>
-            <span v-if="selected.binary" class="note">бинарный</span>
-            <span v-else-if="selected.tooBig" class="note">слишком большой — превью отключено</span>
-          </template>
-          <span class="grow"></span>
-          <button class="act" :class="{ on: sideBySide }" :title="sideBySide ? 'Рядом' : 'В строку'" @click="sideBySide = !sideBySide">
-            {{ sideBySide ? '⇆ рядом' : '≡ в строку' }}
-          </button>
-          <button class="act" :disabled="loading" title="Обновить" @click="load"><span v-if="loading" class="spin"></span><span v-else>↻</span></button>
-        </div>
-        <div ref="host" class="editor"></div>
-      </section>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .diff-core { height: 100%; min-height: 0; }
 .state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; }
 .state p { margin: 0; }
 .sm { font-size: 12.5px; }
 .bad { color: var(--bad); font-weight: 600; }
-.spin.big { width: 24px; height: 24px; border-width: 3px; }
 
 .split { height: 100%; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
 .filelist { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px; background: var(--sidebar); }
@@ -215,9 +223,5 @@ onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(
 .grow { flex: 1; }
 .editor { flex: 1; min-height: 0; }
 
-.act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
-  padding: 4px 10px; font-size: 12.5px; cursor: pointer; flex: none; }
-.act:hover { color: var(--ink); border-color: var(--line-2); }
-.act.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.act.big { padding: 6px 14px; }
+.layout-toggle { flex: none; }
 </style>

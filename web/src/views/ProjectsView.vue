@@ -1,4 +1,80 @@
-<script setup>
+<template>
+  <div class="page">
+    <p class="hint">
+      Проект = имя + пути репозиториев на диске; схемы конвейера привязаны к нему по имени.
+      <HelpTip :text="help" />
+    </p>
+
+    <div v-if="error" class="err">{{ error }}</div>
+    <div v-if="loading" class="empty">Загрузка…</div>
+
+    <template v-else>
+      <div class="cards">
+        <section v-for="p in projects" :key="p.id" class="card">
+          <header class="chead">
+            <span class="cname mono">{{ p.id }}</span>
+            <span class="src" :class="{ fab: p.factory }">{{ p.factory ? 'профиль фабрики' : 'кокпит' }}</span>
+          </header>
+
+          <!-- Репозитории -->
+          <div v-if="edit?.id !== p.id" class="repos">
+            <div v-if="!p.repos.length" class="muted">Пути репозиториев не заданы</div>
+            <div v-for="r in p.repos" :key="r.key" class="repo">
+              <span class="rkey mono">{{ r.key }}</span>
+              <span class="rdir mono" :title="r.dir">{{ r.dir }}</span>
+              <span class="dot" :class="r.exists ? 'ok' : 'no'" :title="r.exists ? 'есть на диске' : 'нет на диске'"></span>
+            </div>
+          </div>
+
+          <!-- Редактор путей (кокпитные проекты и фабричные без путей в профиле) -->
+          <div v-else class="editbox">
+            <div v-for="(r, i) in edit.repos" :key="i" class="erow">
+              <UiInput v-model="r.key" class="ekey mono" placeholder="service" title="Метка репозитория (service, docs…)" />
+              <UiInput v-model="r.dir" class="edir mono" placeholder="/workspace/sample/service" title="Абсолютный путь к корню git-репозитория" />
+              <UiIconButton class="act" label="Убрать строку" title="Убрать строку" @click="delRow(i)">✕</UiIconButton>
+            </div>
+            <div class="ebtns">
+              <UiButton class="act" @click="addRow">+ репозиторий</UiButton>
+              <span class="grow"></span>
+              <span v-if="edit.msg" class="emsg">{{ edit.msg }}</span>
+              <UiButton class="act" @click="edit = null">Отмена</UiButton>
+              <UiButton class="act pri" tone="accent" :loading="edit.saving" loading-label="Сохраняю" @click="save">Сохранить</UiButton>
+            </div>
+          </div>
+
+          <!-- Схемы конвейера проекта -->
+          <div class="routes">
+            <span class="muted">Схемы:</span>
+            <template v-if="p.routes.length">
+              <UiButton v-for="r in p.routes" :key="r" class="rchip mono" variant="ghost" title="Открыть в «Маршрутах»" @click="toRoutes(p.id)">{{ r }}</UiButton>
+            </template>
+
+            <span v-else class="muted">нет</span>
+          </div>
+
+          <footer class="cfoot">
+            <UiButton v-if="canEdit(p) && edit?.id !== p.id" class="act" @click="startEdit(p)">Пути…</UiButton>
+            <HelpTip v-else-if="!canEdit(p)" text="Пути задаёт профиль фабрики (PROFILE_TRIAGE_REPOS в profiles/<имя>/profile.sh) — здесь они только показываются." />
+            <span class="grow"></span>
+            <UiButton v-if="p.repos.length" class="act" @click="toCode(p.id)">Код →</UiButton>
+          </footer>
+        </section>
+
+        <!-- Новый проект -->
+        <section class="card newcard">
+          <header class="chead"><span class="cname">Новый проект</span></header>
+          <p class="muted sm">Появится в «Маршрутах» и здесь; пути репозиториев задаются после создания.</p>
+          <div class="erow">
+            <UiInput v-model="newId" class="edir mono" placeholder="id: строчные латиница/цифры/-/_" @keyup.enter="create" />
+            <UiButton class="act pri" tone="accent" :loading="creating" :disabled="!newId.trim()" loading-label="Создаю" @click="create">Создать</UiButton>
+          </div>
+        </section>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
 // Раздел «Проекты»: реестр проектов с путями репозиториев на диске.
 // Проект — это то же имя, что профиль фабрики и папка базы маршрутов (routes/<id>).
 // Пути фабричного проекта показываются из его bash-профиля (единственный источник,
@@ -6,8 +82,13 @@
 import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
+import {
+  UiButton,
+  UiIconButton,
+  UiInput,
+  alertDialog,
+} from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
-import { alertDialog } from '../shared/ui/confirm.js';
 import HelpTip from '../shared/ui/HelpTip.vue';
 import { useToolLauncher } from '../shared/tools/launcher.js';
 
@@ -28,7 +109,7 @@ watch(() => edit.value?.id || '', (project) => {
   else projectsContext.blur();
 }, { immediate: true });
 
-const HELP = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код». У проекта фабрики пути задаёт его профиль (PROFILE_TRIAGE_REPOS); у проекта, заведённого здесь, пути хранятся в кокпите.';
+const help = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код». У проекта фабрики пути задаёт его профиль (PROFILE_TRIAGE_REPOS); у проекта, заведённого здесь, пути хранятся в кокпите.';
 
 async function load() {
   loading.value = true; error.value = '';
@@ -95,81 +176,6 @@ function toCode(id) {
 }
 </script>
 
-<template>
-  <div class="page">
-    <p class="hint">
-      Проект = имя + пути репозиториев на диске; схемы конвейера привязаны к нему по имени.
-      <HelpTip :text="HELP" />
-    </p>
-
-    <div v-if="error" class="err">{{ error }}</div>
-    <div v-if="loading" class="empty">Загрузка…</div>
-
-    <template v-else>
-      <div class="cards">
-        <section v-for="p in projects" :key="p.id" class="card">
-          <header class="chead">
-            <span class="cname mono">{{ p.id }}</span>
-            <span class="src" :class="{ fab: p.factory }">{{ p.factory ? 'профиль фабрики' : 'кокпит' }}</span>
-          </header>
-
-          <!-- Репозитории -->
-          <div v-if="edit?.id !== p.id" class="repos">
-            <div v-if="!p.repos.length" class="muted">Пути репозиториев не заданы</div>
-            <div v-for="r in p.repos" :key="r.key" class="repo">
-              <span class="rkey mono">{{ r.key }}</span>
-              <span class="rdir mono" :title="r.dir">{{ r.dir }}</span>
-              <span class="dot" :class="r.exists ? 'ok' : 'no'" :title="r.exists ? 'есть на диске' : 'нет на диске'"></span>
-            </div>
-          </div>
-
-          <!-- Редактор путей (кокпитные проекты и фабричные без путей в профиле) -->
-          <div v-else class="editbox">
-            <div v-for="(r, i) in edit.repos" :key="i" class="erow">
-              <input v-model="r.key" class="ekey mono" placeholder="service" title="Метка репозитория (service, docs…)" />
-              <input v-model="r.dir" class="edir mono" placeholder="/workspace/sample/service" title="Абсолютный путь к корню git-репозитория" />
-              <button class="act" title="Убрать строку" @click="delRow(i)">✕</button>
-            </div>
-            <div class="ebtns">
-              <button class="act" @click="addRow">+ репозиторий</button>
-              <span class="grow"></span>
-              <span v-if="edit.msg" class="emsg">{{ edit.msg }}</span>
-              <button class="act" @click="edit = null">Отмена</button>
-              <button class="act pri" :disabled="edit.saving" @click="save">{{ edit.saving ? 'Сохраняю…' : 'Сохранить' }}</button>
-            </div>
-          </div>
-
-          <!-- Схемы конвейера проекта -->
-          <div class="routes">
-            <span class="muted">Схемы:</span>
-            <template v-if="p.routes.length">
-              <button v-for="r in p.routes" :key="r" class="rchip mono" title="Открыть в «Маршрутах»" @click="toRoutes(p.id)">{{ r }}</button>
-            </template>
-            <span v-else class="muted">нет</span>
-          </div>
-
-          <footer class="cfoot">
-            <button v-if="canEdit(p) && edit?.id !== p.id" class="act" @click="startEdit(p)">Пути…</button>
-            <HelpTip v-else-if="!canEdit(p)" text="Пути задаёт профиль фабрики (PROFILE_TRIAGE_REPOS в profiles/<имя>/profile.sh) — здесь они только показываются." />
-            <span class="grow"></span>
-            <button v-if="p.repos.length" class="act" @click="toCode(p.id)">Код →</button>
-          </footer>
-        </section>
-
-        <!-- Новый проект -->
-        <section class="card newcard">
-          <header class="chead"><span class="cname">Новый проект</span></header>
-          <p class="muted sm">Появится в «Маршрутах» и здесь; пути репозиториев задаются после создания.</p>
-          <div class="erow">
-            <input v-model="newId" class="edir mono" placeholder="id: строчные латиница/цифры/-/_" @keyup.enter="create" />
-            <button class="act pri" :disabled="creating || !newId.trim()" @click="create">{{ creating ? '…' : 'Создать' }}</button>
-          </div>
-        </section>
-      </div>
-    </template>
-  </div>
-</template>
-
 <style scoped>
 .page { max-width: 1100px; }
 .hint { margin: 0 0 16px; color: var(--ink-mid); font-size: 13px; display: flex; align-items: center; gap: 6px; }
@@ -198,23 +204,14 @@ function toCode(id) {
 
 .editbox { display: flex; flex-direction: column; gap: 7px; }
 .erow { display: flex; align-items: center; gap: 7px; }
-.erow input { padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface-2);
-  color: var(--ink); font-size: 12px; }
-.erow input:focus { outline: none; border-color: var(--accent); }
 .ekey { width: 58px; flex: none; }
 .edir { flex: 1; min-width: 0; }
 .ebtns { display: flex; align-items: center; gap: 7px; }
 .emsg { color: var(--bad); font-size: 11.5px; }
 
 .routes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.rchip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 999px;
-  padding: 2px 10px; font-size: 11.5px; cursor: pointer; }
-.rchip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.rchip { flex: none; }
 
 .cfoot { display: flex; align-items: center; gap: 8px; margin-top: auto; }
-.act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
-  padding: 4px 11px; font-size: 12.5px; cursor: pointer; flex: none; }
-.act:hover { color: var(--ink); border-color: var(--line-2); }
-.act.pri { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.act:disabled { opacity: .5; cursor: default; }
+.act { flex: none; }
 </style>

@@ -1,9 +1,30 @@
+<template>
+  <div class="term-view" :class="{ compact }">
+    <div class="bar">
+      <span class="st" :class="status">
+        <span class="dot"></span>
+        {{ status === 'open' ? 'подключено' : status === 'connecting' ? 'подключение…' : 'отключено' }}
+      </span>
+      <div class="chips">
+        <UiCommandButton class="chip" title="Авторизация Claude" @click="insert('claude\n')">claude login</UiCommandButton>
+        <UiCommandButton class="chip" @click="insert('claude --version\n')">claude --version</UiCommandButton>
+        <UiCommandButton class="chip" @click="insert('clear\n')">clear</UiCommandButton>
+      </div>
+      <UiButton v-if="status === 'closed'" class="reconnect" variant="solid" tone="accent"
+                @click="reconnect">Переподключить</UiButton>
+      <UiButton v-else class="end" tone="danger"
+                @click="closeSession({ announce: true })">Завершить сессию</UiButton>
+    </div>
+    <div ref="host" class="term-host" data-escape-owner="terminal"></div>
+  </div>
+</template>
+
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
 import { api } from '../../shared/api-client.js';
+import { UiButton, UiCommandButton } from '../../ui';
 
 const props = defineProps({
   active: { type: Boolean, default: true },
@@ -235,25 +256,6 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<template>
-  <div class="term-view" :class="{ compact }">
-    <div class="bar">
-      <span class="st" :class="status">
-        <span class="dot"></span>
-        {{ status === 'open' ? 'подключено' : status === 'connecting' ? 'подключение…' : 'отключено' }}
-      </span>
-      <div class="chips">
-        <button class="chip" title="Авторизация Claude" @click="insert('claude\n')">claude login</button>
-        <button class="chip" @click="insert('claude --version\n')">claude --version</button>
-        <button class="chip" @click="insert('clear\n')">clear</button>
-      </div>
-      <button v-if="status === 'closed'" class="reconnect" @click="reconnect">Переподключить</button>
-      <button v-else class="end" @click="closeSession({ announce: true })">Завершить сессию</button>
-    </div>
-    <div ref="host" class="term-host" data-escape-owner="terminal"></div>
-  </div>
-</template>
-
 <style scoped>
 .term-view { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -263,17 +265,9 @@ onBeforeUnmount(() => {
 .st.connecting .dot { background: var(--warn); }
 .st.closed .dot { background: var(--bad); }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.chip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid); border-radius: 7px;
-  padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: var(--mono); }
-.chip:hover { color: var(--ink); border-color: var(--line-2); }
-.reconnect { margin-left: auto; background: var(--accent); color: #fff; border: none; border-radius: 8px;
-  padding: 5px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
-.end { margin-left: auto; background: var(--surface-2); color: var(--ink-mid); border: 1px solid var(--line);
-  border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
-.end:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.reconnect, .end { margin-left: auto; }
 .term-host { flex: 1; min-height: 0; padding: 8px 10px; background: var(--ground); overflow: hidden; }
 :deep(.xterm) { height: 100%; }
 :deep(.xterm-viewport) { background: transparent !important; }
 .term-view.compact .bar { gap: 8px; padding: 7px var(--tool-dock-actions-space, 9px) 7px 9px; }
-.term-view.compact .chip { padding-inline: 7px; }
 </style>

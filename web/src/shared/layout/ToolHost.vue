@@ -1,3 +1,44 @@
+<template>
+  <aside v-if="dockCapable" class="tool-rail" aria-label="Инструменты в панели">
+    <UiIconButton v-for="item in railItems" :key="item.id"
+                  :ref="(value) => setRailButton(item.id, value)" role="rail"
+                  class="tool-rail-item" :class="{ active: presentedTool === item.id }"
+                  :title="item.label" :label="item.label"
+                  :pressed="presentation === 'dock' && presentedTool === item.id"
+                  @click="clickRail(item)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
+      </svg>
+      <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(dock.runtime.terminal?.status)"
+            class="runtime-dot" :class="dock.runtime.terminal.status" aria-hidden="true"></span>
+    </UiIconButton>
+  </aside>
+
+  <template v-for="item in TOOL_REGISTRY" :key="item.id">
+    <ToolDock v-if="dock.mounted[item.id]"
+              :ref="(value) => setDockRef(item.id, value)" :mode="modeOf(item.id)"
+              :label="item.label" :width="dock.width" :min-width="minWidth" :max-width="maxWidth"
+              :expanded="expandedOf(item.id)" :expanded-width="contentWidth"
+              @hide="hideDock(item.id)" @toggle-expanded="toggleDockExpanded"
+              @resize="resize($event)" @resize-end="resize($event, true)">
+      <component :is="item.component" :ref="(value) => setPanelRef(item.id, value)"
+                 :active="presentedTool === item.id" :compact="compactOf(item.id)"
+                 :presentation="modeOf(item.id)" :intents="dock.intents[item.id] || []"
+                 @consume-intent="consumeIntent(item.id, $event)"
+                 @status="onStatus(item.id, $event)" @context="onContext(item.id, $event)" />
+    </ToolDock>
+  </template>
+
+  <section v-if="presentation === 'placeholder'" class="tool-placeholder" role="status">
+    <span v-if="routeState === 'pending'">Проверяю доступность инструмента…</span>
+    <span v-else>
+      Плагин «{{ routeItem?.label || 'Инструмент' }}» выключен.
+      Включить его можно в «Настройки → Плагины».
+    </span>
+  </section>
+</template>
+
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -9,6 +50,7 @@ import { registerLayer } from '../ui/layer-stack.js';
 import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';
 import { useDockViewport } from '../tools/viewport.js';
 import ToolDock from './ToolDock.vue';
+import { UiIconButton } from '../../ui';
 
 const route = useRoute();
 const router = useRouter();
@@ -237,47 +279,6 @@ onBeforeUnmount(() => {
   dock.resetAllRuntime();
 });
 </script>
-
-<template>
-  <aside v-if="dockCapable" class="tool-rail" aria-label="Инструменты в панели">
-    <button v-for="item in railItems" :key="item.id"
-            :ref="(value) => setRailButton(item.id, value)" type="button"
-            class="tool-rail-item" :class="{ active: presentedTool === item.id }"
-            :title="item.label" :aria-label="item.label"
-            :aria-pressed="presentation === 'dock' && presentedTool === item.id"
-            @click="clickRail(item)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
-      </svg>
-      <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(dock.runtime.terminal?.status)"
-            class="runtime-dot" :class="dock.runtime.terminal.status" aria-hidden="true"></span>
-    </button>
-  </aside>
-
-  <template v-for="item in TOOL_REGISTRY" :key="item.id">
-    <ToolDock v-if="dock.mounted[item.id]"
-              :ref="(value) => setDockRef(item.id, value)" :mode="modeOf(item.id)"
-              :label="item.label" :width="dock.width" :min-width="minWidth" :max-width="maxWidth"
-              :expanded="expandedOf(item.id)" :expanded-width="contentWidth"
-              @hide="hideDock(item.id)" @toggle-expanded="toggleDockExpanded"
-              @resize="resize($event)" @resize-end="resize($event, true)">
-      <component :is="item.component" :ref="(value) => setPanelRef(item.id, value)"
-                 :active="presentedTool === item.id" :compact="compactOf(item.id)"
-                 :presentation="modeOf(item.id)" :intents="dock.intents[item.id] || []"
-                 @consume-intent="consumeIntent(item.id, $event)"
-                 @status="onStatus(item.id, $event)" @context="onContext(item.id, $event)" />
-    </ToolDock>
-  </template>
-
-  <section v-if="presentation === 'placeholder'" class="tool-placeholder" role="status">
-    <span v-if="routeState === 'pending'">Проверяю доступность инструмента…</span>
-    <span v-else>
-      Плагин «{{ routeItem?.label || 'Инструмент' }}» выключен.
-      Включить его можно в «Настройки → Плагины».
-    </span>
-  </section>
-</template>
 
 <style scoped>
 .tool-rail {

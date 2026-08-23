@@ -1,7 +1,98 @@
-<script setup>
+<template>
+  <div class="routes-page">
+    <!-- Состав опубликованного каталога -->
+    <aside class="list">
+      <div class="list-head">
+        <span class="ttl">Маршруты</span>
+        <HelpTip :text="helpPanel" />
+      </div>
+      <ProjectSwitcher :profiles="profiles" :model-value="profile"
+                       @update:model-value="switchProfile" @created="onProjectCreated" />
+      <div v-if="loading && !revisions.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
+      <div v-else-if="error" class="pad bad">{{ error }}</div>
+      <div v-else-if="!published" class="pad muted">Каталог не опубликован</div>
+      <UiSelectableRow v-for="r in routeList" :key="r.id" class="item"
+                       :selected="r.id === selectedRoute" @select="selectRoute(r.id)">
+        <span class="route-item-content">
+          <span class="rid mono">{{ r.id }}</span>
+          <span class="chip mono" :title="r.hash">{{ shortHash(r.hash) }}</span>
+        </span>
+      </UiSelectableRow>
+    </aside>
+
+    <section class="panel">
+      <header class="phead">
+        <span class="ttl">{{ profile || '—' }}</span>
+        <span v-if="published" class="hash mono" :title="currentHash">current {{ shortHash(currentHash) }}</span>
+        <span v-else class="muted">маршрутов ещё нет</span>
+        <span class="grow"></span>
+        <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
+        <template v-if="publishSupported">
+          <UiButton class="btn" :loading="busy === 'validate'" :disabled="!!busy && busy !== 'validate'"
+                    loading-label="Проверяю" @click="run('validate')">Проверить</UiButton>
+          <UiButton class="btn accent" tone="accent" :loading="busy === 'publish'"
+                    :disabled="!!busy && busy !== 'publish'" loading-label="Публикую"
+                    @click="run('publish')">Опубликовать</UiButton>
+        </template>
+
+        <span v-else class="muted nopub" title="Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs">
+          нет скрипта публикации
+        </span>
+      </header>
+
+      <!-- Каталог ещё не опубликован: честно говорим, чего не хватает -->
+      <div v-if="!published && !loading" class="hint">
+        <p>У проекта нет опубликованного каталога маршрутов.</p>
+        <p class="muted">Каталог собирает сам профиль: <span class="mono">routes/publish.mjs</span>.
+          Как только он появится, здесь заработают проверка, публикация и откат.</p>
+      </div>
+
+      <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
+      <div v-else class="canvas">
+        <div v-if="graphLoading" class="mid muted"><UiSpinner decorative /> Схема…</div>
+        <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
+        <FactoryGraph v-else-if="graph" :graph="graph" reference />
+        <div v-else class="mid muted">Выбери маршрут слева</div>
+      </div>
+
+      <!-- Ответ публикатора: показываем как есть, формат — его дело -->
+      <details v-if="report" class="report">
+        <summary>Отчёт публикатора</summary>
+        <pre class="mono">{{ JSON.stringify(report, null, 2) }}</pre>
+      </details>
+
+      <!-- Ревизии и откат -->
+      <section v-if="revisions.length" class="revs">
+        <div class="revs-head">
+          <span class="ttl">Ревизии каталога</span>
+          <HelpTip :text="helpRevisions" />
+          <span class="muted rcount">{{ revisions.length }}</span>
+        </div>
+        <div class="rrow" v-for="rev in revisions" :key="rev.catalogHash" :class="{ cur: rev.isCurrent }">
+          <span class="rhash mono" :title="rev.catalogHash">{{ shortHash(rev.catalogHash) }}</span>
+          <span class="rwhen muted">{{ fmtWhen(rev.createdAt) }}</span>
+          <span v-if="rev.integrity !== 'ok'" class="rbad bad" :title="rev.integrity">повреждена</span>
+          <span v-else class="rroutes muted">{{ Object.keys(rev.routes || {}).join(', ') }}</span>
+          <span class="grow"></span>
+          <span v-if="rev.isCurrent" class="rcur">current</span>
+          <UiButton v-else class="btn" :disabled="!!busy || rev.integrity !== 'ok'" @click="rollback(rev)">
+            Откатить
+          </UiButton>
+        </div>
+      </section>
+    </section>
+  </div>
+</template>
+
+<script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../shared/api-client.js';
-import { confirmDialog } from '../shared/ui/confirm.js';
+import {
+  UiButton,
+  UiSelectableRow,
+  UiSpinner,
+  confirmDialog,
+} from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import HelpTip from '../shared/ui/HelpTip.vue';
@@ -28,8 +119,8 @@ const busy = ref('');            // 'validate' | 'publish' | 'rollback'
 const notice = ref('');
 const report = ref(null);        // сырой ответ публикатора — в «подробностях»
 
-const HELP_PANEL = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes/), здесь только проверка, публикация и откат.';
-const HELP_REVISIONS = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие останутся на своей.';
+const helpPanel = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes/), здесь только проверка, публикация и откат.';
+const helpRevisions = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие останутся на своей.';
 
 const routesContext = useUiContextSource('routes', { layer: 'page', active: false });
 watch([profile, selectedRoute], ([project, route], [previousProject] = []) => {
@@ -166,90 +257,6 @@ async function rollback(rev) {
 onMounted(load);
 </script>
 
-<template>
-  <div class="routes-page">
-    <!-- Состав опубликованного каталога -->
-    <aside class="list">
-      <div class="list-head">
-        <span class="ttl">Маршруты</span>
-        <HelpTip :text="HELP_PANEL" />
-      </div>
-      <ProjectSwitcher :profiles="profiles" :model-value="profile"
-                       @update:model-value="switchProfile" @created="onProjectCreated" />
-      <div v-if="loading && !revisions.length" class="pad muted"><span class="spin"></span> Загружаю…</div>
-      <div v-else-if="error" class="pad bad">{{ error }}</div>
-      <div v-else-if="!published" class="pad muted">Каталог не опубликован</div>
-      <button v-for="r in routeList" :key="r.id" class="item" :class="{ sel: r.id === selectedRoute }"
-              @click="selectRoute(r.id)">
-        <span class="rid mono">{{ r.id }}</span>
-        <span class="chip mono" :title="r.hash">{{ shortHash(r.hash) }}</span>
-      </button>
-    </aside>
-
-    <section class="panel">
-      <header class="phead">
-        <span class="ttl">{{ profile || '—' }}</span>
-        <span v-if="published" class="hash mono" :title="currentHash">current {{ shortHash(currentHash) }}</span>
-        <span v-else class="muted">маршрутов ещё нет</span>
-        <span class="grow"></span>
-        <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
-        <template v-if="publishSupported">
-          <button class="btn" :disabled="!!busy" @click="run('validate')">
-            <span v-if="busy === 'validate'" class="spin"></span> Проверить
-          </button>
-          <button class="btn accent" :disabled="!!busy" @click="run('publish')">
-            <span v-if="busy === 'publish'" class="spin"></span> Опубликовать
-          </button>
-        </template>
-        <span v-else class="muted nopub" title="Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs">
-          нет скрипта публикации
-        </span>
-      </header>
-
-      <!-- Каталог ещё не опубликован: честно говорим, чего не хватает -->
-      <div v-if="!published && !loading" class="hint">
-        <p>У проекта нет опубликованного каталога маршрутов.</p>
-        <p class="muted">Каталог собирает сам профиль: <span class="mono">routes/publish.mjs</span>.
-          Как только он появится, здесь заработают проверка, публикация и откат.</p>
-      </div>
-
-      <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
-      <div v-else class="canvas">
-        <div v-if="graphLoading" class="mid muted"><span class="spin"></span> Схема…</div>
-        <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
-        <FactoryGraph v-else-if="graph" :graph="graph" reference />
-        <div v-else class="mid muted">Выбери маршрут слева</div>
-      </div>
-
-      <!-- Ответ публикатора: показываем как есть, формат — его дело -->
-      <details v-if="report" class="report">
-        <summary>Отчёт публикатора</summary>
-        <pre class="mono">{{ JSON.stringify(report, null, 2) }}</pre>
-      </details>
-
-      <!-- Ревизии и откат -->
-      <section v-if="revisions.length" class="revs">
-        <div class="revs-head">
-          <span class="ttl">Ревизии каталога</span>
-          <HelpTip :text="HELP_REVISIONS" />
-          <span class="muted rcount">{{ revisions.length }}</span>
-        </div>
-        <div class="rrow" v-for="rev in revisions" :key="rev.catalogHash" :class="{ cur: rev.isCurrent }">
-          <span class="rhash mono" :title="rev.catalogHash">{{ shortHash(rev.catalogHash) }}</span>
-          <span class="rwhen muted">{{ fmtWhen(rev.createdAt) }}</span>
-          <span v-if="rev.integrity !== 'ok'" class="rbad bad" :title="rev.integrity">повреждена</span>
-          <span v-else class="rroutes muted">{{ Object.keys(rev.routes || {}).join(', ') }}</span>
-          <span class="grow"></span>
-          <span v-if="rev.isCurrent" class="rcur">current</span>
-          <button v-else class="btn small" :disabled="!!busy || rev.integrity !== 'ok'" @click="rollback(rev)">
-            Откатить
-          </button>
-        </div>
-      </section>
-    </section>
-  </div>
-</template>
-
 <style scoped>
 .routes-page { height: 100%; display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
 
@@ -257,10 +264,8 @@ onMounted(load);
 .list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
 .list-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 10px; }
 .ttl { font-weight: 700; font-size: 13.5px; }
-.item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none;
-  border: none; color: var(--ink); padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
-.item:hover { background: var(--surface); }
-.item.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.item { width: 100%; margin-bottom: 4px; }
+.route-item-content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
 .item .rid { flex: 1; min-width: 0; font-weight: 700; color: var(--node-code); font-size: 12.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { flex: none; font-size: 10px; color: var(--ink-mid); background: var(--surface-2);
@@ -306,12 +311,6 @@ onMounted(load);
 .rcur { font-size: 11.5px; color: var(--good); }
 .rbad { font-size: 12px; }
 
-.btn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
-  padding: 7px 13px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-.btn:hover { border-color: var(--line-2); }
-.btn:disabled { opacity: .45; cursor: default; }
-.btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.btn.small { padding: 4px 10px; font-size: 12px; }
 .bad { color: var(--bad); }
 
 @media (max-width: 820px) {

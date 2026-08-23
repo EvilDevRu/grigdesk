@@ -1,6 +1,29 @@
+<template>
+  <UiPressable
+    ref="button"
+    class="companion-avatar"
+    :class="[`is-${interaction}`, `attention-${attention?.kind || 'none'}`]"
+    :data-interaction="interaction"
+    :data-attention="attention?.kind || 'none'"
+    :aria-label="ariaLabel"
+    :aria-expanded="expanded"
+    :aria-controls="controls"
+    @click="emit('toggle')"
+  >
+    <CompanionRobot class="avatar-art" :interaction="interaction" :attention="attention?.kind || 'none'" />
+    <span
+      v-if="attention?.count"
+      class="attention-badge"
+      role="status"
+      :aria-label="attentionLabel"
+    >{{ attention.count > 99 ? '99+' : attention.count }}</span>
+  </UiPressable>
+</template>
+
 <script setup>
 import { computed, ref } from 'vue';
 import CompanionRobot from './CompanionRobot.vue';
+import { UiPressable } from '../../ui';
 
 const props = defineProps({
   expanded: { type: Boolean, default: false },
@@ -29,29 +52,6 @@ const ariaLabel = computed(() => {
 
 defineExpose({ focus: () => button.value?.focus?.() });
 </script>
-
-<template>
-  <button
-    ref="button"
-    type="button"
-    class="companion-avatar"
-    :class="[`is-${interaction}`, `attention-${attention?.kind || 'none'}`]"
-    :data-interaction="interaction"
-    :data-attention="attention?.kind || 'none'"
-    :aria-label="ariaLabel"
-    :aria-expanded="expanded"
-    :aria-controls="controls"
-    @click="emit('toggle')"
-  >
-    <CompanionRobot class="avatar-art" :interaction="interaction" :attention="attention?.kind || 'none'" />
-    <span
-      v-if="attention?.count"
-      class="attention-badge"
-      role="status"
-      :aria-label="attentionLabel"
-    >{{ attention.count > 99 ? '99+' : attention.count }}</span>
-  </button>
-</template>
 
 <style scoped>
 /* Фигурка робота, а не клавиша: ни рамки, ни подложки — форму держит сам силуэт. */

@@ -1,40 +1,14 @@
 // Проверяет отображение расширенных изменений файлов в ленте шагов агента.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
-const STEP_LIST_PATH = fileURLToPath(new URL('../../web/src/views/chat/StepList.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const DIFF_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/diff.js', import.meta.url),
-)).href;
-
-let compileNonce = 0;
+const STEP_LIST_PATH = webFile('src/views/chat/StepList.vue');
 
 async function compileStepList() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(STEP_LIST_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: STEP_LIST_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, {
-    id: `data-v-step-list-rich-changes-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("from '../../shared/diff.js'", `from "${DIFF_URL}"`);
-
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  return compileVue(STEP_LIST_PATH);
 }
 
 let browser;

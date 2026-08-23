@@ -1,9 +1,23 @@
+<template>
+  <TopbarActions>
+    <UiIconButton role="rail" label="Назад" title="Назад" @click="close">←</UiIconButton>
+    <span class="title" :title="document?.displayPath || title">{{ title }}</span>
+  </TopbarActions>
+  <main class="documents-view">
+    <div v-if="resolving" class="resolve-state"><UiSpinner decorative /> Проверяю ссылку…</div>
+    <div v-else-if="resolveError" class="resolve-state error">{{ resolveError }}</div>
+    <DocumentPanel v-else :source="source" :path="documentPath" :anchor="anchor" :line="line"
+                   @loaded="document = $event" />
+  </main>
+</template>
+
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
 import TopbarActions from '../shared/layout/TopbarActions.vue';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
+import { UiIconButton, UiSpinner } from '../ui';
 
 const route = useRoute();
 const router = useRouter();
@@ -50,24 +64,8 @@ function close() {
 }
 </script>
 
-<template>
-  <TopbarActions>
-    <button class="back" type="button" title="Назад" @click="close">←</button>
-    <span class="title" :title="document?.displayPath || title">{{ title }}</span>
-  </TopbarActions>
-  <main class="documents-view">
-    <div v-if="resolving" class="resolve-state"><span class="spin"></span> Проверяю ссылку…</div>
-    <div v-else-if="resolveError" class="resolve-state error">{{ resolveError }}</div>
-    <DocumentPanel v-else :source="source" :path="documentPath" :anchor="anchor" :line="line"
-                   @loaded="document = $event" />
-  </main>
-</template>
-
 <style scoped>
 .documents-view { height: 100%; min-height: 0; overflow: hidden; }
-.back { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line);
-  border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font-size: 17px; }
-.back:hover { border-color: var(--line-2); background: var(--surface-2); }
 .title { max-width: min(54vw, 560px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--ink-mid); font: 12px var(--mono, monospace); }
 .resolve-state { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink-mid); }

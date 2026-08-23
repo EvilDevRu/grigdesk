@@ -1,0 +1,126 @@
+/* Общий reset и состояния UI-kit. Каждый selector остаётся внутри публичного .ui-* skin. */
+.ui-button,
+.ui-action-link,
+.ui-icon-button,
+.ui-pressable,
+.ui-svg-pressable,
+.ui-command-button,
+.ui-toggle-button,
+.ui-disclosure-button,
+.ui-tab,
+.ui-selectable-row,
+.ui-choice-list__option,
+.ui-input,
+.ui-number-input,
+.ui-textarea,
+.ui-select,
+.ui-checkbox,
+.ui-radio,
+.ui-switch,
+.ui-range {
+  font: inherit;
+}
+
+.ui-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.ui-button,
+.ui-icon-button,
+.ui-pressable,
+.ui-command-button,
+.ui-toggle-button,
+.ui-disclosure-button,
+.ui-tab,
+.ui-selectable-row,
+.ui-choice-list__option {
+  margin: 0;
+  appearance: none;
+}
+
+.ui-button:focus-visible,
+.ui-action-link:focus-visible,
+.ui-icon-button:focus-visible,
+.ui-pressable:focus-visible,
+.ui-svg-pressable:focus-visible,
+.ui-command-button:focus-visible,
+.ui-toggle-button:focus-visible,
+.ui-disclosure-button:focus-visible,
+.ui-tab:focus-visible,
+.ui-selectable-row:focus-visible,
+.ui-choice-list__option:focus-visible,
+.ui-input:focus-visible,
+.ui-number-input:focus-visible,
+.ui-textarea:focus-visible,
+.ui-select:focus-visible,
+.ui-range:focus-visible {
+  border-color: var(--control-focus-color);
+  outline: 1px solid transparent;
+  box-shadow: var(--control-focus-ring);
+}
+
+.ui-button:disabled,
+.ui-button[aria-disabled='true'],
+.ui-action-link[aria-disabled='true'],
+.ui-icon-button:disabled,
+.ui-icon-button[aria-disabled='true'],
+.ui-pressable:disabled,
+.ui-pressable[aria-disabled='true'],
+.ui-svg-pressable[aria-disabled='true'],
+.ui-command-button:disabled,
+.ui-command-button[aria-disabled='true'],
+.ui-toggle-button:disabled,
+.ui-toggle-button[aria-disabled='true'],
+.ui-disclosure-button:disabled,
+.ui-disclosure-button[aria-disabled='true'],
+.ui-tab:disabled,
+.ui-tab[aria-disabled='true'],
+.ui-selectable-row:disabled,
+.ui-selectable-row[aria-disabled='true'],
+.ui-choice-list__option:disabled,
+.ui-choice-list__option[aria-disabled='true'],
+.ui-input:disabled,
+.ui-number-input:disabled,
+.ui-textarea:disabled,
+.ui-select:disabled,
+.ui-checkbox.is-disabled,
+.ui-radio.is-disabled,
+.ui-switch.is-disabled,
+.ui-range:disabled {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button,
+  .ui-action-link,
+  .ui-icon-button,
+  .ui-pressable,
+  .ui-svg-pressable,
+  .ui-command-button,
+  .ui-toggle-button,
+  .ui-disclosure-button,
+  .ui-tab,
+  .ui-selectable-row,
+  .ui-choice-list__option,
+  .ui-input,
+  .ui-number-input,
+  .ui-textarea,
+  .ui-select,
+  .ui-checkbox,
+  .ui-radio,
+  .ui-switch,
+  .ui-range {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms !important;
+  }
+}

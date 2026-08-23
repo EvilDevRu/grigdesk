@@ -1,0 +1,133 @@
+.ui-spinner {
+  display: inline-block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  color: var(--accent);
+  animation: ui-spinner-rotate 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+.ui-spinner--inline,
+.ui-spinner[data-role='inline'] {
+  width: 13px;
+  height: 13px;
+}
+
+.ui-spinner--standalone,
+.ui-spinner[data-role='standalone'] {
+  width: 18px;
+  height: 18px;
+}
+
+.ui-spinner--large,
+.ui-spinner[data-role='large'] {
+  width: 24px;
+  height: 24px;
+  border-width: 3px;
+}
+
+.ui-inline-message {
+  --ui-message-tone: var(--ink-mid);
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--ui-message-tone) 38%, var(--line));
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--ui-message-tone) 7%, var(--surface));
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.ui-inline-message[data-tone='neutral'],
+.ui-inline-message--neutral {
+  --ui-message-tone: var(--ink-mid);
+}
+
+.ui-inline-message[data-tone='accent'],
+.ui-inline-message--accent {
+  --ui-message-tone: var(--accent);
+}
+
+.ui-inline-message[data-tone='success'],
+.ui-inline-message--success {
+  --ui-message-tone: var(--good);
+}
+
+.ui-inline-message[data-tone='warning'],
+.ui-inline-message--warning {
+  --ui-message-tone: var(--warn);
+}
+
+.ui-inline-message[data-tone='danger'],
+.ui-inline-message--danger {
+  --ui-message-tone: var(--bad);
+}
+
+.ui-inline-message__title {
+  color: var(--ui-message-tone);
+  font-weight: 650;
+}
+
+.ui-inline-message__body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-progress {
+  min-width: 0;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.ui-progress__value,
+.ui-progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-progress__label {
+  color: var(--ink-mid);
+  font-size: 11.5px;
+}
+
+.ui-progress__bar.is-indeterminate {
+  width: 42%;
+  animation: ui-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes ui-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ui-progress-indeterminate {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-spinner {
+    animation-duration: 2s;
+  }
+
+  .ui-progress__value {
+    transition-duration: 0.01ms;
+  }
+
+  .ui-progress__bar.is-indeterminate {
+    animation-duration: 3s;
+  }
+}

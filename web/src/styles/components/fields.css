@@ -1,0 +1,216 @@
+.ui-input,
+.ui-number-input,
+.ui-textarea,
+.ui-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  color: var(--control-text);
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing),
+    box-shadow var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-select-wrap {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-input,
+.ui-number-input,
+.ui-select {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+}
+
+.ui-textarea {
+  min-height: 92px;
+  padding: 8px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.ui-input::placeholder,
+.ui-number-input::placeholder,
+.ui-textarea::placeholder {
+  color: var(--control-placeholder);
+  opacity: 1;
+}
+
+.ui-input:hover:not(:disabled):not([readonly]),
+.ui-number-input:hover:not(:disabled):not([readonly]),
+.ui-textarea:hover:not(:disabled):not([readonly]),
+.ui-select:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+}
+
+.ui-input[readonly],
+.ui-number-input[readonly],
+.ui-textarea[readonly] {
+  background: var(--control-background-readonly);
+  color: var(--ink-mid);
+}
+
+.ui-select[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+.ui-input[aria-invalid='true'],
+.ui-number-input[aria-invalid='true'],
+.ui-textarea[aria-invalid='true'],
+.ui-select[aria-invalid='true'],
+.ui-input.is-invalid,
+.ui-number-input.is-invalid,
+.ui-textarea.is-invalid,
+.ui-select.is-invalid {
+  border-color: var(--bad);
+}
+
+.ui-select {
+  padding-right: 30px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a93a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.ui-select option,
+.ui-select optgroup {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.ui-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ui-field__label {
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ui-field__required {
+  color: var(--bad);
+}
+
+.ui-field__control {
+  min-width: 0;
+}
+
+.ui-field__hint,
+.ui-field__error {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.ui-field__hint {
+  color: var(--ink-mid);
+}
+
+.ui-field__error {
+  color: var(--bad);
+}
+
+.ui-password-input,
+.ui-search-input,
+.ui-number-field {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.ui-input-composite {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ui-password-input,
+.ui-search-input {
+  position: relative;
+}
+
+.ui-password-input .ui-input,
+.ui-search-input .ui-input,
+.ui-number-field .ui-number-input {
+  flex: 1;
+}
+
+.ui-password-input .ui-input,
+.ui-search-input .ui-input {
+  padding-right: 42px;
+}
+
+.ui-password-input__action,
+.ui-search-input__action,
+.ui-input-composite > .ui-icon-button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+
+.ui-number-field__steppers,
+.ui-number-field__steps {
+  display: grid;
+  flex: none;
+  align-content: center;
+  margin-left: 4px;
+}
+
+.ui-file-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ui-file-picker__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ui-file-picker__summary {
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .ui-file-picker {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ui-file-picker__summary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

@@ -1,0 +1,697 @@
+{
+  "version": 1,
+  "findings": {
+    "web/dev/ui-gallery/UiGallery.vue": {
+      "packed-members": {
+        "{ 0: 'Быстро', 1: 'Обычно', 2: 'Глубоко' }": 1
+      }
+    },
+    "web/src/composables/useUiFieldContext.ts": {
+      "function-explanation": {
+        "export function provideUiFieldContext(context: UiFieldContext): void { provide(UI_FIELD_CONTEXT, context); }": 1,
+        "export function useUiFieldContext(): UiFieldContext | null { return inject(UI_FIELD_CONTEXT, null); }": 1,
+        "export function mergeUiDescribedBy(...values: Array<string | null | undefined>): string | undefined { const ids = values.flatMap((value) => String(value || '').split(/\\s+/)).filter": 1,
+        "export function useResolvedFieldState(options: { id?: MaybeRefOrGetter<string | undefined>; describedBy?: MaybeRefOrGetter<string | undefined>; invalid?: MaybeRefOrGetter<boolean |": 1
+      },
+      "logical-spacing": {
+        "declaration->exit: return ids.length ? [...new Set(ids)].join(' ') : undefined;": 1,
+        "declaration->exit: return { id: computed(() => toValue(options.id) || field?.controlId.value), describedBy: computed(() => mergeUiDescribedBy(toValue(options.describedBy), field?.describedBy.value)),": 1
+      }
+    },
+    "web/src/composables/useUiLayer.ts": {
+      "function-explanation": {
+        "export function useUiLayer( requestedName: MaybeRefOrGetter<UiLayerName>, options: UseUiLayerOptions = {}, ) { const instanceId = options.id ?? `ui-layer-${++layerInstanceSequence}": 1,
+        "function register(): void { unregister(); if (!enabled.value) return; handle = registerUiLayer(instanceId, { name: name.value, close: (event) => options.onEscape ? options.onEscape": 1
+      },
+      "logical-spacing": {
+        "effect->branch: if (options.element !== undefined) { watch(() => toValue(options.element), refreshLayerStack, { flush: 'post' }); }": 1,
+        "function->branch: if (getCurrentScope()) onScopeDispose(dispose);": 1,
+        "effect->branch: if (!enabled.value) return;": 1,
+        "branch->effect: handle = registerUiLayer(instanceId, { name: name.value, close: (event) => options.onEscape ? options.onEscape(event) : false, enabled: () => enabled.value, element: options.elemen": 1
+      },
+      "unbraced-control": {
+        "if (!enabled.value) return;": 1,
+        "if (getCurrentScope()) onScopeDispose(dispose);": 1
+      }
+    },
+    "web/src/composables/useUiTabsContext.ts": {
+      "function-explanation": {
+        "export function provideUiTabsContext(context: UiTabsContext): void { provide(UI_TABS_CONTEXT, context); }": 1,
+        "export function useUiTabsContext(): UiTabsContext { const context = inject(UI_TABS_CONTEXT, null); if (!context) throw new Error('UiTab должен находиться внутри UiTabs'); return co": 1
+      },
+      "logical-spacing": {
+        "declaration->branch: if (!context) throw new Error('UiTab должен находиться внутри UiTabs');": 1,
+        "branch->exit: return context;": 1
+      },
+      "unbraced-control": {
+        "if (!context) throw new Error('UiTab должен находиться внутри UiTabs');": 1
+      }
+    },
+    "web/src/services/dialogs.ts": {
+      "logical-spacing": {
+        "branch->effect: pumpQueued = true;": 1,
+        "branch->effect: active = queue.shift() ?? null;": 1,
+        "effect->branch: if (active) host.controller.show(active.request);": 1,
+        "declaration->effect: host = { token, controller };": 1,
+        "effect->branch: if (active) controller.show(active.request); else pump();": 1,
+        "branch->effect: host = null;": 1,
+        "declaration->branch: if (!item || item.request.id !== requestId) return false;": 1,
+        "effect->branch: if (isConfirmItem(item)) item.resolve(result as boolean); else if (isPromptItem(item)) item.resolve(result as string | null); else item.resolve();": 1,
+        "branch->effect: schedulePump();": 1,
+        "effect->exit: return true;": 1,
+        "declaration->effect: enqueue({ request, resolve });": 3
+      },
+      "unbraced-control": {
+        "if (pumpQueued) return;": 1,
+        "if (!host || active || queue.length === 0) return;": 1,
+        "if (active) host.controller.show(active.request);": 1,
+        "if (active) controller.show(active.request); else pump();": 2,
+        "if (host?.token !== token) return;": 1,
+        "if (!item || item.request.id !== requestId) return false;": 1,
+        "if (isConfirmItem(item) && typeof result !== 'boolean') return false;": 1,
+        "if (isPromptItem(item) && result !== null && typeof result !== 'string') return false;": 1,
+        "if (!isConfirmItem(item) && !isPromptItem(item) && result !== undefined) return false;": 1,
+        "if (isConfirmItem(item)) item.resolve(result as boolean); else if (isPromptItem(item)) item.resolve(result as string | null); else item.resolve();": 1,
+        "if (isPromptItem(item)) item.resolve(result as string | null); else item.resolve();": 2
+      },
+      "function-explanation": {
+        "function pump(): void { if (!host || active || queue.length === 0) return; active = queue.shift() ?? null; if (active) host.controller.show(active.request); }": 1,
+        "export function registerDialogHost(controller: DialogHostController): () => void { const token = Symbol('ui-dialog-host'); host = { token, controller }; if (active) controller.show": 1,
+        "export function completeDialogRequest(requestId: number, result: DialogResult): boolean { const item = active; if (!item || item.request.id !== requestId) return false; if (isConfi": 1,
+        "export function confirmDialog(text: string, options: ConfirmDialogOptions = {}): Promise<boolean> { return new Promise<boolean>((resolve) => { const request: ConfirmDialogRequest =": 1,
+        "export function promptDialog(options: PromptDialogOptions = {}): Promise<string | null> { return new Promise<string | null>((resolve) => { const request: PromptDialogRequest = Obje": 1,
+        "export function alertDialog(text: string, options: AlertDialogOptions = {}): Promise<void> { return new Promise<void>((resolve) => { const request: AlertDialogRequest = Object.free": 1,
+        "export function pendingDialogCount(): number { return queue.length + (active ? 1 : 0); }": 1
+      }
+    },
+    "web/src/services/layers/modalEnvironment.ts": {
+      "logical-spacing": {
+        "declaration->exit: return isUiLayerName(value) ? value : null;": 1,
+        "declaration->exit: return name ? uiLayerPriority(name) : null;": 1,
+        "branch->effect: element.inert = true;": 1,
+        "declaration->branch: if (!saved) return;": 1,
+        "branch->effect: element.inert = saved.inert;": 1,
+        "effect->branch: if (saved.ariaHidden === null) element.removeAttribute('aria-hidden'); else element.setAttribute('aria-hidden', saved.ariaHidden);": 1,
+        "branch->effect: forcedElements.delete(element);": 1,
+        "declaration->loop: for (const child of [...body.children]) { if (!(child instanceof HTMLElement)) continue; if (child === top.root) continue; if (entries.some((entry) => entry.root === child)) contin": 1,
+        "loop->exit: return desired;": 1,
+        "declaration->branch: if (priority !== null && priority > top.priority) continue;": 1,
+        "branch->effect: desired.add(child);": 1,
+        "branch->effect: unlockBody();": 1,
+        "declaration->branch: if (scrollbarWidth > 0 && view) { const currentPadding = Number.parseFloat(view.getComputedStyle(body).paddingRight) || 0; body.style.paddingRight = `${currentPadding + scrollbarWi": 1,
+        "branch->effect: body.style.overflow = 'hidden';": 1,
+        "declaration->effect: body.style.paddingRight = `${currentPadding + scrollbarWidth}px`;": 1,
+        "effect->branch: if (!observedBody) return;": 1,
+        "branch->effect: observedBody.style.overflow = savedBodyOverflow;": 1,
+        "effect->branch: if (!bodyHadLockClass) observedBody.classList.remove('ui-modal-scroll-lock');": 1,
+        "branch->effect: observedBody = null;": 1,
+        "branch->effect: refreshQueued = true;": 1,
+        "declaration->branch: if (!top) { for (const element of [...forcedElements.keys()]) restoreElement(element); unlockBody(); notify(); return; }": 1,
+        "effect->declaration: const desired = desiredInertElements(top);": 1,
+        "declaration->loop: for (const element of [...forcedElements.keys()]) { if (!desired.has(element)) restoreElement(element); }": 1,
+        "loop->effect: notify();": 1,
+        "loop->effect: unlockBody();": 1,
+        "effect->exit: return;": 1,
+        "effect->exit: return () => listeners.delete(listener);": 1,
+        "declaration->effect: modals.set(token, entry);": 1,
+        "declaration->exit: return { token, root, isTop: () => registered && isTopModal(token), refresh: refreshModalEnvironment, unregister: () => { if (!registered) return; registered = false; restoreElemen": 1,
+        "branch->effect: registered = false;": 1,
+        "effect->loop: for (const element of [...forcedElements.keys()]) restoreElement(element);": 1,
+        "loop->effect: sequence = 0;": 1
+      },
+      "function-explanation": {
+        "function restoreElement(element: HTMLElement): void { const saved = forcedElements.get(element); if (!saved) return; element.inert = saved.inert; if (saved.ariaHidden === null) ele": 1,
+        "function desiredInertElements(top: ModalEntry): Set<HTMLElement> { const desired = new Set<HTMLElement>(); const entries = connectedEntries(); for (const entry of entries) { if (en": 1,
+        "function lockBody(body: HTMLElement): void { if (observedBody === body) return; unlockBody(); observedBody = body; savedBodyOverflow = body.style.overflow; savedBodyPaddingRight = ": 1,
+        "function unlockBody(): void { observer?.disconnect(); observer = null; if (!observedBody) return; observedBody.style.overflow = savedBodyOverflow; observedBody.style.paddingRight =": 1,
+        "export function refreshModalEnvironment(): void { const top = topEntry(); if (!top) { for (const element of [...forcedElements.keys()]) restoreElement(element); unlockBody(); notif": 1,
+        "export function subscribeModalEnvironment(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }": 1,
+        "export function isTopModal(token: symbol): boolean { return topEntry()?.token === token; }": 1,
+        "export function activeModalElement(): HTMLElement | null { return topEntry()?.root ?? null; }": 1,
+        "export function registerModalEnvironment( root: HTMLElement, layer: UiLayerName = 'dialog', ): ModalEnvironmentHandle { const token = Symbol(`modal-${layer}`); const entry: ModalEn": 1,
+        "export function resetModalEnvironmentForTests(): void { modals.clear(); for (const element of [...forcedElements.keys()]) restoreElement(element); sequence = 0; unlockBody(); notif": 1
+      },
+      "unbraced-control": {
+        "if (!saved) return;": 1,
+        "if (saved.ariaHidden === null) element.removeAttribute('aria-hidden'); else element.setAttribute('aria-hidden', saved.ariaHidden);": 2,
+        "if (entry.token !== top.token) desired.add(entry.root);": 1,
+        "if (!(child instanceof HTMLElement)) continue;": 1,
+        "if (child === top.root) continue;": 1,
+        "if (entries.some((entry) => entry.root === child)) continue;": 1,
+        "if (priority !== null && priority > top.priority) continue;": 1,
+        "if (observedBody === body) return;": 1,
+        "if (!observedBody) return;": 1,
+        "if (!bodyHadLockClass) observedBody.classList.remove('ui-modal-scroll-lock');": 1,
+        "if (refreshQueued) return;": 1,
+        "for (const listener of [...listeners]) listener();": 1,
+        "for (const element of [...forcedElements.keys()]) restoreElement(element);": 2,
+        "if (!desired.has(element)) restoreElement(element);": 1,
+        "for (const element of desired) saveAndForce(element);": 1,
+        "if (!registered) return;": 1
+      }
+    },
+    "web/src/services/layers/priorities.ts": {
+      "function-explanation": {
+        "export function isUiLayerName(value: unknown): value is UiLayerName { return typeof value === 'string' && UI_LAYER_NAMES.has(value as UiLayerName); }": 1,
+        "export function normalizeUiLayerName(value: unknown, fallback: UiLayerName = 'dialog'): UiLayerName { return isUiLayerName(value) ? value : fallback; }": 1,
+        "export function uiLayerPriority(name: UiLayerName): number { return UI_LAYER_PRIORITIES[name]; }": 1,
+        "export function uiLayerProps(name: UiLayerName): UiLayerRootProps { return { 'data-ui-layer': name, style: { '--ui-layer-z': String(uiLayerPriority(name)) }, }; }": 1
+      }
+    },
+    "web/src/services/layers/stack.ts": {
+      "logical-spacing": {
+        "branch->exit: return Boolean((target as Element).closest('[data-escape-owner]'));": 1,
+        "declaration->branch: if (!layer) return;": 1,
+        "declaration->try: try { handled = layer.close(event); } catch (error) { // Ошибка обработчика не должна передать тот же Escape следующему слою. event.preventDefault(); event.stopImmediatePropagation": 1,
+        "branch->effect: event.preventDefault();": 1,
+        "effect->exit: return;": 1,
+        "branch->effect: listeningDocument?.removeEventListener('keydown', onKeydown, true);": 1,
+        "branch->effect: listeningDocument.removeEventListener('keydown', onKeydown, true);": 1,
+        "effect->exit: return () => listeners.delete(listener);": 1,
+        "declaration->branch: if (!element) return null;": 1,
+        "branch->try: try { return element(); } catch { return null; }": 1,
+        "effect->declaration: const token = Symbol(id);": 2,
+        "declaration->effect: layers.set(token, entry);": 2,
+        "declaration->exit: return handle;": 1,
+        "branch->effect: registered = false;": 2,
+        "declaration->effect: ensureListener();": 1,
+        "declaration->effect: Object.defineProperties(unregister, { token: { value: token, enumerable: true }, handle: { value: handle, enumerable: true }, });": 1,
+        "effect->exit: return unregister;": 1
+      },
+      "unbraced-control": {
+        "if (!target || typeof (target as Element).closest !== 'function') return false;": 1,
+        "if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) return;": 1,
+        "if (!layer) return;": 1,
+        "if (handled === false) return;": 1,
+        "if (typeof document === 'undefined' || listeningDocument === document) return;": 1,
+        "if (layers.size > 0 || !listeningDocument) return;": 1,
+        "for (const listener of [...listeners]) listener();": 1,
+        "if (!element) return null;": 1,
+        "if (!registered) return;": 2
+      },
+      "function-explanation": {
+        "function onKeydown(event: KeyboardEvent): void { if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) return; const layer = topLayer(); if (!laye": 1,
+        "function ensureListener(): void { if (typeof document === 'undefined' || listeningDocument === document) return; listeningDocument?.removeEventListener('keydown', onKeydown, true);": 1,
+        "export function refreshLayerStack(): void { notify(); }": 1,
+        "export function subscribeLayerStack(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }": 1,
+        "export function activeLayerId(): string | null { return topLayer()?.id ?? null; }": 1,
+        "export function activeLayerElement(): HTMLElement | null { const element = topLayer()?.element; if (!element) return null; try { return element(); } catch { return null; } }": 1,
+        "export function isTopLayerToken(token: symbol): boolean { return topLayer()?.token === token; }": 1,
+        "export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle { ensureListener(); const token = Symbol(id); const entry: LayerEntry = { token, id,": 1,
+        "export function registerLayer(id: string, options: LegacyLayerRegistrationOptions): LegacyLayerUnregister { const name = normalizeUiLayerName(options.name, 'dialog'); ensureListene": 1,
+        "export function resetLayerStackForTests(): void { layers.clear(); listeners.clear(); sequence = 0; removeListenerWhenIdle(); }": 1
+      },
+      "one-line-function": {
+        "() => { throw error; }": 1
+      }
+    },
+    "web/src/shared/ui/HelpTip.vue": {
+      "logical-spacing": {
+        "branch->exit: return 'top';": 1
+      },
+      "unbraced-control": {
+        "if (props.align === 'left') return 'top-start';": 1,
+        "if (props.align === 'right') return 'top-end';": 1
+      }
+    },
+    "web/src/shared/ui/NumberField.vue": {
+      "logical-spacing": {
+        "declaration->function: function set(value: UiNumberValue): void { const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 0; model.value = Math.max(props.min, normalized); }": 1,
+        "declaration->effect: model.value = Math.max(props.min, normalized);": 1
+      },
+      "packed-members": {
+        "{ min: 0, max: undefined, step: 1, placeholder: '' }": 1
+      }
+    },
+    "web/src/shared/ui/ToggleSwitch.vue": {
+      "logical-spacing": {
+        "effect->declaration: const model = defineModel<boolean>({ required: true });": 1
+      }
+    },
+    "web/src/types/uiActions.ts": {
+      "function-explanation": {
+        "export function normalizeActionVariant(value: unknown): UiActionVariant { return UI_ACTION_VARIANTS.includes(value as UiActionVariant) ? value as UiActionVariant : 'outline'; }": 1,
+        "export function normalizeActionTone(value: unknown): UiActionTone { return UI_ACTION_TONES.includes(value as UiActionTone) ? value as UiActionTone : 'neutral'; }": 1
+      }
+    },
+    "web/src/types/uiFields.ts": {
+      "line-length": {
+        "48:| { type: 'button'; label: string; description?: string; tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }": 1
+      },
+      "packed-members": {
+        "{ type: 'toggle'; label: string; description?: string }": 1,
+        "{ type: 'text'; label: string; description?: string; placeholder?: string }": 1,
+        "{ type: 'number'; label: string; description?: string; min?: number; max?: number; step?: number }": 1,
+        "{ type: 'select'; label: string; description?: string; options: UiSettingOption[] }": 1,
+        "{ type: 'button'; label: string; description?: string; tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }": 1,
+        "{ type: 'link'; label: string; description?: string; href: string; external?: boolean }": 1
+      }
+    },
+    "web/src/views/AgentsView.vue": {
+      "line-length": {
+        "64:return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет — модель и effort берутся из runners.env проекта.`;": 1,
+        "71:label: 'Как этап будет подписан на схеме конвейера — текст внутри блока. Например «Разведка» или «Приёмка кода».',": 1,
+        "72:kind: 'Кто делает этап: 🤖 агент — работает ИИ; 👤 человек — конвейер останавливается и ждёт решения человека; </> код — выполняется команда на хосте. Здесь это заготовка для новог": 1,
+        "73:tier: 'Насколько сильная модель нужна этапу: рассуждающая — для сложного анализа, сбалансированная — для рутины по готовой спецификации, экономная — для механики и проверок. Конкре": 1,
+        "74:effort: 'Сколько усилий модели тратить на обдумывание хода — пометка тому, кто собирает маршрут. На запуск не влияет: фактический effort этапа берётся из runners.env проекта.',": 1,
+        "76:key: 'Короткое имя этапа в реестре задачи (runKey): под ним движок хранит результат этапа и показывает его в дашборде и логах. Здесь — предложение для нового узла; у собранной схем": 1,
+        "77:timeout: 'За сколько секунд этап должен уложиться — ориентир тому, кто собирает маршрут; 0 — без рекомендации. Боевой лимит принадлежит опубликованному маршруту, и агент узнаёт его": 1,
+        "78:budget: 'Ориентир объёма работы этапа для автора маршрута; 0 — без рекомендации. В маршрутах бюджет задан именованным классом (standard, large), так что число отсюда никуда не едет": 1,
+        "79:flags: 'Две пометки для нового узла: read-only — этапу нельзя писать в репозиторий (только смотрит и отчитывается), optional — этап разрешено штатно пропустить. Настоящую файловую ": 1,
+        "80:prompt: 'С чего начинается задание этапа. Это заготовка: боевой текст живёт в маршруте профиля (routes/<маршрут>/prompts/), туда его переносят отсюда — правка заготовки собранные м": 1,
+        "86:'Агент здесь — описание роли конвейера: как этап подписан на схеме, какого класса модель ему нужна и с чего начинается его задание.',": 1,
+        "87:'Это библиотека, а не настройки запуска. Прогон задачи отсюда не читает ничего: боевой промпт этапа лежит в маршруте проекта (profiles/<проект>/routes/<маршрут>/prompts/), а модель": 1,
+        "88:'Смысл — держать формулировку роли в одном месте: описать её один раз и переносить в маршруты проектов, а не выдумывать заново под каждый. Все поля карточки — рекомендации автору м": 1,
+        "124:if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;": 1,
+        "130:if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;": 1,
+        "159:if (!(await confirmDialog(`Удалить агента «${form.value.label || selectedId.value}»?`, { danger: true, okText: 'Удалить' }))) return;": 1
+      },
+      "logical-spacing": {
+        "declaration->effect: watch(selectedId, (agentId) => { if (agentId) agentsContext.focus({ details: { agentId } }); else agentsContext.blur(); }, { immediate: true });": 1,
+        "declaration->branch: if (a.tier) parts.push(`модель класса «${tierLabel[a.tier] || a.tier}»`);": 1,
+        "branch->exit: return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет — модель и effort берутся из runners.env проекта.`;": 1,
+        "branch->exit: return JSON.stringify(form.value) !== JSON.stringify(original.value);": 1,
+        "effect->try: try { agents.value = (await api.get('/api/agents')).agents || []; if (!selectedId.value && agents.value.length) select(agents.value[0].id); } catch (e) { error.value = e.message; }": 1,
+        "effect->branch: if (!selectedId.value && agents.value.length) select(agents.value[0].id);": 1,
+        "declaration->branch: if (!a) return;": 1,
+        "branch->effect: selectedId.value = id;": 1,
+        "branch->effect: selectedId.value = '';": 1,
+        "branch->effect: saving.value = true;": 1,
+        "effect->try: try { if (isNew.value) { const created = await api.post('/api/agents', form.value); isNew.value = false; selectedId.value = created.id; } else { await api.put(`/api/agents/${select": 1,
+        "branch->effect: await load();": 1,
+        "effect->declaration: const cur = agents.value.find((a) => a.id === selectedId.value);": 1,
+        "declaration->branch: if (cur) form.value = JSON.parse(JSON.stringify(cur));": 1,
+        "branch->effect: notice.value = 'Сохранено';": 1,
+        "declaration->effect: isNew.value = false;": 1,
+        "branch->try: try { await api.del(`/api/agents/${selectedId.value}`); selectedId.value = ''; form.value = null; await load(); } catch (e) { notice.value = `Ошибка: ${e.message}`; }": 1,
+        "effect->try: try { const r = await api.post('/api/agents/install'); await load(); installNotice.value = r.created?.length ? `Установлено агентов: ${r.created.length}` : 'Все агенты набора уже е": 1,
+        "declaration->effect: await load();": 1
+      },
+      "unbraced-control": {
+        "if (agentId) agentsContext.focus({ details: { agentId } }); else agentsContext.blur();": 2,
+        "if (a.tier) parts.push(`модель класса «${tierLabel[a.tier] || a.tier}»`);": 1,
+        "if (a.effort) parts.push(`effort ${a.effort}`);": 1,
+        "if (isNew.value) return true;": 1,
+        "if (!form.value || !original.value) return false;": 1,
+        "if (!selectedId.value && agents.value.length) select(agents.value[0].id);": 1,
+        "if (!a) return;": 1,
+        "if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;": 2,
+        "if (!form.value) return;": 1,
+        "if (cur) form.value = JSON.parse(JSON.stringify(cur));": 1,
+        "if (!selectedId.value || isNew.value) return;": 1,
+        "if (!(await confirmDialog(`Удалить агента «${form.value.label || selectedId.value}»?`, { danger: true, okText: 'Удалить' }))) return;": 1
+      },
+      "packed-members": {
+        "{ agent: '🤖', human: '👤', code: '</>' }": 1,
+        "{ id: '', kind: 'agent', label: '', sub: '', key: '', tier: '', effort: '', timeout: 0, budget: 0, readonly: false, optional: false, prompt: '', }": 1
+      },
+      "function-explanation": {
+        "async function load() { loading.value = true; error.value = ''; try { agents.value = (await api.get('/api/agents')).agents || []; if (!selectedId.value && agents.value.length) sele": 1,
+        "async function select(id) { const a = agents.value.find((x) => x.id === id); if (!a) return; if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { o": 1,
+        "async function createNew() { if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return; selectedId.value = ''; isNew.value": 1,
+        "async function save() { if (!form.value) return; saving.value = true; notice.value = ''; try { if (isNew.value) { const created = await api.post('/api/agents', form.value); isNew.v": 1,
+        "async function del() { if (!selectedId.value || isNew.value) return; if (!(await confirmDialog(`Удалить агента «${form.value.label || selectedId.value}»?`, { danger: true, okText: ": 1
+      },
+      "one-line-function": {
+        "() => { notice.value = ''; }": 1,
+        "() => { installNotice.value = ''; }": 1
+      }
+    },
+    "web/src/views/GitHubView.vue": {
+      "line-length": {
+        "190:'Отключить GitHub? Webhook будет удалён, а секреты стёрты. Ранее принятые обращения останутся в Inbox для чтения.',": 1,
+        "256:'Разрешить coding-агентам выбранного проекта искать содержимое GitHub Issues? Человеческий Inbox от этой настройки не изменится.',": 1,
+        "321:return ({ pending: 'Ожидает webhook ping', connected: 'Подключён', cleanup_pending: 'Очистка не завершена' })[value]": 1
+      },
+      "packed-members": {
+        "{ owner: '', repo: '', token: '' }": 1,
+        "{ project: '', kind: 'bug', responsibleId: '', groupId: '', priority: 1, }": 1,
+        "{ responsibleId, groupId, priority: Number(ruleForm.priority) }": 1,
+        "{ pending: 'Ожидает webhook ping', connected: 'Подключён', cleanup_pending: 'Очистка не завершена' }": 1
+      },
+      "logical-spacing": {
+        "declaration->exit: return { configured: raw.configured === true, state: typeof raw.state === 'string' ? raw.state : null, repositoryId: typeof raw.repositoryId === 'string' ? raw.repositoryId : null,": 1,
+        "branch->effect: ruleForm.project = typeof rule.project === 'string' ? rule.project : '';": 1,
+        "effect->exit: return;": 2,
+        "declaration->effect: applyRulesSnapshot(data);": 1,
+        "effect->exit: return data;": 1,
+        "effect->branch: if (!verified.value) { rules.value = []; policyFingerprint.value = ''; agentSearchKnown.value = false; applyRule(null); rulesLoaded.value = true; return; }": 1,
+        "branch->effect: await readRulesSnapshot();": 1,
+        "effect->try: try { const data = await api.get('/api/github/status'); status.value = publicStatus(data); unavailable.value = false; await loadRules(); } catch (err) { if (isPluginDisabled(err)) ": 1,
+        "declaration->effect: status.value = publicStatus(data);": 1,
+        "branch->effect: busy.value = 'connect';": 1,
+        "effect->try: try { await api.post('/api/github/connect', { owner: connectForm.owner.trim(), repo: connectForm.repo.trim(), token: connectForm.token.trim(), }); connectForm.token = ''; notice.va": 1,
+        "branch->effect: busy.value = 'recheck';": 1,
+        "effect->try: try { await api.post('/api/github/recheck', {}); notice.value = 'Состояние GitHub перепроверено.'; await load(); } catch (err) { error.value = err?.message || 'Перепроверка GitHub ": 1,
+        "branch->effect: busy.value = 'disconnect';": 1,
+        "effect->try: try { await api.post('/api/github/disconnect', {}); notice.value = 'GitHub отключён.'; await load(); } catch (err) { error.value = err?.message || 'Отключение GitHub не завершено.'": 1,
+        "declaration->exit: return text ? Number(text) : null;": 1,
+        "declaration->branch: if (responsibleId !== null || groupId !== null || rules.value[0]?.b24) { rule.b24 = { responsibleId, groupId, priority: Number(ruleForm.priority) }; }": 1,
+        "branch->exit: return rule;": 1,
+        "branch->effect: busy.value = 'rules';": 1,
+        "effect->try: try { await api.put('/api/github/rules', { repositoryId: status.value.repositoryId, rules: nextRules, }); notice.value = nextRules.length ? 'Репозиторий допущен в Inbox.' : 'Allowl": 1,
+        "declaration->branch: if (event?.target) event.target.checked = agentSearchKnown.value && agentSearch.value;": 1,
+        "effect->try: try { await api.put('/api/github/rules/agent-search', { repositoryId: status.value.repositoryId, expectedPolicyFingerprint: policyFingerprint.value, enabled, }); notice.value = ena": 1,
+        "declaration->try: try { await readRulesSnapshot(); rulesLoaded.value = true; if (!agentSearchKnown.value) { throw new Error('Сервер не вернул достоверный policy fingerprint.'); } const actual = agen": 1,
+        "effect->branch: if (!agentSearchKnown.value) { throw new Error('Сервер не вернул достоверный policy fingerprint.'); }": 1,
+        "branch->declaration: const actual = agentSearch.value;": 1,
+        "declaration->branch: if (actual === enabled) { error.value = ''; notice.value = `Повторная проверка подтвердила: поиск агентам ${actual ? 'разрешён' : 'закрыт'}.`; } else { notice.value = ''; error.val": 1,
+        "branch->effect: await saveRules([]);": 1,
+        "declaration->exit: return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');": 1
+      },
+      "function-explanation": {
+        "function applyRule(rule) { if (!isPlainObject(rule)) { ruleForm.project = ''; ruleForm.kind = 'bug'; ruleForm.responsibleId = ''; ruleForm.groupId = ''; ruleForm.priority = 1; pres": 1,
+        "function applyRulesSnapshot(data) { rules.value = Array.isArray(data?.rules) ? data.rules.slice(0, 1) : []; policyFingerprint.value = typeof data?.policyFingerprint === 'string' &&": 1,
+        "async function loadRules() { rulesLoaded.value = false; if (!verified.value) { rules.value = []; policyFingerprint.value = ''; agentSearchKnown.value = false; applyRule(null); rule": 1,
+        "async function load() { loading.value = true; error.value = ''; try { const data = await api.get('/api/github/status'); status.value = publicStatus(data); unavailable.value = false": 1,
+        "async function connect() { if (!canConnect.value) return; busy.value = 'connect'; error.value = ''; try { await api.post('/api/github/connect', { owner: connectForm.owner.trim(), r": 1,
+        "async function recheck() { if (busy.value) return; busy.value = 'recheck'; error.value = ''; try { await api.post('/api/github/recheck', {}); notice.value = 'Состояние GitHub переп": 1,
+        "async function disconnect() { if (busy.value || !(await confirmDialog( 'Отключить GitHub? Webhook будет удалён, а секреты стёрты. Ранее принятые обращения останутся в Inbox для чте": 1,
+        "function rulePayload() { const rule = { repositoryId: status.value.repositoryId, project: ruleForm.project.trim(), kind: ruleForm.kind, }; const responsibleId = idOrNull(ruleForm.r": 1,
+        "async function saveRules(nextRules) { if (busy.value || !providerWritable.value) return; busy.value = 'rules'; error.value = ''; try { await api.put('/api/github/rules', { reposito": 1,
+        "async function changeAgentSearch(event) { const enabled = event?.target?.checked === true; if (event?.target) event.target.checked = agentSearchKnown.value && agentSearch.value; if": 1
+      },
+      "unbraced-control": {
+        "if (!canConnect.value) return;": 1,
+        "if (busy.value) return;": 1,
+        "if (busy.value || !(await confirmDialog( 'Отключить GitHub? Webhook будет удалён, а секреты стёрты. Ранее принятые обращения останутся в Inbox для чтения.', { okText: 'Отключить' }": 1,
+        "if (preservedAutoTask) rule.autoTask = { ...preservedAutoTask };": 1,
+        "if (busy.value || !providerWritable.value) return;": 1,
+        "if (event?.target) event.target.checked = agentSearchKnown.value && agentSearch.value;": 1,
+        "if (busy.value || !providerWritable.value || rules.value.length !== 1 || !agentSearchKnown.value || !policyFingerprint.value) return;": 1,
+        "if (enabled && !(await confirmDialog( 'Разрешить coding-агентам выбранного проекта искать содержимое GitHub Issues? Человеческий Inbox от этой настройки не изменится.', { okText: '": 1,
+        "if (!providerWritable.value || !(await confirmDialog( 'Убрать репозиторий из allowlist? Новые issues не будут попадать в Inbox.', { okText: 'Убрать' }, ))) return;": 1
+      }
+    },
+    "web/src/views/InboxView.vue": {
+      "line-length": {
+        "375:text: 'Без пояснения задача потеряет суть вложения. Нажмите «Создать задачу» ещё раз и опишите содержимое.',": 1,
+        "384:text: 'Обращение или выбор изменились, пока вы писали. Проверьте выбор и нажмите «Создать задачу» — текст пояснения сохранён.',": 1,
+        "538:text: `Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите «Создать задачу» и опишите содержимое${": 1,
+        "549:text: `Авторазбор через ${formatRemaining(readyAtMs - nowMs.value)} тишины. Новые сообщения продлят ожидание.`,": 1
+      },
+      "packed-members": {
+        "{ items: [], channels: [], errors: [], truncated: false, worker: null }": 1,
+        "{ kind: 'bad', text: 'Автообработчик входящих остановлен.', settings: false, }": 1,
+        "{ kind: 'bad', text: 'Состояние автообработчика временно недоступно.', settings: false, }": 1,
+        "{ kind: 'bad', text: 'Последний автоматический разбор завершился технической ошибкой.', settings: false, }": 1,
+        "{ items: [], channels: [], errors: [], truncated: false, worker: null, }": 1,
+        "{ connected: 'Подключён', disconnected: 'Не подключён', degraded: 'Ошибка канала' }": 1
+      },
+      "logical-spacing": {
+        "declaration->branch: if (!worker) return null;": 1,
+        "branch->declaration: const incompatibleModel = [ 'executor_unavailable', 'invalid_model_ref', 'model_unavailable', 'model_not_found', 'registry_failed', 'unknown_model', 'unknown_provider', 'unsafe_mod": 1,
+        "declaration->branch: if (incompatibleModel.includes(worker.readiness) || incompatibleModel.includes(worker.lastReason)) return { kind: 'warn', text: 'Автозадачи приостановлены: выбранная модель не подд": 1,
+        "branch->exit: return null;": 1,
+        "branch->exit: return `skipped:${message.decision.decisionId}:${message.decision.version}`;": 1,
+        "declaration->branch: if (!key) return [];": 1,
+        "branch->declaration: const accepted = new Set(allowed.filter((message) => selectionKey(message) === key) .map((message) => message.messageRef));": 1,
+        "declaration->exit: return item.messages.map((message) => message.messageRef).filter((ref) => accepted.has(ref));": 1,
+        "declaration->loop: for (const ref of Object.keys(selection)) { if (!live.has(ref)) delete selection[ref]; }": 1,
+        "branch->declaration: const retry = itemAlerts[item.ref]?.retry;": 1,
+        "declaration->branch: if (retry && (retry.revision !== item.revision || !sameRefs(retry.messageRefs, selection[item.ref]))) delete itemAlerts[item.ref];": 1,
+        "declaration->effect: selection[item.ref] = normalizeSelection(item, initial);": 1,
+        "declaration->branch: if (!payload.value.items.length && !payload.value.channels.length) loading.value = true;": 1,
+        "branch->try: try { const data = await api.get('/api/inbox'); if (own !== loadVersion) return; const next = { items: Array.isArray(data?.items) ? data.items : [], channels: Array.isArray(data?.c": 1,
+        "declaration->branch: if (own !== loadVersion) return;": 1,
+        "branch->declaration: const next = { items: Array.isArray(data?.items) ? data.items : [], channels: Array.isArray(data?.channels) ? data.channels : [], errors: Array.isArray(data?.errors) ? data.errors ": 1,
+        "declaration->effect: payload.value = next;": 1,
+        "declaration->branch: if (!target || !selectable(target)) return;": 1,
+        "branch->declaration: const refs = new Set(selectedRefs(item));": 1,
+        "declaration->branch: if (checked) { const key = selectionKey(target); for (const message of selectedMessages(item)) { if (selectionKey(message) !== key) refs.delete(message.messageRef); } refs.add(mess": 1,
+        "branch->effect: selection[item.ref] = normalizeSelection(item, [...refs]);": 1,
+        "declaration->loop: for (const message of selectedMessages(item)) { if (selectionKey(message) !== key) refs.delete(message.messageRef); }": 1,
+        "loop->effect: refs.add(messageRef);": 1,
+        "declaration->exit: return item.messages.filter((message) => refs.has(message.messageRef));": 1,
+        "declaration->exit: return messages.length > 0 && messages.every((message) => !message.decision);": 1,
+        "declaration->branch: if (!messages.length || messages.some((message) => message.decision?.status !== 'skipped')) return null;": 1,
+        "branch->declaration: const first = messages[0].decision;": 1,
+        "declaration->exit: return messages.every((message) => message.decision.decisionId === first.decisionId && message.decision.version === first.version) ? first : null;": 1,
+        "branch->exit: return 'none';": 1,
+        "declaration->exit: return decisions.filter((decision) => { if (!decision?.taskUrl || seen.has(decision.taskUrl)) return false; seen.add(decision.taskUrl); return true; }).map((decision, index, links)": 1,
+        "branch->effect: seen.add(decision.taskUrl);": 1,
+        "effect->exit: return true;": 1,
+        "branch->declaration: const why = notificationReasons[notification.reason];": 1,
+        "declaration->exit: return `, но ответ в исходный чат не отправлен${why ? ` (${why})` : ''} — сообщите там сами`;": 1,
+        "branch->declaration: const messageRefs = [...selectedRefs(item)];": 1,
+        "declaration->branch: if (action === 'reset') { const decision = resetDecision(item); if (!decision) return; body.decisionId = decision.decisionId; body.decisionVersion = decision.version; } else if (!c": 1,
+        "branch->effect: busy.value = `${item.ref}:${action}`;": 1,
+        "effect->try: try { const done = await api.post(`/api/inbox/items/${encodeURIComponent(item.ref)}/${action}`, body); const undelivered = action === 'task' && notificationFailure(done?.notificati": 1,
+        "declaration->branch: if (!decision) return;": 1,
+        "branch->effect: body.decisionId = decision.decisionId;": 1,
+        "declaration->branch: if (undelivered) noticeKind.value = 'warn';": 1,
+        "branch->effect: notice.value = action === 'task' ? `Задача создана${undelivered}` : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю' : 'Обращение возвращено к разбору';": 1,
+        "declaration->branch: if (['stale_item', 'stale_decision', 'account_changed'].includes(code)) { const text = 'Обращение изменилось — данные обновлены'; delete selection[item.ref]; await load(); if (visi": 1,
+        "declaration->effect: delete selection[item.ref];": 1,
+        "effect->branch: if (visibleItems.value.some((entry) => entry.ref === item.ref)) { itemAlerts[item.ref] = { kind: 'warn', text }; } else { notice.value = text; }": 1,
+        "declaration->branch: if (attachments.length) { lines.push('', 'Не удалось разобрать:'); for (const attachment of attachments) { lines.push(attachment.reason ? `• ${attachment.label} — ${attachment.reas": 1,
+        "branch->effect: lines.push( '', 'Опишите своими словами, что там было и что нужно сделать.', 'Текст уйдёт на разбор модели вместе с обращением и попадёт в описание задачи.', );": 1,
+        "effect->declaration: const answer = await promptDialog({ title: 'Опишите содержимое вложений', text: lines.join('\\n'), placeholder: 'Например: на видео после сохранения фильтра таблица сбрасывает сорти": 1,
+        "declaration->branch: if (answer === null) return;": 1,
+        "branch->declaration: const note = String(answer).trim();": 1,
+        "effect->branch: if (!note) { itemAlerts[item.ref] = { kind: 'warn', text: 'Без пояснения задача потеряет суть вложения. Нажмите «Создать задачу» ещё раз и опишите содержимое.', }; return; }": 1,
+        "branch->declaration: const current = payload.value.items.find((entry) => entry.ref === item.ref);": 1,
+        "declaration->branch: if (!current || current.revision !== item.revision || !sameRefs(messageRefs, selectedRefs(item))) { itemAlerts[item.ref] = { kind: 'warn', text: 'Обращение или выбор изменились, по": 1,
+        "branch->effect: await mutateItem(item, 'task', { operatorNote: note });": 1,
+        "effect->loop: for (const attachment of attachments) { lines.push(attachment.reason ? `• ${attachment.label} — ${attachment.reason}` : `• ${attachment.label}`); }": 1,
+        "effect->exit: return;": 2,
+        "branch->effect: busy.value = `${channel.id}:${action}`;": 1,
+        "effect->try: try { await api.post(`/api/inbox/channels/${encodeURIComponent(channel.id)}/${action}`, { activationVersion: channel.activationVersion, }); notice.value = action === 'activate' ? `": 1,
+        "branch->exit: return statusLabel(item.status);": 1,
+        "declaration->exit: return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');": 1,
+        "declaration->branch: if (!minutes) return `${seconds} с`;": 1,
+        "branch->exit: return seconds ? `${minutes} мин ${seconds} с` : `${minutes} мин`;": 1,
+        "declaration->branch: if (!Number.isFinite(size) || size < 0) return '';": 1,
+        "branch->exit: return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} МБ`;": 1,
+        "declaration->exit: return [name && name !== kind ? `${kind}: ${name}` : kind, size].filter(Boolean).join(' · ');": 1,
+        "declaration->branch: if (blocked) { fallbackStatus = 'failed'; fallbackLabel = 'Не удалось разобрать'; } else if (autoTaskDone) { fallbackStatus = 'ready'; fallbackLabel = 'Содержимое разобрано'; } els": 1,
+        "branch->exit: return { status: status || fallbackStatus, label: labels[status] || fallbackLabel, text: String(nested?.transcript || nested?.text || attachment?.transcript || '').trim(), };": 1,
+        "declaration->branch: if (judging?.ref === item.ref && ['new', 'mixed'].includes(item.status)) return { kind: 'judging', text: 'Разбирается прямо сейчас: модель читает обращение и решает, какие задачи с": 1,
+        "branch->declaration: const analysisBlock = analysisBlocksByRef.value.get(item.ref);": 1,
+        "declaration->branch: if (analysisBlock) return { kind: 'blocked', text: `Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите «Создать задачу» и опишите содержимое${ Number.isSafeI": 1,
+        "branch->declaration: const readyAtMs = Number(item.autoTask.readyAtMs);": 1,
+        "declaration->branch: if (Number.isFinite(readyAtMs) && readyAtMs > nowMs.value) return { kind: 'waiting', text: `Авторазбор через ${formatRemaining(readyAtMs - nowMs.value)} тишины. Новые сообщения про": 1,
+        "branch->declaration: const readiness = payload.value.worker?.readiness;": 1,
+        "declaration->branch: if (readiness && readiness !== 'ready') return { kind: 'blocked', text: 'Обращение готово к авторазбору, но автоматика приостановлена.', };": 1,
+        "branch->exit: return { kind: 'queued', text: 'Обращение готово к авторазбору. Если модель не уверена, оно останется здесь для ручного решения.', };": 1,
+        "branch->effect: clockTimer = null;": 1
+      },
+      "unbraced-control": {
+        "if (!worker) return null;": 1,
+        "if (worker.readiness === 'no_model') return { kind: 'warn', text: 'Автозадачи приостановлены: в плагине «Входящие» не выбрана модель разбора.', settings: true, };": 1,
+        "if (worker.readiness === 'no_b24') return { kind: 'warn', text: 'Автозадачи приостановлены: Битрикс24 не подключён.', settings: false, };": 1,
+        "if (incompatibleModel.includes(worker.readiness) || incompatibleModel.includes(worker.lastReason)) return { kind: 'warn', text: 'Автозадачи приостановлены: выбранная модель не подд": 1,
+        "if (worker.readiness === 'stopped') return { kind: 'bad', text: 'Автообработчик входящих остановлен.', settings: false, };": 1,
+        "if (worker.readiness === 'unavailable') return { kind: 'bad', text: 'Состояние автообработчика временно недоступно.', settings: false, };": 1,
+        "if (['snapshot_failed', 'tick_failed'].includes(worker.lastReason)) return { kind: 'bad', text: 'Последний автоматический разбор завершился технической ошибкой.', settings: false, ": 1,
+        "if (!message?.decision) return 'new';": 1,
+        "if (message.decision.status !== 'skipped') return '';": 1,
+        "if (!key) return [];": 1,
+        "if (!live.has(ref)) delete selection[ref];": 1,
+        "if (!live.has(ref)) delete itemAlerts[ref];": 1,
+        "if (retry && (retry.revision !== item.revision || !sameRefs(retry.messageRefs, selection[item.ref]))) delete itemAlerts[item.ref];": 1,
+        "if (!payload.value.items.length && !payload.value.channels.length) loading.value = true;": 1,
+        "if (own !== loadVersion) return;": 2,
+        "if (own === loadVersion) loading.value = false;": 1,
+        "if (!target || !selectable(target)) return;": 1,
+        "if (checked) { const key = selectionKey(target); for (const message of selectedMessages(item)) { if (selectionKey(message) !== key) refs.delete(message.messageRef); } refs.add(mess": 1,
+        "if (selectionKey(message) !== key) refs.delete(message.messageRef);": 1,
+        "if (!messages.length || messages.some((message) => message.decision?.status !== 'skipped')) return null;": 1,
+        "if (canDecide(item)) return 'new';": 1,
+        "if (resetDecision(item)) return 'skipped';": 1,
+        "if (!decision?.taskUrl || seen.has(decision.taskUrl)) return false;": 1,
+        "if (!notification || notification.enabled === false || notification.sent === true) return '';": 1,
+        "if (busy.value || itemReadOnly(item)) return;": 1,
+        "if (!decision) return;": 1,
+        "if (!canDecide(item)) return;": 1,
+        "if (undelivered) noticeKind.value = 'warn';": 1,
+        "if (answer === null) return;": 1,
+        "if (busy.value || channel.readOnly || !Number.isSafeInteger(channel.activationVersion)) return;": 1,
+        "if (action === 'deactivate' && !(await confirmDialog( 'Остановить приём? Сообщения, пришедшие во время паузы, не попадут в очередь после возобновления.', { okText: 'Остановить приё": 1,
+        "if (item.status === 'mixed' && !pendingMessages(item).length) return 'Разобрано по частям';": 1,
+        "if (!minutes) return `${seconds} с`;": 1,
+        "if (!Number.isFinite(size) || size < 0) return '';": 1,
+        "if (size < 1024) return `${Math.round(size)} Б`;": 1,
+        "if (size < 1024 * 1024) return `${Math.round(size / 1024)} КБ`;": 1,
+        "if (judging?.ref === item.ref && ['new', 'mixed'].includes(item.status)) return { kind: 'judging', text: 'Разбирается прямо сейчас: модель читает обращение и решает, какие задачи с": 1,
+        "if (item.status !== 'new' || !item.autoTask || typeof item.autoTask !== 'object') return null;": 1,
+        "if (item.autoTask.enabled !== true) return { kind: 'off', text: 'Автосоздание выключено для этого источника.', };": 1,
+        "if (analysisBlock) return { kind: 'blocked', text: `Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите «Создать задачу» и опишите содержимое${ Number.isSafeI": 1,
+        "if (Number.isFinite(readyAtMs) && readyAtMs > nowMs.value) return { kind: 'waiting', text: `Авторазбор через ${formatRemaining(readyAtMs - nowMs.value)} тишины. Новые сообщения про": 1,
+        "if (readiness && readiness !== 'ready') return { kind: 'blocked', text: 'Обращение готово к авторазбору, но автоматика приостановлена.', };": 1,
+        "if (name === 'inbox-changed') load();": 1,
+        "if (clockTimer) clearInterval(clockTimer);": 1
+      },
+      "function-explanation": {
+        "function selectionKey(message) { if (!message?.decision) return 'new'; if (message.decision.status !== 'skipped') return ''; return `skipped:${message.decision.decisionId}:${messag": 1,
+        "function normalizeSelection(item, refs) { const messagesByRef = new Map(item.messages.map((message) => [message.messageRef, message])); const allowed = refs.map((ref) => messagesBy": 1,
+        "function syncSelection(items) { const live = new Set(items.map((item) => item.ref)); for (const ref of Object.keys(selection)) { if (!live.has(ref)) delete selection[ref]; } for (c": 1,
+        "async function load() { const own = ++loadVersion; if (!payload.value.items.length && !payload.value.channels.length) loading.value = true; try { const data = await api.get('/api/i": 1,
+        "function toggleMessage(item, messageRef, checked) { const target = item.messages.find((message) => message.messageRef === messageRef); if (!target || !selectable(target)) return; c": 1,
+        "function resetDecision(item) { const messages = selectedMessages(item); if (!messages.length || messages.some((message) => message.decision?.status !== 'skipped')) return null; con": 1,
+        "function selectionMode(item) { if (canDecide(item)) return 'new'; if (resetDecision(item)) return 'skipped'; return 'none'; }": 1,
+        "async function mutateItem(item, action, { operatorNote = '' } = {}) { if (busy.value || itemReadOnly(item)) return; const messageRefs = [...selectedRefs(item)]; const body = { revi": 1,
+        "async function changeParticipation(channel, action) { if (busy.value || channel.readOnly || !Number.isSafeInteger(channel.activationVersion)) return; if (action === 'deactivate' &&": 1,
+        "function formatTime(value) { const numeric = Number(value); const millis = numeric > 0 && numeric < 10_000_000_000 ? numeric * 1000 : numeric; const date = new Date(millis); return": 1,
+        "function formatRemaining(value) { const total = Math.max(1, Math.ceil(value / 1000)); const minutes = Math.floor(total / 60); const seconds = total % 60; if (!minutes) return `${se": 1,
+        "function formatBytes(value) { const size = Number(value); if (!Number.isFinite(size) || size < 0) return ''; if (size < 1024) return `${Math.round(size)} Б`; if (size < 1024 * 1024": 1,
+        "function attachmentLabel(attachment) { const kind = String(attachment?.displayLabel || attachment?.kind || 'Вложение').trim() || 'Вложение'; const name = String(attachment?.name ||": 1,
+        "function attachmentAnalysis(attachment, item) { const rawAnalysis = attachment?.attachmentAnalysis ?? attachment?.analysis ?? null; const nested = rawAnalysis && typeof rawAnalysis": 1,
+        "function autoTaskState(item) { // Живое состояние воркера сильнее расписания: между обратным отсчётом и готовым // решением проходят минуты разбора, и карточка обязана показывать э": 1
+      },
+      "one-line-function": {
+        "(name) => { if (name === 'inbox-changed') load(); }": 1,
+        "() => { nowMs.value = Date.now(); }": 1
+      }
+    },
+    "web/src/views/ProjectsView.vue": {
+      "line-length": {
+        "36:const help = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код». У проекта фабрики пути зада": 1
+      },
+      "logical-spacing": {
+        "declaration->effect: watch(() => edit.value?.id || '', (project) => { // Карточки не имеют выбранного repository: публикуем только реально открытый editor, // не первый путь и не абсолютные `dir` из фо": 1,
+        "function->effect: onMounted(load);": 1,
+        "function->function: function addRow() { edit.value?.repos.push({ key: '', dir: '' }); }": 1,
+        "function->function: function delRow(i) { edit.value?.repos.splice(i, 1); }": 1,
+        "function->function: function toCode(id) { openCode({ project: id }); }": 1,
+        "effect->try: try { projects.value = (await api.get('/api/projects')).projects || []; } catch (e) { error.value = e.message; } finally { loading.value = false; }": 1,
+        "declaration->branch: if (!id) return;": 1,
+        "branch->effect: creating.value = true;": 1,
+        "effect->try: try { await api.post('/api/profiles', { id }); newId.value = ''; await load(); // Свежезаведённому проекту сразу открываем редактор путей — ради них он и заводился. const p = proje": 1,
+        "declaration->branch: if (p) startEdit(p);": 1,
+        "branch->declaration: const repos = edit.value.repos .map((r) => ({ key: r.key.trim(), dir: r.dir.trim() })) .filter((r) => r.key || r.dir);": 1,
+        "declaration->effect: edit.value.saving = true;": 1,
+        "effect->try: try { await api.put(`/api/projects/${edit.value.id}`, { repos }); edit.value = null; await load(); } catch (e) { edit.value.msg = e.message; edit.value.saving = false; }": 1
+      },
+      "unbraced-control": {
+        "if (project) projectsContext.focus({ details: { project } }); else projectsContext.blur();": 2,
+        "if (!id) return;": 1,
+        "if (p) startEdit(p);": 1,
+        "if (!edit.value || edit.value.saving) return;": 1
+      },
+      "function-explanation": {
+        "async function load() { loading.value = true; error.value = ''; try { projects.value = (await api.get('/api/projects')).projects || []; } catch (e) { error.value = e.message; } fin": 1,
+        "async function create() { const id = newId.value.trim(); if (!id) return; creating.value = true; try { await api.post('/api/profiles', { id }); newId.value = ''; await load(); // С": 1,
+        "async function save() { if (!edit.value || edit.value.saving) return; const repos = edit.value.repos .map((r) => ({ key: r.key.trim(), dir: r.dir.trim() })) .filter((r) => r.key ||": 1
+      },
+      "one-line-function": {
+        "function canEdit(p) { return !p.factory || !p.repos.some((r) => r.from === 'factory'); }": 1,
+        "function addRow() { edit.value?.repos.push({ key: '', dir: '' }); }": 1,
+        "function delRow(i) { edit.value?.repos.splice(i, 1); }": 1
+      }
+    },
+    "web/src/views/RoutesView.vue": {
+      "line-length": {
+        "36:const helpPanel = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет": 1,
+        "37:const helpRevisions = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие": 1,
+        "98:graph.value = (await api.get(`/api/routes/${profile.value}/routes/${id}/${hash}/graph?c=${currentHash.value}`)).graph;": 1,
+        "128:`Опубликовать каталог «${profile.value}»? Новые попытки пойдут по новой ревизии; уже бегущие останутся на своей.`,": 1
+      },
+      "logical-spacing": {
+        "declaration->effect: watch([profile, selectedRoute], ([project, route], [previousProject] = []) => { if (!project) { routesContext.blur(); return; } const next = { details: { project, route: route || n": 1,
+        "function->function: function fmtWhen(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-": 1,
+        "function->function: function say(text, bad = false) { notice.value = bad ? `Ошибка: ${text}` : text; setTimeout(() => { if (notice.value.includes(text)) notice.value = ''; }, bad ? 8000 : 3000); }": 1,
+        "branch->declaration: const next = { details: { project, route: route || null } };": 1,
+        "declaration->branch: if (project !== previousProject) routesContext.focus(next); else routesContext.update(next);": 1,
+        "effect->exit: return;": 1,
+        "declaration->exit: return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', });": 1,
+        "effect->try: try { if (!profiles.value.length) { profiles.value = (await api.get('/api/profiles')).profiles || []; if (profiles.value.length && !profiles.value.includes(profile.value)) { profil": 1,
+        "branch->declaration: const data = await api.get(`/api/routes/${profile.value}/revisions`);": 1,
+        "declaration->effect: publishSupported.value = !!data.publishSupported;": 1,
+        "effect->branch: if (!routeList.value.some((r) => r.id === selectedRoute.value)) { selectedRoute.value = routeList.value[0]?.id || ''; }": 1,
+        "branch->effect: await loadGraph();": 1,
+        "effect->branch: if (profiles.value.length && !profiles.value.includes(profile.value)) { profile.value = profiles.value[0]; localStorage.setItem('cockpit-project', profile.value); }": 1,
+        "effect->branch: if (!selected.value) return;": 1,
+        "branch->effect: graphLoading.value = true;": 1,
+        "effect->try: try { const { id, hash } = selected.value; // ?c=<catalogHash> в URL обязателен: когда-то схема отдавалась с immutable, и браузер // до сих пор может держать тот старый ответ по го": 1,
+        "branch->effect: selectedRoute.value = id;": 1,
+        "branch->effect: profile.value = next;": 1,
+        "branch->effect: switchProfile(id);": 1,
+        "branch->effect: busy.value = mode;": 1,
+        "effect->try: try { const body = mode === 'publish' ? { mode, expectedCatalogHash: currentHash.value } : { mode }; const res = await api.post(`/api/routes/${profile.value}/publish`, body); repor": 1,
+        "declaration->effect: report.value = res.result;": 1,
+        "effect->branch: if (mode === 'publish') { await load(); say(res.result?.catalogCreated === false ? 'Ревизия не изменилась — публиковать было нечего' : `Опубликовано: ${shortHash(res.result?.catalo": 1,
+        "branch->effect: busy.value = 'rollback';": 1,
+        "effect->try: try { await api.put(`/api/routes/${profile.value}/current`, { desiredCatalogHash: rev.catalogHash, expectedCatalogHash: currentHash.value, }); await load(); say(`Текущая ревизия — ": 1
+      },
+      "unbraced-control": {
+        "if (project !== previousProject) routesContext.focus(next); else routesContext.update(next);": 2,
+        "if (notice.value.includes(text)) notice.value = '';": 1,
+        "if (!profile.value) return;": 1,
+        "if (!selected.value) return;": 1,
+        "if (id === selectedRoute.value) return;": 1,
+        "if (next === profile.value) return;": 1,
+        "if (fresh.length) profiles.value = fresh;": 1,
+        "if (busy.value) return;": 1,
+        "if (mode === 'publish' && !(await confirmDialog( `Опубликовать каталог «${profile.value}»? Новые попытки пойдут по новой ревизии; уже бегущие останутся на своей.`, { okText: 'Опубл": 1,
+        "if (busy.value || rev.isCurrent) return;": 1,
+        "if (!(await confirmDialog( `Перевести current на ревизию ${shortHash(rev.catalogHash)} от ${fmtWhen(rev.createdAt)}?`, { okText: 'Откатить' }, ))) return;": 1
+      },
+      "one-line-function": {
+        "function shortHash(hash) { return hash ? String(hash).slice(0, 12) : '—'; }": 1,
+        "() => { if (notice.value.includes(text)) notice.value = ''; }": 1
+      },
+      "packed-members": {
+        "{ day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', }": 1
+      },
+      "function-explanation": {
+        "function say(text, bad = false) { notice.value = bad ? `Ошибка: ${text}` : text; setTimeout(() => { if (notice.value.includes(text)) notice.value = ''; }, bad ? 8000 : 3000); }": 1,
+        "async function load() { loading.value = true; error.value = ''; try { if (!profiles.value.length) { profiles.value = (await api.get('/api/profiles')).profiles || []; if (profiles.v": 1,
+        "async function loadGraph() { graph.value = null; graphError.value = ''; if (!selected.value) return; graphLoading.value = true; try { const { id, hash } = selected.value; // ?c=<ca": 1,
+        "function switchProfile(next) { if (next === profile.value) return; profile.value = next; localStorage.setItem('cockpit-project', next); selectedRoute.value = ''; graph.value = null": 1
+      }
+    },
+    "web/src/views/settings/AccessOverview.vue": {
+      "line-length": {
+        "38:const desiredGatewayDomain = computed(() => (props.gatewayJob?.state === 'done' ? props.gatewayJob.domain : '')": 1,
+        "120:return `Доступ дома остаётся по HTTP :${httpPort.value}. Сертификаты сохраняются, внешний шлюз не меняется.`;": 1
+      },
+      "logical-spacing": {
+        "branch->declaration: const desired = normalizeDomain(desiredGatewayDomain.value);": 1,
+        "declaration->branch: if (!desired) return false;": 1,
+        "branch->exit: return desired !== normalizeDomain(props.gatewayPublicDomain);": 1,
+        "declaration->branch: if (!checked || checked !== normalizeDomain(gatewayDomain.value)) return false;": 1,
+        "branch->declaration: const configuredGateway = String(props.gatewaySetup?.gateway || '').trim();": 1,
+        "declaration->branch: if (!configuredGateway) return true;": 1,
+        "branch->exit: return String(props.gatewayChecks?.gateway || '').trim() === configuredGateway;": 1,
+        "declaration->branch: if (props.tlsState === 'loading') return { kind: 'idle', label: 'Проверяем…' };": 1,
+        "branch->exit: return { kind: 'danger', label: 'HTTPS не поднялся' };": 1,
+        "branch->exit: return { kind: 'off', label: 'HTTP без шифрования' };": 1,
+        "branch->exit: return `http://${localAddress.value}:${httpPort.value}`;": 1,
+        "branch->exit: return `Доступ дома остаётся по HTTP :${httpPort.value}. Сертификаты сохраняются, внешний шлюз не меняется.`;": 1,
+        "branch->exit: return { kind: 'off', label: 'Не настроен' };": 1,
+        "branch->exit: return gatewayConfigured.value ? 'Управление и проверка' : 'Настроить шлюз';": 1
+      },
+      "unbraced-control": {
+        "if (props.gatewayJob?.state === 'done' && props.gatewayJob.needsRestart) return true;": 1,
+        "if (!desired) return false;": 1,
+        "if (!checked || checked !== normalizeDomain(gatewayDomain.value)) return false;": 1,
+        "if (!configuredGateway) return true;": 1,
+        "if (props.tlsState === 'loading') return { kind: 'idle', label: 'Проверяем…' };": 1,
+        "if (props.tlsState === 'error') return { kind: 'danger', label: 'Статус недоступен' };": 1,
+        "if (!tls) return { kind: 'danger', label: 'Нет данных' };": 1,
+        "if (tls.https?.up) return { kind: 'warn', label: 'Отключится после рестарта' };": 1,
+        "if (tls.https?.error) return { kind: 'danger', label: 'HTTPS не поднялся' };": 1,
+        "if (!tls.leaf?.exists) return { kind: 'warn', label: 'Нужен сертификат' };": 1,
+        "if (tls.missingAddresses?.length) return { kind: 'warn', label: 'Адрес не в сертификате' };": 1,
+        "if (tls.needsRestart) return { kind: 'warn', label: 'Нужен перезапуск' };": 1,
+        "if (tls.https?.up) return { kind: 'ok', label: 'HTTPS работает' };": 1,
+        "if (props.tlsState === 'loading') return 'проверяем адрес…';": 1,
+        "if (props.tlsState === 'error') return 'адрес не удалось определить';": 1,
+        "if (props.tls?.https?.up) return `https://${localAddress.value}:${httpsPort.value}`;": 1,
+        "if (props.tlsState === 'loading') return 'Сверяем настройку с фактически поднятым сокетом.';": 1,
+        "if (props.gatewayJob?.state === 'running') return { kind: 'warn', label: 'Настройка идёт' };": 1,
+        "if (props.gatewayJob?.state === 'failed') return { kind: 'danger', label: 'Настройка сорвалась' };": 1,
+        "if (gatewayRestartPending.value) return { kind: 'warn', label: 'Нужен перезапуск' };": 1,
+        "if (props.gatewayState === 'loading') return { kind: 'idle', label: 'Проверяем…' };": 1,
+        "if (props.gatewayState === 'error') return { kind: 'danger', label: 'Статус недоступен' };": 1,
+        "if (gatewayVerified.value) return { kind: 'ok', label: 'Связь проверена' };": 1,
+        "if (gatewayHasRemarks.value) return { kind: 'warn', label: 'Есть замечания' };": 1,
+        "if (gatewayConfigured.value) return { kind: 'warn', label: 'Не проверен' };": 1,
+        "if (props.activeDetails === 'gateway') return 'Скрыть настройки';": 1,
+        "if (props.gatewayState === 'loading') return 'Проверяем состояние…';": 1,
+        "if (props.gatewayState === 'error') return 'Повторить и открыть';": 1
+      }
+    }
+  }
+}

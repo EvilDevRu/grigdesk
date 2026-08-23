@@ -229,14 +229,14 @@ test('COMP-A11Y-HOST-01: runtime focus, layer Escape, /chats и cleanup lifecycl
   await flushPromises();
   const composer = wrapper.find('[data-testid="companion-composer"]');
   assert.equal(composer.exists(), true);
-  assert.equal(browser.document.activeElement, composer.element,
+  assert.equal(browser.document.activeElement === composer.element, true,
     'avatar open transfers focus to the compact composer');
 
   await wrapper.find('.icon-control.close').trigger('click');
   await flushPromises();
   const avatar = wrapper.find('.companion-avatar');
   assert.equal(wrapper.find('[data-testid="companion-composer"]').exists(), false);
-  assert.equal(browser.document.activeElement, avatar.element,
+  assert.equal(browser.document.activeElement === avatar.element, true,
     'explicit close returns focus to the avatar');
 
   let lowerCloses = 0;

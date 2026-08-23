@@ -1,8 +1,35 @@
+<template>
+  <!-- Пока не знаем состояние входа — не рисуем ничего: иначе на миг мелькает либо форма
+       у вошедшего, либо интерфейс у невошедшего. -->
+  <!-- На экране входа обновление остаётся доступно без AppShell: оно работает с SW,
+       а не с закрытым API. После входа уведомление переезжает в штатный топбар. -->
+  <UpdateBanner v-if="!auth.authenticated" standalone />
+  <UiDialogHost />
+
+  <template v-if="auth.ready">
+    <LoginView v-if="!auth.authenticated" />
+    <!-- Provider существует только в authenticated-ветке: logout размонтирует его
+         вместе с единственным mic-controller и немедленно отзывает browser resources. -->
+    <SpeechProvider v-else>
+      <AppShell>
+        <router-view v-slot="{ Component }">
+          <component :is="Component" />
+        </router-view>
+      </AppShell>
+      <TaskModal />
+      <CompanionHost />
+      <DiffModal />
+      <DocumentModal />
+    </SpeechProvider>
+  </template>
+</template>
+
 <script setup>
 import { onMounted, watch } from 'vue';
+import { UiDialogHost } from './ui';
 import AppShell from './shared/layout/AppShell.vue';
 import LoginView from './views/LoginView.vue';
-import UpdateBanner from './shared/ui/UpdateBanner.vue';
+import UpdateBanner from './features/pwa/UpdateBanner.vue';
 import TaskModal from './views/TaskModal.vue';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';
@@ -47,28 +74,3 @@ watch(() => auth.authenticated, (on, was) => {
   }
 });
 </script>
-
-<template>
-  <!-- Пока не знаем состояние входа — не рисуем ничего: иначе на миг мелькает либо форма
-       у вошедшего, либо интерфейс у невошедшего. -->
-  <!-- Баннер обновления — ВНЕ ветки авторизации: service worker может держать старую сборку
-       и на экране входа, а обновление не требует сессии (работает с SW, не с API). -->
-  <UpdateBanner />
-
-  <template v-if="auth.ready">
-    <LoginView v-if="!auth.authenticated" />
-    <!-- Provider существует только в authenticated-ветке: logout размонтирует его
-         вместе с единственным mic-controller и немедленно отзывает browser resources. -->
-    <SpeechProvider v-else>
-      <AppShell>
-        <router-view v-slot="{ Component }">
-          <component :is="Component" />
-        </router-view>
-      </AppShell>
-      <TaskModal />
-      <CompanionHost />
-      <DiffModal />
-      <DocumentModal />
-    </SpeechProvider>
-  </template>
-</template>

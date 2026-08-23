@@ -35,48 +35,28 @@
   --control-height: 36px;
   --control-radius: 9px;
 
+  /* Семантические токены общего control skin. Значения только ссылаются на исходную
+     палитру: foundation не вводит вторую тему и не меняет существующие поверхности. */
+  --control-background: var(--ground);
+  --control-background-hover: var(--surface-2);
+  --control-background-readonly: color-mix(in srgb, var(--surface-2) 58%, var(--ground));
+  --control-border: var(--line);
+  --control-border-hover: var(--line-2);
+  --control-text: var(--ink);
+  --control-placeholder: var(--ink-mid);
+  --control-focus-color: var(--accent);
+  --control-focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --control-disabled-opacity: 0.48;
+  --control-motion-duration: 150ms;
+  --control-motion-easing: ease;
+  --control-thumb-shadow: 0 1px 3px #00000080;
+
+  --overlay-scrim: #000000aa;
+  --overlay-popover-shadow: 0 14px 40px #000000aa;
+  --overlay-dialog-shadow: 0 24px 70px #000000cc;
+
   --radius: 12px;
   --shadow: inset 0 1px 0 #ffffff0a, 0 1px 2px #00000050, 0 6px 22px #00000055;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
 }
-
-* { box-sizing: border-box; }
-html, body, #app { height: 100%; }
-
-/* Скроллбар под тёмную тему */
-* { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-::-webkit-scrollbar { width: 11px; height: 11px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--ink-mid); background-clip: padding-box; }
-::-webkit-scrollbar-corner { background: transparent; }
-body {
-  margin: 0;
-  font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.55;
-  background: var(--ground);
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-}
-a { color: inherit; text-decoration: none; }
-button { font-family: inherit; }
-
-.mono { font-family: var(--mono); }
-.muted { color: var(--ink-mid); }
-
-/* Пока открыт диф-модал — гасим blur нижних оверлеев (приёмка/задача): они под непрозрачным
-   дифом, но их перерисовка под Monaco даёт мерцание. Класс ставит DiffModal. */
-html.diff-modal-open .soverlay,
-html.diff-modal-open .overlay { backdrop-filter: none !important; }
-
-/* Спиннер загрузки (глобальный) */
-.spin {
-  display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
-  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-top-color: var(--accent); border-radius: 50%;
-  animation: spin .7s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }

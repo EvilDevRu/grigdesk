@@ -1,6 +1,85 @@
+<template>
+  <div v-if="rows.length" class="steps" :class="{ live }">
+    <!-- Сохранённая лента свёрнута: сначала ответ, детали — по клику -->
+    <UiDisclosureButton v-if="!live" class="sum" :open="open" :controls="`${baseId}-list`"
+                        @update:open="open = $event">
+      Ход агента: {{ summary }}
+    </UiDisclosureButton>
+    <div v-if="open || live" :id="`${baseId}-list`" class="list">
+      <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, r.sub ? 'nested' : '']">
+        <!-- Размышление -->
+        <template v-if="r.k === 'think'">
+          <UiDisclosureButton class="head think" :open="Boolean(expanded[i])"
+                              :controls="`${baseId}-step-${i}`" :disabled="!hasBody(r)"
+                              @update:open="toggle(i, r)">
+            <span class="ico">✻</span>
+            <span class="ttl">Размышление<template v-if="r.secs"> · {{ r.secs }} с</template></span>
+          </UiDisclosureButton>
+          <pre v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body">{{ r.text }}</pre>
+        </template>
+
+        <!-- Промежуточный текст агента -->
+        <div v-else-if="r.k === 'text'" class="say">{{ r.text }}</div>
+
+        <!-- Вызов инструмента + его результат -->
+        <template v-else-if="r.k === 'tool'">
+          <UiDisclosureButton class="head" :class="kindOf(r.name).cls"
+                              :open="Boolean(expanded[i])" :controls="`${baseId}-step-${i}`"
+                              :disabled="!hasBody(r)" @update:open="toggle(i, r)">
+            <span class="ico">{{ kindOf(r.name).ico }}</span>
+            <span class="nm">{{ toolLabel(r.name) }}</span>
+            <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
+            <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
+            <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+            <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">{{ r.res.ok ? '✓' : '✕' }}</span>
+            <span v-else-if="live" class="mark run">…</span>
+          </UiDisclosureButton>
+          <div v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body-wrap">
+            <div v-if="r.sub" class="path">{{ r.sub }}</div>
+            <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
+            <pre v-if="r.command" class="body command">{{ r.command }}</pre>
+            <!-- Один вызов инструмента может изменить несколько файлов. -->
+            <div v-if="changesOf(r).length" class="changes">
+              <div v-for="(change, c) in changesOf(r)" :key="`${change.path || ''}:${c}`" class="change">
+                <div v-if="change.path" class="path">{{ change.path }}</div>
+                <div v-if="hasChangeDiff(change)" class="diff">
+                  <div class="dhead"><span>было</span><span>стало</span></div>
+                  <div v-for="(d, k) in splitChangeOf(change)" :key="k" class="drow">
+                    <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
+                    <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Дифф правки в две колонки: слева убранное, справа добавленное -->
+            <div v-if="r.diff && !hasRichDiff(r)" class="diff">
+              <div class="dhead"><span>было</span><span>стало</span></div>
+              <div v-for="(d, k) in splitOf(r)" :key="k" class="drow">
+                <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
+                <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
+              </div>
+            </div>
+            <pre v-if="r.preview" class="body">{{ r.preview }}</pre>
+            <pre v-if="r.res?.text" class="body res" :class="{ bad: !r.res.ok }">{{ r.res.text }}</pre>
+          </div>
+        </template>
+
+        <!-- Служебное: старт хода, ретраи, сжатие контекста -->
+        <div v-else-if="r.k === 'start'" class="note start">
+          старт · модель <b>{{ r.model || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
+        </div>
+        <div v-else-if="r.k === 'note'" class="note" :class="r.level">
+          {{ r.text }}<template v-if="r.times > 1"> ×{{ r.times }}</template>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, useId } from 'vue';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
+import { UiDisclosureButton } from '../../ui';
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
@@ -13,6 +92,7 @@ const props = defineProps({
 // Свёрнутая по умолчанию сохранённая лента (в живой всё видно сразу).
 const open = ref(props.live);
 const expanded = ref({}); // индекс шага → раскрыт ли
+const baseId = `chat-steps-${useId().replaceAll(':', '')}`;
 
 // Результаты приклеиваем к своим вызовам (res приходит отдельным шагом с тем же id) —
 // строка ленты должна быть одна: «инструмент + чем закончился».
@@ -137,93 +217,28 @@ function toolLabel(name) {
 }
 </script>
 
-<template>
-  <div v-if="rows.length" class="steps" :class="{ live }">
-    <!-- Сохранённая лента свёрнута: сначала ответ, детали — по клику -->
-    <button v-if="!live" class="sum" @click="open = !open">
-      <span class="chev" :class="{ on: open }">›</span>
-      Ход агента: {{ summary }}
-    </button>
-    <div v-if="open || live" class="list">
-      <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, r.sub ? 'nested' : '']">
-        <!-- Размышление -->
-        <template v-if="r.k === 'think'">
-          <button class="head think" @click="toggle(i, r)">
-            <span class="ico">✻</span>
-            <span class="ttl">Размышление<template v-if="r.secs"> · {{ r.secs }} с</template></span>
-            <span class="chev" :class="{ on: expanded[i] }">›</span>
-          </button>
-          <pre v-if="expanded[i]" class="body">{{ r.text }}</pre>
-        </template>
-
-        <!-- Промежуточный текст агента -->
-        <div v-else-if="r.k === 'text'" class="say">{{ r.text }}</div>
-
-        <!-- Вызов инструмента + его результат -->
-        <template v-else-if="r.k === 'tool'">
-          <button class="head" :class="kindOf(r.name).cls" @click="toggle(i, r)">
-            <span class="ico">{{ kindOf(r.name).ico }}</span>
-            <span class="nm">{{ toolLabel(r.name) }}</span>
-            <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
-            <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
-            <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
-            <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">{{ r.res.ok ? '✓' : '✕' }}</span>
-            <span v-else-if="live" class="mark run">…</span>
-            <span v-if="hasBody(r)" class="chev" :class="{ on: expanded[i] }">›</span>
-          </button>
-          <div v-if="expanded[i]" class="body-wrap">
-            <div v-if="r.sub" class="path">{{ r.sub }}</div>
-            <!-- В компактной строке команда сокращена; в раскрытии видны начало и конец. -->
-            <pre v-if="r.command" class="body command">{{ r.command }}</pre>
-            <!-- Один вызов инструмента может изменить несколько файлов. -->
-            <div v-if="changesOf(r).length" class="changes">
-              <div v-for="(change, c) in changesOf(r)" :key="`${change.path || ''}:${c}`" class="change">
-                <div v-if="change.path" class="path">{{ change.path }}</div>
-                <div v-if="hasChangeDiff(change)" class="diff">
-                  <div class="dhead"><span>было</span><span>стало</span></div>
-                  <div v-for="(d, k) in splitChangeOf(change)" :key="k" class="drow">
-                    <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
-                    <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <!-- Дифф правки в две колонки: слева убранное, справа добавленное -->
-            <div v-if="r.diff && !hasRichDiff(r)" class="diff">
-              <div class="dhead"><span>было</span><span>стало</span></div>
-              <div v-for="(d, k) in splitOf(r)" :key="k" class="drow">
-                <div class="dcell" :class="d.l?.t || 'nil'">{{ d.l ? d.l.text || ' ' : '' }}</div>
-                <div class="dcell" :class="d.r?.t || 'nil'">{{ d.r ? d.r.text || ' ' : '' }}</div>
-              </div>
-            </div>
-            <pre v-if="r.preview" class="body">{{ r.preview }}</pre>
-            <pre v-if="r.res?.text" class="body res" :class="{ bad: !r.res.ok }">{{ r.res.text }}</pre>
-          </div>
-        </template>
-
-        <!-- Служебное: старт хода, ретраи, сжатие контекста -->
-        <div v-else-if="r.k === 'start'" class="note start">
-          старт · модель <b>{{ r.model || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
-        </div>
-        <div v-else-if="r.k === 'note'" class="note" :class="r.level">
-          {{ r.text }}<template v-if="r.times > 1"> ×{{ r.times }}</template>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .steps { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
-.sum { align-self: flex-start; background: none; border: none; color: var(--ink-mid); cursor: pointer;
-  padding: 2px 0; font-size: 12px; display: flex; align-items: center; gap: 5px; }
-.sum:hover { color: var(--ink); }
+.sum {
+  align-self: flex-start;
+  height: auto;
+  min-height: 0;
+  padding: 2px 0;
+  border-radius: 6px;
+  font-size: 12px;
+}
 .list { display: flex; flex-direction: column; gap: 2px; }
 .step.nested { padding-left: 16px; border-left: 1px dashed var(--line); }
 
-.head { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none;
-  border: none; padding: 3px 4px; border-radius: 6px; cursor: pointer; color: var(--ink-mid); min-width: 0; }
-.head:hover { background: var(--surface-2); }
+.head {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 3px 4px;
+  border-radius: 6px;
+  text-align: left;
+}
 .head .ico { flex: none; width: 15px; text-align: center; font-size: 12px; }
 .head .nm { flex: none; color: var(--ink); font-weight: 600; font-size: 12px; }
 .head .ttl { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
@@ -238,10 +253,6 @@ function toolLabel(name) {
 .head.read .ico, .head.find .ico { color: var(--ink-mid); }
 .head.task .ico, .head.mcp .ico { color: var(--accent); }
 .head.ask .ico { color: var(--warn, #e0a33a); }
-
-.chev { flex: none; margin-left: auto; transition: transform .15s; opacity: .6; }
-.chev.on { transform: rotate(90deg); }
-.sum .chev { margin-left: 0; }
 
 .body-wrap { padding: 2px 0 6px 26px; display: flex; flex-direction: column; gap: 4px; }
 .path { font-size: 11px; color: var(--ink-mid); font-family: var(--mono, monospace); word-break: break-all; }
@@ -271,7 +282,14 @@ function toolLabel(name) {
 .dcell.add::before { content: '+ '; opacity: .7; }
 
 .say { padding: 3px 4px 3px 26px; color: var(--ink); white-space: pre-wrap; }
-.note { padding: 2px 4px 2px 26px; font-size: 11.5px; color: var(--ink-mid); }
+.note {
+  padding: 2px 4px 2px 26px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-mid);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
 .note.warn { color: var(--warn, #e0a33a); }
 .note.start b { color: var(--ink); font-weight: 600; }
 </style>

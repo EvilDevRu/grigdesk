@@ -1,0 +1,17 @@
+html,
+body,
+#app {
+  height: 100%;
+}
+
+/* Пока открыт диф-модал — гасим blur нижних оверлеев (приёмка/задача): они под непрозрачным
+   дифом, но их перерисовка под Monaco даёт мерцание. Класс ставит DiffModal. */
+html.diff-modal-open .soverlay,
+html.diff-modal-open .overlay {
+  backdrop-filter: none !important;
+}
+
+html.ui-scroll-locked,
+body.ui-scroll-locked {
+  overflow: hidden;
+}
