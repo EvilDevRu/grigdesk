@@ -1,122 +1,175 @@
-<script setup>
-import { ref, computed, watch } from 'vue';
-
-// Диалог агента: он спросил (AskUserQuestion) — показываем варианты и отправляем выбор.
-// Не путать со всплывашкой разрешений: здесь не «разрешить/отклонить», а ответ по существу.
-const props = defineProps({
-  req: { type: Object, required: true }, // { pid, chatKey, questions: [{question, header, options[], multiSelect}] }
-});
-const emit = defineEmits(['answer', 'skip']);
-
-// Выбор по каждому вопросу: индекс вопроса → { picked: [метки], text, own }
-// own — раскрыто ли поле своего ответа (по умолчанию скрыто: в 9 случаях из 10 хватает вариантов).
-const state = ref([]);
-watch(() => props.req?.pid, () => {
-  state.value = (props.req?.questions || []).map(() => ({ picked: [], text: '', own: false }));
-}, { immediate: true });
-
-const questions = computed(() => props.req?.questions || []);
-// Отвечать можно, когда есть хоть один выбор или свой текст.
-const ready = computed(() => state.value.some((s) => s.picked.length || s.text.trim()));
-
-// Свой текст принимает не всякий канал: ACP-мост Kimi несёт только выбранный
-// optionId. Показывать «свой ответ…» там, откуда он не доедет, — обман; поле
-// прячем, а вместо него канал объясняет своё ограничение строкой `hint`.
-function freeText(q) { return q?.allowFreeText !== false; }
-
-function pick(qi, label) {
-  const s = state.value[qi];
-  const multi = questions.value[qi]?.multiSelect;
-  if (multi) {
-    const i = s.picked.indexOf(label);
-    if (i >= 0) s.picked.splice(i, 1); else s.picked.push(label);
-  } else {
-    s.picked = s.picked[0] === label ? [] : [label];
-  }
-}
-function isPicked(qi, label) { return state.value[qi]?.picked.includes(label); }
-
-function submit() {
-  emit('answer', questions.value.map((q, i) => ({
-    header: q.header || '', question: q.question || '',
-    selected: state.value[i]?.picked || [], text: (state.value[i]?.text || '').trim(),
-  })));
-}
-</script>
-
 <template>
   <div class="q">
     <div class="col">
-      <!-- Вариант — строка на всю ширину: отметка, название, справа пояснение агента.
-           Так видно, чем варианты отличаются, и попасть мышью проще, чем по чипам. -->
-      <div v-for="(q, qi) in questions" :key="qi" class="q-item">
+      <div
+        v-for="(question, questionIndex) in questions"
+        :key="questionIndex"
+        class="q-item"
+      >
         <div class="q-text">
-          <span class="q-ico">?</span>{{ q.question }}
-          <span v-if="q.multiSelect" class="q-multi">можно несколько</span>
+          <span class="q-ico">?</span>
+          {{ question.question }}
+          <span v-if="question.multiSelect" class="q-multi">можно несколько</span>
         </div>
-        <!-- Ограничение канала (у Kimi — один вариант без своего текста): пишем прямо,
-             иначе человек ищет отсутствующие чекбоксы и поле ввода. -->
-        <div v-if="q.hint" class="q-hint">{{ q.hint }}</div>
-        <div class="q-opts">
-          <button v-for="o in q.options || []" :key="o.label" class="q-opt" :class="{ on: isPicked(qi, o.label) }"
-                  @click="pick(qi, o.label)">
-            <span class="q-mark" :class="{ multi: q.multiSelect }"></span>
-            <span class="q-name">{{ o.label }}</span>
-            <span v-if="o.description" class="q-desc">{{ o.description }}</span>
-          </button>
-          <button v-if="freeText(q)" class="q-opt own" :class="{ on: state[qi].own }"
-                  @click="state[qi].own = !state[qi].own">
-            <span class="q-mark" :class="{ multi: q.multiSelect }"></span>
-            <span class="q-name">свой ответ…</span>
-          </button>
-        </div>
-        <input v-if="freeText(q) && state[qi].own" v-model="state[qi].text" class="q-own"
-               placeholder="напиши своими словами" @keydown.enter.prevent="ready && submit()" />
+
+        <div v-if="question.hint" class="q-hint">{{ question.hint }}</div>
+
+        <UiChoiceList
+          class="q-opts"
+          :label="question.header || question.question"
+          :mode="question.multiSelect ? 'multiple' : 'single'"
+          :model-value="pickedValue(questionIndex)"
+          :options="optionsOf(question)"
+          @update:model-value="setPicked(questionIndex, $event)"
+        />
+
+        <UiButton
+          v-if="freeText(question)"
+          class="q-own-toggle"
+          variant="text"
+          tone="neutral"
+          :pressed="state[questionIndex].own"
+          block
+          @click="toggleOwn(questionIndex)"
+        >
+          свой ответ…
+        </UiButton>
+
+        <UiInput
+          v-if="freeText(question) && state[questionIndex].own"
+          v-model="state[questionIndex].text"
+          class="q-own"
+          placeholder="напиши своими словами"
+          @keydown.enter.prevent="ready && submit()"
+        />
       </div>
-      <div class="q-act">
-        <button class="q-ok" :disabled="!ready" @click="submit">Ответить</button>
-        <button class="q-no" @click="emit('skip')">Пропустить</button>
-      </div>
+
+      <UiFormActions class="q-act" align="start">
+        <UiButton
+          variant="solid"
+          tone="accent"
+          :disabled="!ready"
+          @click="submit"
+        >
+          Ответить
+        </UiButton>
+        <UiButton @click="emit('skip')">Пропустить</UiButton>
+      </UiFormActions>
     </div>
   </div>
 </template>
 
+<script setup>
+import { computed, ref, watch } from 'vue';
+import {
+  UiButton,
+  UiChoiceList,
+  UiFormActions,
+  UiInput,
+} from '../../ui';
+
+// Диалог агента: он спросил по существу, а не запросил разрешение на действие.
+const props = defineProps({
+  req: {
+    type: Object,
+    required: true,
+  },
+});
+const emit = defineEmits(['answer', 'skip']);
+
+const state = ref([]);
+
+watch(
+  () => props.req?.pid,
+  () => {
+    state.value = (props.req?.questions || []).map(() => ({
+      picked: [],
+      text: '',
+      own: false,
+    }));
+  },
+  { immediate: true },
+);
+
+const questions = computed(() => props.req?.questions || []);
+const ready = computed(() => (
+  state.value.some((item) => item.picked.length || item.text.trim())
+));
+
+function freeText(question) {
+  return question?.allowFreeText !== false;
+}
+
+function optionsOf(question) {
+  return (question?.options || []).map((option) => ({
+    value: String(option.label || ''),
+    label: String(option.label || ''),
+    description: option.description ? String(option.description) : undefined,
+  }));
+}
+
+function pickedValue(questionIndex) {
+  const picked = state.value[questionIndex]?.picked || [];
+
+  return questions.value[questionIndex]?.multiSelect
+    ? picked
+    : (picked[0] ?? null);
+}
+
+/**
+ * UiChoiceList использует scalar в single-режиме и массив в multiple.
+ * Внутреннее состояние хранит единый массив, чтобы payload ответа оставался прежним.
+ */
+function setPicked(questionIndex, value) {
+  const item = state.value[questionIndex];
+
+  if (!item) {
+    return;
+  }
+
+  const selected = Array.isArray(value)
+    ? value
+    : (value == null ? [] : [value]);
+  item.picked = selected.map((entry) => String(entry));
+}
+
+function toggleOwn(questionIndex) {
+  const item = state.value[questionIndex];
+
+  if (item) {
+    item.own = !item.own;
+  }
+}
+
+/**
+ * Ответ сохраняет server contract: один объект на вопрос, выбранные подписи
+ * остаются массивом, а свободный текст обрезается только по краям.
+ */
+function submit() {
+  emit(
+    'answer',
+    questions.value.map((question, index) => ({
+      header: question.header || '',
+      question: question.question || '',
+      selected: state.value[index]?.picked || [],
+      text: (state.value[index]?.text || '').trim(),
+    })),
+  );
+}
+</script>
+
 <style scoped>
-/* Плашка живёт над композером — она не должна съедать пол-экрана:
-   ограничиваем высоту и скроллим, если вопросов много. */
+/* Плашка живёт над композером и скроллится сама, если вопросов много. */
 .q { padding: 9px 22px 10px; border-top: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, transparent); max-height: 38vh; overflow-y: auto; }
 .col { width: 100%; min-width: 0; }
 .q-item + .q-item { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
-.q-text { font-size: 13px; margin-bottom: 7px; display: flex; align-items: baseline; gap: 6px; }
+.q-text { display: flex; align-items: baseline; gap: 6px; margin-bottom: 7px; font-size: 13px; }
 .q-ico { flex: none; color: var(--accent); font-weight: 700; }
-.q-multi { font-size: 10.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
-.q-hint { font-size: 11px; color: var(--ink-mid); margin: -3px 0 7px 18px; line-height: 1.45; }
-/* Варианты — строки на всю ширину: отметка, название, справа пояснение от агента */
-.q-opts { display: flex; flex-direction: column; gap: 3px; }
-.q-opt { display: flex; align-items: baseline; gap: 9px; width: 100%; text-align: left; padding: 6px 10px;
-  background: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer; color: var(--ink); font-size: 12.5px; }
-.q-opt:hover { background: var(--surface-2); }
-.q-opt.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-/* Отметку держим у первой строки: пояснение может занять несколько строк, и по центру
-   высокой строки кружок отрывается от названия. */
-.q-mark { flex: none; width: 12px; height: 12px; border: 1.5px solid var(--line-2); border-radius: 50%;
-  align-self: flex-start; margin-top: 2px; }
-.q-mark.multi { border-radius: 3px; }
-.q-opt.on .q-mark { border-color: var(--accent); background: var(--accent);
-  box-shadow: inset 0 0 0 2.5px var(--ground); }
-.q-name { flex: none; }
-/* Пояснение — то, чем варианты и отличаются: показываем целиком, с переносом.
-   Обрезка многоточием прятала как раз ту часть, ради которой его читают. */
-.q-desc { color: var(--ink-mid); font-size: 11.5px; min-width: 0; line-height: 1.45;
-  overflow-wrap: anywhere; }
-.q-opt.own .q-name { color: var(--ink-mid); }
-.q-own { width: 100%; margin-top: 5px; height: 30px; background: var(--ground); border: 1px solid var(--line);
-  border-radius: 8px; color: var(--ink); padding: 0 10px; font-size: 12.5px; font-family: inherit; }
-.q-own:focus { outline: none; border-color: var(--line-2); }
-.q-act { display: flex; gap: 8px; margin-top: 9px; }
-.q-ok, .q-no { border: none; border-radius: 8px; padding: 5px 13px; font-size: 12.5px; cursor: pointer; }
-.q-ok { background: var(--accent); color: #fff; }
-.q-ok:disabled { opacity: .5; cursor: default; }
-.q-no { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
+.q-multi { padding: 0 5px; border: 1px solid var(--line); border-radius: 5px;
+  color: var(--ink-mid); font-size: 10.5px; }
+.q-hint { margin: -3px 0 7px 18px; color: var(--ink-mid); font-size: 11px; line-height: 1.45; }
+.q-own-toggle { margin-top: 3px; }
+.q-own { margin-top: 5px; }
+.q-act { margin-top: 9px; }
 </style>

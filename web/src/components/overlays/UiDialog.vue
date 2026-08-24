@@ -19,6 +19,7 @@
           ref="surfaceElement"
           :class="['ui-dialog', attrs.class]"
           :style="attrs.style"
+          :data-body-inset="bodyInset ? 'true' : 'false'"
           :role="normalizedRole"
           aria-modal="true"
           :aria-label="hasTitle ? undefined : label"
@@ -105,6 +106,7 @@ interface Props {
   returnFocus?: boolean | UiInitialFocus;
   mobileFullscreen?: boolean;
   fadeOnly?: boolean;
+  bodyInset?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -121,6 +123,7 @@ const props = withDefaults(defineProps<Props>(), {
   returnFocus: true,
   mobileFullscreen: true,
   fadeOnly: false,
+  bodyInset: true,
 });
 const emit = defineEmits<{
   'update:open': [value: boolean];

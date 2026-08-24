@@ -2,7 +2,7 @@
   <div class="page">
     <p class="hint">
       Проект = имя + пути репозиториев на диске; схемы конвейера привязаны к нему по имени.
-      <HelpTip :text="help" />
+      <UiTooltip :text="help" />
     </p>
 
     <div v-if="error" class="err">{{ error }}</div>
@@ -54,7 +54,10 @@
 
           <footer class="cfoot">
             <UiButton v-if="canEdit(p) && edit?.id !== p.id" class="act" @click="startEdit(p)">Пути…</UiButton>
-            <HelpTip v-else-if="!canEdit(p)" text="Пути задаёт профиль фабрики (PROFILE_TRIAGE_REPOS в profiles/<имя>/profile.sh) — здесь они только показываются." />
+            <UiTooltip
+              v-else-if="!canEdit(p)"
+              text="Пути задаёт профиль фабрики (PROFILE_TRIAGE_REPOS в profiles/<имя>/profile.sh) — здесь они только показываются."
+            />
             <span class="grow"></span>
             <UiButton v-if="p.repos.length" class="act" @click="toCode(p.id)">Код →</UiButton>
           </footer>
@@ -86,10 +89,10 @@ import {
   UiButton,
   UiIconButton,
   UiInput,
+  UiTooltip,
   alertDialog,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
-import HelpTip from '../shared/ui/HelpTip.vue';
 import { useToolLauncher } from '../shared/tools/launcher.js';
 
 const router = useRouter();

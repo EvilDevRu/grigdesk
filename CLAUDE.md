@@ -25,8 +25,9 @@
   Машинный порог нетривиальности: экспортируемая функция, не меньше четырёх statements
   верхнего уровня либо не меньше двух ветвлений/циклов/`try`.
 - Vue SFC называются `PascalCase.vue`, TypeScript-файлы — `lowerCamelCase.ts`. Проверки
-  `check:readability` и `check:ui` имеют shrinking-baseline: старый долг разрешено только
-  уменьшать, новые плотные конструкции и новые неправильные имена запрещены.
+  readability, file naming и оставшихся domain control styles имеют точные
+  shrinking-baseline: старый долг разрешено только уменьшать. Native UI boundary и порядок
+  блоков SFC уже безусловны; возвращать для них baseline запрещено.
 
 ## Работа с проектным контекстом
 
@@ -556,9 +557,19 @@
 - **Палитра — точная тёмная тема старого дашборда фабрики** (`#0b0d11/#151920/#5aa2ff/#3fb950/#e0a33a/#f0564c`).
   Кокпит закоммичен в dark.
 - **Одноранговые контролы образуют единый ритм.** Кнопки, поля и select в одной панели
-  используют общие `--control-height` и `--control-radius` из `web/src/styles.css`; нельзя
+  используют общие `--control-height` и `--control-radius` из
+  `web/src/styles/tokens.css`; нельзя
   задавать им разные локальные высоты или радиусы. Адаптив меняет раскладку всей группы,
   но не размер одной кнопки относительно соседних и не вводит свой локальный размер.
+- **UI имеет одну публичную границу.** Product consumers импортируют primitives,
+  composites, overlays, dialog services и `useUiLayer` только из `web/src/ui.ts`.
+  Нативными `button`/`input`/`textarea`/`select` владеют только
+  `web/src/components/primitives/`; `shared/ui`, deep imports из `components/` и локальные
+  control skins запрещены guards. Глобальный CSS входит через `web/src/styles/index.css`,
+  reusable skin живёт в `styles/components/`, а Vue SFC всегда идут
+  `template → script → style`. Browser-геометрия проверяется командой
+  `npm --prefix web run test:ui-browser`: она использует `CHROME_BIN` либо системный Chrome,
+  отдельный временный profile и dev-only `ui-gallery.html`.
 - **Конвейер — порт `dashboard.py`**: `node_geom`/`edge_path` (12 типов кривых), `pipeline_statuses`
   (9 статусов узлов), `loop_facts` — портированы 1:1 в `lib/factory-graph.js` + `web/shared/graph-geom.js`.
 - **B24 принадлежит Cockpit целиком:** сервер — единственный владелец портальной сессии,

@@ -3,6 +3,7 @@
     <UiButton
       v-for="option in options"
       :key="String(option.value)"
+      :data-option-value="String(option.value)"
       variant="ghost"
       :pressed="Object.is(option.value, model)"
       :disabled="disabled || option.disabled"

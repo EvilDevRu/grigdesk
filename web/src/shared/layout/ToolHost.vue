@@ -2,6 +2,7 @@
   <aside v-if="dockCapable" class="tool-rail" aria-label="Инструменты в панели">
     <UiIconButton v-for="item in railItems" :key="item.id"
                   :ref="(value) => setRailButton(item.id, value)" role="rail"
+                  data-context="tool-rail-item"
                   class="tool-rail-item" :class="{ active: presentedTool === item.id }"
                   :title="item.label" :label="item.label"
                   :pressed="presentation === 'dock' && presentedTool === item.id"
@@ -46,11 +47,10 @@ import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';
 import { usePluginsStore } from '../../stores/plugins.js';
 import { useUiContextSource } from '../../composables/useUiContextSource.js';
 import { NAV_ICONS } from '../nav-icons.js';
-import { registerLayer } from '../ui/layer-stack.js';
 import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';
 import { useDockViewport } from '../tools/viewport.js';
 import ToolDock from './ToolDock.vue';
-import { UiIconButton } from '../../ui';
+import { UiIconButton, useUiLayer } from '../../ui';
 
 const route = useRoute();
 const router = useRouter();
@@ -90,7 +90,6 @@ const contentWidth = ref(0);
 const maxWidth = computed(() => Math.max(0, Math.floor(contentWidth.value * 0.7)));
 const minWidth = computed(() => Math.min(MIN_DOCK_WIDTH, maxWidth.value));
 let contentObserver = null;
-let unregisterDockLayer = null;
 let publishedContextKey = '';
 
 function modeOf(id) {
@@ -192,6 +191,12 @@ function closeDockLayer() {
   hideDock();
 }
 
+useUiLayer('dock', {
+  id: 'tool-dock',
+  enabled: computed(() => presentation.value === 'dock'),
+  onEscape: closeDockLayer,
+});
+
 function resize(value, persist = false) {
   dock.setWidth(value, { min: minWidth.value, max: maxWidth.value, persist });
 }
@@ -255,14 +260,6 @@ watch(
   () => focusPresented({ dockHeader: presentation.value === 'dock' }),
 );
 
-watch(presentation, (mode) => {
-  unregisterDockLayer?.();
-  unregisterDockLayer = null;
-  if (mode === 'dock') {
-    unregisterDockLayer = registerLayer('tool-dock', { priority: 80, close: closeDockLayer });
-  }
-});
-
 onMounted(() => {
   const content = document.querySelector('.shell > .content');
   if (content && typeof ResizeObserver !== 'undefined') {
@@ -273,7 +270,6 @@ onMounted(() => {
   measureContent();
 });
 onBeforeUnmount(() => {
-  unregisterDockLayer?.();
   contentObserver?.disconnect?.();
   window.removeEventListener('resize', measureContent);
   dock.resetAllRuntime();
@@ -286,12 +282,7 @@ onBeforeUnmount(() => {
   display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 5px;
   background: var(--sidebar); border-left: 1px solid var(--line);
 }
-.tool-rail-item { position: relative; width: 34px; height: 34px; display: grid; place-items: center;
-  border: 0; border-radius: 8px; background: transparent; color: var(--ink-mid); cursor: pointer; }
-.tool-rail-item:hover { color: var(--ink); background: var(--surface); }
-.tool-rail-item.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.tool-rail-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tool-rail-item svg { width: 19px; height: 19px; }
+.tool-rail-item { position: relative; }
 .runtime-dot { position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--good); box-shadow: 0 0 0 2px var(--sidebar); }
 .runtime-dot.connecting { background: var(--warn); }

@@ -1,3 +1,22 @@
+<template>
+  <div ref="host" class="agents" :class="`m-${pane}`" :style="layoutStyle">
+    <ChatList @open="pane = 'chat'" />
+    <div ref="splitter" class="lsplit" role="separator" aria-orientation="vertical" tabindex="0"
+         aria-label="Ширина списка чатов"
+         :aria-valuemin="LIST_MIN_W" :aria-valuemax="Math.round(listMaxW)"
+         :aria-valuenow="Math.round(listWidth ?? LIST_DEF_W)"
+         title="Потяни — ширина списка. Двойной клик — вернуть обычную"
+         @pointerdown.prevent="startListResize" @pointermove.prevent="moveListResize"
+         @pointerup.prevent="finishListResize" @pointercancel.prevent="cancelListResize"
+         @dblclick="resetListWidth" @keydown="onListResizeKey">
+      <span></span>
+    </div>
+    <div class="stage">
+      <ChatSession v-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -152,25 +171,6 @@ onBeforeUnmount(() => {
   pageSurface.dispose();
 });
 </script>
-
-<template>
-  <div ref="host" class="agents" :class="`m-${pane}`" :style="layoutStyle">
-    <ChatList @open="pane = 'chat'" />
-    <div ref="splitter" class="lsplit" role="separator" aria-orientation="vertical" tabindex="0"
-         aria-label="Ширина списка чатов"
-         :aria-valuemin="LIST_MIN_W" :aria-valuemax="Math.round(listMaxW)"
-         :aria-valuenow="Math.round(listWidth ?? LIST_DEF_W)"
-         title="Потяни — ширина списка. Двойной клик — вернуть обычную"
-         @pointerdown.prevent="startListResize" @pointermove.prevent="moveListResize"
-         @pointerup.prevent="finishListResize" @pointercancel.prevent="cancelListResize"
-         @dblclick="resetListWidth" @keydown="onListResizeKey">
-      <span></span>
-    </div>
-    <div class="stage">
-      <ChatSession v-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
-    </div>
-  </div>
-</template>
 
 <style scoped>
 .agents { display: flex; height: 100%; min-height: 0;

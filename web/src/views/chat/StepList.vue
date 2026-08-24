@@ -1,19 +1,34 @@
 <template>
   <div v-if="rows.length" class="steps" :class="{ live }">
     <!-- Сохранённая лента свёрнута: сначала ответ, детали — по клику -->
-    <UiDisclosureButton v-if="!live" class="sum" :open="open" :controls="`${baseId}-list`"
-                        @update:open="open = $event">
-      Ход агента: {{ summary }}
+    <UiDisclosureButton
+      v-if="!live"
+      class="summary-disclosure"
+      density="compact"
+      :open="open"
+      :controls="`${baseId}-list`"
+      @update:open="open = $event"
+    >
+      <span class="sum">Ход агента: {{ summary }}</span>
     </UiDisclosureButton>
     <div v-if="open || live" :id="`${baseId}-list`" class="list">
       <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, r.sub ? 'nested' : '']">
         <!-- Размышление -->
         <template v-if="r.k === 'think'">
-          <UiDisclosureButton class="head think" :open="Boolean(expanded[i])"
-                              :controls="`${baseId}-step-${i}`" :disabled="!hasBody(r)"
-                              @update:open="toggle(i, r)">
-            <span class="ico">✻</span>
-            <span class="ttl">Размышление<template v-if="r.secs"> · {{ r.secs }} с</template></span>
+          <UiDisclosureButton
+            class="step-disclosure"
+            density="compact"
+            :open="Boolean(expanded[i])"
+            :controls="`${baseId}-step-${i}`"
+            :disabled="!hasBody(r)"
+            @update:open="toggle(i, r)"
+          >
+            <span class="head think">
+              <span class="ico">✻</span>
+              <span class="ttl">
+                Размышление<template v-if="r.secs"> · {{ r.secs }} с</template>
+              </span>
+            </span>
           </UiDisclosureButton>
           <pre v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body">{{ r.text }}</pre>
         </template>
@@ -23,16 +38,25 @@
 
         <!-- Вызов инструмента + его результат -->
         <template v-else-if="r.k === 'tool'">
-          <UiDisclosureButton class="head" :class="kindOf(r.name).cls"
-                              :open="Boolean(expanded[i])" :controls="`${baseId}-step-${i}`"
-                              :disabled="!hasBody(r)" @update:open="toggle(i, r)">
-            <span class="ico">{{ kindOf(r.name).ico }}</span>
-            <span class="nm">{{ toolLabel(r.name) }}</span>
-            <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
-            <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
-            <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
-            <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">{{ r.res.ok ? '✓' : '✕' }}</span>
-            <span v-else-if="live" class="mark run">…</span>
+          <UiDisclosureButton
+            class="step-disclosure"
+            density="compact"
+            :open="Boolean(expanded[i])"
+            :controls="`${baseId}-step-${i}`"
+            :disabled="!hasBody(r)"
+            @update:open="toggle(i, r)"
+          >
+            <span class="head" :class="kindOf(r.name).cls">
+              <span class="ico">{{ kindOf(r.name).ico }}</span>
+              <span class="nm">{{ toolLabel(r.name) }}</span>
+              <span class="ttl" :title="r.command || r.title">{{ r.title }}</span>
+              <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
+              <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
+              <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">
+                {{ r.res.ok ? '✓' : '✕' }}
+              </span>
+              <span v-else-if="live" class="mark run">…</span>
+            </span>
           </UiDisclosureButton>
           <div v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body-wrap">
             <div v-if="r.sub" class="path">{{ r.sub }}</div>
@@ -219,24 +243,28 @@ function toolLabel(name) {
 
 <style scoped>
 .steps { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
-.sum {
+.summary-disclosure {
   align-self: flex-start;
-  height: auto;
-  min-height: 0;
-  padding: 2px 0;
-  border-radius: 6px;
+}
+
+.sum {
   font-size: 12px;
 }
 .list { display: flex; flex-direction: column; gap: 2px; }
 .step.nested { padding-left: 16px; border-left: 1px dashed var(--line); }
 
-.head {
+.step-disclosure {
   width: 100%;
   min-width: 0;
-  height: auto;
-  min-height: 0;
-  padding: 3px 4px;
-  border-radius: 6px;
+}
+
+.head {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
   text-align: left;
 }
 .head .ico { flex: none; width: 15px; text-align: center; font-size: 12px; }

@@ -2,25 +2,27 @@
   <!-- Стоит в ряду исполнителей и обёрнут точками: компаньон — «ещё один
        исполнитель» по языку топбара, поэтому и знак, и разделители те же. -->
   <template v-if="visible">
-    <HelpTip align="right" class="companion-tb-tip" :text="tip">
-      <UiPressable
-        class="companion-tb"
-        :class="[`is-${companion.interaction}`, `attention-${attentionKind}`]"
-        :data-interaction="companion.interaction"
-        :data-attention="attentionKind"
-        :aria-label="tip"
-        :aria-expanded="onChats ? undefined : expanded"
-        :aria-controls="expanded ? BUBBLE_ID : undefined"
-        @click="activate"
-      >
-        <CompanionRobot
-          class="companion-tb-art"
-          variant="mark"
-          :interaction="companion.interaction"
-          :attention="attentionKind"
-        />
-      </UiPressable>
-    </HelpTip>
+    <UiTooltip :text="tip" placement="top-end">
+      <template #trigger>
+        <UiPressable
+          class="companion-tb"
+          :class="[`is-${companion.interaction}`, `attention-${attentionKind}`]"
+          :data-interaction="companion.interaction"
+          :data-attention="attentionKind"
+          :aria-label="tip"
+          :aria-expanded="onChats ? undefined : expanded"
+          :aria-controls="expanded ? BUBBLE_ID : undefined"
+          @click="activate"
+        >
+          <CompanionRobot
+            class="companion-tb-art"
+            variant="mark"
+            :interaction="companion.interaction"
+            :attention="attentionKind"
+          />
+        </UiPressable>
+      </template>
+    </UiTooltip>
     <span class="sep" aria-hidden="true">·</span>
   </template>
 </template>
@@ -32,9 +34,8 @@
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useCompanionStore } from '../../stores/companion.js';
-import HelpTip from '../../shared/ui/HelpTip.vue';
 import CompanionRobot from './CompanionRobot.vue';
-import { UiPressable } from '../../ui';
+import { UiPressable, UiTooltip } from '../../ui';
 
 const BUBBLE_ID = 'cockpit-companion-bubble';
 const route = useRoute();
@@ -74,8 +75,6 @@ function activate() {
 <style scoped>
 /* Тот же обвес, что у знаков исполнителей: без кнопочного контейнера и с нулевой
    высотой строки, иначе baseline-зазор SVG сбивает знак с общей оптической оси. */
-.companion-tb-tip { display: inline-flex; align-items: center; vertical-align: middle; }
-.companion-tb-tip :deep(.ht-tr) { line-height: 0; }
 .companion-tb {
   display: inline-grid;
   place-items: center;

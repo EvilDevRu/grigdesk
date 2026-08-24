@@ -25,6 +25,7 @@ export function providerUsageView(entry, provider = {}) {
   const fallback = entry.state === 'ok'
     ? ''
     : `Статус лимитов ${provider.name || 'исполнителя'} недоступен.`;
+
   return {
     ...entry,
     bars: Array.isArray(entry.bars) ? entry.bars : [],

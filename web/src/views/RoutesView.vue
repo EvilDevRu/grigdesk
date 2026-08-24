@@ -4,7 +4,7 @@
     <aside class="list">
       <div class="list-head">
         <span class="ttl">Маршруты</span>
-        <HelpTip :text="helpPanel" />
+        <UiTooltip :text="helpPanel" />
       </div>
       <ProjectSwitcher :profiles="profiles" :model-value="profile"
                        @update:model-value="switchProfile" @created="onProjectCreated" />
@@ -65,7 +65,7 @@
       <section v-if="revisions.length" class="revs">
         <div class="revs-head">
           <span class="ttl">Ревизии каталога</span>
-          <HelpTip :text="helpRevisions" />
+          <UiTooltip :text="helpRevisions" />
           <span class="muted rcount">{{ revisions.length }}</span>
         </div>
         <div class="rrow" v-for="rev in revisions" :key="rev.catalogHash" :class="{ cur: rev.isCurrent }">
@@ -91,12 +91,12 @@ import {
   UiButton,
   UiSelectableRow,
   UiSpinner,
+  UiTooltip,
   confirmDialog,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
+import ProjectSwitcher from '../features/projects/ProjectSwitcher.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
-import HelpTip from '../shared/ui/HelpTip.vue';
-import ProjectSwitcher from '../shared/ui/ProjectSwitcher.vue';
 
 // Маршруты проекта — ОПУБЛИКОВАННЫЙ каталог, а не редактируемая копия.
 // Правится маршрут в самом профиле (routes/), кокпит даёт две кнопки —
@@ -266,7 +266,7 @@ onMounted(load);
 .ttl { font-weight: 700; font-size: 13.5px; }
 .item { width: 100%; margin-bottom: 4px; }
 .route-item-content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
-.item .rid { flex: 1; min-width: 0; font-weight: 700; color: var(--node-code); font-size: 12.5px;
+.route-item-content .rid { flex: 1; min-width: 0; font-weight: 700; color: var(--node-code); font-size: 12.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip { flex: none; font-size: 10px; color: var(--ink-mid); background: var(--surface-2);
   border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }

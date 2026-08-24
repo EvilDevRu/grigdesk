@@ -14,113 +14,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileTaskModal, TASK_MODAL_PATH } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TaskModal.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const PINIA_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
-)).href;
-
 let compileNonce = 0;
-
-async function compileTaskModal() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-tg-expand-${++compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replaceAll("from 'pinia'", `from "${PINIA_URL}"`)
-    .replace(
-      "import { useRouter } from 'vue-router';",
-      'const useRouter = () => ({ push() {} });',
-    )
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
-    )
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__tgExpandApi;',
-    )
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => true;',
-    )
-    .replace(
-      "import { registerLayer } from '../shared/ui/layer-stack.js';",
-      'const registerLayer = () => () => {};',
-    )
-    .replace(
-      "import HelpTip from '../shared/ui/HelpTip.vue';",
-      'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__tgExpandUiStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../stores/tasks.js';",
-      'const useTasksStore = globalThis.__tgExpandTasksStore;',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__tgExpandBoardStore;',
-    )
-    .replace(
-      "import { useAnalysisStore } from '../stores/analysis.js';",
-      'const useAnalysisStore = globalThis.__tgExpandAnalysisStore;',
-    )
-    .replace(
-      "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
-      'const useTaskFavoritesStore = globalThis.__tgExpandFavoritesStore;',
-    )
-    .replace(
-      "import { useTaskSeenStore } from '../stores/task-seen.js';",
-      'const useTaskSeenStore = globalThis.__tgExpandSeenStore;',
-    )
-    .replace(
-      "import { liveTimerSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { mdToHtml } from '../shared/md.js';",
-      'const mdToHtml = (value) => String(value || "");',
-    )
-    .replace(
-      "import { providerLabel } from '../shared/runner-display.js';",
-      'const providerLabel = (id) => String(id || "");',
-    )
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { template: "<span></span>" };',
-    )
-    .replace(
-      "import TaskFavoriteButton from './board/TaskFavoriteButton.vue';",
-      'const TaskFavoriteButton = { template: "<span></span>" };',
-    );
-  // Хвост `#nonce` обязателен: без него data:-модуль берётся из кэша загрузчика
-  // (байты те же), и второе монтирование работает со сторами первого теста.
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${compileNonce}`
-  )).default;
-}
 
 // Одно монтирование модалки на задаче с готовым полем `telegram`
 // (именно в таком виде его отдаёт GET /api/b24/task/:id).
 async function mountModal(t, task) {
+  compileNonce += 1;
+
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://cockpit.test/#/board' });
   for (const [key, value] of Object.entries({
@@ -190,10 +94,10 @@ async function mountModal(t, task) {
   });
 
   const pinia = createPinia();
-  const TaskModal = await compileTaskModal();
+  const TaskModal = await compileTaskModal('__tgExpand');
   const wrapper = mount(TaskModal, {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [pinia] },
+    global: { plugins: [pinia], stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
@@ -342,7 +246,7 @@ test('TG-UI-04: HTML из чужого чата не исполняется', as
 
 test('TG-UI-05: длинная цитата ограничена переносом, а не шириной колонки', async () => {
   // Статическая проверка: живого замера в офлайне нет (см. шапку файла).
-  const source = await readFile(VIEW_PATH, 'utf8');
+  const source = await readFile(TASK_MODAL_PATH, 'utf8');
   const style = source.slice(source.indexOf('<style'));
   const rule = (selector) => {
     const at = style.indexOf(`${selector} {`);

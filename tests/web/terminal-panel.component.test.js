@@ -1,38 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
-const PANEL_PATH = fileURLToPath(new URL('../../web/src/views/terminal/TerminalPanel.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-let compileNonce = 0;
+const PANEL_PATH = webFile('src/views/terminal/TerminalPanel.vue');
 
 async function compilePanel() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(PANEL_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: PANEL_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-terminal-panel-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { Terminal } from '@xterm/xterm';", 'const Terminal = globalThis.__terminalPanelTerminal;')
-    .replace("import { FitAddon } from '@xterm/addon-fit';", 'const FitAddon = globalThis.__terminalPanelFitAddon;')
-    .replace("import '@xterm/xterm/css/xterm.css';", '')
-    .replace("import { api } from '../../shared/api-client.js';", 'const api = globalThis.__terminalPanelApi;');
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  return compileVue(PANEL_PATH, {
+    stubs: {
+      '@xterm/xterm': 'export const Terminal = globalThis.__terminalPanelTerminal;',
+      '@xterm/addon-fit': 'export const FitAddon = globalThis.__terminalPanelFitAddon;',
+      '../../shared/api-client.js': 'export const api = globalThis.__terminalPanelApi;',
+    },
+  });
 }
 
 let browser = null;

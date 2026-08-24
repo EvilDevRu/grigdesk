@@ -20,7 +20,7 @@ test('COMP-A11Y-01..09: avatar/bubble имеют keyboard, focus, motion и safe
     source('web/src/App.vue'),
   ]);
 
-  assert.match(avatar, /<button/);
+  assert.match(avatar, /<UiPressable/);
   assert.match(avatar, /aria-expanded/);
   assert.match(avatar, /aria-controls/);
   // Рисунок один на обе поверхности и монохромен: цвет задаёт место, не фигурка.
@@ -28,11 +28,15 @@ test('COMP-A11Y-01..09: avatar/bubble имеют keyboard, focus, motion и safe
   assert.match(robot, /aria-hidden/);
   assert.match(avatar, /CompanionRobot/);
   assert.match(topbar, /CompanionRobot/);
-  assert.match(topbar, /<button/);
-  assert.match(bubble, /role="dialog"/);
+  assert.match(topbar, /<UiPressable/);
+  assert.match(host, /<UiFloatingDialog/);
+  assert.doesNotMatch(bubble, /role="dialog"/);
   assert.match(bubble, /aria-live="polite"/);
-  assert.match(bubble, /aria-pressed/);
-  assert.match(host, /registerLayer/);
+  assert.match(bubble, /:pressed="outputAvailable \? muted : true"/);
+  assert.match(bubble, /<UiTextarea/);
+  assert.match(bubble, /<UiIconButton/);
+  assert.doesNotMatch(bubble, /<(?:button|textarea)\b/);
+  assert.match(host, /layer="companion"/);
   assert.match(host + avatar + robot + bubble, /prefers-reduced-motion:\s*reduce/);
   assert.match(host, /safe-area-inset-bottom/);
   assert.match(host, /bubbleVisible\.value\s*&&\s*!document\.hidden/,

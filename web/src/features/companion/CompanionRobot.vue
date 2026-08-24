@@ -1,14 +1,3 @@
-<script setup>
-// Фигурка компаньона — ОДИН источник рисунка на обе поверхности. Вариантов два:
-// `figure` — плавающий аватар (объём, визор, мимика), `mark` — знак в топбаре,
-// упрощённый до контура в том же весе линии, что знаки исполнителей рядом.
-defineProps({
-  variant: { type: String, default: 'figure' },
-  interaction: { type: String, default: 'idle' },
-  attention: { type: String, default: 'none' },
-});
-</script>
-
 <template>
   <svg
     class="companion-robot"
@@ -42,6 +31,17 @@ defineProps({
     </template>
   </svg>
 </template>
+
+<script setup>
+// Фигурка компаньона — ОДИН источник рисунка на обе поверхности. Вариантов два:
+// `figure` — плавающий аватар (объём, визор, мимика), `mark` — знак в топбаре,
+// упрощённый до контура в том же весе линии, что знаки исполнителей рядом.
+defineProps({
+  variant: { type: String, default: 'figure' },
+  interaction: { type: String, default: 'idle' },
+  attention: { type: String, default: 'none' },
+});
+</script>
 
 <style scoped>
 /* Фигурка монохромна через currentColor — цвет задаёт место (везде это основной

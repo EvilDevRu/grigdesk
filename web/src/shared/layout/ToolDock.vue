@@ -13,6 +13,7 @@
     </div>
     <div v-if="mode === 'dock'" class="dock-actions" aria-label="Управление панелью">
       <UiIconButton ref="expandButton" class="expand-action" role="embedded"
+                    data-context="tool-dock-expand"
                     :label="expanded ? 'Вернуть ширину панели' : 'Во весь экран'"
                     :title="expanded ? 'Вернуть ширину панели' : 'Во весь экран'"
                     :pressed="expanded" @click="emit('toggle-expanded')">
@@ -23,6 +24,7 @@
         </svg>
       </UiIconButton>
       <UiIconButton class="hide-action" role="embedded" tone="danger"
+                    data-context="tool-dock-hide"
                     label="Скрыть панель" title="Скрыть панель" @click="emit('hide')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
              stroke-linecap="round" aria-hidden="true">
@@ -120,21 +122,6 @@ defineExpose({ focusHeader: () => expandButton.value?.focus?.() });
   position: absolute; z-index: 4; top: var(--tool-dock-action-top); right: 7px;
   display: flex; gap: 4px;
 }
-.dock-actions .expand-action,
-.dock-actions .hide-action {
-  width: var(--tool-dock-action-size); height: var(--tool-dock-action-size);
-  display: grid; place-items: center; padding: 0;
-  border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2);
-  color: var(--ink-mid); cursor: pointer; transition: color .12s, border-color .12s, background .12s; }
-.dock-actions .expand-action:hover,
-.dock-actions .hide-action:hover { color: var(--ink); border-color: var(--line-2); background: var(--surface); }
-.dock-actions .expand-action[aria-pressed="true"] { color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); }
-.dock-actions .hide-action:hover { color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 42%, var(--line)); }
-.dock-actions .expand-action:focus-visible,
-.dock-actions .hide-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.dock-actions svg { width: 16px; height: 16px; }
 .dock-resizer { position: absolute; z-index: 2; left: -5px; top: 0; bottom: 0; width: 10px;
   display: grid; place-items: center; cursor: col-resize; touch-action: none; outline: none; }
 .dock-resizer span { width: 2px; height: 46px; border-radius: 999px; background: var(--line-2); }

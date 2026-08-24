@@ -2,44 +2,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { compilePipelineView } from './helpers/pipeline-view.js';
+import { compileTaskModal } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
 
 const root = new URL('../../', import.meta.url);
 const source = (path) => readFile(new URL(path, root), 'utf8');
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const PINIA_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
-)).href;
-
-function replaceRequired(code, needle, replacement, label) {
-  const next = code.replace(needle, replacement);
-  assert.notEqual(next, code, `не найден import ${label}`);
-  return next;
-}
-
-async function compilePublisher(path, id, transform) {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const filename = fileURLToPath(new URL(`../../${path}`, import.meta.url));
-  const text = await readFile(filename, 'utf8');
-  const { descriptor, errors } = parse(text, { filename });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, { id, inlineTemplate: true }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from '${VUE_URL}'`)
-    .replaceAll('from "pinia"', `from "${PINIA_URL}"`)
-    .replaceAll("from 'pinia'", `from '${PINIA_URL}'`);
-  code = transform(code);
-  compilePublisher.revision = (compilePublisher.revision || 0) + 1;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(`${code}\n// publisher ${compilePublisher.revision}`).toString('base64')}`
-  )).default;
-}
 
 async function browserHarness() {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -66,268 +36,44 @@ async function browserHarness() {
 }
 
 async function compilePipelinePublisher() {
-  return compilePublisher(
-    'web/src/views/PipelineView.vue',
-    'data-v-ui-context-pipeline-runtime',
-    (input) => {
-      let code = input;
-      code = replaceRequired(
-        code,
-        "import { api } from '../shared/api-client.js';",
-        'const api = globalThis.__uiContextPipelineApi;',
-        'Pipeline api',
-      );
-      code = replaceRequired(
-        code,
-        "import { useSse } from '../composables/useSse.js';",
-        'const useSse = () => {};',
-        'Pipeline SSE',
-      );
-      code = replaceRequired(
-        code,
-        "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-        'const useUiContextSource = globalThis.__uiContextSourceHelper;',
-        'Pipeline ui-context source',
-      );
-      code = replaceRequired(
-        code,
-        "import { useUiStore } from '../stores/ui.js';",
-        'const useUiStore = globalThis.__uiContextUiStore;',
-        'Pipeline UI store',
-      );
-      code = replaceRequired(
-        code,
-        "import { useTasksStore } from '../stores/tasks.js';",
-        'const useTasksStore = globalThis.__uiContextTasksStore;',
-        'Pipeline tasks store',
-      );
-      code = replaceRequired(
-        code,
-        "import { useBoardStore } from '../stores/board.js';",
-        'const useBoardStore = globalThis.__uiContextBoardStore;',
-        'Pipeline board store',
-      );
-      code = replaceRequired(
-        code,
-        "import { useCompanionStore } from '../stores/companion.js';",
-        'const useCompanionStore = globalThis.__uiContextCompanionStore;',
-        'Pipeline companion store',
-      );
-      code = replaceRequired(
-        code,
-        "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
-        'const liveTimerSec = () => 0; const pipelineWorkSec = () => null; const secToHMS = (value) => String(value ?? 0);',
-        'Pipeline format',
-      );
-      code = replaceRequired(
-        code,
-        "import { mdToHtml } from '../shared/md.js';",
-        'const mdToHtml = (value) => String(value || "");',
-        'Pipeline markdown',
-      );
-      code = replaceRequired(
-        code,
-        "import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';",
-        'const confirmDialog = async () => true; const alertDialog = async () => {};',
-        'Pipeline dialogs',
-      );
-      code = replaceRequired(
-        code,
-        "import { sandboxUrl } from '../shared/sandbox.js';",
-        'const sandboxUrl = (port) => `http://sandbox.test:${port}`;',
-        'Pipeline sandbox',
-      );
-      code = replaceRequired(
-        code,
-        "import { agentActivityLabel } from '../shared/agent-activity.js';",
-        'const agentActivityLabel = () => "";',
-        'Pipeline activity',
-      );
-      code = replaceRequired(
-        code,
-        "import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';",
-        'const { waitingReason, stripEmoji } = globalThis.__uiContextPipelineWait;',
-        'Pipeline wait helpers',
-      );
-      code = replaceRequired(
-        code,
-        /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-        'const { attemptCostLabel, attemptCostTitle, attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel, runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel } = globalThis.__uiContextRunnerDisplay;',
-        'Pipeline runner helpers',
-      );
-      code = replaceRequired(
-        code,
-        "import FactoryGraph from './pipeline/FactoryGraph.vue';",
-        'const FactoryGraph = globalThis.__uiContextFactoryGraph;',
-        'Pipeline graph',
-      );
-      return replaceRequired(
-        code,
-        "import OpenDiffButton from './OpenDiffButton.vue';",
-        'const OpenDiffButton = { template: "<span></span>" };',
-        'Pipeline diff button',
-      );
-    },
-  );
+  return compilePipelineView('__uiContextPipeline');
 }
-
 async function compileTaskModalPublisher() {
-  return compilePublisher(
-    'web/src/views/TaskModal.vue',
-    'data-v-ui-context-task-runtime',
-    (input) => {
-      let code = input;
-      code = replaceRequired(
-        code,
-        "import { useRouter } from 'vue-router';",
-        'const useRouter = () => ({ push() {} });',
-        'TaskModal router',
-      );
-      code = replaceRequired(
-        code,
-        "import { api } from '../shared/api-client.js';",
-        'const api = globalThis.__uiContextTaskApi;',
-        'TaskModal api',
-      );
-      code = replaceRequired(
-        code,
-        "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-        'const useUiContextSource = globalThis.__uiContextSourceHelper;',
-        'TaskModal ui-context source',
-      );
-      code = replaceRequired(
-        code,
-        "import { confirmDialog } from '../shared/ui/confirm.js';",
-        'const confirmDialog = async () => true;',
-        'TaskModal dialog',
-      );
-      code = replaceRequired(
-        code,
-        "import { registerLayer } from '../shared/ui/layer-stack.js';",
-        'const registerLayer = () => () => {};',
-        'TaskModal layer',
-      );
-      code = replaceRequired(
-        code,
-        "import HelpTip from '../shared/ui/HelpTip.vue';",
-        'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
-        'TaskModal help',
-      );
-      for (const [path, globalName, label] of [
-        ["../stores/ui.js", '__uiContextUiStore', 'UI'],
-        ["../stores/tasks.js", '__uiContextTasksStore', 'tasks'],
-        ["../stores/board.js", '__uiContextBoardStore', 'board'],
-        ["../stores/analysis.js", '__uiContextAnalysisStore', 'analysis'],
-        ["../stores/task-favorites.js", '__uiContextFavoritesStore', 'favorites'],
-        ["../stores/task-seen.js", '__uiContextSeenStore', 'seen'],
-      ]) {
-        const exported = {
-          UI: 'useUiStore', tasks: 'useTasksStore', board: 'useBoardStore',
-          analysis: 'useAnalysisStore', favorites: 'useTaskFavoritesStore', seen: 'useTaskSeenStore',
-        }[label];
-        code = replaceRequired(
-          code,
-          `import { ${exported} } from '${path}';`,
-          `const ${exported} = globalThis.${globalName};`,
-          `TaskModal ${label} store`,
-        );
-      }
-      code = replaceRequired(
-        code,
-        "import { liveTimerSec, secToHMS } from '../shared/format.js';",
-        'const liveTimerSec = () => 0; const secToHMS = (value) => String(value ?? 0);',
-        'TaskModal format',
-      );
-      code = replaceRequired(
-        code,
-        "import { mdToHtml } from '../shared/md.js';",
-        'const mdToHtml = (value) => String(value || "");',
-        'TaskModal markdown',
-      );
-      code = replaceRequired(
-        code,
-        "import { providerLabel } from '../shared/runner-display.js';",
-        'const { providerLabel } = globalThis.__uiContextRunnerDisplay;',
-        'TaskModal runner helper',
-      );
-      code = replaceRequired(
-        code,
-        "import OpenDiffButton from './OpenDiffButton.vue';",
-        'const OpenDiffButton = { template: "<span></span>" };',
-        'TaskModal diff button',
-      );
-      return replaceRequired(
-        code,
-        "import TaskFavoriteButton from './board/TaskFavoriteButton.vue';",
-        'const TaskFavoriteButton = { props: ["active", "pending", "taskTitle"], emits: ["toggle"], template: "<button />" };',
-        'TaskModal favorite button',
-      );
-    },
-  );
+  return compileTaskModal('__uiContext', { stubDialog: true });
 }
-
 async function compileToolHostPublisher() {
-  return compilePublisher(
-    'web/src/shared/layout/ToolHost.vue',
-    'data-v-ui-context-tool-runtime',
-    (input) => {
-      let code = input;
-      code = replaceRequired(
-        code,
-        "import { useRoute, useRouter } from 'vue-router';",
-        'const useRoute = () => globalThis.__uiContextToolRoute; const useRouter = () => ({ push() {} });',
-        'ToolHost router',
-      );
-      code = replaceRequired(
-        code,
-        "import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';",
-        'const { useDockStore, MIN_DOCK_WIDTH } = globalThis.__uiContextDockModule;',
-        'ToolHost dock store',
-      );
-      code = replaceRequired(
-        code,
-        "import { usePluginsStore } from '../../stores/plugins.js';",
-        'const usePluginsStore = globalThis.__uiContextPluginsStore;',
-        'ToolHost plugins store',
-      );
-      code = replaceRequired(
-        code,
-        "import { useUiContextSource } from '../../composables/useUiContextSource.js';",
-        'const useUiContextSource = globalThis.__uiContextSourceHelper;',
-        'ToolHost ui-context source',
-      );
-      code = replaceRequired(
-        code,
-        "import { NAV_ICONS } from '../nav-icons.js';",
-        'const NAV_ICONS = { code: "", plugin: "" };',
-        'ToolHost icons',
-      );
-      code = replaceRequired(
-        code,
-        "import { registerLayer } from '../ui/layer-stack.js';",
-        'const registerLayer = () => () => {};',
-        'ToolHost layer',
-      );
-      code = replaceRequired(
-        code,
-        "import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';",
-        'const { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } = globalThis.__uiContextToolRegistry;',
-        'ToolHost registry',
-      );
-      code = replaceRequired(
-        code,
-        "import { useDockViewport } from '../tools/viewport.js';",
-        'const useDockViewport = () => ({ dockCapable: globalThis.__uiContextDockCapable });',
-        'ToolHost viewport',
-      );
-      return replaceRequired(
-        code,
-        "import ToolDock from './ToolDock.vue';",
-        'const ToolDock = globalThis.__uiContextToolDock;',
-        'ToolHost dock component',
-      );
+  return compileVue(webFile('src/shared/layout/ToolHost.vue'), {
+    stubs: {
+      'vue-router': `
+        export const useRoute = () => globalThis.__uiContextToolRoute;
+        export const useRouter = () => ({ push() {} });
+      `,
+      '../../stores/dock.js': `
+        export const MIN_DOCK_WIDTH = globalThis.__uiContextDockModule.MIN_DOCK_WIDTH;
+        export const useDockStore = (...args) =>
+          globalThis.__uiContextDockModule.useDockStore(...args);
+      `,
+      '../../stores/plugins.js': `
+        export const usePluginsStore = (...args) => globalThis.__uiContextPluginsStore(...args);
+      `,
+      '../../composables/useUiContextSource.js': `
+        export const useUiContextSource = (...args) => globalThis.__uiContextSourceHelper(...args);
+      `,
+      '../nav-icons.js': 'export const NAV_ICONS = { code: "", plugin: "" };',
+      '../tools/registry.js': `
+        export const TOOL_REGISTRY = globalThis.__uiContextToolRegistry.TOOL_REGISTRY;
+        export const TOOL_BY_ID = globalThis.__uiContextToolRegistry.TOOL_BY_ID;
+        export const toolAvailability = (...args) =>
+          globalThis.__uiContextToolRegistry.toolAvailability(...args);
+      `,
+      '../tools/viewport.js': `
+        export const useDockViewport = () => ({
+          dockCapable: globalThis.__uiContextDockCapable,
+        });
+      `,
+      './ToolDock.vue': 'export default globalThis.__uiContextToolDock;',
     },
-  );
+  });
 }
 
 test('COMP-PROV-09/10: owner dispose и explicit focus управляют scope без focus theft от details update', async (t) => {
@@ -433,6 +179,11 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     browser.close();
     for (const key of [
       '__uiContextPipelineApi', '__uiContextTaskApi', '__uiContextSourceHelper',
+      '__uiContextPipelineUiStore', '__uiContextPipelineTasksStore',
+      '__uiContextPipelineBoardStore', '__uiContextPipelineCompanionStore',
+      '__uiContextPipelineContextSource', '__uiContextPipelineConfirmDialog',
+      '__uiContextPipelineAlertDialog', '__uiContextPipelineFactoryGraph',
+      '__uiContextApi', '__uiContextContextSource',
       '__uiContextUiStore', '__uiContextTasksStore', '__uiContextBoardStore',
       '__uiContextCompanionStore', '__uiContextAnalysisStore', '__uiContextFavoritesStore',
       '__uiContextSeenStore', '__uiContextPipelineWait', '__uiContextRunnerDisplay',
@@ -441,6 +192,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
   });
 
   globalThis.__uiContextSourceHelper = useUiContextSource;
+  globalThis.__uiContextContextSource = useUiContextSource;
   globalThis.__uiContextUiStore = defineStore('ui-context-runtime-ui', {
     state: () => ({ taskId: null, launchRequested: false }),
     actions: {
@@ -538,6 +290,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     async post() { return {}; },
     async upload() { return {}; },
   };
+  globalThis.__uiContextApi = globalThis.__uiContextTaskApi;
   globalThis.__uiContextPipelineWait = await import('../../web/src/shared/pipeline-wait.js');
   globalThis.__uiContextRunnerDisplay = await import('../../web/src/shared/runner-display.js');
   globalThis.__uiContextFactoryGraph = {
@@ -546,6 +299,14 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     emits: ['node'],
     template: '<div class="factory-graph-runtime"></div>',
   };
+  globalThis.__uiContextPipelineUiStore = globalThis.__uiContextUiStore;
+  globalThis.__uiContextPipelineTasksStore = globalThis.__uiContextTasksStore;
+  globalThis.__uiContextPipelineBoardStore = globalThis.__uiContextBoardStore;
+  globalThis.__uiContextPipelineCompanionStore = globalThis.__uiContextCompanionStore;
+  globalThis.__uiContextPipelineContextSource = useUiContextSource;
+  globalThis.__uiContextPipelineConfirmDialog = async () => true;
+  globalThis.__uiContextPipelineAlertDialog = async () => undefined;
+  globalThis.__uiContextPipelineFactoryGraph = globalThis.__uiContextFactoryGraph;
 
   const PipelineView = await compilePipelinePublisher();
   pipelineWrapper = mount(PipelineView, {
@@ -554,7 +315,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
   });
   await flushPromises();
   pipelineWrapper.getComponent({ name: 'FactoryGraph' }).vm.$emit('node', {
-    nid: 'review', label: '🔎 Ревью', status: 'done', sub: '',
+    id: 'review', label: '🔎 Ревью', status: 'done', subtitle: '',
   });
   await nextTick();
   await flushPromises();

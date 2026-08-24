@@ -8,7 +8,6 @@ import { parse } from '@vue/compiler-sfc';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
-const DEFAULT_BASELINE = 'tests/web/fixtures/ui/ui-boundary-baseline.json';
 
 const CONTROL_TAGS = new Set(['button', 'input', 'textarea', 'select', 'dialog']);
 const FORM_CONTROL_TAGS = new Set(['button', 'input', 'textarea', 'select']);
@@ -26,9 +25,12 @@ const PRESSABLE_CONSUMERS = new Set([
   'web/src/components/composites/UiTab.vue',
   'web/src/features/companion/CompanionAvatar.vue',
   'web/src/features/companion/CompanionTopbarButton.vue',
+  'web/src/shared/layout/AppShell.vue',
+  'web/src/views/BoardView.vue',
   'web/src/views/chat/ChatList.vue',
   'web/src/views/code/CodePanel.vue',
   'web/src/views/diff/DiffPanel.vue',
+  'web/src/views/VideoView.vue',
 ]);
 const SVG_PRESSABLE_CONSUMERS = new Set([
   'web/dev/ui-gallery/UiGallery.vue',
@@ -349,7 +351,7 @@ function structuralState(repoRoot) {
     ...walkFiles(path.join(repoRoot, 'web/dev/ui-gallery'), new Set(['.css'])),
   ]
     .map((file) => relativeFile(repoRoot, file))
-    .filter((file) => file !== 'web/src/styles.css' && !file.startsWith('web/src/styles/'));
+    .filter((file) => !file.startsWith('web/src/styles/'));
   return {
     misplacedUiVue,
     invalidComponentFiles,
@@ -382,91 +384,22 @@ export function collectUiBoundary(repoRoot = DEFAULT_REPO_ROOT) {
   return report;
 }
 
-function sortedObject(value) {
-  if (Array.isArray(value)) return [...value].sort();
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortedObject(value[key])]));
-}
-
-export function createUiBoundaryBaseline(report) {
-  return sortedObject({
-    version: 1,
-    nativeTemplateControls: report.nativeTemplateControls,
-    scriptControls: report.scriptControls,
-    nonSemanticActivations: report.nonSemanticActivations,
-    legacySharedUiFiles: report.structural.legacySharedUiFiles,
-  });
-}
-
-function validateFindingMap(name, value, errors) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    errors.push(`baseline: ${name} должен быть object`);
-    return;
-  }
-  for (const [file, kinds] of Object.entries(value)) {
-    if (!file.startsWith('web/')) errors.push(`baseline: некорректный путь ${file}`);
-    for (const [kind, finding] of Object.entries(kinds || {})) {
-      const total = Object.values(finding?.fingerprints || {}).reduce((sum, count) => sum + count, 0);
-      if (!Number.isInteger(finding?.count) || finding.count < 1 || finding.count !== total) {
-        errors.push(`baseline: ${name}.${file}.${kind} имеет неточный count`);
-      }
-    }
-  }
-}
-
-export function validateUiBoundaryBaseline(baseline) {
-  const errors = [];
-  if (baseline?.version !== 1) errors.push('baseline: поддерживается только version=1');
-  validateFindingMap('nativeTemplateControls', baseline?.nativeTemplateControls, errors);
-  validateFindingMap('scriptControls', baseline?.scriptControls, errors);
-  validateFindingMap('nonSemanticActivations', baseline?.nonSemanticActivations, errors);
-  if (!Array.isArray(baseline?.legacySharedUiFiles)
-      || baseline.legacySharedUiFiles.some((file) => typeof file !== 'string')) {
-    errors.push('baseline: legacySharedUiFiles должен быть массивом путей');
-  } else if (new Set(baseline.legacySharedUiFiles).size !== baseline.legacySharedUiFiles.length) {
-    errors.push('baseline: legacySharedUiFiles содержит дубли');
-  }
-  return errors;
-}
-
-function compareFindingMap(label, actual, baseline, errors) {
-  for (const [file, kinds] of Object.entries(actual)) {
+function appendFindingErrors(label, findings, errors) {
+  for (const [file, kinds] of Object.entries(findings)) {
     for (const [kind, finding] of Object.entries(kinds)) {
-      const allowed = baseline?.[file]?.[kind];
-      if (!allowed) {
-        errors.push(`${label}: новый долг ${file} ${kind}`);
-        continue;
-      }
-      if (finding.count > allowed.count) {
-        errors.push(`${label}: рост ${file} ${kind}: ${finding.count} > ${allowed.count}`);
-      }
-      for (const [fingerprint, count] of Object.entries(finding.fingerprints)) {
-        const allowedCount = allowed.fingerprints?.[fingerprint] || 0;
-        if (count > allowedCount) {
-          errors.push(
-            `${label}: новый fingerprint в ${file} (${kind}, ${count} > ${allowedCount}): ${fingerprint}`,
-          );
-        }
-      }
+      const fingerprints = Object.entries(finding.fingerprints)
+        .map(([fingerprint, count]) => `${count}× ${fingerprint}`)
+        .join('; ');
+      errors.push(`${label}: запрещено ${file} ${kind}: ${fingerprints}`);
     }
   }
 }
 
-export function compareUiBoundary(report, baseline) {
-  const errors = [...validateUiBoundaryBaseline(baseline), ...report.parseErrors];
-  compareFindingMap(
-    'нативные template-контролы',
-    report.nativeTemplateControls,
-    baseline?.nativeTemplateControls,
-    errors,
-  );
-  compareFindingMap('script-контролы', report.scriptControls, baseline?.scriptControls, errors);
-  compareFindingMap(
-    'несемантическая активация',
-    report.nonSemanticActivations,
-    baseline?.nonSemanticActivations,
-    errors,
-  );
+export function compareUiBoundary(report) {
+  const errors = [...report.parseErrors];
+  appendFindingErrors('нативные template-контролы', report.nativeTemplateControls, errors);
+  appendFindingErrors('script-контролы', report.scriptControls, errors);
+  appendFindingErrors('несемантическая активация', report.nonSemanticActivations, errors);
 
   if (report.clipboardFilePresent && report.clipboardTextareaCount !== 1) {
     errors.push(
@@ -479,31 +412,20 @@ export function compareUiBoundary(report, baseline) {
   errors.push(...report.structural.invalidComponentFiles.map((file) => `не-SFC файл в components/: ${file}`));
   errors.push(...report.structural.componentsUi.map((file) => `запрещён components/ui/: ${file}`));
   errors.push(...report.structural.forbiddenGlobalCss.map((file) => `global CSS вне styles/: ${file}`));
-  const legacyAllowed = new Set(baseline?.legacySharedUiFiles || []);
-  for (const file of report.structural.legacySharedUiFiles) {
-    if (!legacyAllowed.has(file)) errors.push(`новый файл в legacy shared/ui: ${file}`);
-  }
+  errors.push(...report.structural.legacySharedUiFiles.map((file) => `запрещён shared/ui: ${file}`));
   return [...new Set(errors)];
 }
 
-export function loadUiBoundaryBaseline(repoRoot = DEFAULT_REPO_ROOT, baselinePath = DEFAULT_BASELINE) {
-  const absolute = path.isAbsolute(baselinePath) ? baselinePath : path.join(repoRoot, baselinePath);
-  return JSON.parse(fs.readFileSync(absolute, 'utf8'));
-}
-
-export function checkUiBoundary({ repoRoot = DEFAULT_REPO_ROOT, baselinePath = DEFAULT_BASELINE } = {}) {
+export function checkUiBoundary({ repoRoot = DEFAULT_REPO_ROOT } = {}) {
   const report = collectUiBoundary(repoRoot);
-  const baseline = loadUiBoundaryBaseline(repoRoot, baselinePath);
-  return { report, baseline, errors: compareUiBoundary(report, baseline) };
+  return { report, errors: compareUiBoundary(report) };
 }
 
 function parseArguments(argv) {
-  const options = { repoRoot: DEFAULT_REPO_ROOT, baselinePath: DEFAULT_BASELINE, printBaseline: false };
+  const options = { repoRoot: DEFAULT_REPO_ROOT };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--repo-root') options.repoRoot = path.resolve(argv[++index]);
-    else if (argument === '--baseline') options.baselinePath = argv[++index];
-    else if (argument === '--print-baseline') options.printBaseline = true;
     else throw new Error(`Неизвестный аргумент: ${argument}`);
   }
   return options;
@@ -512,21 +434,13 @@ function parseArguments(argv) {
 function main() {
   const options = parseArguments(process.argv.slice(2));
   const report = collectUiBoundary(options.repoRoot);
-  if (options.printBaseline) {
-    process.stdout.write(`${JSON.stringify(createUiBoundaryBaseline(report), null, 2)}\n`);
-    return;
-  }
-  const baseline = loadUiBoundaryBaseline(options.repoRoot, options.baselinePath);
-  const errors = compareUiBoundary(report, baseline);
+  const errors = compareUiBoundary(report);
   if (errors.length) {
     process.stderr.write(`UI boundary нарушен:\n- ${errors.join('\n- ')}\n`);
     process.exitCode = 1;
     return;
   }
-  const nativeCount = Object.values(report.nativeTemplateControls)
-    .flatMap((kinds) => Object.values(kinds))
-    .reduce((sum, finding) => sum + finding.count, 0);
-  process.stdout.write(`UI boundary: OK, legacy native controls: ${nativeCount}\n`);
+  process.stdout.write('UI boundary: OK\n');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

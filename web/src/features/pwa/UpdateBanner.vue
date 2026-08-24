@@ -57,13 +57,6 @@ const pwa = usePwaStore();
   white-space: nowrap;
 }
 
-.update-action {
-  flex: none;
-  padding-inline: 8px;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
 .update-icon {
   width: 13px;
   height: 13px;
@@ -86,9 +79,5 @@ const pwa = usePwaStore();
     display: none;
   }
 
-  .update-notice:not(.is-standalone) .update-action {
-    width: var(--control-height);
-    padding-inline: 0;
-  }
 }
 </style>

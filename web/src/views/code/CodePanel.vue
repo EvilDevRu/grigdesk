@@ -5,6 +5,7 @@
       <span v-if="context" class="tlabel mono">{{ project }} · {{ context.label }}</span>
       <span class="grow"></span>
       <UiButton v-if="compact" class="navigator-toggle" variant="ghost"
+                data-context="tool-dock-navigator"
                 :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
                 :title="navigatorCollapsed ? 'Показать дерево' : 'Скрыть дерево'"
                 @click="navigatorCollapsed = !navigatorCollapsed">
@@ -1137,12 +1138,6 @@ onBeforeUnmount(() => {
 .code-split span { width: 2px; height: 34px; border-radius: 999px; background: var(--line-2); }
 .code-split:hover span, .code-split:focus-visible span { background: var(--accent); }
 .code-split:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.navigator-toggle {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: var(--tool-dock-action-size, 30px);
-  padding-block: 0; padding-inline: 8px; line-height: 1;
-}
-.navigator-toggle svg { width: 14px; height: 14px; }
 .code-panel.compact .code-head {
   min-height: 40px;
   padding: var(--tool-dock-action-top, 4px) var(--tool-dock-actions-space, 4px) 5px 11px;

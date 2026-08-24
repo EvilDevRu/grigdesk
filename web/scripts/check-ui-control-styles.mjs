@@ -45,10 +45,7 @@ function vueFiles(repoRoot) {
 }
 
 function cssFiles(repoRoot) {
-  const files = walk(path.join(repoRoot, 'web/src/styles'), new Set(['.css']));
-  const legacy = path.join(repoRoot, 'web/src/styles.css');
-  if (fs.existsSync(legacy)) files.push(legacy);
-  return files.sort();
+  return walk(path.join(repoRoot, 'web/src/styles'), new Set(['.css'])).sort();
 }
 
 function staticTokenAttribute(node, name) {
@@ -79,7 +76,7 @@ function controlTokens(descriptor) {
 }
 
 function selectorMatchesTokens(selector, tokens) {
-  if (CONTROL_TAG.test(selector) || /\.spin(?:\b|-)|:deep\([^)]*\.ui-/.test(selector) || /\.ui-/.test(selector)) {
+  if (CONTROL_TAG.test(selector) || /\.spin(?:\b|-)|:deep\([^)]*\.ui-/.test(selector)) {
     return true;
   }
   for (const token of tokens.classes) {
@@ -198,6 +195,12 @@ export function collectUiControlStyles(repoRoot = DEFAULT_REPO_ROOT) {
   const resolvedRoot = path.resolve(repoRoot);
   const findings = {};
   const structuralErrors = [];
+  const legacyStyles = path.join(resolvedRoot, 'web/src/styles.css');
+
+  if (fs.existsSync(legacyStyles)) {
+    structuralErrors.push('web/src/styles.css: legacy CSS entry запрещён');
+  }
+
   const allTokens = { classes: new Set(), ids: new Set() };
   const parsedVue = [];
   for (const absoluteFile of vueFiles(resolvedRoot)) {

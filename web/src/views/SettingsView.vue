@@ -1,3 +1,2193 @@
+<template>
+  <div class="settings">
+    <header class="settings-hero">
+      <div>
+        <p class="eyebrow">Центр управления</p>
+        <h2>Настройте Cockpit под свой процесс</h2>
+        <p>
+          Подключения, исполнители и системные параметры собраны в одном месте.
+          Изменения применяются только там, где это явно указано.
+        </p>
+      </div>
+      <div class="hero-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6h10 M18 6h2 M10 12h10 M4 12h2 M4 18h7 M15 18h5 M14 4v4 M6 10v4 M11 16v4" />
+        </svg>
+      </div>
+    </header>
+
+    <div class="settings-layout">
+      <aside class="settings-nav-wrap">
+        <nav ref="settingsNav" class="settings-nav" aria-label="Разделы настроек">
+          <div v-for="group in TAB_GROUPS" :key="group.label" class="nav-group">
+            <div class="nav-group-label">{{ group.label }}</div>
+            <UiButton
+              v-for="item in group.items"
+              :key="item.id"
+              class="settings-nav-item"
+              variant="ghost"
+              data-role="settings-nav"
+              :data-settings-tab="item.id"
+              :class="{ active: tab === item.id }"
+              :aria-current="tab === item.id ? 'page' : undefined"
+              @click="setTab(item.id)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path :d="item.icon" />
+              </svg>
+              <span>
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.short }}</small>
+              </span>
+            </UiButton>
+          </div>
+        </nav>
+      </aside>
+
+      <div class="settings-workspace" :class="{ wide: tab === 'providers' || tab === 'plugins' }">
+        <header class="section-intro">
+          <span class="section-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path :d="currentTab.icon" />
+            </svg>
+          </span>
+          <div>
+            <p class="eyebrow">{{ currentTab.group }}</p>
+            <h2>{{ currentTab.label }}</h2>
+            <p>{{ currentTab.description }}</p>
+          </div>
+        </header>
+
+    <!-- Приложение: локальные настройки устройства, не уезжают на другие окна -->
+    <section v-if="tab === 'app'">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Экран устройства</h3>
+            <p class="muted small">Локальная настройка — не влияет на другие компьютеры и планшеты.</p>
+          </div>
+          <span class="scope-pill">Это устройство</span>
+        </div>
+        <div class="mode">
+          <UiSwitch
+            :model-value="pwa.wakeLockEnabled"
+            :disabled="pwa.wakeLockBusy || (!pwa.wakeLockSupported && !pwa.wakeLockEnabled)"
+            @update:model-value="pwa.setWakeLockEnabled"
+          >
+            Не гасить экран
+          </UiSwitch>
+          <p class="muted small">
+            Удерживает экран включённым на всех страницах кокпита. При сворачивании PWA
+            блокировка снимается системой и автоматически возвращается после открытия.
+          </p>
+        </div>
+        <p v-if="pwa.wakeLockActive" class="msg ok">Экран удерживается включённым.</p>
+        <p v-else-if="pwa.wakeLockError" class="msg err">{{ pwa.wakeLockError }}</p>
+        <p v-else-if="!pwa.wakeLockSupported" class="msg warn">
+          {{ wakeLockNeedsHttps
+            ? 'Функция доступна только при открытии кокпита через HTTPS.'
+            : 'Этот браузер не поддерживает удержание экрана.' }}
+        </p>
+        <p v-else-if="pwa.wakeLockEnabled" class="muted small">
+          Блокировка включится, когда приложение снова станет активным.
+        </p>
+
+        <div class="mode notification-mode">
+          <div class="notification-line">
+            <div>
+              <b>Системные оповещения</b>
+              <p class="muted small">
+                Ответы агентов, вопросы и остановки конвейера, пока приложение запущено.
+              </p>
+            </div>
+            <UiButton
+              data-role="settings-action"
+              :disabled="pwa.notificationBusy || !pwa.notificationSupported"
+              @click="pwa.testNotification"
+            >
+              {{ pwa.notificationBusy
+                ? 'Проверяю…'
+                : (pwa.notificationPermission === 'granted' ? 'Проверить' : 'Включить и проверить') }}
+            </UiButton>
+          </div>
+          <p v-if="pwa.notificationPermission === 'granted'" class="msg ok">
+            Оповещения разрешены на этом устройстве.
+          </p>
+          <p v-else-if="pwa.notificationError" class="msg err">{{ pwa.notificationError }}</p>
+          <p v-else-if="!pwa.notificationSupported" class="msg warn">
+            {{ notificationNeedsHttps
+              ? 'Оповещения доступны только при открытии кокпита через HTTPS.'
+              : 'Этот браузер не поддерживает системные оповещения.' }}
+          </p>
+          <p v-else class="muted small">
+            Разрешение спрашивается только по этой кнопке — автоматический запрос PWA браузер блокирует.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Компаньон — своя карточка, а не строка в «Экране устройства»: у него три разных
+           решения (показывать ли, чем отвечает, озвучивать ли), и два из них device-local,
+           а одно общее для всех окон. Область каждого блока названа пилюлей: без этого
+           непонятно, почему смена модели видна на планшете, а тумблер — нет. -->
+      <div class="card companion-card" data-testid="companion-settings">
+        <div class="card-head">
+          <div>
+            <h3>Голосовой компаньон</h3>
+            <p class="muted small">
+              Компактный аватар поверх страниц: быстрый вопрос голосом или текстом в том же
+              разговоре, что открыт на странице «Чаты».
+            </p>
+          </div>
+          <span class="status-pill" :class="{ ok: companion.deviceEnabled }"
+                data-testid="companion-connection-state">
+            <span class="dot"></span>
+            {{ companion.deviceEnabled ? 'Подключён' : 'Отключён' }}
+          </span>
+        </div>
+
+        <div class="mode" data-testid="companion-device-setting">
+          <UiSwitch
+            :model-value="companion.deviceEnabled"
+            @update:model-value="companion.setDeviceEnabled"
+          >
+            Показывать компаньона на этом устройстве
+          </UiSwitch>
+          <p class="muted small">
+            Скрывает только аватар и компактное окно на этом устройстве. Полная страница
+            «Чаты», история и настройки речи продолжают работать; вернуть компаньона можно здесь.
+          </p>
+        </div>
+
+        <!-- Единственная СЕРВЕРНАЯ настройка компаньона: разговор у него один на все окна,
+             поэтому и модель одна. Здесь же — единственное место, где её меняют: селекты
+             в самом companion-чате неактивны, иначе правд стало бы две. -->
+        <div class="mode companion-run-setting" data-testid="companion-run-setting">
+          <div class="companion-run-head">
+            <div>
+              <b>Чем отвечает</b>
+              <p class="muted small">
+                Исполнитель, модель и усилие быстрого хода. Настройка общая для всех окон и
+                для всех разговоров компаньона — и общего, и привязанных к задачам.
+                Режим у него всегда «план»: быстрый ход только читает и отвечает.
+              </p>
+            </div>
+            <span class="scope-pill">Все окна</span>
+          </div>
+          <div class="plug-model-grid"
+               :class="{ solo: !(companionEffortLevels.length || companionEffortLost) }">
+            <div class="plugrow wide">
+              <label for="companion-model">Модель</label>
+              <UiSelect
+                id="companion-model"
+                class="inp"
+                data-context="settings-field"
+                data-testid="companion-model-select"
+                :disabled="companionRunBusy"
+                :model-value="companionModelValue"
+                @change="setCompanionModel($event.target.value)"
+              >
+                <option value="">— по умолчанию из реестра —</option>
+                <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит). Молча
+                     показать «по умолчанию» нельзя: в настройках он остался, и ход
+                     компаньона сейчас вообще не уйдёт. -->
+                <option v-if="companionModelLost" :value="companionModelValue">
+                  {{ companionModelLost }} — нет в реестре
+                </option>
+                <optgroup v-for="g in modelGroups" :key="g.id"
+                          :label="g.name + (g.available ? '' : ' — недоступен')">
+                  <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
+                    {{ m.name }}
+                  </option>
+                </optgroup>
+              </UiSelect>
+            </div>
+            <div v-if="companionEffortLevels.length || companionEffortLost" class="plugrow effort-row">
+              <label for="companion-effort">Усилие</label>
+              <UiSelect
+                id="companion-effort"
+                class="inp"
+                data-context="settings-field"
+                data-testid="companion-effort-select"
+                :disabled="companionRunBusy"
+                :model-value="companionRun.effort"
+                @change="setCompanionEffort($event.target.value)"
+              >
+                <option value="">по умолчанию исполнителя</option>
+                <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем его
+                     прямо: перед ходом реестр такой уровень снимет, и человек должен
+                     видеть, что выбор больше не действует. -->
+                <option v-if="companionEffortLost" :value="companionEffortLost">
+                  {{ companionEffortLost }} — нет у этой модели
+                </option>
+                <option v-for="e in companionEffortLevels" :key="e" :value="e">{{ e }}</option>
+              </UiSelect>
+            </div>
+          </div>
+          <p v-if="companionModelLost" class="msg warn" data-testid="companion-model-lost">
+            Этой модели нет в реестре исполнителей — ход компаньона не уйдёт, пока выбор не сменят.
+          </p>
+          <p v-if="companionRunMsg" class="msg" :class="companionRunMsg.type">{{ companionRunMsg.text }}</p>
+        </div>
+
+        <div class="mode companion-audio-setting" data-testid="companion-audio-setting">
+          <UiSwitch
+            :model-value="companionTtsEnabled"
+            @update:model-value="setCompanionTtsEnabled"
+          >
+            Озвучивать прямые голосовые ответы
+          </UiSwitch>
+          <p class="muted small">
+            Выключено по умолчанию. Голос браузера или операционной системы может использовать
+            внешний облачный сервис; ему передаётся только сокращённый текст ответа на ваш
+            текущий голосовой запрос. Настройка хранится лишь на этом устройстве.
+          </p>
+          <p v-if="!companionOutputAvailable" class="msg warn" data-testid="companion-tts-unavailable">
+            Этот браузер не предоставляет speechSynthesis — ответ останется текстом.
+            Выбор сохранится на устройстве и применится, когда API станет доступен.
+          </p>
+          <div
+            v-if="companion.ttsConsentPrompt"
+            class="companion-tts-consent"
+            role="group"
+            aria-labelledby="settings-companion-tts-consent"
+            data-testid="settings-companion-tts-consent"
+          >
+            <b id="settings-companion-tts-consent">Разрешить браузерную озвучку на этом устройстве?</b>
+            <div class="row">
+              <UiButton
+                variant="solid"
+                tone="accent"
+                data-role="settings-action"
+                @click="companion.confirmTtsConsent?.()"
+              >
+                Разрешить
+              </UiButton>
+              <UiButton
+                data-role="settings-action"
+                @click="companion.dismissTtsConsent?.()"
+              >
+                Не сейчас
+              </UiButton>
+            </div>
+          </div>
+          <div class="companion-audio-grid">
+            <label>
+              Голос
+              <UiSelect
+                class="settings-select"
+                data-context="settings-field"
+                data-testid="companion-voice-select"
+                :model-value="companionOutputPrefs.voiceURI"
+                @change="setCompanionOutputPref('voiceURI', $event.target.value)"
+              >
+                <option value="">Автоматически по языку</option>
+                <option
+                  v-for="voice in companionOutputVoices"
+                  :key="voice.voiceURI"
+                  :value="voice.voiceURI"
+                >{{ voice.name || voice.voiceURI }}{{ voice.lang ? ` · ${voice.lang}` : '' }}</option>
+              </UiSelect>
+            </label>
+            <label>
+              Скорость · {{ Number(companionOutputPrefs.rate).toFixed(1) }}×
+              <UiRange
+                data-testid="companion-rate"
+                :min="0.7"
+                :max="1.3"
+                :step="0.1"
+                :model-value="Number(companionOutputPrefs.rate)"
+                @input="setCompanionOutputPref('rate', Number($event.target.value))"
+              />
+            </label>
+            <label>
+              Громкость · {{ Math.round(Number(companionOutputPrefs.volume) * 100) }}%
+              <UiRange
+                data-testid="companion-volume"
+                :min="0"
+                :max="1"
+                :step="0.05"
+                :model-value="Number(companionOutputPrefs.volume)"
+                @input="setCompanionOutputPref('volume', Number($event.target.value))"
+              />
+            </label>
+          </div>
+          <p class="muted small companion-window-mute">
+            Быстрое выключение звука в окне компаньона действует только до закрытия этой вкладки
+            и не меняет настройку устройства.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Речь: настройка общая для окон, возможности браузера — фактические для этого устройства -->
+    <section v-else-if="tab === 'speech'" data-testid="speech-settings">
+      <div v-if="speechLoading" class="card muted">Загрузка настроек речи…</div>
+      <template v-else>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Движок диктовки</h3>
+              <p class="muted small">Выбор хранится на сервере и действует во всех окнах Cockpit.</p>
+            </div>
+            <span class="scope-pill">Все устройства</span>
+          </div>
+          <div class="speech-choice-grid">
+            <div class="speech-choice" :class="{ active: speech.engine === 'browser' }">
+              <UiRadio
+                v-model="speech.engine"
+                value="browser"
+                data-testid="speech-engine-browser"
+              >
+                <span class="speech-choice-copy">
+                  <b>Браузер</b>
+                  <small>
+                    Текст приходит по мере распознавания, если браузер отдаёт промежуточные
+                    результаты.
+                  </small>
+                </span>
+              </UiRadio>
+            </div>
+            <div class="speech-choice" :class="{ active: speech.engine === 'whisper' }">
+              <UiRadio
+                v-model="speech.engine"
+                value="whisper"
+                data-testid="speech-engine-whisper"
+              >
+                <span class="speech-choice-copy">
+                  <b>Whisper</b>
+                  <small>
+                    Запись уходит только на сервер Cockpit и распознаётся локальной моделью.
+                  </small>
+                </span>
+              </UiRadio>
+            </div>
+          </div>
+
+          <template v-if="speech.engine === 'browser'">
+            <div class="speech-subhead">Обработка браузером</div>
+            <div class="speech-choice-grid">
+              <div class="speech-choice" :class="{ active: speech.browserProcessing === 'auto' }">
+                <UiRadio
+                  v-model="speech.browserProcessing"
+                  value="auto"
+                  data-testid="speech-processing-auto"
+                >
+                  <span class="speech-choice-copy">
+                    <b>На усмотрение браузера</b>
+                    <small>
+                      Может выполняться на устройстве или удалённым сервисом браузера.
+                    </small>
+                  </span>
+                </UiRadio>
+              </div>
+              <div class="speech-choice" :class="{ active: speech.browserProcessing === 'local' }">
+                <UiRadio
+                  v-model="speech.browserProcessing"
+                  value="local"
+                  data-testid="speech-processing-local"
+                >
+                  <span class="speech-choice-copy">
+                    <b>Только на устройстве</b>
+                    <small>
+                      Ставит <code>processLocally=true</code>; в облако молча не переключается.
+                    </small>
+                  </span>
+                </UiRadio>
+              </div>
+            </div>
+            <p v-if="speech.browserProcessing === 'auto'" class="msg warn" data-testid="speech-cloud-warning">
+              До первой записи Cockpit отдельно попросит согласие: браузер может передать звук своему сервису.
+              {{ speech.browserAutoConsent ? 'Согласие уже дано.' : 'Согласие ещё не дано.' }}
+            </p>
+            <p v-else-if="browserLocalBusy" class="muted small">Проверяю локальную модель этого браузера…</p>
+          </template>
+        </div>
+
+        <div class="card" data-testid="speech-quality">
+          <div class="card-head">
+            <div>
+              <h3>Качество Whisper</h3>
+              <p class="muted small">Пресет задаёт модель и ширину поиска; ручные override имеют приоритет.</p>
+            </div>
+          </div>
+          <div class="speech-quality-block">
+            <b>Короткая диктовка</b>
+            <div class="speech-quality-grid">
+              <div v-for="preset in SPEECH_QUALITIES" :key="`dictation:${preset.id}`"
+                   class="speech-quality" :class="{ active: speech.quality === preset.id }">
+                <UiRadio
+                  v-model="speech.quality"
+                  :value="preset.id"
+                  :data-testid="`speech-quality-${preset.id}`"
+                >
+                  <span class="speech-quality-copy">
+                    <b>{{ preset.label }}</b>
+                    <small>{{ preset.model }} · beam {{ preset.beam }}</small>
+                    <small>{{ preset.hint }}</small>
+                  </span>
+                </UiRadio>
+              </div>
+            </div>
+            <p v-if="speech.model" class="msg info">Пресет {{ SPEECH_QUALITIES.find((item) => item.id === speech.quality)?.label }},
+              но модель переопределена вручну: {{ speechModelLabel(speech.model) }}.</p>
+          </div>
+          <div class="speech-quality-block">
+            <b>Разбор видео</b>
+            <div class="speech-quality-grid">
+              <div v-for="preset in SPEECH_QUALITIES" :key="`video:${preset.id}`"
+                   class="speech-quality" :class="{ active: speech.videoQuality === preset.id }">
+                <UiRadio
+                  v-model="speech.videoQuality"
+                  :value="preset.id"
+                  :data-testid="`speech-video-quality-${preset.id}`"
+                >
+                  <span class="speech-quality-copy">
+                    <b>{{ preset.label }}</b>
+                    <small>{{ preset.model }}</small>
+                    <small>{{ preset.hint }}</small>
+                  </span>
+                </UiRadio>
+              </div>
+            </div>
+            <p v-if="speech.videoModel" class="msg info">Модель видео переопределена: {{ speechModelLabel(speech.videoModel) }}.</p>
+            <label class="speech-field">Стилевая подсказка
+              <UiTextarea
+                v-model="speech.videoInitialPrompt"
+                rows="3"
+                maxlength="600"
+                data-role="settings-textarea"
+                data-testid="speech-video-prompt"
+                placeholder="Пусто — расшифровка выйдет сплошным потоком без знаков препинания"
+              />
+            </label>
+            <div class="speech-field-actions">
+              <UiButton
+                data-role="settings-action"
+                data-testid="speech-video-prompt-reset"
+                @click="resetVideoInitialPrompt"
+              >
+                Вернуть стандартную
+              </UiButton>
+              <span class="muted small">{{ [...(speech.videoInitialPrompt || '')].length }} / 600 символов</span>
+            </div>
+            <p class="muted small">
+              Задаёт стиль первому окну распознавания: с подсказкой модель ставит знаки препинания,
+              без неё выдаёт сплошной поток слов до конца записи. Пишите <b>короткий заголовок</b>
+              («Стенограмма рабочей встречи.»), а не указание модели: подсказку она считает уже
+              сказанным текстом и продолжает его — из фразы «реплики записаны с пунктуацией»
+              получается расшифровка, где эта фраза повторяется вместо разговора. Это не словарь
+              терминов, для них есть поле ниже.
+            </p>
+          </div>
+          <UiDisclosureButton
+            v-model:open="speechAdvanced"
+            class="speech-advanced-toggle"
+            controls="speech-advanced-panel"
+            data-role="settings-disclosure"
+            data-testid="speech-advanced-toggle"
+          >
+            {{ speechAdvanced ? 'Скрыть продвинутые' : 'Показать продвинутые' }}
+          </UiDisclosureButton>
+          <div
+            v-if="speechAdvanced"
+            id="speech-advanced-panel"
+            class="speech-advanced"
+            data-testid="speech-advanced"
+          >
+            <label>Модель диктовки
+              <UiSelect
+                class="speech-select"
+                data-context="settings-field"
+                :model-value="speech.model || ''"
+                @change="speech.model = $event.target.value || null"
+              >
+                <option value="">Как в пресете ({{ speechModelLabel(QUALITY_MODELS[speech.quality]) }})</option>
+                <option v-for="model in SPEECH_MODELS" :key="model.id" :value="model.id">{{ model.label }}</option>
+              </UiSelect>
+            </label>
+            <label>Модель видео
+              <UiSelect
+                class="speech-select"
+                data-context="settings-field"
+                :model-value="speech.videoModel || ''"
+                @change="speech.videoModel = $event.target.value || null"
+              >
+                <option value="">Как в пресете ({{ speechModelLabel(QUALITY_MODELS[speech.videoQuality]) }})</option>
+                <option v-for="model in SPEECH_MODELS" :key="model.id" :value="model.id">{{ model.label }}</option>
+              </UiSelect>
+            </label>
+            <label>Устройство для обоих сценариев
+              <UiSelect
+                v-model="speech.device"
+                class="speech-select"
+                data-context="settings-field"
+                data-testid="speech-device"
+              >
+                <option value="auto">Авто — GPU с CPU-fallback</option>
+                <option value="cpu">CPU</option>
+                <option value="cuda" :disabled="!cudaReady">CUDA / NVIDIA GPU{{ cudaReady ? '' : ' — недоступно' }}</option>
+              </UiSelect>
+            </label>
+            <label>Compute type
+              <UiSelect
+                class="speech-select"
+                data-context="settings-field"
+                :model-value="speech.computeType || ''"
+                @change="speech.computeType = $event.target.value || null"
+              >
+                <option value="">По устройству (CPU int8 / CUDA float16)</option>
+                <option value="int8">int8</option>
+                <option value="int8_float16">int8_float16</option>
+                <option value="float16">float16</option>
+                <option value="float32">float32</option>
+              </UiSelect>
+            </label>
+            <label>Beam size диктовки
+              <UiNumberInput
+                :min="1"
+                :max="10"
+                :model-value="speech.beamSize ?? ''"
+                data-context="settings-field"
+                placeholder="Как в пресете"
+                @input="setNullableInteger('beamSize', $event.target.value, 1, 10)"
+              />
+            </label>
+            <label>Пауза VAD, мс
+              <UiNumberInput
+                v-model="speech.vadSilenceMs"
+                :min="100"
+                :max="5000"
+                :step="100"
+                data-context="settings-field"
+              />
+            </label>
+            <div class="speech-check">
+              <UiCheckbox v-model="speech.conditionOnPreviousText">
+                <span class="speech-check-copy">
+                  <b>Учитывать предыдущий текст</b>
+                  <small>
+                    Помогает связности, но может повторять ошибку из прежнего фрагмента.
+                  </small>
+                </span>
+              </UiCheckbox>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Язык и термины</h3>
+              <p class="muted small">Один словарь используется Whisper и браузером, когда тот поддерживает contextual biasing.</p>
+            </div>
+          </div>
+          <label class="speech-field">Язык
+            <UiSelect
+              v-model="speech.language"
+              class="speech-select"
+              data-context="settings-field"
+            >
+              <option value="auto">Как язык интерфейса / авто для Whisper</option>
+              <option value="ru">Русский</option>
+              <option value="en">English</option>
+            </UiSelect>
+          </label>
+          <label class="speech-field">Термины проекта
+            <UiTextarea
+              v-model="speech.dictionary"
+              rows="6"
+              maxlength="800"
+              data-role="settings-textarea"
+              data-testid="speech-dictionary"
+              placeholder="По одному термину или фразе на строку&#10;Fastify&#10;worktree&#10;Битрикс24"
+            />
+          </label>
+          <div class="speech-field-actions">
+            <UiButton
+              data-role="settings-action"
+              data-testid="speech-dictionary-template"
+              @click="fillCockpitDictionary"
+            >
+              Подставить термины кокпита
+            </UiButton>
+            <span class="muted small">{{ [...speech.dictionary].length }} / 800 символов</span>
+          </div>
+          <p class="muted small">
+            В браузере список применяется только при наличии <code>SpeechRecognitionPhrase</code>;
+            неподдерживаемый словарь не ломает диктовку — запуск повторяется без него.
+          </p>
+          <p v-if="speechCapabilities.lastDictionaryMeasure" class="msg info">
+            Последний замер словаря:
+            {{ speechCapabilities.lastDictionaryMeasure.hotwordsTokens ?? speechCapabilities.lastDictionaryMeasure.tokens ?? 'токены не сообщены' }}
+            <template v-if="speechCapabilities.lastDictionaryMeasure.hotwordsTruncated || speechCapabilities.lastDictionaryMeasure.truncated"> · обрезан моделью</template>
+          </p>
+        </div>
+
+        <div class="card" data-testid="speech-models">
+          <div class="card-head">
+            <div>
+              <h3>Локальные модели</h3>
+              <p class="muted small">Первая диктовка ничего не скачивает: веса появляются только по явной кнопке.</p>
+            </div>
+          </div>
+          <p v-if="!speechCapabilities.models.length" class="muted small">Сервер пока не сообщил каталог моделей.</p>
+          <div v-else class="speech-model-list">
+            <div v-for="model in speechCapabilities.models" :key="model.modelId" class="speech-model-row">
+              <div class="speech-model-main">
+                <b>{{ speechModelLabel(model.modelId) }}</b>
+                <span class="muted small">{{ model.repo || model.modelId }}</span>
+                <span class="speech-model-state" :class="model.cached ? 'ready' : 'missing'">
+                  {{ model.cached ? `в кэше${formatModelSize(model.sizeMb) ? ` · ${formatModelSize(model.sizeMb)}` : ''}` : 'не скачана' }}
+                </span>
+              </div>
+              <div class="speech-model-actions">
+                <UiButton
+                  data-role="settings-action"
+                  :data-testid="`speech-download-${model.modelId}`"
+                  :disabled="model.cached || speechJobActive(modelJob(model.modelId)) || speechStarting[`download:${model.modelId}`]"
+                  @click="startSpeechJob('download', model.modelId)"
+                >
+                  {{ model.cached ? 'Скачана' : 'Скачать' }}
+                </UiButton>
+                <UiButton
+                  v-if="!model.cached"
+                  data-role="settings-action"
+                  :data-testid="`speech-copy-${model.modelId}`"
+                  :disabled="speechJobActive(modelJob(model.modelId)) || speechStarting[`copy:${model.modelId}`]"
+                  @click="startSpeechJob('copy', model.modelId)"
+                >
+                  Скопировать из общего кэша
+                </UiButton>
+              </div>
+              <div v-if="modelJob(model.modelId)" class="speech-job" :class="modelJob(model.modelId).status">
+                <div>
+                  <span>{{ modelJob(model.modelId).kind === 'copy' ? 'Копирование' : 'Скачивание' }}: {{ speechJobLabel(modelJob(model.modelId)) }}</span>
+                  <UiButton
+                    v-if="speechJobActive(modelJob(model.modelId))"
+                    class="speech-cancel"
+                    variant="ghost"
+                    tone="danger"
+                    data-role="settings-compact-action"
+                    :data-testid="`speech-cancel-${model.modelId}`"
+                    @click="cancelSpeechJob(modelJob(model.modelId))"
+                  >
+                    Отменить
+                  </UiButton>
+                </div>
+                <progress v-if="speechJobPercent(modelJob(model.modelId)) !== null" max="100" :value="speechJobPercent(modelJob(model.modelId))"></progress>
+                <small v-if="modelJob(model.modelId).progress?.file" class="muted">{{ modelJob(model.modelId).progress.file }}</small>
+                <p v-if="modelJob(model.modelId).error" class="msg err">{{ modelJob(model.modelId).error.message }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" data-testid="speech-environment">
+          <div class="card-head">
+            <div>
+              <h3>Окружение и замер</h3>
+              <p class="muted small">Проверка идёт в том же media-venv и HF-кэше, которые использует транскрипция.</p>
+            </div>
+            <UiButton
+              data-role="settings-action"
+              data-testid="speech-refresh"
+              :disabled="speechRefreshing"
+              @click="refreshSpeechCapabilities"
+            >
+              {{ speechRefreshing ? 'Проверяю…' : 'Перепроверить' }}
+            </UiButton>
+          </div>
+          <div class="speech-env-grid">
+            <div>
+              <b>Whisper</b>
+              <p :class="speechCapabilities.local.ready ? 'msg ok' : 'msg warn'">
+                {{ speechCapabilities.local.ready ? 'Готов' : (speechCapabilities.local.reason || 'Не готов') }}
+              </p>
+              <ul v-if="speechCapabilities.local.checks.length" class="speech-checks">
+                <li v-for="check in speechCapabilities.local.checks" :key="check.name || check.id" :class="check.ok ? 'ok' : 'err'">
+                  {{ check.name || check.id }}<span v-if="!check.ok && check.fix" class="muted"> — {{ check.fix }}</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <b>CUDA</b>
+              <p :class="cudaReady ? 'msg ok' : 'msg warn'">{{ cudaReason }}</p>
+              <p v-if="!cudaReady" class="muted small">Доустановить воспроизводимым способом: <code data-testid="speech-cuda-command">deploy/install.sh --with-cuda</code>
+              </p>
+            </div>
+          </div>
+          <div class="speech-benchmark">
+            <div>
+              <b>Замер на эталонной записи</b>
+              <p class="muted small">Модель {{ speechModelLabel(effectiveDictationModel) }} ·
+                {{ speech.device === 'auto' ? `auto → ${benchmarkDevice}` : benchmarkDevice }} · {{ benchmarkComputeType }}.</p>
+            </div>
+            <UiButton
+              data-role="settings-action"
+              data-testid="speech-benchmark"
+              :disabled="speechJobActive(benchmarkJob()) || !benchmarkAvailable || (speech.device === 'cuda' && !cudaReady)"
+              @click="startBenchmark"
+            >
+              Замерить
+            </UiButton>
+          </div>
+          <p v-if="!benchmarkAvailable" class="msg warn" data-testid="speech-benchmark-unavailable">
+            {{ benchmarkReason }} Укажи эталонный WAV через <code>COCKPIT_SPEECH_BENCHMARK_AUDIO</code>.
+          </p>
+          <div v-if="benchmarkJob()" class="speech-job" :class="benchmarkJob().status">
+            <div>
+              <span>Замер: {{ speechJobLabel(benchmarkJob()) }}</span>
+              <UiButton
+                v-if="speechJobActive(benchmarkJob())"
+                class="speech-cancel"
+                variant="ghost"
+                tone="danger"
+                data-role="settings-compact-action"
+                data-testid="speech-benchmark-cancel"
+                @click="cancelSpeechJob(benchmarkJob())"
+              >
+                Отменить
+              </UiButton>
+            </div>
+            <progress v-if="speechJobPercent(benchmarkJob()) !== null" max="100" :value="speechJobPercent(benchmarkJob())"></progress>
+            <p v-if="benchmarkJob().error" class="msg err">{{ benchmarkJob().error.message }}</p>
+          </div>
+          <p v-if="benchmarkResult" class="msg ok" data-testid="speech-benchmark-result">{{ benchmarkText(benchmarkResult) }}</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Фактический путь</h3>
+              <p class="muted small">Серверный выбор может быть недоступен в конкретном браузере.</p>
+            </div>
+            <span class="status-pill" :class="speechEffective.startsWith('Недоступно') ? 'danger' : 'ok'">
+              <span class="dot"></span>{{ speechEffective.startsWith('Недоступно') ? 'Недоступно' : 'Готово' }}
+            </span>
+          </div>
+          <p data-testid="speech-effective"><b>Выбрано:</b> {{ speech.engine === 'browser' ? 'браузер' : 'Whisper' }}</p>
+          <p><b>На этом устройстве:</b> {{ speechEffective }}</p>
+          <p v-if="speech.engine === 'browser' && browserSpeechReason" class="msg warn">{{ browserSpeechReason }}</p>
+          <p v-if="!speech.local.ready && speech.local.reason" class="muted small">Whisper: {{ speech.local.reason }}</p>
+          <p class="muted small">Диктовка: {{ speechModelLabel(effectiveDictationModel) }} · видео: {{ speechModelLabel(effectiveVideoModel) }}.</p>
+          <div class="row">
+            <UiButton
+              variant="solid"
+              tone="accent"
+              data-role="settings-action"
+              :disabled="speechSaving"
+              data-testid="speech-save"
+              @click="saveSpeech"
+            >
+              {{ speechSaving ? 'Сохраняю…' : 'Сохранить' }}
+            </UiButton>
+          </div>
+          <p v-if="speechMsg" class="msg" :class="speechMsg.type">{{ speechMsg.text }}</p>
+        </div>
+      </template>
+    </section>
+
+    <!-- Битрикс24 -->
+    <section v-else-if="tab === 'b24'">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Подключение к порталу</h3>
+            <p class="muted small">Учётные данные хранятся только на сервере и не попадают в git.</p>
+          </div>
+          <span class="status-pill" :class="configured ? 'ok' : 'neutral'">
+            <span class="dot"></span>{{ configured ? 'Настроено' : 'Не настроено' }}
+          </span>
+        </div>
+        <div class="form-grid">
+          <label class="full">Портал
+            <UiInput
+              v-model="form.baseUrl"
+              data-context="settings-field"
+              placeholder="https://ваш-портал.bitrix24.ru"
+            />
+          </label>
+          <label>Логин
+            <UiInput
+              v-model="form.login"
+              data-context="settings-field"
+              autocomplete="username"
+              placeholder="user@example.com"
+            />
+          </label>
+          <label>Пароль
+            <UiInput
+              v-model="form.password"
+              type="password"
+              data-context="settings-field"
+              autocomplete="current-password"
+              :placeholder="configured ? '•••••• (задан, введите новый для замены)' : 'пароль портала'"
+            />
+          </label>
+        </div>
+        <div class="row">
+          <UiButton
+            variant="solid"
+            tone="accent"
+            data-role="settings-action"
+            :disabled="saving || !form.login || !form.password"
+            @click="save"
+          >
+            {{ saving ? 'Сохранение…' : 'Сохранить' }}
+          </UiButton>
+          <UiButton
+            data-role="settings-action"
+            :disabled="testing || !configured"
+            @click="testAuth"
+          >
+            {{ testing ? 'Проверка…' : 'Проверить авторизацию' }}
+          </UiButton>
+        </div>
+        <p v-if="msg" class="msg" :class="msg.type">{{ msg.text }}</p>
+      </div>
+    </section>
+
+    <!-- Исполнители: реестр LLM-агентов (/api/providers) -->
+    <section v-else-if="tab === 'providers'">
+      <!-- Плашка на исполнителя, плашки — горизонтальной линией: у каждого ИИ свои
+           ручки, и мешать их в один список нельзя. -->
+      <div v-if="!prov.loaded" class="card muted">Загрузка…</div>
+      <div v-else class="pvcards">
+        <div v-for="p in prov.providers" :key="p.id" class="card pvcard">
+          <div class="pvhead">
+            <span class="pvicon" :style="{ color: p.available ? p.color : 'var(--ink-mid)' }">
+              <ProviderIcon :provider="p" :size="20" />
+            </span>
+            <div class="pvtitle">
+              <div class="pvname">{{ p.name }}</div>
+              <div class="pvsub muted">{{ p.vendor }} · {{ p.kind }}</div>
+            </div>
+            <span class="pvstate" :class="p.available ? 'ok' : 'err'">
+              <span class="dot"></span>{{ p.available ? 'доступен' : 'недоступен' }}
+            </span>
+          </div>
+          <div class="pvfacts">
+            <div class="pvsub muted">{{ p.authLabel }}<template v-if="p.version"> · {{ p.version }}</template></div>
+            <div v-if="p.chatEnabled === false" class="pvsub pvsoon">
+              Установка доступна; подключение к чатам пока не включено.
+            </div>
+            <div v-if="p.models?.length" class="pvsub muted">
+              моделей в каталоге: {{ p.models.length }}<template v-if="hiddenCount(p)"> (в выборе {{ p.models.length - hiddenCount(p) }} — остальные скрыты)</template><template v-if="p.models.some((m) => m.unknown)"> · есть неизвестные CLI (помечены «?»)</template>
+            </div>
+            <!-- Индикатор новой версии: кокпит только сообщает, обновление — по кнопке -->
+            <div v-if="p.updateAvailable" class="pvupd">
+              ● Доступно обновление: <b>{{ p.latest }}</b> — нажми «Обновить»
+            </div>
+            <div v-else-if="p.latest" class="pvsub muted">последняя версия ({{ p.latest }})</div>
+          </div>
+          <div v-if="!p.available && (p.setupCommand || p.install)" class="pvinstall">
+            {{ p.installed ? 'Авторизация' : 'Установка' }}:
+            <UiCommandButton
+              data-role="settings-command"
+              title="Кликни — откроется терминал с введённой командой"
+              @click="installInTerminal(p)"
+            >
+              {{ p.setupCommand || p.install }}
+            </UiCommandButton>
+          </div>
+          <p v-if="updMsg[p.id]" class="msg" :class="updMsg[p.id].type">{{ updMsg[p.id].text }}</p>
+          <!-- Свои настройки исполнителя. Список объявляет сам executor (поле settings),
+               фронт про вендоров не знает и рисует по kind; выбор сохраняется в prefs. -->
+          <div class="pvset">
+            <div class="pvsetttl">Настройки исполнителя</div>
+            <template v-if="p.settings?.length">
+              <div v-for="s in p.settings" :key="s.id" class="pvsetrow">
+                <div class="pvsetline">
+                  <UiSwitch
+                    v-if="s.kind === 'toggle'"
+                    :model-value="!!s.value"
+                    :disabled="s.disabled === true"
+                    @update:model-value="(v) => saveProviderSetting(p, s, v)"
+                  >
+                    {{ s.label }}
+                  </UiSwitch>
+                  <!-- Ползунок (num_ctx у Ollama): потолок вычисляет исполнитель.
+                       Без валидного max падаем обратно в числовой инпут ниже. -->
+                  <template v-else-if="s.kind === 'range' && Number(s.max) > Number(s.min)">
+                    <span class="pvsetlbl">{{ s.label }}</span>
+                    <UiRange
+                      class="pvsetrange"
+                      :min="Number(s.min)"
+                      :max="Number(s.max)"
+                      :step="Number(s.step || 1)"
+                      :model-value="Number(s.value)"
+                      :disabled="s.disabled === true"
+                      @change="(e) => saveProviderSetting(p, s, Number(e.target.value))"
+                    />
+                    <span class="pvrangeval">{{ Number(s.value).toLocaleString('ru') }} / {{ Number(s.max).toLocaleString('ru') }}</span>
+                  </template>
+                  <template v-else-if="s.kind === 'text' || s.kind === 'number' || s.kind === 'range'">
+                    <span class="pvsetlbl">{{ s.label }}</span>
+                    <UiInput
+                      v-if="s.kind === 'text'"
+                      class="pvsetinput"
+                      data-context="settings-field"
+                      :model-value="String(s.value ?? '')"
+                      :disabled="s.disabled === true"
+                      @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
+                      @blur="(e) => commitProviderSetting(p, s, e)"
+                    />
+                    <UiNumberInput
+                      v-else
+                      class="pvsetinput"
+                      data-context="settings-field"
+                      :min="Number(s.min) || 512"
+                      :model-value="Number(s.value)"
+                      :disabled="s.disabled === true"
+                      @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
+                      @blur="(e) => commitProviderSetting(p, s, e)"
+                    />
+                  </template>
+                  <span v-else class="pvsetlbl">{{ s.label }}</span>
+                  <span v-if="s.note" class="pvsoon">{{ s.note }}</span>
+                </div>
+                <div v-if="s.hint" class="muted small">{{ s.hint }}</div>
+                <p v-if="setMsg[`${p.id}:${s.id}`]" class="msg err">{{ setMsg[`${p.id}:${s.id}`] }}</p>
+              </div>
+            </template>
+            <p v-else class="muted small">Своих настроек у этого исполнителя пока нет.</p>
+          </div>
+          <!-- MCP-серверы: чем агент этого CLI дополнен сверх своих инструментов.
+               Список и живость знает только сам CLI, поэтому блок грузится отдельным
+               запросом (см. loadMcpFor) и есть лишь у тех, кто объявил mcpStatus. -->
+          <div v-if="p.mcp && p.available" class="pvset">
+            <div class="pvsetttl">
+              MCP-серверы
+              <UiButton
+                class="mcpbtn"
+                data-role="settings-compact-action"
+                :disabled="mcpOf(p)?.loading"
+                @click="loadMcpFor(p, true)"
+              >
+                {{ mcpOf(p)?.loading ? 'Проверка…' : 'Перепроверить' }}
+              </UiButton>
+            </div>
+            <p v-if="!mcpOf(p) || (mcpOf(p).loading && !mcpOf(p).servers)" class="muted small">
+              Опрашиваем CLI — это несколько секунд…
+            </p>
+            <p v-else-if="mcpOf(p).state === 'error'" class="msg err">
+              Не удалось опросить: {{ mcpOf(p).error }}
+            </p>
+            <template v-else>
+              <div v-for="g in mcpGroups(p)" :key="g.id" class="mcpgrp">
+                <div class="mcpgrpttl muted">{{ g.label }} ({{ g.servers.length }})</div>
+                <div v-if="g.hint" class="mcpgrphint muted">{{ g.hint }}</div>
+                <div v-for="s in g.servers" :key="s.name" class="mcprow">
+                  <div class="mcpline">
+                    <span class="mcpdot" :class="mcpState(s).cls"></span>
+                    <span class="mcpname" :title="s.target || undefined">{{ s.name }}</span>
+                    <span class="mcpst" :class="mcpState(s).cls">{{ mcpState(s).label }}</span>
+                  </div>
+                  <!-- Причина отказа — то единственное, по чему сервер чинят -->
+                  <div v-if="s.state !== 'ok' && s.detail" class="mcpdetail muted">{{ s.detail }}</div>
+                  <div v-if="s.state === 'needs-auth'" class="mcpdetail muted">
+                    {{ s.scope === 'account'
+                      ? 'Авторизуется в настройках коннекторов на claude.ai — из кокпита ход этого не умеет.'
+                      : 'Нужен вход: `claude mcp login ' + s.name + '` в терминале.' }}
+                  </div>
+                </div>
+              </div>
+              <p v-if="!mcpGroups(p).length" class="muted small">Серверов не подключено.</p>
+              <p v-if="mcpOf(p).checkedAt" class="muted small">
+                проверено {{ new Date(mcpOf(p).checkedAt).toLocaleTimeString('ru') }}
+              </p>
+            </template>
+          </div>
+          <div class="pvfoot">
+            <UiButton
+              v-if="p.installed && p.canUpdate"
+              class="upd"
+              :class="{ hot: p.updateAvailable }"
+              data-role="settings-action"
+              :disabled="!!updating"
+              title="Обновить CLI исполнителя. После обновления каталог моделей перечитается."
+              @click="updateProvider(p)"
+            >
+              {{ updating === p.id ? 'Обновление…' : 'Обновить' }}
+            </UiButton>
+          </div>
+        </div>
+      </div>
+      <!-- Общее для всех исполнителей — отдельной карточкой под плашками -->
+      <div class="card narrow">
+        <div class="prow first">
+          <UiSwitch
+            :model-value="prefs?.showAllModels === true"
+            @update:model-value="toggleShowAllModels"
+          >
+            Показывать все модели: скрытые и старые версии
+          </UiSwitch>
+          <div class="muted small">
+            По умолчанию в выборе — актуальные модели из каталогов установленных исполнителей.
+            Скрытые, устаревающие и старые версии доступны по этому флажку; дублирующие алиасы
+            схлопываются с канонической моделью.
+          </div>
+          <p v-if="modelsMsg" class="msg" :class="modelsMsg.type">{{ modelsMsg.text }}</p>
+        </div>
+        <div class="row">
+          <UiButton data-role="settings-action" :disabled="refreshing" @click="refreshProv">
+            {{ refreshing ? 'Проверка…' : 'Перепроверить' }}
+          </UiButton>
+          <UiButton
+            data-role="settings-action"
+            :disabled="checking"
+            title="Кокпит и сам проверяет раз в 6 часов; обновление никогда не запускается автоматически"
+            @click="checkUpdates"
+          >
+            {{ checking ? 'Смотрю…' : 'Проверить обновления' }}
+          </UiButton>
+        </div>
+        <p class="muted small">
+          Новые версии проверяются автоматически раз в 6 часов (индикатор — точка на иконке
+          исполнителя в шапке). Обновление ставится только по кнопке.
+        </p>
+      </div>
+      <div class="card narrow">
+        <div>
+          <b>Доверенные каталоги</b>
+          <p class="muted small trusted-copy">
+            Дополнительные деревья, которые Cockpit открывает новым ходам исполнителей,
+            поддерживающих эту настройку. Текущий каталог проекта доступен и без этого
+            списка; корень <code>/</code> добавить нельзя.
+          </p>
+          <p v-if="!prov.loaded" class="muted small" data-testid="trusted-directory-providers">
+            Определяю исполнителей по реестру…
+          </p>
+          <p v-else-if="trustedDirectoryProviderNames" class="muted small" data-testid="trusted-directory-providers">
+            <b>Настройку применяют:</b> {{ trustedDirectoryProviderNames }}.
+          </p>
+          <p v-else class="muted small" data-testid="trusted-directory-providers">
+            Сейчас ни один чат-исполнитель не применяет эту настройку.
+          </p>
+        </div>
+        <div v-if="trustedDirectories.length" class="trusted-list">
+          <div v-for="(directory, index) in trustedDirectories" :key="directory" class="trusted-item">
+            <code :title="directory">{{ directory }}</code>
+            <UiButton
+              data-role="settings-compact-action"
+              :disabled="trustedDirectoriesBusy"
+              @click="removeTrustedDirectory(index)"
+            >
+              Убрать
+            </UiButton>
+          </div>
+        </div>
+        <p v-else class="muted small">Дополнительных каталогов пока нет.</p>
+        <div class="trusted-add">
+          <UiInput
+            v-model="trustedDirectoryInput"
+            data-context="settings-field"
+            :disabled="trustedDirectoriesBusy"
+            placeholder="/home/user/Workspace"
+            aria-label="Абсолютный путь к доверенному каталогу"
+            @keyup.enter="addTrustedDirectory"
+          />
+          <UiButton
+            data-role="settings-action"
+            :disabled="trustedDirectoriesBusy || !trustedDirectoryInput.trim()"
+            @click="addTrustedDirectory"
+          >
+            Добавить
+          </UiButton>
+        </div>
+        <div class="row">
+          <UiButton
+            variant="solid"
+            tone="accent"
+            data-role="settings-action"
+            :disabled="trustedDirectoriesBusy"
+            @click="applyTrustedDirectories"
+          >
+            {{ trustedDirectoriesBusy ? 'Сохраняю…' : 'Сохранить каталоги' }}
+          </UiButton>
+        </div>
+        <p class="muted small">
+          Настройка действует внутри Cockpit и не переписывает глобальные конфиги CLI.
+          Режим подтверждений выбранного исполнителя продолжает действовать отдельно.
+        </p>
+        <p v-if="trustedDirectoriesMsg" class="msg" :class="trustedDirectoriesMsg.type">
+          {{ trustedDirectoriesMsg.text }}
+        </p>
+      </div>
+    </section>
+
+    <!-- Запуски: обязательные правила перед стартом триажа/конвейера -->
+    <section v-else-if="tab === 'runs'">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Поведение запусков</h3>
+            <p class="muted small">Действует перед триажем задачи и стартом конвейера фабрики.</p>
+          </div>
+        </div>
+        <div v-if="!prefs" class="muted">Загрузка…</div>
+        <template v-else>
+          <UiSwitch
+            :model-value="prefs.gitRefreshBeforeRun"
+            @update:model-value="toggleGitRefresh"
+          >
+            Обновлять репозитории перед запуском
+          </UiSwitch>
+          <p class="muted small">
+            Перед триажем и конвейером: <code>git fetch</code> всегда; <code>git pull --ff-only</code> —
+            только если репозиторий стоит на чистом master (ветка задачи или незакоммиченные
+            правки не трогаются, в результате запуска фиксируется причина пропуска).
+          </p>
+          <UiSwitch
+            :model-value="prefs.autoRecoverPipelines"
+            @update:model-value="toggleAutoRecover"
+          >
+            Продолжать незакрытые конвейеры после запуска Cockpit
+          </UiSwitch>
+          <p class="muted small">
+            Кокпит возобновит только прогон с погибшим демоном. Ворота, остановка для
+            человека, завершённая задача и повторяющийся сбой остаются заблокированными.
+            После трёх аварийных перезапусков потребуется ручное решение.
+          </p>
+          <div class="compact-setting">
+            <label>
+              Сжимать контекст чата при
+              <UiNumberField
+                v-model="compactWindow"
+                :min="0"
+                :step="10000"
+                data-context="settings-field"
+                placeholder="0 — не вмешиваться"
+              />
+              <span class="unit">токенах</span>
+            </label>
+            <UiButton class="btn" data-role="settings-action" @click="saveCompactWindow">
+              Сохранить
+            </UiButton>
+          </div>
+          <p class="muted small">
+            CLI умеет сжимать разговор сам, но включает это у самого потолка своего окна:
+            на окне 1M — около 950 000 токенов. <b>0</b> — не вмешиваться. Claude получает порог через свою
+            переменную окружения, Codex — через <code>model_auto_compact_token_limit</code>.
+            Кольцо в чате считает до меньшей из двух границ: этого порога (если он не
+            нулевой) и 80% окна модели. На 80% ближайшей границы кольцо желтеет, на самой
+            границе — краснеет. Кэш показан отдельно по факту последнего запроса: долей
+            чтения и объёмами, если исполнитель их сообщает, либо честным статусом
+            «нет данных» / «без тарифа». Кэш не меняет цвет кольца.
+          </p>
+          <div class="compact-setting">
+            <label>
+              Сжимать контекст этапа конвейера при
+              <UiNumberField
+                v-model="stageCompactWindow"
+                :min="0"
+                :step="10000"
+                data-context="settings-field"
+                placeholder="0 — не вмешиваться"
+              />
+              <span class="unit">токенах</span>
+            </label>
+            <UiButton class="btn" data-role="settings-action" @click="saveStageCompactWindow">
+              Сохранить
+            </UiButton>
+          </div>
+          <p class="muted small">
+            То же самое, но для агентов на узлах схемы, и порог отдельный: в чате сжатие
+            рвёт нить разговора с тобой, а на этапе просто ужимает рабочий контекст между
+            вызовами инструментов. Настройка ограничивает объём активного контекста и не
+            делает предположений о кэше или тарифе выбранного исполнителя. <b>0</b> — не
+            вмешиваться. Применится к новым заходам; уже идущий
+            этап доработает как есть.
+          </p>
+          <div class="compact-setting">
+            <label>
+              Звать, если ход конвейера молчит дольше
+              <UiNumberField
+                v-model="silenceWindowMin"
+                :min="0"
+                :step="5"
+                data-context="settings-field"
+                placeholder="0 — не звать"
+              />
+              <span class="unit">мин</span>
+            </label>
+            <UiButton class="btn" data-role="settings-action" @click="saveSilenceWindow">
+              Сохранить
+            </UiButton>
+          </div>
+          <p class="muted small">
+            Зависший вызов инструмента не выглядит аварией: демон жив, этап работает,
+            а движок вмешается только когда сгорит весь лимит этапа — это часы.
+            Порог должен пропускать долгую сборку и прогон тестов, но сработать раньше
+            таймаута зависшего MCP. <b>0</b> — не звать.
+            Кокпит только оповещает: остановить ход и решить, что с ним делать, — твоё.
+          </p>
+          <p v-if="prefsMsg" class="msg" :class="prefsMsg.type" aria-live="polite">{{ prefsMsg.text }}</p>
+        </template>
+      </div>
+      <div class="card">
+        <div>
+          <b>Диагностическое логирование фабрики</b>
+          <p class="muted small debug-copy">
+            Помогает разбирать выбор модели, переключение ИИ и ошибки runner-а.
+            Не меняет маршрут или результат этапа. Короткий обязательный audit остаётся
+            даже в режиме «Выключено».
+          </p>
+        </div>
+        <div v-if="!factoryDebug && !factoryDebugMsg" class="muted">Загрузка…</div>
+        <div v-else class="debug-setting">
+          <label>
+            Уровень
+            <UiSelect
+              class="settings-select"
+              data-context="settings-field"
+              :model-value="factoryDebug?.effective || 'off'"
+              :disabled="factoryDebugBusy"
+              @change="saveFactoryDebug($event.target.value)"
+            >
+              <option v-for="level in FACTORY_DEBUG_LEVELS"
+                      :key="level.value"
+                      :value="level.value">
+                {{ level.label }}
+              </option>
+            </UiSelect>
+          </label>
+          <span v-if="factoryDebug" class="debug-effective">
+            действует: <b>{{ factoryDebug.effective }}</b>
+            <span class="muted"> · источник: {{ factoryDebug.source }}</span>
+          </span>
+        </div>
+        <p class="muted small">
+          Подробные журналы имеют ограничение размера и срок хранения; prompt, credentials
+          и status/control tokens в них не записываются. Выключение не удаляет уже созданные логи.
+        </p>
+        <p v-if="factoryDebugMsg" class="msg" :class="factoryDebugMsg.type">
+          {{ factoryDebugMsg.text }}
+        </p>
+      </div>
+    </section>
+
+    <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
+         папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера. -->
+    <section v-else-if="tab === 'plugins'">
+      <div class="plugin-overview">
+        <p class="section-note">
+          Здесь включаются самостоятельные возможности Cockpit. Пользовательский модуль —
+          папка <code>plugins/&lt;id&gt;/</code> с <code>plugin.json</code>; серверная часть
+          подключается после рестарта.
+        </p>
+        <div v-if="pluginsStore.loaded" class="plugin-stats" aria-label="Сводка по плагинам">
+          <span><b>{{ pluginStats.enabled }}</b><small>включено</small></span>
+          <span><b>{{ pluginStats.configurable }}</b><small>с настройками</small></span>
+          <span><b>{{ pluginStats.custom }}</b><small>пользовательских</small></span>
+        </div>
+      </div>
+      <div v-if="!pluginsStore.loaded" class="plugin-loading muted">
+        <UiSpinner decorative /> Загружаю плагины…
+      </div>
+      <div v-else class="plugcards">
+        <!-- Плашка с раскрытыми настройками идёт во всю ширину: условие то же, что
+             у блока .plugset ниже, иначе класс и содержимое разъедутся. -->
+        <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard"
+             :class="{ wide: p.enabled && p.settings.length, off: !p.enabled }">
+          <div class="plughead">
+            <div class="plugidentity">
+              <span class="plugicon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path :d="pluginIconPath(p)" />
+                </svg>
+              </span>
+              <div class="plugtitle">
+                <div class="plugname">
+                  <b>{{ p.name }}</b>
+                  <span class="plugver">v{{ p.version }}</span>
+                </div>
+                <div class="plugmeta">
+                  <span class="plugtag" :class="{ user: !p.system }">{{ p.system ? 'системный' : 'пользовательский' }}</span>
+                  <span v-if="p.nav?.label" class="plugplace">раздел «{{ p.nav.label }}»</span>
+                </div>
+              </div>
+            </div>
+            <div class="plug-switch" :class="{ on: p.enabled }">
+              <span>{{ p.enabled ? 'Включён' : 'Выключен' }}</span>
+              <UiSwitch
+                :model-value="p.enabled"
+                @update:model-value="(v) => pluginsStore.toggle(p.id, v)"
+              />
+            </div>
+          </div>
+          <p class="plugdesc">{{ p.description }}</p>
+          <p v-if="p.needsRestart" class="plugrestart">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" />
+            </svg>
+            Изменение серверной части применится после рестарта Cockpit.
+          </p>
+          <div v-if="p.enabled && p.settings.length" class="plugset">
+            <div class="plugset-head">
+              <div>
+                <span>Параметры</span>
+                <b>Настройки плагина</b>
+              </div>
+            </div>
+            <template v-for="s in p.settings" :key="s.key">
+              <div v-if="s.type === 'checkbox'" class="plugrow plugcheck">
+                <UiCheckbox v-model="p.values[s.key]">
+                  <span class="plugcheck-copy">
+                    <b>{{ s.label }}</b>
+                    <small v-if="s.hint">{{ s.hint }}</small>
+                  </span>
+                </UiCheckbox>
+              </div>
+              <template v-else>
+                <div v-if="s.type === 'model'" class="plug-model-grid"
+                     :class="{ solo: !(pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)) }">
+                  <!-- Модель берётся из общего реестра исполнителей — того же, что рисует
+                       селект в чате. Значение хранится парой «исполнитель + модель»:
+                       склеенной строкой её не разобрать, у локальных исполнителей id
+                       модели сам бывает со слэшами и двоеточиями (`hf.co/user/repo:tag`). -->
+                  <div class="plugrow wide">
+                    <label>{{ s.label }}</label>
+                    <UiSelect
+                      class="inp"
+                      data-context="settings-field"
+                      :model-value="pluginModelValue(p, s.key)"
+                      @change="setPluginModel(p, s.key, $event.target.value)"
+                    >
+                      <option value="">— не выбрана —</option>
+                      <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит).
+                           Молча показать «не выбрана» нельзя: в настройках он остался,
+                           и сервер всё ещё ходит именно этой моделью. -->
+                      <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
+                        {{ pluginModelLost(p, s.key) }} — нет в реестре
+                      </option>
+                      <optgroup v-for="g in modelGroups" :key="g.id"
+                                :label="g.name + (g.available ? '' : ' — недоступен')">
+                        <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
+                          {{ m.name }}
+                        </option>
+                      </optgroup>
+                    </UiSelect>
+                  </div>
+                  <!-- Усилие — свойство ЗАПУСКА, а не модели. Поэтому контрол остаётся
+                       отдельным, но визуально стоит с моделью в одной строке: это одна
+                       настройка запуска. На узком экране сетка складывается в колонку. -->
+                  <div v-if="pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)"
+                       class="plugrow effort-row">
+                    <label>Усилие</label>
+                    <UiSelect
+                      class="inp"
+                      data-context="settings-field"
+                      :model-value="p.values[s.key]?.effort || ''"
+                      @change="setPluginEffort(p, s.key, $event.target.value)"
+                    >
+                      <option value="">по умолчанию исполнителя</option>
+                      <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем
+                           его прямо: сервер такой уровень снимет и пойдёт на умолчании,
+                           и человек должен видеть, что выбор больше не действует. -->
+                      <option v-if="pluginEffortLost(p, s.key)" :value="pluginEffortLost(p, s.key)">
+                        {{ pluginEffortLost(p, s.key) }} — нет у этой модели
+                      </option>
+                      <option v-for="e in pluginEffortLevels(p.values[s.key])" :key="e" :value="e">{{ e }}</option>
+                    </UiSelect>
+                  </div>
+                </div>
+                <div v-else class="plugrow">
+                  <label>{{ s.label }}</label>
+                  <UiSelect
+                    v-if="s.type === 'select'"
+                    v-model="p.values[s.key]"
+                    class="inp"
+                    data-context="settings-field"
+                  >
+                    <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
+                  </UiSelect>
+                  <UiInput
+                    v-else
+                    v-model="p.values[s.key]"
+                    class="inp"
+                    data-context="settings-field"
+                  />
+                </div>
+                <p v-if="s.hint" class="muted small plughint">{{ s.hint }}</p>
+              </template>
+            </template>
+            <UiButton
+              class="btn plugin-save"
+              :class="{ saved: plugMsg === p.id }"
+              data-role="settings-action"
+              @click="savePlugin(p)"
+            >
+              <svg v-if="plugMsg === p.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12l4 4L19 6" />
+              </svg>
+              {{ plugMsg === p.id ? 'Сохранено' : 'Сохранить' }}
+            </UiButton>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
+    <section v-else-if="tab === 'server'">
+      <p class="section-note">
+        Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
+        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки).
+        Локальный checkout и опубликованный релиз применяются разными явными действиями:
+        ни одно из них не выполняет неявный <code>git pull</code> и не затирает WIP.
+      </p>
+      <div class="card cockpit-release-card">
+        <div class="card-head">
+          <div>
+            <h3>Версия Cockpit</h3>
+            <p class="muted small">Запущенный процесс, текущий checkout и стабильный канал релизов.</p>
+          </div>
+          <span v-if="cockpitStatus" class="status-pill"
+                :class="cockpitJob?.status === 'failed' ? 'danger' : cockpitStatus.updateAvailable ? 'warn' : 'ok'">
+            <span class="dot"></span>
+            {{ cockpitJob?.status === 'failed' ? 'Ошибка применения' : cockpitStatus.updateAvailable ? 'Есть релиз' : 'Актуально' }}
+          </span>
+        </div>
+        <div v-if="cockpitUpdate.loading && !cockpitStatus" class="muted">Читаю локальную версию…</div>
+        <template v-else-if="cockpitStatus">
+          <dl class="version-facts">
+            <div>
+              <dt>Запущено</dt>
+              <dd><b>{{ cockpitStatus.running.version }}</b> · <code>{{ shortSha(cockpitStatus.running.sha) }}</code></dd>
+            </div>
+            <div>
+              <dt>Checkout</dt>
+              <dd>
+                <b>{{ cockpitStatus.checkout.version }}</b> · <code>{{ shortSha(cockpitStatus.checkout.sha) }}</code>
+                · {{ cockpitStatus.checkout.branch || 'detached HEAD' }}
+                <span v-if="cockpitStatus.checkout.dirty" class="dirty-mark">dirty</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Стабильный канал</dt>
+              <dd v-if="cockpitStatus.latest">
+                <b>{{ cockpitStatus.latest.tag }}</b> · <code>{{ shortSha(cockpitStatus.latest.sha) }}</code>
+                <a v-if="cockpitStatus.latest.url" :href="cockpitStatus.latest.url" target="_blank" rel="noopener noreferrer">Что изменилось ↗</a>
+              </dd>
+              <dd v-else>релизы пока не найдены</dd>
+            </div>
+            <div>
+              <dt>Последняя проверка</dt>
+              <dd>{{ fmtChecked(cockpitStatus.checkedAt) }}</dd>
+            </div>
+            <div>
+              <dt>Web-бандл</dt>
+              <dd>
+                {{ clientBuildVersion }} · <code>{{ shortSha(clientBuildSha) }}</code>
+                <span v-if="clientBuildSha !== 'dev' && clientBuildSha !== cockpitStatus.running.sha" class="dirty-mark">
+                  ожидает обновления PWA
+                </span>
+              </dd>
+            </div>
+          </dl>
+
+          <p v-if="cockpitStatus.checkoutChanged" class="msg info">
+            Checkout изменился после запуска сервера. Чтобы запущенный процесс и web-бандл
+            соответствовали ему, примените локальные изменения.
+          </p>
+          <p v-if="cockpitStatus.checkError" class="msg warn">
+            {{ cockpitStatus.checkError.message }} Последний успешный результат сохранён.
+          </p>
+
+          <div v-if="cockpitJob" class="update-job" :class="cockpitJob.status">
+            <b>{{ UPDATE_STAGE_LABELS[cockpitJob.stage] || cockpitJob.stage }}</b>
+            <span class="muted small">
+              {{ cockpitJob.kind === 'update' ? `Релиз ${cockpitJob.targetTag}` : 'Локальный checkout' }}
+              · {{ shortSha(cockpitJob.targetSha) }}
+            </span>
+            <p v-if="cockpitJob.error" class="msg err">{{ cockpitJob.error.message }}</p>
+          </div>
+
+          <div class="row update-actions">
+            <UiButton
+              data-role="settings-action"
+              :disabled="cockpitUpdate.checking || cockpitUpdate.active"
+              @click="cockpitUpdate.check"
+            >
+              {{ cockpitUpdate.checking ? 'Проверяю…' : 'Проверить обновления' }}
+            </UiButton>
+            <UiButton
+              data-role="settings-action"
+              :disabled="!cockpitStatus.canApplyCheckout || cockpitUpdate.actionBusy"
+              @click="startCockpitAction('apply')"
+            >
+              Применить локальные изменения
+            </UiButton>
+            <UiButton
+              v-if="cockpitStatus.latest"
+              variant="solid"
+              tone="accent"
+              data-role="settings-action"
+              :disabled="!cockpitStatus.canInstallRelease || cockpitUpdate.actionBusy"
+              @click="startCockpitAction('update')"
+            >
+              Обновить до {{ cockpitStatus.latest.tag }}
+            </UiButton>
+          </div>
+
+          <ul v-if="cockpitStatus.applyBlockReasons?.length" class="block-reasons">
+            <li v-for="reason in cockpitStatus.applyBlockReasons" :key="`apply-${reason}`">
+              Локальное применение: {{ blockReasonLabel(reason) }}
+            </li>
+          </ul>
+          <ul v-if="cockpitStatus.installBlockReasons?.length" class="block-reasons">
+            <li v-for="reason in cockpitStatus.installBlockReasons" :key="`install-${reason}`">
+              Установка релиза: {{ blockReasonLabel(reason) }}
+            </li>
+          </ul>
+          <p v-if="cockpitUpdate.error" class="msg err">{{ cockpitUpdate.error }}</p>
+        </template>
+        <p v-else class="msg err">Не удалось прочитать состояние версии Cockpit.</p>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Процесс Cockpit</h3>
+            <p class="muted small">Перезапуск применяет свежий серверный код и состав плагинов.</p>
+          </div>
+          <span v-if="srv" class="status-pill" :class="srv.systemd ? 'ok' : 'warn'">
+            <span class="dot"></span>{{ srv.systemd ? 'Под управлением systemd' : 'Ручной запуск' }}
+          </span>
+        </div>
+        <div v-if="!srv" class="muted">Загрузка…</div>
+        <template v-else>
+          <p class="srvline">
+            Режим: <b>{{ srv.systemd ? 'демон systemd' : 'запущен вручную' }}</b>
+            <span class="muted"> · PID {{ srv.pid }} · работает {{ fmtUptime(srv.uptimeSec) }}</span>
+          </p>
+          <p v-if="!srv.systemd" class="muted small">
+            Ручной запуск — режим разработки. Чтобы демон поднимался сам, один раз выполни
+            <code>deploy/install.sh</code>. Режимы не смешивать: ручной экземпляр держит порт,
+            и юнит будет падать в цикле.
+          </p>
+          <div class="row">
+            <UiButton
+              class="btn"
+              data-role="settings-action"
+              :disabled="restarting || rebuilding"
+              @click="restartServer"
+            >
+              {{ restarting ? 'Перезапускаю… жду возвращения' : 'Перезапустить сервер' }}
+            </UiButton>
+            <UiButton
+              class="btn"
+              data-role="settings-action"
+              :disabled="rebuilding || restarting"
+              @click="rebuildWeb"
+            >
+              {{ rebuilding ? 'Собираю web-бандл…' : 'Пересобрать web-бандл' }}
+            </UiButton>
+          </div>
+          <p class="muted small">Пересборка трогает только web: npm install + vite build из рабочего дерева, включая незакоммиченные правки. Без смены checkout и перезапуска сервера.</p>
+          <p v-if="srvMsg" class="msg" :class="srvMsg.type">{{ srvMsg.text }}</p>
+        </template>
+      </div>
+    </section>
+
+    <!-- Доступ: вход в сам кокпит (один пользователь) -->
+    <section v-else-if="tab === 'access'">
+      <!-- Предупреждение только когда оно по делу: на localhost соединение и так не выходит
+           за пределы машины, а за шлюзом браузер идёт по https. -->
+      <p v-if="!auth.secure && !auth.isLocal" class="msg err">
+        Текущее соединение без HTTPS — пароль передаётся открытым текстом. В карточке
+        «В домашней сети» включи локальный HTTPS.
+      </p>
+
+      <!-- Сводка строится по фактическим путям, а не по двум неравноценным prefs-флагам:
+           LAN без локального TLS остаётся доступен по HTTP, а шлюз вообще живёт отдельно. -->
+      <div v-if="!prefs" class="card"><span class="muted">Загрузка способов подключения…</span></div>
+      <AccessOverview
+        v-else
+        :local-https-enabled="prefs.accessLocalHttps === true"
+        :local-https-busy="accessBusy === 'accessLocalHttps'"
+        :local-message="accessMsg"
+        :tls="tls"
+        :tls-state="tlsState"
+        :tls-error="tlsLoadError"
+        :gateway-setup="gwSaved"
+        :gateway-job="gwJob"
+        :gateway-public-domain="gwPublicDomain"
+        :gateway-checks="gwChecks"
+        :gateway-state="gatewaySetupState"
+        :gateway-error="gatewayLoadError"
+        :active-details="activeAccessDetails"
+        @set-local-https="setLocalHttpsMode"
+        @reload-tls="loadTls"
+        @toggle-details="toggleAccessDetails"
+      />
+
+      <!-- Учётная запись остаётся доступной независимо от того, раскрыт ли длинный мастер шлюза. -->
+      <section class="access-account" aria-labelledby="access-account-title">
+        <h3 id="access-account-title" class="sechead">Защита входа</h3>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Учётная запись</h3>
+              <p class="muted small">Один пользователь Cockpit и его активные сессии.</p>
+            </div>
+            <span class="scope-pill">Сервер</span>
+          </div>
+          <p class="muted small">
+            Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер не
+            попадает — клиент получает только сессионную cookie.
+          </p>
+          <div class="form-grid">
+            <label class="full">Логин
+              <UiInput
+                v-model="acc.login"
+                data-context="settings-field"
+                autocomplete="username"
+                placeholder="необязательно"
+              />
+            </label>
+            <label class="full">Текущий пароль
+              <UiInput
+                v-model="acc.currentPassword"
+                type="password"
+                data-context="settings-field"
+                autocomplete="current-password"
+              />
+            </label>
+            <label>Новый пароль
+              <UiInput
+                v-model="acc.password"
+                type="password"
+                data-context="settings-field"
+                autocomplete="new-password"
+                placeholder="минимум 8 символов"
+              />
+            </label>
+            <label>Новый пароль ещё раз
+              <UiInput
+                v-model="acc.password2"
+                type="password"
+                data-context="settings-field"
+                autocomplete="new-password"
+              />
+            </label>
+          </div>
+          <p class="muted small">
+            Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
+            Текущее устройство останется в системе.
+          </p>
+          <div class="row">
+            <UiButton
+              variant="solid"
+              tone="accent"
+              data-role="settings-action"
+              :disabled="accBusy || !acc.currentPassword || !acc.password"
+              @click="saveAccount"
+            >
+              {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
+            </UiButton>
+            <UiButton data-role="settings-action" @click="auth.doLogout()">Выйти</UiButton>
+            <UiButton
+              variant="ghost"
+              tone="danger"
+              data-role="settings-action"
+              @click="logoutAll"
+            >
+              Выйти со всех устройств
+            </UiButton>
+          </div>
+          <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
+        </div>
+      </section>
+
+      <!-- Локальный HTTPS: свой корень + сертификат на адрес мозга -->
+      <template v-if="tls?.source !== 'env' && activeAccessDetails === 'local'">
+      <section
+        id="local-https-settings"
+        class="access-detail-region"
+        role="region"
+        aria-labelledby="local-https-settings-title"
+        tabindex="-1"
+      >
+      <div class="access-detail-head">
+      <h3 id="local-https-settings-title" class="sechead">Локальный HTTPS</h3>
+      <p class="muted">
+        Дома PWA не ставится без HTTPS: <code>navigator.serviceWorker</code> существует только
+        в защищённом контексте, а сертификат на домашний адрес публичный центр не выпишет.
+        Кокпит выпускает свой: корень ставится на устройства один раз, дальше всё как в интернете.
+        Порт <code>{{ tls?.httpPort || 8140 }}</code> остаётся как был — по нему кокпит ходит
+        сам с собой (фабрика, <code>bin/b24</code>, терминал с мозга).
+      </p>
+      </div>
+
+      <!-- Ошибку показываем прямо здесь: до перезапуска сервера этих эндпоинтов ещё нет,
+           и «Загрузка…» навсегда выглядела бы как зависший запрос. -->
+      <div v-if="!tls" class="card">
+        <span v-if="!tlsMsg" class="muted">Загрузка…</span>
+        <template v-else>
+          <p class="msg err">{{ tlsMsg.text }}</p>
+          <p class="muted small">
+            Если сервер ещё не перезапускался после обновления — перезапусти его на вкладке
+            «Сервер»: раздел появится вместе с новыми эндпоинтами.
+          </p>
+        </template>
+      </div>
+      <template v-else>
+        <p v-if="!tls.openssl" class="msg err">
+          На машине нет <code>openssl</code> — выпустить сертификат нечем.
+          Поставь его (<code>sudo apt install openssl</code>) и обнови страницу.
+        </p>
+
+        <div class="card">
+          <p class="tlsline">
+            Состояние:
+            <b v-if="tls.https.up && tls.needsRestart" class="warn">
+              работает с прежней конфигурацией на порту {{ tls.https.port }}
+            </b>
+            <b v-else-if="tls.https.up" class="ok">работает на порту {{ tls.https.port }}</b>
+            <b v-else-if="tls.enabled" class="warn">выпущен, но не поднят</b>
+            <b v-else class="off">выключен</b>
+            <span v-if="tls.source === 'env'" class="muted"> · сертификат задан переменными окружения</span>
+          </p>
+          <p v-if="tls.https.error" class="msg err">{{ tls.https.error }}</p>
+          <p v-if="tls.needsRestart" class="msg warn">
+            Изменения вступят в силу после перезапуска сервера — сертификат читается один раз
+            при старте. Кнопка на вкладке «Сервер».
+          </p>
+
+          <p v-if="tls.leaf.exists" class="muted small">
+            Выписан на {{ tls.leaf.addresses.join(', ') }} ·
+            действует до {{ new Date(tls.leaf.notAfter).toLocaleDateString('ru-RU') }}
+            ({{ tls.leaf.daysLeft }} дн.)
+            <template v-if="tls.ca.exists">
+              · корень до {{ new Date(tls.ca.notAfter).toLocaleDateString('ru-RU') }}
+            </template>
+          </p>
+          <p v-if="tls.missingAddresses.length" class="msg warn small">
+            Адрес машины изменился: {{ tls.missingAddresses.join(', ') }} нет в сертификате.
+            Перевыпусти — устройства при этом трогать не нужно, корень остаётся прежним.
+          </p>
+
+          <div class="tlsaddrs">
+            <span class="muted small">Адреса, по которым будешь открывать кокпит:</span>
+            <div v-for="a in tls.addresses" :key="a.address" class="tlsaddr">
+              <UiCheckbox
+                :checked="tlsPicked.includes(a.address)"
+                @change="toggleTlsAddress(a.address, $event.target.checked)"
+              />
+              <code>{{ a.address }}</code><span class="muted small">{{ a.iface }}</span>
+            </div>
+            <p v-if="!tls.addresses.length" class="muted small">
+              Сетевых адресов не видно — машина не в сети?
+            </p>
+          </div>
+
+          <div class="row">
+            <UiButton
+              variant="solid"
+              tone="accent"
+              data-role="settings-action"
+              :disabled="tlsBusy || !tlsPicked.length || !tls.openssl"
+              @click="generateTls"
+            >
+              {{ tlsBusy ? 'Выпускаю…' : (tls.leaf.exists ? 'Перевыпустить сертификат' : 'Выпустить сертификат') }}
+            </UiButton>
+            <UiButton
+              v-if="tls.enabled"
+              variant="ghost"
+              tone="danger"
+              data-role="settings-action"
+              :disabled="tlsBusy"
+              @click="dropTlsCertificate"
+            >
+              Удалить сертификат
+            </UiButton>
+          </div>
+          <p v-if="tlsMsg" class="msg" :class="tlsMsg.type">{{ tlsMsg.text }}</p>
+        </div>
+
+        <!-- Установка корня. QR ведёт на HTTP-адрес намеренно: он работает и до перезапуска,
+             и после (http отдаёт корень даже клиентам из сети). Веди он на https — файл
+             пришлось бы качать через то самое предупреждение, которое он и убирает. -->
+        <div v-if="tls.ca.exists && tlsAddress()" class="card">
+          <p class="tlsline"><b>Поставить корень на устройство</b></p>
+          <div class="tlsqr">
+            <img :src="`/api/settings/tls/ca.svg?address=${tlsAddress()}`" alt="QR со ссылкой на корневой сертификат" width="180" height="180" />
+            <ol class="tlssteps small">
+              <li>Наведи камеру планшета — откроется скачивание <code>cockpit-ca.crt</code>.</li>
+              <li>Android: «Настройки → Безопасность → Шифрование → Установить сертификат →
+                Сертификат ЦС». iOS/iPadOS: профиль установится сам, потом
+                «Настройки → Основные → Об устройстве → Доверие сертификатам» — включить тумблер.</li>
+              <li>Открой <code>{{ tlsUrl() || `https://${tlsAddress()}:8143` }}</code> — замок без предупреждений,
+                и «Установить приложение» появится в меню браузера.</li>
+            </ol>
+          </div>
+          <p class="muted small">
+            На самом мозге ставить ничего не нужно: <code>http://localhost:{{ tls.httpPort || 8140 }}</code>
+            и так защищённый контекст.
+            <a :href="'/api/settings/tls/ca.crt'" download>Скачать корень файлом</a> ·
+            отпечаток <code class="fp">{{ (tls.ca.fingerprint || '').slice(0, 29) }}…</code>
+          </p>
+        </div>
+      </template>
+      </section>
+      </template>
+
+      <!-- Шлюз: установка формой. Руками это два идемпотентных скрипта плюс reconciliation
+           двух точных DNS-имён, которых ни один скрипт сделать не может. -->
+      <template v-if="activeAccessDetails === 'gateway'">
+      <section
+        id="gateway-settings"
+        class="access-detail-region"
+        role="region"
+        aria-labelledby="gateway-settings-title"
+        tabindex="-1"
+      >
+      <div class="access-detail-head">
+      <h3 id="gateway-settings-title" class="sechead">Доступ снаружи (VPS-шлюз)</h3>
+      <p class="muted">
+        Кокпит виден по публичному домену, а домашний адрес наружу не выставлен: с мозга на VPS
+        идут два исходящих SSH-туннеля (один — кокпит, второй — стенды, чтобы трафик стендов не
+        придавливал SSE и терминал). Схема не зависит ни от CGNAT, ни от смены сети.
+      </p>
+      <p class="section-note">
+        Эта панель только настраивает и проверяет шлюз. Если её скрыть, уже установленные
+        туннели, публичный домен и внешний доступ продолжат работать.
+      </p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Что настраиваем</h3>
+            <p class="muted small">Выделенный поддомен и временный VPS, через который кокпит виден снаружи.</p>
+          </div>
+          <span v-if="gwSaved" class="status-pill ok"><i class="dot"></i>{{ gwSaved.domain }}</span>
+        </div>
+        <div class="form-grid">
+          <label>Выделенный поддомен шлюза
+            <UiInput
+              v-model="gw.domain"
+              data-context="settings-field"
+              placeholder="cockpit.example.com"
+              :disabled="gwRunning"
+            />
+          </label>
+          <label>Адрес VPS (IPv4)
+            <UiInput
+              v-model="gw.gateway"
+              data-context="settings-field"
+              placeholder="203.0.113.10"
+              :disabled="gwRunning"
+            />
+          </label>
+          <label>Пользователь SSH
+            <UiInput
+              v-model="gw.sshUser"
+              data-context="settings-field"
+              placeholder="root"
+              :disabled="gwRunning"
+            />
+          </label>
+          <label>Порт SSH
+            <UiNumberInput
+              v-model="gw.sshPort"
+              data-context="settings-field"
+              :min="1"
+              :max="65535"
+              :disabled="gwRunning"
+            />
+          </label>
+        </div>
+        <p class="muted small">
+          Стенды поедут на поддомены <code>p&lt;порт&gt;.{{ gw.domain || 'домен' }}</code>, поэтому
+          Cockpit резервирует два точных имени: этот поддомен и <code>*</code>. При каждой
+          установке они заново сверяются с адресом текущего VPS.
+        </p>
+      </div>
+
+      <!-- Cloudflare опционален: у другого провайдера DNS записи заводятся руками, и шаг
+           честно превращается в подсказку, а не в отказ установки. -->
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>DNS-записи</h3>
+            <p class="muted small">Единственный шаг, который ни один скрипт не сделает сам.</p>
+          </div>
+        </div>
+        <UiSwitch v-model="gw.useCloudflare" :disabled="gwRunning">
+          Домен на Cloudflare — синхронизировать записи автоматически
+        </UiSwitch>
+        <template v-if="gw.useCloudflare">
+          <div class="form-grid">
+            <label class="full">API-токен Cloudflare
+              <UiInput
+                v-model="gw.cloudflareToken"
+                data-context="settings-field"
+                type="password"
+                autocomplete="off"
+                placeholder="токен с Zone:Read и DNS:Edit"
+                :disabled="gwRunning"
+              />
+            </label>
+          </div>
+          <p class="muted small">
+            Логин и пароль аккаунта тут не годятся: API Cloudflare ими не управляется вовсе
+            (а с двухфакторной — тем более). Нужен токен: кабинет → My&nbsp;Profile →
+            API&nbsp;Tokens → Create&nbsp;Token → шаблон «Edit zone DNS». В Permissions должны
+            получиться ровно две строки: <code>Zone → Zone → Read</code> и
+            <code>Zone → DNS → Edit</code>. Во второй строке средняя колонка — именно
+            <b>DNS</b>, не Zone: похожее разрешение <code>Zone → Zone → Edit</code> не даёт
+            права менять DNS и закончится отказом. В Zone&nbsp;Resources выбери Include →
+            Specific&nbsp;zone → родительскую зону (для <code>cockpit.example.com</code>
+            обычно <code>example.com</code>). Токен уходит на сервер только для сверки и
+            установки, нигде не сохраняется.
+          </p>
+          <p class="muted small">
+            Облако у записей будет <b>серым</b> (proxied выключен). Оранжевое — это уже прокси
+            Cloudflare, а с ним возвращаются 100 секунд на ответ (рвёт долгий ход агента),
+            100&nbsp;МБ на тело (рубит загрузку видео) и чужая терминация TLS.
+          </p>
+          <p class="muted small">
+            Перед подтверждением Cockpit прочитает текущие записи и покажет изменения. У двух
+            управляемых имён останется ровно по одной A-записи на текущий VPS; старые A,
+            AAAA и CNAME удалятся. TXT, MX, CAA и вся остальная зона не затрагиваются.
+          </p>
+        </template>
+        <p v-else class="muted small">
+          Записи заведёшь сам в панели своего провайдера — установка их дождётся и назовёт,
+          что именно нужно создать.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Доступ к VPS</h3>
+            <p class="muted small">Пароль уйдёт один раз — положить туда наш ключ. Нигде не сохраняется.</p>
+          </div>
+        </div>
+        <div class="row">
+          <UiButton
+            data-role="settings-action"
+            :disabled="gwBusy || gwRunning || !gw.gateway.trim()"
+            @click="gwProbeHost"
+          >
+            Проверить сервер
+          </UiButton>
+          <span v-if="gwBusy && !gwProbe" class="muted small">стучимся…</span>
+        </div>
+        <template v-if="gwProbe">
+          <p class="tlsline">Отпечаток ключа: <code class="fp">{{ gwProbe.fingerprint }}</code>
+            <span class="muted small"> ({{ gwProbe.fingerprintType }})</span></p>
+          <div class="tlsaddr">
+            <UiCheckbox v-model="gwHostOk" :disabled="gwRunning">
+              Тип и SHA256-отпечаток SSH-ключа совпали с данными хостера
+            </UiCheckbox>
+          </div>
+          <p class="muted small">
+            Это отпечаток ключа самого VPS (SSH host key), а не твоего ключа для входа.
+            Ищи в панели хостера поле SSH host key/fingerprint. Если его там нет, открой
+            встроенную веб-консоль/VNC хостера — не подключение по SSH — и выполни
+            <code>for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done</code>.
+            Найди строку того же типа и сравни всё значение <code>SHA256:…</code> посимвольно.
+            При несовпадении не ставь галку: сначала проверь IP и не закончилась ли
+            переустановка VPS. Без сверки пароль root может уйти чужому серверу посередине.
+            Подтверждённый отпечаток запомнится, и при следующем изменении установка
+            остановится сама.
+          </p>
+          <div v-if="gwNeedsPassword" class="form-grid">
+            <label class="full">Пароль {{ gw.sshUser || 'root' }} на VPS
+              <UiInput
+                v-model="gw.sshPassword"
+                data-context="settings-field"
+                type="password"
+                autocomplete="off"
+                placeholder="пароль из письма хостера"
+                :disabled="gwRunning"
+              />
+            </label>
+          </div>
+          <p v-else class="msg ok">Сервер уже пускает по нашему ключу — пароль не нужен.</p>
+          <p v-if="gwNeedsPassword" class="muted small">
+            Нужен ровно один раз: положить на сервер наш ключ туннеля. Дальше вход только по
+            ключу, пароль никуда не сохраняется.
+          </p>
+        </template>
+        <p v-else class="muted small">
+          Сначала проверяем сервер — жив ли он и тот ли это сервер. Пароль спросим после.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Мозг и сертификаты</h3>
+            <p class="muted small">Всё необязательное: без этих полей установка тоже проходит.</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label class="full">Пароль sudo на мозге (необязательно)
+            <UiInput
+              v-model="gw.sudoPassword"
+              data-context="settings-field"
+              type="password"
+              autocomplete="off"
+              placeholder="оставь пустым — дадим команду для терминала"
+              :disabled="gwRunning"
+            />
+          </label>
+          <label class="full">Почта для Let’s Encrypt (необязательно)
+            <UiInput
+              v-model="gw.acmeEmail"
+              data-context="settings-field"
+              placeholder="для писем об истечении сертификата"
+              :disabled="gwRunning"
+            />
+          </label>
+        </div>
+        <UiSwitch v-model="gw.acmeStaging" :disabled="gwRunning">
+          Тестовые сертификаты Let’s Encrypt (для проверки схемы)
+        </UiSwitch>
+        <p class="muted small">
+          У Let’s Encrypt пять неудач на имя в час. Тестовый режим выдаёт недоверенный
+          сертификат (браузер ругнётся), зато лимит не тратит — включай, если гоняешь установку
+          повторно.
+        </p>
+      </div>
+
+      <div class="row">
+        <UiButton
+          data-role="settings-action"
+          variant="solid"
+          tone="accent"
+          :disabled="!gwCanStart"
+          @click="gwStart"
+        >
+          Установить
+        </UiButton>
+        <UiButton
+          data-role="settings-action"
+          :disabled="gwBusy || gwRunning || (!gwSaved && !gw.domain.trim())"
+          @click="gwVerify"
+        >
+          Проверить связь
+        </UiButton>
+      </div>
+      <p v-if="gwMsg" class="msg" :class="gwMsg.type">{{ gwMsg.text }}</p>
+      <p v-if="!gwCanStart && !gwRunning" class="muted small">
+        Кнопка ждёт: домен, адрес VPS, сверенный отпечаток<span v-if="gw.useCloudflare">,
+        токен Cloudflare</span><span v-if="gwNeedsPassword">, пароль VPS</span>.
+      </p>
+      <p v-if="gw.useCloudflare" class="muted small">
+        Выключение или удаление VPS само по себе DNS не очищает: токен не хранится, поэтому
+        Cockpit не может изменить Cloudflare после установки. Следующий запуск снова заменит
+        старый адрес текущим; перед окончательным освобождением IP запись пока нужно удалить вручную.
+      </p>
+
+      <!-- Ход установки. Живёт на сервере и уезжает по SSE: начали с компьютера — видно
+           и с планшета, F5 картину не теряет. -->
+      <div v-if="gwJob" class="card">
+        <div class="card-head">
+          <div>
+            <h3>Установка</h3>
+            <p class="muted small">Восемь шагов; сорвавшийся называет причину и не идёт дальше.</p>
+          </div>
+          <span
+            class="status-pill"
+            :class="gwJobConfirmed ? 'ok' : (gwJob.state === 'failed' ? 'danger' : 'warn')"
+          ><i class="dot"></i>{{ gwJob.state === 'done' ? (gwJobConfirmed ? 'готово и проверено' : 'шаги завершены')
+            : (gwJob.state === 'failed' ? 'сорвалась' : 'идёт') }}</span>
+        </div>
+        <ul class="gwsteps small">
+          <li v-for="s in gwJob.steps" :key="s.key">
+            <b :class="{ ok: s.state === 'ok', warn: s.state === 'run', off: s.state === 'skip' }">
+              {{ GW_MARK[s.state] || '·' }}
+            </b>
+            <span>{{ s.title }}<span v-if="s.detail" class="muted"> — {{ s.detail }}</span></span>
+          </li>
+        </ul>
+        <p v-if="gwJob.error" class="msg err">{{ gwJob.error.message }}</p>
+        <p v-if="gwJob.state === 'done'" class="msg" :class="gwJobConfirmed ? 'ok' : 'warn'">
+          <template v-if="gwJobConfirmed">
+            Автоматические шаги завершены, внешний адрес проверен:
+            <code>https://{{ gwJob.domain }}</code>.
+          </template>
+          <template v-else>
+            Автоматические шаги завершены, но это ещё не подтверждает внешний доступ.
+            Выполни оставшиеся действия, перезапуск, если он указан, затем нажми «Проверить связь».
+          </template>
+        </p>
+        <!-- Не «осталось сделать», а чего ждать: трогать VPN визард не просит и не будет. -->
+        <p v-if="gwJob.state === 'done'" class="muted small">
+          Туннель ходит через VPN — так задумано, менять в нём ничего не нужно. Отсюда две
+          особенности: до планшета крюк через выходной узел VPN, а вместе с VPN туннель падает
+          и поднимается. Юниты туннеля этого и ждут, поэтому «activating» при опущенном
+          VPN — ожидание, а не поломка. Если VPN уже работает через не-TUN интерфейс,
+          его имя задаётся как <code>COCKPIT_VPN_IFACE</code> в корневом <code>.env</code>.
+        </p>
+        <p v-if="gwJob.needsRestart" class="msg warn">
+          Нужен перезапуск сервера: домен и режим за прокси читаются один раз при старте.
+          Кнопка — во вкладке «Сервер». Из чата агенту перезапускать нельзя: он сам дочерний
+          процесс этого сервера.
+        </p>
+        <details v-if="gwJob.log?.length" class="gwlog">
+          <summary class="muted small">Журнал ({{ gwJob.log.length }})</summary>
+          <pre>{{ gwJob.log.join('\n') }}</pre>
+        </details>
+      </div>
+
+      <!-- Что установка сделать не может: чужая панель DNS, root на мозге. Правила для VPN
+           здесь нет намеренно — туннель ходит через него, и настройки VPN мы не трогаем. -->
+      <div v-if="gwJob?.manual?.length" class="card">
+        <div class="card-head">
+          <div>
+            <h3>Осталось сделать руками</h3>
+            <p class="muted small">Шаги, которые кокпит за человека делать не имеет права.</p>
+          </div>
+        </div>
+        <div v-for="m in gwJob.manual" :key="m.key" class="gwman">
+          <p class="tlsline"><b>{{ m.title }}</b></p>
+          <p class="muted small">{{ m.text }}</p>
+          <template v-if="m.command">
+            <pre class="gwcmd">{{ m.command }}</pre>
+            <div class="row">
+              <UiButton data-role="settings-action" @click="gwManualToTerminal(m)">
+                Открыть в терминале
+              </UiButton>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="gwChecks" class="card">
+        <div class="card-head">
+          <div>
+            <h3>Проверка связи</h3>
+            <p class="muted small">Живые запросы снаружи: туннели, кокпит и стенд под входом.</p>
+          </div>
+          <span class="status-pill" :class="gwChecks.ok ? 'ok' : 'warn'">
+            <i class="dot"></i>{{ gwChecks.ok ? 'всё сходится' : 'есть замечания' }}
+          </span>
+        </div>
+        <ul class="gwsteps small">
+          <li v-for="c in gwChecks.checks" :key="c.key">
+            <b :class="c.ok ? 'ok' : 'warn'">{{ c.ok ? '✓' : '✗' }}</b>
+            <span>{{ c.title }}<span v-if="c.detail" class="muted"> — {{ c.detail }}</span></span>
+          </li>
+        </ul>
+        <p v-if="gwSaved && !gwPublicDomain" class="muted small">
+          Стенды проверятся после перезапуска сервера — до него домен в конфиг не попал.
+        </p>
+      </div>
+      </section>
+      </template>
+        </section>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { computed, nextTick, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue';
 import { api } from '../shared/api-client.js';
@@ -6,8 +2196,6 @@ import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { useToolLauncher } from '../shared/tools/launcher.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import AccessOverview from './settings/AccessOverview.vue';
-import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';
-import NumberField from '../shared/ui/NumberField.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
@@ -19,7 +2207,22 @@ import {
   UPDATE_STAGE_LABELS,
   useCockpitUpdateStore,
 } from '../stores/cockpit-update.js';
-import { confirmDialog } from '../shared/ui/confirm.js';
+import {
+  confirmDialog,
+  UiButton,
+  UiCheckbox,
+  UiCommandButton,
+  UiDisclosureButton,
+  UiInput,
+  UiNumberField,
+  UiNumberInput,
+  UiRadio,
+  UiRange,
+  UiSelect,
+  UiSpinner,
+  UiSwitch,
+  UiTextarea,
+} from '../ui';
 import { useSse } from '../composables/useSse.js';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
 
@@ -1072,9 +3275,29 @@ async function saveAccount() {
   } finally { accBusy.value = false; }
 }
 
+/**
+ * Массовый выход инвалидирует и текущую сессию, поэтому действие подтверждается
+ * через общий dialog host до запроса, а после запроса клиент всегда уходит на вход.
+ */
 async function logoutAll() {
-  if (!confirm('Разлогинить все устройства, включая это?')) return;
-  try { await api.post('/api/auth/logout-all'); } catch { /* всё равно уходим на вход */ }
+  const confirmed = await confirmDialog(
+    'Разлогинить все устройства, включая это?',
+    {
+      danger: true,
+      okText: 'Выйти со всех',
+    },
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api.post('/api/auth/logout-all');
+  } catch {
+    // Сервер мог инвалидировать cookie раньше ответа — клиент всё равно уходит на вход.
+  }
+
   auth.authenticated = false;
 }
 
@@ -1704,1708 +3927,6 @@ onMounted(() => {
 });
 </script>
 
-<template>
-  <div class="settings">
-    <header class="settings-hero">
-      <div>
-        <p class="eyebrow">Центр управления</p>
-        <h2>Настройте Cockpit под свой процесс</h2>
-        <p>
-          Подключения, исполнители и системные параметры собраны в одном месте.
-          Изменения применяются только там, где это явно указано.
-        </p>
-      </div>
-      <div class="hero-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 6h10 M18 6h2 M10 12h10 M4 12h2 M4 18h7 M15 18h5 M14 4v4 M6 10v4 M11 16v4" />
-        </svg>
-      </div>
-    </header>
-
-    <div class="settings-layout">
-      <aside class="settings-nav-wrap">
-        <nav ref="settingsNav" class="settings-nav" aria-label="Разделы настроек">
-          <div v-for="group in TAB_GROUPS" :key="group.label" class="nav-group">
-            <div class="nav-group-label">{{ group.label }}</div>
-            <button
-              v-for="item in group.items"
-              :key="item.id"
-              type="button"
-              class="settings-nav-item"
-              :data-settings-tab="item.id"
-              :class="{ active: tab === item.id }"
-              :aria-current="tab === item.id ? 'page' : undefined"
-              @click="setTab(item.id)"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path :d="item.icon" />
-              </svg>
-              <span>
-                <strong>{{ item.label }}</strong>
-                <small>{{ item.short }}</small>
-              </span>
-            </button>
-          </div>
-        </nav>
-      </aside>
-
-      <div class="settings-workspace" :class="{ wide: tab === 'providers' || tab === 'plugins' }">
-        <header class="section-intro">
-          <span class="section-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path :d="currentTab.icon" />
-            </svg>
-          </span>
-          <div>
-            <p class="eyebrow">{{ currentTab.group }}</p>
-            <h2>{{ currentTab.label }}</h2>
-            <p>{{ currentTab.description }}</p>
-          </div>
-        </header>
-
-    <!-- Приложение: локальные настройки устройства, не уезжают на другие окна -->
-    <section v-if="tab === 'app'">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Экран устройства</h3>
-            <p class="muted small">Локальная настройка — не влияет на другие компьютеры и планшеты.</p>
-          </div>
-          <span class="scope-pill">Это устройство</span>
-        </div>
-        <div class="mode">
-          <ToggleSwitch
-            :model-value="pwa.wakeLockEnabled"
-            :disabled="pwa.wakeLockBusy || (!pwa.wakeLockSupported && !pwa.wakeLockEnabled)"
-            label="Не гасить экран"
-            @update:model-value="pwa.setWakeLockEnabled"
-          />
-          <p class="muted small">
-            Удерживает экран включённым на всех страницах кокпита. При сворачивании PWA
-            блокировка снимается системой и автоматически возвращается после открытия.
-          </p>
-        </div>
-        <p v-if="pwa.wakeLockActive" class="msg ok">Экран удерживается включённым.</p>
-        <p v-else-if="pwa.wakeLockError" class="msg err">{{ pwa.wakeLockError }}</p>
-        <p v-else-if="!pwa.wakeLockSupported" class="msg warn">
-          {{ wakeLockNeedsHttps
-            ? 'Функция доступна только при открытии кокпита через HTTPS.'
-            : 'Этот браузер не поддерживает удержание экрана.' }}
-        </p>
-        <p v-else-if="pwa.wakeLockEnabled" class="muted small">
-          Блокировка включится, когда приложение снова станет активным.
-        </p>
-
-        <div class="mode notification-mode">
-          <div class="notification-line">
-            <div>
-              <b>Системные оповещения</b>
-              <p class="muted small">
-                Ответы агентов, вопросы и остановки конвейера, пока приложение запущено.
-              </p>
-            </div>
-            <button
-              :disabled="pwa.notificationBusy || !pwa.notificationSupported"
-              @click="pwa.testNotification"
-            >
-              {{ pwa.notificationBusy
-                ? 'Проверяю…'
-                : (pwa.notificationPermission === 'granted' ? 'Проверить' : 'Включить и проверить') }}
-            </button>
-          </div>
-          <p v-if="pwa.notificationPermission === 'granted'" class="msg ok">
-            Оповещения разрешены на этом устройстве.
-          </p>
-          <p v-else-if="pwa.notificationError" class="msg err">{{ pwa.notificationError }}</p>
-          <p v-else-if="!pwa.notificationSupported" class="msg warn">
-            {{ notificationNeedsHttps
-              ? 'Оповещения доступны только при открытии кокпита через HTTPS.'
-              : 'Этот браузер не поддерживает системные оповещения.' }}
-          </p>
-          <p v-else class="muted small">
-            Разрешение спрашивается только по этой кнопке — автоматический запрос PWA браузер блокирует.
-          </p>
-        </div>
-
-      </div>
-
-      <!-- Компаньон — своя карточка, а не строка в «Экране устройства»: у него три разных
-           решения (показывать ли, чем отвечает, озвучивать ли), и два из них device-local,
-           а одно общее для всех окон. Область каждого блока названа пилюлей: без этого
-           непонятно, почему смена модели видна на планшете, а тумблер — нет. -->
-      <div class="card companion-card" data-testid="companion-settings">
-        <div class="card-head">
-          <div>
-            <h3>Голосовой компаньон</h3>
-            <p class="muted small">
-              Компактный аватар поверх страниц: быстрый вопрос голосом или текстом в том же
-              разговоре, что открыт на странице «Чаты».
-            </p>
-          </div>
-          <span class="status-pill" :class="{ ok: companion.deviceEnabled }"
-                data-testid="companion-connection-state">
-            <span class="dot"></span>
-            {{ companion.deviceEnabled ? 'Подключён' : 'Отключён' }}
-          </span>
-        </div>
-
-        <div class="mode" data-testid="companion-device-setting">
-          <ToggleSwitch
-            :model-value="companion.deviceEnabled"
-            label="Показывать компаньона на этом устройстве"
-            @update:model-value="companion.setDeviceEnabled"
-          />
-          <p class="muted small">
-            Скрывает только аватар и компактное окно на этом устройстве. Полная страница
-            «Чаты», история и настройки речи продолжают работать; вернуть компаньона можно здесь.
-          </p>
-        </div>
-
-        <!-- Единственная СЕРВЕРНАЯ настройка компаньона: разговор у него один на все окна,
-             поэтому и модель одна. Здесь же — единственное место, где её меняют: селекты
-             в самом companion-чате неактивны, иначе правд стало бы две. -->
-        <div class="mode companion-run-setting" data-testid="companion-run-setting">
-          <div class="companion-run-head">
-            <div>
-              <b>Чем отвечает</b>
-              <p class="muted small">
-                Исполнитель, модель и усилие быстрого хода. Настройка общая для всех окон и
-                для всех разговоров компаньона — и общего, и привязанных к задачам.
-                Режим у него всегда «план»: быстрый ход только читает и отвечает.
-              </p>
-            </div>
-            <span class="scope-pill">Все окна</span>
-          </div>
-          <div class="plug-model-grid"
-               :class="{ solo: !(companionEffortLevels.length || companionEffortLost) }">
-            <div class="plugrow wide">
-              <label for="companion-model">Модель</label>
-              <select id="companion-model" class="inp" data-testid="companion-model-select"
-                      :disabled="companionRunBusy"
-                      :value="companionModelValue"
-                      @change="setCompanionModel($event.target.value)">
-                <option value="">— по умолчанию из реестра —</option>
-                <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит). Молча
-                     показать «по умолчанию» нельзя: в настройках он остался, и ход
-                     компаньона сейчас вообще не уйдёт. -->
-                <option v-if="companionModelLost" :value="companionModelValue">
-                  {{ companionModelLost }} — нет в реестре
-                </option>
-                <optgroup v-for="g in modelGroups" :key="g.id"
-                          :label="g.name + (g.available ? '' : ' — недоступен')">
-                  <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
-                    {{ m.name }}
-                  </option>
-                </optgroup>
-              </select>
-            </div>
-            <div v-if="companionEffortLevels.length || companionEffortLost" class="plugrow effort-row">
-              <label for="companion-effort">Усилие</label>
-              <select id="companion-effort" class="inp" data-testid="companion-effort-select"
-                      :disabled="companionRunBusy"
-                      :value="companionRun.effort"
-                      @change="setCompanionEffort($event.target.value)">
-                <option value="">по умолчанию исполнителя</option>
-                <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем его
-                     прямо: перед ходом реестр такой уровень снимет, и человек должен
-                     видеть, что выбор больше не действует. -->
-                <option v-if="companionEffortLost" :value="companionEffortLost">
-                  {{ companionEffortLost }} — нет у этой модели
-                </option>
-                <option v-for="e in companionEffortLevels" :key="e" :value="e">{{ e }}</option>
-              </select>
-            </div>
-          </div>
-          <p v-if="companionModelLost" class="msg warn" data-testid="companion-model-lost">
-            Этой модели нет в реестре исполнителей — ход компаньона не уйдёт, пока выбор не сменят.
-          </p>
-          <p v-if="companionRunMsg" class="msg" :class="companionRunMsg.type">{{ companionRunMsg.text }}</p>
-        </div>
-
-        <div class="mode companion-audio-setting" data-testid="companion-audio-setting">
-          <ToggleSwitch
-            :model-value="companionTtsEnabled"
-            label="Озвучивать прямые голосовые ответы"
-            @update:model-value="setCompanionTtsEnabled"
-          />
-          <p class="muted small">
-            Выключено по умолчанию. Голос браузера или операционной системы может использовать
-            внешний облачный сервис; ему передаётся только сокращённый текст ответа на ваш
-            текущий голосовой запрос. Настройка хранится лишь на этом устройстве.
-          </p>
-          <p v-if="!companionOutputAvailable" class="msg warn" data-testid="companion-tts-unavailable">
-            Этот браузер не предоставляет speechSynthesis — ответ останется текстом.
-            Выбор сохранится на устройстве и применится, когда API станет доступен.
-          </p>
-          <div
-            v-if="companion.ttsConsentPrompt"
-            class="companion-tts-consent"
-            role="group"
-            aria-labelledby="settings-companion-tts-consent"
-            data-testid="settings-companion-tts-consent"
-          >
-            <b id="settings-companion-tts-consent">Разрешить браузерную озвучку на этом устройстве?</b>
-            <div class="row">
-              <button type="button" class="primary" @click="companion.confirmTtsConsent?.()">Разрешить</button>
-              <button type="button" @click="companion.dismissTtsConsent?.()">Не сейчас</button>
-            </div>
-          </div>
-          <div class="companion-audio-grid">
-            <label>
-              Голос
-              <select
-                class="settings-select"
-                data-testid="companion-voice-select"
-                :value="companionOutputPrefs.voiceURI"
-                @change="setCompanionOutputPref('voiceURI', $event.target.value)"
-              >
-                <option value="">Автоматически по языку</option>
-                <option
-                  v-for="voice in companionOutputVoices"
-                  :key="voice.voiceURI"
-                  :value="voice.voiceURI"
-                >{{ voice.name || voice.voiceURI }}{{ voice.lang ? ` · ${voice.lang}` : '' }}</option>
-              </select>
-            </label>
-            <label>
-              Скорость · {{ Number(companionOutputPrefs.rate).toFixed(1) }}×
-              <input
-                type="range"
-                data-testid="companion-rate"
-                min="0.7"
-                max="1.3"
-                step="0.1"
-                :value="companionOutputPrefs.rate"
-                @input="setCompanionOutputPref('rate', Number($event.target.value))"
-              />
-            </label>
-            <label>
-              Громкость · {{ Math.round(Number(companionOutputPrefs.volume) * 100) }}%
-              <input
-                type="range"
-                data-testid="companion-volume"
-                min="0"
-                max="1"
-                step="0.05"
-                :value="companionOutputPrefs.volume"
-                @input="setCompanionOutputPref('volume', Number($event.target.value))"
-              />
-            </label>
-          </div>
-          <p class="muted small companion-window-mute">
-            Быстрое выключение звука в окне компаньона действует только до закрытия этой вкладки
-            и не меняет настройку устройства.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Речь: настройка общая для окон, возможности браузера — фактические для этого устройства -->
-    <section v-else-if="tab === 'speech'" data-testid="speech-settings">
-      <div v-if="speechLoading" class="card muted">Загрузка настроек речи…</div>
-      <template v-else>
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h3>Движок диктовки</h3>
-              <p class="muted small">Выбор хранится на сервере и действует во всех окнах Cockpit.</p>
-            </div>
-            <span class="scope-pill">Все устройства</span>
-          </div>
-          <div class="speech-choice-grid">
-            <label class="speech-choice" :class="{ active: speech.engine === 'browser' }">
-              <input v-model="speech.engine" type="radio" value="browser" />
-              <span><b>Браузер</b><small>Текст приходит по мере распознавания, если браузер отдаёт промежуточные результаты.</small></span>
-            </label>
-            <label class="speech-choice" :class="{ active: speech.engine === 'whisper' }">
-              <input v-model="speech.engine" type="radio" value="whisper" />
-              <span><b>Whisper</b><small>Запись уходит только на сервер Cockpit и распознаётся локальной моделью.</small></span>
-            </label>
-          </div>
-
-          <template v-if="speech.engine === 'browser'">
-            <div class="speech-subhead">Обработка браузером</div>
-            <div class="speech-choice-grid">
-              <label class="speech-choice" :class="{ active: speech.browserProcessing === 'auto' }">
-                <input v-model="speech.browserProcessing" type="radio" value="auto" />
-                <span><b>На усмотрение браузера</b><small>Может выполняться на устройстве или удалённым сервисом браузера.</small></span>
-              </label>
-              <label class="speech-choice" :class="{ active: speech.browserProcessing === 'local' }">
-                <input v-model="speech.browserProcessing" type="radio" value="local" />
-                <span><b>Только на устройстве</b><small>Ставит <code>processLocally=true</code>; в облако молча не переключается.</small></span>
-              </label>
-            </div>
-            <p v-if="speech.browserProcessing === 'auto'" class="msg warn" data-testid="speech-cloud-warning">
-              До первой записи Cockpit отдельно попросит согласие: браузер может передать звук своему сервису.
-              {{ speech.browserAutoConsent ? 'Согласие уже дано.' : 'Согласие ещё не дано.' }}
-            </p>
-            <p v-else-if="browserLocalBusy" class="muted small">Проверяю локальную модель этого браузера…</p>
-          </template>
-        </div>
-
-        <div class="card" data-testid="speech-quality">
-          <div class="card-head">
-            <div>
-              <h3>Качество Whisper</h3>
-              <p class="muted small">Пресет задаёт модель и ширину поиска; ручные override имеют приоритет.</p>
-            </div>
-          </div>
-          <div class="speech-quality-block">
-            <b>Короткая диктовка</b>
-            <div class="speech-quality-grid">
-              <label v-for="preset in SPEECH_QUALITIES" :key="`dictation:${preset.id}`"
-                     class="speech-quality" :class="{ active: speech.quality === preset.id }">
-                <input v-model="speech.quality" type="radio" :value="preset.id" />
-                <span><b>{{ preset.label }}</b><small>{{ preset.model }} · beam {{ preset.beam }}</small><small>{{ preset.hint }}</small></span>
-              </label>
-            </div>
-            <p v-if="speech.model" class="msg info">Пресет {{ SPEECH_QUALITIES.find((item) => item.id === speech.quality)?.label }},
-              но модель переопределена вручну: {{ speechModelLabel(speech.model) }}.</p>
-          </div>
-          <div class="speech-quality-block">
-            <b>Разбор видео</b>
-            <div class="speech-quality-grid">
-              <label v-for="preset in SPEECH_QUALITIES" :key="`video:${preset.id}`"
-                     class="speech-quality" :class="{ active: speech.videoQuality === preset.id }">
-                <input v-model="speech.videoQuality" type="radio" :value="preset.id" />
-                <span><b>{{ preset.label }}</b><small>{{ preset.model }}</small><small>{{ preset.hint }}</small></span>
-              </label>
-            </div>
-            <p v-if="speech.videoModel" class="msg info">Модель видео переопределена: {{ speechModelLabel(speech.videoModel) }}.</p>
-            <label class="speech-field">Стилевая подсказка
-              <textarea v-model="speech.videoInitialPrompt" rows="3" maxlength="600"
-                        data-testid="speech-video-prompt"
-                        placeholder="Пусто — расшифровка выйдет сплошным потоком без знаков препинания"></textarea>
-            </label>
-            <div class="speech-field-actions">
-              <button type="button" data-testid="speech-video-prompt-reset"
-                      @click="resetVideoInitialPrompt">Вернуть стандартную</button>
-              <span class="muted small">{{ [...(speech.videoInitialPrompt || '')].length }} / 600 символов</span>
-            </div>
-            <p class="muted small">
-              Задаёт стиль первому окну распознавания: с подсказкой модель ставит знаки препинания,
-              без неё выдаёт сплошной поток слов до конца записи. Пишите <b>короткий заголовок</b>
-              («Стенограмма рабочей встречи.»), а не указание модели: подсказку она считает уже
-              сказанным текстом и продолжает его — из фразы «реплики записаны с пунктуацией»
-              получается расшифровка, где эта фраза повторяется вместо разговора. Это не словарь
-              терминов, для них есть поле ниже.
-            </p>
-          </div>
-          <button type="button" class="speech-advanced-toggle" data-testid="speech-advanced-toggle"
-                  :aria-expanded="speechAdvanced" @click="speechAdvanced = !speechAdvanced">
-            {{ speechAdvanced ? 'Скрыть продвинутые' : 'Показать продвинутые' }}
-          </button>
-          <div v-if="speechAdvanced" class="speech-advanced" data-testid="speech-advanced">
-            <label>Модель диктовки
-              <select class="speech-select" :value="speech.model || ''" @change="speech.model = $event.target.value || null">
-                <option value="">Как в пресете ({{ speechModelLabel(QUALITY_MODELS[speech.quality]) }})</option>
-                <option v-for="model in SPEECH_MODELS" :key="model.id" :value="model.id">{{ model.label }}</option>
-              </select>
-            </label>
-            <label>Модель видео
-              <select class="speech-select" :value="speech.videoModel || ''" @change="speech.videoModel = $event.target.value || null">
-                <option value="">Как в пресете ({{ speechModelLabel(QUALITY_MODELS[speech.videoQuality]) }})</option>
-                <option v-for="model in SPEECH_MODELS" :key="model.id" :value="model.id">{{ model.label }}</option>
-              </select>
-            </label>
-            <label>Устройство для обоих сценариев
-              <select v-model="speech.device" class="speech-select" data-testid="speech-device">
-                <option value="auto">Авто — GPU с CPU-fallback</option>
-                <option value="cpu">CPU</option>
-                <option value="cuda" :disabled="!cudaReady">CUDA / NVIDIA GPU{{ cudaReady ? '' : ' — недоступно' }}</option>
-              </select>
-            </label>
-            <label>Compute type
-              <select class="speech-select" :value="speech.computeType || ''" @change="speech.computeType = $event.target.value || null">
-                <option value="">По устройству (CPU int8 / CUDA float16)</option>
-                <option value="int8">int8</option>
-                <option value="int8_float16">int8_float16</option>
-                <option value="float16">float16</option>
-                <option value="float32">float32</option>
-              </select>
-            </label>
-            <label>Beam size диктовки
-              <input type="number" min="1" max="10" :value="speech.beamSize ?? ''" placeholder="Как в пресете"
-                     @input="setNullableInteger('beamSize', $event.target.value, 1, 10)" />
-            </label>
-            <label>Пауза VAD, мс
-              <input v-model.number="speech.vadSilenceMs" type="number" min="100" max="5000" step="100" />
-            </label>
-            <label class="speech-check">
-              <input v-model="speech.conditionOnPreviousText" type="checkbox" />
-              <span><b>Учитывать предыдущий текст</b><small>Помогает связности, но может повторять ошибку из прежнего фрагмента.</small></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h3>Язык и термины</h3>
-              <p class="muted small">Один словарь используется Whisper и браузером, когда тот поддерживает contextual biasing.</p>
-            </div>
-          </div>
-          <label class="speech-field">Язык
-            <select v-model="speech.language" class="speech-select">
-              <option value="auto">Как язык интерфейса / авто для Whisper</option>
-              <option value="ru">Русский</option>
-              <option value="en">English</option>
-            </select>
-          </label>
-          <label class="speech-field">Термины проекта
-            <textarea v-model="speech.dictionary" rows="6" maxlength="800"
-                      data-testid="speech-dictionary"
-                      placeholder="По одному термину или фразе на строку&#10;Fastify&#10;worktree&#10;Битрикс24"></textarea>
-          </label>
-          <div class="speech-field-actions">
-            <button type="button" data-testid="speech-dictionary-template" @click="fillCockpitDictionary">Подставить термины кокпита</button>
-            <span class="muted small">{{ [...speech.dictionary].length }} / 800 символов</span>
-          </div>
-          <p class="muted small">
-            В браузере список применяется только при наличии <code>SpeechRecognitionPhrase</code>;
-            неподдерживаемый словарь не ломает диктовку — запуск повторяется без него.
-          </p>
-          <p v-if="speechCapabilities.lastDictionaryMeasure" class="msg info">
-            Последний замер словаря:
-            {{ speechCapabilities.lastDictionaryMeasure.hotwordsTokens ?? speechCapabilities.lastDictionaryMeasure.tokens ?? 'токены не сообщены' }}
-            <template v-if="speechCapabilities.lastDictionaryMeasure.hotwordsTruncated || speechCapabilities.lastDictionaryMeasure.truncated"> · обрезан моделью</template>
-          </p>
-        </div>
-
-        <div class="card" data-testid="speech-models">
-          <div class="card-head">
-            <div>
-              <h3>Локальные модели</h3>
-              <p class="muted small">Первая диктовка ничего не скачивает: веса появляются только по явной кнопке.</p>
-            </div>
-          </div>
-          <p v-if="!speechCapabilities.models.length" class="muted small">Сервер пока не сообщил каталог моделей.</p>
-          <div v-else class="speech-model-list">
-            <div v-for="model in speechCapabilities.models" :key="model.modelId" class="speech-model-row">
-              <div class="speech-model-main">
-                <b>{{ speechModelLabel(model.modelId) }}</b>
-                <span class="muted small">{{ model.repo || model.modelId }}</span>
-                <span class="speech-model-state" :class="model.cached ? 'ready' : 'missing'">
-                  {{ model.cached ? `в кэше${formatModelSize(model.sizeMb) ? ` · ${formatModelSize(model.sizeMb)}` : ''}` : 'не скачана' }}
-                </span>
-              </div>
-              <div class="speech-model-actions">
-                <button type="button" :data-testid="`speech-download-${model.modelId}`"
-                        :disabled="model.cached || speechJobActive(modelJob(model.modelId)) || speechStarting[`download:${model.modelId}`]"
-                        @click="startSpeechJob('download', model.modelId)">
-                  {{ model.cached ? 'Скачана' : 'Скачать' }}
-                </button>
-                <button v-if="!model.cached" type="button" :data-testid="`speech-copy-${model.modelId}`"
-                        :disabled="speechJobActive(modelJob(model.modelId)) || speechStarting[`copy:${model.modelId}`]"
-                        @click="startSpeechJob('copy', model.modelId)">Скопировать из общего кэша</button>
-              </div>
-              <div v-if="modelJob(model.modelId)" class="speech-job" :class="modelJob(model.modelId).status">
-                <div>
-                  <span>{{ modelJob(model.modelId).kind === 'copy' ? 'Копирование' : 'Скачивание' }}: {{ speechJobLabel(modelJob(model.modelId)) }}</span>
-                  <button v-if="speechJobActive(modelJob(model.modelId))" type="button" class="speech-cancel"
-                          :data-testid="`speech-cancel-${model.modelId}`" @click="cancelSpeechJob(modelJob(model.modelId))">Отменить</button>
-                </div>
-                <progress v-if="speechJobPercent(modelJob(model.modelId)) !== null" max="100" :value="speechJobPercent(modelJob(model.modelId))"></progress>
-                <small v-if="modelJob(model.modelId).progress?.file" class="muted">{{ modelJob(model.modelId).progress.file }}</small>
-                <p v-if="modelJob(model.modelId).error" class="msg err">{{ modelJob(model.modelId).error.message }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" data-testid="speech-environment">
-          <div class="card-head">
-            <div>
-              <h3>Окружение и замер</h3>
-              <p class="muted small">Проверка идёт в том же media-venv и HF-кэше, которые использует транскрипция.</p>
-            </div>
-            <button type="button" data-testid="speech-refresh" :disabled="speechRefreshing" @click="refreshSpeechCapabilities">
-              {{ speechRefreshing ? 'Проверяю…' : 'Перепроверить' }}
-            </button>
-          </div>
-          <div class="speech-env-grid">
-            <div>
-              <b>Whisper</b>
-              <p :class="speechCapabilities.local.ready ? 'msg ok' : 'msg warn'">
-                {{ speechCapabilities.local.ready ? 'Готов' : (speechCapabilities.local.reason || 'Не готов') }}
-              </p>
-              <ul v-if="speechCapabilities.local.checks.length" class="speech-checks">
-                <li v-for="check in speechCapabilities.local.checks" :key="check.name || check.id" :class="check.ok ? 'ok' : 'err'">
-                  {{ check.name || check.id }}<span v-if="!check.ok && check.fix" class="muted"> — {{ check.fix }}</span>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <b>CUDA</b>
-              <p :class="cudaReady ? 'msg ok' : 'msg warn'">{{ cudaReason }}</p>
-              <p v-if="!cudaReady" class="muted small">Доустановить воспроизводимым способом: <code data-testid="speech-cuda-command">deploy/install.sh --with-cuda</code>
-              </p>
-            </div>
-          </div>
-          <div class="speech-benchmark">
-            <div>
-              <b>Замер на эталонной записи</b>
-              <p class="muted small">Модель {{ speechModelLabel(effectiveDictationModel) }} ·
-                {{ speech.device === 'auto' ? `auto → ${benchmarkDevice}` : benchmarkDevice }} · {{ benchmarkComputeType }}.</p>
-            </div>
-            <button type="button" data-testid="speech-benchmark"
-                    :disabled="speechJobActive(benchmarkJob()) || !benchmarkAvailable || (speech.device === 'cuda' && !cudaReady)"
-                    @click="startBenchmark">Замерить</button>
-          </div>
-          <p v-if="!benchmarkAvailable" class="msg warn" data-testid="speech-benchmark-unavailable">
-            {{ benchmarkReason }} Укажи эталонный WAV через <code>COCKPIT_SPEECH_BENCHMARK_AUDIO</code>.
-          </p>
-          <div v-if="benchmarkJob()" class="speech-job" :class="benchmarkJob().status">
-            <div>
-              <span>Замер: {{ speechJobLabel(benchmarkJob()) }}</span>
-              <button v-if="speechJobActive(benchmarkJob())" type="button" class="speech-cancel" data-testid="speech-benchmark-cancel"
-                      @click="cancelSpeechJob(benchmarkJob())">Отменить</button>
-            </div>
-            <progress v-if="speechJobPercent(benchmarkJob()) !== null" max="100" :value="speechJobPercent(benchmarkJob())"></progress>
-            <p v-if="benchmarkJob().error" class="msg err">{{ benchmarkJob().error.message }}</p>
-          </div>
-          <p v-if="benchmarkResult" class="msg ok" data-testid="speech-benchmark-result">{{ benchmarkText(benchmarkResult) }}</p>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h3>Фактический путь</h3>
-              <p class="muted small">Серверный выбор может быть недоступен в конкретном браузере.</p>
-            </div>
-            <span class="status-pill" :class="speechEffective.startsWith('Недоступно') ? 'danger' : 'ok'">
-              <span class="dot"></span>{{ speechEffective.startsWith('Недоступно') ? 'Недоступно' : 'Готово' }}
-            </span>
-          </div>
-          <p data-testid="speech-effective"><b>Выбрано:</b> {{ speech.engine === 'browser' ? 'браузер' : 'Whisper' }}</p>
-          <p><b>На этом устройстве:</b> {{ speechEffective }}</p>
-          <p v-if="speech.engine === 'browser' && browserSpeechReason" class="msg warn">{{ browserSpeechReason }}</p>
-          <p v-if="!speech.local.ready && speech.local.reason" class="muted small">Whisper: {{ speech.local.reason }}</p>
-          <p class="muted small">Диктовка: {{ speechModelLabel(effectiveDictationModel) }} · видео: {{ speechModelLabel(effectiveVideoModel) }}.</p>
-          <div class="row">
-            <button class="primary" type="button" :disabled="speechSaving" data-testid="speech-save" @click="saveSpeech">
-              {{ speechSaving ? 'Сохраняю…' : 'Сохранить' }}
-            </button>
-          </div>
-          <p v-if="speechMsg" class="msg" :class="speechMsg.type">{{ speechMsg.text }}</p>
-        </div>
-      </template>
-    </section>
-
-    <!-- Битрикс24 -->
-    <section v-else-if="tab === 'b24'">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Подключение к порталу</h3>
-            <p class="muted small">Учётные данные хранятся только на сервере и не попадают в git.</p>
-          </div>
-          <span class="status-pill" :class="configured ? 'ok' : 'neutral'">
-            <span class="dot"></span>{{ configured ? 'Настроено' : 'Не настроено' }}
-          </span>
-        </div>
-        <div class="form-grid">
-          <label class="full">Портал<input v-model="form.baseUrl" placeholder="https://ваш-портал.bitrix24.ru" /></label>
-          <label>Логин<input v-model="form.login" autocomplete="username" placeholder="user@example.com" /></label>
-          <label>Пароль
-            <input v-model="form.password" type="password" autocomplete="current-password"
-                   :placeholder="configured ? '•••••• (задан, введите новый для замены)' : 'пароль портала'" />
-          </label>
-        </div>
-        <div class="row">
-          <button class="primary" :disabled="saving || !form.login || !form.password" @click="save">{{ saving ? 'Сохранение…' : 'Сохранить' }}</button>
-          <button :disabled="testing || !configured" @click="testAuth">{{ testing ? 'Проверка…' : 'Проверить авторизацию' }}</button>
-        </div>
-        <p v-if="msg" class="msg" :class="msg.type">{{ msg.text }}</p>
-      </div>
-    </section>
-
-    <!-- Исполнители: реестр LLM-агентов (/api/providers) -->
-    <section v-else-if="tab === 'providers'">
-      <!-- Плашка на исполнителя, плашки — горизонтальной линией: у каждого ИИ свои
-           ручки, и мешать их в один список нельзя. -->
-      <div v-if="!prov.loaded" class="card muted">Загрузка…</div>
-      <div v-else class="pvcards">
-        <div v-for="p in prov.providers" :key="p.id" class="card pvcard">
-          <div class="pvhead">
-            <span class="pvicon" :style="{ color: p.available ? p.color : 'var(--ink-mid)' }">
-              <ProviderIcon :provider="p" :size="20" />
-            </span>
-            <div class="pvtitle">
-              <div class="pvname">{{ p.name }}</div>
-              <div class="pvsub muted">{{ p.vendor }} · {{ p.kind }}</div>
-            </div>
-            <span class="pvstate" :class="p.available ? 'ok' : 'err'">
-              <span class="dot"></span>{{ p.available ? 'доступен' : 'недоступен' }}
-            </span>
-          </div>
-          <div class="pvfacts">
-            <div class="pvsub muted">{{ p.authLabel }}<template v-if="p.version"> · {{ p.version }}</template></div>
-            <div v-if="p.chatEnabled === false" class="pvsub pvsoon">
-              Установка доступна; подключение к чатам пока не включено.
-            </div>
-            <div v-if="p.models?.length" class="pvsub muted">
-              моделей в каталоге: {{ p.models.length }}<template v-if="hiddenCount(p)"> (в выборе {{ p.models.length - hiddenCount(p) }} — остальные скрыты)</template><template v-if="p.models.some((m) => m.unknown)"> · есть неизвестные CLI (помечены «?»)</template>
-            </div>
-            <!-- Индикатор новой версии: кокпит только сообщает, обновление — по кнопке -->
-            <div v-if="p.updateAvailable" class="pvupd">
-              ● Доступно обновление: <b>{{ p.latest }}</b> — нажми «Обновить»
-            </div>
-            <div v-else-if="p.latest" class="pvsub muted">последняя версия ({{ p.latest }})</div>
-          </div>
-          <div v-if="!p.available && (p.setupCommand || p.install)" class="pvinstall">
-            {{ p.installed ? 'Авторизация' : 'Установка' }}:
-            <code class="click" title="Кликни — откроется терминал с введённой командой"
-                  @click="installInTerminal(p)">{{ p.setupCommand || p.install }}</code>
-          </div>
-          <p v-if="updMsg[p.id]" class="msg" :class="updMsg[p.id].type">{{ updMsg[p.id].text }}</p>
-          <!-- Свои настройки исполнителя. Список объявляет сам executor (поле settings),
-               фронт про вендоров не знает и рисует по kind; выбор сохраняется в prefs. -->
-          <div class="pvset">
-            <div class="pvsetttl">Настройки исполнителя</div>
-            <template v-if="p.settings?.length">
-              <div v-for="s in p.settings" :key="s.id" class="pvsetrow">
-                <div class="pvsetline">
-                  <ToggleSwitch v-if="s.kind === 'toggle'" :model-value="!!s.value"
-                                :disabled="s.disabled === true" :label="s.label"
-                                @update:model-value="(v) => saveProviderSetting(p, s, v)" />
-                  <!-- Ползунок (num_ctx у Ollama): потолок вычисляет исполнитель.
-                       Без валидного max падаем обратно в числовой инпут ниже. -->
-                  <template v-else-if="s.kind === 'range' && Number(s.max) > Number(s.min)">
-                    <span class="pvsetlbl">{{ s.label }}</span>
-                    <input type="range" class="pvsetrange" :min="s.min" :max="s.max" :step="s.step || 1"
-                           :value="s.value" :disabled="s.disabled === true"
-                           @change="(e) => saveProviderSetting(p, s, Number(e.target.value))" />
-                    <span class="pvrangeval">{{ Number(s.value).toLocaleString('ru') }} / {{ Number(s.max).toLocaleString('ru') }}</span>
-                  </template>
-                  <template v-else-if="s.kind === 'text' || s.kind === 'number' || s.kind === 'range'">
-                    <span class="pvsetlbl">{{ s.label }}</span>
-                    <input class="pvsetinput" :type="s.kind === 'range' ? 'number' : s.kind"
-                           :min="s.kind === 'text' ? undefined : (Number(s.min) || 512)"
-                           :value="s.value" :disabled="s.disabled === true"
-                           @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
-                           @blur="(e) => commitProviderSetting(p, s, e)" />
-                  </template>
-                  <span v-else class="pvsetlbl">{{ s.label }}</span>
-                  <span v-if="s.note" class="pvsoon">{{ s.note }}</span>
-                </div>
-                <div v-if="s.hint" class="muted small">{{ s.hint }}</div>
-                <p v-if="setMsg[`${p.id}:${s.id}`]" class="msg err">{{ setMsg[`${p.id}:${s.id}`] }}</p>
-              </div>
-            </template>
-            <p v-else class="muted small">Своих настроек у этого исполнителя пока нет.</p>
-          </div>
-          <!-- MCP-серверы: чем агент этого CLI дополнен сверх своих инструментов.
-               Список и живость знает только сам CLI, поэтому блок грузится отдельным
-               запросом (см. loadMcpFor) и есть лишь у тех, кто объявил mcpStatus. -->
-          <div v-if="p.mcp && p.available" class="pvset">
-            <div class="pvsetttl">
-              MCP-серверы
-              <button class="mcpbtn" :disabled="mcpOf(p)?.loading" @click="loadMcpFor(p, true)">
-                {{ mcpOf(p)?.loading ? 'Проверка…' : 'Перепроверить' }}
-              </button>
-            </div>
-            <p v-if="!mcpOf(p) || (mcpOf(p).loading && !mcpOf(p).servers)" class="muted small">
-              Опрашиваем CLI — это несколько секунд…
-            </p>
-            <p v-else-if="mcpOf(p).state === 'error'" class="msg err">
-              Не удалось опросить: {{ mcpOf(p).error }}
-            </p>
-            <template v-else>
-              <div v-for="g in mcpGroups(p)" :key="g.id" class="mcpgrp">
-                <div class="mcpgrpttl muted">{{ g.label }} ({{ g.servers.length }})</div>
-                <div v-if="g.hint" class="mcpgrphint muted">{{ g.hint }}</div>
-                <div v-for="s in g.servers" :key="s.name" class="mcprow">
-                  <div class="mcpline">
-                    <span class="mcpdot" :class="mcpState(s).cls"></span>
-                    <span class="mcpname" :title="s.target || undefined">{{ s.name }}</span>
-                    <span class="mcpst" :class="mcpState(s).cls">{{ mcpState(s).label }}</span>
-                  </div>
-                  <!-- Причина отказа — то единственное, по чему сервер чинят -->
-                  <div v-if="s.state !== 'ok' && s.detail" class="mcpdetail muted">{{ s.detail }}</div>
-                  <div v-if="s.state === 'needs-auth'" class="mcpdetail muted">
-                    {{ s.scope === 'account'
-                      ? 'Авторизуется в настройках коннекторов на claude.ai — из кокпита ход этого не умеет.'
-                      : 'Нужен вход: `claude mcp login ' + s.name + '` в терминале.' }}
-                  </div>
-                </div>
-              </div>
-              <p v-if="!mcpGroups(p).length" class="muted small">Серверов не подключено.</p>
-              <p v-if="mcpOf(p).checkedAt" class="muted small">
-                проверено {{ new Date(mcpOf(p).checkedAt).toLocaleTimeString('ru') }}
-              </p>
-            </template>
-          </div>
-          <div class="pvfoot">
-            <button v-if="p.installed && p.canUpdate" class="upd" :class="{ hot: p.updateAvailable }" :disabled="!!updating"
-                    title="Обновить CLI исполнителя. После обновления каталог моделей перечитается."
-                    @click="updateProvider(p)">
-              {{ updating === p.id ? 'Обновление…' : 'Обновить' }}
-            </button>
-          </div>
-        </div>
-      </div>
-      <!-- Общее для всех исполнителей — отдельной карточкой под плашками -->
-      <div class="card narrow">
-        <div class="prow first">
-          <ToggleSwitch :model-value="prefs?.showAllModels === true" label="Показывать все модели: скрытые и старые версии"
-                        @update:model-value="toggleShowAllModels" />
-          <div class="muted small">
-            По умолчанию в выборе — актуальные модели из каталогов установленных исполнителей.
-            Скрытые, устаревающие и старые версии доступны по этому флажку; дублирующие алиасы
-            схлопываются с канонической моделью.
-          </div>
-          <p v-if="modelsMsg" class="msg" :class="modelsMsg.type">{{ modelsMsg.text }}</p>
-        </div>
-        <div class="row">
-          <button :disabled="refreshing" @click="refreshProv">{{ refreshing ? 'Проверка…' : 'Перепроверить' }}</button>
-          <button :disabled="checking" title="Кокпит и сам проверяет раз в 6 часов; обновление никогда не запускается автоматически"
-                  @click="checkUpdates">{{ checking ? 'Смотрю…' : 'Проверить обновления' }}</button>
-        </div>
-        <p class="muted small">
-          Новые версии проверяются автоматически раз в 6 часов (индикатор — точка на иконке
-          исполнителя в шапке). Обновление ставится только по кнопке.
-        </p>
-      </div>
-      <div class="card narrow">
-        <div>
-          <b>Доверенные каталоги</b>
-          <p class="muted small trusted-copy">
-            Дополнительные деревья, которые Cockpit открывает новым ходам исполнителей,
-            поддерживающих эту настройку. Текущий каталог проекта доступен и без этого
-            списка; корень <code>/</code> добавить нельзя.
-          </p>
-          <p v-if="!prov.loaded" class="muted small" data-testid="trusted-directory-providers">
-            Определяю исполнителей по реестру…
-          </p>
-          <p v-else-if="trustedDirectoryProviderNames" class="muted small" data-testid="trusted-directory-providers">
-            <b>Настройку применяют:</b> {{ trustedDirectoryProviderNames }}.
-          </p>
-          <p v-else class="muted small" data-testid="trusted-directory-providers">
-            Сейчас ни один чат-исполнитель не применяет эту настройку.
-          </p>
-        </div>
-        <div v-if="trustedDirectories.length" class="trusted-list">
-          <div v-for="(directory, index) in trustedDirectories" :key="directory" class="trusted-item">
-            <code :title="directory">{{ directory }}</code>
-            <button type="button" :disabled="trustedDirectoriesBusy" @click="removeTrustedDirectory(index)">
-              Убрать
-            </button>
-          </div>
-        </div>
-        <p v-else class="muted small">Дополнительных каталогов пока нет.</p>
-        <div class="trusted-add">
-          <input v-model="trustedDirectoryInput"
-                 :disabled="trustedDirectoriesBusy"
-                 placeholder="/home/user/Workspace"
-                 aria-label="Абсолютный путь к доверенному каталогу"
-                 @keyup.enter="addTrustedDirectory" />
-          <button type="button"
-                  :disabled="trustedDirectoriesBusy || !trustedDirectoryInput.trim()"
-                  @click="addTrustedDirectory">
-            Добавить
-          </button>
-        </div>
-        <div class="row">
-          <button class="primary" type="button" :disabled="trustedDirectoriesBusy" @click="applyTrustedDirectories">
-            {{ trustedDirectoriesBusy ? 'Сохраняю…' : 'Сохранить каталоги' }}
-          </button>
-        </div>
-        <p class="muted small">
-          Настройка действует внутри Cockpit и не переписывает глобальные конфиги CLI.
-          Режим подтверждений выбранного исполнителя продолжает действовать отдельно.
-        </p>
-        <p v-if="trustedDirectoriesMsg" class="msg" :class="trustedDirectoriesMsg.type">
-          {{ trustedDirectoriesMsg.text }}
-        </p>
-      </div>
-    </section>
-
-    <!-- Запуски: обязательные правила перед стартом триажа/конвейера -->
-    <section v-else-if="tab === 'runs'">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Поведение запусков</h3>
-            <p class="muted small">Действует перед триажем задачи и стартом конвейера фабрики.</p>
-          </div>
-        </div>
-        <div v-if="!prefs" class="muted">Загрузка…</div>
-        <template v-else>
-          <ToggleSwitch :model-value="prefs.gitRefreshBeforeRun" label="Обновлять репозитории перед запуском"
-                        @update:model-value="toggleGitRefresh" />
-          <p class="muted small">
-            Перед триажем и конвейером: <code>git fetch</code> всегда; <code>git pull --ff-only</code> —
-            только если репозиторий стоит на чистом master (ветка задачи или незакоммиченные
-            правки не трогаются, в результате запуска фиксируется причина пропуска).
-          </p>
-          <ToggleSwitch :model-value="prefs.autoRecoverPipelines" label="Продолжать незакрытые конвейеры после запуска Cockpit"
-                        @update:model-value="toggleAutoRecover" />
-          <p class="muted small">
-            Кокпит возобновит только прогон с погибшим демоном. Ворота, остановка для
-            человека, завершённая задача и повторяющийся сбой остаются заблокированными.
-            После трёх аварийных перезапусков потребуется ручное решение.
-          </p>
-          <div class="compact-setting">
-            <label>
-              Сжимать контекст чата при
-              <NumberField v-model="compactWindow" :min="0" :step="10000" placeholder="0 — не вмешиваться" />
-              <span class="unit">токенах</span>
-            </label>
-            <button class="btn" @click="saveCompactWindow">Сохранить</button>
-          </div>
-          <p class="muted small">
-            CLI умеет сжимать разговор сам, но включает это у самого потолка своего окна:
-            на окне 1M — около 950 000 токенов. <b>0</b> — не вмешиваться. Claude получает порог через свою
-            переменную окружения, Codex — через <code>model_auto_compact_token_limit</code>.
-            Кольцо в чате считает до меньшей из двух границ: этого порога (если он не
-            нулевой) и 80% окна модели. На 80% ближайшей границы кольцо желтеет, на самой
-            границе — краснеет. Кэш показан отдельно по факту последнего запроса: долей
-            чтения и объёмами, если исполнитель их сообщает, либо честным статусом
-            «нет данных» / «без тарифа». Кэш не меняет цвет кольца.
-          </p>
-          <div class="compact-setting">
-            <label>
-              Сжимать контекст этапа конвейера при
-              <NumberField v-model="stageCompactWindow" :min="0" :step="10000" placeholder="0 — не вмешиваться" />
-              <span class="unit">токенах</span>
-            </label>
-            <button class="btn" @click="saveStageCompactWindow">Сохранить</button>
-          </div>
-          <p class="muted small">
-            То же самое, но для агентов на узлах схемы, и порог отдельный: в чате сжатие
-            рвёт нить разговора с тобой, а на этапе просто ужимает рабочий контекст между
-            вызовами инструментов. Настройка ограничивает объём активного контекста и не
-            делает предположений о кэше или тарифе выбранного исполнителя. <b>0</b> — не
-            вмешиваться. Применится к новым заходам; уже идущий
-            этап доработает как есть.
-          </p>
-          <div class="compact-setting">
-            <label>
-              Звать, если ход конвейера молчит дольше
-              <NumberField v-model="silenceWindowMin" :min="0" :step="5" placeholder="0 — не звать" />
-              <span class="unit">мин</span>
-            </label>
-            <button class="btn" @click="saveSilenceWindow">Сохранить</button>
-          </div>
-          <p class="muted small">
-            Зависший вызов инструмента не выглядит аварией: демон жив, этап работает,
-            а движок вмешается только когда сгорит весь лимит этапа — это часы.
-            Порог должен пропускать долгую сборку и прогон тестов, но сработать раньше
-            таймаута зависшего MCP. <b>0</b> — не звать.
-            Кокпит только оповещает: остановить ход и решить, что с ним делать, — твоё.
-          </p>
-          <p v-if="prefsMsg" class="msg" :class="prefsMsg.type" aria-live="polite">{{ prefsMsg.text }}</p>
-        </template>
-      </div>
-      <div class="card">
-        <div>
-          <b>Диагностическое логирование фабрики</b>
-          <p class="muted small debug-copy">
-            Помогает разбирать выбор модели, переключение ИИ и ошибки runner-а.
-            Не меняет маршрут или результат этапа. Короткий обязательный audit остаётся
-            даже в режиме «Выключено».
-          </p>
-        </div>
-        <div v-if="!factoryDebug && !factoryDebugMsg" class="muted">Загрузка…</div>
-        <div v-else class="debug-setting">
-          <label>
-            Уровень
-            <select class="settings-select"
-                    :value="factoryDebug?.effective || 'off'"
-                    :disabled="factoryDebugBusy"
-                    @change="saveFactoryDebug($event.target.value)">
-              <option v-for="level in FACTORY_DEBUG_LEVELS"
-                      :key="level.value"
-                      :value="level.value">
-                {{ level.label }}
-              </option>
-            </select>
-          </label>
-          <span v-if="factoryDebug" class="debug-effective">
-            действует: <b>{{ factoryDebug.effective }}</b>
-            <span class="muted"> · источник: {{ factoryDebug.source }}</span>
-          </span>
-        </div>
-        <p class="muted small">
-          Подробные журналы имеют ограничение размера и срок хранения; prompt, credentials
-          и status/control tokens в них не записываются. Выключение не удаляет уже созданные логи.
-        </p>
-        <p v-if="factoryDebugMsg" class="msg" :class="factoryDebugMsg.type">
-          {{ factoryDebugMsg.text }}
-        </p>
-      </div>
-    </section>
-
-    <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
-         папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера. -->
-    <section v-else-if="tab === 'plugins'">
-      <div class="plugin-overview">
-        <p class="section-note">
-          Здесь включаются самостоятельные возможности Cockpit. Пользовательский модуль —
-          папка <code>plugins/&lt;id&gt;/</code> с <code>plugin.json</code>; серверная часть
-          подключается после рестарта.
-        </p>
-        <div v-if="pluginsStore.loaded" class="plugin-stats" aria-label="Сводка по плагинам">
-          <span><b>{{ pluginStats.enabled }}</b><small>включено</small></span>
-          <span><b>{{ pluginStats.configurable }}</b><small>с настройками</small></span>
-          <span><b>{{ pluginStats.custom }}</b><small>пользовательских</small></span>
-        </div>
-      </div>
-      <div v-if="!pluginsStore.loaded" class="plugin-loading muted">
-        <span class="spin"></span> Загружаю плагины…
-      </div>
-      <div v-else class="plugcards">
-        <!-- Плашка с раскрытыми настройками идёт во всю ширину: условие то же, что
-             у блока .plugset ниже, иначе класс и содержимое разъедутся. -->
-        <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard"
-             :class="{ wide: p.enabled && p.settings.length, off: !p.enabled }">
-          <div class="plughead">
-            <div class="plugidentity">
-              <span class="plugicon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                  <path :d="pluginIconPath(p)" />
-                </svg>
-              </span>
-              <div class="plugtitle">
-                <div class="plugname">
-                  <b>{{ p.name }}</b>
-                  <span class="plugver">v{{ p.version }}</span>
-                </div>
-                <div class="plugmeta">
-                  <span class="plugtag" :class="{ user: !p.system }">{{ p.system ? 'системный' : 'пользовательский' }}</span>
-                  <span v-if="p.nav?.label" class="plugplace">раздел «{{ p.nav.label }}»</span>
-                </div>
-              </div>
-            </div>
-            <div class="plug-switch" :class="{ on: p.enabled }">
-              <span>{{ p.enabled ? 'Включён' : 'Выключен' }}</span>
-              <ToggleSwitch :model-value="p.enabled" label="" @update:model-value="(v) => pluginsStore.toggle(p.id, v)" />
-            </div>
-          </div>
-          <p class="plugdesc">{{ p.description }}</p>
-          <p v-if="p.needsRestart" class="plugrestart">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" />
-            </svg>
-            Изменение серверной части применится после рестарта Cockpit.
-          </p>
-          <div v-if="p.enabled && p.settings.length" class="plugset">
-            <div class="plugset-head">
-              <div>
-                <span>Параметры</span>
-                <b>Настройки плагина</b>
-              </div>
-            </div>
-            <template v-for="s in p.settings" :key="s.key">
-              <label v-if="s.type === 'checkbox'" class="plugrow plugcheck">
-                <input v-model="p.values[s.key]" type="checkbox" />
-                <span>
-                  <b>{{ s.label }}</b>
-                  <small v-if="s.hint">{{ s.hint }}</small>
-                </span>
-              </label>
-              <template v-else>
-                <div v-if="s.type === 'model'" class="plug-model-grid"
-                     :class="{ solo: !(pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)) }">
-                  <!-- Модель берётся из общего реестра исполнителей — того же, что рисует
-                       селект в чате. Значение хранится парой «исполнитель + модель»:
-                       склеенной строкой её не разобрать, у локальных исполнителей id
-                       модели сам бывает со слэшами и двоеточиями (`hf.co/user/repo:tag`). -->
-                  <div class="plugrow wide">
-                    <label>{{ s.label }}</label>
-                    <select class="inp"
-                            :value="pluginModelValue(p, s.key)"
-                            @change="setPluginModel(p, s.key, $event.target.value)">
-                      <option value="">— не выбрана —</option>
-                      <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит).
-                           Молча показать «не выбрана» нельзя: в настройках он остался,
-                           и сервер всё ещё ходит именно этой моделью. -->
-                      <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
-                        {{ pluginModelLost(p, s.key) }} — нет в реестре
-                      </option>
-                      <optgroup v-for="g in modelGroups" :key="g.id"
-                                :label="g.name + (g.available ? '' : ' — недоступен')">
-                        <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
-                          {{ m.name }}
-                        </option>
-                      </optgroup>
-                    </select>
-                  </div>
-                  <!-- Усилие — свойство ЗАПУСКА, а не модели. Поэтому контрол остаётся
-                       отдельным, но визуально стоит с моделью в одной строке: это одна
-                       настройка запуска. На узком экране сетка складывается в колонку. -->
-                  <div v-if="pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)"
-                       class="plugrow effort-row">
-                    <label>Усилие</label>
-                    <select class="inp" :value="p.values[s.key]?.effort || ''"
-                            @change="setPluginEffort(p, s.key, $event.target.value)">
-                      <option value="">по умолчанию исполнителя</option>
-                      <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем
-                           его прямо: сервер такой уровень снимет и пойдёт на умолчании,
-                           и человек должен видеть, что выбор больше не действует. -->
-                      <option v-if="pluginEffortLost(p, s.key)" :value="pluginEffortLost(p, s.key)">
-                        {{ pluginEffortLost(p, s.key) }} — нет у этой модели
-                      </option>
-                      <option v-for="e in pluginEffortLevels(p.values[s.key])" :key="e" :value="e">{{ e }}</option>
-                    </select>
-                  </div>
-                </div>
-                <div v-else class="plugrow">
-                  <label>{{ s.label }}</label>
-                  <select v-if="s.type === 'select'" v-model="p.values[s.key]" class="inp">
-                    <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
-                  </select>
-                  <input v-else v-model="p.values[s.key]" class="inp" type="text" />
-                </div>
-                <p v-if="s.hint" class="muted small plughint">{{ s.hint }}</p>
-              </template>
-            </template>
-            <button class="btn plugin-save" :class="{ saved: plugMsg === p.id }" @click="savePlugin(p)">
-              <svg v-if="plugMsg === p.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M5 12l4 4L19 6" />
-              </svg>
-              {{ plugMsg === p.id ? 'Сохранено' : 'Сохранить' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
-    <section v-else-if="tab === 'server'">
-      <p class="section-note">
-        Боевой режим — демон systemd: юнит ставится один раз командой <code>deploy/install.sh</code>,
-        дальше сервер живёт сам (<code>Restart=always</code>, ждёт VPN, переживает перезагрузки).
-        Локальный checkout и опубликованный релиз применяются разными явными действиями:
-        ни одно из них не выполняет неявный <code>git pull</code> и не затирает WIP.
-      </p>
-      <div class="card cockpit-release-card">
-        <div class="card-head">
-          <div>
-            <h3>Версия Cockpit</h3>
-            <p class="muted small">Запущенный процесс, текущий checkout и стабильный канал релизов.</p>
-          </div>
-          <span v-if="cockpitStatus" class="status-pill"
-                :class="cockpitJob?.status === 'failed' ? 'danger' : cockpitStatus.updateAvailable ? 'warn' : 'ok'">
-            <span class="dot"></span>
-            {{ cockpitJob?.status === 'failed' ? 'Ошибка применения' : cockpitStatus.updateAvailable ? 'Есть релиз' : 'Актуально' }}
-          </span>
-        </div>
-        <div v-if="cockpitUpdate.loading && !cockpitStatus" class="muted">Читаю локальную версию…</div>
-        <template v-else-if="cockpitStatus">
-          <dl class="version-facts">
-            <div>
-              <dt>Запущено</dt>
-              <dd><b>{{ cockpitStatus.running.version }}</b> · <code>{{ shortSha(cockpitStatus.running.sha) }}</code></dd>
-            </div>
-            <div>
-              <dt>Checkout</dt>
-              <dd>
-                <b>{{ cockpitStatus.checkout.version }}</b> · <code>{{ shortSha(cockpitStatus.checkout.sha) }}</code>
-                · {{ cockpitStatus.checkout.branch || 'detached HEAD' }}
-                <span v-if="cockpitStatus.checkout.dirty" class="dirty-mark">dirty</span>
-              </dd>
-            </div>
-            <div>
-              <dt>Стабильный канал</dt>
-              <dd v-if="cockpitStatus.latest">
-                <b>{{ cockpitStatus.latest.tag }}</b> · <code>{{ shortSha(cockpitStatus.latest.sha) }}</code>
-                <a v-if="cockpitStatus.latest.url" :href="cockpitStatus.latest.url" target="_blank" rel="noopener noreferrer">Что изменилось ↗</a>
-              </dd>
-              <dd v-else>релизы пока не найдены</dd>
-            </div>
-            <div>
-              <dt>Последняя проверка</dt>
-              <dd>{{ fmtChecked(cockpitStatus.checkedAt) }}</dd>
-            </div>
-            <div>
-              <dt>Web-бандл</dt>
-              <dd>
-                {{ clientBuildVersion }} · <code>{{ shortSha(clientBuildSha) }}</code>
-                <span v-if="clientBuildSha !== 'dev' && clientBuildSha !== cockpitStatus.running.sha" class="dirty-mark">
-                  ожидает обновления PWA
-                </span>
-              </dd>
-            </div>
-          </dl>
-
-          <p v-if="cockpitStatus.checkoutChanged" class="msg info">
-            Checkout изменился после запуска сервера. Чтобы запущенный процесс и web-бандл
-            соответствовали ему, примените локальные изменения.
-          </p>
-          <p v-if="cockpitStatus.checkError" class="msg warn">
-            {{ cockpitStatus.checkError.message }} Последний успешный результат сохранён.
-          </p>
-
-          <div v-if="cockpitJob" class="update-job" :class="cockpitJob.status">
-            <b>{{ UPDATE_STAGE_LABELS[cockpitJob.stage] || cockpitJob.stage }}</b>
-            <span class="muted small">
-              {{ cockpitJob.kind === 'update' ? `Релиз ${cockpitJob.targetTag}` : 'Локальный checkout' }}
-              · {{ shortSha(cockpitJob.targetSha) }}
-            </span>
-            <p v-if="cockpitJob.error" class="msg err">{{ cockpitJob.error.message }}</p>
-          </div>
-
-          <div class="row update-actions">
-            <button :disabled="cockpitUpdate.checking || cockpitUpdate.active" @click="cockpitUpdate.check">
-              {{ cockpitUpdate.checking ? 'Проверяю…' : 'Проверить обновления' }}
-            </button>
-            <button :disabled="!cockpitStatus.canApplyCheckout || cockpitUpdate.actionBusy"
-                    @click="startCockpitAction('apply')">
-              Применить локальные изменения
-            </button>
-            <button v-if="cockpitStatus.latest" class="primary"
-                    :disabled="!cockpitStatus.canInstallRelease || cockpitUpdate.actionBusy"
-                    @click="startCockpitAction('update')">
-              Обновить до {{ cockpitStatus.latest.tag }}
-            </button>
-          </div>
-
-          <ul v-if="cockpitStatus.applyBlockReasons?.length" class="block-reasons">
-            <li v-for="reason in cockpitStatus.applyBlockReasons" :key="`apply-${reason}`">
-              Локальное применение: {{ blockReasonLabel(reason) }}
-            </li>
-          </ul>
-          <ul v-if="cockpitStatus.installBlockReasons?.length" class="block-reasons">
-            <li v-for="reason in cockpitStatus.installBlockReasons" :key="`install-${reason}`">
-              Установка релиза: {{ blockReasonLabel(reason) }}
-            </li>
-          </ul>
-          <p v-if="cockpitUpdate.error" class="msg err">{{ cockpitUpdate.error }}</p>
-        </template>
-        <p v-else class="msg err">Не удалось прочитать состояние версии Cockpit.</p>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Процесс Cockpit</h3>
-            <p class="muted small">Перезапуск применяет свежий серверный код и состав плагинов.</p>
-          </div>
-          <span v-if="srv" class="status-pill" :class="srv.systemd ? 'ok' : 'warn'">
-            <span class="dot"></span>{{ srv.systemd ? 'Под управлением systemd' : 'Ручной запуск' }}
-          </span>
-        </div>
-        <div v-if="!srv" class="muted">Загрузка…</div>
-        <template v-else>
-          <p class="srvline">
-            Режим: <b>{{ srv.systemd ? 'демон systemd' : 'запущен вручную' }}</b>
-            <span class="muted"> · PID {{ srv.pid }} · работает {{ fmtUptime(srv.uptimeSec) }}</span>
-          </p>
-          <p v-if="!srv.systemd" class="muted small">
-            Ручной запуск — режим разработки. Чтобы демон поднимался сам, один раз выполни
-            <code>deploy/install.sh</code>. Режимы не смешивать: ручной экземпляр держит порт,
-            и юнит будет падать в цикле.
-          </p>
-          <div class="row">
-            <button class="btn" :disabled="restarting || rebuilding" @click="restartServer">
-              {{ restarting ? 'Перезапускаю… жду возвращения' : 'Перезапустить сервер' }}
-            </button>
-            <button class="btn" :disabled="rebuilding || restarting" @click="rebuildWeb">
-              {{ rebuilding ? 'Собираю web-бандл…' : 'Пересобрать web-бандл' }}
-            </button>
-          </div>
-          <p class="muted small">Пересборка трогает только web: npm install + vite build из рабочего дерева, включая незакоммиченные правки. Без смены checkout и перезапуска сервера.</p>
-          <p v-if="srvMsg" class="msg" :class="srvMsg.type">{{ srvMsg.text }}</p>
-        </template>
-      </div>
-    </section>
-
-    <!-- Доступ: вход в сам кокпит (один пользователь) -->
-    <section v-else-if="tab === 'access'">
-      <!-- Предупреждение только когда оно по делу: на localhost соединение и так не выходит
-           за пределы машины, а за шлюзом браузер идёт по https. -->
-      <p v-if="!auth.secure && !auth.isLocal" class="msg err">
-        Текущее соединение без HTTPS — пароль передаётся открытым текстом. В карточке
-        «В домашней сети» включи локальный HTTPS.
-      </p>
-
-      <!-- Сводка строится по фактическим путям, а не по двум неравноценным prefs-флагам:
-           LAN без локального TLS остаётся доступен по HTTP, а шлюз вообще живёт отдельно. -->
-      <div v-if="!prefs" class="card"><span class="muted">Загрузка способов подключения…</span></div>
-      <AccessOverview
-        v-else
-        :local-https-enabled="prefs.accessLocalHttps === true"
-        :local-https-busy="accessBusy === 'accessLocalHttps'"
-        :local-message="accessMsg"
-        :tls="tls"
-        :tls-state="tlsState"
-        :tls-error="tlsLoadError"
-        :gateway-setup="gwSaved"
-        :gateway-job="gwJob"
-        :gateway-public-domain="gwPublicDomain"
-        :gateway-checks="gwChecks"
-        :gateway-state="gatewaySetupState"
-        :gateway-error="gatewayLoadError"
-        :active-details="activeAccessDetails"
-        @set-local-https="setLocalHttpsMode"
-        @reload-tls="loadTls"
-        @toggle-details="toggleAccessDetails"
-      />
-
-      <!-- Учётная запись остаётся доступной независимо от того, раскрыт ли длинный мастер шлюза. -->
-      <section class="access-account" aria-labelledby="access-account-title">
-        <h3 id="access-account-title" class="sechead">Защита входа</h3>
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h3>Учётная запись</h3>
-              <p class="muted small">Один пользователь Cockpit и его активные сессии.</p>
-            </div>
-            <span class="scope-pill">Сервер</span>
-          </div>
-          <p class="muted small">
-            Пароль хранится хешем на сервере (<code>.state</code>, не в git) и в браузер не
-            попадает — клиент получает только сессионную cookie.
-          </p>
-          <div class="form-grid">
-            <label class="full">Логин<input v-model="acc.login" autocomplete="username" placeholder="необязательно" /></label>
-            <label class="full">Текущий пароль
-              <input v-model="acc.currentPassword" type="password" autocomplete="current-password" />
-            </label>
-            <label>Новый пароль
-              <input v-model="acc.password" type="password" autocomplete="new-password" placeholder="минимум 8 символов" />
-            </label>
-            <label>Новый пароль ещё раз
-              <input v-model="acc.password2" type="password" autocomplete="new-password" />
-            </label>
-          </div>
-          <p class="muted small">
-            Смена пароля разлогинивает все устройства — украденная cookie перестаёт работать.
-            Текущее устройство останется в системе.
-          </p>
-          <div class="row">
-            <button class="primary" :disabled="accBusy || !acc.currentPassword || !acc.password" @click="saveAccount">
-              {{ accBusy ? 'Сохранение…' : 'Сменить пароль' }}
-            </button>
-            <button @click="auth.doLogout()">Выйти</button>
-            <button class="danger-ghost" @click="logoutAll">Выйти со всех устройств</button>
-          </div>
-          <p v-if="accMsg" class="msg" :class="accMsg.type">{{ accMsg.text }}</p>
-        </div>
-      </section>
-
-      <!-- Локальный HTTPS: свой корень + сертификат на адрес мозга -->
-      <template v-if="tls?.source !== 'env' && activeAccessDetails === 'local'">
-      <section
-        id="local-https-settings"
-        class="access-detail-region"
-        role="region"
-        aria-labelledby="local-https-settings-title"
-        tabindex="-1"
-      >
-      <div class="access-detail-head">
-      <h3 id="local-https-settings-title" class="sechead">Локальный HTTPS</h3>
-      <p class="muted">
-        Дома PWA не ставится без HTTPS: <code>navigator.serviceWorker</code> существует только
-        в защищённом контексте, а сертификат на домашний адрес публичный центр не выпишет.
-        Кокпит выпускает свой: корень ставится на устройства один раз, дальше всё как в интернете.
-        Порт <code>{{ tls?.httpPort || 8140 }}</code> остаётся как был — по нему кокпит ходит
-        сам с собой (фабрика, <code>bin/b24</code>, терминал с мозга).
-      </p>
-      </div>
-
-      <!-- Ошибку показываем прямо здесь: до перезапуска сервера этих эндпоинтов ещё нет,
-           и «Загрузка…» навсегда выглядела бы как зависший запрос. -->
-      <div v-if="!tls" class="card">
-        <span v-if="!tlsMsg" class="muted">Загрузка…</span>
-        <template v-else>
-          <p class="msg err">{{ tlsMsg.text }}</p>
-          <p class="muted small">
-            Если сервер ещё не перезапускался после обновления — перезапусти его на вкладке
-            «Сервер»: раздел появится вместе с новыми эндпоинтами.
-          </p>
-        </template>
-      </div>
-      <template v-else>
-        <p v-if="!tls.openssl" class="msg err">
-          На машине нет <code>openssl</code> — выпустить сертификат нечем.
-          Поставь его (<code>sudo apt install openssl</code>) и обнови страницу.
-        </p>
-
-        <div class="card">
-          <p class="tlsline">
-            Состояние:
-            <b v-if="tls.https.up && tls.needsRestart" class="warn">
-              работает с прежней конфигурацией на порту {{ tls.https.port }}
-            </b>
-            <b v-else-if="tls.https.up" class="ok">работает на порту {{ tls.https.port }}</b>
-            <b v-else-if="tls.enabled" class="warn">выпущен, но не поднят</b>
-            <b v-else class="off">выключен</b>
-            <span v-if="tls.source === 'env'" class="muted"> · сертификат задан переменными окружения</span>
-          </p>
-          <p v-if="tls.https.error" class="msg err">{{ tls.https.error }}</p>
-          <p v-if="tls.needsRestart" class="msg warn">
-            Изменения вступят в силу после перезапуска сервера — сертификат читается один раз
-            при старте. Кнопка на вкладке «Сервер».
-          </p>
-
-          <p v-if="tls.leaf.exists" class="muted small">
-            Выписан на {{ tls.leaf.addresses.join(', ') }} ·
-            действует до {{ new Date(tls.leaf.notAfter).toLocaleDateString('ru-RU') }}
-            ({{ tls.leaf.daysLeft }} дн.)
-            <template v-if="tls.ca.exists">
-              · корень до {{ new Date(tls.ca.notAfter).toLocaleDateString('ru-RU') }}
-            </template>
-          </p>
-          <p v-if="tls.missingAddresses.length" class="msg warn small">
-            Адрес машины изменился: {{ tls.missingAddresses.join(', ') }} нет в сертификате.
-            Перевыпусти — устройства при этом трогать не нужно, корень остаётся прежним.
-          </p>
-
-          <div class="tlsaddrs">
-            <span class="muted small">Адреса, по которым будешь открывать кокпит:</span>
-            <label v-for="a in tls.addresses" :key="a.address" class="tlsaddr">
-              <input
-                type="checkbox"
-                :checked="tlsPicked.includes(a.address)"
-                @change="toggleTlsAddress(a.address, $event.target.checked)"
-              />
-              <code>{{ a.address }}</code><span class="muted small">{{ a.iface }}</span>
-            </label>
-            <p v-if="!tls.addresses.length" class="muted small">
-              Сетевых адресов не видно — машина не в сети?
-            </p>
-          </div>
-
-          <div class="row">
-            <button class="primary" :disabled="tlsBusy || !tlsPicked.length || !tls.openssl" @click="generateTls">
-              {{ tlsBusy ? 'Выпускаю…' : (tls.leaf.exists ? 'Перевыпустить сертификат' : 'Выпустить сертификат') }}
-            </button>
-            <button v-if="tls.enabled" class="danger-ghost" :disabled="tlsBusy" @click="dropTlsCertificate">Удалить сертификат</button>
-          </div>
-          <p v-if="tlsMsg" class="msg" :class="tlsMsg.type">{{ tlsMsg.text }}</p>
-        </div>
-
-        <!-- Установка корня. QR ведёт на HTTP-адрес намеренно: он работает и до перезапуска,
-             и после (http отдаёт корень даже клиентам из сети). Веди он на https — файл
-             пришлось бы качать через то самое предупреждение, которое он и убирает. -->
-        <div v-if="tls.ca.exists && tlsAddress()" class="card">
-          <p class="tlsline"><b>Поставить корень на устройство</b></p>
-          <div class="tlsqr">
-            <img :src="`/api/settings/tls/ca.svg?address=${tlsAddress()}`" alt="QR со ссылкой на корневой сертификат" width="180" height="180" />
-            <ol class="tlssteps small">
-              <li>Наведи камеру планшета — откроется скачивание <code>cockpit-ca.crt</code>.</li>
-              <li>Android: «Настройки → Безопасность → Шифрование → Установить сертификат →
-                Сертификат ЦС». iOS/iPadOS: профиль установится сам, потом
-                «Настройки → Основные → Об устройстве → Доверие сертификатам» — включить тумблер.</li>
-              <li>Открой <code>{{ tlsUrl() || `https://${tlsAddress()}:8143` }}</code> — замок без предупреждений,
-                и «Установить приложение» появится в меню браузера.</li>
-            </ol>
-          </div>
-          <p class="muted small">
-            На самом мозге ставить ничего не нужно: <code>http://localhost:{{ tls.httpPort || 8140 }}</code>
-            и так защищённый контекст.
-            <a :href="'/api/settings/tls/ca.crt'" download>Скачать корень файлом</a> ·
-            отпечаток <code class="fp">{{ (tls.ca.fingerprint || '').slice(0, 29) }}…</code>
-          </p>
-        </div>
-      </template>
-      </section>
-      </template>
-
-      <!-- Шлюз: установка формой. Руками это два идемпотентных скрипта плюс reconciliation
-           двух точных DNS-имён, которых ни один скрипт сделать не может. -->
-      <template v-if="activeAccessDetails === 'gateway'">
-      <section
-        id="gateway-settings"
-        class="access-detail-region"
-        role="region"
-        aria-labelledby="gateway-settings-title"
-        tabindex="-1"
-      >
-      <div class="access-detail-head">
-      <h3 id="gateway-settings-title" class="sechead">Доступ снаружи (VPS-шлюз)</h3>
-      <p class="muted">
-        Кокпит виден по публичному домену, а домашний адрес наружу не выставлен: с мозга на VPS
-        идут два исходящих SSH-туннеля (один — кокпит, второй — стенды, чтобы трафик стендов не
-        придавливал SSE и терминал). Схема не зависит ни от CGNAT, ни от смены сети.
-      </p>
-      <p class="section-note">
-        Эта панель только настраивает и проверяет шлюз. Если её скрыть, уже установленные
-        туннели, публичный домен и внешний доступ продолжат работать.
-      </p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Что настраиваем</h3>
-            <p class="muted small">Выделенный поддомен и временный VPS, через который кокпит виден снаружи.</p>
-          </div>
-          <span v-if="gwSaved" class="status-pill ok"><i class="dot"></i>{{ gwSaved.domain }}</span>
-        </div>
-        <div class="form-grid">
-          <label>Выделенный поддомен шлюза
-            <input v-model="gw.domain" placeholder="cockpit.example.com" :disabled="gwRunning" />
-          </label>
-          <label>Адрес VPS (IPv4)
-            <input v-model="gw.gateway" placeholder="203.0.113.10" :disabled="gwRunning" />
-          </label>
-          <label>Пользователь SSH
-            <input v-model="gw.sshUser" placeholder="root" :disabled="gwRunning" />
-          </label>
-          <label>Порт SSH
-            <input v-model.number="gw.sshPort" type="number" min="1" max="65535" :disabled="gwRunning" />
-          </label>
-        </div>
-        <p class="muted small">
-          Стенды поедут на поддомены <code>p&lt;порт&gt;.{{ gw.domain || 'домен' }}</code>, поэтому
-          Cockpit резервирует два точных имени: этот поддомен и <code>*</code>. При каждой
-          установке они заново сверяются с адресом текущего VPS.
-        </p>
-      </div>
-
-      <!-- Cloudflare опционален: у другого провайдера DNS записи заводятся руками, и шаг
-           честно превращается в подсказку, а не в отказ установки. -->
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>DNS-записи</h3>
-            <p class="muted small">Единственный шаг, который ни один скрипт не сделает сам.</p>
-          </div>
-        </div>
-        <ToggleSwitch
-          :model-value="gw.useCloudflare" :disabled="gwRunning"
-          label="Домен на Cloudflare — синхронизировать записи автоматически"
-          @update:model-value="gw.useCloudflare = $event"
-        />
-        <template v-if="gw.useCloudflare">
-          <div class="form-grid">
-            <label class="full">API-токен Cloudflare
-              <input
-                v-model="gw.cloudflareToken" type="password" autocomplete="off"
-                placeholder="токен с Zone:Read и DNS:Edit" :disabled="gwRunning"
-              />
-            </label>
-          </div>
-          <p class="muted small">
-            Логин и пароль аккаунта тут не годятся: API Cloudflare ими не управляется вовсе
-            (а с двухфакторной — тем более). Нужен токен: кабинет → My&nbsp;Profile →
-            API&nbsp;Tokens → Create&nbsp;Token → шаблон «Edit zone DNS». В Permissions должны
-            получиться ровно две строки: <code>Zone → Zone → Read</code> и
-            <code>Zone → DNS → Edit</code>. Во второй строке средняя колонка — именно
-            <b>DNS</b>, не Zone: похожее разрешение <code>Zone → Zone → Edit</code> не даёт
-            права менять DNS и закончится отказом. В Zone&nbsp;Resources выбери Include →
-            Specific&nbsp;zone → родительскую зону (для <code>cockpit.example.com</code>
-            обычно <code>example.com</code>). Токен уходит на сервер только для сверки и
-            установки, нигде не сохраняется.
-          </p>
-          <p class="muted small">
-            Облако у записей будет <b>серым</b> (proxied выключен). Оранжевое — это уже прокси
-            Cloudflare, а с ним возвращаются 100 секунд на ответ (рвёт долгий ход агента),
-            100&nbsp;МБ на тело (рубит загрузку видео) и чужая терминация TLS.
-          </p>
-          <p class="muted small">
-            Перед подтверждением Cockpit прочитает текущие записи и покажет изменения. У двух
-            управляемых имён останется ровно по одной A-записи на текущий VPS; старые A,
-            AAAA и CNAME удалятся. TXT, MX, CAA и вся остальная зона не затрагиваются.
-          </p>
-        </template>
-        <p v-else class="muted small">
-          Записи заведёшь сам в панели своего провайдера — установка их дождётся и назовёт,
-          что именно нужно создать.
-        </p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Доступ к VPS</h3>
-            <p class="muted small">Пароль уйдёт один раз — положить туда наш ключ. Нигде не сохраняется.</p>
-          </div>
-        </div>
-        <div class="row">
-          <button :disabled="gwBusy || gwRunning || !gw.gateway.trim()" @click="gwProbeHost">
-            Проверить сервер
-          </button>
-          <span v-if="gwBusy && !gwProbe" class="muted small">стучимся…</span>
-        </div>
-        <template v-if="gwProbe">
-          <p class="tlsline">Отпечаток ключа: <code class="fp">{{ gwProbe.fingerprint }}</code>
-            <span class="muted small"> ({{ gwProbe.fingerprintType }})</span></p>
-          <label class="tlsaddr">
-            <input v-model="gwHostOk" type="checkbox" :disabled="gwRunning" />
-            <span>Тип и SHA256-отпечаток SSH-ключа совпали с данными хостера</span>
-          </label>
-          <p class="muted small">
-            Это отпечаток ключа самого VPS (SSH host key), а не твоего ключа для входа.
-            Ищи в панели хостера поле SSH host key/fingerprint. Если его там нет, открой
-            встроенную веб-консоль/VNC хостера — не подключение по SSH — и выполни
-            <code>for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done</code>.
-            Найди строку того же типа и сравни всё значение <code>SHA256:…</code> посимвольно.
-            При несовпадении не ставь галку: сначала проверь IP и не закончилась ли
-            переустановка VPS. Без сверки пароль root может уйти чужому серверу посередине.
-            Подтверждённый отпечаток запомнится, и при следующем изменении установка
-            остановится сама.
-          </p>
-          <div v-if="gwNeedsPassword" class="form-grid">
-            <label class="full">Пароль {{ gw.sshUser || 'root' }} на VPS
-              <input
-                v-model="gw.sshPassword" type="password" autocomplete="off"
-                placeholder="пароль из письма хостера" :disabled="gwRunning"
-              />
-            </label>
-          </div>
-          <p v-else class="msg ok">Сервер уже пускает по нашему ключу — пароль не нужен.</p>
-          <p v-if="gwNeedsPassword" class="muted small">
-            Нужен ровно один раз: положить на сервер наш ключ туннеля. Дальше вход только по
-            ключу, пароль никуда не сохраняется.
-          </p>
-        </template>
-        <p v-else class="muted small">
-          Сначала проверяем сервер — жив ли он и тот ли это сервер. Пароль спросим после.
-        </p>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Мозг и сертификаты</h3>
-            <p class="muted small">Всё необязательное: без этих полей установка тоже проходит.</p>
-          </div>
-        </div>
-        <div class="form-grid">
-          <label class="full">Пароль sudo на мозге (необязательно)
-            <input
-              v-model="gw.sudoPassword" type="password" autocomplete="off"
-              placeholder="оставь пустым — дадим команду для терминала" :disabled="gwRunning"
-            />
-          </label>
-          <label class="full">Почта для Let’s Encrypt (необязательно)
-            <input v-model="gw.acmeEmail" placeholder="для писем об истечении сертификата" :disabled="gwRunning" />
-          </label>
-        </div>
-        <ToggleSwitch
-          :model-value="gw.acmeStaging" :disabled="gwRunning"
-          label="Тестовые сертификаты Let’s Encrypt (для проверки схемы)"
-          @update:model-value="gw.acmeStaging = $event"
-        />
-        <p class="muted small">
-          У Let’s Encrypt пять неудач на имя в час. Тестовый режим выдаёт недоверенный
-          сертификат (браузер ругнётся), зато лимит не тратит — включай, если гоняешь установку
-          повторно.
-        </p>
-      </div>
-
-      <div class="row">
-        <button class="primary" :disabled="!gwCanStart" @click="gwStart">Установить</button>
-        <button :disabled="gwBusy || gwRunning || (!gwSaved && !gw.domain.trim())" @click="gwVerify">
-          Проверить связь
-        </button>
-      </div>
-      <p v-if="gwMsg" class="msg" :class="gwMsg.type">{{ gwMsg.text }}</p>
-      <p v-if="!gwCanStart && !gwRunning" class="muted small">
-        Кнопка ждёт: домен, адрес VPS, сверенный отпечаток<span v-if="gw.useCloudflare">,
-        токен Cloudflare</span><span v-if="gwNeedsPassword">, пароль VPS</span>.
-      </p>
-      <p v-if="gw.useCloudflare" class="muted small">
-        Выключение или удаление VPS само по себе DNS не очищает: токен не хранится, поэтому
-        Cockpit не может изменить Cloudflare после установки. Следующий запуск снова заменит
-        старый адрес текущим; перед окончательным освобождением IP запись пока нужно удалить вручную.
-      </p>
-
-      <!-- Ход установки. Живёт на сервере и уезжает по SSE: начали с компьютера — видно
-           и с планшета, F5 картину не теряет. -->
-      <div v-if="gwJob" class="card">
-        <div class="card-head">
-          <div>
-            <h3>Установка</h3>
-            <p class="muted small">Восемь шагов; сорвавшийся называет причину и не идёт дальше.</p>
-          </div>
-          <span
-            class="status-pill"
-            :class="gwJobConfirmed ? 'ok' : (gwJob.state === 'failed' ? 'danger' : 'warn')"
-          ><i class="dot"></i>{{ gwJob.state === 'done' ? (gwJobConfirmed ? 'готово и проверено' : 'шаги завершены')
-            : (gwJob.state === 'failed' ? 'сорвалась' : 'идёт') }}</span>
-        </div>
-        <ul class="gwsteps small">
-          <li v-for="s in gwJob.steps" :key="s.key">
-            <b :class="{ ok: s.state === 'ok', warn: s.state === 'run', off: s.state === 'skip' }">
-              {{ GW_MARK[s.state] || '·' }}
-            </b>
-            <span>{{ s.title }}<span v-if="s.detail" class="muted"> — {{ s.detail }}</span></span>
-          </li>
-        </ul>
-        <p v-if="gwJob.error" class="msg err">{{ gwJob.error.message }}</p>
-        <p v-if="gwJob.state === 'done'" class="msg" :class="gwJobConfirmed ? 'ok' : 'warn'">
-          <template v-if="gwJobConfirmed">
-            Автоматические шаги завершены, внешний адрес проверен:
-            <code>https://{{ gwJob.domain }}</code>.
-          </template>
-          <template v-else>
-            Автоматические шаги завершены, но это ещё не подтверждает внешний доступ.
-            Выполни оставшиеся действия, перезапуск, если он указан, затем нажми «Проверить связь».
-          </template>
-        </p>
-        <!-- Не «осталось сделать», а чего ждать: трогать VPN визард не просит и не будет. -->
-        <p v-if="gwJob.state === 'done'" class="muted small">
-          Туннель ходит через VPN — так задумано, менять в нём ничего не нужно. Отсюда две
-          особенности: до планшета крюк через выходной узел VPN, а вместе с VPN туннель падает
-          и поднимается. Юниты туннеля этого и ждут, поэтому «activating» при опущенном
-          VPN — ожидание, а не поломка. Если VPN уже работает через не-TUN интерфейс,
-          его имя задаётся как <code>COCKPIT_VPN_IFACE</code> в корневом <code>.env</code>.
-        </p>
-        <p v-if="gwJob.needsRestart" class="msg warn">
-          Нужен перезапуск сервера: домен и режим за прокси читаются один раз при старте.
-          Кнопка — во вкладке «Сервер». Из чата агенту перезапускать нельзя: он сам дочерний
-          процесс этого сервера.
-        </p>
-        <details v-if="gwJob.log?.length" class="gwlog">
-          <summary class="muted small">Журнал ({{ gwJob.log.length }})</summary>
-          <pre>{{ gwJob.log.join('\n') }}</pre>
-        </details>
-      </div>
-
-      <!-- Что установка сделать не может: чужая панель DNS, root на мозге. Правила для VPN
-           здесь нет намеренно — туннель ходит через него, и настройки VPN мы не трогаем. -->
-      <div v-if="gwJob?.manual?.length" class="card">
-        <div class="card-head">
-          <div>
-            <h3>Осталось сделать руками</h3>
-            <p class="muted small">Шаги, которые кокпит за человека делать не имеет права.</p>
-          </div>
-        </div>
-        <div v-for="m in gwJob.manual" :key="m.key" class="gwman">
-          <p class="tlsline"><b>{{ m.title }}</b></p>
-          <p class="muted small">{{ m.text }}</p>
-          <template v-if="m.command">
-            <pre class="gwcmd">{{ m.command }}</pre>
-            <div class="row">
-              <button @click="gwManualToTerminal(m)">Открыть в терминале</button>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <div v-if="gwChecks" class="card">
-        <div class="card-head">
-          <div>
-            <h3>Проверка связи</h3>
-            <p class="muted small">Живые запросы снаружи: туннели, кокпит и стенд под входом.</p>
-          </div>
-          <span class="status-pill" :class="gwChecks.ok ? 'ok' : 'warn'">
-            <i class="dot"></i>{{ gwChecks.ok ? 'всё сходится' : 'есть замечания' }}
-          </span>
-        </div>
-        <ul class="gwsteps small">
-          <li v-for="c in gwChecks.checks" :key="c.key">
-            <b :class="c.ok ? 'ok' : 'warn'">{{ c.ok ? '✓' : '✗' }}</b>
-            <span>{{ c.title }}<span v-if="c.detail" class="muted"> — {{ c.detail }}</span></span>
-          </li>
-        </ul>
-        <p v-if="gwSaved && !gwPublicDomain" class="muted small">
-          Стенды проверятся после перезапуска сервера — до него домен в конфиг не попал.
-        </p>
-      </div>
-      </section>
-      </template>
-        </section>
-      </div>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .settings {
   width: min(100%, 1280px);
@@ -3494,44 +4015,6 @@ onMounted(() => {
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.settings-nav-item {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 10px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--ink-mid);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color .15s, background .15s, color .15s;
-}
-.settings-nav-item::before {
-  content: '';
-  position: absolute;
-  left: -11px;
-  width: 3px;
-  height: 22px;
-  border-radius: 0 4px 4px 0;
-  background: transparent;
-}
-.settings-nav-item:hover { border-color: var(--line); background: var(--surface-2); color: var(--ink); }
-.settings-nav-item.active {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-  background: color-mix(in srgb, var(--accent) 11%, var(--surface-2));
-  color: var(--ink);
-}
-.settings-nav-item.active::before { background: var(--accent); }
-.settings-nav-item svg { flex: none; width: 20px; height: 20px; color: currentColor; }
-.settings-nav-item.active svg { color: var(--accent); }
-.settings-nav-item > span { min-width: 0; display: grid; gap: 1px; }
-.settings-nav-item strong { overflow: hidden; font-size: 13.5px; font-weight: 630; text-overflow: ellipsis; }
-.settings-nav-item small { overflow: hidden; color: var(--ink-mid); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-
 .settings-workspace { min-width: 0; max-width: 860px; }
 .settings-workspace.wide { max-width: none; }
 .section-intro {
@@ -3615,20 +4098,12 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 }
 .speech-choice.active { border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
   background: color-mix(in srgb, var(--accent) 8%, var(--ground)); }
-.speech-choice input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
-.speech-choice span { min-width: 0; display: grid; gap: 4px; color: var(--ink); }
-.speech-choice small { color: var(--ink-mid); font-size: 12px; line-height: 1.45; }
-.speech-choice code { font-size: 11px; }
+.speech-choice-copy { min-width: 0; display: grid; gap: 4px; color: var(--ink); }
+.speech-choice-copy small { color: var(--ink-mid); font-size: 12px; line-height: 1.45; }
+.speech-choice-copy code { font-size: 11px; }
 .speech-subhead { margin-top: 3px; color: var(--ink-mid); font-size: 11px; font-weight: 700;
   letter-spacing: .06em; text-transform: uppercase; }
 .speech-field { gap: 7px; }
-.speech-field textarea, .speech-select {
-  width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 9px;
-  background: var(--ground); color: var(--ink); padding: 10px 11px; font: inherit; font-size: 14px;
-}
-.speech-field textarea { resize: vertical; min-height: 116px; line-height: 1.45; }
-.speech-field textarea:focus, .speech-select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.speech-select option { background: var(--surface); color: var(--ink); }
 .speech-quality-block { display: grid; gap: 9px; }
 .speech-quality-block + .speech-quality-block { padding-top: 13px; border-top: 1px solid var(--line); }
 .speech-quality-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
@@ -3636,19 +4111,16 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
   padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); cursor: pointer; }
 .speech-quality.active { border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
   background: color-mix(in srgb, var(--accent) 8%, var(--ground)); }
-.speech-quality input { flex: none; width: 15px; height: 15px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
-.speech-quality span { display: grid; gap: 3px; min-width: 0; color: var(--ink); }
-.speech-quality small { color: var(--ink-mid); font-size: 11.5px; line-height: 1.4; }
+.speech-quality-copy { display: grid; gap: 3px; min-width: 0; color: var(--ink); }
+.speech-quality-copy small { color: var(--ink-mid); font-size: 11.5px; line-height: 1.4; }
 .speech-advanced-toggle { justify-self: start; }
 .speech-advanced { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px;
   padding-top: 13px; border-top: 1px dashed var(--line); }
 .speech-check { grid-column: 1 / -1; display: flex; flex-direction: row; align-items: flex-start; gap: 9px;
   padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); }
-.speech-check input { flex: none; width: 16px; height: 16px; padding: 0; margin-top: 2px; accent-color: var(--accent); }
-.speech-check span { display: grid; gap: 3px; }
-.speech-check small { color: var(--ink-mid); line-height: 1.4; }
+.speech-check-copy { display: grid; gap: 3px; }
+.speech-check-copy small { color: var(--ink-mid); line-height: 1.4; }
 .speech-field-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.speech-field-actions button { padding: 7px 10px; font-size: 12px; }
 .speech-model-list { display: grid; gap: 9px; }
 .speech-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px;
   padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); }
@@ -3658,14 +4130,12 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .speech-model-state.ready { background: color-mix(in srgb, var(--good) 12%, transparent); color: var(--good); }
 .speech-model-state.missing { background: var(--surface-2); color: var(--ink-mid); }
 .speech-model-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
-.speech-model-actions button { padding: 7px 10px; font-size: 12px; }
 .speech-job { grid-column: 1 / -1; display: grid; gap: 5px; padding-top: 7px; border-top: 1px dashed var(--line);
   color: var(--ink-mid); font-size: 12px; }
 .speech-job > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .speech-job progress { width: 100%; height: 7px; accent-color: var(--accent); }
 .speech-job.done { color: var(--good); }
 .speech-job.failed, .speech-job.interrupted { color: var(--bad); }
-.speech-cancel { padding: 4px 8px; font-size: 11px; }
 .speech-env-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .speech-env-grid > div { display: grid; align-content: start; gap: 6px; padding: 11px;
   border: 1px solid var(--line); border-radius: 10px; background: var(--ground); }
@@ -3741,18 +4211,6 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .plugrow { min-width: 0; display: grid; gap: 6px; }
 .plugrow label { color: var(--ink-mid); font-size: 11.5px; }
 .plugrow .inp { width: min(100%, 320px); max-width: 320px; }
-/* Нормальный селект вместо нативного: свой фон, рамка и шеврон. */
-.plugrow select.inp {
-  appearance: none; -webkit-appearance: none;
-  background: var(--surface) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a93a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
-  border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
-  padding: 9px 31px 9px 11px; font: inherit; font-size: 12.5px; cursor: pointer;
-}
-.plugrow select.inp:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.plugrow select.inp:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-/* Раскрытый список рисует система, и фон от самого селекта он не наследует:
-   без этого правила на тёмной теме он нечитаем (та же грабля, что в чате). */
-.plugrow select.inp option, .plugrow select.inp optgroup { background: var(--surface); color: var(--ink); }
 /* Выбор модели: подпись сверху, селект во всю карточку — названия моделей вместе
    с именем исполнителя в узкой колонке не помещаются. */
 .plugrow.wide { align-items: stretch; }
@@ -3762,20 +4220,28 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .plug-model-grid .plugrow .inp { width: 100%; max-width: none; }
 .plughint { max-width: 720px; margin: -2px 0 1px; color: var(--ink-mid); font-size: 11px; line-height: 1.5; }
 .effort-row { min-width: 0; }
-.plugcheck { grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 10px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); cursor: pointer; }
-.plugcheck input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--accent); }
-.plugcheck > span { min-width: 0; display: grid; gap: 2px; }
-.plugcheck b { color: var(--ink); font-size: 12px; font-weight: 590; }
-.plugcheck small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.45; }
+.plugcheck {
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.plugcheck-copy { min-width: 0; display: grid; gap: 2px; }
+.plugcheck-copy b { color: var(--ink); font-size: 12px; font-weight: 590; }
+.plugcheck-copy small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.45; }
 /* Кнопка — по содержимому. Общий max-width делал её полосой во всю карточку. */
 .plugset > .btn { align-self: flex-start; }
-.plugin-save { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; padding: 8px 12px; border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); color: var(--accent); font-size: 12px; }
-.plugin-save:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface-2)); }
-.plugin-save.saved { border-color: color-mix(in srgb, var(--good) 38%, var(--line)); color: var(--good); }
-.plugin-save svg { width: 14px; height: 14px; }
-label { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--ink-mid); }
-input { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink); font-size: 14px; }
-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.plugin-save { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }
+label:not([class^='ui-']):not([class*=' ui-']) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .debug-copy { margin: 5px 0 0; }
 .trusted-copy { margin: 5px 0 0; }
@@ -3785,10 +4251,10 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   white-space: nowrap; background: var(--ground); border: 1px solid var(--line);
   border-radius: 7px; padding: 0 9px; height: 36px; box-sizing: border-box;
   display: flex; align-items: center; font-size: 12px; }
-.trusted-item button { flex: none; height: 36px; box-sizing: border-box; padding: 0 10px; font-size: 12px; }
+.trusted-item .ui-button { flex: none; box-sizing: border-box; }
 .trusted-add { display: flex; align-items: stretch; gap: 8px; }
-.trusted-add input { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; }
-.trusted-add button { height: 38px; box-sizing: border-box; }
+.trusted-add .ui-input { flex: 1; min-width: 0; box-sizing: border-box; }
+.trusted-add .ui-button { box-sizing: border-box; }
 .debug-setting { display: flex; align-items: end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .debug-setting label { min-width: 230px; }
 /* Порог автокомпакта: подпись, поле и единица в одну строку — значение читается как
@@ -3798,23 +4264,10 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .compact-setting label :deep(.nf) { width: 130px; }
 .compact-setting .unit { color: var(--ink-mid); }
 .debug-effective { font-size: 12px; padding-bottom: 8px; color: var(--ink-mid); }
-.settings-select {
-  appearance: none; -webkit-appearance: none;
-  background: var(--ground) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888da8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
-  border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
-  padding: 9px 32px 9px 11px; font: inherit; font-size: 14px; cursor: pointer;
-}
-.settings-select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.settings-select:disabled { opacity: .55; cursor: default; }
 /* Настройка показа моделей — отделена от списка исполнителей */
 .prow { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; display: grid; gap: 6px; }
 /* Первый блок своей карточки — отбивать сверху не от чего */
 .prow.first { border-top: none; margin-top: 0; padding-top: 0; }
-button { padding: 9px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 14px; cursor: pointer; }
-button:disabled { opacity: .5; cursor: default; }
-button.primary { background: var(--accent); color: #07101d; border-color: var(--accent); font-weight: 650; }
-button.danger-ghost { border-color: color-mix(in srgb, var(--bad) 42%, var(--line)); color: color-mix(in srgb, var(--bad) 82%, #fff); }
-button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 10%, var(--surface-2)); border-color: var(--bad); }
 .msg { font-size: 13px; margin: 0; white-space: pre-line; }
 .small { font-size: 12px; line-height: 1.5; }
 .msg.ok { color: var(--good); }
@@ -3836,12 +4289,8 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .pvsetttl { font-size: 12px; color: var(--ink-mid); text-transform: uppercase; letter-spacing: .04em; }
 .pvsetrow { display: grid; gap: 3px; }
 .pvsetline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.pvsetinput { flex: 1; min-width: 140px; padding: 6px 9px; border: 1px solid var(--line);
-  border-radius: 8px; background: var(--ground); color: var(--ink); font-size: 13px; }
-.pvsetinput:focus { outline: none; border-color: var(--accent); }
-.pvsetinput:disabled { opacity: .55; cursor: not-allowed; }
+.pvsetinput { flex: 1; min-width: 140px; }
 .pvsetrange { flex: 1; min-width: 140px; accent-color: var(--accent); }
-.pvsetrange:disabled { opacity: .55; cursor: not-allowed; }
 .pvrangeval { font-size: 12px; color: var(--mut, var(--ink-mid)); white-space: nowrap;
   font-variant-numeric: tabular-nums; }
 .pvsetlbl { font-size: 13px; }
@@ -3850,10 +4299,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   padding: 1px 8px; color: var(--mut, var(--ink-mid)); }
 /* MCP-серверы исполнителя: заголовок с кнопкой проверки, затем секции по scope */
 .pvsetttl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.mcpbtn { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
-  border-radius: 8px; padding: 3px 9px; font-size: 11px; cursor: pointer;
-  text-transform: none; letter-spacing: 0; }
-.mcpbtn:disabled { opacity: .55; cursor: default; }
 .mcpgrp { display: grid; gap: 4px; }
 .mcpgrpttl { font-size: 11.5px; }
 .mcpgrphint { font-size: 11px; line-height: 1.4; opacity: .8; }
@@ -3878,13 +4323,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   overflow-wrap: anywhere; }
 /* Кнопка футера прижата к низу плашки: при равной высоте ряда кнопки в одну линию */
 .pvfoot { display: flex; justify-content: flex-end; margin-top: auto; }
-.upd { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
-  padding: 5px 11px; font-size: 12px; cursor: pointer; }
-.upd:hover:not(:disabled) { border-color: var(--line-2); }
-.upd:disabled { opacity: .55; cursor: default; }
-/* Есть новая версия — кнопка заметная, но ничего не делает сама */
-.upd.hot { border-color: color-mix(in srgb, var(--warn, #e0a33a) 55%, var(--line));
-  background: color-mix(in srgb, var(--warn, #e0a33a) 14%, transparent); color: var(--warn, #e0a33a); }
 .pvupd { margin-top: 3px; font-size: 12.5px; color: var(--warn, #e0a33a); }
 .pvupd b { font-weight: 600; }
 .pvstate { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
@@ -3895,10 +4333,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .pvstate.err .dot { background: var(--bad); }
 /* Подсказка установки недоступного исполнителя */
 .pvinstall { font-size: 12px; color: var(--ink-mid); margin-top: 4px; }
-.pvinstall code.click { background: var(--ground); border: 1px solid var(--line); border-radius: 5px;
-  padding: 2px 7px; font-size: 11.5px; cursor: pointer; user-select: all; }
-.pvinstall code.click:hover { border-color: var(--line-2); color: var(--ink); }
-
 /* Сервер: строка режима + кнопка перезапуска */
 .srvline { margin: 0; font-size: 13.5px; }
 .srvline b { font-weight: 640; }
@@ -3951,7 +4385,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .companion-run-setting .msg { margin: 0; }
 .companion-audio-grid { margin-left: 39px; display: grid;
   grid-template-columns: minmax(180px, 1.3fr) repeat(2, minmax(130px, 1fr)); gap: 10px; }
-.companion-audio-grid input[type="range"] { padding: 0; border: 0; accent-color: var(--accent); }
 .companion-tts-consent { margin-left: 39px; display: grid; gap: 8px; padding: 11px 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
   border-radius: 9px; background: var(--ground); font-size: 13px; }
@@ -3960,7 +4393,7 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .notification-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .notification-line > div { display: grid; gap: 2px; }
 .notification-line p { margin: 0; }
-.notification-line button { flex: none; }
+.notification-line .ui-button { flex: none; }
 .tlsline { margin: 0; font-size: 13.5px; }
 .tlsline b { font-weight: 640; }
 .tlsline b.ok { color: var(--good); }
@@ -3969,7 +4402,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
 .msg.warn { color: var(--warn, #e0a33a); }
 .tlsaddrs { display: grid; gap: 6px; }
 .tlsaddr { flex-direction: row; align-items: center; gap: 8px; }
-.tlsaddr input { flex: none; width: 15px; height: 15px; accent-color: var(--accent); padding: 0; }
 .tlsaddr code { background: var(--ground); border: 1px solid var(--line); border-radius: 6px;
   padding: 2px 7px; font-size: 12.5px; }
 .tlsqr { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
@@ -4029,14 +4461,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .settings-nav::-webkit-scrollbar { display: none; }
   .nav-group { display: contents; }
   .nav-group-label { display: none; }
-  .settings-nav-item {
-    flex: 0 0 auto;
-    width: auto;
-    min-width: 132px;
-    padding: 9px 11px;
-    scroll-snap-align: start;
-  }
-  .settings-nav-item::before { display: none; }
   .settings-workspace, .settings-workspace.wide { max-width: 920px; margin: 16px auto 0; }
 }
 
@@ -4058,8 +4482,6 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .hero-mark svg { width: 24px; height: 24px; }
   .settings-nav-wrap { margin: 0 -16px; padding: 7px 16px; }
   .settings-nav { margin: 0 -7px; }
-  .settings-nav-item { min-width: auto; padding: 9px 11px; }
-  .settings-nav-item small { display: none; }
   .section-intro { min-height: 0; gap: 11px; padding: 4px 0 16px; }
   .section-icon { width: 38px; height: 38px; border-radius: 10px; }
   .section-intro h2 { font-size: 19px; }
@@ -4091,19 +4513,19 @@ button.danger-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--
   .pvstate { margin-left: 44px; }
   .plugrow label, .plugrow .inp { min-width: 0; max-width: none; }
   .row { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .row > button { width: 100%; }
+  .row > .ui-button { width: 100%; }
   .compact-setting { align-items: stretch; flex-direction: column; }
   .compact-setting label { align-items: stretch; flex-direction: column; }
   .compact-setting label :deep(.nf) { width: 100%; }
   .trusted-add { flex-direction: column; }
-  .trusted-add button { width: 100%; }
+  .trusted-add .ui-button { width: 100%; }
   .debug-setting { align-items: stretch; flex-direction: column; }
   .debug-setting label { min-width: 0; }
   .mode > p { margin-left: 0; padding-left: 39px; }
   .companion-audio-grid { margin-left: 0; padding-left: 39px; grid-template-columns: minmax(0, 1fr); }
   .companion-tts-consent { margin-left: 0; }
   .notification-line { align-items: stretch; flex-direction: column; }
-  .notification-line button { width: 100%; }
+  .notification-line .ui-button { width: 100%; }
   .version-facts > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   .tlsaddr { flex-wrap: wrap; }
   .tlsqr { display: grid; justify-items: center; }

@@ -1,79 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileSettingsView as compileSettingsViewFixture } from './helpers/settings-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/SettingsView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const FACTORY_DEBUG_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/factory-debug.js', import.meta.url),
-)).href;
-const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/companion-run.js', import.meta.url),
-)).href;
-let compileNonce = 0;
-
 async function compileSettingsView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  const stubStore = (name) => `const ${name} = globalThis.__speechSettingsStores.${name};`;
-  let code = compileScript(descriptor, {
-    id: `data-v-settings-speech-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__speechSettingsApi;')
-    .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ update() {}, focus() {}, blur() {}, dispose() {} });',
-    )
-    .replace(
-      "import { useToolLauncher } from '../shared/tools/launcher.js';",
-      'const useToolLauncher = () => ({ openTerminal() {} });',
-    )
-    .replace("import ProviderIcon from '../shared/ProviderIcon.vue';", 'const ProviderIcon = { template: "<i></i>" };')
-    .replace(
-      "import AccessOverview from './settings/AccessOverview.vue';",
-      'const AccessOverview = { template: "<div class=\\\"access-overview-stub\\\"></div>" };',
-    )
-    .replace("import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';", 'const ToggleSwitch = { template: "<button></button>" };')
-    .replace("import NumberField from '../shared/ui/NumberField.vue';", 'const NumberField = { template: "<input />" };')
-    .replace("import { useAuthStore } from '../stores/auth.js';", stubStore('useAuthStore'))
-    .replace("import { usePluginsStore } from '../stores/plugins.js';", stubStore('usePluginsStore'))
-    .replace("import { useChatStore } from '../stores/chat.js';", stubStore('useChatStore'))
-    .replace("import { useCompanionStore } from '../stores/companion.js';", "const useCompanionStore = () => ({ deviceEnabled: true, setDeviceEnabled() {} });")
-    .replace("import { useCompanionStore } from '../stores/companion.js';", stubStore('useCompanionStore'))
-    .replace("import { usePwaStore } from '../stores/pwa.js';", stubStore('usePwaStore'))
-    .replace(
-      /import \{\s*blockReasonLabel,\s*UPDATE_STAGE_LABELS,\s*useCockpitUpdateStore,\s*\} from '\.\.\/stores\/cockpit-update\.js';/,
-      'const blockReasonLabel = (v) => String(v || ""); const UPDATE_STAGE_LABELS = {};'
-      + ' const useCockpitUpdateStore = globalThis.__speechSettingsStores.useCockpitUpdateStore;',
-    )
-    .replace("import { confirmDialog } from '../shared/ui/confirm.js';", 'const confirmDialog = async () => true;')
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = () => ({ connected: { value: false } });',
-    )
-    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`)
-    // Чистый модуль без Vue/pinia: подставляем НАСТОЯЩИЙ по абсолютному URL, а не
-    // заглушку — иначе тест разошёлся бы с правилом «полупустая ссылка = дефолт».
-    .replace("from '../shared/companion-run.js';", `from "${COMPANION_RUN_URL}";`);
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  return compileSettingsViewFixture({ prefix: '__speechSettings' });
 }
 
 async function installBrowser(t) {
@@ -308,7 +241,7 @@ test('вкладка речи сохраняет выбор и opaque SHA revisi
   assert.deepEqual(snapshots[0].settings.local, { ready: true, reason: '' });
   assert.equal(snapshots[0].capabilities.local.ready, true);
 
-  await section.get('input[value="local"]').setValue(true);
+  await section.get('[data-testid="speech-processing-local"]').setValue(true);
   await section.get('select').setValue('en');
   await section.get('[data-testid="speech-dictionary"]').setValue('Codex\nBitrix24');
   await section.get('[data-testid="speech-save"]').trigger('click');
@@ -357,7 +290,7 @@ test('save отправляет только diff и не откатывает �
     },
   });
   const section = wrapper.get('[data-testid="speech-settings"]');
-  await section.get('[data-testid="speech-quality"] input[value="accurate"]').setValue(true);
+  await section.get('[data-testid="speech-quality-accurate"]').setValue(true);
   await section.get('[data-testid="speech-save"]').trigger('click');
   await flushPromises();
 
@@ -371,7 +304,7 @@ test('save отправляет только diff и не откатывает �
   await flushPromises();
   assert.equal(section.get('select').element.value, 'en', 'незатронутое поле принимает SSE');
   assert.equal(
-    section.get('[data-testid="speech-quality"] input[value="accurate"]').element.checked,
+    section.get('[data-testid="speech-quality-accurate"]').element.checked,
     true,
     'локальная dirty-правка сохраняется поверх нового baseline',
   );
@@ -399,8 +332,8 @@ test('пресеты, advanced overrides, CUDA gate и шаблон словар
   const section = wrapper.get('[data-testid="speech-settings"]');
   const quality = section.get('[data-testid="speech-quality"]');
 
-  await quality.findAll('.speech-quality-block')[0].get('input[value="accurate"]').setValue(true);
-  await quality.findAll('.speech-quality-block')[1].get('input[value="fast"]').setValue(true);
+  await quality.get('[data-testid="speech-quality-accurate"]').setValue(true);
+  await quality.get('[data-testid="speech-video-quality-fast"]').setValue(true);
   await quality.get('[data-testid="speech-advanced-toggle"]').trigger('click');
 
   const advanced = quality.get('[data-testid="speech-advanced"]');

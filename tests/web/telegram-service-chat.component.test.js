@@ -101,7 +101,7 @@ test('адрес уезжает числом и только по кнопке',
   const srv = server();
   const { wrapper, flushPromises } = await mountView(t, { api: srv.api });
 
-  assert.equal(saveBtn(wrapper), undefined, 'кнопка сохранения при нетронутом выборе');
+  assert.equal(Boolean(saveBtn(wrapper)), false, 'кнопка сохранения при нетронутом выборе');
   await select(wrapper).setValue(String(OWNER));
   assert.deepEqual(srv.posts, [], 'выбор уехал на сервер до нажатия кнопки');
 
@@ -112,7 +112,7 @@ test('адрес уезжает числом и только по кнопке',
   assert.equal(srv.posts[0].url, '/api/telegram/service-chat');
   assert.equal(srv.posts[0].body.botId, 8123456789, 'provider identity служит CAS старой формы');
   assert.equal(srv.posts[0].body.chatId, OWNER, 'id чата должен быть числом, как в архиве');
-  assert.equal(saveBtn(wrapper), undefined, 'кнопка осталась, хотя всё сохранено');
+  assert.equal(Boolean(saveBtn(wrapper)), false, 'кнопка осталась, хотя всё сохранено');
   assert.match(wrapper.get('.ok').text(), /Тестовый пользователь/);
 });
 
@@ -141,7 +141,7 @@ test('назначенный чат виден в селекте, даже ес�
 
   assert.equal(select(wrapper).element.value, '777000222');
   assert.match(card(wrapper).text(), /Старая личка/);
-  assert.equal(saveBtn(wrapper), undefined, 'показ сохранённого адреса выглядит как правка');
+  assert.equal(Boolean(saveBtn(wrapper)), false, 'показ сохранённого адреса выглядит как правка');
 });
 
 test('отказ сервера виден его текстом, а выбор откатывается к сохранённому', async (t) => {
@@ -163,5 +163,5 @@ test('отказ сервера виден его текстом, а выбор 
   // На экране не должно остаться выбора, которого сервер не принял: иначе раздел
   // показывал бы настроенную пересылку, которой нет.
   assert.equal(select(wrapper).element.value, '');
-  assert.equal(saveBtn(wrapper), undefined);
+  assert.equal(Boolean(saveBtn(wrapper)), false);
 });

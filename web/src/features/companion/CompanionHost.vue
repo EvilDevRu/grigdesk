@@ -1,3 +1,72 @@
+<template>
+  <!-- На /chats единственным полем ввода остаётся полная страница чата. -->
+  <div v-if="hostVisible" class="companion-host">
+    <UiFloatingDialog
+      class="companion-floating-dialog"
+      :open="bubbleVisible"
+      label="Голосовой компаньон"
+      focus-policy="none"
+      placement="top-end"
+      layer="companion"
+      :offset="10"
+      @update:open="setBubbleOpen"
+    >
+      <template #trigger>
+        <CompanionAvatar
+          :expanded="bubbleVisible"
+          :controls="BUBBLE_ID"
+          :interaction="companion.interaction"
+          :attention="companion.attention"
+        />
+      </template>
+      <template #default="{ close }">
+        <CompanionBubble
+          ref="bubble"
+          :id="BUBBLE_ID"
+          :draft="companion.draft"
+          :interim="companion.dictationState.interim"
+          :scope-label="scopeLabel"
+          :run-label="runLabel"
+          :run-title="runTitle"
+          :context-view="contextView"
+          :interaction="companion.interaction"
+          :attention="companion.attention"
+          :attention-destination="companion.attentionDestination"
+          :status-label="companion.statusLabel"
+          :last-reply="companion.lastReply"
+          :speech-busy="companion.speechBusy"
+          :transcribing="companion.transcribing"
+          :thinking="companion.thinking"
+          :stopping="companion.stopping"
+          :can-send="companion.canSend"
+          :muted="companion.muted"
+          :output-available="companion.outputState.available"
+          :tts-consent-prompt="companion.ttsConsentPrompt"
+          :prompt="companion.dictationState.prompt || ''"
+          :speech-error="companion.speechError"
+          :chat-error="companion.chatError"
+          :output-error="companion.outputError"
+          :conflict="companion.chatErrorCode === 'companion_chat_conflict'"
+          @update:draft="companion.setDraft"
+          @send="companion.sendText"
+          @mic="companion.toggleVoice"
+          @cancel="companion.cancelVoice"
+          @stop="companion.stopTurn"
+          @mute="companion.toggleMute"
+          @confirm-tts="companion.confirmTtsConsent"
+          @dismiss-tts="companion.dismissTtsConsent"
+          @open-chat="openConversation"
+          @open-pipeline="router.push('/pipeline')"
+          @close="close('action')"
+          @consent-browser="companion.confirmBrowserConsent"
+          @use-whisper="companion.useWhisper"
+          @install-browser="companion.installBrowserLanguage"
+        />
+      </template>
+    </UiFloatingDialog>
+  </div>
+</template>
+
 <script setup>
 import {
   computed,
@@ -8,7 +77,7 @@ import {
   watchEffect,
 } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { registerLayer } from '../../shared/ui/layer-stack.js';
+import { UiFloatingDialog } from '../../ui';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useCompanionStore } from '../../stores/companion.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -30,8 +99,6 @@ const providers = useProvidersStore();
 const notifyWatch = useNotifyWatchStore();
 const uiContext = useUiContextStore();
 const dictation = useDictationController();
-const host = ref(null);
-const avatar = ref(null);
 const bubble = ref(null);
 
 const bridge = createCompanionChatBridge({
@@ -176,125 +243,46 @@ function syncSurfaceVisibility() {
 watch([bubbleVisible, () => companion.currentChatId], syncSurfaceVisibility, { immediate: true });
 document.addEventListener('visibilitychange', syncSurfaceVisibility);
 
-async function openBubble() {
-  if (onChats.value) return;
-  companion.openBubble();
-  await nextTick();
-  bubble.value?.focusComposer?.();
-}
-
-async function closeBubble({ focusAvatar = true } = {}) {
+async function closeBubble() {
   await companion.closeBubble({ cancelVoice: true });
   companion.syncPageScope(scopeTaskId.value || null);
-  if (focusAvatar && !onChats.value) await nextTick(() => avatar.value?.focus?.());
 }
 
-function toggleBubble() {
-  if (companion.bubbleOpen) void closeBubble();
-  else void openBubble();
+function setBubbleOpen(open) {
+  if (open && !onChats.value) {
+    companion.openBubble();
+
+    return;
+  }
+  if (!open && companion.bubbleOpen) {
+    void closeBubble();
+  }
 }
 
 function openConversation() {
   void companion.openConversation(effectiveTaskId.value || null);
 }
 
-function outsidePointer(event) {
-  if (!bubbleVisible.value || host.value?.contains?.(event.target)) return;
-  void closeBubble({ focusAvatar: false });
-}
-
-let unregisterLayer = null;
 watch(bubbleVisible, (visible) => {
-  unregisterLayer?.();
-  unregisterLayer = null;
-  document.removeEventListener('pointerdown', outsidePointer, true);
-  if (!visible) return;
-  unregisterLayer = registerLayer('companion-bubble', {
-    priority: 95,
-    close: () => { void closeBubble(); },
-  });
-  // Событие указателя, открывшее пузырь, не должно тут же закрыть новый слой.
-  nextTick(() => {
-    if (bubbleVisible.value) {
-      document.addEventListener('pointerdown', outsidePointer, true);
-      bubble.value?.focusComposer?.();
-    }
-  });
+  if (!visible) {
+    return;
+  }
+
+  nextTick(() => bubble.value?.focusComposer?.());
 }, { immediate: true });
 
 watch(onChats, (value) => {
-  if (value && companion.bubbleOpen) void closeBubble({ focusAvatar: false });
+  if (value && companion.bubbleOpen) void closeBubble();
 }, { flush: 'sync' });
 watch(() => companion.deviceEnabled, (enabled) => {
-  if (!enabled && companion.bubbleOpen) void closeBubble({ focusAvatar: false });
+  if (!enabled && companion.bubbleOpen) void closeBubble();
 }, { flush: 'sync' });
 
 onUnmounted(() => {
-  unregisterLayer?.();
-  document.removeEventListener('pointerdown', outsidePointer, true);
   document.removeEventListener('visibilitychange', syncSurfaceVisibility);
   disconnect();
 });
 </script>
-
-<template>
-  <!-- На /chats единственным полем ввода остаётся полная страница чата. -->
-  <div v-if="hostVisible" ref="host" class="companion-host">
-    <Transition name="companion-pop">
-      <CompanionBubble
-        v-if="bubbleVisible"
-        ref="bubble"
-        :id="BUBBLE_ID"
-        :draft="companion.draft"
-        :interim="companion.dictationState.interim"
-        :scope-label="scopeLabel"
-        :run-label="runLabel"
-        :run-title="runTitle"
-        :context-view="contextView"
-        :interaction="companion.interaction"
-        :attention="companion.attention"
-        :attention-destination="companion.attentionDestination"
-        :status-label="companion.statusLabel"
-        :last-reply="companion.lastReply"
-        :speech-busy="companion.speechBusy"
-        :transcribing="companion.transcribing"
-        :thinking="companion.thinking"
-        :stopping="companion.stopping"
-        :can-send="companion.canSend"
-        :muted="companion.muted"
-        :output-available="companion.outputState.available"
-        :tts-consent-prompt="companion.ttsConsentPrompt"
-        :prompt="companion.dictationState.prompt || ''"
-        :speech-error="companion.speechError"
-        :chat-error="companion.chatError"
-        :output-error="companion.outputError"
-        :conflict="companion.chatErrorCode === 'companion_chat_conflict'"
-        @update:draft="companion.setDraft"
-        @send="companion.sendText"
-        @mic="companion.toggleVoice"
-        @cancel="companion.cancelVoice"
-        @stop="companion.stopTurn"
-        @mute="companion.toggleMute"
-        @confirm-tts="companion.confirmTtsConsent"
-        @dismiss-tts="companion.dismissTtsConsent"
-        @open-chat="openConversation"
-        @open-pipeline="router.push('/pipeline')"
-        @close="closeBubble"
-        @consent-browser="companion.confirmBrowserConsent"
-        @use-whisper="companion.useWhisper"
-        @install-browser="companion.installBrowserLanguage"
-      />
-    </Transition>
-    <CompanionAvatar
-      ref="avatar"
-      :expanded="bubbleVisible"
-      :controls="BUBBLE_ID"
-      :interaction="companion.interaction"
-      :attention="companion.attention"
-      @toggle="toggleBubble"
-    />
-  </div>
-</template>
 
 <style scoped>
 .companion-host {
@@ -309,8 +297,6 @@ onUnmounted(() => {
   pointer-events: none;
 }
 .companion-host > * { pointer-events: auto; }
-.companion-pop-enter-active, .companion-pop-leave-active { transition: opacity .16s ease, transform .16s ease; }
-.companion-pop-enter-from, .companion-pop-leave-to { opacity: 0; transform: translateY(10px) scale(.985); }
 @media (max-width: 899px) and (min-width: 760px) {
   .companion-host { right: calc(18px + env(safe-area-inset-right, 0px)); }
 }
@@ -320,9 +306,5 @@ onUnmounted(() => {
     bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     left: calc(10px + env(safe-area-inset-left, 0px));
   }
-  .companion-host :deep(.companion-bubble) { align-self: stretch; width: 100%; max-height: min(66dvh, 570px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .companion-pop-enter-active, .companion-pop-leave-active { animation: none !important; transition: none !important; }
 }
 </style>

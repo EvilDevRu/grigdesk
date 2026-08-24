@@ -1,20 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
 // Маршрутный CodeView теперь только adapter. Состояние и Monaco живут в единственном
 // CodePanel, поэтому компонентные контракты проверяем непосредственно на нём.
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/code/CodePanel.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const CODE_TREE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/code-tree.js', import.meta.url),
-)).href;
-let compileNonce = 0;
+const VIEW_PATH = webFile('src/views/code/CodePanel.vue');
 
 function deferred() {
   let resolve;
@@ -36,35 +29,16 @@ function query(url) {
 }
 
 async function compileCodeView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-code-view-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace(
-      "import { api } from '../../shared/api-client.js';",
-      'const api = globalThis.__codeViewApi;',
-    )
-    .replace(
-      "import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';",
-      'const monaco = globalThis.__codeViewMonaco; const langOf = (path) => path.split(".").pop() || "plaintext"; const READONLY_OPTS = {};',
-    )
-    .replace(
-      "from '../../shared/code-tree.js'",
-      `from "${CODE_TREE_URL}"`,
-    );
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  return compileVue(VIEW_PATH, {
+    stubs: {
+      '../../shared/api-client.js': 'export const api = globalThis.__codeViewApi;',
+      '../../shared/monaco.js': `
+        export const monaco = globalThis.__codeViewMonaco;
+        export const langOf = (path) => path.split('.').pop() || 'plaintext';
+        export const READONLY_OPTS = {};
+      `,
+    },
+  });
 }
 
 function installBrowser(t, storage = {}) {

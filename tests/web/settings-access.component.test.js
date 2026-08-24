@@ -3,132 +3,23 @@
 // изображать выключателем, пока у сервера нет операции остановки туннелей.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { compileSettingsView as compileSettingsViewFixture } from './helpers/settings-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL(
-  '../../web/src/views/settings/AccessOverview.vue',
-  import.meta.url,
-));
-const SETTINGS_VIEW_PATH = fileURLToPath(new URL(
-  '../../web/src/views/SettingsView.vue',
-  import.meta.url,
-));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const FACTORY_DEBUG_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/factory-debug.js', import.meta.url),
-)).href;
-const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/companion-run.js', import.meta.url),
-)).href;
-let compileNonce = 0;
+const VIEW_PATH = webFile('src/views/settings/AccessOverview.vue');
 
 async function compileAccessOverview() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-settings-access-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace(
-      "import ToggleSwitch from '../../shared/ui/ToggleSwitch.vue';",
-      `const ToggleSwitch = {
-        props: ['modelValue', 'label', 'disabled'], emits: ['update:modelValue'],
-        template: '<button class="https-switch" type="button" role="switch"'
-          + ' :aria-checked="String(modelValue)" :disabled="disabled"'
-          + ' @click="$emit(\\'update:modelValue\\', !modelValue)">{{ label }}</button>',
-      };`,
-    );
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  return compileVue(VIEW_PATH);
 }
 
 async function compileSettingsView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(SETTINGS_VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: SETTINGS_VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-settings-access-integration-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  const stubStore = (name) => `const ${name} = globalThis.__accessSettingsStores.${name};`;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__accessSettingsApi;')
-    .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ update() {}, focus() {}, blur() {}, dispose() {} });',
-    )
-    .replace(
-      "import { useToolLauncher } from '../shared/tools/launcher.js';",
-      'const useToolLauncher = () => ({ openTerminal() {} });',
-    )
-    .replace(
-      "import ProviderIcon from '../shared/ProviderIcon.vue';",
-      "const ProviderIcon = { props: ['id'], template: '<i class=\"picon\"></i>' };",
-    )
-    .replace(
-      "import AccessOverview from './settings/AccessOverview.vue';",
-      'const AccessOverview = globalThis.__accessSettingsOverview;',
-    )
-    .replace(
-      "import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';",
-      `const ToggleSwitch = {
-        props: ['modelValue', 'label', 'disabled'], emits: ['update:modelValue'],
-        template: '<button class="toggle" type="button" role="switch"'
-          + ' :aria-checked="String(modelValue)" :disabled="disabled"'
-          + ' @click="$emit(\\\'update:modelValue\\\', !modelValue)">{{ label }}</button>',
-      };`,
-    )
-    .replace(
-      "import NumberField from '../shared/ui/NumberField.vue';",
-      "const NumberField = { props: ['modelValue'], template: '<input class=\"numfield\" />' };",
-    )
-    .replace("import { useAuthStore } from '../stores/auth.js';", stubStore('useAuthStore'))
-    .replace("import { usePluginsStore } from '../stores/plugins.js';", stubStore('usePluginsStore'))
-    .replace("import { useChatStore } from '../stores/chat.js';", stubStore('useChatStore'))
-    .replace("import { useCompanionStore } from '../stores/companion.js';", stubStore('useCompanionStore'))
-    .replace("import { usePwaStore } from '../stores/pwa.js';", stubStore('usePwaStore'))
-    .replace(
-      /import \{\s*blockReasonLabel,\s*UPDATE_STAGE_LABELS,\s*useCockpitUpdateStore,\s*\} from '\.\.\/stores\/cockpit-update\.js';/,
-      'const blockReasonLabel = (v) => String(v || ""); const UPDATE_STAGE_LABELS = {};'
-      + ' const useCockpitUpdateStore = globalThis.__accessSettingsStores.useCockpitUpdateStore;',
-    )
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = globalThis.__accessSettingsConfirm;',
-    )
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = () => ({ connected: { value: false } });',
-    )
-    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`)
-    // Чистый модуль без Vue/pinia: подставляем НАСТОЯЩИЙ по абсолютному URL, а не
-    // заглушку — иначе тест разошёлся бы с правилом «полупустая ссылка = дефолт».
-    .replace("from '../shared/companion-run.js';", `from "${COMPANION_RUN_URL}";`);
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  return compileSettingsViewFixture({
+    prefix: '__accessSettings',
+    accessOverview: true,
+    confirm: true,
+  });
 }
 
 async function installBrowser(t) {
@@ -385,7 +276,7 @@ test('ACCESS-WEB-02: у шлюза нет ложного switch, кнопка у
   const gatewayButton = wrapper.get('[data-testid="gateway-details-toggle"]');
   assert.equal(gatewayButton.attributes('role'), undefined);
   assert.equal(gatewayButton.attributes('aria-expanded'), 'false');
-  assert.equal(gatewayButton.text(), 'Управление и проверка');
+  assert.equal(gatewayButton.get('.ui-button__label').text(), 'Управление и проверка');
 
   await gatewayButton.trigger('click');
   assert.deepEqual(wrapper.emitted('toggle-details'), [['gateway']]);
@@ -462,9 +353,12 @@ test('ACCESS-WEB-05: раскрыта может быть только одна 
   await wrapper.setProps({ activeDetails: 'gateway' });
   assert.equal(wrapper.get('[data-testid="local-details-toggle"]').attributes('aria-expanded'), 'false');
   assert.equal(wrapper.get('[data-testid="gateway-details-toggle"]').attributes('aria-expanded'), 'true');
-  assert.equal(wrapper.get('[data-testid="gateway-details-toggle"]').text(), 'Скрыть настройки');
+  assert.equal(
+    wrapper.get('[data-testid="gateway-details-toggle"] .ui-button__label').text(),
+    'Скрыть настройки',
+  );
 
-  await wrapper.get('.https-switch').trigger('click');
+  await wrapper.get('[data-testid="access-route-home"] [role="switch"]').trigger('click');
   assert.deepEqual(wrapper.emitted('set-local-https'), [[false]]);
 });
 
@@ -479,10 +373,10 @@ test('ACCESS-WEB-06: системный TLS показан фактом, а не
   });
 
   const home = wrapper.get('[data-testid="access-route-home"]');
-  const httpsSwitch = home.get('.https-switch');
+  const httpsSwitch = home.get('[role="switch"]');
   assert.equal(httpsSwitch.attributes('aria-checked'), 'true', 'показываем фактически поднятый TLS');
   assert.equal(httpsSwitch.attributes('disabled'), '', 'env-настройку нельзя обещать изменить из UI');
-  assert.match(httpsSwitch.text(), /управляется системой/);
+  assert.match(home.text(), /управляется системой/);
   assert.equal(home.get('.access-route-url').text(), 'HTTPS · адрес задаётся системой');
   assert.doesNotMatch(home.get('.access-route-url').text(), /192\.168/);
   assert.equal(home.find('[data-testid="local-details-toggle"]').exists(), false);
@@ -553,7 +447,7 @@ test('ACCESS-WEB-08: карточка LAN не выдаёт старый адр�
   });
   assert.match(home().text(), /Системный HTTPS не поднялся/);
   assert.match(home().text(), /Исправить его можно только в конфигурации сервера/);
-  assert.equal(home().get('.https-switch').attributes('disabled'), '');
+  assert.equal(home().get('[role="switch"]').attributes('disabled'), '');
 });
 
 test('ACCESS-WEB-09: шлюз различает загрузку, цель проверки и результат verify-шага', async (t) => {
@@ -602,7 +496,7 @@ test('ACCESS-WEB-10: отключение LAN HTTPS подтверждается
   const {
     wrapper, posts, confirmations, tlsReadCount, flushPromises,
   } = await mountSettingsAccess(t, { confirmAnswers: [false, true] });
-  const httpsSwitch = () => wrapper.get('[data-testid="access-route-home"] .https-switch');
+  const httpsSwitch = () => wrapper.get('[data-testid="access-route-home"] [role="switch"]');
 
   assert.equal(httpsSwitch().attributes('aria-checked'), 'true');
   assert.equal(tlsReadCount(), 1, 'первый GET нужен для начальной сводки');
@@ -631,7 +525,7 @@ test('ACCESS-WEB-11: ошибка prefs остаётся рядом с LAN и н
     prefsPost: async () => { throw new Error('prefs недоступны'); },
   });
 
-  await wrapper.get('[data-testid="access-route-home"] .https-switch').trigger('click');
+  await wrapper.get('[data-testid="access-route-home"] [role="switch"]').trigger('click');
   await flushPromises();
 
   assert.deepEqual(
@@ -640,7 +534,7 @@ test('ACCESS-WEB-11: ошибка prefs остаётся рядом с LAN и н
   );
   assert.equal(tlsReadCount(), 1, 'при несохранённом prefs нечего перечитывать');
   assert.equal(
-    wrapper.get('[data-testid="access-route-home"] .https-switch').attributes('aria-checked'),
+    wrapper.get('[data-testid="access-route-home"] [role="switch"]').attributes('aria-checked'),
     'true',
   );
   const message = wrapper.get('[data-testid="access-route-home"] .access-inline-message');
@@ -672,7 +566,7 @@ test('ACCESS-WEB-12: SettingsView действительно монтирует 
 test('COMP-SHELL-10: device switch скрывает только companion и остаётся локальной настройкой', async (t) => {
   const { wrapper, companionChanges, flushPromises } = await mountSettingsAccess(t, { tab: 'app' });
   const setting = wrapper.get('[data-testid="companion-device-setting"]');
-  const toggle = setting.get('.toggle');
+  const toggle = setting.get('[role="switch"]');
 
   assert.equal(toggle.attributes('aria-checked'), 'true');
   assert.match(setting.text(), /Скрывает только аватар и компактное окно на этом устройстве/);
@@ -693,7 +587,7 @@ test('COMP-TTS-16: device settings управляют consent, voice, rate и vo
   assert.match(setting.text(), /только сокращённый текст/);
   assert.match(setting.text(), /только до закрытия этой вкладки/);
 
-  const toggle = setting.get('.toggle');
+  const toggle = setting.get('[role="switch"]');
   assert.equal(toggle.attributes('aria-checked'), 'true');
   await toggle.trigger('click');
   await setting.get('[data-testid="companion-voice-select"]').setValue('en-main');
@@ -749,7 +643,7 @@ test('ACCESS-WEB-14: ошибка TLS — отдельное состояние 
 
   assert.match(home.text(), /Статус недоступен/);
   assert.match(home.text(), /эндпоинт недоступен/);
-  assert.equal(home.get('.https-switch').attributes('disabled'), '');
+  assert.equal(home.get('[role="switch"]').attributes('disabled'), '');
   assert.equal(home.find('[data-testid="local-details-toggle"]').exists(), false);
   await home.get('[data-testid="tls-retry"]').trigger('click');
   assert.deepEqual(wrapper.emitted('reload-tls'), [[]]);
@@ -823,4 +717,38 @@ test('ACCESS-WEB-17: мастер явно различает права Cloudfl
   assert.match(gateway.text(), /веб-консоль\/VNC/);
   assert.match(gateway.text(), /ssh_host_\*_key\.pub/);
   assert.match(gateway.text(), /SHA256/);
+});
+
+test('ACCESS-WEB-18: выход со всех устройств проходит через общий danger-dialog', async (t) => {
+  const {
+    wrapper,
+    posts,
+    confirmations,
+    flushPromises,
+  } = await mountSettingsAccess(t, {
+    confirmAnswers: [false, true],
+  });
+  const logoutAllButton = wrapper.findAll('button')
+    .find((button) => button.text() === 'Выйти со всех устройств');
+
+  assert.ok(logoutAllButton);
+
+  await logoutAllButton.trigger('click');
+  await flushPromises();
+  assert.equal(posts.some((call) => call.path === '/api/auth/logout-all'), false);
+
+  await logoutAllButton.trigger('click');
+  await flushPromises();
+  assert.equal(confirmations.length, 2);
+  assert.deepEqual(confirmations[1], {
+    message: 'Разлогинить все устройства, включая это?',
+    options: {
+      danger: true,
+      okText: 'Выйти со всех',
+    },
+  });
+  assert.equal(
+    posts.filter((call) => call.path === '/api/auth/logout-all').length,
+    1,
+  );
 });

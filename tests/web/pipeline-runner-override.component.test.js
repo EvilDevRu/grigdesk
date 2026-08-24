@@ -2,104 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compilePipelineView } from './helpers/pipeline-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/PipelineView.vue', import.meta.url));
 const TASKS_STORE_PATH = fileURLToPath(new URL('../../web/src/stores/tasks.js', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
 const PINIA_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
 )).href;
-
-async function compilePipelineView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-pipeline-runner-override-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', 'from "' + VUE_URL + '"')
-    .replaceAll("from 'vue'", "from '" + VUE_URL + "'")
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__pipelineRunnerApi;',
-    )
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = () => {};',
-    )
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__pipelineRunnerUiStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../stores/tasks.js';",
-      'const useTasksStore = globalThis.__pipelineRunnerTasksStore;',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__pipelineRunnerBoardStore;',
-    )
-    .replace(
-      "import { useCompanionStore } from '../stores/companion.js';",
-      'const useCompanionStore = globalThis.__pipelineRunnerCompanionStore;',
-    )
-    .replace(
-      "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const pipelineWorkSec = (tm) => tm?.workSec ?? null; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { mdToHtml } from '../shared/md.js';",
-      'const mdToHtml = (value) => String(value || "");',
-    )
-    .replace(
-      "import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => true; const alertDialog = async () => {};',
-    )
-    .replace(
-      "import { sandboxUrl } from '../shared/sandbox.js';",
-      'const sandboxUrl = (port) => "http://sandbox.test:" + port;',
-    )
-    .replace(
-      "import { agentActivityLabel } from '../shared/agent-activity.js';",
-      'const agentActivityLabel = () => "";',
-    )
-    .replace(
-      "import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';",
-      'const { waitingReason, stripEmoji } = globalThis.__pipelineRunnerWait;',
-    )
-    .replace(
-      /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptCostLabel, attemptCostTitle, attemptResultLabel, providerLabel, runnerAttemptModelLabel, runnerChainLabel, runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
-      + ' = globalThis.__pipelineRunnerDisplay;',
-    )
-    .replace(
-      "import FactoryGraph from './pipeline/FactoryGraph.vue';",
-      'const FactoryGraph = globalThis.__pipelineRunnerFactoryGraph;',
-    )
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { props: ["taskId"], template: "<span></span>" };',
-    );
-  // Уникальный хвост: одинаковый data: URL отдал бы кеш модуля с заглушками чужого теста.
-  compilePipelineView.seq = (compilePipelineView.seq || 0) + 1;
-  return (await import(
-    'data:text/javascript;base64,'
-    + Buffer.from(`${code}\n// compile #${compilePipelineView.seq}`).toString('base64')
-  )).default;
-}
 
 // Задача №42 на маршруте feature: два узла, у plan — runner-мета с заданным источником.
 function makeFixture({
@@ -189,8 +99,8 @@ async function mountPipeline(t, {
     },
     async post() { return { ok: true }; },
   };
-  globalThis.__pipelineRunnerWait = await import('../../web/src/shared/pipeline-wait.js');
-  globalThis.__pipelineRunnerDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__pipelineRunnerConfirmDialog = async () => true;
+  globalThis.__pipelineRunnerAlertDialog = async () => {};
   globalThis.__pipelineRunnerFactoryGraph = {
     name: 'FactoryGraph',
     props: ['graph', 'loopsOn'],
@@ -222,17 +132,20 @@ async function mountPipeline(t, {
     actions: { openForTask() {} },
   });
 
-  const wrapper = mount(await compilePipelineView(), {
+  const wrapper = mount(await compilePipelineView('__pipelineRunner'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: {
+      plugins: [createPinia()],
+      stubs: { teleport: true },
+    },
   });
   t.after(() => {
     wrapper.unmount();
     browser.close();
     for (const key of [
       '__pipelineRunnerApi',
-      '__pipelineRunnerWait',
-      '__pipelineRunnerDisplay',
+      '__pipelineRunnerConfirmDialog',
+      '__pipelineRunnerAlertDialog',
       '__pipelineRunnerFactoryGraph',
       '__pipelineRunnerUiStore',
       '__pipelineRunnerTasksStore',
@@ -246,7 +159,12 @@ async function mountPipeline(t, {
     wrapper.findComponent(globalThis.__pipelineRunnerFactoryGraph).vm.$emit('node', node);
     await flushPromises();
   };
-  const openPlanStage = (status) => openStage({ nid: 'plan', label: '📋 План', sub: '', status });
+  const openPlanStage = (status) => openStage({
+    id: 'plan',
+    label: '📋 План',
+    subtitle: '',
+    status,
+  });
   return { wrapper, flushPromises, getCalls, runnerCalls, openStage, openPlanStage };
 }
 

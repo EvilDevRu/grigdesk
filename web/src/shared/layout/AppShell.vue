@@ -1,7 +1,363 @@
+<template>
+  <div class="shell" :class="{ collapsed }">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="logo">◧</span>
+        <span class="name">Кокпит</span>
+      </div>
+      <nav class="nav">
+        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active"
+                     :title="item.to === '/board' && boardChipVisible ? `${item.label} · ${boardChipTitle}` : item.label">
+          <span class="icwrap">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+            <span v-if="item.to === '/board' && boardChipVisible"
+                  class="boardchip"
+                  :class="{
+                    timing: boardNavActivity.activeTimerCount,
+                    'only-new': !boardNavActivity.activeTimerCount,
+                  }"
+                  role="status" :aria-label="boardChipTitle" :title="boardChipTitle">
+              <span v-if="boardNavActivity.activeTimerCount">
+                {{ boardNavActivity.activeTimerCount > 99 ? '99+' : boardNavActivity.activeTimerCount }}
+              </span>
+              <span v-if="boardNavActivity.activeTimerCount" class="boardtimer" aria-hidden="true"></span>
+              <span v-if="boardNavActivity.unseenCount && boardNavActivity.activeTimerCount"
+                    class="boardnew" aria-hidden="true"></span>
+            </span>
+            <!-- У конвейера цветной круг показывает состав: красный — аварии, жёлтый —
+                 готовые задачи на воротах, синий — ещё выполняются. Число внутри не
+                 включает синие задачи. У остальных разделов чип остаётся одноцветным. -->
+            <span v-if="badges[item.to]" class="navbadge"
+                  :class="[badges[item.to].kind, badges[item.to].pulseKind]"
+                  :style="badges[item.to].style"
+                  role="status" :aria-label="badges[item.to].title"
+                  :title="badges[item.to].title">{{ badges[item.to].n }}</span>
+          </span>
+          <span class="lbl">{{ item.label }}</span>
+        </router-link>
+        <!-- Плагины: под основными разделами, за разделителем. Состав живёт в «Настройки → Плагины». -->
+        <template v-if="pluginNav.length">
+          <div class="navsep"></div>
+          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+            <span class="icwrap">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
+              <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
+                    role="status" :aria-label="badges[item.to].title" :title="badges[item.to].title">
+                {{ badges[item.to].n > 99 ? '99+' : badges[item.to].n }}
+              </span>
+            </span>
+            <span class="lbl">{{ item.label }}</span>
+          </router-link>
+        </template>
+        <template v-if="toolsNav.length">
+          <div class="navsep"></div>
+          <UiPressable ref="toolsTrigger" class="navitem tools-trigger"
+                       :class="{ active: toolsActive }" title="Инструменты"
+                       :aria-expanded="toolsOpen" aria-haspopup="true" @click="toggleTools">
+            <span class="icwrap">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
+                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
+                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
+              </span>
+            </span>
+            <span class="lbl">Инструменты</span>
+          </UiPressable>
+          <router-link to="/tools" class="navitem tools-mobile" active-class="active" title="Инструменты">
+            <span class="icwrap">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
+                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
+                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
+              </span>
+            </span>
+            <span class="lbl">Инструменты</span>
+          </router-link>
+        </template>
+      </nav>
+      <nav class="nav nav-bottom dock-route-nav">
+        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+          <span class="lbl">{{ item.label }}</span>
+        </router-link>
+      </nav>
+      <UiPressable class="collapse-btn" :title="collapsed ? 'Развернуть' : 'Свернуть'"
+                   @click="toggleSidebar">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="collapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'" /></svg>
+        <span class="lbl">Свернуть</span>
+      </UiPressable>
+    </aside>
+
+    <header class="topbar">
+      <div class="tbleft">
+        <span class="mlogo">◧</span>
+        <h1 class="page">{{ route.meta.title || 'Кокпит' }}</h1>
+      </div>
+      <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
+      <div id="tb-slot" class="tb-slot"></div>
+      <UpdateBanner />
+      <div class="status">
+        <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
+             не сдвигая остальные элементы (правый край статуса зафиксирован) -->
+        <UiTooltip
+          v-if="sys"
+          placement="top-end"
+          :surface-style="{ maxWidth: '320px' }"
+        >
+          <template #trigger>
+            <span class="metric mono" tabindex="0">
+              CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
+              · RAM
+              <b :class="loadClass(sys.mem.percent)">
+                {{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}
+              </b>
+            </span>
+          </template>
+          <!-- Разбивка нагрузки полосками: одной строкой «занято 22 из 47» не видно,
+               кончилась физическая память или просто лежит холодный swap. -->
+          <template #tip>
+            <span class="ptip">
+              <span class="pu">
+                <span class="pu-row">
+                  <span class="pu-head"><span>Процессор · {{ sys.cpu.cores }} ядер</span><b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(sys.cpu.percent)" :style="{ width: Math.min(100, sys.cpu.percent) + '%' }"></span></span>
+                  <span class="pu-reset">средняя загрузка за минуту — {{ sys.cpu.load1 }}</span>
+                </span>
+                <span class="pu-row">
+                  <span class="pu-head"><span>Оперативная память</span><b :class="loadClass(mem.ramPercent)">{{ mem.ramPercent }}%</b></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.ramPercent)" :style="{ width: Math.min(100, mem.ramPercent) + '%' }"></span></span>
+                  <span class="pu-reset">занято {{ mem.ramUsed }} из {{ mem.ramTotal }} ГБ · свободно {{ mem.ramFree }} ГБ</span>
+                </span>
+                <span v-if="mem.swapTotal" class="pu-row">
+                  <span class="pu-head"><span>Подкачка (swap)</span><b :class="loadClass(mem.swapPercent)">{{ mem.swapPercent }}%</b></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.swapPercent)" :style="{ width: Math.min(100, mem.swapPercent) + '%' }"></span></span>
+                  <span class="pu-reset">занято {{ mem.swapUsed }} из {{ mem.swapTotal }} ГБ</span>
+                </span>
+                <span v-else class="pu-reset">подкачка выключена</span>
+              </span>
+              <span class="sysnote">В шапке ОЗУ и подкачка сложены: занято {{ sys.mem.usedGb }} из {{ sys.mem.totalGb }} ГБ</span>
+            </span>
+          </template>
+        </UiTooltip>
+        <span v-if="sys" class="sep" aria-hidden="true">·</span>
+        <!-- Компаньон стоит в ряду исполнителей: на /chats плавающей фигурки нет,
+             а здесь он доступен всегда. Свой разделитель рисует сам. -->
+        <CompanionTopbarButton />
+        <AttentionAlerts />
+        <!-- pointerdown, а не только mouseenter: на тач-экране ховера нет, и без него
+             свежие лимиты приезжали бы уже после раскрытия всплывашки -->
+        <span v-if="runtimeProviders.length" class="provbox"
+              @mouseenter="prov.loadUsage()" @pointerdown="prov.loadUsage()">
+          <span
+            v-for="p in runtimeProviders"
+            :key="p.id"
+            :class="['prov-tip', `prov-${p.id}`]"
+          >
+            <UiPopover
+              trigger-mode="both"
+              focus-policy="none"
+              placement="top"
+              :style="{ maxWidth: '320px' }"
+            >
+              <!-- Клик раскрывает всплывашку на планшете; обновление CLI остаётся ручным. -->
+              <template #trigger>
+                <UiPressable
+                  class="prov"
+                  data-context="provider-status"
+                  :class="[p.id, { off: !p.available, upd: p.updateAvailable }]"
+                  :aria-label="provTitle(p)"
+                  :style="p.available && !['codex', 'kimi'].includes(p.id)
+                    ? { color: p.color }
+                    : null"
+                >
+                  <ProviderIcon :provider="p" :size="15" />
+                  <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
+                </UiPressable>
+              </template>
+              <template #default="{ close }">
+              <span class="ptip">
+                <span>{{ provTitle(p) }}</span>
+                <!-- Индикатор новой версии. Кокпит НИЧЕГО не обновляет сам — только сообщает. -->
+                <span v-if="p.updateAvailable" class="pupd">
+                  Доступно обновление: <b>{{ p.latest }}</b>
+                </span>
+                <!-- Потребление лимитов подписки — как /usage в CLI -->
+                <span class="pu">
+                  <span v-for="b in usageOf(p).bars" :key="b.key" class="pu-row">
+                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
+                    <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
+                    <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
+                  </span>
+                  <ProviderUsageResources :provider-id="p.id" :resources="usageOf(p).resources" />
+                  <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
+                    <span>{{ usageOf(p).message }}</span>
+                    <span v-if="usageOf(p).note" class="pu-reset">{{ usageOf(p).note }}</span>
+                    <UiButton
+                      v-if="usageOf(p).action"
+                      data-context="topbar-popover-action"
+                      variant="outline"
+                      @click.stop="close('action'); runUsageAction(usageOf(p).action)"
+                    >
+                      {{ usageOf(p).action.label }}
+                    </UiButton>
+                  </span>
+                </span>
+                <span class="ptip-go">
+                  <UiButton
+                    block
+                    data-context="topbar-popover-footer"
+                    variant="outline"
+                    @click="close('action'); toProviders()"
+                  >
+                    Настройки исполнителей
+                  </UiButton>
+                </span>
+              </span>
+              </template>
+            </UiPopover>
+          </span>
+        </span>
+        <span v-if="runtimeProviders.length && sys?.net" class="sep" aria-hidden="true">·</span>
+        <UiTooltip
+          v-if="sys?.net"
+          :text="`Публичный IP мозга: ${sys.net.ip}`
+            + (sys.net.country ? ` · ${sys.net.country}` : '')"
+        >
+          <template #trigger>
+            <span class="netbox mono" tabindex="0">
+              <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
+              <span class="ip">{{ sys.net.ip }}</span>
+            </span>
+          </template>
+        </UiTooltip>
+        <span v-if="sys?.net" class="sep" aria-hidden="true">·</span>
+        <UiTooltip
+          placement="top-end"
+          :text="connected
+            ? 'Связь с сервером кокпита — канал жив'
+            : 'Нет связи с сервером кокпита'"
+        >
+          <template #trigger>
+            <span class="conn" :class="connected ? 'on' : 'off'" tabindex="0">
+              <span class="dot"></span>
+              <span class="host mono">{{ health ? health.host : 'офлайн' }}</span>
+            </span>
+          </template>
+        </UiTooltip>
+      </div>
+      <span v-if="cockpitVersion" class="cockpit-tip">
+        <UiPopover
+          trigger-mode="both"
+          focus-policy="none"
+          placement="top-end"
+          :style="{ maxWidth: 'min(340px, calc(100vw - 20px))' }"
+        >
+          <template #trigger>
+            <UiPressable
+              class="cockpit-version"
+              data-context="cockpit-version"
+              :class="cockpitUpdate.tone"
+              :aria-label="cockpitToneTitle"
+              :title="cockpitToneTitle"
+            >
+              <!-- «◧» рисуем SVG: текстовый глиф сидел ниже геометрического центра. -->
+              <svg class="ic" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 5h7v14H5z" fill="currentColor" />
+                <rect
+                  x="5"
+                  y="5"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                />
+              </svg>
+              <span v-if="cockpitUpdate.tone" class="cockpit-dot" aria-hidden="true"></span>
+            </UiPressable>
+          </template>
+          <template #default="{ close }">
+          <span class="ptip cockpit-version-tip">
+            <b>{{ cockpitToneTitle }}</b>
+            <span>
+              Запущено: {{ cockpitVersion.running.version }} ·
+              <span class="mono">{{ shortSha(cockpitVersion.running.sha) }}</span>
+            </span>
+            <span v-if="cockpitVersion.checkoutChanged || cockpitVersion.checkout.dirty">
+              Checkout: {{ cockpitVersion.checkout.version }} ·
+              <span class="mono">{{ shortSha(cockpitVersion.checkout.sha) }}</span> ·
+              {{ cockpitVersion.checkout.branch || 'detached HEAD' }}<template v-if="cockpitVersion.checkout.dirty"> · dirty</template>
+            </span>
+            <span v-if="cockpitVersion.latest">Доступно: {{ cockpitVersion.latest.tag }}</span>
+            <span class="pu-reset">Проверено: {{ checkedLabel(cockpitVersion.checkedAt) }}</span>
+            <span v-if="cockpitVersion.checkError" class="pu-state is-warn">
+              {{ cockpitVersion.checkError.message }}
+            </span>
+            <span v-if="cockpitVersion.installBlockReasons?.length" class="pu-reset">
+              {{ blockReasonLabel(cockpitVersion.installBlockReasons[0]) }}
+            </span>
+            <span class="ptip-go">
+              <UiButton
+                block
+                data-context="topbar-popover-footer"
+                variant="outline"
+                @click="close('action'); toCockpitSettings()"
+              >
+                Настройки обновления
+              </UiButton>
+            </span>
+          </span>
+          </template>
+        </UiPopover>
+      </span>
+      <router-link to="/settings" class="settings-link" active-class="active"
+                   title="Настройки" aria-label="Настройки">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="ICONS.settings" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </router-link>
+    </header>
+
+    <main class="content" :inert="toolDock.isExpanded"
+          :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
+    <ToolHost />
+
+    <Teleport to="body">
+      <section v-if="toolsOpen" ref="toolsPopover" class="tools-popover" :style="toolsPopoverStyle"
+               aria-label="Инструменты">
+        <header>
+          <strong>Инструменты</strong>
+          <router-link to="/tools" @click="closeTools()">Все на странице →</router-link>
+        </header>
+        <ToolsGrid :items="toolsNav" :badges="badges" @select="closeTools()" />
+      </section>
+    </Teleport>
+
+    <!-- Установка на устройство. Появляется только когда браузер сам счёл приложение
+         устанавливаемым (https + иконки + живой SW) — по http-адресу кнопки не будет. -->
+    <div v-if="pwa.canInstall" class="instbar">
+      <span>Установить кокпит как приложение</span>
+      <UiButton variant="solid" tone="accent" @click="pwa.install()">Установить</UiButton>
+      <UiButton variant="text" @click="pwa.installPrompt = null">Позже</UiButton>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { ref, computed, nextTick, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
+import {
+  UiButton,
+  UiPopover,
+  UiPressable,
+  UiTooltip,
+  useUiLayer,
+} from '../../ui';
 import { api } from '../api-client.js';
 import { useSse } from '../../composables/useSse.js';
 import { useSystemStore } from '../../stores/system.js';
@@ -14,19 +370,17 @@ import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
 import { useInboxStore } from '../../stores/inbox.js';
 import { useDockStore } from '../../stores/dock.js';
-import { providerUsageView } from '../provider-usage.js';
+import { providerUsageView } from '../../features/providers/providerUsage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
 import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
 import ProviderIcon from '../ProviderIcon.vue';
-import ProviderUsageResources from '../ProviderUsageResources.vue';
-import AttentionAlerts from './AttentionAlerts.vue';
-import HelpTip from '../ui/HelpTip.vue';
+import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
+import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
 import { TOOL_BY_ID } from '../tools/registry.js';
 import { useToolLauncher } from '../tools/launcher.js';
-import { registerLayer } from '../ui/layer-stack.js';
 
 const route = useRoute();
 const toolDock = useDockStore();
@@ -243,11 +597,18 @@ const toolsOpen = ref(false);
 const toolsTrigger = ref(null);
 const toolsPopover = ref(null);
 const toolsPopoverStyle = ref({});
-let unregisterToolsLayer = null;
 const toolsActive = computed(() => route.path === '/tools' || toolsNav.value.some((item) => item.to === route.path));
+useUiLayer('tools', {
+  id: 'tools-popover',
+  enabled: toolsOpen,
+  element: toolsPopover,
+  onEscape: () => {
+    closeTools({ focus: true });
+  },
+});
 
 function placeToolsPopover() {
-  const rect = toolsTrigger.value?.getBoundingClientRect?.();
+  const rect = toolsTrigger.value?.el?.getBoundingClientRect?.();
   if (!rect) return;
   const width = Math.min(360, window.innerWidth - 24);
   const left = Math.min(rect.right + 8, window.innerWidth - width - 12);
@@ -266,17 +627,12 @@ async function toggleTools() {
   toolsPopover.value?.querySelector?.('a')?.focus?.();
 }
 function toolsOutside(event) {
-  if (toolsTrigger.value?.contains(event.target) || toolsPopover.value?.contains(event.target)) return;
+  if (toolsTrigger.value?.el?.contains(event.target)
+      || toolsPopover.value?.contains(event.target)) return;
   closeTools();
 }
 watch(toolsOpen, (open) => {
-  unregisterToolsLayer?.();
-  unregisterToolsLayer = null;
   if (open) {
-    unregisterToolsLayer = registerLayer('tools-popover', {
-      priority: 70,
-      close: () => { closeTools({ focus: true }); },
-    });
     document.addEventListener('pointerdown', toolsOutside, true);
     window.addEventListener('resize', placeToolsPopover, { passive: true });
   } else {
@@ -286,7 +642,6 @@ watch(toolsOpen, (open) => {
 });
 watch(() => route.fullPath, () => closeTools());
 onUnmounted(() => {
-  unregisterToolsLayer?.();
   document.removeEventListener('pointerdown', toolsOutside, true);
   window.removeEventListener('resize', placeToolsPopover);
 });
@@ -300,276 +655,6 @@ const { connected } = useSse((name) => {
   if (name === 'cockpit-update') cockpitUpdate.load({ quiet: true });
 });
 </script>
-
-<template>
-  <div class="shell" :class="{ collapsed }">
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="logo">◧</span>
-        <span class="name">Кокпит</span>
-      </div>
-      <nav class="nav">
-        <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" active-class="active"
-                     :title="item.to === '/board' && boardChipVisible ? `${item.label} · ${boardChipTitle}` : item.label">
-          <span class="icwrap">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
-            <span v-if="item.to === '/board' && boardChipVisible"
-                  class="boardchip"
-                  :class="{
-                    timing: boardNavActivity.activeTimerCount,
-                    'only-new': !boardNavActivity.activeTimerCount,
-                  }"
-                  role="status" :aria-label="boardChipTitle" :title="boardChipTitle">
-              <span v-if="boardNavActivity.activeTimerCount">
-                {{ boardNavActivity.activeTimerCount > 99 ? '99+' : boardNavActivity.activeTimerCount }}
-              </span>
-              <span v-if="boardNavActivity.activeTimerCount" class="boardtimer" aria-hidden="true"></span>
-              <span v-if="boardNavActivity.unseenCount && boardNavActivity.activeTimerCount"
-                    class="boardnew" aria-hidden="true"></span>
-            </span>
-            <!-- У конвейера цветной круг показывает состав: красный — аварии, жёлтый —
-                 готовые задачи на воротах, синий — ещё выполняются. Число внутри не
-                 включает синие задачи. У остальных разделов чип остаётся одноцветным. -->
-            <span v-if="badges[item.to]" class="navbadge"
-                  :class="[badges[item.to].kind, badges[item.to].pulseKind]"
-                  :style="badges[item.to].style"
-                  role="status" :aria-label="badges[item.to].title"
-                  :title="badges[item.to].title">{{ badges[item.to].n }}</span>
-          </span>
-          <span class="lbl">{{ item.label }}</span>
-        </router-link>
-        <!-- Плагины: под основными разделами, за разделителем. Состав живёт в «Настройки → Плагины». -->
-        <template v-if="pluginNav.length">
-          <div class="navsep"></div>
-          <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
-              <span v-if="badges[item.to]" class="navbadge" :class="badges[item.to].kind"
-                    role="status" :aria-label="badges[item.to].title" :title="badges[item.to].title">
-                {{ badges[item.to].n > 99 ? '99+' : badges[item.to].n }}
-              </span>
-            </span>
-            <span class="lbl">{{ item.label }}</span>
-          </router-link>
-        </template>
-        <template v-if="toolsNav.length">
-          <div class="navsep"></div>
-          <button ref="toolsTrigger" type="button" class="navitem tools-trigger"
-                  :class="{ active: toolsActive }" title="Инструменты"
-                  :aria-expanded="toolsOpen" aria-haspopup="true" @click="toggleTools">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
-                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
-                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
-              </span>
-            </span>
-            <span class="lbl">Инструменты</span>
-          </button>
-          <router-link to="/tools" class="navitem tools-mobile" active-class="active" title="Инструменты">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <span v-if="badges['/tools']" class="navbadge" :class="badges['/tools'].kind"
-                    role="status" :aria-label="badges['/tools'].title" :title="badges['/tools'].title">
-                {{ badges['/tools'].n > 99 ? '99+' : badges['/tools'].n }}
-              </span>
-            </span>
-            <span class="lbl">Инструменты</span>
-          </router-link>
-        </template>
-      </nav>
-      <nav class="nav nav-bottom dock-route-nav">
-        <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" active-class="active" :title="item.label">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
-          <span class="lbl">{{ item.label }}</span>
-        </router-link>
-      </nav>
-      <button class="collapse-btn" :title="collapsed ? 'Развернуть' : 'Свернуть'" @click="toggleSidebar">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="collapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'" /></svg>
-        <span class="lbl">Свернуть</span>
-      </button>
-    </aside>
-
-    <header class="topbar">
-      <div class="tbleft">
-        <span class="mlogo">◧</span>
-        <h1 class="page">{{ route.meta.title || 'Кокпит' }}</h1>
-      </div>
-      <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
-      <div id="tb-slot" class="tb-slot"></div>
-      <UpdateBanner />
-      <div class="status">
-        <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
-             не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <HelpTip v-if="sys" align="right" class="sys-tip" :tip-style="{ maxWidth: '320px' }">
-          <span class="metric mono">
-            CPU <b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b>
-            · RAM <b :class="loadClass(sys.mem.percent)">{{ sys.mem.usedGb }}/{{ sys.mem.totalGb }}</b>
-          </span>
-          <!-- Разбивка нагрузки полосками: одной строкой «занято 22 из 47» не видно,
-               кончилась физическая память или просто лежит холодный swap. -->
-          <template #tip>
-            <span class="ptip">
-              <span class="pu">
-                <span class="pu-row">
-                  <span class="pu-head"><span>Процессор · {{ sys.cpu.cores }} ядер</span><b :class="loadClass(sys.cpu.percent)">{{ sys.cpu.percent }}%</b></span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(sys.cpu.percent)" :style="{ width: Math.min(100, sys.cpu.percent) + '%' }"></span></span>
-                  <span class="pu-reset">средняя загрузка за минуту — {{ sys.cpu.load1 }}</span>
-                </span>
-                <span class="pu-row">
-                  <span class="pu-head"><span>Оперативная память</span><b :class="loadClass(mem.ramPercent)">{{ mem.ramPercent }}%</b></span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.ramPercent)" :style="{ width: Math.min(100, mem.ramPercent) + '%' }"></span></span>
-                  <span class="pu-reset">занято {{ mem.ramUsed }} из {{ mem.ramTotal }} ГБ · свободно {{ mem.ramFree }} ГБ</span>
-                </span>
-                <span v-if="mem.swapTotal" class="pu-row">
-                  <span class="pu-head"><span>Подкачка (swap)</span><b :class="loadClass(mem.swapPercent)">{{ mem.swapPercent }}%</b></span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.swapPercent)" :style="{ width: Math.min(100, mem.swapPercent) + '%' }"></span></span>
-                  <span class="pu-reset">занято {{ mem.swapUsed }} из {{ mem.swapTotal }} ГБ</span>
-                </span>
-                <span v-else class="pu-reset">подкачка выключена</span>
-              </span>
-              <span class="sysnote">В шапке ОЗУ и подкачка сложены: занято {{ sys.mem.usedGb }} из {{ sys.mem.totalGb }} ГБ</span>
-            </span>
-          </template>
-        </HelpTip>
-        <span v-if="sys" class="sep" aria-hidden="true">·</span>
-        <!-- Компаньон стоит в ряду исполнителей: на /chats плавающей фигурки нет,
-             а здесь он доступен всегда. Свой разделитель рисует сам. -->
-        <CompanionTopbarButton />
-        <AttentionAlerts />
-        <!-- pointerdown, а не только mouseenter: на тач-экране ховера нет, и без него
-             свежие лимиты приезжали бы уже после раскрытия всплывашки -->
-        <span v-if="runtimeProviders.length" class="provbox"
-              @mouseenter="prov.loadUsage()" @pointerdown="prov.loadUsage()">
-          <HelpTip v-for="p in runtimeProviders" :key="p.id" :class="['prov-tip', `prov-${p.id}`]" toggle
-                   :tip-style="{ maxWidth: '320px' }">
-            <!-- Клик раскрывает саму всплывашку (на планшете ховера нет), а в настройки
-                 ведёт кнопка внутри неё: обновление CLI — только вручную, кнопкой -->
-            <span class="prov" :class="[p.id, { off: !p.available, upd: p.updateAvailable }]"
-                  :style="p.available && !['codex', 'kimi'].includes(p.id) ? { color: p.color } : null">
-              <ProviderIcon :provider="p" :size="15" />
-              <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
-            </span>
-            <template #tip>
-              <span class="ptip">
-                <span>{{ provTitle(p) }}</span>
-                <!-- Индикатор новой версии. Кокпит НИЧЕГО не обновляет сам — только сообщает. -->
-                <span v-if="p.updateAvailable" class="pupd">
-                  Доступно обновление: <b>{{ p.latest }}</b>
-                </span>
-                <!-- Потребление лимитов подписки — как /usage в CLI -->
-                <span class="pu">
-                  <span v-for="b in usageOf(p).bars" :key="b.key" class="pu-row">
-                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
-                    <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
-                    <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
-                  </span>
-                  <ProviderUsageResources :provider-id="p.id" :resources="usageOf(p).resources" />
-                  <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
-                    <span>{{ usageOf(p).message }}</span>
-                    <span v-if="usageOf(p).note" class="pu-reset">{{ usageOf(p).note }}</span>
-                    <button v-if="usageOf(p).action" type="button"
-                            @click.stop="runUsageAction(usageOf(p).action)">
-                      {{ usageOf(p).action.label }}
-                    </button>
-                  </span>
-                </span>
-                <span class="ptip-go">
-                  <button type="button" @click="toProviders">Настройки исполнителей</button>
-                </span>
-              </span>
-            </template>
-          </HelpTip>
-        </span>
-        <span v-if="runtimeProviders.length && sys?.net" class="sep" aria-hidden="true">·</span>
-        <HelpTip v-if="sys?.net" :text="`Публичный IP мозга: ${sys.net.ip}` + (sys.net.country ? ` · ${sys.net.country}` : '')">
-          <span class="netbox mono">
-            <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
-            <span class="ip">{{ sys.net.ip }}</span>
-          </span>
-        </HelpTip>
-        <span v-if="sys?.net" class="sep" aria-hidden="true">·</span>
-        <HelpTip align="right" :text="connected ? 'Связь с сервером кокпита — канал жив' : 'Нет связи с сервером кокпита'">
-          <span class="conn" :class="connected ? 'on' : 'off'">
-            <span class="dot"></span>
-            <span class="host mono">{{ health ? health.host : 'офлайн' }}</span>
-          </span>
-        </HelpTip>
-      </div>
-      <HelpTip v-if="cockpitVersion" align="right" class="cockpit-tip" toggle
-               :tip-style="{ maxWidth: 'min(340px, calc(100vw - 20px))' }">
-        <span class="cockpit-version" :class="cockpitUpdate.tone"
-              role="status" :aria-label="cockpitToneTitle" :title="cockpitToneTitle">
-          <!-- «◧» рисуем SVG: текстовый глиф сидел на базовой линии шрифта
-               ниже геометрического центра em-бокса и выглядел смещённым вниз -->
-          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 5h7v14H5z" fill="currentColor" />
-            <rect x="5" y="5" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" />
-          </svg>
-          <span v-if="cockpitUpdate.tone" class="cockpit-dot" aria-hidden="true"></span>
-        </span>
-        <template #tip>
-          <span class="ptip cockpit-version-tip">
-            <b>{{ cockpitToneTitle }}</b>
-            <span>
-              Запущено: {{ cockpitVersion.running.version }} ·
-              <span class="mono">{{ shortSha(cockpitVersion.running.sha) }}</span>
-            </span>
-            <span v-if="cockpitVersion.checkoutChanged || cockpitVersion.checkout.dirty">
-              Checkout: {{ cockpitVersion.checkout.version }} ·
-              <span class="mono">{{ shortSha(cockpitVersion.checkout.sha) }}</span> ·
-              {{ cockpitVersion.checkout.branch || 'detached HEAD' }}<template v-if="cockpitVersion.checkout.dirty"> · dirty</template>
-            </span>
-            <span v-if="cockpitVersion.latest">Доступно: {{ cockpitVersion.latest.tag }}</span>
-            <span class="pu-reset">Проверено: {{ checkedLabel(cockpitVersion.checkedAt) }}</span>
-            <span v-if="cockpitVersion.checkError" class="pu-state is-warn">
-              {{ cockpitVersion.checkError.message }}
-            </span>
-            <span v-if="cockpitVersion.installBlockReasons?.length" class="pu-reset">
-              {{ blockReasonLabel(cockpitVersion.installBlockReasons[0]) }}
-            </span>
-            <span class="ptip-go">
-              <button type="button" @click="toCockpitSettings">Настройки обновления</button>
-            </span>
-          </span>
-        </template>
-      </HelpTip>
-      <router-link to="/settings" class="settings-link" active-class="active"
-                   title="Настройки" aria-label="Настройки">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path :d="ICONS.settings" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </router-link>
-    </header>
-
-    <main class="content" :inert="toolDock.isExpanded"
-          :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
-    <ToolHost />
-
-    <Teleport to="body">
-      <section v-if="toolsOpen" ref="toolsPopover" class="tools-popover" :style="toolsPopoverStyle"
-               aria-label="Инструменты">
-        <header>
-          <strong>Инструменты</strong>
-          <router-link to="/tools" @click="closeTools()">Все на странице →</router-link>
-        </header>
-        <ToolsGrid :items="toolsNav" :badges="badges" @select="closeTools()" />
-      </section>
-    </Teleport>
-
-    <!-- Установка на устройство. Появляется только когда браузер сам счёл приложение
-         устанавливаемым (https + иконки + живой SW) — по http-адресу кнопки не будет. -->
-    <div v-if="pwa.canInstall" class="instbar">
-      <span>Установить кокпит как приложение</span>
-      <button @click="pwa.install()">Установить</button>
-      <button class="ghost" @click="pwa.installPrompt = null">Позже</button>
-    </div>
-  </div>
-</template>
 
 <style scoped>
 .shell {
@@ -687,19 +772,8 @@ const { connected } = useSse((name) => {
   border-radius: 8px; color: var(--ink-mid); transition: background .12s, color .12s;
 }
 .cockpit-tip { display: inline-flex; align-items: center; height: 32px; }
-.cockpit-tip :deep(.ht-tr) { display: inline-flex; align-items: center; height: 32px; }
-.cockpit-version > .ic { display: block; width: 16px; height: 16px; }
 .settings-link { line-height: 0; }
 .settings-link .ic { display: block; }
-.cockpit-version {
-  width: 32px; height: 32px; flex: none; display: grid; place-items: center; position: relative;
-  border-radius: 8px; color: var(--ink-mid); cursor: pointer;
-  transition: background .12s, color .12s;
-}
-.cockpit-version:hover { background: var(--surface); color: var(--ink); }
-.cockpit-version.checkout { color: var(--accent); }
-.cockpit-version.release { color: var(--warn, #e0a33a); }
-.cockpit-version.error { color: var(--bad); }
 .cockpit-dot {
   position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%;
   background: currentColor; border: 2px solid var(--topbar);
@@ -714,19 +788,18 @@ const { connected } = useSse((name) => {
 .provbox { display: inline-flex; align-items: center; gap: 9px; }
 /* В топбаре это обычные знаки, без кнопочных контейнеров. Нулевая высота строки
    убирает baseline-зазор SVG и ставит все три логотипа на одну оптическую ось. */
-.prov-tip { display: inline-flex; align-items: center; vertical-align: middle; }
-.prov-tip :deep(.ht-tr) { line-height: 0; }
+.prov-tip {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+  vertical-align: middle;
+}
 /* У Kimi широкий SVG-кадр: правое плечо «K» заканчивается раньше его блока. Без
    поправки визуальный зазор до следующего знака на 4px больше, чем у Codex → Kimi. */
 .prov-kimi + .prov-ollama { margin-left: -4px; }
-.prov { display: inline-grid; place-items: center; position: relative; cursor: pointer; }
-/* OpenAI и Kimi в шапке нейтральные: цвет здесь означает состояние, а не бренд. */
-.prov.codex, .prov.kimi { color: var(--ink); }
-.prov.off { color: var(--ink-mid); opacity: .45; }
 /* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
 .updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--warn, #e0a33a); box-shadow: 0 0 0 2px var(--surface); }
-.prov.upd { opacity: 1; }
 .pupd { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
   color: var(--warn, #e0a33a); line-height: 1.5; }
 .pupd b { font-weight: 600; }
@@ -748,20 +821,8 @@ const { connected } = useSse((name) => {
 }
 .pu-state.is-bad { color: var(--bad); }
 .pu-state.is-warn { color: var(--warn); }
-.pu-state button {
-  padding: 4px 10px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
-  font-size: 11px;
-}
-.pu-state button:hover { border-color: var(--accent); color: var(--accent); }
 /* Переход в настройки исполнителей — теперь кнопкой внутри всплывашки, а не кликом по иконке */
 .ptip-go { display: flex; padding-top: 8px; border-top: 1px solid var(--line); }
-.ptip-go button {
-  width: 100%; padding: 6px 10px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-mid);
-  font-size: 11.5px;
-}
-.ptip-go button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).
    Селекторы с тегом: иначе .pu-head b перебивает .lv-* по специфичности. */
@@ -828,15 +889,12 @@ const { connected } = useSse((name) => {
   padding: 8px 10px 8px 18px; font-size: 13px; box-shadow: 0 8px 26px #0009;
   max-width: calc(100vw - 24px);
 }
-.instbar button { background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.instbar button.ghost { background: none; color: var(--ink-mid); font-weight: 400; padding: 6px 8px; }
 @media (max-width: 759px) {
   .instbar { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (max-width: 639px) {
   .instbar { gap: 3px; padding: 5px; }
   .instbar > span { display: none; }
-  .instbar button { min-height: 36px; }
 }
 
 /* ── Мобайл: сайдбар → нижняя навигация ── */

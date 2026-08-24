@@ -1,109 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileTaskModal } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
-
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TaskModal.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const PINIA_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
-)).href;
-
-async function compileTaskModal() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-task-modal-favorite-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replaceAll("from 'pinia'", `from "${PINIA_URL}"`)
-    .replace(
-      "import { useRouter } from 'vue-router';",
-      'const useRouter = () => ({ push() {} });',
-    )
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
-    )
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__taskModalFavoriteApi;',
-    )
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => true;',
-    )
-    .replace(
-      "import { registerLayer } from '../shared/ui/layer-stack.js';",
-      'const registerLayer = () => () => {};',
-    )
-    .replace(
-      "import HelpTip from '../shared/ui/HelpTip.vue';",
-      'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__taskModalFavoriteUiStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../stores/tasks.js';",
-      'const useTasksStore = globalThis.__taskModalFavoriteTasksStore;',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__taskModalFavoriteBoardStore;',
-    )
-    .replace(
-      "import { useAnalysisStore } from '../stores/analysis.js';",
-      'const useAnalysisStore = globalThis.__taskModalFavoriteAnalysisStore;',
-    )
-    .replace(
-      "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
-      'const useTaskFavoritesStore = globalThis.__taskModalFavoriteStore;',
-    )
-    .replace(
-      "import { useTaskSeenStore } from '../stores/task-seen.js';",
-      'const useTaskSeenStore = globalThis.__taskModalFavoriteSeenStore;',
-    )
-    .replace(
-      "import { liveTimerSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = (task) => task?.timerElapsed || 0; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { mdToHtml } from '../shared/md.js';",
-      'const mdToHtml = (value) => String(value || "");',
-    )
-    .replace(
-      "import { providerLabel } from '../shared/runner-display.js';",
-      'const { providerLabel } = globalThis.__taskModalFavoriteRunnerDisplay;',
-    )
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { template: "<span></span>" };',
-    )
-    .replace(
-      "import TaskFavoriteButton from './board/TaskFavoriteButton.vue';",
-      `const TaskFavoriteButton = {
-        props: ["active", "pending", "taskTitle"],
-        emits: ["toggle"],
-        template: '<button class="stub-modal-fav" :aria-pressed="String(active)" @click="$emit(\\'toggle\\')">{{ taskTitle }}</button>',
-      };`,
-    );
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-  )).default;
-}
 
 test('UI-05/06: TaskModal переключает тот же favorite store и показывает его ошибку', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -166,7 +65,7 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
   globalThis.__taskModalFavoriteAnalysisStore = defineStore('task-modal-favorite-analysis', {
     actions: { async detail() { return {}; }, async analyze() {} },
   });
-  globalThis.__taskModalFavoriteStore = defineStore('task-modal-favorite', {
+  globalThis.__taskModalFavoriteFavoritesStore = defineStore('task-modal-favorite', {
     state: () => ({
       taskIds: [],
       loaded: true,
@@ -203,23 +102,21 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
   });
 
   const pinia = createPinia();
-  globalThis.__taskModalFavoriteRunnerDisplay = await import('../../web/src/shared/runner-display.js');
-  const TaskModal = await compileTaskModal();
+  const TaskModal = await compileTaskModal('__taskModalFavorite');
   const wrapper = mount(TaskModal, {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [pinia] },
+    global: { plugins: [pinia], stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
     browser.close();
     for (const key of [
       '__taskModalFavoriteApi',
-      '__taskModalFavoriteRunnerDisplay',
       '__taskModalFavoriteUiStore',
       '__taskModalFavoriteTasksStore',
       '__taskModalFavoriteBoardStore',
       '__taskModalFavoriteAnalysisStore',
-      '__taskModalFavoriteStore',
+      '__taskModalFavoriteFavoritesStore',
       '__taskModalFavoriteSeenStore',
     ]) delete globalThis[key];
   });

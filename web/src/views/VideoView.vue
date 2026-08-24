@@ -1,8 +1,538 @@
+<template>
+  <div class="video">
+    <header class="video-hero" :class="{ compact: job?.status === 'done' }">
+      <div class="hero-copy">
+        <p class="eyebrow">Разбор встреч</p>
+        <h2 class="ttl">Видео → задачи</h2>
+        <p class="lead">
+          Загрузи запись — Cockpit расшифрует разговор, выделит договорённости
+          и подготовит черновики для Битрикс24.
+        </p>
+      </div>
+      <div class="hero-route" aria-hidden="true">
+        <span class="route-node active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+          </svg>
+        </span>
+        <i></i>
+        <span class="route-node">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5h16 M4 10h10 M4 15h16 M4 20h8" />
+          </svg>
+        </span>
+        <i></i>
+        <span class="route-node good">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+        </span>
+      </div>
+    </header>
+
+    <div v-if="pluginOff" class="empty-state">
+      <span class="empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3v4 M16 3v4 M5 7h14v4a7 7 0 0 1-14 0z M12 18v3" />
+        </svg>
+      </span>
+      <div>
+        <h3>Плагин выключен</h3>
+        <p>Включи «Видео → задачи» в разделе «Настройки → Плагины», чтобы снова разбирать записи.</p>
+      </div>
+    </div>
+    <template v-else>
+      <div v-if="doctorOk === false" class="notice danger">
+        <span class="notice-icon" aria-hidden="true">!</span>
+        <div>
+          <b>Медиа-конвейер не готов</b>
+          <p>Проверь окружение сервера: для разбора нужны ffmpeg, venv и whisper.</p>
+        </div>
+      </div>
+
+      <section class="upload-card" :class="{ busy: uploading || job?.status === 'running', compact: job?.status === 'done' }">
+        <!-- multiple: инструменты записи режут длинный созвон на файлы, и встреча
+             законно лежит в нескольких частях. Выбранные склеиваются в одну встречу
+             по времени файла — порядок каталога у браузера произвольный. -->
+        <UiFilePicker
+          accept="video/*,audio/*"
+          multiple
+          presentation="dropzone"
+          :density="job?.status === 'done' ? 'compact' : 'default'"
+          :disabled="Boolean(job && job.status === 'running')"
+          :busy="uploading"
+          :show-summary="false"
+          :show-reset="false"
+          @change="onFiles"
+        >
+          <template #leading>
+            <span class="upload-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 16V4 M8 8l4-4 4 4 M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+              </svg>
+            </span>
+          </template>
+          {{ uploading
+            ? 'Загружаю запись…'
+            : job?.status === 'done'
+              ? 'Разобрать другую запись'
+              : 'Выбрать видео или аудио' }}
+          <template #hint>
+            <template v-if="job?.status !== 'done'">
+              Сама запись останется в Cockpit — на портал уйдут только подтверждённые задачи и их кадры
+            </template>
+            <template v-else>
+              Текущий разбор останется на экране до выбора нового файла
+            </template>
+          </template>
+          <template #trailing>
+            <span class="upload-action">{{ uploading ? 'Подожди' : 'Выбрать файл' }}</span>
+          </template>
+        </UiFilePicker>
+      </section>
+
+      <div v-if="error" class="notice danger err">
+        <span class="notice-icon" aria-hidden="true">!</span>
+        <p>{{ error }}</p>
+      </div>
+
+      <!-- Прогресс распознавания -->
+      <section v-if="job && job.status === 'running'" class="progress">
+        <div class="progress-head">
+          <span class="progress-mark"><UiSpinner decorative /></span>
+          <div>
+            <b>Распознаю речь</b>
+            <p>Разбиваю запись на реплики и восстанавливаю таймкоды.</p>
+          </div>
+          <span v-if="job.progress" class="mono progress-count">{{ job.progress.done }}/{{ job.progress.total }}</span>
+        </div>
+        <div class="pbar"><span :style="{ width: job.progress ? (job.progress.done / job.progress.total * 100) + '%' : '10%' }"></span></div>
+      </section>
+
+      <div v-if="job && job.status === 'done'" class="result">
+      <!-- Что именно разобрано. Строка обязательна: файлы записи называются почти
+           одинаково и лежат рядом, а без имени, размера и длительности на экране
+           «я выбирал другой» и «раздел обрезал» неотличимы. Живой случай: инструмент
+           разбил встречу на два файла (17:04 и 1:18), уехал второй. -->
+        <section class="meeting-summary">
+          <div class="meeting-file">
+            <span class="meeting-check" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12l4 4L19 6" />
+              </svg>
+            </span>
+            <div>
+              <span class="summary-kicker">Распознавание завершено</span>
+              <p class="filenote">
+                <template v-if="parts.length > 1">Разобрано частей: <b>{{ parts.length }}</b></template><!--
+                --><template v-else>Разобран файл<template v-if="uploaded">:&nbsp;<b>{{ uploaded.name }}</b></template><!--
+                --><template v-if="uploaded && mb(uploaded.size)"> · {{ mb(uploaded.size) }}</template></template><!--
+                --><template v-if="mediaDuration"> · запись {{ mmss(mediaDuration) }}</template><!--
+                --><template v-if="segments.length"> · {{ segments.length }} реплик</template>
+              </p>
+              <!-- Части перечислены поимённо и по порядку: склейка меняет таймкоды,
+                   и человек должен видеть, что и в каком порядке в неё вошло. -->
+              <ul v-if="parts.length > 1" class="partlist">
+                <li v-for="(p, i) in parts" :key="p.jobId || i">
+                  <span class="mono">{{ i + 1 }}.</span> {{ p.name }}
+                  <span v-if="p.job?.result?.duration" class="muted">· {{ mmss(p.job.result.duration) }}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="summary-metrics">
+            <span v-if="mediaDuration"><b class="mono">{{ mmss(mediaDuration) }}</b><small>запись</small></span>
+            <span><b>{{ segments.length }}</b><small>реплик</small></span>
+            <span><b>{{ drafts.length }}</b><small>черновиков</small></span>
+          </div>
+        </section>
+
+      <!-- Черновики задач -->
+      <section class="drafts">
+        <div class="dhead">
+          <div class="section-title">
+            <span class="section-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+            </span>
+            <div>
+              <p class="section-kicker">Шаг 2</p>
+              <h3 class="h">Проверь задачи <span class="count-pill">{{ drafts.length }}</span></h3>
+            </div>
+          </div>
+          <UiButton class="btn icon-btn" @click="addDraft">
+            + ещё задача
+          </UiButton>
+        </div>
+
+        <!-- Разбор моделью -->
+        <div class="plan">
+          <div class="plan-head">
+            <span class="plan-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z" />
+              </svg>
+            </span>
+            <div>
+              <b>Авторазбор встречи</b>
+              <small v-if="planModel">{{ planModel.model || planModel }}</small>
+              <small v-else>Модель пока не выбрана</small>
+            </div>
+          </div>
+          <template v-if="planModel">
+            <div class="planrow">
+              <UiInput
+                v-model="planHint"
+                class="hint"
+                placeholder="Что учесть при разборе (необязательно)"
+                :disabled="planning"
+              />
+              <UiButton
+                class="btn analyze"
+                variant="solid"
+                tone="accent"
+                :disabled="planning"
+                :loading="planning"
+                loading-label="Разбираю встречу на задачи"
+                @click="planTasks"
+              >
+                <template #leading>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 3v3 M12 18v3 M3 12h3 M18 12h3 M7 7l2 2 M15 15l2 2 M17 7l-2 2 M9 15l-2 2" />
+                  </svg>
+                </template>
+                {{ planning ? 'Разбираю…' : 'Разобрать на задачи' }}
+              </UiButton>
+            </div>
+            <p class="muted note">Модель прочитает расшифровку и предложит черновики. Проверь их: формулировку собрала она, а ставишь задачи ты.</p>
+          </template>
+          <p v-else class="muted note">
+            Автоматический разбор выключен: модель не выбрана в «Настройки → Плагины → Видео&nbsp;→&nbsp;задачи».
+            Задачи можно собрать вручную — клик по реплике добавляет её в последний черновик.
+          </p>
+          <p v-if="planError" class="err note">{{ planError }}</p>
+          <p v-if="planInfo" class="muted note">
+            <template v-if="planInfo.count">Модель {{ planInfo.model }} предложила задач: {{ planInfo.count }}.</template>
+            <template v-else>Модель {{ planInfo.model }} не нашла задач в этой встрече.</template>
+            <template v-if="planInfo.truncated"> Прочитаны первые {{ planInfo.shown }} реплик — остальное разбери сам.</template>
+          </p>
+        </div>
+
+        <!-- Кому и куда: общий выбор на всю встречу -->
+        <div class="common">
+          <div class="common-head">
+            <b>По умолчанию для новых задач</b>
+            <span>Можно изменить в каждом черновике</span>
+          </div>
+          <label class="fld">
+            <span class="lbl">Постановщик
+              <UiTooltip text="От чьего имени создать задачу. Пусто — от тебя: задачу ставит владелец портальной сессии. На встрече поводы приносят разные люди, и «от того, кто просил» читается иначе, чем «от меня»." />
+            </span>
+            <UiSelect v-model="defCreator">
+              <option value="">— от меня —</option>
+              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+            </UiSelect>
+          </label>
+          <label class="fld">
+            <span class="lbl">Исполнитель
+              <UiTooltip text="Кому делать. Не выбран — задача уйдёт на владельца сессии, то есть на тебя." />
+            </span>
+            <UiSelect v-model="defResponsible">
+              <option value="">— на себя —</option>
+              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+            </UiSelect>
+          </label>
+          <label class="fld">
+            <span class="lbl">Проект</span>
+            <UiSelect v-model="defGroup">
+              <option value="">— без проекта —</option>
+              <option v-for="g in b24groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+            </UiSelect>
+          </label>
+          <label class="fld">
+            <span class="lbl">Приоритет</span>
+            <UiSelect v-model.number="defPriority">
+              <option :value="0">низкий</option>
+              <option :value="1">средний</option>
+              <option :value="2">высокий</option>
+            </UiSelect>
+          </label>
+        </div>
+
+        <div v-for="(d, i) in drafts" :key="i" class="draft" :class="{ done: d.createdId }">
+          <div class="draft-head">
+            <span class="draft-index mono">{{ String(i + 1).padStart(2, '0') }}</span>
+            <span v-if="d.confidence !== null" class="conf" :class="{ low: d.confidence < 0.6 }" :title="d.reason">
+              модель: {{ Math.round(d.confidence * 100) }}%
+            </span>
+            <span v-else class="draft-kind">ручной черновик</span>
+            <UiIconButton
+              v-if="!d.createdId"
+              class="del"
+              role="embedded"
+              tone="danger"
+              label="Удалить черновик"
+              title="Удалить черновик"
+              @click="removeDraft(i)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <path d="M6 6l12 12 M18 6L6 18" />
+              </svg>
+            </UiIconButton>
+          </div>
+          <!-- Превью: задачу пришли ПРОЧИТАТЬ перед постановкой, а не заполнить.
+               Поля формы на этом месте заставляли вычитывать заголовок из инпута и
+               описание из textarea со своей полосой прокрутки. Правка — по кнопке. -->
+          <template v-if="!d.editing">
+            <h4 class="ptitle">{{ d.title || 'Без заголовка' }}</h4>
+            <p class="pdesc">{{ d.description }}</p>
+          </template>
+          <template v-else>
+            <UiInput
+              v-model="d.title"
+              class="dtitle"
+              placeholder="Заголовок задачи"
+              :disabled="Boolean(d.createdId)"
+            />
+            <UiTextarea
+              v-model="d.description"
+              rows="5"
+              :disabled="Boolean(d.createdId)"
+              placeholder="Описание (клик по реплике добавит её текст)"
+            />
+          </template>
+          <!-- Кадр записи на том же таймкоде, что и ссылка в описании. Он и есть
+               ответ на «о чём вообще шла речь»: формулировку собрала модель по чужой
+               речи, а кадр показывает место, откуда она её взяла. Клик открывает
+               полный размер — на превью в 420 px текст на экране не прочитать. -->
+          <figure v-if="d.frame" class="shot" :class="{ off: d.frameOff }">
+            <a :href="frameUrl(d.frame.name)" target="_blank" rel="noopener">
+              <!-- Пропавший кадр (истёк TTL, начат новый разбор) убираем молча:
+                   показывать нечего, а задача от этого не портится. -->
+              <img :src="frameUrl(d.frame.name)" :alt="`Кадр записи на ${mmss(d.frame.at)}`"
+                   loading="lazy" @error="d.frame = null" />
+            </a>
+            <figcaption>
+              <span class="tc mono">{{ mmss(d.frame.at) }}</span>
+              <span class="shot-note">{{ d.frameOff ? 'к задаче не приложится' : 'приложится к задаче' }}</span>
+              <UiToggleButton
+                v-if="!d.createdId"
+                v-model="d.frameOff"
+                class="btn compact-action"
+              >
+                {{ d.frameOff ? 'Приложить' : 'Не прикладывать' }}
+              </UiToggleButton>
+            </figcaption>
+          </figure>
+          <div class="drow">
+            <UiSelect
+              v-model="d.createdById"
+              compact
+              title="постановщик — от кого задача"
+              :disabled="Boolean(d.createdId)"
+            >
+              <option value="">от меня</option>
+              <option v-for="u in b24users" :key="u.id" :value="u.id">от: {{ u.name }}</option>
+            </UiSelect>
+            <UiSelect
+              v-model="d.responsibleId"
+              compact
+              title="исполнитель"
+              :disabled="Boolean(d.createdId)"
+            >
+              <option value="">на себя</option>
+              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+            </UiSelect>
+            <UiSelect
+              v-model="d.groupId"
+              compact
+              title="проект"
+              :disabled="Boolean(d.createdId)"
+            >
+              <option value="">без проекта</option>
+              <option v-for="g in b24groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+            </UiSelect>
+            <UiSelect
+              v-model.number="d.priority"
+              compact
+              title="приоритет"
+              :disabled="Boolean(d.createdId)"
+            >
+              <option :value="0">низкий</option>
+              <option :value="1">средний</option>
+              <option :value="2">высокий</option>
+            </UiSelect>
+            <!-- Своя кнопка у каждой задачи: человек решает по каждой отдельно, а не
+                 удаляет лишние черновики ради того, чтобы уехал нужный. -->
+            <span class="dact">
+              <span v-if="d.createdId" class="ok">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12l4 4L19 6" />
+                </svg>
+                задача {{ d.createdId }}
+              </span>
+              <template v-else>
+                <UiToggleButton v-model="d.editing" class="btn compact-action">
+                  {{ d.editing ? 'Готово' : 'Править' }}
+                </UiToggleButton>
+                <UiButton
+                  class="btn compact-action"
+                  variant="solid"
+                  tone="success"
+                  :disabled="d.creating || creating || !d.title.trim()"
+                  :loading="d.creating"
+                  loading-label="Ставлю задачу"
+                  @click="createOne(d)"
+                >
+                  {{ d.creating ? 'Ставлю…' : 'Поставить' }}
+                </UiButton>
+              </template>
+            </span>
+          </div>
+          <p v-if="d.error" class="err small">{{ d.error }}</p>
+        </div>
+
+        <div v-if="ready.length > 1" class="actions">
+          <UiButton
+            class="btn"
+            :disabled="creating"
+            :loading="creating"
+            loading-label="Ставлю все задачи"
+            @click="createAll"
+          >
+            {{ creating ? 'Ставлю…' : `Поставить все (${ready.length})` }}
+          </UiButton>
+        </div>
+      </section>
+      <!-- Расшифровка: свёрнута, потому что раздел отвечает на «какие задачи». -->
+      <section class="transcript" :class="{ folded: !showTranscript }">
+        <div class="thead">
+          <UiDisclosureButton
+            v-model:open="showTranscript"
+            class="fold"
+            controls="video-transcript-content"
+          >
+            <span class="section-mark transcript-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 12v3 M8 8v11 M12 5v14 M16 8v11 M20 12v3" />
+              </svg>
+            </span>
+            <span class="fold-copy">
+              <span class="section-kicker">Исходник</span>
+              <span class="h">Расшифровка</span>
+            </span>
+            <span class="transcript-meta">
+              <span>{{ segments.length }} реплик</span>
+              <span v-if="mediaDuration">запись {{ mmss(mediaDuration) }}</span>
+            </span>
+          </UiDisclosureButton>
+          <UiSegmentedControl
+            v-if="showTranscript"
+            v-model="view"
+            class="tabs"
+            label="Вид расшифровки"
+            :options="TRANSCRIPT_VIEW_OPTIONS"
+          />
+        </div>
+
+        <!-- Речь кончилась сильно раньше конца записи. Это законно (в конце молчали),
+             поэтому оговорка, а не ошибка: она отвечает на «почему реплик так мало»
+             до того, как вопрос превратится в подозрение к разбору. -->
+        <p v-if="speechTail" class="muted note">
+          Речь заканчивается на {{ mmss(speechTail.last) }}, дальше до конца записи тишина
+          ({{ mmss(speechTail.silence) }}). Если ждал большего — проверь, тот ли файл загружен.
+        </p>
+
+        <div v-if="showTranscript" id="video-transcript-content" class="transcript-content">
+        <div v-if="view === 'turns'" class="segs">
+          <UiPressable
+            v-for="(s, i) in segments"
+            :key="i"
+            class="seg"
+            data-role="transcript-segment"
+            title="Добавить в черновик задачи"
+            :aria-label="`Добавить реплику ${mmss(s.start)} в черновик задачи: ${s.text}`"
+            @click="appendSegment(s)"
+          >
+            <span class="tc mono">{{ mmss(s.start) }}</span>
+            <span class="txt">{{ s.text }}</span>
+            <span class="seg-add" aria-hidden="true">+</span>
+          </UiPressable>
+        </div>
+        <div v-else class="plain">
+          <p v-for="(p, i) in paragraphs" :key="i" class="para">
+            <span class="tc mono">{{ mmss(p.start) }}</span> {{ p.text }}
+          </p>
+        </div>
+
+        <div class="tools">
+          <UiButton class="btn" @click="copyText">
+            <template #leading>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 8h11v11H8z M5 16H4V5h11v1" />
+              </svg>
+            </template>
+            {{ copied ? 'Скопировано' : 'Скопировать текст' }}
+          </UiButton>
+          <UiButton class="btn" @click="downloadText">
+            <template #leading>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 4v11 M8 11l4 4 4-4 M5 20h14" />
+              </svg>
+            </template>
+            Скачать .txt
+          </UiButton>
+          <UiButton class="btn" @click="useFullText">
+            <template #leading>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5h16 M4 10h16 M4 15h10 M18 14v6 M15 17h6" />
+              </svg>
+            </template>
+            Весь текст в задачу
+          </UiButton>
+        </div>
+        </div>
+      </section>
+      </div>
+    </template>
+  </div>
+</template>
+
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue';
+import {
+  UiButton,
+  UiDisclosureButton,
+  UiFilePicker,
+  UiIconButton,
+  UiInput,
+  UiPressable,
+  UiSegmentedControl,
+  UiSelect,
+  UiSpinner,
+  UiTextarea,
+  UiTooltip,
+  UiToggleButton,
+} from '../ui';
 import { api } from '../shared/api-client.js';
+import { writeClipboardText } from '../shared/clipboard.js';
 import { usePluginsStore } from '../stores/plugins.js';
-import HelpTip from '../shared/ui/HelpTip.vue';
 
 // Раздел — плагин «Видео → задачи»: выключенный показывает заглушку вместо формы.
 const plugins = usePluginsStore();
@@ -12,7 +542,7 @@ const pluginOff = computed(() => plugins.loaded && !plugins.enabled('video'));
 // вручную: кнопка авторазбора просто не предлагается.
 const planModel = computed(() => plugins.byId('video')?.values?.triageModel || null);
 
-const BASE = (import.meta.env.VITE_BRAIN_URL || '').replace(/\/$/, '');
+const BASE = (import.meta.env?.VITE_BRAIN_URL || '').replace(/\/$/, '');
 
 const doctorOk = ref(null);
 const uploading = ref(false);
@@ -112,6 +642,10 @@ const speechTail = computed(() => {
 // --- Расшифровка: реплики или сплошной текст ---
 
 const view = ref('turns');   // turns | text
+const TRANSCRIPT_VIEW_OPTIONS = [
+  { value: 'turns', label: 'Реплики' },
+  { value: 'text', label: 'Сплошной текст' },
+];
 const PAUSE_SEC = 2.5;       // пауза, после которой начинается новый абзац
 const PARA_CHARS = 700;      // и потолок на случай непрерывной речи без пауз
 
@@ -146,26 +680,14 @@ const plainText = computed(() => paragraphs.value
 const copied = ref(false);
 let copiedTimer = null;
 async function copyText() {
-  const value = plainText.value;
-  let ok = false;
-  try {
-    // clipboard API живёт только в secure context: по http://<адрес> его нет вовсе
-    // (та же грабля, что у микрофона). Поэтому запасной путь — скрытое поле и
-    // execCommand: без него кнопка молча не работала бы у окна в локальной сети.
-    await navigator.clipboard.writeText(value);
-    ok = true;
-  } catch {
-    const area = document.createElement('textarea');
-    area.value = value;
-    area.setAttribute('readonly', '');
-    area.style.position = 'fixed';
-    area.style.opacity = '0';
-    document.body.appendChild(area);
-    area.select();
-    try { ok = document.execCommand('copy'); } catch { ok = false; }
-    area.remove();
+  const ok = await writeClipboardText(plainText.value);
+
+  if (!ok) {
+    error.value = 'Скопировать не удалось — выдели текст и нажми Ctrl+C.';
+
+    return;
   }
-  if (!ok) { error.value = 'Скопировать не удалось — выдели текст и нажми Ctrl+C.'; return; }
+
   copied.value = true;
   clearTimeout(copiedTimer);
   copiedTimer = setTimeout(() => { copied.value = false; }, 1600);
@@ -243,8 +765,8 @@ watch(defPriority, (value, prev) => {
   for (const d of drafts.value) if (d.priority === prev) d.priority = value;
 });
 
-async function onFile(e) {
-  const picked = [...(e.target.files || [])];
+async function onFiles(files) {
+  const picked = [...files];
   if (!picked.length) return;
   uploading.value = true; error.value = null; job.value = null; drafts.value = []; created.value = [];
   planError.value = null; planInfo.value = null;
@@ -429,400 +951,6 @@ async function createAll() {
 onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 </script>
 
-<template>
-  <div class="video">
-    <header class="video-hero" :class="{ compact: job?.status === 'done' }">
-      <div class="hero-copy">
-        <p class="eyebrow">Разбор встреч</p>
-        <h2 class="ttl">Видео → задачи</h2>
-        <p class="lead">
-          Загрузи запись — Cockpit расшифрует разговор, выделит договорённости
-          и подготовит черновики для Битрикс24.
-        </p>
-      </div>
-      <div class="hero-route" aria-hidden="true">
-        <span class="route-node active">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
-          </svg>
-        </span>
-        <i></i>
-        <span class="route-node">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 5h16 M4 10h10 M4 15h16 M4 20h8" />
-          </svg>
-        </span>
-        <i></i>
-        <span class="route-node good">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-        </span>
-      </div>
-    </header>
-
-    <div v-if="pluginOff" class="empty-state">
-      <span class="empty-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 3v4 M16 3v4 M5 7h14v4a7 7 0 0 1-14 0z M12 18v3" />
-        </svg>
-      </span>
-      <div>
-        <h3>Плагин выключен</h3>
-        <p>Включи «Видео → задачи» в разделе «Настройки → Плагины», чтобы снова разбирать записи.</p>
-      </div>
-    </div>
-    <template v-else>
-      <div v-if="doctorOk === false" class="notice danger">
-        <span class="notice-icon" aria-hidden="true">!</span>
-        <div>
-          <b>Медиа-конвейер не готов</b>
-          <p>Проверь окружение сервера: для разбора нужны ffmpeg, venv и whisper.</p>
-        </div>
-      </div>
-
-      <section class="upload-card" :class="{ busy: uploading || job?.status === 'running', compact: job?.status === 'done' }">
-        <label class="filebtn">
-          <!-- multiple: инструменты записи режут длинный созвон на файлы, и встреча
-               законно лежит в нескольких частях. Выбранные склеиваются в одну встречу
-               по времени файла — порядок каталога у браузера произвольный. -->
-          <input type="file" accept="video/*,audio/*" multiple @change="onFile" :disabled="uploading || (job && job.status === 'running')" />
-          <span class="upload-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 16V4 M8 8l4-4 4 4 M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
-            </svg>
-          </span>
-          <span class="upload-copy">
-            <strong>{{ uploading ? 'Загружаю запись…' : job?.status === 'done' ? 'Разобрать другую запись' : 'Выбрать видео или аудио' }}</strong>
-            <small v-if="job?.status !== 'done'">Сама запись останется в Cockpit — на портал уйдут только подтверждённые задачи и их кадры</small>
-            <small v-else>Текущий разбор останется на экране до выбора нового файла</small>
-          </span>
-          <span class="upload-action">{{ uploading ? 'Подожди' : 'Выбрать файл' }}</span>
-        </label>
-      </section>
-
-      <div v-if="error" class="notice danger err">
-        <span class="notice-icon" aria-hidden="true">!</span>
-        <p>{{ error }}</p>
-      </div>
-
-      <!-- Прогресс распознавания -->
-      <section v-if="job && job.status === 'running'" class="progress">
-        <div class="progress-head">
-          <span class="progress-mark"><span class="spin"></span></span>
-          <div>
-            <b>Распознаю речь</b>
-            <p>Разбиваю запись на реплики и восстанавливаю таймкоды.</p>
-          </div>
-          <span v-if="job.progress" class="mono progress-count">{{ job.progress.done }}/{{ job.progress.total }}</span>
-        </div>
-        <div class="pbar"><span :style="{ width: job.progress ? (job.progress.done / job.progress.total * 100) + '%' : '10%' }"></span></div>
-      </section>
-
-      <div v-if="job && job.status === 'done'" class="result">
-      <!-- Что именно разобрано. Строка обязательна: файлы записи называются почти
-           одинаково и лежат рядом, а без имени, размера и длительности на экране
-           «я выбирал другой» и «раздел обрезал» неотличимы. Живой случай: инструмент
-           разбил встречу на два файла (17:04 и 1:18), уехал второй. -->
-        <section class="meeting-summary">
-          <div class="meeting-file">
-            <span class="meeting-check" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M5 12l4 4L19 6" />
-              </svg>
-            </span>
-            <div>
-              <span class="summary-kicker">Распознавание завершено</span>
-              <p class="filenote">
-                <template v-if="parts.length > 1">Разобрано частей: <b>{{ parts.length }}</b></template><!--
-                --><template v-else>Разобран файл<template v-if="uploaded">:&nbsp;<b>{{ uploaded.name }}</b></template><!--
-                --><template v-if="uploaded && mb(uploaded.size)"> · {{ mb(uploaded.size) }}</template></template><!--
-                --><template v-if="mediaDuration"> · запись {{ mmss(mediaDuration) }}</template><!--
-                --><template v-if="segments.length"> · {{ segments.length }} реплик</template>
-              </p>
-              <!-- Части перечислены поимённо и по порядку: склейка меняет таймкоды,
-                   и человек должен видеть, что и в каком порядке в неё вошло. -->
-              <ul v-if="parts.length > 1" class="partlist">
-                <li v-for="(p, i) in parts" :key="p.jobId || i">
-                  <span class="mono">{{ i + 1 }}.</span> {{ p.name }}
-                  <span v-if="p.job?.result?.duration" class="muted">· {{ mmss(p.job.result.duration) }}</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div class="summary-metrics">
-            <span v-if="mediaDuration"><b class="mono">{{ mmss(mediaDuration) }}</b><small>запись</small></span>
-            <span><b>{{ segments.length }}</b><small>реплик</small></span>
-            <span><b>{{ drafts.length }}</b><small>черновиков</small></span>
-          </div>
-        </section>
-
-      <!-- Черновики задач -->
-      <section class="drafts">
-        <div class="dhead">
-          <div class="section-title">
-            <span class="section-mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-              </svg>
-            </span>
-            <div>
-              <p class="section-kicker">Шаг 2</p>
-              <h3 class="h">Проверь задачи <span class="count-pill">{{ drafts.length }}</span></h3>
-            </div>
-          </div>
-          <button class="btn icon-btn" @click="addDraft">
-            + ещё задача
-          </button>
-        </div>
-
-        <!-- Разбор моделью -->
-        <div class="plan">
-          <div class="plan-head">
-            <span class="plan-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z" />
-              </svg>
-            </span>
-            <div>
-              <b>Авторазбор встречи</b>
-              <small v-if="planModel">{{ planModel.model || planModel }}</small>
-              <small v-else>Модель пока не выбрана</small>
-            </div>
-          </div>
-          <template v-if="planModel">
-            <div class="planrow">
-              <input v-model="planHint" class="hint" placeholder="Что учесть при разборе (необязательно)" :disabled="planning" />
-              <button class="btn primary analyze" :disabled="planning" @click="planTasks">
-                <span v-if="planning" class="spin"></span>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M12 3v3 M12 18v3 M3 12h3 M18 12h3 M7 7l2 2 M15 15l2 2 M17 7l-2 2 M9 15l-2 2" />
-                </svg>
-                {{ planning ? 'Разбираю…' : 'Разобрать на задачи' }}
-              </button>
-            </div>
-            <p class="muted note">Модель прочитает расшифровку и предложит черновики. Проверь их: формулировку собрала она, а ставишь задачи ты.</p>
-          </template>
-          <p v-else class="muted note">
-            Автоматический разбор выключен: модель не выбрана в «Настройки → Плагины → Видео&nbsp;→&nbsp;задачи».
-            Задачи можно собрать вручную — клик по реплике добавляет её в последний черновик.
-          </p>
-          <p v-if="planError" class="err note">{{ planError }}</p>
-          <p v-if="planInfo" class="muted note">
-            <template v-if="planInfo.count">Модель {{ planInfo.model }} предложила задач: {{ planInfo.count }}.</template>
-            <template v-else>Модель {{ planInfo.model }} не нашла задач в этой встрече.</template>
-            <template v-if="planInfo.truncated"> Прочитаны первые {{ planInfo.shown }} реплик — остальное разбери сам.</template>
-          </p>
-        </div>
-
-        <!-- Кому и куда: общий выбор на всю встречу -->
-        <div class="common">
-          <div class="common-head">
-            <b>По умолчанию для новых задач</b>
-            <span>Можно изменить в каждом черновике</span>
-          </div>
-          <label class="fld">
-            <span class="lbl">Постановщик
-              <HelpTip text="От чьего имени создать задачу. Пусто — от тебя: задачу ставит владелец портальной сессии. На встрече поводы приносят разные люди, и «от того, кто просил» читается иначе, чем «от меня»." />
-            </span>
-            <select v-model="defCreator">
-              <option value="">— от меня —</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
-            </select>
-          </label>
-          <label class="fld">
-            <span class="lbl">Исполнитель
-              <HelpTip text="Кому делать. Не выбран — задача уйдёт на владельца сессии, то есть на тебя." />
-            </span>
-            <select v-model="defResponsible">
-              <option value="">— на себя —</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
-            </select>
-          </label>
-          <label class="fld">
-            <span class="lbl">Проект</span>
-            <select v-model="defGroup">
-              <option value="">— без проекта —</option>
-              <option v-for="g in b24groups" :key="g.id" :value="g.id">{{ g.name }}</option>
-            </select>
-          </label>
-          <label class="fld">
-            <span class="lbl">Приоритет</span>
-            <select v-model.number="defPriority">
-              <option :value="0">низкий</option>
-              <option :value="1">средний</option>
-              <option :value="2">высокий</option>
-            </select>
-          </label>
-        </div>
-
-        <div v-for="(d, i) in drafts" :key="i" class="draft" :class="{ done: d.createdId }">
-          <div class="draft-head">
-            <span class="draft-index mono">{{ String(i + 1).padStart(2, '0') }}</span>
-            <span v-if="d.confidence !== null" class="conf" :class="{ low: d.confidence < 0.6 }" :title="d.reason">
-              модель: {{ Math.round(d.confidence * 100) }}%
-            </span>
-            <span v-else class="draft-kind">ручной черновик</span>
-            <button v-if="!d.createdId" class="del" @click="removeDraft(i)" title="удалить" aria-label="Удалить черновик">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                <path d="M6 6l12 12 M18 6L6 18" />
-              </svg>
-            </button>
-          </div>
-          <!-- Превью: задачу пришли ПРОЧИТАТЬ перед постановкой, а не заполнить.
-               Поля формы на этом месте заставляли вычитывать заголовок из инпута и
-               описание из textarea со своей полосой прокрутки. Правка — по кнопке. -->
-          <template v-if="!d.editing">
-            <h4 class="ptitle">{{ d.title || 'Без заголовка' }}</h4>
-            <p class="pdesc">{{ d.description }}</p>
-          </template>
-          <template v-else>
-            <input v-model="d.title" placeholder="Заголовок задачи" class="dtitle" :disabled="!!d.createdId" />
-            <textarea v-model="d.description" rows="5" :disabled="!!d.createdId"
-                      placeholder="Описание (клик по реплике добавит её текст)"></textarea>
-          </template>
-          <!-- Кадр записи на том же таймкоде, что и ссылка в описании. Он и есть
-               ответ на «о чём вообще шла речь»: формулировку собрала модель по чужой
-               речи, а кадр показывает место, откуда она её взяла. Клик открывает
-               полный размер — на превью в 420 px текст на экране не прочитать. -->
-          <figure v-if="d.frame" class="shot" :class="{ off: d.frameOff }">
-            <a :href="frameUrl(d.frame.name)" target="_blank" rel="noopener">
-              <!-- Пропавший кадр (истёк TTL, начат новый разбор) убираем молча:
-                   показывать нечего, а задача от этого не портится. -->
-              <img :src="frameUrl(d.frame.name)" :alt="`Кадр записи на ${mmss(d.frame.at)}`"
-                   loading="lazy" @error="d.frame = null" />
-            </a>
-            <figcaption>
-              <span class="tc mono">{{ mmss(d.frame.at) }}</span>
-              <span class="shot-note">{{ d.frameOff ? 'к задаче не приложится' : 'приложится к задаче' }}</span>
-              <button v-if="!d.createdId" class="btn small" @click="d.frameOff = !d.frameOff">
-                {{ d.frameOff ? 'Приложить' : 'Не прикладывать' }}
-              </button>
-            </figcaption>
-          </figure>
-          <div class="drow">
-            <select v-model="d.createdById" class="mini" title="постановщик — от кого задача" :disabled="!!d.createdId">
-              <option value="">от меня</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">от: {{ u.name }}</option>
-            </select>
-            <select v-model="d.responsibleId" class="mini" title="исполнитель" :disabled="!!d.createdId">
-              <option value="">на себя</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
-            </select>
-            <select v-model="d.groupId" class="mini" title="проект" :disabled="!!d.createdId">
-              <option value="">без проекта</option>
-              <option v-for="g in b24groups" :key="g.id" :value="g.id">{{ g.name }}</option>
-            </select>
-            <select v-model.number="d.priority" class="mini" title="приоритет" :disabled="!!d.createdId">
-              <option :value="0">низкий</option>
-              <option :value="1">средний</option>
-              <option :value="2">высокий</option>
-            </select>
-            <!-- Своя кнопка у каждой задачи: человек решает по каждой отдельно, а не
-                 удаляет лишние черновики ради того, чтобы уехал нужный. -->
-            <span class="dact">
-              <span v-if="d.createdId" class="ok">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M5 12l4 4L19 6" />
-                </svg>
-                задача {{ d.createdId }}
-              </span>
-              <template v-else>
-                <button class="btn small" @click="d.editing = !d.editing">
-                  {{ d.editing ? 'Готово' : 'Править' }}
-                </button>
-                <button class="btn success small" :disabled="d.creating || creating || !d.title.trim()"
-                        @click="createOne(d)">
-                  {{ d.creating ? 'Ставлю…' : 'Поставить' }}
-                </button>
-              </template>
-            </span>
-          </div>
-          <p v-if="d.error" class="err small">{{ d.error }}</p>
-        </div>
-
-        <div v-if="ready.length > 1" class="actions">
-          <button class="btn" :disabled="creating" @click="createAll">
-            {{ creating ? 'Ставлю…' : `Поставить все (${ready.length})` }}
-          </button>
-        </div>
-      </section>
-      <!-- Расшифровка: свёрнута, потому что раздел отвечает на «какие задачи». -->
-      <section class="transcript" :class="{ folded: !showTranscript }">
-        <div class="thead">
-          <button class="fold" :aria-expanded="showTranscript" @click="showTranscript = !showTranscript">
-            <span class="section-mark transcript-mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 12v3 M8 8v11 M12 5v14 M16 8v11 M20 12v3" />
-              </svg>
-            </span>
-            <span class="fold-copy">
-              <span class="section-kicker">Исходник</span>
-              <span class="h">Расшифровка</span>
-            </span>
-            <span class="transcript-meta">
-              <span>{{ segments.length }} реплик</span>
-              <span v-if="mediaDuration">запись {{ mmss(mediaDuration) }}</span>
-            </span>
-            <svg class="chevron" :class="{ open: showTranscript }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
-          <div v-if="showTranscript" class="tabs">
-            <button class="tab" :class="{ on: view === 'turns' }" @click="view = 'turns'">Реплики</button>
-            <button class="tab" :class="{ on: view === 'text' }" @click="view = 'text'">Сплошной текст</button>
-          </div>
-        </div>
-
-        <!-- Речь кончилась сильно раньше конца записи. Это законно (в конце молчали),
-             поэтому оговорка, а не ошибка: она отвечает на «почему реплик так мало»
-             до того, как вопрос превратится в подозрение к разбору. -->
-        <p v-if="speechTail" class="muted note">
-          Речь заканчивается на {{ mmss(speechTail.last) }}, дальше до конца записи тишина
-          ({{ mmss(speechTail.silence) }}). Если ждал большего — проверь, тот ли файл загружен.
-        </p>
-
-        <template v-if="showTranscript">
-        <div v-if="view === 'turns'" class="segs">
-          <div v-for="(s, i) in segments" :key="i" class="seg" @click="appendSegment(s)" title="добавить в черновик задачи">
-            <span class="tc mono">{{ mmss(s.start) }}</span>
-            <span class="txt">{{ s.text }}</span>
-            <span class="seg-add" aria-hidden="true">+</span>
-          </div>
-        </div>
-        <div v-else class="plain">
-          <p v-for="(p, i) in paragraphs" :key="i" class="para">
-            <span class="tc mono">{{ mmss(p.start) }}</span> {{ p.text }}
-          </p>
-        </div>
-
-        <div class="tools">
-          <button class="btn" @click="copyText">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M8 8h11v11H8z M5 16H4V5h11v1" />
-            </svg>
-            {{ copied ? 'Скопировано' : 'Скопировать текст' }}
-          </button>
-          <button class="btn" @click="downloadText">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 4v11 M8 11l4 4 4-4 M5 20h14" />
-            </svg>
-            Скачать .txt
-          </button>
-          <button class="btn" @click="useFullText">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 5h16 M4 10h16 M4 15h10 M18 14v6 M15 17h6" />
-            </svg>
-            Весь текст в задачу
-          </button>
-        </div>
-        </template>
-      </section>
-      </div>
-    </template>
-  </div>
-</template>
-
 <style scoped>
 .video {
   width: min(100%, 1160px);
@@ -923,18 +1051,6 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
   transition: border-color .18s ease, background .18s ease;
 }
 .upload-card:hover:not(.busy) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
-.filebtn {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 15px;
-  min-height: 104px;
-  padding: 18px 20px;
-  border-radius: 12px;
-  cursor: pointer;
-}
-.filebtn input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .upload-icon {
   display: grid;
   place-items: center;
@@ -946,9 +1062,6 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
   color: var(--accent);
 }
 .upload-icon svg { width: 23px; height: 23px; }
-.upload-copy { min-width: 0; display: grid; gap: 3px; }
-.upload-copy strong { overflow: hidden; font-size: 15px; font-weight: 660; text-overflow: ellipsis; white-space: nowrap; }
-.upload-copy small { color: var(--ink-mid); font-size: 12.5px; line-height: 1.45; }
 .upload-action {
   min-width: 112px;
   padding: 9px 13px;
@@ -960,7 +1073,6 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
   font-weight: 650;
   text-align: center;
 }
-.upload-card.compact .filebtn { min-height: 74px; padding-block: 10px; }
 .upload-card.compact .upload-icon { width: 42px; height: 42px; border-radius: 12px; }
 .upload-card.busy { opacity: .7; }
 
@@ -1025,15 +1137,11 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 .section-kicker { margin-bottom: 3px; font-size: 9px; }
 .count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 19px; margin-left: 4px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--ground); color: var(--ink-mid); font-family: var(--mono); font-size: 10.5px; vertical-align: 1px; }
 .tabs { display: flex; gap: 4px; }
-.tab { padding: 6px 11px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink-mid); font-size: 12px; cursor: pointer; }
-.tab:hover { color: var(--ink); }
-.tab.on { border-color: var(--line); background: var(--surface-2); color: var(--ink); box-shadow: inset 0 1px 0 #ffffff08; }
 .segs, .plain { max-height: 480px; overflow-y: auto; overflow-wrap: anywhere; }
 .segs { display: grid; gap: 3px; margin-top: 14px; padding-right: 4px; }
-.seg { display: grid; grid-template-columns: 52px minmax(0, 1fr) 24px; align-items: start; gap: 11px; padding: 9px 8px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; font-size: 13.5px; transition: border-color .15s, background .15s; }
-.seg:hover { border-color: var(--line); background: var(--surface-2); }
+.seg { display: grid; width: 100%; grid-template-columns: 52px minmax(0, 1fr) 24px; align-items: start; gap: 11px; text-align: left; }
 .seg-add { display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink-mid); opacity: 0; transition: opacity .15s, color .15s; }
-.seg:hover .seg-add { color: var(--accent); opacity: 1; }
+.segs > :hover .seg-add { color: var(--accent); opacity: 1; }
 .plain { margin-top: 15px; }
 .para { margin: 0; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.65; }
 .para:last-child { border-bottom: 0; }
@@ -1047,8 +1155,7 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 .plan-icon { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 11%, var(--surface-2)); color: var(--accent); }
 .plan-icon svg { width: 16px; height: 16px; }
 .planrow { display: flex; gap: 8px; }
-.hint { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font-family: inherit; font-size: 13px; }
-.hint:focus, .dtitle:focus, .draft textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.hint { flex: 1; min-width: 0; }
 .note { margin: 8px 0 0; font-size: 12px; line-height: 1.5; }
 .common { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
 .common-head { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -1064,8 +1171,7 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 .draft-kind, .conf { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-mid); font-size: 10.5px; }
 .conf { border-color: color-mix(in srgb, var(--good) 32%, var(--line)); background: color-mix(in srgb, var(--good) 7%, transparent); color: var(--good); }
 .conf.low { border-color: color-mix(in srgb, var(--warn) 36%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, transparent); color: var(--warn); }
-.dtitle, .draft textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font-family: inherit; font-size: 14px; }
-.draft textarea { min-height: 122px; resize: vertical; line-height: 1.5; }
+.dtitle { width: 100%; }
 .drow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 2px; }
 /* Кнопка задачи прижата вправо: она решение, а не ещё один селект в ряду. */
 .dact { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -1091,36 +1197,20 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 .partlist li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Свёрнутая расшифровка — одна строка-заголовок, а не пустая коробка. */
 .transcript.folded { padding-block: 16px; }
-.fold { min-width: 0; flex: 1; display: flex; align-items: center; gap: 11px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.fold { min-width: 0; flex: 1; text-align: left; }
 .fold-copy { display: grid; gap: 1px; }
 .fold-copy .section-kicker { margin: 0; }
 .transcript-mark { color: var(--ink-mid); }
 .transcript-meta { display: flex; gap: 6px; margin-left: auto; }
 .transcript-meta span { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--ground); color: var(--ink-mid); font-size: 10.5px; white-space: nowrap; }
-.chevron { width: 17px; height: 17px; margin-left: 4px; color: var(--ink-mid); transition: transform .18s; }
-.chevron.open { transform: rotate(180deg); }
 .transcript:not(.folded) .thead { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-.btn.small { padding: 5px 11px; font-size: 12px; }
 /* Поставленная задача остаётся видимой, но приглушённой: править её уже нечем,
    а убирать с экрана нельзя — по ней сверяют, что именно уехало на портал. */
 .draft.done { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); background: color-mix(in srgb, var(--good) 4%, var(--ground)); }
-.draft.done .dtitle, .draft.done textarea, .draft.done select { opacity: .6; }
 .err.small { font-size: 12px; margin: 0; }
-select { width: 100%; max-width: 100%; padding: 8px 28px 8px 10px; border: 1px solid var(--line); border-radius: 8px; appearance: none; background: var(--surface) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a93a3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center; color: var(--ink); font-family: inherit; font-size: 12.5px; }
-select.mini { flex: 0 1 auto; width: auto; min-width: 0; padding-block: 6px; font-size: 11.5px; }
-option { background: var(--surface); }
-.del { position: absolute; top: 11px; right: 11px; display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--ink-mid); cursor: pointer; }
-.del:hover { background: color-mix(in srgb, var(--bad) 10%, var(--surface-2)); color: var(--bad); }
-.del svg { width: 15px; height: 15px; }
+.drow > .ui-select-wrap--compact { flex: 0 1 auto; }
+.del { position: absolute; top: 11px; right: 11px; }
 .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; flex-wrap: wrap; }
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--ink); font-size: 12.5px; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
-.btn:hover:not(:disabled) { border-color: var(--line-2); background: color-mix(in srgb, var(--surface-2) 88%, #fff); }
-.btn svg { width: 16px; height: 16px; }
-.btn.primary { border-color: var(--accent); background: var(--accent); color: #07101d; font-weight: 650; }
-.btn.success { border-color: var(--good); background: var(--good); color: #06210f; font-weight: 650; }
-.btn.icon-btn { padding-left: 10px; }
-.btn .spin { width: 12px; height: 12px; border-color: #07101d45; border-top-color: #07101d; }
-.btn:disabled { opacity: .5; cursor: default; }
 .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--good); font-size: 12px; }
 .ok svg { width: 15px; height: 15px; }
 
@@ -1128,7 +1218,6 @@ option { background: var(--surface); }
   .video-hero { min-height: 0; padding: 23px; border-radius: 17px; }
   .hero-route { display: none; }
   .ttl { font-size: 25px; }
-  .filebtn { grid-template-columns: auto minmax(0, 1fr); min-height: 92px; padding: 14px; }
   .upload-action { display: none; }
   .meeting-summary { align-items: flex-start; flex-direction: column; }
   .meeting-file { width: 100%; }
@@ -1140,7 +1229,6 @@ option { background: var(--surface); }
   .planrow { align-items: stretch; flex-direction: column; }
   .planrow .btn { width: 100%; }
   .thead { align-items: stretch; flex-direction: column; }
-  .tabs { padding-left: 50px; }
   .transcript-meta span:nth-child(2) { display: none; }
 }
 
@@ -1148,21 +1236,16 @@ option { background: var(--surface); }
   .video { gap: 12px; }
   .video-hero { padding: 20px; }
   .video-hero.compact .lead { display: none; }
-  .upload-copy small { display: none; }
   .upload-icon { width: 43px; height: 43px; border-radius: 12px; }
   .meeting-summary, .transcript, .drafts { padding: 15px; border-radius: 14px; }
   .dhead { align-items: flex-start; }
-  .dhead .icon-btn { width: 36px; height: 36px; overflow: hidden; padding: 0; color: transparent; gap: 0; }
-  .dhead .icon-btn::before { content: '+'; color: var(--ink); font-size: 18px; font-weight: 400; line-height: 1; }
-  .dhead .icon-btn svg { flex: none; color: var(--ink); }
   .draft { padding: 13px; }
   .shot { align-items: stretch; flex-direction: column; }
   .shot a { align-self: flex-start; }
   .drow { align-items: stretch; }
-  select.mini { flex: 1 1 30%; width: 100%; }
+  .drow > .ui-select-wrap--compact { flex: 1 1 30%; width: 100%; }
   .dact { width: 100%; margin-left: 0; padding-top: 3px; }
   .dact .btn { flex: 1; }
-  .tabs { padding-left: 0; }
   .transcript-meta { display: none; }
   .seg { grid-template-columns: 45px minmax(0, 1fr); }
   .seg-add { display: none; }
@@ -1170,6 +1253,6 @@ option { background: var(--surface); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .upload-card, .pbar span, .seg, .seg-add, .chevron, .btn { transition: none; }
+  .upload-card, .pbar span, .seg-add { transition: none; }
 }
 </style>

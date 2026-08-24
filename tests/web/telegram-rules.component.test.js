@@ -117,7 +117,7 @@ test('правил нет — раздел говорит, что закрыты
   // до того, как удивится неразвёрнутой ссылке.
   assert.match(wrapper.text(), /ни один чат не разрешён/i);
   assert.equal(wrapper.findAll('.rule').length, 0);
-  assert.equal(saveBtn(wrapper), undefined, 'кнопка сохранения при нетронутых правилах');
+  assert.equal(Boolean(saveBtn(wrapper)), false, 'кнопка сохранения при нетронутых правилах');
   assert.deepEqual(srv.puts, [], 'открытие раздела записало правила');
 });
 
@@ -144,7 +144,7 @@ test('правило добавляется чатом из услышанных
   // будет негде, а правило останется.
   assert.equal(saved.title, 'Команда Альфа · разработка');
   // Сохранили — несохранённого не осталось.
-  assert.equal(saveBtn(wrapper), undefined);
+  assert.equal(Boolean(saveBtn(wrapper)), false);
 });
 
 test('услышанные темы подгружаются сами и выбранная уезжает числом', async (t) => {
@@ -322,7 +322,7 @@ test('«Отменить» возвращает то, что лежит на с�
   await settle(flushPromises);
 
   assert.equal(projectSelect(wrapper.get('.rule')).element.value, 'demo');
-  assert.equal(saveBtn(wrapper), undefined);
+  assert.equal(Boolean(saveBtn(wrapper)), false);
   assert.deepEqual(srv.puts, [], 'отмена что-то записала');
 });
 

@@ -239,8 +239,16 @@ Pin защищает только bundle (machine + prompts). `engine` и `profi
 рестарта/развёртывания. Поэтому rollout сначала ставит обратно совместимые live-компоненты,
 затем CAS-публикует новый catalog; уже начатые попытки не перепривязываются.
 
-**UI-мелочи:** системный `confirm()` запрещён — единый `shared/ui/confirm.js`
-(`await confirmDialog(text, {danger, okText})`, тёмная модалка проекта). Тултип исполнителя
+**UI-слой:** `web/src/ui.ts` — единственная публичная точка импорта для product consumers.
+Нативными form controls владеют только `web/src/components/primitives/`, overlays проходят
+через общие `UiTooltip`/`UiPopover`/`UiDialog`, а reusable skin подключается единым графом
+`web/src/styles/index.css`. Системный `confirm()` запрещён: простой вопрос вызывает
+`await confirmDialog(text, { danger, okText })` из public facade и показывает `UiDialogHost`.
+Отдельный `web/ui-gallery.html` не входит в production build и служит auth-free browser
+fixture. `npm --prefix web run test:ui-browser` поднимает его через Vite и настоящим Chrome
+проверяет ширины 340–1500 px, peer-геометрию 36/9, overflow, disclosure, overlays, Escape
+и возврат фокуса; Chrome запускается с отдельным временным profile.
+Тултип исполнителя
 в топбаре показывает потребление лимитов подписки (`/api/providers/usage` →
 `executor.usage()`: у Claude — OAuth-ручка usage хостового CLI, у Codex — read-only
 `account/rateLimits/read` официального `codex app-server`; кэш 60с). Запрос Codex не создаёт
@@ -304,8 +312,17 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   подмены свежим снимком, а очищаются только после подтверждения, что выбор исчез.
   До загрузки lazy chunk и первого API-снимка показывается лёгкий `CodePanelLoading` той
   же геометрии; он не импортирует и не создаёт Monaco.
+  В compact-шапке текстовая кнопка «Дерево» и icon actions дока используют один размер
+  30 px: central `data-context="tool-dock-navigator"` задаёт одновременно `height` и
+  `min-height`. Одного `height` недостаточно — базовый `UiButton` сохраняет минимум 36 px.
   Односторонний diff добавленного/удалённого файла автоматически занимает одну колонку,
   не оставляя заведомо пустую половину редактора.
+  В `TaskModal` метаданные триажа оборачиваются отдельно от action, поэтому чипы могут
+  переноситься, не сталкивая «Переоценить» вниз; все footer-actions имеют единый размер
+  36 px через `data-context="task-footer-action"`. Служебные actions во всплывашках
+  topbar компактнее обычной формы: 28 px внутри секции и 30 px у нижнего перехода.
+  Внешние provider-resource links сохраняют вид компактной подчёркнутой ссылки и переносят
+  длинный текст внутри popover через `data-context="topbar-popover-resource-link"`.
   **Изменения показаны группами «В индексе» и «В рабочем дереве»** (`buildGitGroups`), как
   Source Control в VS Code. Пустая группа не рисуется, поэтому при чистом индексе панель
   остаётся прежним списком «Не в коммите», а заголовок второй группы меняется только когда
@@ -330,8 +347,10 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   проект, исчезнувшая рабочая копия и пропавший файл называются в плашке ошибки поимённо.
   Переход 900→899 закрывает док и размонтирует непоказанные панели, чтобы возврат на широкий
   экран сам не создал PTY.
-- **Escape координирует `shared/ui/layer-stack.js`.** Dock, tools-popover, модалки, confirm
-  и закреплённые HelpTip регистрируют приоритет; одно нажатие закрывает только верхний слой.
+- **Escape координирует единый typed stack.** Consumers регистрируют semantic layer через
+  `useUiLayer` из `web/src/ui.ts`; числовые приоритеты остаются private в
+  `services/layers/priorities.ts`. Dock, tools-popover, модалки, confirm и popover закрываются
+  по одному: одно нажатие действует только на верхний слой.
   Monaco/xterm помечают собственного владельца Escape и не отдают локальную клавишу стеку.
 - `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graph-geom.js`
   (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/route-layout.js`.

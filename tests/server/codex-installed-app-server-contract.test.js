@@ -230,9 +230,15 @@ test('установленный Codex сохраняет необходимый
 // `runtimeWorkspaceRoots` — experimental-поле: generate-ts его не печатает, поэтому
 // схемный сторож выше его не увидит. Проверяем живым handshake, без model call:
 // тред эфемерный, turn не запускается, аккаунт не нужен.
-function startThread({ capabilities, params }) {
+function startThread({ capabilities, params, codexHome }) {
   return new Promise((resolve) => {
-    const child = spawn(CODEX_BIN, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(CODEX_BIN, ['app-server'], {
+      env: {
+        ...process.env,
+        CODEX_HOME: codexHome,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     const lines = createInterface({ input: child.stdout });
     let stderr = '';
     const timer = setTimeout(() => finish({ timeout: true }), 25_000);
@@ -267,6 +273,11 @@ function startThread({ capabilities, params }) {
 test('установленный Codex принимает runtimeWorkspaceRoots только с experimentalApi', {
   timeout: 60_000,
 }, async (t) => {
+  // Живой app-server создаёт SQLite state даже без model call. Изолированный state-dir
+  // не зависит от прав на пользовательский ~/.codex и не изменяет настоящую сессию.
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-state-'));
+  t.after(() => fs.rm(codexHome, { recursive: true, force: true }));
+
   const params = {
     cwd: os.tmpdir(),
     approvalPolicy: 'never',
@@ -278,6 +289,7 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
 
   const declared = await startThread({
     capabilities: { experimentalApi: true, requestAttestation: false },
+    codexHome,
     params,
   });
   if (declared.spawnError?.code === 'ENOENT') {
@@ -293,7 +305,7 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
 
   // Негатив закрепляет причину: без capability поле не игнорируется молча, а отвергается,
   // и рабочим корнем остаётся один cwd — ровно тот регресс, ради которого capability и есть.
-  const silent = await startThread({ capabilities: null, params });
+  const silent = await startThread({ capabilities: null, codexHome, params });
   assert.equal(silent.timeout, undefined, 'app-server не ответил на thread/start без capability');
   assert.match(
     String(silent.error?.message || ''),

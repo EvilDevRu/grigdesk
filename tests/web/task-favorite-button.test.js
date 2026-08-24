@@ -1,60 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
-const COMPONENT_PATH = fileURLToPath(
-  new URL('../../web/src/views/board/TaskFavoriteButton.vue', import.meta.url),
-);
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
+const COMPONENT_PATH = webFile('src/views/board/TaskFavoriteButton.vue');
 
 let component;
 async function loadComponent() {
-  if (component) return component;
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(COMPONENT_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: COMPONENT_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-task-favorite-button-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`);
-  component = (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-  )).default;
+  component ||= await compileVue(COMPONENT_PATH);
+
   return component;
 }
 
 async function browserFixture(t) {
-  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/board' });
-  for (const [key, value] of Object.entries({
-    window: browser,
-    document: browser.document,
-    navigator: browser.navigator,
-    location: browser.location,
-    Node: browser.Node,
-    Element: browser.Element,
-    HTMLElement: browser.HTMLElement,
-    SVGElement: browser.SVGElement,
-    Event: browser.Event,
-    CustomEvent: browser.CustomEvent,
-    getComputedStyle: browser.getComputedStyle.bind(browser),
-  })) {
-    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  }
-  browser.document.body.innerHTML = '<div id="mount"></div>';
-  t.after(() => browser.close());
-  return browser;
+  return installUiBrowser(t, 'http://cockpit.test/#/board');
 }
 
 test('UI-01/02: кнопка отражает состояние, подписана и эмитит toggle', async (t) => {
@@ -82,7 +44,7 @@ test('UI-01/02: кнопка отражает состояние, подписа
   assert.equal(button.attributes('aria-label'), 'Убрать задачу «Исправить форму» из избранного');
   assert.equal(button.get('svg').attributes('fill'), 'currentColor');
   assert.equal(button.classes().includes('active'), false);
-  assert.equal(button.classes().includes('is-favorite'), true);
+  assert.equal(button.classes().includes('is-pressed'), true);
 });
 
 test('UI-03: pending блокирует кнопку и сообщает занятость', async (t) => {
@@ -98,7 +60,8 @@ test('UI-03: pending блокирует кнопку и сообщает зан�
   t.after(() => wrapper.unmount());
 
   const button = wrapper.get('button');
-  assert.equal(button.attributes('disabled'), '');
+  assert.equal(button.attributes('disabled'), undefined);
+  assert.equal(button.attributes('aria-disabled'), 'true');
   assert.equal(button.attributes('aria-busy'), 'true');
   assert.equal(button.get('svg').attributes('width'), '18');
   assert.equal(button.get('svg').attributes('height'), '18');

@@ -7,7 +7,6 @@ import { parse } from '@vue/compiler-sfc';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = path.resolve(SCRIPT_DIR, '../..');
-const DEFAULT_BASELINE = 'tests/web/fixtures/ui/vue-sfc-order-baseline.json';
 
 function toPosix(value) {
   return value.split(path.sep).join('/');
@@ -111,62 +110,22 @@ export function collectSfcOrder(repoRoot = DEFAULT_REPO_ROOT) {
   return report;
 }
 
-export function createSfcOrderBaseline(report) {
-  return {
-    version: 1,
-    legacyScriptFirst: [...report.orderViolations]
-      .filter((file) => file.startsWith('web/src/'))
-      .sort(),
-  };
-}
-
-export function validateSfcOrderBaseline(baseline) {
-  const errors = [];
-  if (baseline?.version !== 1) errors.push('baseline: поддерживается только version=1');
-  if (!Array.isArray(baseline?.legacyScriptFirst)
-      || baseline.legacyScriptFirst.some((file) => typeof file !== 'string')) {
-    errors.push('baseline: legacyScriptFirst должен быть массивом путей');
-    return errors;
-  }
-  if (new Set(baseline.legacyScriptFirst).size !== baseline.legacyScriptFirst.length) {
-    errors.push('baseline: legacyScriptFirst содержит дубли');
-  }
-  if (baseline.legacyScriptFirst.some((file) => !file.startsWith('web/src/') || !file.endsWith('.vue'))) {
-    errors.push('baseline: legacyScriptFirst содержит путь вне web/src/**/*.vue');
-  }
-  if (baseline.legacyScriptFirst.some((file) => file.startsWith('web/src/components/'))) {
-    errors.push('baseline: новые components/ не могут быть legacy-исключением');
-  }
-  return errors;
-}
-
-export function compareSfcOrder(report, baseline) {
-  const errors = [...validateSfcOrderBaseline(baseline), ...report.parseErrors, ...report.typeViolations];
-  const allowed = new Set(baseline?.legacyScriptFirst || []);
-  for (const file of report.orderViolations) {
-    if (!allowed.has(file)) errors.push(`новый SFC с неверным порядком блоков: ${file}`);
-  }
+export function compareSfcOrder(report) {
+  const errors = [...report.parseErrors, ...report.typeViolations];
+  errors.push(...report.orderViolations.map((file) => `неверный порядок блоков: ${file}`));
   return [...new Set(errors)];
 }
 
-export function loadSfcOrderBaseline(repoRoot = DEFAULT_REPO_ROOT, baselinePath = DEFAULT_BASELINE) {
-  const absolute = path.isAbsolute(baselinePath) ? baselinePath : path.join(repoRoot, baselinePath);
-  return JSON.parse(fs.readFileSync(absolute, 'utf8'));
-}
-
-export function checkSfcOrder({ repoRoot = DEFAULT_REPO_ROOT, baselinePath = DEFAULT_BASELINE } = {}) {
+export function checkSfcOrder({ repoRoot = DEFAULT_REPO_ROOT } = {}) {
   const report = collectSfcOrder(repoRoot);
-  const baseline = loadSfcOrderBaseline(repoRoot, baselinePath);
-  return { report, baseline, errors: compareSfcOrder(report, baseline) };
+  return { report, errors: compareSfcOrder(report) };
 }
 
 function parseArguments(argv) {
-  const options = { repoRoot: DEFAULT_REPO_ROOT, baselinePath: DEFAULT_BASELINE, printBaseline: false };
+  const options = { repoRoot: DEFAULT_REPO_ROOT };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--repo-root') options.repoRoot = path.resolve(argv[++index]);
-    else if (argument === '--baseline') options.baselinePath = argv[++index];
-    else if (argument === '--print-baseline') options.printBaseline = true;
     else throw new Error(`Неизвестный аргумент: ${argument}`);
   }
   return options;
@@ -175,19 +134,13 @@ function parseArguments(argv) {
 function main() {
   const options = parseArguments(process.argv.slice(2));
   const report = collectSfcOrder(options.repoRoot);
-  if (options.printBaseline) {
-    process.stdout.write(`${JSON.stringify(createSfcOrderBaseline(report), null, 2)}\n`);
-    return;
-  }
-  const baseline = loadSfcOrderBaseline(options.repoRoot, options.baselinePath);
-  const errors = compareSfcOrder(report, baseline);
+  const errors = compareSfcOrder(report);
   if (errors.length) {
     process.stderr.write(`Vue SFC boundary нарушен:\n- ${errors.join('\n- ')}\n`);
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(`Vue SFC order: OK, legacy script-first: ${report.orderViolations.length}\n`);
+  process.stdout.write('Vue SFC order: OK\n');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
-

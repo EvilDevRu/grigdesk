@@ -16,8 +16,8 @@ for (const [key, value] of Object.entries({
   Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
 }
 
-const { activeLayerId, registerLayer } = await compileModule(
-  webFile('src/shared/ui/layer-stack.js'),
+const { activeLayerId, registerUiLayer } = await compileModule(
+  webFile('src/services/layers/stack.ts'),
 );
 
 function escape(target = document.body) {
@@ -28,40 +28,57 @@ function escape(target = document.body) {
 
 test('один Escape закрывает только верхний слой, затем следующий', () => {
   const closed = [];
-  const offDock = registerLayer('dock-test', { priority: 80, close: () => closed.push('dock') });
-  const offTask = registerLayer('task-test', { priority: 100, close: () => closed.push('task') });
+  const dock = registerUiLayer('dock-test', {
+    name: 'dock',
+    close: () => closed.push('dock'),
+  });
+  const task = registerUiLayer('task-test', {
+    name: 'dialog',
+    close: () => closed.push('task'),
+  });
   assert.equal(activeLayerId(), 'task-test');
 
   assert.equal(escape().defaultPrevented, true);
   assert.deepEqual(closed, ['task']);
-  offTask();
+  task.unregister();
   assert.equal(activeLayerId(), 'dock-test');
 
   escape();
   assert.deepEqual(closed, ['task', 'dock']);
-  offDock();
+  dock.unregister();
 });
 
 test('последний слой равного приоритета побеждает, disabled пропускается', () => {
   const closed = [];
-  const offA = registerLayer('a-test', { priority: 50, close: () => closed.push('a') });
-  const offDisabled = registerLayer('disabled-test', {
-    priority: 500,
+  const first = registerUiLayer('a-test', {
+    name: 'tools',
+    close: () => closed.push('a'),
+  });
+  const disabled = registerUiLayer('disabled-test', {
+    name: 'confirm',
     enabled: () => false,
     close: () => closed.push('disabled'),
   });
-  const offB = registerLayer('b-test', { priority: 50, close: () => closed.push('b') });
+  const second = registerUiLayer('b-test', {
+    name: 'tools',
+    close: () => closed.push('b'),
+  });
   escape();
   assert.deepEqual(closed, ['b']);
-  offB(); offDisabled(); offA();
+  second.unregister();
+  disabled.unregister();
+  first.unregister();
 });
 
 test('xterm и Monaco владеют Escape внутри своих областей', () => {
   document.body.innerHTML = '<div data-escape-owner="terminal"><textarea id="term"></textarea></div>';
   let closed = 0;
-  const off = registerLayer('dock-owner-test', { priority: 80, close: () => { closed += 1; } });
+  const layer = registerUiLayer('dock-owner-test', {
+    name: 'dock',
+    close: () => { closed += 1; },
+  });
   const event = escape(document.querySelector('#term'));
   assert.equal(event.defaultPrevented, false);
   assert.equal(closed, 0);
-  off();
+  layer.unregister();
 });

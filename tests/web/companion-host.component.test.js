@@ -1,112 +1,88 @@
 // Проверяет интеграцию корневого хоста компаньона с UI и внешними зависимостями.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   compileCompanionSfc,
   installCompanionBrowser,
 } from './helpers/companion-component.js';
+import { compileModule, compileVue, webFile } from './helpers/compile-vue.js';
 
-const HOST_PATH = fileURLToPath(new URL('../../web/src/features/companion/CompanionHost.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
+const HOST_PATH = webFile('src/features/companion/CompanionHost.vue');
 let compileNonce = 0;
 
 async function compileHost(deps, t) {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(HOST_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: HOST_PATH });
-  assert.deepEqual(errors, []);
   const key = `__companionHostDeps${compileNonce++}`;
   globalThis[key] = deps;
   t.after(() => { delete globalThis[key]; });
   const fromDeps = `globalThis[${JSON.stringify(key)}]`;
-  let code = compileScript(descriptor, {
-    id: `data-v-companion-host-runtime-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replace('Transition as _Transition', 'Transition as _UnusedTransition')
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace(
-      "import { useRoute, useRouter } from 'vue-router';",
-      `const { useRoute, useRouter } = ${fromDeps};`,
-    )
-    .replace(
-      "import { registerLayer } from '../../shared/ui/layer-stack.js';",
-      `const { registerLayer } = ${fromDeps};`,
-    )
-    .replace(
-      "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
-      `const { useChatStore, CONTEXT_WINDOW } = ${fromDeps};`,
-    )
-    .replace(
-      "import { useCompanionStore } from '../../stores/companion.js';",
-      `const { useCompanionStore } = ${fromDeps};`,
-    )
-    .replace(
-      "import { useProvidersStore } from '../../stores/providers.js';",
-      `const { useProvidersStore } = ${fromDeps};`,
-    )
-    .replace(
-      "import { contextFill } from '../../shared/chat-context.js';",
-      `const { contextFill } = ${fromDeps};`,
-    )
-    .replace(
-      "import { useNotifyWatchStore } from '../../stores/notify-watch.js';",
-      `const { useNotifyWatchStore } = ${fromDeps};`,
-    )
-    .replace(
-      "import { useUiContextStore } from '../../stores/ui-context.js';",
-      `const { useUiContextStore } = ${fromDeps};`,
-    )
-    .replace(
-      "import { useDictationController } from '../speech/provider.js';",
-      `const { useDictationController } = ${fromDeps};`,
-    )
-    .replace(
-      "import { createCompanionChatBridge } from './chat-bridge.js';",
-      `const { createCompanionChatBridge } = ${fromDeps};`,
-    )
-    .replace(
-      "import { createSpeechOutput } from './speech-output.js';",
-      `const { createSpeechOutput } = ${fromDeps};`,
-    )
-    .replace(
-      "import CompanionAvatar from './CompanionAvatar.vue';",
-      `const { CompanionAvatar } = ${fromDeps};`,
-    )
-    .replace(
-      "import CompanionBubble from './CompanionBubble.vue';",
-      `const { CompanionBubble } = ${fromDeps};`,
-    )
-    .replace(
-      "const BUBBLE_ID = 'cockpit-companion-bubble';",
-      `const { TransitionStub: _Transition } = ${fromDeps};\nconst BUBBLE_ID = 'cockpit-companion-bubble';`,
-    );
-  assert.doesNotMatch(code, /from ['"]\.\.?\//, 'all Host dependencies are explicit runtime stubs');
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#host-${compileNonce}`
-  )).default;
+
+  return compileVue(HOST_PATH, {
+    stubs: {
+      'vue-router': `
+        export const useRoute = () => ${fromDeps}.useRoute();
+        export const useRouter = () => ${fromDeps}.useRouter();
+      `,
+      '../../ui': `
+        export const UiFloatingDialog = ${fromDeps}.UiFloatingDialog;
+      `,
+      '../../stores/chat.js': `
+        export const CONTEXT_WINDOW = ${fromDeps}.CONTEXT_WINDOW;
+        export const useChatStore = (...args) => ${fromDeps}.useChatStore(...args);
+      `,
+      '../../stores/companion.js': `
+        export const useCompanionStore = (...args) => ${fromDeps}.useCompanionStore(...args);
+      `,
+      '../../stores/providers.js': `
+        export const useProvidersStore = (...args) => ${fromDeps}.useProvidersStore(...args);
+      `,
+      '../../shared/chat-context.js': `
+        export const contextFill = (...args) => ${fromDeps}.contextFill(...args);
+      `,
+      '../../stores/notify-watch.js': `
+        export const useNotifyWatchStore = (...args) => ${fromDeps}.useNotifyWatchStore(...args);
+      `,
+      '../../stores/ui-context.js': `
+        export const useUiContextStore = (...args) => ${fromDeps}.useUiContextStore(...args);
+      `,
+      '../speech/provider.js': `
+        export const useDictationController = (...args) =>
+          ${fromDeps}.useDictationController(...args);
+      `,
+      './chat-bridge.js': `
+        export const createCompanionChatBridge = (...args) =>
+          ${fromDeps}.createCompanionChatBridge(...args);
+      `,
+      './speech-output.js': `
+        export const createSpeechOutput = (...args) => ${fromDeps}.createSpeechOutput(...args);
+      `,
+      './CompanionAvatar.vue': `export default ${fromDeps}.CompanionAvatar;`,
+      './CompanionBubble.vue': `export default ${fromDeps}.CompanionBubble;`,
+    },
+  });
 }
 
 test('COMP-A11Y-HOST-01: runtime focus, layer Escape, /chats и cleanup lifecycle', async (t) => {
   const browser = await installCompanionBrowser(t);
   const [
-    { defineComponent, h, nextTick, reactive },
+    {
+      defineComponent,
+      h,
+      cloneVNode,
+      nextTick,
+      onScopeDispose,
+      reactive,
+      toValue,
+      watch,
+    },
     { mount, flushPromises },
-    { activeLayerId, registerLayer },
+    { activeLayerId, registerUiLayer },
     CompanionAvatar,
     CompanionBubble,
   ] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    import('../../web/src/shared/ui/layer-stack.js'),
+    compileModule(webFile('src/services/layers/stack.ts')),
     compileCompanionSfc('CompanionAvatar'),
     compileCompanionSfc('CompanionBubble'),
   ]);
@@ -191,10 +167,71 @@ test('COMP-A11Y-HOST-01: runtime focus, layer Escape, /chats и cleanup lifecycl
       route.path = path;
     },
   };
+  let layerSequence = 0;
+  function useUiLayer(name, options = {}) {
+    let handle = null;
+    const stop = watch(
+      () => options.enabled === undefined || Boolean(toValue(options.enabled)),
+      (enabled) => {
+        handle?.unregister();
+        handle = enabled
+          ? registerUiLayer(options.id || `host-layer-${++layerSequence}`, {
+              name: toValue(name),
+              close: (event) => options.onEscape?.(event),
+              element: options.element === undefined
+                ? undefined
+                : () => toValue(options.element),
+            })
+          : null;
+      },
+      { immediate: true, flush: 'sync' },
+    );
+
+    onScopeDispose(() => {
+      stop();
+      handle?.unregister();
+    });
+  }
+  const UiFloatingDialog = defineComponent({
+    props: {
+      open: Boolean,
+    },
+    emits: ['update:open'],
+    setup(props, { emit, slots }) {
+      useUiLayer('companion', {
+        id: 'companion-bubble',
+        enabled: () => props.open,
+        onEscape: () => {
+          emit('update:open', false);
+        },
+      });
+
+      async function setOpen(value, returnFocus = false) {
+        emit('update:open', value);
+
+        if (returnFocus) {
+          await nextTick();
+          browser.document.querySelector('.companion-avatar')?.focus();
+        }
+      }
+
+      return () => {
+        const trigger = slots.trigger?.()[0];
+        const triggerWithClick = trigger
+          ? cloneVNode(trigger, { onClick: () => setOpen(!props.open) })
+          : null;
+        const content = props.open
+          ? slots.default?.({ close: () => setOpen(false, true) })
+          : null;
+
+        return h('div', { class: 'floating-dialog-stub' }, [triggerWithClick, content]);
+      };
+    },
+  });
   const Host = await compileHost({
     useRoute: () => route,
     useRouter: () => router,
-    registerLayer,
+    UiFloatingDialog,
     useChatStore: () => chat,
     useCompanionStore: () => companion,
     useNotifyWatchStore: () => notifyWatch,
@@ -240,8 +277,8 @@ test('COMP-A11Y-HOST-01: runtime focus, layer Escape, /chats и cleanup lifecycl
     'explicit close returns focus to the avatar');
 
   let lowerCloses = 0;
-  const unregisterLower = registerLayer('host-test-lower', {
-    priority: 80,
+  const lowerLayer = registerUiLayer('host-test-lower', {
+    name: 'dock',
     close: () => { lowerCloses += 1; },
   });
   await avatar.trigger('click');
@@ -249,12 +286,12 @@ test('COMP-A11Y-HOST-01: runtime focus, layer Escape, /chats и cleanup lifecycl
   assert.equal(activeLayerId(), 'companion-bubble');
 
   let upperCloses = 0;
-  let unregisterUpper = null;
-  unregisterUpper = registerLayer('host-test-upper', {
-    priority: 100,
+  let upperLayer = null;
+  upperLayer = registerUiLayer('host-test-upper', {
+    name: 'dialog',
     close: () => {
       upperCloses += 1;
-      unregisterUpper?.();
+      upperLayer?.unregister();
     },
   });
   const firstEscape = new browser.KeyboardEvent('keydown', {
@@ -313,6 +350,6 @@ test('COMP-A11Y-HOST-01: runtime focus, layer Escape, /chats и cleanup lifecycl
     'unmount removes visibilitychange listener');
   assert.equal(lifecycle.closes, closesBeforeUnmount,
     'unmount removes outside-pointer listener');
-  unregisterLower();
+  lowerLayer.unregister();
   assert.equal(activeLayerId(), null);
 });

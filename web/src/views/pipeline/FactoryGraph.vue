@@ -1,88 +1,3 @@
-<script setup>
-import { computed } from 'vue';
-import { nodeGeom, edgePath, computeViewBox, MARKS, START_DOT } from '../../shared/graph-geom.js';
-import { graphStallView } from '../../shared/graph-stall.js';
-import { runnerChainLabel, runnerModelLabel, runnerNodeLabel } from '../../shared/runner-display.js';
-
-// graph — ответ /api/tasks/:id/graph; loopsOn — показывать потенциальные fail-рёбра.
-const props = defineProps({
-  graph: { type: Object, required: true },
-  loopsOn: { type: Boolean, default: false },
-  reference: { type: Boolean, default: false }, // эталонная схема маршрута (без статусов задачи)
-  interactive: { type: Boolean, default: false }, // клики по узлам даже в reference (редактор маршрутов)
-});
-const emit = defineEmits(['node']);
-
-const doneLike = new Set(['done', 'skip']);
-const stallView = computed(() => (props.reference ? null : graphStallView(props.graph)));
-
-// Тесный viewBox по узлам (убирает пустоту зашитого vb).
-const vb = computed(() => computeViewBox(props.graph.pos, props.graph.nodes));
-
-// Рёбра с вычисленным визуальным классом и подписью.
-const edgeEls = computed(() => {
-  const g = props.graph;
-  const statuses = g.statuses || {};
-  const out = [];
-  for (const [src, dst, label, cls, routing] of g.edges) {
-    const { d, label: lp } = edgePath(src, dst, routing, g.pos, g.nodes);
-    let klass; let lbl = label; let visible = true; let lblClass = 'elbl';
-    if (cls === 'fail') {
-      if (props.reference) { klass = 'e-fail'; lblClass = 'elbl-fail'; }
-      else {
-        const n = g.loops?.[src] || 0;
-        klass = n > 0 ? 'e-loop' : 'e-fail';
-        if (n > 0 && statuses[dst] === 'run') klass += ' e-flow';
-        lbl = n > 0 ? `${label} ×${n}` : label;
-        visible = props.loopsOn || n > 0; // потенциальные петли — только по тумблеру
-        lblClass = 'elbl-fail';
-      }
-    } else if (props.reference) {
-      klass = 'e-on';
-      lblClass = cls === 'pass' ? 'elbl-pass' : 'elbl';
-    } else {
-      const s = src === '_start' ? 'done' : statuses[src];
-      klass = doneLike.has(s) ? 'e-on' : s === 'run' ? 'e-flow' : 'e-off';
-      lblClass = cls === 'pass' ? 'elbl-pass' : 'elbl';
-    }
-    out.push({ key: `${src}-${dst}`, d, klass, lbl, lp, lblClass, visible });
-  }
-  return out;
-});
-
-// Узлы с геометрией, статусом, типом.
-const nodeEls = computed(() => {
-  const g = props.graph;
-  return Object.keys(g.pos).map((nid) => {
-    const def = g.nodes[nid] || ['agent', nid, ''];
-    const kind = def[0];
-    const label = def[1] || nid;
-    const sub = def[2] || '';
-    const { cx, cy, hw, hh } = nodeGeom(nid, g.pos, g.nodes);
-    const status = props.reference ? 'ref' : ((g.statuses || {})[nid] || 'pending');
-    const runnerMeta = g.nodeMeta?.[nid]?.runner || null;
-    const runner = runnerMeta ? runnerNodeLabel(runnerMeta) : '';
-    const runnerModel = runnerMeta ? runnerModelLabel(runnerMeta) : '';
-    const nodeStall = stallView.value?.node === nid ? stallView.value : null;
-    const rx = kind === 'human' ? hh : 6;
-    const points = kind === 'code'
-      ? `${cx},${cy - hh} ${cx + hw},${cy} ${cx},${cy + hh} ${cx - hw},${cy}`
-      : null;
-    return {
-      nid, kind, label, sub, cx, cy, hw, hh, rx, points, status,
-      runner, runnerModel, runnerSwitched: !!runnerMeta?.switched,
-      nodeTitle: [
-        nodeStall ? `${nodeStall.title}${nodeStall.hint ? ` — ${nodeStall.hint}` : ''}` : '',
-        runnerMeta ? `${runnerChainLabel(runnerMeta)}${runnerModel ? ` · модель ${runnerModel}` : ''}` : '',
-      ].filter(Boolean).join('\n'),
-      mark: MARKS[status] || '',
-      subY: kind === 'code' ? cy + hh + 12 : cy + hh + 13,
-      runnerY: cy + hh + (sub ? 24 : 13),
-    };
-  });
-});
-</script>
-
 <template>
   <div class="graph-shell">
     <div v-if="stallView" class="graph-stop" role="alert">
@@ -92,40 +7,367 @@ const nodeEls = computed(() => {
       <span v-if="stallView.hint" class="graph-stop-hint">{{ stallView.hint }}</span>
     </div>
 
-    <svg class="graph" :viewBox="vb" preserveAspectRatio="xMidYMid meet">
-    <defs>
-      <marker id="arr" viewBox="0 0 8 8" refX="6.5" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
-        <path d="M0,0 L8,4 L0,8 z" />
-      </marker>
-    </defs>
+    <svg
+      class="graph"
+      :viewBox="viewBox"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <defs>
+        <marker
+          id="arr"
+          viewBox="0 0 8 8"
+          refX="6.5"
+          refY="4"
+          markerWidth="6.5"
+          markerHeight="6.5"
+          orient="auto-start-reverse"
+        >
+          <path d="M0,0 L8,4 L0,8 z" />
+        </marker>
+      </defs>
 
-    <!-- старт -->
-    <circle class="startdot" :cx="START_DOT[0]" :cy="START_DOT[1]" r="4" />
+      <!-- старт -->
+      <circle
+        class="startdot"
+        :cx="START_DOT[0]"
+        :cy="START_DOT[1]"
+        r="4"
+      />
 
-    <!-- рёбра -->
-    <g class="edges">
-      <template v-for="e in edgeEls" :key="e.key">
-        <path v-if="e.visible" :d="e.d" :class="e.klass" marker-end="url(#arr)" />
-        <text v-if="e.visible && e.lbl && e.lp" :x="e.lp[0]" :y="e.lp[1]" :class="e.lblClass" text-anchor="middle">{{ e.lbl }}</text>
-      </template>
-    </g>
+      <!-- рёбра -->
+      <g class="edges">
+        <template
+          v-for="edge in edgeElements"
+          :key="edge.key"
+        >
+          <path
+            v-if="edge.visible"
+            :d="edge.d"
+            :class="edge.className"
+            marker-end="url(#arr)"
+          />
+          <text
+            v-if="edge.visible && edge.label && edge.labelPosition"
+            :x="edge.labelPosition[0]"
+            :y="edge.labelPosition[1]"
+            :class="edge.labelClass"
+            text-anchor="middle"
+          >
+            {{ edge.label }}
+          </text>
+        </template>
+      </g>
 
-    <!-- узлы -->
-    <g v-for="n in nodeEls" :key="n.nid" class="ng" :class="[`ns-${n.status}`, `nt-${n.kind}`, { clickable: interactive || !reference }]"
-       @click="(interactive || !reference) && emit('node', n, $event)">
-      <title v-if="n.nodeTitle">{{ n.nodeTitle }}</title>
-      <polygon v-if="n.points" :points="n.points" />
-      <rect v-else :x="n.cx - n.hw" :y="n.cy - n.hh" :width="n.hw * 2" :height="n.hh * 2" :rx="n.rx" />
-      <text :x="n.cx" :y="n.cy + 4" text-anchor="middle" class="nlbl">{{ n.label }}<tspan class="mk" :class="`mk-${n.status}`"> {{ n.mark }}</tspan></text>
-      <text v-if="n.sub" :x="n.cx" :y="n.subY" text-anchor="middle" class="sub">{{ n.sub }}</text>
-      <text v-if="n.runner" :x="n.cx" :y="n.runnerY" text-anchor="middle"
-            class="runner" :class="{ switched: n.runnerSwitched }">
-        {{ n.runner }}<tspan v-if="n.runnerModel"> · {{ n.runnerModel }}</tspan>
-      </text>
-    </g>
+      <!-- узлы -->
+      <component
+        :is="nodeElement"
+        v-for="node in nodeElements"
+        :key="node.id"
+        class="ng"
+        :class="[
+          `ns-${node.status}`,
+          `nt-${node.kind}`,
+          { clickable: nodeInteractive },
+        ]"
+        :aria-label="nodeInteractive ? node.label : undefined"
+        @click="onNodeActivate(node, $event)"
+      >
+        <title v-if="node.title">{{ node.title }}</title>
+        <polygon
+          v-if="node.points"
+          :points="node.points"
+        />
+        <rect
+          v-else
+          :x="node.cx - node.halfWidth"
+          :y="node.cy - node.halfHeight"
+          :width="node.halfWidth * 2"
+          :height="node.halfHeight * 2"
+          :rx="node.radius"
+        />
+        <text
+          :x="node.cx"
+          :y="node.cy + 4"
+          text-anchor="middle"
+          class="nlbl"
+        >
+          {{ node.label }}<tspan
+            class="mk"
+            :class="`mk-${node.status}`"
+          > {{ node.mark }}</tspan>
+        </text>
+        <text
+          v-if="node.subtitle"
+          :x="node.cx"
+          :y="node.subtitleY"
+          text-anchor="middle"
+          class="sub"
+        >
+          {{ node.subtitle }}
+        </text>
+        <text
+          v-if="node.runner"
+          :x="node.cx"
+          :y="node.runnerY"
+          text-anchor="middle"
+          class="runner"
+          :class="{ switched: node.runnerSwitched }"
+        >
+          {{ node.runner }}<tspan v-if="node.runnerModel"> · {{ node.runnerModel }}</tspan>
+        </text>
+      </component>
     </svg>
   </div>
 </template>
+
+<script setup lang="ts">
+import { computed } from 'vue';
+
+import { UiSvgPressable } from '../../ui';
+import {
+  computeViewBox,
+  edgePath,
+  MARKS,
+  nodeGeom,
+  START_DOT,
+} from '../../shared/graph-geom.js';
+import { graphStallView } from '../../shared/graph-stall.js';
+import {
+  runnerChainLabel,
+  runnerModelLabel,
+  runnerNodeLabel,
+} from '../../shared/runner-display.js';
+
+type GraphPosition = [number, number];
+type GraphNodeDefinition = [string, string?, string?];
+type GraphEdge = [string, string, string, string, string?];
+type LabelPosition = [number, number] | null;
+
+interface RunnerMetadata extends Record<string, unknown> {
+  switched?: boolean;
+}
+
+interface GraphNodeMetadata {
+  runner?: RunnerMetadata;
+}
+
+interface FactoryGraphData {
+  pos: Record<string, GraphPosition>;
+  nodes: Record<string, GraphNodeDefinition>;
+  edges: GraphEdge[];
+  statuses?: Record<string, string>;
+  loops?: Record<string, number>;
+  nodeMeta?: Record<string, GraphNodeMetadata>;
+  stall?: unknown;
+}
+
+interface GraphStall {
+  node: string | null;
+  nodeLabel: string;
+  title: string;
+  hint: string;
+  fails: number | null;
+}
+
+interface EdgeElement {
+  key: string;
+  d: string;
+  className: string;
+  label: string;
+  labelPosition: LabelPosition;
+  labelClass: string;
+  visible: boolean;
+}
+
+interface GraphNodeElement {
+  id: string;
+  kind: string;
+  label: string;
+  subtitle: string;
+  cx: number;
+  cy: number;
+  halfWidth: number;
+  halfHeight: number;
+  radius: number;
+  points: string | null;
+  status: string;
+  runner: string;
+  runnerModel: string;
+  runnerSwitched: boolean;
+  title: string;
+  mark: string;
+  subtitleY: number;
+  runnerY: number;
+}
+
+const props = withDefaults(
+  defineProps<{
+    graph: FactoryGraphData;
+    loopsOn?: boolean;
+    reference?: boolean;
+    interactive?: boolean;
+  }>(),
+  {
+    loopsOn: false,
+    reference: false,
+    interactive: false,
+  },
+);
+
+const emit = defineEmits<{
+  node: [node: GraphNodeElement, event: MouseEvent | KeyboardEvent];
+}>();
+
+const doneLike = new Set(['done', 'skip']);
+const statusMarks = MARKS as Record<string, string>;
+const nodeInteractive = computed(() => props.interactive || !props.reference);
+const nodeElement = computed(() => (nodeInteractive.value ? UiSvgPressable : 'g'));
+const stallView = computed<GraphStall | null>(() => {
+  if (props.reference) {
+    return null;
+  }
+
+  return graphStallView(props.graph) as GraphStall | null;
+});
+const viewBox = computed(() => computeViewBox(props.graph.pos, props.graph.nodes));
+
+/**
+ * Fail-рёбра зависят не только от статуса источника: потенциальные циклы скрыты,
+ * пока пользователь не включит их или сервер не зафиксирует фактический проход.
+ */
+const edgeElements = computed<EdgeElement[]>(() => {
+  const graph = props.graph;
+  const statuses = graph.statuses ?? {};
+  const elements: EdgeElement[] = [];
+
+  for (const [source, destination, originalLabel, edgeClass, routing] of graph.edges) {
+    const path = edgePath(
+      source,
+      destination,
+      routing,
+      graph.pos,
+      graph.nodes,
+    ) as { d: string; label: LabelPosition };
+    let className = 'e-off';
+    let label = originalLabel;
+    let visible = true;
+    let labelClass = 'elbl';
+
+    if (edgeClass === 'fail') {
+      if (props.reference) {
+        className = 'e-fail';
+        labelClass = 'elbl-fail';
+      } else {
+        const loopCount = graph.loops?.[source] ?? 0;
+
+        className = loopCount > 0 ? 'e-loop' : 'e-fail';
+
+        if (loopCount > 0 && statuses[destination] === 'run') {
+          className += ' e-flow';
+        }
+
+        label = loopCount > 0 ? `${originalLabel} ×${loopCount}` : originalLabel;
+        visible = props.loopsOn || loopCount > 0;
+        labelClass = 'elbl-fail';
+      }
+    } else if (props.reference) {
+      className = 'e-on';
+      labelClass = edgeClass === 'pass' ? 'elbl-pass' : 'elbl';
+    } else {
+      const sourceStatus = source === '_start' ? 'done' : statuses[source];
+
+      className = doneLike.has(sourceStatus)
+        ? 'e-on'
+        : sourceStatus === 'run'
+          ? 'e-flow'
+          : 'e-off';
+      labelClass = edgeClass === 'pass' ? 'elbl-pass' : 'elbl';
+    }
+
+    elements.push({
+      key: `${source}-${destination}`,
+      d: path.d,
+      className,
+      label,
+      labelPosition: path.label,
+      labelClass,
+      visible,
+    });
+  }
+
+  return elements;
+});
+
+/**
+ * Сервер отдаёт компактные tuples, а шаблону нужны готовые геометрия, подписи
+ * раннера и состояние остановки. Нормализация здесь удерживает SVG декларативным.
+ */
+const nodeElements = computed<GraphNodeElement[]>(() => {
+  const graph = props.graph;
+
+  return Object.keys(graph.pos).map((nodeId) => {
+    const definition = graph.nodes[nodeId] ?? ['agent', nodeId, ''];
+    const kind = definition[0];
+    const label = definition[1] || nodeId;
+    const subtitle = definition[2] || '';
+    const geometry = nodeGeom(nodeId, graph.pos, graph.nodes);
+    const status = props.reference
+      ? 'ref'
+      : (graph.statuses?.[nodeId] ?? 'pending');
+    const runnerMetadata = graph.nodeMeta?.[nodeId]?.runner ?? null;
+    const runner = runnerMetadata ? runnerNodeLabel(runnerMetadata) : '';
+    const runnerModel = runnerMetadata ? runnerModelLabel(runnerMetadata) : '';
+    const nodeStall = stallView.value?.node === nodeId ? stallView.value : null;
+    const radius = kind === 'human' ? geometry.hh : 6;
+    const points = kind === 'code'
+      ? `${geometry.cx},${geometry.cy - geometry.hh} `
+        + `${geometry.cx + geometry.hw},${geometry.cy} `
+        + `${geometry.cx},${geometry.cy + geometry.hh} `
+        + `${geometry.cx - geometry.hw},${geometry.cy}`
+      : null;
+    const stallTitle = nodeStall
+      ? `${nodeStall.title}${nodeStall.hint ? ` — ${nodeStall.hint}` : ''}`
+      : '';
+    const runnerTitle = runnerMetadata
+      ? `${runnerChainLabel(runnerMetadata)}${runnerModel ? ` · модель ${runnerModel}` : ''}`
+      : '';
+
+    return {
+      id: nodeId,
+      kind,
+      label,
+      subtitle,
+      cx: geometry.cx,
+      cy: geometry.cy,
+      halfWidth: geometry.hw,
+      halfHeight: geometry.hh,
+      radius,
+      points,
+      status,
+      runner,
+      runnerModel,
+      runnerSwitched: Boolean(runnerMetadata?.switched),
+      title: [stallTitle, runnerTitle].filter(Boolean).join('\n'),
+      mark: statusMarks[status] ?? '',
+      subtitleY: kind === 'code'
+        ? geometry.cy + geometry.hh + 12
+        : geometry.cy + geometry.hh + 13,
+      runnerY: geometry.cy + geometry.hh + (subtitle ? 24 : 13),
+    };
+  });
+});
+
+function onNodeActivate(
+  node: GraphNodeElement,
+  event: MouseEvent | KeyboardEvent,
+): void {
+  if (!nodeInteractive.value) {
+    return;
+  }
+
+  emit('node', node, event);
+}
+</script>
 
 <style scoped>
 .graph-shell { width: 100%; }

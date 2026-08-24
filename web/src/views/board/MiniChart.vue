@@ -1,3 +1,32 @@
+<template>
+  <div class="chart">
+    <div class="chart-head">
+      <span class="title">{{ title }}</span>
+      <span class="head-val">
+        <b class="val mono">{{ headVal }}</b>
+        <span v-if="labels[activeIdx]" class="hday">{{ labels[activeIdx] }}</span>
+      </span>
+    </div>
+    <div ref="wrap" class="plot" @mousemove="onMove" @mouseleave="onLeave">
+      <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="svg">
+        <line :x1="PAD" :y1="H - PAD" :x2="W - PAD" :y2="H - PAD" class="axis" />
+        <polyline v-if="deptPts" :points="deptPts" class="dept" />
+        <polyline v-if="youPts" :points="youPts" class="you" />
+      </svg>
+      <!-- Направляющая + точки (HTML — чтобы не растягивались non-uniform-масштабом SVG) -->
+      <div class="guide" :class="{ hot: hoverIdx !== null }" :style="{ left: hx + '%' }"></div>
+      <span class="pt dept" :style="{ left: hx + '%', top: hyDept + '%' }"></span>
+      <span class="pt you" :style="{ left: hx + '%', top: hyYou + '%' }"></span>
+      <!-- Тултип: чтение выбранного дня -->
+      <div v-if="hoverIdx !== null" class="tip" :style="{ left: tipLeft + '%' }">
+        <div class="tday">{{ labels[activeIdx] }}</div>
+        <div class="trow"><span class="tk you">Вы</span><b>{{ fmt(you[activeIdx]) }}</b></div>
+        <div class="trow"><span class="tk dept">Коллеги</span><b>{{ fmt(dept[activeIdx]) }}</b></div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { ref, computed } from 'vue';
 import { hoursToHM } from '../../shared/format.js';
@@ -58,35 +87,6 @@ const hyYou = computed(() => (yOf(props.you[activeIdx.value]) / H) * 100);
 const hyDept = computed(() => (yOf(props.dept[activeIdx.value]) / H) * 100);
 const tipLeft = computed(() => Math.min(85, Math.max(15, hx.value)));
 </script>
-
-<template>
-  <div class="chart">
-    <div class="chart-head">
-      <span class="title">{{ title }}</span>
-      <span class="head-val">
-        <b class="val mono">{{ headVal }}</b>
-        <span v-if="labels[activeIdx]" class="hday">{{ labels[activeIdx] }}</span>
-      </span>
-    </div>
-    <div ref="wrap" class="plot" @mousemove="onMove" @mouseleave="onLeave">
-      <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="svg">
-        <line :x1="PAD" :y1="H - PAD" :x2="W - PAD" :y2="H - PAD" class="axis" />
-        <polyline v-if="deptPts" :points="deptPts" class="dept" />
-        <polyline v-if="youPts" :points="youPts" class="you" />
-      </svg>
-      <!-- Направляющая + точки (HTML — чтобы не растягивались non-uniform-масштабом SVG) -->
-      <div class="guide" :class="{ hot: hoverIdx !== null }" :style="{ left: hx + '%' }"></div>
-      <span class="pt dept" :style="{ left: hx + '%', top: hyDept + '%' }"></span>
-      <span class="pt you" :style="{ left: hx + '%', top: hyYou + '%' }"></span>
-      <!-- Тултип: чтение выбранного дня -->
-      <div v-if="hoverIdx !== null" class="tip" :style="{ left: tipLeft + '%' }">
-        <div class="tday">{{ labels[activeIdx] }}</div>
-        <div class="trow"><span class="tk you">Вы</span><b>{{ fmt(you[activeIdx]) }}</b></div>
-        <div class="trow"><span class="tk dept">Коллеги</span><b>{{ fmt(dept[activeIdx]) }}</b></div>
-      </div>
-    </div>
-  </div>
-</template>
 
 <style scoped>
 .chart { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }

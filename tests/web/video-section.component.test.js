@@ -12,22 +12,15 @@
 // замыкании), и это к лучшему: проверяем тот же путь, что проходит человек — загрузка
 // файла, вкладки, кнопки, — а не внутренние ref.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installBrowser, settle } from './helpers/telegram-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/VideoView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
+const VIEW_PATH = webFile('src/views/VideoView.vue');
 const TEST_UTILS = '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs';
-const COMPILER_SFC = '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js';
-
-let compileNonce = 0;
 
 const SEGMENTS = [
   { start: 0, end: 3.2, text: 'Привет, все на месте?' },
@@ -96,33 +89,15 @@ async function mountVideoView(t, { api, planModel = null } = {}) {
     globalThis.setInterval = realSetInterval;
   });
 
-  const { parse, compileScript } = await import(COMPILER_SFC);
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, {
-    id: `data-v-video-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    // У data:-модуля нет ни базового пути, ни сборщика, поэтому подстановки Vite
-    // до него не доезжают: `import.meta.env` здесь просто undefined.
-    .replaceAll('import.meta.env.VITE_BRAIN_URL', "''")
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__vidApi;')
-    .replace(
-      "import { usePluginsStore } from '../stores/plugins.js';",
-      'const usePluginsStore = globalThis.__vidPluginsStore;',
-    )
-    // HelpTip — обычный компонент, заглушке достаточно занять его место.
-    .replace(
-      "import HelpTip from '../shared/ui/HelpTip.vue';",
-      'const HelpTip = { name: "HelpTip", props: ["text"], template: "<i/>" };',
-    );
-  const nonce = compileNonce++;
-  const VideoView = (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+  const VideoView = await compileVue(VIEW_PATH, {
+    stubs: {
+      '../shared/api-client.js': 'export const api = globalThis.__vidApi;',
+      '../shared/clipboard.js': 'export const writeClipboardText = async () => true;',
+      '../stores/plugins.js': `
+        export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
+      `,
+    },
+  });
 
   const { mount, flushPromises } = await import(TEST_UTILS);
   const wrapper = mount(VideoView, { attachTo: browser.document.querySelector('#mount') });
@@ -181,8 +156,14 @@ test('сплошной текст собирается абзацами по п�
   await view.run();
   // Развернули — вид по умолчанию реплики: у каждой свой таймкод и клик в черновик.
   assert.equal(view.wrapper.findAll('.seg').length, 4);
+  const firstSegment = view.wrapper.findAll('.seg')[0];
+  assert.equal(firstSegment.element.tagName, 'BUTTON');
+  assert.equal(firstSegment.attributes('type'), 'button');
+  assert.match(firstSegment.attributes('aria-label'), /Добавить реплику 00:00/u);
+  await firstSegment.trigger('click');
+  assert.match(view.wrapper.get('.draft textarea').element.value, /\[00:00\] Привет/u);
 
-  await view.wrapper.findAll('.tab')[1].trigger('click');
+  await view.wrapper.get('[data-option-value="text"]').trigger('click');
   const paragraphs = view.wrapper.findAll('.para');
   assert.equal(paragraphs.length, 2, 'пауза 265 с обязана разделить абзацы');
   assert.match(paragraphs[0].text(), /Привет, все на месте\?\s+Да, начинаем\./u);
@@ -195,7 +176,7 @@ test('без выбранной модели раздел объясняет с�
   await view.upload();
 
   assert.match(view.wrapper.text(), /Настройки → Плагины/u);
-  assert.equal(view.button('Разобрать на задачи'), undefined);
+  assert.equal(Boolean(view.button('Разобрать на задачи')), false);
   // Ручной разбор при этом на месте — раздел не становится бесполезным.
   assert.ok(view.button('+ ещё задача'));
 });
@@ -392,7 +373,7 @@ test('у каждой задачи своя кнопка, и она ставит
 
   const after = view.wrapper.findAll('.draft');
   assert.match(after[0].text(), /задача 5150/u, 'номер показан у своего черновика');
-  assert.equal(draftButton(after[0]), undefined, 'поставленную задачу нельзя поставить второй раз');
+  assert.equal(Boolean(draftButton(after[0])), false, 'поставленную задачу нельзя поставить второй раз');
   assert.ok(draftButton(after[1]), 'у нерешённой кнопка остаётся');
 });
 

@@ -4,16 +4,21 @@
     <aside class="list">
       <div class="list-head">
         <span class="ttl">База агентов</span>
-        <!-- toggle: на планшете ховера нет, а объяснение раздела длинное — его читают, а не задевают мышью -->
-        <HelpTip class="page-tip" toggle align="left" :tip-style="{ maxWidth: '330px' }">
-          <template #tip>
-            <span class="doc">
-              <b class="doc-ttl">Библиотека ролей конвейера</b>
-              <span v-for="(p, i) in helpPage" :key="i" class="doc-p">{{ p }}</span>
-            </span>
+        <!-- На планшете ховера нет, а объяснение раздела длинное — его открывают явно. -->
+        <UiPopover
+          trigger-mode="both"
+          focus-policy="none"
+          placement="top-start"
+          :style="{ maxWidth: '330px' }"
+        >
+          <template #trigger>
+            <UiIconButton class="page-tip" role="embedded" label="О разделе">?</UiIconButton>
           </template>
-
-        </HelpTip>
+          <span class="doc">
+            <b class="doc-ttl">Библиотека ролей конвейера</b>
+            <span v-for="(p, i) in helpPage" :key="i" class="doc-p">{{ p }}</span>
+          </span>
+        </UiPopover>
         <span class="grow"></span>
         <UiButton class="btn" :loading="installing"
                 title="Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются"
@@ -68,24 +73,26 @@
       <!-- Обычные настройки -->
       <div class="fields">
         <label class="f f-label">
-          <span class="lbl">Подпись <HelpTip :text="help.label" align="left" /></span>
+          <span class="lbl">
+            Подпись <UiTooltip :text="help.label" placement="top-start" />
+          </span>
           <UiInput v-model="form.label" class="fld" placeholder="Название блока на схеме" />
         </label>
         <label class="f">
-          <span class="lbl">Форма блока <HelpTip :text="help.kind" /></span>
+          <span class="lbl">Форма блока <UiTooltip :text="help.kind" /></span>
           <UiSelect v-model="form.kind" class="fld">
             <option v-for="k in kinds" :key="k.v" :value="k.v">{{ k.label }}</option>
           </UiSelect>
         </label>
         <label class="f">
-          <span class="lbl">Класс модели <HelpTip :text="help.tier" /></span>
+          <span class="lbl">Класс модели <UiTooltip :text="help.tier" /></span>
           <UiSelect v-model="form.tier" class="fld">
             <option value="">без рекомендации</option>
             <option v-for="t in tiers" :key="t.v" :value="t.v">{{ t.label }}</option>
           </UiSelect>
         </label>
         <label class="f">
-          <span class="lbl">Рекомендация effort <HelpTip :text="help.effort" /></span>
+          <span class="lbl">Рекомендация effort <UiTooltip :text="help.effort" /></span>
           <UiSelect v-model="form.effort" class="fld">
             <option value="">без рекомендации</option>
             <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
@@ -96,25 +103,27 @@
       <!-- Профи-настройки -->
       <div v-if="pro" class="fields pro">
         <label class="f">
-          <span class="lbl">Сноска <HelpTip :text="help.sub" align="left" /></span>
+          <span class="lbl">
+            Сноска <UiTooltip :text="help.sub" placement="top-start" />
+          </span>
           <UiInput v-model="form.sub" class="fld" placeholder="под блоком (напр. lint · tests)" />
         </label>
         <label class="f">
-          <span class="lbl">Ключ реестра <HelpTip :text="help.key" /></span>
+          <span class="lbl">Ключ реестра <UiTooltip :text="help.key" /></span>
           <UiInput v-model="form.key" class="fld mono" placeholder="SCOUT" spellcheck="false" />
         </label>
         <label class="f">
-          <span class="lbl">Таймаут, сек <HelpTip :text="help.timeout" /></span>
+          <span class="lbl">Таймаут, сек <UiTooltip :text="help.timeout" /></span>
           <UiNumberField :model-value="form.timeout" :min="0" :step="60" placeholder="0 = дефолт"
                          @update:model-value="form.timeout = typeof $event === 'number' ? $event : 0" />
         </label>
         <label class="f">
-          <span class="lbl">Бюджет <HelpTip :text="help.budget" /></span>
+          <span class="lbl">Бюджет <UiTooltip :text="help.budget" /></span>
           <UiNumberField :model-value="form.budget" :min="0" placeholder="0 = нет"
                          @update:model-value="form.budget = typeof $event === 'number' ? $event : 0" />
         </label>
         <div class="f">
-          <span class="lbl">Флаги <HelpTip :text="help.flags" /></span>
+          <span class="lbl">Флаги <UiTooltip :text="help.flags" /></span>
           <div class="row">
             <UiToggleButton v-model="form.readonly" class="tag"
                     title="Советовать запрет записи в репозиторий: этап только смотрит и отчитывается"
@@ -127,7 +136,12 @@
       </div>
 
       <div class="prompt-wrap">
-        <div class="lbl prompt-lbl">Заготовка задания <HelpTip :text="help.prompt" align="left" /> <span class="muted sm">— основа для промпта этапа; боевой текст живёт в маршруте проекта</span></div>
+        <div class="lbl prompt-lbl">
+          Заготовка задания <UiTooltip :text="help.prompt" placement="top-start" />
+          <span class="muted sm">
+            — основа для промпта этапа; боевой текст живёт в маршруте проекта
+          </span>
+        </div>
         <UiTextarea v-model="form.prompt" class="prompt mono" spellcheck="false"
                     :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'" />
       </div>
@@ -143,19 +157,19 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { api } from '../shared/api-client.js';
 import {
-  UiButton,
+  UiButton, UiIconButton,
   UiInput,
-  UiNumberField,
+  UiNumberField, UiPopover,
   UiSelect,
   UiSelectableRow,
   UiSpinner,
   UiSwitch,
   UiTextarea,
   UiToggleButton,
+  UiTooltip,
   confirmDialog,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
-import HelpTip from '../shared/ui/HelpTip.vue';
 
 // База агентов (ролей конвейера): слева список, справа редактор карточки.
 // Агент — заготовка роли: метаданные + начало задания. Ни одно поле не исполняется:

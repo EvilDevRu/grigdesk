@@ -1,28 +1,12 @@
 // Общая обвязка для офлайн-тестов раздела «Телеграм» (`views/TelegramView.vue`).
 //
-// Компонент компилируется в память и грузится как `data:`-модуль, а такой модуль
-// НЕ УМЕЕТ резолвить относительные импорты: любой `import ... from '../…'` внутри
-// вью падает `ERR_UNSUPPORTED_RESOLVE_REQUEST` и роняет все тесты файла разом.
-// Поэтому каждый импорт заменяется заглушкой прямо в исходнике — и делать это
-// нужно в ОДНОМ месте: пока замены жили копиями в трёх тестах, добавленный во вью
-// импорт ломал три файла сразу, и чинить приходилось каждый.
-//
-// Второй известный подвох — кэш модулей: Node ключует `data:`-URL целиком, а две
-// компиляции одного SFC дают побайтово равный текст (scopeId в вывод не попадает).
-// Без хвоста-nonce второй mount получил бы модуль первого вместе с его сторами.
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+// Общий compiler бандлит настоящий UI facade, а здесь подменяются только сеть,
+// plugin store и dialog service. Так тесты проходят тот же DOM-контракт, что экран.
+import { compileVue, webFile } from './compile-vue.js';
 
-const VIEW_PATH = fileURLToPath(new URL('../../../web/src/views/TelegramView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
+const VIEW_PATH = webFile('src/views/TelegramView.vue');
 const HAPPY_DOM = '../../../web/node_modules/happy-dom/lib/index.js';
 const TEST_UTILS = '../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs';
-const COMPILER_SFC = '../../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js';
-
-let compileNonce = 0;
 
 /** Ошибка в форме api-client: текст сервера в `message`, тело — в `data`. */
 export function apiError(status, data) {
@@ -33,30 +17,20 @@ export function apiError(status, data) {
 }
 
 /** Компиляция вью с заглушками вместо импортов. */
-export async function compileTelegramView(prefix = 'telegram') {
-  const { parse, compileScript } = await import(COMPILER_SFC);
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, {
-    id: `data-v-${prefix}-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__tgApi;')
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = (...args) => globalThis.__tgConfirm(...args);',
-    )
-    .replace(
-      "import { usePluginsStore } from '../stores/plugins.js';",
-      'const usePluginsStore = globalThis.__tgPluginsStore;',
-    );
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+export async function compileTelegramView(_prefix = 'telegram') {
+  return compileVue(VIEW_PATH, {
+    stubs: {
+      '../shared/api-client.js': 'export const api = globalThis.__tgApi;',
+      '../stores/plugins.js': `
+        export const usePluginsStore = (...args) => globalThis.__tgPluginsStore(...args);
+      `,
+      './services/dialogs': `
+        export const confirmDialog = (...args) => globalThis.__tgConfirm(...args);
+        export const alertDialog = async () => undefined;
+        export const promptDialog = async () => null;
+      `,
+    },
+  });
 }
 
 /** Браузерное окружение happy-dom с классами DOM в глобалях (Vue снимает разметку после теста). */

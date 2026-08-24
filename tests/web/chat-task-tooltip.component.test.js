@@ -1,146 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
+import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
 
 process.env.NODE_ENV = 'test';
 
-const CHAT_SESSION_PATH = fileURLToPath(
-  new URL('../../web/src/views/chat/ChatSession.vue', import.meta.url),
-);
-const HELP_TIP_PATH = fileURLToPath(
-  new URL('../../web/src/shared/ui/HelpTip.vue', import.meta.url),
-);
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const LAYER_STACK_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/ui/layer-stack.js', import.meta.url),
-)).href;
+const UI_TOOLTIP_PATH = webFile('src/components/overlays/UiTooltip.vue');
 
-async function compileSfc(path, id) {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(path, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: path });
-  assert.deepEqual(errors, []);
-  return compileScript(descriptor, { id, inlineTemplate: true }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("from './layer-stack.js'", `from "${LAYER_STACK_URL}"`);
+async function compileTooltip() {
+  return compileVue(UI_TOOLTIP_PATH);
 }
 
-async function compileHelpTip() {
-  const code = await compileSfc(HELP_TIP_PATH, 'data-v-help-tip-test');
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-  )).default;
-}
-
-let chatSessionInstance = 0;
-async function compileChatSession() {
-  let code = await compileSfc(CHAT_SESSION_PATH, 'data-v-chat-task-tip-test');
-  code = code
-    .replace(
-      "import { useRouter } from 'vue-router';",
-      'const useRouter = () => globalThis.__chatTaskTooltipRouter || ({ push() {} });',
-    )
-    .replace(
-      "import { api } from '../../shared/api-client.js';",
-      'const api = globalThis.__chatTaskTooltipApi;',
-    )
-    .replace(
-      "import { useDictationController } from '../../features/speech/provider.js';",
-      `const useDictationController = () => ({ acquire: () => ({
-        state: { phase: 'idle', busy: false, prompt: null, interim: '', notice: '' },
-        start: async () => {}, stop: async () => {}, cancel: async () => {},
-        confirmBrowserConsent: async () => {}, useWhisper: async () => {},
-        installBrowserLanguage: async () => {}, release: async () => {},
-      }) });`,
-    )
-    .replace(
-      "import { contextFill } from '../../shared/chat-context.js';",
-      'const contextFill = globalThis.__sharedChatContextFill;',
-    )
-    .replace(
-      "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
-      'const CONTEXT_WINDOW = 200000; const useChatStore = globalThis.__chatTaskTooltipChatStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../../stores/tasks.js';",
-      'const useTasksStore = globalThis.__chatTaskTooltipTasksStore;',
-    )
-    .replace(
-      "import { useUiStore } from '../../stores/ui.js';",
-      'const useUiStore = globalThis.__chatTaskTooltipUiStore;',
-    )
-    .replace(
-      "import { useProvidersStore } from '../../stores/providers.js';",
-      'const useProvidersStore = globalThis.__chatTaskTooltipProvidersStore;',
-    )
-    .replace(
-      "import EffortSlider from './EffortSlider.vue';",
-      // Пропсы объявлены, чтобы тест мог проверить, ЧТО ему передали (значение, блокировку,
-      // подсказку). Поведение самого слайдера — в effort-slider.component.test.js.
-      'const EffortSlider = { name: "EffortSlider", props: ["modelValue", "levels", "disabled", "hint"],'
-      + ' template: "<span class=\\"eff-stub\\"></span>" };',
-    )
-    .replace(
-      "import StepList from './StepList.vue';",
-      'const StepList = { template: "<span></span>" };',
-    )
-    .replace(
-      "import ChatQuestion from './ChatQuestion.vue';",
-      'const ChatQuestion = { template: "<span></span>" };',
-    )
-    .replace(
-      "import ChatPermission from './ChatPermission.vue';",
-      'const ChatPermission = { template: "<span></span>" };',
-    )
-    .replace(
-      "import HelpTip from '../../shared/ui/HelpTip.vue';",
-      `const HelpTip = globalThis.__chatTaskTooltipHelpTip || {
-        props: ['text', 'align', 'triggerFocusable', 'tipStyle'],
-        template: '<span class="help-tip-stub" :data-text="text" :data-focusable="triggerFocusable"><slot /><span class="help-tip-content"><slot name="tip">{{ text }}</slot></span></span>',
-      };`,
-    )
-    .replace(
-      "import { confirmDialog } from '../../shared/ui/confirm.js';",
-      // Модалка подтверждения лезет в document.head/body; тултипу задачи она не нужна,
-      // а «согласие» по умолчанию делает заглушку безопасной для будущих проверок кольца.
-      'const confirmDialog = async () => true;',
-    )
-    .replace(
-      "import { mdToHtml } from '../../shared/md.js';",
-      'const mdToHtml = (text) => text;',
-    )
-    .replace(
-      "import { documentLinkFromClick } from '../../features/documents/links.js';",
-      'const documentLinkFromClick = () => "";',
-    )
-    .replace(
-      "import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';",
-      'const chatFileLinkHref = () => ""; const codeLinkFromClick = () => null;'
-      + ' const loadCodeRoots = () => Promise.resolve([]);',
-    )
-    .replace(
-      "import { useToolLauncher } from '../../shared/tools/launcher.js';",
-      'const useToolLauncher = () => ({ openTool: () => {} });',
-    )
-    .replace(
-      "import { useDocumentPreviewStore } from '../../stores/document-preview.js';",
-      'const useDocumentPreviewStore = () => globalThis.__chatTaskTooltipDocumentPreview || ({ show() {}, showImage() {} });',
-    )
-    .replace(
-      "import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';",
-      "const lastModelRun = () => null; const modelRunView = () => ({ model: '' });",
-    );
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(`${code}\n// экземпляр ${++chatSessionInstance}`).toString('base64')}`
-  )).default;
-}
+const compileChatSession = () => compileChatSessionHarness('__chatTaskTooltip');
 
 // Окно на весь файл, а не на тест: Vue захватывает `document` один раз при импорте
 // runtime-dom, поэтому Teleport подсказки из второго окна ушёл бы в body первого.
@@ -166,6 +38,12 @@ async function browserHarness(t) {
     Event: browser.Event,
     CustomEvent: browser.CustomEvent,
     getComputedStyle: browser.getComputedStyle.bind(browser),
+    requestAnimationFrame: (callback) => {
+      queueMicrotask(() => callback(Date.now()));
+
+      return 1;
+    },
+    cancelAnimationFrame: () => {},
   })) {
     Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   }
@@ -181,49 +59,90 @@ function contextTooltipRows(tip) {
   ]));
 }
 
-test('HelpTip не добавляет второй Tab-stop составному триггеру и открывается по наведению', async (t) => {
+/**
+ * UiTooltip телепортирует surface за пределы wrapper, поэтому связываем его с trigger
+ * по aria-describedby и возвращаем DOMWrapper над фактическим узлом в document.body.
+ */
+async function openTooltip(wrapper, selector) {
+  const trigger = wrapper.get(selector);
+
+  await trigger.trigger('mouseenter');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await wrapper.vm.$nextTick();
+
+  const id = trigger.attributes('aria-describedby');
+  const element = document.getElementById(id);
+  assert.ok(element, `tooltip ${id || selector} не открылся`);
+
+  const { DOMWrapper } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+
+  return new DOMWrapper(element);
+}
+
+async function openContextTooltip(wrapper) {
+  return (await openTooltip(wrapper, '.ctx-ring')).get('[data-testid="context-tooltip"]');
+}
+
+test('UiTooltip не добавляет второй Tab-stop составному триггеру и открывается по наведению', async (t) => {
   const browser = await browserHarness(t);
-  const [{ h }, { mount }, HelpTip] = await Promise.all([
+  const [{ h }, { mount }, UiTooltip] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileHelpTip(),
+    compileTooltip(),
   ]);
-  const wrapper = mount(HelpTip, {
+  const wrapper = mount(UiTooltip, {
     attachTo: browser.document.querySelector('#mount'),
     props: {
       text: 'Полное название задачи',
-      triggerFocusable: false,
     },
     slots: {
-      default: () => h('select', [h('option', 'Задача')]),
+      trigger: () => h('span', { class: 'compound-trigger' }, [
+        h('select', [h('option', 'Задача')]),
+      ]),
     },
   });
   t.after(() => wrapper.unmount());
 
-  assert.equal(wrapper.find('.ht-tr').attributes('tabindex'), undefined);
+  const trigger = wrapper.get('.compound-trigger');
+  assert.equal(trigger.attributes('tabindex'), undefined);
   // Подсказка телепортирована в <body>: искать её в поддереве компонента нельзя,
   // зато её не обрежет ни один скролл-контейнер страницы.
-  const tip = browser.document.querySelector('[role="tooltip"]');
-  assert.equal(tip.parentElement === browser.document.body, true);
+  assert.equal(Boolean(browser.document.querySelector('[role="tooltip"]')), false);
+  await trigger.trigger('mouseenter');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await wrapper.vm.$nextTick();
+  let tip = browser.document.querySelector('[role="tooltip"]');
+  assert.ok(tip);
+  assert.equal(browser.document.body.contains(tip), true);
+  assert.equal(Boolean(tip.closest('#mount')), false, 'tooltip должен выйти из скролл-контейнера trigger-а');
   assert.equal(tip.textContent.trim(), 'Полное название задачи');
-  await wrapper.find('.ht').trigger('mouseenter');
-  assert.equal(tip.classList.contains('on'), true);
+  assert.equal(tip.dataset.state, 'open');
 
   // У составного триггера своего Tab-stop нет, но фокус внутрь (в <select>) обязан
   // показать подсказку — иначе с клавиатуры её не прочитать.
-  await wrapper.find('.ht').trigger('mouseleave');
-  await new Promise((r) => setTimeout(r, 260)); // гашение отложено — ждём его
+  await trigger.trigger('mouseleave');
+  await new Promise((resolve) => setTimeout(resolve, 120));
   await wrapper.vm.$nextTick();
-  assert.equal(tip.classList.contains('on'), false);
+  assert.equal(Boolean(browser.document.querySelector('[role="tooltip"]')), false);
   await wrapper.find('select').trigger('focusin');
-  assert.equal(tip.classList.contains('on'), true);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await wrapper.vm.$nextTick();
+  tip = browser.document.querySelector('[role="tooltip"]');
+  assert.ok(tip);
+  assert.equal(tip.dataset.state, 'open');
+
+  await trigger.trigger('focusout');
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await wrapper.vm.$nextTick();
+  assert.equal(Boolean(browser.document.querySelector('[role="tooltip"]')), false);
 });
 
-test('кольцо контекста открывает форматированный HelpTip без системного title', async (t) => {
+test('кольцо контекста открывает форматированный UiTooltip без системного title', async (t) => {
   const browser = await browserHarness(t);
-  const [{ mount, flushPromises }, HelpTip, { reactive, nextTick }] = await Promise.all([
+  const [{ mount, flushPromises }, { reactive, nextTick }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileHelpTip(),
     import('../../web/node_modules/vue/index.mjs'),
   ]);
   const session = reactive({
@@ -245,7 +164,6 @@ test('кольцо контекста открывает форматирова�
     },
     sending: false,
   });
-  globalThis.__chatTaskTooltipHelpTip = HelpTip;
   globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
   globalThis.__chatTaskTooltipChatStore = () => ({
     sessions: [session],
@@ -276,7 +194,6 @@ test('кольцо контекста открывает форматирова�
   });
   const ChatSession = await compileChatSession();
   t.after(() => {
-    delete globalThis.__chatTaskTooltipHelpTip;
     delete globalThis.__chatTaskTooltipApi;
     delete globalThis.__chatTaskTooltipChatStore;
     delete globalThis.__chatTaskTooltipTasksStore;
@@ -295,13 +212,15 @@ test('кольцо контекста открывает форматирова�
   const ring = wrapper.get('.ctx-ring');
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 160[\s\u00a0]000/);
-  const content = browser.document.querySelector('[data-testid="context-tooltip"]');
-  assert.ok(content, 'форматированный слот не попал в HelpTip');
-  const tip = content.closest('[role="tooltip"]');
-  assert.equal(tip.classList.contains('on'), false);
+  assert.equal(Boolean(browser.document.querySelector('[data-testid="context-tooltip"]')), false);
 
-  await wrapper.get('.ctx-tip').trigger('mouseenter');
-  assert.equal(tip.classList.contains('on'), true);
+  await ring.trigger('mouseenter');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await nextTick();
+  let content = browser.document.querySelector('[data-testid="context-tooltip"]');
+  assert.ok(content, 'форматированный слот не попал в UiTooltip');
+  let tip = content.closest('[role="tooltip"]');
+  assert.equal(tip.dataset.state, 'open');
   assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '80%');
   assert.deepEqual(
     [...content.querySelectorAll('.ctx-pop-label')].map((node) => node.textContent.trim()),
@@ -318,14 +237,19 @@ test('кольцо контекста открывает форматирова�
 
   // Временно недоступное действие остаётся фокусируемым: иначе вместе с native disabled
   // клавиатура теряла и саму форматированную подсказку.
-  await wrapper.get('.ctx-tip').trigger('mouseleave');
-  await new Promise((resolve) => setTimeout(resolve, 220));
+  await ring.trigger('mouseleave');
+  await new Promise((resolve) => setTimeout(resolve, 120));
   session.sessionId = null;
   await nextTick();
   assert.equal(ring.attributes('disabled'), undefined);
   assert.equal(ring.attributes('aria-disabled'), 'true');
   await ring.trigger('focusin');
-  assert.equal(tip.classList.contains('on'), true);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await nextTick();
+  content = browser.document.querySelector('[data-testid="context-tooltip"]');
+  assert.ok(content);
+  tip = content.closest('[role="tooltip"]');
+  assert.equal(tip.dataset.state, 'open');
   assert.equal(content.querySelector('.ctx-pop-status')?.textContent.trim(), 'Контекст пуст');
 });
 
@@ -431,21 +355,22 @@ test('ChatSession передаёт в тултип полное загружен
   await flushPromises();
   await flushPromises();
 
-  const tip = wrapper.find('.help-tip-stub');
-  assert.equal(tip.attributes('data-text'), `#42 · ${title}`);
-  assert.equal(tip.attributes('data-focusable'), 'false');
+  const taskTip = await openTooltip(wrapper, '.task-tip');
+  assert.equal(taskTip.text(), `#42 · ${title}`);
+  assert.equal(wrapper.get('.task-tip').attributes('tabindex'), undefined);
   assert.equal(wrapper.find('.sel.task option[value="42"]').text(), `#42 · ${title}`);
   const ring = wrapper.find('.ctx-ring');
   const ringLabel = ring.attributes('aria-label');
   assert.equal(ring.attributes('title'), undefined, 'native title снова создаст системную подсказку');
-  assert.equal(ring.element.closest('.help-tip-stub')?.classList.contains('ctx-tip'), true);
+  assert.equal(ring.classes().includes('ctx-tip'), true);
+  assert.ok(ring.attributes('aria-describedby'));
   // Заполненность — доля практического потолка (здесь автосжатие выключено, значит 80%
   // окна), а окно модели осталось справочной строкой: см. gotchas про кольцо.
   assert.match(ringLabel, /Контекст: 80[\s ]000 из 204[\s ]800 до потолка окна \(39%\)/);
   assert.match(ringLabel, /окно модели 256[\s ]000/);
   assert.match(ringLabel, /за сессию обработано 240[\s\u00a0]000 входных токенов/);
   assert.match(ringLabel, /кэш: 90% · чт\. 72 тыс\. · мимо 8 тыс\./);
-  const contextTip = wrapper.get('[data-testid="context-tooltip"]');
+  const contextTip = await openContextTooltip(wrapper);
   assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
   assert.equal(contextTip.get('.ctx-pop-unit').text(), '· токены');
   assert.equal(contextTip.get('.ctx-pop-pct').text(), '39%');
@@ -474,9 +399,9 @@ test('ChatSession передаёт в тултип полное загружен
     mime: 'image/png',
   }]);
 
-  const debugTip = wrapper.find('.debug-tip');
-  assert.match(debugTip.attributes('data-text'), /отдельный Debug-чат в той же песочнице/);
-  assert.match(debugTip.attributes('data-text'), /Новый конвейер не создаётся, черновик останется неотправленным/);
+  const debugTip = await openTooltip(wrapper, '.debug-act');
+  assert.match(debugTip.text(), /отдельный Debug-чат в той же песочнице/);
+  assert.match(debugTip.text(), /Новый конвейер не создаётся, черновик останется неотправленным/);
   await wrapper.find('.cs-act .act:not(.debug-act)').trigger('click');
   assert.deepEqual(openedTasks, ['42']);
   assert.match(wrapper.find('.lm').text(), /проверь параметры запуска в карточке задачи/);
@@ -682,7 +607,7 @@ test('ChatSession рисует дугу и процент кольца по то
   assert.doesNotMatch(ring.attributes('aria-label'), /уже подорожал/);
   // Окно модели остаётся справочным: как основная шкала оно и обещало запас, которого нет.
   assert.match(ring.attributes('aria-label'), /окно модели 1[\s ]000[\s ]000/);
-  const contextTip = wrapper.get('[data-testid="context-tooltip"]');
+  const contextTip = await openContextTooltip(wrapper);
   assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст');
   assert.equal(contextTip.get('.ctx-pop-pct').text(), '80%');
   assert.equal(contextTip.get('.ctx-pop-status').text(), 'Порог близко — пора сжать');
@@ -783,7 +708,8 @@ test('ChatSession игнорирует устаревшую границу ст�
   assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
   assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
   assert.equal(ring.classes().includes('mid'), false);
-  assert.equal(contextTooltipRows(wrapper.get('[data-testid="context-tooltip"]')).Кэш, 'нет данных');
+  const contextTip = await openContextTooltip(wrapper);
+  assert.equal(contextTooltipRows(contextTip).Кэш, 'нет данных');
 
   const arc = wrapper.find('.ctx-ring .rfg');
   const circumference = Number(arc.attributes('stroke-dasharray'));
@@ -797,7 +723,7 @@ test('ChatSession игнорирует устаревшую границу ст�
   session.contextTokens = MODEL_WINDOW * 0.8;
   await nextTick();
   assert.match(ring.attributes('aria-label'), /порог достигнут — пора сжать/);
-  assert.doesNotMatch(wrapper.get('[data-testid="context-tooltip"]').text(), /подорож/);
+  assert.doesNotMatch(contextTip.text(), /подорож/);
   assert.equal(ring.classes().includes('hi'), true);
 });
 
@@ -870,7 +796,7 @@ test('ChatSession показывает provider-нейтральный стат�
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
   assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
-  assert.equal(contextTooltipRows(wrapper.get('[data-testid="context-tooltip"]')).Кэш, 'без тарифа');
+  assert.equal(contextTooltipRows(await openContextTooltip(wrapper)).Кэш, 'без тарифа');
   assert.equal(ring.classes().includes('mid'), false);
   assert.equal(ring.classes().includes('hi'), false);
 });
@@ -952,7 +878,7 @@ test('ChatSession показывает неподтверждённое окно
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ringLabel, /Контекст: пусто/);
   assert.match(ringLabel, /окно модели 200[\s ]000 \(не подтверждено\)/);
-  const contextTip = wrapper.get('[data-testid="context-tooltip"]');
+  const contextTip = await openContextTooltip(wrapper);
   assert.match(contextTip.text(), /Контекст пуст/);
   assert.match(contextTooltipRows(contextTip).Окно, /200[\s\u00a0]000 · неточно/);
 

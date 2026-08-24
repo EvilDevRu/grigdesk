@@ -4,7 +4,7 @@ import type {
   UiLayerName,
   UiLayerRegistrationOptions,
 } from '../../types/uiLayers';
-import { normalizeUiLayerName, uiLayerPriority } from './priorities';
+import { uiLayerPriority } from './priorities';
 
 interface LayerEntry {
   token: symbol;
@@ -16,19 +16,6 @@ interface LayerEntry {
   enabled?: () => boolean;
   element?: () => HTMLElement | null;
 }
-
-export interface LegacyLayerRegistrationOptions {
-  priority?: number;
-  name?: UiLayerName;
-  close: UiLayerCloseHandler;
-  enabled?: (() => boolean) | null;
-  element?: (() => HTMLElement | null) | null;
-}
-
-export type LegacyLayerUnregister = (() => void) & {
-  readonly token: symbol;
-  readonly handle: UiLayerHandle;
-};
 
 const layers = new Map<symbol, LayerEntry>();
 const listeners = new Set<() => void>();
@@ -156,53 +143,6 @@ export function registerUiLayer(id: string, options: UiLayerRegistrationOptions)
     },
   };
   return handle;
-}
-
-/**
- * Переходный API для legacy facade. Новый код передаёт semantic `name`.
- */
-export function registerLayer(id: string, options: LegacyLayerRegistrationOptions): LegacyLayerUnregister {
-  const name = normalizeUiLayerName(options.name, 'dialog');
-  ensureListener();
-  const token = Symbol(id);
-  const priority = Number.isFinite(options.priority)
-    ? Number(options.priority)
-    : uiLayerPriority(name);
-  const entry: LayerEntry = {
-    token,
-    id,
-    name,
-    priority,
-    sequence: ++sequence,
-    close: options.close,
-    enabled: options.enabled ?? undefined,
-    element: options.element ?? undefined,
-  };
-  layers.set(token, entry);
-  notify();
-
-  let registered = true;
-  const handle: UiLayerHandle = {
-    token,
-    id,
-    name,
-    priority,
-    isTop: () => registered && isTopLayerToken(token),
-    refresh: refreshLayerStack,
-    unregister: () => {
-      if (!registered) return;
-      registered = false;
-      layers.delete(token);
-      notify();
-      removeListenerWhenIdle();
-    },
-  };
-  const unregister = (() => handle.unregister()) as LegacyLayerUnregister;
-  Object.defineProperties(unregister, {
-    token: { value: token, enumerable: true },
-    handle: { value: handle, enumerable: true },
-  });
-  return unregister;
 }
 
 /** Только для изолированных component-тестов, не входит в public facade. */

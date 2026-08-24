@@ -1,9 +1,50 @@
+<template>
+  <span v-if="busy" class="tri busy" :title="state === 'running' ? 'триаж идёт' : 'в очереди триажа'"><span class="dot"></span></span>
+  <span v-else-if="state === 'failed' && !a" class="tri chip bad" :title="row?.status?.error || 'триаж упал'">!</span>
+  <UiTooltip v-else-if="a" placement="top-end">
+    <template #trigger>
+      <span class="tri" tabindex="0">
+        <span class="chip" :class="tone('cx', a.complexity)">сложн {{ a.complexity }}</span>
+        <span class="chip" :class="tone('risk', a.risk)">риск {{ a.risk }}</span>
+        <span class="chip dim">{{ a.diff_size }}</span>
+        <span v-if="needsInfo" class="chip warn">уточнить</span>
+        <svg class="total" :class="`t${total}`" viewBox="0 0 20 20">
+          <circle class="trk" cx="10" cy="10" r="8" />
+          <circle
+            class="arc"
+            cx="10"
+            cy="10"
+            r="8"
+            :stroke-dasharray="arc"
+            transform="rotate(-90 10 10)"
+          />
+          <text x="10" y="10.5" text-anchor="middle" dominant-baseline="central">
+            {{ total }}
+          </text>
+        </svg>
+      </span>
+    </template>
+    <template #tip>
+      <span class="tipbody">
+        <span class="trow"><b>Итог {{ total }}/5</b> — максимум из сложности и риска</span>
+        <span class="trow"><b>Сложность {{ a.complexity }}/5</b> — {{ CX_DESC[a.complexity] || '' }}</span>
+        <span class="trow"><b>Риск {{ a.risk }}/5</b> — {{ RISK_DESC[a.risk] || '' }}</span>
+        <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[a.diff_size] || '' }}</span>
+        <span class="trow muted">маршрут: {{ a.route_guess }} · уверенность: {{ CONF_RU[a.confidence] || a.confidence }}</span>
+        <span v-if="a.summary" class="trow sum clamp">{{ a.summary }}</span>
+        <span v-for="q in (a.questions || []).slice(0, 2)" :key="q" class="trow q clamp2">? {{ q }}</span>
+        <span v-if="(a.questions || []).length > 2" class="trow muted">…ещё {{ (a.questions || []).length - 2 }} — в карточке задачи</span>
+      </span>
+    </template>
+  </UiTooltip>
+</template>
+
 <script setup>
 // Бейджи триажа в строке задачи: сложность / риск / размер диффа словами.
-// Подробности (расшифровка шкал, резюме, вопросы) — в тултипе HelpTip по ховеру.
+// Подробности (расшифровка шкал, резюме, вопросы) — в общем тултипе по ховеру.
 // Пока анализ в очереди/идёт — пульсирующая точка; упал — красный «!».
 import { computed } from 'vue';
-import HelpTip from '../../shared/ui/HelpTip.vue';
+import { UiTooltip } from '../../ui';
 
 const props = defineProps({
   row: { type: Object, default: null }, // { analysis?, status? } из стора analysis
@@ -42,36 +83,6 @@ const total = computed(() => (a.value ? Math.max(a.value.complexity || 0, a.valu
 const CIRC = 2 * Math.PI * 8;
 const arc = computed(() => `${(total.value / 5) * CIRC} ${CIRC}`);
 </script>
-
-<template>
-  <span v-if="busy" class="tri busy" :title="state === 'running' ? 'триаж идёт' : 'в очереди триажа'"><span class="dot"></span></span>
-  <span v-else-if="state === 'failed' && !a" class="tri chip bad" :title="row?.status?.error || 'триаж упал'">!</span>
-  <HelpTip v-else-if="a" align="right">
-    <span class="tri">
-      <span class="chip" :class="tone('cx', a.complexity)">сложн {{ a.complexity }}</span>
-      <span class="chip" :class="tone('risk', a.risk)">риск {{ a.risk }}</span>
-      <span class="chip dim">{{ a.diff_size }}</span>
-      <span v-if="needsInfo" class="chip warn">уточнить</span>
-      <svg class="total" :class="`t${total}`" viewBox="0 0 20 20">
-        <circle class="trk" cx="10" cy="10" r="8" />
-        <circle class="arc" cx="10" cy="10" r="8" :stroke-dasharray="arc" transform="rotate(-90 10 10)" />
-        <text x="10" y="10.5" text-anchor="middle" dominant-baseline="central">{{ total }}</text>
-      </svg>
-    </span>
-    <template #tip>
-      <span class="tipbody">
-        <span class="trow"><b>Итог {{ total }}/5</b> — максимум из сложности и риска</span>
-        <span class="trow"><b>Сложность {{ a.complexity }}/5</b> — {{ CX_DESC[a.complexity] || '' }}</span>
-        <span class="trow"><b>Риск {{ a.risk }}/5</b> — {{ RISK_DESC[a.risk] || '' }}</span>
-        <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[a.diff_size] || '' }}</span>
-        <span class="trow muted">маршрут: {{ a.route_guess }} · уверенность: {{ CONF_RU[a.confidence] || a.confidence }}</span>
-        <span v-if="a.summary" class="trow sum clamp">{{ a.summary }}</span>
-        <span v-for="q in (a.questions || []).slice(0, 2)" :key="q" class="trow q clamp2">? {{ q }}</span>
-        <span v-if="(a.questions || []).length > 2" class="trow muted">…ещё {{ (a.questions || []).length - 2 }} — в карточке задачи</span>
-      </span>
-    </template>
-  </HelpTip>
-</template>
 
 <style scoped>
 .tri { display: inline-flex; gap: 3px; align-items: center; flex: none; }

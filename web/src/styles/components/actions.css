@@ -196,10 +196,22 @@
   text-overflow: ellipsis;
 }
 
+.ui-button__label > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
 .ui-button__leading,
 .ui-button__trailing {
   display: inline-flex;
   flex: none;
+}
+
+.ui-button__leading > svg,
+.ui-button__trailing > svg {
+  width: 16px;
+  height: 16px;
 }
 
 .ui-disclosure-button > .ui-button__content {
@@ -219,6 +231,14 @@
 
 .ui-disclosure-button .ui-button__trailing {
   margin-left: auto;
+}
+
+.ui-disclosure-button--compact,
+.ui-disclosure-button[data-density='compact'] {
+  height: auto;
+  min-height: 0;
+  padding: 3px 4px;
+  border-radius: 6px;
 }
 
 .ui-button__loading {
@@ -254,6 +274,18 @@
   padding: 0;
 }
 
+.ui-icon-button .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.ui-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
 .ui-icon-button--peer,
 .ui-icon-button[data-role='peer'] {
   width: var(--control-height);
@@ -285,6 +317,91 @@
   border-radius: 5px;
 }
 
+.ui-icon-button[data-context^='tool-dock-'] {
+  width: var(--tool-dock-action-size);
+  height: var(--tool-dock-action-size);
+  min-height: var(--tool-dock-action-size);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  transition: color .12s, border-color .12s, background .12s;
+}
+
+.ui-icon-button[data-context^='tool-dock-']:hover {
+  border-color: var(--line-2);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='tool-dock-expand'][aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='tool-dock-hide']:hover {
+  border-color: color-mix(in srgb, var(--bad) 42%, var(--line));
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context^='tool-dock-']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ui-icon-button[data-context^='tool-dock-'] svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-button[data-context='tool-dock-navigator'] {
+  flex: none;
+  width: auto;
+  height: var(--tool-dock-action-size, 30px);
+  min-height: var(--tool-dock-action-size, 30px);
+  padding: 0 8px;
+  border-radius: 7px;
+  line-height: 1;
+}
+
+.ui-button[data-context='tool-dock-navigator'] > .ui-button__content {
+  gap: 6px;
+}
+
+.ui-button[data-context='tool-dock-navigator'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-icon-button[data-context='tool-rail-item'] {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='tool-rail-item']:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='tool-rail-item'].active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='tool-rail-item']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ui-icon-button[data-context='tool-rail-item'] svg {
+  width: 19px;
+  height: 19px;
+}
+
 .ui-pressable,
 .ui-svg-pressable {
   border: 0;
@@ -298,9 +415,322 @@
   padding: 0;
 }
 
+.ui-pressable[data-context='cockpit-version'] {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--ink-mid);
+  transition: background 0.12s, color 0.12s;
+}
+
+.ui-pressable[data-context='cockpit-version'] > .ic {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.ui-pressable[data-context='cockpit-version']:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-pressable[data-context='cockpit-version'].checkout {
+  color: var(--accent);
+}
+
+.ui-pressable[data-context='cockpit-version'].release {
+  color: var(--warn, #e0a33a);
+}
+
+.ui-pressable[data-context='cockpit-version'].error {
+  color: var(--bad);
+}
+
+.ui-pressable[data-context='provider-status'] {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+/* OpenAI и Kimi в шапке нейтральные: цвет здесь означает состояние, а не бренд. */
+.ui-pressable[data-context='provider-status'].codex,
+.ui-pressable[data-context='provider-status'].kimi {
+  color: var(--ink);
+}
+
+.ui-pressable[data-context='provider-status'].off {
+  color: var(--ink-mid);
+  opacity: 0.45;
+}
+
+.ui-pressable[data-context='provider-status'].upd {
+  opacity: 1;
+}
+
+/* Popover в узком topbar хранит служебные действия, а не полноразмерную форму.
+   Высоты повторяют прежнюю плотность и не съедают половину карточки лимитов. */
+.ui-button[data-context='topbar-popover-action'],
+.ui-inline-confirm[data-context='topbar-popover-confirm'] .ui-button {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: var(--line-2);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.ui-button[data-context='topbar-popover-action']:hover:not(:disabled),
+.ui-inline-confirm[data-context='topbar-popover-confirm'] .ui-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ui-button[data-context='topbar-popover-footer'] {
+  width: 100%;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-color: var(--line-2);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 11.5px;
+}
+
+.ui-button[data-context='topbar-popover-footer']:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Внешний ресурс — ссылка, а не кнопка формы. Обычный action skin добавляет ей
+   36 px высоты и nowrap; длинная подпись Claude из-за этого раздвигала popover. */
+.ui-action-link[data-context='topbar-popover-resource-link'] {
+  justify-content: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  line-height: 1.45;
+  text-align: left;
+  text-decoration: underline;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='topbar-popover-resource-link']:hover:not([aria-disabled='true']) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+}
+
+.ui-pressable[data-role='transcript-segment'] {
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: inherit;
+  font-size: 13.5px;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-pressable[data-role='transcript-segment']:hover {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.ui-pressable[data-role='task-title'] {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-pressable[data-role='task-title'][data-emphasis='active'] {
+  font-weight: 600;
+}
+
+.ui-pressable[data-role='task-title']:hover {
+  color: var(--accent);
+}
+
 .ui-command-button {
   font-family: var(--mono);
   font-size: 12px;
+}
+
+.ui-button[data-role='pipeline-toolbar'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.ui-button[data-role='pipeline-project'] {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+
+.ui-button[data-role='pipeline-project'] b {
+  margin-left: 4px;
+  color: var(--ink);
+}
+
+.ui-button[data-role='pipeline-project'][aria-pressed='true'] {
+  --ui-action-background: var(--accent);
+  --ui-action-border: var(--accent);
+  --ui-action-color: var(--ground);
+}
+
+.ui-button[data-role='pipeline-project'][aria-pressed='true'] b {
+  color: inherit;
+}
+
+.ui-button[data-role='pipeline-task-id'],
+.ui-button[data-role='pipeline-title'] {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.ui-button[data-role='pipeline-task-id'] {
+  flex: none;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ui-button[data-role='pipeline-title'] {
+  flex: 1;
+  justify-content: flex-start;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.ui-button[data-role='pipeline-title'] > .ui-button__content,
+.ui-button[data-role='pipeline-title'] .ui-button__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-button[data-role='pipeline-title'] .ui-button__label {
+  white-space: nowrap;
+}
+
+.ui-button[data-role='pipeline-task-id']:hover,
+.ui-button[data-role='pipeline-title']:hover {
+  color: var(--accent);
+}
+
+.ui-button[data-role='pipeline-compact-action'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.ui-button[data-role='task-compact-action'] {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ui-button[data-context='task-footer-action'] {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.ui-disclosure-button[data-role='task-note-disclosure'] {
+  width: 100%;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: left;
+}
+
+.ui-tab[data-context='task-modal-tab'] {
+  padding-inline: 11px;
+  font-size: 12.5px;
+}
+
+.ui-button[data-role='pipeline-runner'] {
+  flex: 1 1 150px;
+  justify-content: flex-start;
+  min-width: 126px;
+  height: auto;
+  min-height: 58px;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-button[data-role='pipeline-runner'] > .ui-button__content,
+.ui-button[data-role='pipeline-runner'] .ui-button__label {
+  width: 100%;
+  align-items: flex-start;
+}
+
+.ui-button[data-role='pipeline-runner'] .ui-button__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ui-button[data-role='pipeline-runner'] b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ui-button[data-role='pipeline-runner'] small {
+  color: var(--ink-mid);
+  font: 10.5px/1.4 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.ui-button[data-role='pipeline-runner'][aria-pressed='true'] b {
+  color: var(--accent);
+}
+
+.ui-button[data-role='pipeline-section-disclosure'] {
+  width: 100%;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  text-transform: uppercase;
 }
 
 .ui-disclosure-button__icon,
@@ -313,4 +743,645 @@
 .ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__icon,
 .ui-disclosure-button[aria-expanded='true'] .ui-disclosure-button__chevron {
   transform: rotate(90deg);
+}
+
+/* Действия списка лежат поверх названия и бейджа модели. Их фон обязан быть
+   непрозрачным: прозрачный ghost-control показывает текст строки сквозь иконку. */
+.ui-icon-button[data-context='chat-list-new'] {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 16px;
+}
+
+.ui-icon-button[data-context='chat-list-new']:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='chat-list-action'] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--ground);
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='chat-list-action']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-list-action'][data-tone='accent']:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.ui-icon-button[data-context='chat-list-action'][data-tone='danger']:hover:not(:disabled) {
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-session-back'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.ui-icon-button[data-context='chat-session-back']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-title-edit'] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 12px;
+  opacity: 0.5;
+  transition:
+    opacity var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.cs .hrow:hover .ui-icon-button[data-context='chat-title-edit'],
+.ui-icon-button[data-context='chat-title-edit']:hover:not(:disabled),
+.ui-icon-button[data-context='chat-title-edit']:focus-visible {
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-title-edit']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-context'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.ui-icon-button[data-context='chat-context'] svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Внутренний label обычной кнопки режет переполнение ради длинного текста. Кольцо —
+   SVG-иконка, поэтому ему нужна точная коробка без text-overflow clipping. */
+.ui-icon-button[data-context='chat-context'] .ui-button__label {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  overflow: visible;
+}
+
+.ui-icon-button[data-context='chat-context'] .rfg {
+  stroke: var(--good);
+  transition: stroke-dashoffset 0.3s;
+}
+
+.ui-icon-button[data-context='chat-context'] .rbg {
+  stroke: var(--surface-2);
+}
+
+.ui-icon-button[data-context='chat-context'].mid .rfg {
+  stroke: var(--warn);
+}
+
+.ui-icon-button[data-context='chat-context'].hi .rfg {
+  stroke: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-context'].estimate .rfg {
+  stroke: var(--accent);
+  opacity: 0.8;
+}
+
+.ui-icon-button[data-context='chat-context'].compacting {
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-context'].compacting .rfg {
+  stroke: var(--accent);
+}
+
+.ui-icon-button[data-context='chat-context'].compacting svg {
+  animation: ui-chat-context-spin 0.8s linear infinite;
+}
+
+.ui-icon-button[data-context='chat-context']:hover:not([aria-disabled='true']) {
+  background: var(--surface-2);
+}
+
+.ui-icon-button[data-context='chat-context'][aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.ui-icon-button[data-context='chat-message-copy'] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin-bottom: 3px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-mid);
+  opacity: 0;
+  transition:
+    opacity var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-icon-button[data-context='chat-message-copy'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.msg:hover .ui-icon-button[data-context='chat-message-copy'],
+.ui-icon-button[data-context='chat-message-copy']:focus-visible,
+.ui-icon-button[data-context='chat-message-copy'].done {
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-message-copy']:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-message-copy'].done {
+  color: var(--good);
+}
+
+.ui-button[data-role='chat-task-action'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.ui-button[data-role='chat-task-action'].onconv {
+  --ui-action-background: color-mix(in srgb, var(--accent) 16%, transparent);
+  --ui-action-border: color-mix(in srgb, var(--accent) 45%, var(--line));
+  --ui-action-color: var(--accent);
+}
+
+.ui-icon-button[data-context='chat-pending-remove'] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 14px;
+}
+
+.ui-icon-button[data-context='chat-pending-remove']:hover:not(:disabled) {
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-microphone'] {
+  isolation: isolate;
+  overflow: visible;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='chat-microphone'] svg {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+}
+
+.ui-icon-button[data-context='chat-microphone']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-microphone'].rec {
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
+  color: var(--bad);
+}
+
+.ui-icon-button[data-context='chat-microphone'].rec::before {
+  position: absolute;
+  z-index: -1;
+  inset: 3px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bad) 48%, transparent);
+  content: '';
+  pointer-events: none;
+  animation: ui-chat-mic-pulse 1.35s ease-out infinite;
+}
+
+.ui-icon-button[data-context='chat-microphone'].wait {
+  color: var(--accent);
+  cursor: default;
+  opacity: 1;
+}
+
+.ui-icon-button[data-context='chat-microphone'] .spin-ico {
+  animation: ui-chat-icon-rotate 0.9s linear infinite;
+}
+
+.ui-button[data-role='chat-speech-action'] {
+  height: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.ui-button[data-role='chat-command'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-button[data-role='chat-command'] > .ui-button__content,
+.ui-button[data-role='chat-command'] .ui-button__label {
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-button[data-role='chat-command'] .ui-button__label {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.ui-button[data-role='chat-command'] + .ui-button[data-role='chat-command'] {
+  border-top: 1px solid var(--line);
+}
+
+.ui-button[data-role='chat-command'].on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.ui-button[data-role='chat-command'].off {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ui-button[data-role='chat-command'].off .c-cmd {
+  color: var(--ink-mid);
+}
+
+/* Настройки используют те же primitives, но навигация и компактные служебные
+   действия сохраняют собственную плотность и двухстрочную геометрию. */
+.ui-button[data-role='settings-action'] {
+  font-size: 14px;
+}
+
+.ui-button[data-role='settings-compact-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.ui-button[data-role='settings-nav'] {
+  position: relative;
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 10px;
+  border-radius: 10px;
+  color: var(--ink-mid);
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-button[data-role='settings-nav'] > .ui-button__content,
+.ui-button[data-role='settings-nav'] .ui-button__label {
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-button[data-role='settings-nav'] > .ui-button__content {
+  justify-content: flex-start;
+}
+
+.ui-button[data-role='settings-nav'] .ui-button__label {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  overflow: visible;
+}
+
+.ui-button[data-role='settings-nav']::before {
+  position: absolute;
+  left: -11px;
+  width: 3px;
+  height: 22px;
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  content: '';
+}
+
+.ui-button[data-role='settings-nav']:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-button[data-role='settings-nav'].active {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 11%, var(--surface-2));
+  color: var(--ink);
+}
+
+.ui-button[data-role='settings-nav'].active::before {
+  background: var(--accent);
+}
+
+.ui-button[data-role='settings-nav'] .ui-button__label > svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: currentColor;
+}
+
+.ui-button[data-role='settings-nav'].active .ui-button__label > svg {
+  color: var(--accent);
+}
+
+.ui-button[data-role='settings-nav'] .ui-button__label > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ui-button[data-role='settings-nav'] strong {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 630;
+  text-overflow: ellipsis;
+}
+
+.ui-button[data-role='settings-nav'] small {
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.speech-field-actions .ui-button[data-role='settings-action'],
+.speech-model-actions .ui-button[data-role='settings-action'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.ui-button.speech-cancel[data-role='settings-compact-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.ui-button.mcpbtn[data-role='settings-compact-action'] {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.trusted-item .ui-button[data-role='settings-compact-action'] {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.trusted-add .ui-button[data-role='settings-action'] {
+  height: 38px;
+  min-height: 38px;
+}
+
+.ui-button.plugin-save[data-role='settings-action'] {
+  --ui-action-border: color-mix(in srgb, var(--accent) 42%, var(--line));
+  --ui-action-color: var(--accent);
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ui-button.plugin-save[data-role='settings-action']:hover:not(:disabled) {
+  --ui-action-border: var(--accent);
+  --ui-action-background-hover: color-mix(in srgb, var(--accent) 9%, var(--surface-2));
+}
+
+.ui-button.plugin-save[data-role='settings-action'].saved {
+  --ui-action-border: color-mix(in srgb, var(--good) 38%, var(--line));
+  --ui-action-color: var(--good);
+}
+
+.ui-button.plugin-save[data-role='settings-action'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-button.upd[data-role='settings-action'] {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.ui-button.upd[data-role='settings-action']:hover:not(:disabled) {
+  --ui-action-border: var(--line-2);
+}
+
+.ui-button.upd[data-role='settings-action'].hot {
+  --ui-action-background: color-mix(in srgb, var(--warn) 14%, transparent);
+  --ui-action-border: color-mix(in srgb, var(--warn) 55%, var(--line));
+  --ui-action-color: var(--warn);
+}
+
+.ui-command-button[data-role='settings-command'] {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 2px 7px;
+  border-color: var(--line);
+  border-radius: 5px;
+  background: var(--ground);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
+  user-select: all;
+}
+
+.ui-command-button[data-role='settings-command']:hover:not(:disabled) {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='chat-send'],
+.ui-icon-button[data-context='chat-stop'] {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 16px;
+}
+
+.ui-icon-button[data-context='chat-send']:disabled,
+.ui-icon-button[data-context='chat-stop']:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ui-icon-button[data-context='chat-stop'] .sq {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: #fff;
+}
+
+@keyframes ui-chat-mic-pulse {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.62);
+  }
+}
+
+@keyframes ui-chat-icon-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ui-chat-context-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-icon-button[data-context='chat-microphone'].rec::before {
+    animation: none;
+    opacity: 0.35;
+    transform: scale(1.18);
+  }
+}
+
+@media (max-width: 1000px) {
+  .ui-button[data-role='settings-nav'] {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 132px;
+    padding: 9px 11px;
+    scroll-snap-align: start;
+  }
+
+  .ui-button[data-role='settings-nav']::before {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .ui-button[data-role='settings-nav'] {
+    min-width: auto;
+    padding: 9px 11px;
+  }
+
+  .ui-button[data-role='settings-nav'] small {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-icon-button[data-context='task-modal-header'],
+  .ui-button[data-role='task-compact-action'],
+  .ui-dialog[data-role='task-modal'] .ui-button {
+    min-height: 40px;
+  }
+
+  .ui-icon-button[data-context='task-modal-header'] {
+    width: 40px;
+    height: 40px;
+  }
+
+  .ui-button[data-role='task-compact-action'] {
+    height: 40px;
+  }
+
+  .ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
+    width: 100%;
+  }
+
+  .ui-tab[data-context='task-modal-tab'] {
+    flex: 1;
+    justify-content: center;
+    min-height: 40px;
+    padding-inline: 8px;
+  }
+
+  .ui-icon-button[data-context='pipeline-stage-close'] {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .ui-button[data-role='pipeline-runner'] {
+    flex-basis: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
 }

@@ -105,7 +105,7 @@ test('cutover call-sites: Pipeline использует exact companion intent, 
   ]);
   assert.match(pipeline, /companion\.openForTask\(stage\.task\)/);
   assert.doesNotMatch(pipeline, /chat\.openFor\(/);
-  assert.equal(/props\.variant|\bvariant\s*:|variant=["']|\.panel\s|chat\.close\(/.test(session), false,
+  assert.equal(/props\.variant|\bvariant\s*:|\.panel\s|chat\.close\(/.test(session), false,
     'ChatSession содержит только page layout');
   assert.match(session, /:disabled="frozen\s*\|\|\s*sess\.purpose\s*===\s*'companion'"/);
   assert.doesNotMatch(chats, /variant=["']page["']/);

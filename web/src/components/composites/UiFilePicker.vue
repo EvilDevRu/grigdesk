@@ -1,5 +1,14 @@
 <template>
-  <div class="ui-file-picker" :aria-busy="busy ? 'true' : undefined">
+  <div
+    class="ui-file-picker"
+    :class="[
+      `ui-file-picker--${presentation}`,
+      `ui-file-picker--${density}`,
+    ]"
+    :data-presentation="presentation"
+    :data-density="density"
+    :aria-busy="busy ? 'true' : undefined"
+  >
     <UiFileInput
       ref="input"
       :accept="accept"
@@ -10,16 +19,28 @@
       @change="onFiles"
     />
     <UiButton
-      :disabled="disabled"
+      class="ui-file-picker__trigger"
+      :disabled="disabled || busy"
       :aria-disabled="ariaDisabled"
-      :loading="busy"
+      :loading="busy && presentation !== 'dropzone'"
+      :loading-label="loadingLabel"
+      :block="presentation === 'dropzone'"
       @click="open"
     >
-      {{ label }}
+      <template v-if="$slots.leading" #leading>
+        <slot name="leading" />
+      </template>
+      <span class="ui-file-picker__copy">
+        <strong><slot>{{ label }}</slot></strong>
+        <small v-if="$slots.hint"><slot name="hint" /></small>
+      </span>
+      <template v-if="$slots.trailing" #trailing>
+        <slot name="trailing" />
+      </template>
     </UiButton>
-    <span v-if="summary" class="ui-file-picker__summary">{{ summary }}</span>
+    <span v-if="showSummary && summary" class="ui-file-picker__summary">{{ summary }}</span>
     <UiIconButton
-      v-if="files.length"
+      v-if="showReset && files.length"
       label="Очистить выбранные файлы"
       :disabled="disabled || busy"
       @click="reset"
@@ -44,6 +65,11 @@ const props = withDefaults(
     ariaDisabled?: boolean;
     busy?: boolean;
     label?: string;
+    loadingLabel?: string;
+    presentation?: 'inline' | 'dropzone';
+    density?: 'default' | 'compact';
+    showSummary?: boolean;
+    showReset?: boolean;
   }>(),
   {
     accept: undefined,
@@ -53,8 +79,21 @@ const props = withDefaults(
     ariaDisabled: false,
     busy: false,
     label: 'Выбрать файл',
+    loadingLabel: 'Загрузка файла',
+    presentation: 'inline',
+    density: 'default',
+    showSummary: true,
+    showReset: true,
   },
 );
+
+defineSlots<{
+  default?(): unknown;
+  leading?(): unknown;
+  hint?(): unknown;
+  trailing?(): unknown;
+}>();
+
 const emit = defineEmits<{
   change: [files: File[]];
   reset: [];

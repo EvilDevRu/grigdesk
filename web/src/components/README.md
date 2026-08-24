@@ -31,3 +31,10 @@ Script разделяется пустыми строками на imports, publ
 только справку; интерактивная поверхность использует popover. Все modal overlays проходят
 через `UiDialog` и единый stack, а простые Promise-вопросы — через `confirmDialog`,
 `promptDialog` и `alertDialog`.
+
+Обязательные локальные проверки: `npm run typecheck:ui`, `npm run check:sfc`,
+`npm run check:ui`, `npm run check:ui-styles`, `npm run check:readability` и `npm test`.
+Настоящую раскладку проверяет `npm run test:ui-browser`: команда поднимает отдельный Vite
+entry `ui-gallery.html`, запускает Chrome с временным profile и проходит матрицу ширин.
+Путь к браузеру можно задать через `CHROME_BIN`, а готовый dev server — через
+`UI_GEOMETRY_BASE_URL`.

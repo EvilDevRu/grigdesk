@@ -3,6 +3,7 @@ import test from 'node:test';
 globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -12,6 +13,8 @@ process.env.NODE_ENV = 'test';
 const CHATS_VIEW_PATH = fileURLToPath(new URL('../../web/src/views/ChatsView.vue', import.meta.url));
 const CHAT_LIST_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatList.vue', import.meta.url));
 const CHAT_SESSION_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatSession.vue', import.meta.url));
+const CHAT_FIELDS_PATH = webFile('src/styles/components/fields.css');
+const CHAT_ACTIONS_PATH = webFile('src/styles/components/actions.css');
 const VUE_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
 )).href;
@@ -49,13 +52,22 @@ const compileChatsView = () => compileSfc(CHATS_VIEW_PATH, 'data-v-chats-resize'
   .replace("import ChatList from './chat/ChatList.vue';", 'const ChatList = { emits: ["open"], template: "<aside class=\\"cl\\"><button class=\\"stub-open\\" @click=\\"$emit(\\\'open\\\')\\"></button></aside>" };')
   .replace("import ChatSession from './chat/ChatSession.vue';", 'const ChatSession = { props: ["sid"], template: "<div class=\\"cs\\"></div>" };'));
 
-const compileChatList = () => compileSfc(CHAT_LIST_PATH, 'data-v-chat-list-brand', (code) => code
-  .replace("import { contextFill } from '../../shared/chat-context.js';", 'const contextFill = globalThis.__sharedChatContextFill;')
-  .replace("import { useChatStore } from '../../stores/chat.js';", 'const useChatStore = globalThis.__chatListStore;')
-  .replace("import { useProvidersStore } from '../../stores/providers.js';", 'const useProvidersStore = globalThis.__chatListProviders;')
-  .replace("import ProviderIcon from '../../shared/ProviderIcon.vue';", 'const ProviderIcon = { props: ["provider", "size"], template: "<i class=\\"pico\\"></i>" };')
-  .replace("import ToggleSwitch from '../../shared/ui/ToggleSwitch.vue';", 'const ToggleSwitch = { props: ["modelValue", "label"], template: "<span class=\\"tsw\\"></span>" };')
-  .replace("import { confirmDialog } from '../../shared/ui/confirm.js';", 'const confirmDialog = async () => false;'));
+const compileChatList = () => compileVue(CHAT_LIST_PATH, {
+  stubs: {
+    '../../stores/chat.js': `
+      export const useChatStore = globalThis.__chatListStore;
+    `,
+    '../../stores/providers.js': `
+      export const useProvidersStore = globalThis.__chatListProviders;
+    `,
+    '../../shared/ProviderIcon.vue': `
+      export default {
+        props: ['provider', 'size'],
+        template: '<i class="pico"></i>',
+      };
+    `,
+  },
+});
 
 let shared = null;
 async function browserHarness() {
@@ -246,6 +258,11 @@ test('строка чата: знак исполнителя красится ц
 
   const avas = wrapper.findAll('.ava');
   assert.equal(avas.length, 3);
+  const primaryRows = wrapper.findAll('.row-hit');
+  assert.equal(primaryRows.length, 3);
+  assert.equal(primaryRows.every((entry) => entry.element.tagName === 'BUTTON'), true);
+  assert.equal(primaryRows[0].attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.find('.row-hit button').exists(), false, 'action-кнопки не вложены в primary');
   assert.equal(avas[0].element.style.getPropertyValue('--prov').trim(), '#d97757');
   assert.equal(avas[0].classes().includes('brand'), true);
   assert.equal(avas[1].element.style.getPropertyValue('--prov').trim(), '#10a37f');
@@ -259,9 +276,11 @@ test('строка чата: знак исполнителя красится ц
 });
 
 test('раскладка чата: JS и CSS считают одни и те же границы', async (t) => {
-  const [list, session] = await Promise.all([
+  const [list, session, fields, actions] = await Promise.all([
     readFile(CHAT_LIST_PATH, 'utf8'),
     readFile(CHAT_SESSION_PATH, 'utf8'),
+    readFile(CHAT_FIELDS_PATH, 'utf8'),
+    readFile(CHAT_ACTIONS_PATH, 'utf8'),
   ]);
   void t;
 
@@ -285,12 +304,31 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   // (поворот планшета скрипт не ловит), поэтому обе цифры обязаны совпадать — иначе
   // у разделителя появляется мёртвый ход: число меняется, поле стоит.
   assert.match(session, /class="cs-resize" role="separator" aria-orientation="horizontal"/);
-  assert.match(session, /height: var\(--composer-h, auto\);[^}]*max-height: 46vh;/);
+  assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*height: var\(--composer-h, auto\);/);
+  assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*max-height: 46vh;/);
   assert.match(session, /const COMPOSER_MAX_VH = 0\.46;/);
   // После удаления floating panel у полноразмерного composer остались один минимум и
   // один device-key; legacy key здесь даже не читается.
   assert.match(session, /const COMPOSER_MIN = 48;/);
-  assert.match(session, /\.cs-input textarea \{[^}]*min-height: 48px;/);
+  assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*min-height: 48px;/);
+  assert.match(
+    fields,
+    /data-role='chat-composer'\]:focus-visible\s*\{[^}]*box-shadow:\s*none;/,
+  );
+  assert.match(
+    actions,
+    /data-context='chat-context'\] \.ui-button__label\s*\{[^}]*overflow:\s*visible;/,
+  );
+  assert.match(list, /data-context="chat-list-new"/);
+  assert.match(list, /data-context="chat-list-action"/);
+  assert.match(
+    actions,
+    /data-context='chat-list-new'\]\s*\{[^}]*background:\s*var\(--surface-2\);/,
+  );
+  assert.match(
+    actions,
+    /data-context='chat-list-action'\]\s*\{[^}]*background:\s*var\(--ground\);/,
+  );
   assert.match(session, /'cockpit-chat-composer-h'/);
   assert.doesNotMatch(session, /cockpit-chat-panel-composer-h/);
 });

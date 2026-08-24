@@ -11,7 +11,10 @@ html.diff-modal-open .overlay {
   backdrop-filter: none !important;
 }
 
-html.ui-scroll-locked,
-body.ui-scroll-locked {
+.ui-dialog-overlay[data-ui-layer='diff-workspace'] {
+  backdrop-filter: none;
+}
+
+body.ui-modal-scroll-lock {
   overflow: hidden;
 }

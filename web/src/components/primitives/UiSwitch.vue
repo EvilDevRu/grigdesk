@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { nextTick, ref } from 'vue';
 
 defineOptions({ inheritAttrs: false });
 
@@ -42,8 +42,9 @@ const model = defineModel<boolean>({ default: false });
 const element = ref<HTMLInputElement | null>(null);
 
 /**
- * В режиме `ariaDisabled` нативный checkbox не заблокирован и может переключиться сам.
- * Возвращаем прежнее состояние до любых emit, иначе DOM разойдётся с моделью.
+ * Нативный checkbox меняет DOM до того, как владелец принимает новое значение модели.
+ * `ariaDisabled` откатываем сразу, а обычное изменение — после Vue-tick: так отменённый
+ * async-confirm не оставит DOM в состоянии, которое контролируемый prop не принял.
  */
 function onChange(event: Event): void {
   const input = event.target as HTMLInputElement;
@@ -57,6 +58,10 @@ function onChange(event: Event): void {
 
   emit('change', event);
   model.value = input.checked;
+
+  void nextTick(() => {
+    input.checked = Boolean(model.value);
+  });
 }
 
 defineExpose({

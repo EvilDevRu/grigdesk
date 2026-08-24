@@ -1,110 +1,65 @@
 // Общая обвязка для офлайн-тестов доски (`views/BoardView.vue`).
 //
-// Вью компилируется в память и грузится как `data:`-модуль, а такой модуль НЕ УМЕЕТ
-// резолвить относительные импорты: любой `import ... from '../…'` внутри вью падает
-// `ERR_UNSUPPORTED_RESOLVE_REQUEST` и роняет все тесты файла разом. Поэтому каждый
-// импорт заменяется заглушкой прямо в исходнике — и делать это нужно в ОДНОМ месте:
-// пока замены жили копией в одном тесте, добавленный во вью импорт (`task-seen`)
-// ломал его молча и целиком.
-//
-// Второй известный подвох — кэш модулей: Node ключует `data:`-URL целиком, а две
-// компиляции одного SFC дают побайтово равный текст (scopeId в вывод не попадает).
-// Без хвоста-nonce второй mount получил бы модуль первого вместе с его сторами.
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+// Общий compiler бандлит относительные Vue/TypeScript-импорты, а доменные stores и
+// network-зависимости подменяются здесь один раз. UI facade остаётся настоящим, чтобы
+// тесты видели те же primitive/composite contracts, что и production-доска.
+import { compileVue, singletonUrl, webFile } from './compile-vue.js';
 
-const VIEW_PATH = fileURLToPath(new URL('../../../web/src/views/BoardView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const PINIA_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
-)).href;
-// Отбор списка — настоящий: тесты доски проверяют в том числе сочетание фильтров.
-const LIST_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/src/shared/board-task-list.js', import.meta.url),
-)).href;
+const VIEW_PATH = webFile('src/views/BoardView.vue');
+const PINIA_URL = singletonUrl('pinia');
 const HAPPY_DOM = '../../../web/node_modules/happy-dom/lib/index.js';
 const TEST_UTILS = '../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs';
-const COMPILER_SFC = '../../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js';
 
-let compileNonce = 0;
+let mountNonce = 0;
 
-/** Компиляция вью с заглушками вместо импортов. */
-export async function compileBoardView(prefix = 'board') {
-  const { parse, compileScript } = await import(COMPILER_SFC);
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, {
-    id: `data-v-${prefix}-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replaceAll("from 'pinia'", `from "${PINIA_URL}"`)
-    .replace(
-      "import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.js';",
-      'const hoursToHM = (n) => String(n ?? 0); const liveTimerSec = (t) => t.timerElapsed || 0;'
-      + ' const secToHMS = (n) => String(n ?? 0); const signed = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__boardViewStores.board;',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__boardViewStores.ui;',
-    )
-    .replace(
-      "import { useAnalysisStore } from '../stores/analysis.js';",
-      'const useAnalysisStore = globalThis.__boardViewStores.analysis;',
-    )
-    .replace(
-      "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
-      'const useTaskFavoritesStore = globalThis.__boardViewStores.favorites;',
-    )
-    .replace(
-      "import { useTaskSeenStore } from '../stores/task-seen.js';",
-      'const useTaskSeenStore = globalThis.__boardViewStores.seen;',
-    )
-    .replace(
-      "import MiniChart from './board/MiniChart.vue';",
-      'const MiniChart = { template: "<div></div>" };',
-    )
-    .replace(
-      "import TriageBadge from './board/TriageBadge.vue';",
-      'const TriageBadge = { template: "<span></span>" };',
-    )
-    .replace(
-      "import TaskFavoriteButton from './board/TaskFavoriteButton.vue';",
-      `const TaskFavoriteButton = {
-        props: ["active", "pending", "taskTitle"],
-        emits: ["toggle"],
-        template: '<button class="stub-fav" :aria-pressed="String(active)" @click="$emit(\\'toggle\\')">{{ taskTitle }}</button>',
-      };`,
-    )
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = { get: async () => ({ tasks: [] }) };',
-    )
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = () => ({});',
-    )
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => false;',
-    )
-    .replace(
-      "from '../shared/board-task-list.js'",
-      `from "${LIST_URL}"`,
-    );
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
+/** Компиляция вью через общий TS-aware helper с настоящими UI-компонентами. */
+export async function compileBoardView() {
+  return compileVue(VIEW_PATH, {
+    stubs: {
+      '../shared/format.js': `
+        export const hoursToHM = (value) => String(value ?? 0);
+        export const liveTimerSec = (task) => task.timerElapsed || 0;
+        export const secToHMS = (value) => String(value ?? 0);
+        export const signed = (value) => String(value ?? 0);
+      `,
+      '../stores/board.js': `
+        export const useBoardStore = (...args) => globalThis.__boardViewStores.board(...args);
+      `,
+      '../stores/ui.js': `
+        export const useUiStore = (...args) => globalThis.__boardViewStores.ui(...args);
+      `,
+      '../stores/analysis.js': `
+        export const useAnalysisStore = (...args) => globalThis.__boardViewStores.analysis(...args);
+      `,
+      '../stores/task-favorites.js': `
+        export const useTaskFavoritesStore = (...args) =>
+          globalThis.__boardViewStores.favorites(...args);
+      `,
+      '../stores/task-seen.js': `
+        export const useTaskSeenStore = (...args) => globalThis.__boardViewStores.seen(...args);
+      `,
+      './board/MiniChart.vue': `
+        export default { template: '<div></div>' };
+      `,
+      './board/TriageBadge.vue': `
+        export default { template: '<span></span>' };
+      `,
+      './board/TaskFavoriteButton.vue': `
+        export default {
+          props: ['active', 'pending', 'taskTitle'],
+          emits: ['toggle'],
+          template: '<button class="stub-fav" :aria-pressed="String(active)"'
+            + ' @click="$emit(\\'toggle\\')">{{ taskTitle }}</button>',
+        };
+      `,
+      '../shared/api-client.js': `
+        export const api = { get: async () => ({ tasks: [] }) };
+      `,
+      '../composables/useSse.js': `
+        export const useSse = () => ({});
+      `,
+    },
+  });
 }
 
 /** Браузерное окружение happy-dom с классами DOM в глобалях. */
@@ -164,7 +119,7 @@ export async function mountBoardView(t, {
     import(TEST_UTILS),
     import(PINIA_URL),
   ]);
-  const nonce = compileNonce;
+  const nonce = `${prefix}-${mountNonce++}`;
   const calls = { toggled: [], favoritesLoad: [], seenLoad: [], seenMarked: [] };
   const stores = {
     board: defineStore(`board-view-board-${nonce}`, {
@@ -220,7 +175,7 @@ export async function mountBoardView(t, {
   };
   globalThis.__boardViewStores = stores;
   const pinia = createPinia();
-  const BoardView = await compileBoardView(prefix);
+  const BoardView = await compileBoardView();
   const wrapper = mount(BoardView, {
     attachTo: browser.document.querySelector('#mount'),
     global: {

@@ -78,7 +78,7 @@ test('док использует строку инструмента, а раз
   assert.doesNotMatch(dockView, /class="dock-head"/);
   assert.doesNotMatch(dockView, /grid-template-rows:\s*42px/);
   assert.match(dockView, /expanded \? 'Вернуть ширину панели' : 'Во весь экран'/);
-  assert.match(dockView, /:aria-pressed="expanded"/);
+  assert.match(dockView, /:pressed="expanded"/);
   assert.match(dockView, /mode === 'dock' && !expanded/);
   assert.match(dockView, /emit\('toggle-expanded'\)/);
   assert.match(dockView, /--tool-dock-action-size:\s*30px;/);
@@ -102,15 +102,18 @@ test('Escape у развёрнутого дока сначала возвращ�
   ]);
 
   assert.match(host, /function closeDockLayer\(\)[\s\S]*dock\.isExpanded[\s\S]*dock\.setExpanded\(false\)[\s\S]*hideDock\(\)/);
-  assert.equal(count(host, /registerLayer\('tool-dock'/g), 1);
-  assert.match(host, /registerLayer\('tool-dock', \{ priority: 80, close: closeDockLayer \}\)/);
+  assert.equal(count(host, /useUiLayer\('dock'/g), 1);
+  assert.match(host, /useUiLayer\('dock', \{[\s\S]*id: 'tool-dock'[\s\S]*onEscape: closeDockLayer/);
   assert.match(host, /watch\(\(\) => route\.path,[\s\S]*dock\.isExpanded[\s\S]*dock\.setExpanded\(false, \{ persist: false \}\)/);
   assert.match(shell, /<main class="content" :inert="toolDock\.isExpanded"/);
   assert.match(shell, /:aria-hidden="toolDock\.isExpanded \? 'true' : undefined"/);
 });
 
 test('compact Code держит дерево слева от Monaco и меняет его ширину вертикальным разделителем', async () => {
-  const code = await source('web/src/views/code/CodePanel.vue');
+  const [code, actions] = await Promise.all([
+    source('web/src/views/code/CodePanel.vue'),
+    source('web/src/styles/components/actions.css'),
+  ]);
 
   assert.match(code, /cockpit-code-dock-nav-width/);
   assert.match(code, /aria-orientation="vertical"/);
@@ -121,6 +124,10 @@ test('compact Code держит дерево слева от Monaco и меня�
   assert.match(code, /Math\.floor\(width \* 0\.42\)/);
   assert.match(code, /:aria-valuemax="Math\.round\(navigatorMaxWidth\)"/);
   assert.match(code, /--code-nav-width/);
-  assert.match(code, /\.navigator-toggle \{[\s\S]*height:\s*var\(--tool-dock-action-size, 30px\);[\s\S]*padding-block:\s*0/);
+  assert.match(code, /data-context="tool-dock-navigator"/);
+  assert.match(
+    actions,
+    /data-context='tool-dock-navigator'\] \{[\s\S]*height:\s*var\(--tool-dock-action-size, 30px\);[\s\S]*min-height:\s*var\(--tool-dock-action-size, 30px\);/,
+  );
   assert.match(code, /\.code-panel\.compact \.code-head \{[\s\S]*padding:\s*var\(--tool-dock-action-top, 4px\)[^;]*5px 11px;/);
 });

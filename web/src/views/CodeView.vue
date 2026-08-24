@@ -1,3 +1,7 @@
+<template>
+  <div class="tool-route-adapter" data-tool-route="code" aria-hidden="true"></div>
+</template>
+
 <script setup>
 // Route-adapter намеренно не импортирует CodePanel: единственный экземпляр панели
 // принадлежит постоянному ToolHost в AppShell. Здесь только перевод deep-link
@@ -14,19 +18,22 @@ const router = useRouter();
 const dock = useDockStore();
 
 watch(() => route.fullPath, () => {
-  if (route.name !== 'code') return;
+  if (route.name !== 'code') {
+    return;
+  }
+
   const query = new URLSearchParams(
     Object.entries(route.query)
       .filter(([, value]) => typeof value === 'string')
       .map(([key, value]) => [key, value]),
   );
   const target = parseCodeRouteHref(`#/code?${query}`);
-  if (!target) return;
+
+  if (!target) {
+    return;
+  }
+
   dock.enqueue('code', { type: 'open-file', ...target });
   router.replace({ name: 'code' });
 }, { immediate: true });
 </script>
-
-<template>
-  <div class="tool-route-adapter" data-tool-route="code" aria-hidden="true"></div>
-</template>

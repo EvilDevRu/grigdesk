@@ -9,7 +9,6 @@ import {
   checkSfcOrder,
   collectSfcOrder,
   compareSfcOrder,
-  createSfcOrderBaseline,
   describeSfcOrder,
 } from '../../web/scripts/check-vue-sfc-order.mjs';
 
@@ -32,16 +31,10 @@ function writeFixtureRepo(t, files) {
   return repoRoot;
 }
 
-test('SFC order: exact baseline только уменьшается от исходных 55 script-first файлов', () => {
-  const { report, baseline, errors } = checkSfcOrder({ repoRoot: REPO_ROOT });
+test('SFC order: все production и gallery SFC соблюдают канонический порядок', () => {
+  const { report, errors } = checkSfcOrder({ repoRoot: REPO_ROOT });
   assert.deepEqual(errors, []);
-  assert.deepEqual(
-    createSfcOrderBaseline(report),
-    baseline,
-    'переставленный SFC должен быть удалён из exact baseline в той же волне',
-  );
-  assert.ok(baseline.legacyScriptFirst.length <= 55);
-  assert.ok(report.orderViolations.length <= baseline.legacyScriptFirst.length);
+  assert.deepEqual(report.orderViolations, []);
 });
 
 test('SFC order: compiler offsets принимают template → script → style', () => {
@@ -66,23 +59,18 @@ test('SFC order: style перед script нарушает канонически
   assert.match(state.reasons.join('\n'), /script.*после.*style/i);
 });
 
-test('SFC order: старый exact файл разрешён, новый script-first запрещён', (t) => {
+test('SFC order: любой script-first файл запрещён без переходных исключений', (t) => {
   const repoRoot = writeFixtureRepo(t, {
-    'web/src/views/Legacy.vue': fixture('ScriptFirst.vue'),
+    'web/src/views/Wrong.vue': fixture('ScriptFirst.vue'),
   });
-  const baseline = createSfcOrderBaseline(collectSfcOrder(repoRoot));
-  assert.deepEqual(compareSfcOrder(collectSfcOrder(repoRoot), baseline), []);
+  assert.ok(compareSfcOrder(collectSfcOrder(repoRoot))
+    .some((error) => error.includes('неверный порядок блоков')));
 
-  fs.writeFileSync(path.join(repoRoot, 'web/src/views/Fresh.vue'), fixture('ScriptFirst.vue'));
-  assert.ok(compareSfcOrder(collectSfcOrder(repoRoot), baseline)
-    .some((error) => error.includes('новый SFC с неверным порядком')));
-
-  fs.writeFileSync(path.join(repoRoot, 'web/src/views/Legacy.vue'), fixture('Valid.vue'));
-  fs.rmSync(path.join(repoRoot, 'web/src/views/Fresh.vue'));
-  assert.deepEqual(compareSfcOrder(collectSfcOrder(repoRoot), baseline), []);
+  fs.writeFileSync(path.join(repoRoot, 'web/src/views/Wrong.vue'), fixture('Valid.vue'));
+  assert.deepEqual(compareSfcOrder(collectSfcOrder(repoRoot)), []);
 });
 
-test('SFC order: components и gallery требуют script setup lang=ts без baseline-лазейки', (t) => {
+test('SFC order: components и gallery требуют script setup lang=ts', (t) => {
   const repoRoot = writeFixtureRepo(t, {
     'web/src/components/primitives/UiWrong.vue': fixture('ScriptFirst.vue'),
     'web/dev/ui-gallery/UiGallery.vue': `
@@ -91,11 +79,7 @@ test('SFC order: components и gallery требуют script setup lang=ts бе�
     `,
   });
   const report = collectSfcOrder(repoRoot);
-  const forged = {
-    version: 1,
-    legacyScriptFirst: ['web/src/components/primitives/UiWrong.vue'],
-  };
-  const errors = compareSfcOrder(report, forged).join('\n');
-  assert.match(errors, /components\/ не могут быть legacy-исключением/);
+  const errors = compareSfcOrder(report).join('\n');
+  assert.match(errors, /неверный порядок блоков/);
   assert.match(errors, /нужен <script setup lang="ts">/);
 });

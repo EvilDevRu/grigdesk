@@ -68,3 +68,69 @@ test('UiNumberInput не превращает пустое значение в �
   assert.equal(values.at(-1), '');
   wrapper.unmount();
 });
+
+test('UiSelect compact сжимает wrapper и сохраняет number modifier', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, UiSelect] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/components/primitives/UiSelect.vue')),
+  ]);
+  const values = [];
+  const wrapper = mount(UiSelect, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: {
+      compact: true,
+      modelValue: '',
+      modelModifiers: { number: true },
+      'onUpdate:modelValue': (value) => values.push(value),
+    },
+    slots: {
+      default: '<option value="">—</option><option value="2">Два</option>',
+    },
+  });
+
+  assert.equal(wrapper.classes().includes('ui-select-wrap--compact'), true);
+  assert.equal(wrapper.get('select').classes().includes('ui-select--compact'), true);
+  await wrapper.get('select').setValue('2');
+  assert.equal(values.at(-1), 2);
+  wrapper.unmount();
+});
+
+test('UiFilePicker dropzone передаёт файлы и может скрыть служебные actions', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, UiFilePicker] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/components/composites/UiFilePicker.vue')),
+  ]);
+  const changes = [];
+  const wrapper = mount(UiFilePicker, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: {
+      presentation: 'dropzone',
+      density: 'compact',
+      showSummary: false,
+      showReset: false,
+      onChange: (files) => changes.push(files),
+    },
+    slots: {
+      default: 'Выбрать запись',
+      hint: 'Видео или аудио',
+      trailing: 'Открыть',
+    },
+  });
+  const input = wrapper.get('input[type="file"]');
+
+  Object.defineProperty(input.element, 'files', {
+    value: [new browser.File(['данные'], 'встреча.mp4', { type: 'video/mp4' })],
+    configurable: true,
+  });
+  await input.trigger('change');
+
+  assert.equal(wrapper.classes().includes('ui-file-picker--dropzone'), true);
+  assert.equal(wrapper.classes().includes('ui-file-picker--compact'), true);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0][0].name, 'встреча.mp4');
+  assert.equal(wrapper.find('.ui-file-picker__summary').exists(), false);
+  assert.equal(wrapper.findAll('button').length, 1);
+  wrapper.unmount();
+});

@@ -13,7 +13,15 @@ import { fileURLToPath } from 'node:url';
 import { apiError, mountTelegramView, settle } from './helpers/telegram-view.js';
 
 const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TelegramView.vue', import.meta.url));
-const GLOBAL_STYLES_PATH = fileURLToPath(new URL('../../web/src/styles.css', import.meta.url));
+const GLOBAL_STYLES_PATH = fileURLToPath(new URL('../../web/src/styles/tokens.css', import.meta.url));
+const FIELD_STYLES_PATH = fileURLToPath(new URL(
+  '../../web/src/styles/components/fields.css',
+  import.meta.url,
+));
+const ACTION_STYLES_PATH = fileURLToPath(new URL(
+  '../../web/src/styles/components/actions.css',
+  import.meta.url,
+));
 
 process.env.NODE_ENV = 'test';
 
@@ -133,31 +141,24 @@ test('неверный код: текст сервера виден словам
   assert.equal(wrapper.find('[data-state="pult-on"]').exists(), false);
 });
 
-test('контролы форм одной высоты, селект стилизованный — статическая проверка стилей', async () => {
+test('контролы Telegram используют общий размер, select skin и verification-code role', async () => {
   // Живого замера в офлайне нет (happy-dom раскладку не считает) — правило
-  // стережётся чтением <style scoped>, как TG-UI-05 у разворота ссылок.
-  const [source, globalStyles] = await Promise.all([
+  // стережётся чтением центрального CSS graph, как TG-UI-05 у разворота ссылок.
+  const [source, tokens, fields, actions] = await Promise.all([
     readFile(VIEW_PATH, 'utf8'),
     readFile(GLOBAL_STYLES_PATH, 'utf8'),
+    readFile(FIELD_STYLES_PATH, 'utf8'),
+    readFile(ACTION_STYLES_PATH, 'utf8'),
   ]);
-  const style = source.slice(source.indexOf('<style'));
-  // Селектор ищется с начала строки: голый indexOf('.sel {') совпадает внутри
-  // общего правила `.inp, .sel {` и проверяет не тот блок.
-  const rule = (selector) => {
-    const at = style.indexOf(`\n${selector} {`);
-    assert.ok(at > 0, `в <style scoped> нет правила ${selector}`);
-    return style.slice(at, style.indexOf('}', at));
-  };
-  // Одна высота у селектов, инпутов и кнопок — глобальным токеном, а не совпадением padding-ов.
-  assert.match(globalStyles, /--control-height:\s*36px/);
-  assert.doesNotMatch(rule('.tg'), /--ctl-h/);
-  assert.match(rule('.inp, .sel'), /height:\s*var\(--control-height\)/);
-  assert.match(rule('.btn'), /height:\s*var\(--control-height\)/);
-  assert.match(rule('.code-input'), /height:\s*var\(--control-height\)/);
-  // Селект стилизованный, не нативный (правило проекта): свой шеврон с фиксированным
-  // отступом от края, а не системная стрелка вплотную к рамке.
-  assert.match(rule('.sel'), /appearance:\s*none/);
-  assert.match(rule('.sel'), /background-position:\s*right\s+\d+px\s+center/);
+
+  assert.match(tokens, /--control-height:\s*36px/);
+  assert.match(actions, /height:\s*var\(--control-height\)/);
+  assert.match(fields, /\.ui-input,[\s\S]*\.ui-select[\s\S]*height:\s*var\(--control-height\)/);
+  assert.match(fields, /\.ui-select\s*\{[\s\S]*appearance:\s*none/);
+  assert.match(fields, /background-position:\s*right\s+10px\s+center/);
+  assert.match(fields, /\.ui-input\[data-role='verification-code'\]/);
+  assert.match(source, /<UiInput[\s\S]*class="code-input"[\s\S]*data-role="verification-code"/);
+  assert.doesNotMatch(source, /<(?:button|input|select|textarea)\b/);
 });
 
 test('включённый пульт выключается только после подтверждения', async (t) => {

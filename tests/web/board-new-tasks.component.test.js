@@ -52,7 +52,7 @@ test('BOARD-NEW-02: фильтр оставляет только новые и �
   await filter.trigger('click');
   await flushPromises();
   assert.equal(filter.attributes('aria-pressed'), 'true');
-  assert.equal(filter.classes().includes('on'), true);
+  assert.equal(filter.classes().includes('is-pressed'), true);
   const rows = wrapper.findAll('li.trow');
   assert.equal(rows.length, 1);
   assert.match(rows[0].text(), /Новая задача/);

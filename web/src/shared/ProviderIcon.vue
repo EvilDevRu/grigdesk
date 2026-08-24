@@ -1,12 +1,3 @@
-<script setup>
-// Иконка LLM-исполнителя по id из реестра (/api/providers).
-// Известным рисуем фирменный знак, неизвестным — кружок с первой буквой имени.
-defineProps({
-  provider: { type: Object, required: true },
-  size: { type: Number, default: 16 },
-});
-</script>
-
 <template>
   <!-- Claude: лучистая «звезда» Anthropic (упрощённая) -->
   <svg v-if="provider.id === 'claude'" :width="size" :height="size" viewBox="0 0 24 24"
@@ -44,6 +35,15 @@ defineProps({
     {{ (provider.name || '?')[0].toUpperCase() }}
   </span>
 </template>
+
+<script setup>
+// Иконка LLM-исполнителя по id из реестра (/api/providers).
+// Известным рисуем фирменный знак, неизвестным — кружок с первой буквой имени.
+defineProps({
+  provider: { type: Object, required: true },
+  size: { type: Number, default: 16 },
+});
+</script>
 
 <style scoped>
 svg { display: block; flex: none; }

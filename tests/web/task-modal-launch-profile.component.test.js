@@ -1,108 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileTaskModal } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
-
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TaskModal.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const PINIA_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
-)).href;
-
-async function compileTaskModal() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-task-modal-launch-profile-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', 'from "' + VUE_URL + '"')
-    .replaceAll("from 'vue'", "from '" + VUE_URL + "'")
-    .replaceAll("from 'pinia'", "from '" + PINIA_URL + "'")
-    .replace(
-      "import { useRouter } from 'vue-router';",
-      'const useRouter = () => ({ push() {} });',
-    )
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
-    )
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__taskModalLaunchApi;',
-    )
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => true;',
-    )
-    .replace(
-      "import { registerLayer } from '../shared/ui/layer-stack.js';",
-      'const registerLayer = () => () => {};',
-    )
-    .replace(
-      "import HelpTip from '../shared/ui/HelpTip.vue';",
-      'const HelpTip = { template: "<span><slot /><slot name=\\"tip\\" /></span>" };',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__taskModalLaunchUiStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../stores/tasks.js';",
-      'const useTasksStore = globalThis.__taskModalLaunchTasksStore;',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__taskModalLaunchBoardStore;',
-    )
-    .replace(
-      "import { useAnalysisStore } from '../stores/analysis.js';",
-      'const useAnalysisStore = globalThis.__taskModalLaunchAnalysisStore;',
-    )
-    .replace(
-      "import { useTaskFavoritesStore } from '../stores/task-favorites.js';",
-      'const useTaskFavoritesStore = globalThis.__taskModalLaunchFavoriteStore;',
-    )
-    .replace(
-      "import { useTaskSeenStore } from '../stores/task-seen.js';",
-      'const useTaskSeenStore = globalThis.__taskModalLaunchSeenStore;',
-    )
-    .replace(
-      "import { liveTimerSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { mdToHtml } from '../shared/md.js';",
-      'const mdToHtml = (value) => String(value || "");',
-    )
-    .replace(
-      "import { providerLabel } from '../shared/runner-display.js';",
-      'const { providerLabel } = globalThis.__taskModalLaunchRunnerDisplay;',
-    )
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { template: "<span></span>" };',
-    )
-    .replace(
-      "import TaskFavoriteButton from './board/TaskFavoriteButton.vue';",
-      'const TaskFavoriteButton = { props: ["active", "pending", "taskTitle"], template: "<span></span>" };',
-    );
-  // Уникальный хвост: иначе data: URL совпадает между тестами, import отдаёт кеш
-  // модуля, и компонент навсегда остаётся склеен с заглушками ПЕРВОГО теста.
-  compileTaskModal.seq = (compileTaskModal.seq || 0) + 1;
-  return (await import(
-    'data:text/javascript;base64,'
-    + Buffer.from(`${code}\n// compile #${compileTaskModal.seq}`).toString('base64')
-  )).default;
-}
 
 // Общий стенд для сценариев формы запуска: happy-dom + заглушки сторов.
 // launchOptions/launch задаёт тест, остальные вызовы — безобидные пустышки.
@@ -174,7 +74,7 @@ async function mountLaunchForm(t, { launchOptions }) {
       async analyze() {},
     },
   });
-  globalThis.__taskModalLaunchFavoriteStore = defineStore('task-modal-launch-favorite', {
+  globalThis.__taskModalLaunchFavoritesStore = defineStore('task-modal-launch-favorite', {
     state: () => ({ taskIds: [], loaded: true, loading: false, error: null, pending: {} }),
     getters: {
       isFavorite: () => () => false,
@@ -192,9 +92,9 @@ async function mountLaunchForm(t, { launchOptions }) {
     actions: { async load() {}, async markSeen() { return true; } },
   });
 
-  const wrapper = mount(await compileTaskModal(), {
+  const wrapper = mount(await compileTaskModal('__taskModalLaunch'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: { plugins: [createPinia()], stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
@@ -206,7 +106,7 @@ async function mountLaunchForm(t, { launchOptions }) {
       '__taskModalLaunchTasksStore',
       '__taskModalLaunchBoardStore',
       '__taskModalLaunchAnalysisStore',
-      '__taskModalLaunchFavoriteStore',
+      '__taskModalLaunchFavoritesStore',
       '__taskModalLaunchSeenStore',
     ]) delete globalThis[key];
   });
@@ -309,7 +209,7 @@ test('TaskModal выбирает project-beta, перечитывает feature 
       async analyze() {},
     },
   });
-  globalThis.__taskModalLaunchFavoriteStore = defineStore('task-modal-launch-favorite', {
+  globalThis.__taskModalLaunchFavoritesStore = defineStore('task-modal-launch-favorite', {
     state: () => ({ taskIds: [], loaded: true, loading: false, error: null, pending: {} }),
     getters: {
       isFavorite: () => () => false,
@@ -327,9 +227,9 @@ test('TaskModal выбирает project-beta, перечитывает feature 
     actions: { async load() {}, async markSeen() { return true; } },
   });
 
-  const wrapper = mount(await compileTaskModal(), {
+  const wrapper = mount(await compileTaskModal('__taskModalLaunch'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: { plugins: [createPinia()], stubs: { teleport: true } },
   });
   t.after(() => {
     wrapper.unmount();
@@ -341,18 +241,18 @@ test('TaskModal выбирает project-beta, перечитывает feature 
       '__taskModalLaunchTasksStore',
       '__taskModalLaunchBoardStore',
       '__taskModalLaunchAnalysisStore',
-      '__taskModalLaunchFavoriteStore',
+      '__taskModalLaunchFavoritesStore',
       '__taskModalLaunchSeenStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
 
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
   const profile = wrapper.get('#launch-profile');
   assert.deepEqual(profile.findAll('option').map((option) => option.text()), ['project-alpha', 'project-beta']);
   assert.match(wrapper.text(), /каталог маршрутов профиля не опубликован/);
-  assert.equal(wrapper.get('.lbtns .primary').attributes('disabled'), '');
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').attributes('disabled'), '');
 
   await profile.setValue('project-beta');
   await flushPromises();
@@ -373,7 +273,7 @@ test('TaskModal выбирает project-beta, перечитывает feature 
   await wrapper.get('#launch-route').setValue('feature');
   await flushPromises();
 
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.deepEqual(optionCalls, [['42', ''], ['42', 'project-beta']]);
   assert.equal(launchCalls.length, 1);
@@ -403,7 +303,7 @@ test('TaskModal: исполнитель по умолчанию «из проф�
     }),
   });
 
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
 
   const runner = wrapper.get('#launch-runner');
@@ -414,16 +314,16 @@ test('TaskModal: исполнитель по умолчанию «из проф�
   assert.equal(runner.element.value, '');
 
   // Без выбора исполнителя payload его не несёт — решение остаётся за профилем.
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 1);
   assert.equal(Object.hasOwn(launchCalls[0][1], 'runnerPrimary'), false);
 
   // Явный выбор — runnerPrimary уезжает в launch.
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
   await wrapper.get('#launch-runner').setValue('codex');
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 2);
   assert.equal(launchCalls[1][1].runnerPrimary, 'codex');
@@ -444,7 +344,7 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
       : catalog({ profile: 'project-alpha', runners: ['claude', 'codex'], defaultRunner: 'claude' })),
   });
 
-  await wrapper.get('button.launch').trigger('click');
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
   await wrapper.get('#launch-runner').setValue('codex');
   assert.equal(wrapper.get('#launch-runner').element.value, 'codex');
@@ -459,7 +359,7 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
     ['Из профиля (Codex)', 'Codex'],
   );
 
-  await wrapper.get('.lbtns .primary').trigger('click');
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 1);
   assert.equal(launchCalls[0][1].profile, 'project-beta');

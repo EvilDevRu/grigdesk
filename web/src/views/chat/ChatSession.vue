@@ -1,3 +1,563 @@
+<template>
+  <div v-if="sess" class="cs" :class="{ frozen }" :style="composerStyle"
+       @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+    <!-- Оверлей при перетаскивании файла -->
+    <div v-if="dragOver" class="drop-overlay">
+      <div class="drop-box">📎 Отпусти, чтобы приложить</div>
+    </div>
+    <!-- Шапка в два ряда: сверху название и задача, снизу — настройки хода.
+         Высота фиксирована токеном --chat-head-h: линия под шапкой чата идёт по той же
+         горизонтали, что и линия под шапкой списка чатов слева. -->
+    <div class="cs-top">
+      <div class="hrow">
+        <!-- Назад к списку — только когда список и чат делят одну колонку (мобила) -->
+        <UiIconButton
+          class="back"
+          role="rail"
+          label="К списку чатов"
+          title="К списку чатов"
+          data-context="chat-session-back"
+          @click="emit('back')"
+        >
+          ←
+        </UiIconButton>
+        <div class="ttl">
+          <UiInput
+            v-if="editingTitle"
+            ref="titleEl"
+            v-model="titleVal"
+            class="ctitle-edit"
+            data-role="chat-title"
+            @keydown.enter="commitTitle"
+            @keydown.esc="editingTitle = false"
+            @blur="commitTitle"
+          />
+          <template v-else>
+            <span class="ctitle" :title="chat.tabLabel(sess)">
+              {{ chat.tabLabel(sess) }}
+            </span>
+            <!-- Единственная точка переименования доступна мышью, клавиатурой и touch. -->
+            <UiIconButton
+              class="tedit"
+              role="embedded"
+              label="Переименовать чат"
+              title="Переименовать чат"
+              data-context="chat-title-edit"
+              @click="startTitleEdit"
+            >
+              ✎
+            </UiIconButton>
+          </template>
+        </div>
+        <UiTooltip
+          :text="activeTaskLabel"
+          placement="top-start"
+          :surface-style="{ maxWidth: 'min(520px, calc(100vw - 16px))' }"
+        >
+          <template #trigger>
+            <span class="task-tip sel task">
+              <span class="lbl">задача</span>
+              <UiSelect
+                compact
+                data-context="chat-session-toolbar"
+                :model-value="sess.taskId || ''"
+                :disabled="frozen || sess.purpose === 'companion'"
+                @change="onTaskChange"
+              >
+                <option value="">без задачи</option>
+                <option v-for="o in taskOpts" :key="o.task" :value="o.task">
+                  {{ optLabel(o) }}
+                </option>
+              </UiSelect>
+            </span>
+          </template>
+        </UiTooltip>
+      </div>
+      <div class="col bar">
+        <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
+             иначе показываем запрошенный id и не откатываемся к старому ходу другого ИИ. -->
+        <div v-if="lastRunView.model || modelUnknown" class="factbar">
+          <template v-if="lastRun">
+            <span class="fb" :class="{ warn: lastRunView.mismatch }">
+              последний ход · {{ lastRunView.source }}: <b>{{ lastRunView.model }}</b>
+              <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
+            </span>
+            <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
+          </template>
+          <span v-if="modelUnknown" class="fb warn"
+                title="установленный CLI не знает эту модель — обнови его в настройках">
+            установленный CLI не знает эту модель — обнови его в настройках
+          </span>
+        </div>
+        <div class="spacer"></div>
+        <!-- title у обёртки, а не только у select: на disabled-элементе браузер события
+             мыши подавляет, и объяснение «почему нельзя менять» человеку не показалось бы. -->
+        <div class="sel model" :title="isCompanion ? companionRunHint : undefined">
+          <span class="lbl">модель</span>
+          <UiSelect
+            compact
+            data-context="chat-session-toolbar"
+            :model-value="modelId"
+            :disabled="frozen || isCompanion"
+            :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` + (currentModel.contextUnverified ? ' · окно не подтверждено' : '') : 'Модель'"
+            @change="onModelChange"
+          >
+            <template v-if="provGroups.length">
+              <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
+                <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
+                <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
+                        :title="`${m.id} · контекст ${(m.context / 1000).toFixed(0)}k` + (m.contextUnverified ? ' · окно не подтверждено' : '') + (m.unknown ? ' · нет в каталоге установленного CLI' : '')">
+                  {{ m.name }}{{ m.contextUnverified ? ' · окно не подтверждено' : '' }}{{ m.unknown ? ' ?' : '' }}
+                </option>
+              </optgroup>
+            </template>
+            <template v-else>
+              <option v-for="m in FALLBACK_MODELS" :key="m" :value="m">{{ m }}</option>
+            </template>
+          </UiSelect>
+        </div>
+        <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
+        <div v-if="modes.length" class="sel mode">
+          <span class="lbl">режим</span>
+          <UiSelect
+            compact
+            data-context="chat-session-toolbar"
+            :model-value="currentMode"
+            :disabled="frozen"
+            :title="modeHint"
+            @change="chat.setMode(sid, $event.target.value)"
+          >
+            <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
+          </UiSelect>
+        </div>
+        <!-- Обёртки быть не должно: соседние правила (`.sel + .eff`, `.eff + .ctx-tip`)
+             рисуют разделители по сиблингам, и лишний узел их погасил бы. -->
+        <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
+                      :disabled="frozen || isCompanion" :hint="isCompanion ? companionRunHint : ''"
+                      @update:model-value="chat.setEffort(sid, $event)" />
+        <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
+             Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
+             Подсказка штатная, а не browser title: так она не обрезается и вмещает
+             раздельные числа, состояние и действия. -->
+        <UiTooltip
+          placement="top-end"
+          :surface-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }"
+        >
+          <template #trigger>
+            <UiIconButton
+              class="ctx-tip ctx-ring"
+              :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
+              role="embedded"
+              :label="ctxTitle"
+              :aria-disabled="ctxRingDisabled"
+              data-context="chat-context"
+              @click="onCtxClick"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
+                <circle
+                  class="rfg"
+                  cx="12"
+                  cy="12"
+                  r="9"
+                  fill="none"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  :stroke-dasharray="RING_C"
+                  :stroke-dashoffset="ringDash"
+                  transform="rotate(-90 12 12)"
+                />
+              </svg>
+            </UiIconButton>
+          </template>
+          <template #tip>
+            <span class="ctx-pop" data-testid="context-tooltip">
+              <span class="ctx-pop-head">
+                <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
+                <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
+                  {{ ctxTooltip.percent }}
+                </span>
+              </span>
+              <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
+                {{ ctxTooltip.status }}
+              </span>
+              <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
+              <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
+                <span v-for="row in ctxTooltip.rows" :key="row.label"
+                      class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
+                  <span class="ctx-pop-label">{{ row.label }}</span>
+                  <span class="ctx-pop-value">{{ row.value }}</span>
+                </span>
+              </span>
+              <span v-if="ctxTooltip.actions" class="ctx-pop-actions">
+                <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
+                <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
+              </span>
+            </span>
+          </template>
+        </UiTooltip>
+      </div>
+    </div>
+
+    <!-- Плашки «переписка не сохраняется» здесь НЕТ намеренно: saveError — состояние
+         общее (сервер не принимает запись вообще), а рисовалась бы она внутри открытого
+         чата и висела бы в каждом, куда ни зайди. Об этой беде сообщает разовое
+         оповещение из стора (_saveFailed), а сама переписка держится снимком в браузере. -->
+
+    <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
+    <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
+      <div class="col flow">
+        <div v-if="!sess.messages?.length" class="empty">
+          <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
+          <p class="e-sub muted">
+            {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
+            Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
+            «/» — команды, «$» — навыки Codex.
+          </p>
+        </div>
+        <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
+          <div v-if="m.attachments?.length" class="m-atts">
+            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
+               @click="onAttachmentClick($event, a)">
+              <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
+              <span v-else class="m-file">📄 {{ a.name }}</span>
+            </a>
+          </div>
+          <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей -->
+          <div v-if="m.role === 'assistant'" class="ahead">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
+            </svg>
+            <span>Агент</span>
+            <span v-if="m.actualModel || m.model" class="amodel">
+              {{ m.actualModel || m.model }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
+            </span>
+          </div>
+          <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
+               а не наперегонки (два CLI на одну сессию убивают друг друга). -->
+          <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
+          <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
+          <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
+          <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
+            <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
+            <div v-if="m.role === 'assistant'" class="text md"
+                 v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
+                 @click="onMarkdownClick"></div>
+            <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
+              v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
+              :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
+              :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
+            <UiIconButton
+              v-if="m.text"
+              class="copy"
+              :class="{ done: copiedIdx === i }"
+              role="stepper"
+              :label="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
+              :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'"
+              data-context="chat-message-copy"
+              @click="copyMsg(m, i)"
+            >
+              <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </UiIconButton>
+          </div>
+        </div>
+        <div v-if="sess.sending" class="msg assistant">
+          <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
+          <StepList v-if="sess.steps?.length" :steps="sess.steps" live />
+          <div class="text muted">
+            <UiSpinner decorative />
+            думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
+          </div>
+        </div>
+        <!-- Связь этого окна с сервером оборвалась посреди хода. Сам ход при этом идёт:
+             он живёт в процессе сервера, а не во вкладке, и ответ вернётся через
+             chats/pending. Плашка ЛОКАЛЬНАЯ (поле offline в историю не едет) — порвалось
+             у этого окна, другим устройствам показывать нечего. -->
+        <div v-if="sess.offline" class="msg offline">
+          <div class="text">📡 Связь с сервером прервалась — ход продолжается, ответ появится, когда связь вернётся.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Действия задачи: конвейер или отдельный Debug-чат в той же песочнице. -->
+    <div v-if="sess.taskId && (sess.messages?.length || sess.purpose !== 'debug')" class="cs-act">
+      <div class="col act-row">
+        <UiButton
+          v-if="sess.messages?.length"
+          class="act"
+          :class="{ onconv: onConveyor }"
+          variant="outline"
+          :tone="onConveyor ? 'accent' : 'neutral'"
+          data-role="chat-task-action"
+          :disabled="frozen"
+          @click="toConveyor"
+        >
+          🏭 {{ onConveyor ? 'Уже на конвейере →' : 'На конвейер' }}
+        </UiButton>
+        <UiTooltip
+          v-if="sess.purpose !== 'debug'"
+          :text="DEBUG_HINT"
+          placement="top-start"
+        >
+          <template #trigger>
+            <UiButton
+              class="act debug-act"
+              variant="outline"
+              data-role="chat-task-action"
+              :disabled="frozen || debugOpening"
+              @click="openDebug"
+            >
+              🐞 {{ debugOpening ? 'Открываю…' : 'Исправлять' }}
+            </UiButton>
+          </template>
+        </UiTooltip>
+        <span v-if="launchMsg" class="lm muted">{{ launchMsg }}</span>
+        <span v-if="debugMsg" class="lm muted">{{ debugMsg }}</span>
+      </div>
+    </div>
+
+    <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
+    <ChatQuestion v-if="question" :req="question"
+                  @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
+
+    <!-- Всплывашка разрешения: агент хочет выполнить действие -->
+    <ChatPermission v-if="perm" :req="perm"
+                    @answer="(allow, remember, comment, choice) => chat.answerPerm(perm.pid, allow, remember, comment, choice)" />
+
+    <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
+    <div class="cs-input">
+      <!-- Разделитель высоты поля ввода: стоит на верхней кромке (поверх линии),
+           поэтому места в раскладке не занимает и ничего не сдвигает. -->
+      <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
+           aria-label="Высота поля ввода"
+           :aria-valuemin="COMPOSER_MIN" :aria-valuemax="composerMax()"
+           :aria-valuenow="Math.round(composerH ?? COMPOSER_MIN)"
+           title="Потяни — высота поля ввода. Двойной клик — вернуть обычную"
+           @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
+           @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
+           @dblclick="resetComposerHeight" @keydown="onComposerResizeKey">
+        <span></span>
+      </div>
+      <div class="col">
+        <!-- Чипы ещё не отправленных вложений -->
+        <div v-if="pending.length || attachBusy" class="pend">
+          <div v-for="(a, i) in pending" :key="a.file" class="chip">
+            <img v-if="isImg(a)" :src="api.url(a.url)" alt="" />
+            <span class="nm">{{ a.name }}</span>
+            <UiIconButton
+              class="x"
+              role="stepper"
+              label="Убрать вложение"
+              title="Убрать"
+              data-context="chat-pending-remove"
+              @click="removePending(i)"
+            >
+              ×
+            </UiIconButton>
+          </div>
+          <UiSpinner v-if="attachBusy" decorative />
+        </div>
+        <!-- Меню команд/навыков над композером: секция кокпита + секция исполнителя модели -->
+        <div v-if="cmdMenu.length" ref="cmdMenuEl" class="cmd-menu">
+          <template v-for="item in cmdMenu" :key="item.key">
+            <div v-if="item.header" class="cmd-head">
+              <span v-if="item.color" class="dot" :style="{ background: item.color }"></span>{{ item.header }}
+            </div>
+            <UiButton
+              v-else
+              class="cmd"
+              :class="{ on: item.nav >= 0 && item.nav === cmdIndex, off: item.run === 'none' }"
+              variant="ghost"
+              data-role="chat-command"
+              block
+              :disabled="item.run === 'none'"
+              @mouseenter="item.nav >= 0 && (cmdIndex = item.nav)"
+              @click="runCommand(item)"
+            >
+              <span class="c-cmd">{{ item.cmd }}</span>
+              <span class="c-desc">{{ item.desc }}</span>
+              <span v-if="item.hint" class="c-hint">{{ item.hint }}</span>
+            </UiButton>
+          </template>
+        </div>
+        <div v-if="consentPending" class="speech-prompt" data-testid="speech-consent">
+          <div>
+            <b>Перед первой диктовкой</b>
+            <p>Браузер может обработать звук на этом устройстве или передать своему сервису.
+              До подтверждения микрофон не включается.</p>
+          </div>
+          <div class="speech-actions">
+            <UiButton
+              class="speech-primary"
+              variant="solid"
+              tone="accent"
+              data-role="chat-speech-action"
+              data-testid="speech-consent-browser"
+              @click="confirmBrowserConsent"
+            >
+              Продолжить в браузере
+            </UiButton>
+            <UiButton
+              variant="outline"
+              data-role="chat-speech-action"
+              data-testid="speech-consent-whisper"
+              @click="useWhisperFromPrompt"
+            >
+              Использовать Whisper
+            </UiButton>
+            <UiButton
+              variant="outline"
+              data-role="chat-speech-action"
+              @click="stopSpeech({ cancel: true })"
+            >
+              Отмена
+            </UiButton>
+          </div>
+        </div>
+        <div v-else-if="browserInstallPending" class="speech-prompt" data-testid="speech-browser-install">
+          <div>
+            <b>Нужна локальная языковая модель</b>
+            <p>Браузер может скачать её и после этого распознавать речь только на этом устройстве.</p>
+          </div>
+          <div class="speech-actions">
+            <UiButton
+              class="speech-primary"
+              variant="solid"
+              tone="accent"
+              data-role="chat-speech-action"
+              data-testid="speech-install-browser"
+              @click="installBrowserLanguage"
+            >
+              Скачать и продолжить
+            </UiButton>
+            <UiButton
+              variant="outline"
+              data-role="chat-speech-action"
+              data-testid="speech-install-whisper"
+              @click="useWhisperFromPrompt"
+            >
+              Использовать Whisper
+            </UiButton>
+            <UiButton
+              variant="outline"
+              data-role="chat-speech-action"
+              @click="stopSpeech({ cancel: true })"
+            >
+              Отмена
+            </UiButton>
+          </div>
+        </div>
+        <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">Слышу: {{ interimSpeech }}</div>
+        <div class="composer">
+          <UiFilePicker
+            data-role="chat-attachment"
+            density="compact"
+            multiple
+            :busy="attachBusy"
+            :show-summary="false"
+            :show-reset="false"
+            label="Приложить файл"
+            loading-label="Прикладываю файл"
+            title="Приложить файл (или перетащи/вставь из буфера)"
+            @change="onPick"
+          >
+            <template #leading>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </template>
+          </UiFilePicker>
+          <UiTextarea
+            ref="taEl"
+            v-model="input"
+            rows="2"
+            data-role="chat-composer"
+            :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
+            @keydown="onKey"
+            @paste="onPaste"
+          />
+          <UiTooltip
+            placement="top-end"
+            :text="recording ? 'Остановить · Ctrl+D; отменить · Esc' : drainingSpeech ? 'Завершаю распознавание… Esc — отмена' : transcribing ? 'Расшифровываю запись…' : preparingSpeech || browserInstalling ? 'Подготавливаю… Esc — отмена' : 'Надиктовать голосом · Ctrl+D'"
+          >
+            <template #trigger>
+              <UiIconButton
+                class="tool mic"
+                :class="{ rec: recording, wait: transcribing || preparingSpeech || browserInstalling || drainingSpeech }"
+                role="peer"
+                :label="recording ? 'Остановить диктовку' : 'Начать диктовку'"
+                :pressed="recording"
+                :disabled="transcribing || drainingSpeech"
+                data-context="chat-microphone"
+                @click="toggleMic"
+              >
+                <!-- Расшифровка: крутящийся спиннер -->
+                <svg v-if="transcribing || preparingSpeech || browserInstalling || drainingSpeech" class="spin-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+                  <path d="M21 12a9 9 0 1 1-6.2-8.56" />
+                </svg>
+                <!-- Запись: квадрат-стоп -->
+                <svg v-else-if="recording" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
+                </svg>
+                <!-- Покой: микрофон -->
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
+              </UiIconButton>
+            </template>
+          </UiTooltip>
+          <!-- Пока агент работает, рядом появляется «стоп». Отправку при этом НЕ прячем:
+               следующее сообщение можно готовить и слать сразу — сервер поставит его
+               в очередь и пустит следом (раньше оно молча пропадало). -->
+          <UiIconButton
+            v-if="sess.sending || sess.compacting"
+            class="send stop"
+            role="peer"
+            variant="solid"
+            tone="danger"
+            :disabled="sess.stopping"
+            :label="sess.stopping ? 'Останавливаю…'
+              : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'"
+            :title="sess.stopping ? 'Останавливаю…'
+              : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'"
+            data-context="chat-stop"
+            @click="chat.stop(sid)"
+          >
+            <span class="sq"></span>
+          </UiIconButton>
+          <UiIconButton
+            class="send"
+            role="peer"
+            variant="solid"
+            tone="accent"
+            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
+            :label="speechBusy ? 'Сначала заверши диктовку'
+              : frozen ? frozenHint
+              : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
+            :title="speechBusy ? 'Сначала заверши диктовку'
+              : frozen ? frozenHint
+              : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
+            data-context="chat-send"
+            @click="submit"
+          >
+            ↑
+          </UiIconButton>
+        </div>
+        <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
+        <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
@@ -5,6 +565,7 @@ import { api } from '../../shared/api-client.js';
 import { useDictationController } from '../../features/speech/provider.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { contextFill } from '../../shared/chat-context.js';
+import { writeClipboardText } from '../../shared/clipboard.js';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -12,8 +573,17 @@ import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
-import HelpTip from '../../shared/ui/HelpTip.vue';
-import { confirmDialog } from '../../shared/ui/confirm.js';
+import {
+  confirmDialog,
+  UiButton,
+  UiFilePicker,
+  UiIconButton,
+  UiInput,
+  UiSelect,
+  UiSpinner,
+  UiTextarea,
+  UiTooltip,
+} from '../../ui';
 import { mdToHtml } from '../../shared/md.js';
 import { documentLinkFromClick } from '../../features/documents/links.js';
 import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';
@@ -325,7 +895,7 @@ const ctxLimitReached = computed(() => ctxFill.value.tone === 'hi');
 const ctxLimitWhat = computed(() => ctxFill.value.limitWhat);
 const ctxLimitShort = computed(() => ctxFill.value.limitShort);
 
-// Визуальная подсказка не собирается из одной длинной строки: у штатного HelpTip есть
+// Визуальная подсказка не собирается из одной длинной строки: у штатного UiTooltip есть
 // форматированный слот, поэтому числа, предупреждение и действия остаются отдельными
 // смысловыми блоками. `ctxTitle` ниже — только компактная доступная подпись кнопки.
 const ctxTooltip = computed(() => {
@@ -491,7 +1061,7 @@ function scrollDown() { if (body.value) body.value.scrollTop = body.value.scroll
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
 // высоту решает CSS, как раньше.
 const COMPOSER_KEY = 'cockpit-chat-composer-h';
-// Минимум совпадает с CSS (`.cs-input textarea { min-height: 48px }`): иначе
+// Минимум совпадает с CSS (`[data-role='chat-composer'] { min-height: 48px }`): иначе
 // нижняя часть хода разделителя мертва — тянешь, число меняется, поле стоит.
 const COMPOSER_MIN = 48;
 // Потолок тот же, что в CSS (`max-height: 46vh`) — вторая цифра рядом с первой
@@ -518,7 +1088,7 @@ function clampComposer(value) {
 // Тянем от ФАКТИЧЕСКОЙ высоты поля, а не от сохранённого числа: после смены окна
 // (поворот планшета) CSS уже подрезал поле по 46vh, и старое число дало бы скачок.
 function composerHeightNow() {
-  const h = taEl.value?.getBoundingClientRect?.().height;
+  const h = taEl.value?.el?.getBoundingClientRect?.().height;
   return clampComposer(h > 0 ? h : (composerH.value ?? COMPOSER_MIN));
 }
 function saveComposerHeight() {
@@ -764,7 +1334,6 @@ async function runCommand(command) {
 // ── Вложения (фото): кнопка 📎 + вставка из буфера. Файл сразу уходит на сервер
 // (chats/attachments/), к сообщению прикладывается ссылка — агент читает через Read. ──
 const pending = ref([]); // [{ file, name, url, mime }]
-const fileInput = ref(null);
 const attachBusy = ref(false);
 async function addFiles(files) {
   for (const f of files) {
@@ -779,7 +1348,9 @@ async function addFiles(files) {
     } finally { attachBusy.value = false; }
   }
 }
-function onPick(e) { addFiles([...e.target.files]); e.target.value = ''; }
+function onPick(files) {
+  addFiles(files);
+}
 function onPaste(e) {
   const imgs = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/'));
   if (!imgs.length) return;
@@ -892,22 +1463,18 @@ onUnmounted(() => {
 const copiedIdx = ref(-1);
 async function copyMsg(m, i) {
   const text = m.text || '';
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      // http://<ip> — clipboard API нет, фоллбэк через скрытую textarea
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
+  const copied = await writeClipboardText(text);
+
+  if (!copied) {
+    return;
+  }
+
+  copiedIdx.value = i;
+  setTimeout(() => {
+    if (copiedIdx.value === i) {
+      copiedIdx.value = -1;
     }
-    copiedIdx.value = i;
-    setTimeout(() => { if (copiedIdx.value === i) copiedIdx.value = -1; }, 1500);
-  } catch { /* не скопировалось — молча */ }
+  }, 1500);
 }
 
 // Как в мессенджере: в пузыре показываем только компактные часы и минуты, а полную
@@ -990,355 +1557,6 @@ async function openDebug() {
 }
 </script>
 
-<template>
-  <div v-if="sess" class="cs" :class="{ frozen }" :style="composerStyle"
-       @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
-    <!-- Оверлей при перетаскивании файла -->
-    <div v-if="dragOver" class="drop-overlay">
-      <div class="drop-box">📎 Отпусти, чтобы приложить</div>
-    </div>
-    <!-- Шапка в два ряда: сверху название и задача, снизу — настройки хода.
-         Высота фиксирована токеном --chat-head-h: линия под шапкой чата идёт по той же
-         горизонтали, что и линия под шапкой списка чатов слева. -->
-    <div class="cs-top">
-      <div class="hrow">
-        <!-- Назад к списку — только когда список и чат делят одну колонку (мобила) -->
-        <button class="back" title="К списку чатов" aria-label="К списку чатов"
-                @click="emit('back')">←</button>
-        <div class="ttl">
-          <input v-if="editingTitle" ref="titleEl" v-model="titleVal" class="ctitle-edit"
-                 @keydown.enter="commitTitle" @keydown.esc="editingTitle = false" @blur="commitTitle" />
-          <template v-else>
-            <span class="ctitle" :title="chat.tabLabel(sess)" @dblclick="startTitleEdit">
-              {{ chat.tabLabel(sess) }}
-            </span>
-            <!-- Карандаш, а не только двойной клик: переименование иначе не найти -->
-            <button class="tedit" title="Переименовать чат" aria-label="Переименовать чат"
-                    @click="startTitleEdit">✎</button>
-          </template>
-        </div>
-        <HelpTip class="task-tip" :text="activeTaskLabel" align="left" :trigger-focusable="false"
-                 :tip-style="{ maxWidth: 'min(520px, calc(100vw - 16px))' }">
-          <span class="sel task">
-            <span class="lbl">задача</span>
-            <select :value="sess.taskId || ''" :disabled="frozen || sess.purpose === 'companion'" @change="onTaskChange">
-              <option value="">без задачи</option>
-              <option v-for="o in taskOpts" :key="o.task" :value="o.task">{{ optLabel(o) }}</option>
-            </select>
-          </span>
-        </HelpTip>
-      </div>
-      <div class="col bar">
-        <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
-             иначе показываем запрошенный id и не откатываемся к старому ходу другого ИИ. -->
-        <div v-if="lastRunView.model || modelUnknown" class="factbar">
-          <template v-if="lastRun">
-            <span class="fb" :class="{ warn: lastRunView.mismatch }">
-              последний ход · {{ lastRunView.source }}: <b>{{ lastRunView.model }}</b>
-              <template v-if="lastRun.effort"> · усилие {{ lastRun.effort }}</template>
-            </span>
-            <span v-if="lastRunView.mismatch" class="fb warn">— запрошено «{{ lastRequestedName }}»</span>
-          </template>
-          <span v-if="modelUnknown" class="fb warn"
-                title="установленный CLI не знает эту модель — обнови его в настройках">
-            установленный CLI не знает эту модель — обнови его в настройках
-          </span>
-        </div>
-        <div class="spacer"></div>
-        <!-- title у обёртки, а не только у select: на disabled-элементе браузер события
-             мыши подавляет, и объяснение «почему нельзя менять» человеку не показалось бы. -->
-        <div class="sel model" :title="isCompanion ? companionRunHint : undefined">
-          <span class="lbl">модель</span>
-          <select :value="modelId" :disabled="frozen || isCompanion"
-                  :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` + (currentModel.contextUnverified ? ' · окно не подтверждено' : '') : 'Модель'"
-                  @change="onModelChange">
-            <template v-if="provGroups.length">
-              <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
-                <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
-                <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
-                        :title="`${m.id} · контекст ${(m.context / 1000).toFixed(0)}k` + (m.contextUnverified ? ' · окно не подтверждено' : '') + (m.unknown ? ' · нет в каталоге установленного CLI' : '')">
-                  {{ m.name }}{{ m.contextUnverified ? ' · окно не подтверждено' : '' }}{{ m.unknown ? ' ?' : '' }}
-                </option>
-              </optgroup>
-            </template>
-            <template v-else>
-              <option v-for="m in FALLBACK_MODELS" :key="m" :value="m">{{ m }}</option>
-            </template>
-          </select>
-        </div>
-        <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
-        <div v-if="modes.length" class="sel mode">
-          <span class="lbl">режим</span>
-          <select :value="currentMode" :disabled="frozen" :title="modeHint" @change="chat.setMode(sid, $event.target.value)">
-            <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
-          </select>
-        </div>
-        <!-- Обёртки быть не должно: соседние правила (`.sel + .eff`, `.eff + .ctx-tip`)
-             рисуют разделители по сиблингам, и лишний узел их погасил бы. -->
-        <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
-                      :disabled="frozen || isCompanion" :hint="isCompanion ? companionRunHint : ''"
-                      @update:model-value="chat.setEffort(sid, $event)" />
-        <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
-             Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
-             Подсказка штатная, а не browser title: так она не обрезается и вмещает
-             раздельные числа, состояние и действия. -->
-        <HelpTip class="ctx-tip" align="right" :trigger-focusable="false"
-                 :tip-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }">
-          <button class="ctx-ring" :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
-                  :aria-disabled="ctxRingDisabled ? 'true' : undefined"
-                  :aria-label="ctxTitle"
-                  @click="onCtxClick">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
-              <circle class="rfg" cx="12" cy="12" r="9" fill="none" stroke-width="3" stroke-linecap="round"
-                      :stroke-dasharray="RING_C" :stroke-dashoffset="ringDash" transform="rotate(-90 12 12)" />
-            </svg>
-          </button>
-          <template #tip>
-            <span class="ctx-pop" data-testid="context-tooltip">
-              <span class="ctx-pop-head">
-                <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
-                <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
-                  {{ ctxTooltip.percent }}
-                </span>
-              </span>
-              <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
-                {{ ctxTooltip.status }}
-              </span>
-              <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
-              <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
-                <span v-for="row in ctxTooltip.rows" :key="row.label"
-                      class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
-                  <span class="ctx-pop-label">{{ row.label }}</span>
-                  <span class="ctx-pop-value">{{ row.value }}</span>
-                </span>
-              </span>
-              <span v-if="ctxTooltip.actions" class="ctx-pop-actions">
-                <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
-                <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
-              </span>
-            </span>
-          </template>
-        </HelpTip>
-      </div>
-    </div>
-
-    <!-- Плашки «переписка не сохраняется» здесь НЕТ намеренно: saveError — состояние
-         общее (сервер не принимает запись вообще), а рисовалась бы она внутри открытого
-         чата и висела бы в каждом, куда ни зайди. Об этой беде сообщает разовое
-         оповещение из стора (_saveFailed), а сама переписка держится снимком в браузере. -->
-
-    <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
-    <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
-      <div class="col flow">
-        <div v-if="!sess.messages?.length" class="empty">
-          <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
-          <p class="e-sub muted">
-            {{ sess.taskId ? 'Агент видит код задачи (worktree).' : 'Свободный вопрос без привязки к задаче.' }}<br>
-            Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
-            «/» — команды, «$» — навыки Codex.
-          </p>
-        </div>
-        <div v-for="(m, i) in sess.messages || []" :key="i" class="msg" :class="m.role">
-          <div v-if="m.attachments?.length" class="m-atts">
-            <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
-               @click="onAttachmentClick($event, a)">
-              <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" :title="a.name" />
-              <span v-else class="m-file">📄 {{ a.name }}</span>
-            </a>
-          </div>
-          <!-- Подпись агента: ответ визуально отличим от системных плашек и твоих пузырей -->
-          <div v-if="m.role === 'assistant'" class="ahead">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
-              <path d="M12 2.5v6.2 M12 15.3v6.2 M2.5 12h6.2 M15.3 12h6.2 M5.3 5.3l4.4 4.4 M14.3 14.3l4.4 4.4 M18.7 5.3l-4.4 4.4 M9.7 14.3l-4.4 4.4" />
-            </svg>
-            <span>Агент</span>
-            <span v-if="m.actualModel || m.model" class="amodel">
-              {{ m.actualModel || m.model }}<template v-if="!m.actualModel"> · запрошено</template><template v-if="m.effort"> · {{ m.effort }}</template>
-            </span>
-          </div>
-          <!-- Сообщение принято, но агент ещё занят предыдущим: ходы идут по очереди,
-               а не наперегонки (два CLI на одну сессию убивают друг друга). -->
-          <div v-if="m.queued" class="m-queued">⏳ ждёт очереди — уйдёт, когда агент закончит текущий ход</div>
-          <!-- Ход агента: чем он занимался до ответа (свёрнуто, как в VS Code) -->
-          <StepList v-if="m.role === 'assistant' && m.steps?.length" :steps="m.steps" />
-          <div v-if="m.text || (m.role === 'user' && validMessageTime(m.sentAt))" class="mrow">
-            <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
-            <div v-if="m.role === 'assistant'" class="text md"
-                 v-html="mdToHtml(m.text, { resolveHref: chatFileLinkHref })"
-                 @click="onMarkdownClick"></div>
-            <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><time
-              v-if="m.role === 'user' && validMessageTime(m.sentAt)" class="m-time"
-              :datetime="messageTimeIso(m.sentAt)" :title="messageTimeTitle(m.sentAt)"
-              :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time></div>
-            <button v-if="m.text" class="copy" :class="{ done: copiedIdx === i }"
-                    :title="copiedIdx === i ? 'Скопировано' : 'Копировать сообщение'" @click="copyMsg(m, i)">
-              <svg v-if="copiedIdx === i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div v-if="sess.sending" class="msg assistant">
-          <!-- Живая лента текущего хода: инструменты и размышления по мере поступления -->
-          <StepList v-if="sess.steps?.length" :steps="sess.steps" live />
-          <div class="text muted">
-            <span class="spin"></span> думает…<template v-if="sess.progressTokens"> · {{ sess.progressTokens.toLocaleString('ru') }} ток.</template>
-          </div>
-        </div>
-        <!-- Связь этого окна с сервером оборвалась посреди хода. Сам ход при этом идёт:
-             он живёт в процессе сервера, а не во вкладке, и ответ вернётся через
-             chats/pending. Плашка ЛОКАЛЬНАЯ (поле offline в историю не едет) — порвалось
-             у этого окна, другим устройствам показывать нечего. -->
-        <div v-if="sess.offline" class="msg offline">
-          <div class="text">📡 Связь с сервером прервалась — ход продолжается, ответ появится, когда связь вернётся.</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Действия задачи: конвейер или отдельный Debug-чат в той же песочнице. -->
-    <div v-if="sess.taskId && (sess.messages?.length || sess.purpose !== 'debug')" class="cs-act">
-      <div class="col act-row">
-        <button v-if="sess.messages?.length" class="act" :class="{ onconv: onConveyor }" :disabled="frozen" @click="toConveyor">
-          🏭 {{ onConveyor ? 'Уже на конвейере →' : 'На конвейер' }}
-        </button>
-        <HelpTip v-if="sess.purpose !== 'debug'" class="debug-tip" :text="DEBUG_HINT"
-                 align="left" :trigger-focusable="false">
-          <button class="act debug-act" :disabled="frozen || debugOpening" @click="openDebug">
-            🐞 {{ debugOpening ? 'Открываю…' : 'Исправлять' }}
-          </button>
-        </HelpTip>
-        <span v-if="launchMsg" class="lm muted">{{ launchMsg }}</span>
-        <span v-if="debugMsg" class="lm muted">{{ debugMsg }}</span>
-      </div>
-    </div>
-
-    <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
-    <ChatQuestion v-if="question" :req="question"
-                  @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
-
-    <!-- Всплывашка разрешения: агент хочет выполнить действие -->
-    <ChatPermission v-if="perm" :req="perm"
-                    @answer="(allow, remember, comment, choice) => chat.answerPerm(perm.pid, allow, remember, comment, choice)" />
-
-    <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
-    <div class="cs-input">
-      <!-- Разделитель высоты поля ввода: стоит на верхней кромке (поверх линии),
-           поэтому места в раскладке не занимает и ничего не сдвигает. -->
-      <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
-           aria-label="Высота поля ввода"
-           :aria-valuemin="COMPOSER_MIN" :aria-valuemax="composerMax()"
-           :aria-valuenow="Math.round(composerH ?? COMPOSER_MIN)"
-           title="Потяни — высота поля ввода. Двойной клик — вернуть обычную"
-           @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
-           @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
-           @dblclick="resetComposerHeight" @keydown="onComposerResizeKey">
-        <span></span>
-      </div>
-      <div class="col">
-        <!-- Чипы ещё не отправленных вложений -->
-        <div v-if="pending.length || attachBusy" class="pend">
-          <div v-for="(a, i) in pending" :key="a.file" class="chip">
-            <img v-if="isImg(a)" :src="api.url(a.url)" alt="" />
-            <span class="nm">{{ a.name }}</span>
-            <button class="x" title="Убрать" @click="removePending(i)">×</button>
-          </div>
-          <span v-if="attachBusy" class="muted"><span class="spin"></span></span>
-        </div>
-        <!-- Меню команд/навыков над композером: секция кокпита + секция исполнителя модели -->
-        <div v-if="cmdMenu.length" ref="cmdMenuEl" class="cmd-menu">
-          <template v-for="item in cmdMenu" :key="item.key">
-            <div v-if="item.header" class="cmd-head">
-              <span v-if="item.color" class="dot" :style="{ background: item.color }"></span>{{ item.header }}
-            </div>
-            <button v-else class="cmd" :class="{ on: item.nav >= 0 && item.nav === cmdIndex, off: item.run === 'none' }"
-                    :disabled="item.run === 'none'"
-                    @mouseenter="item.nav >= 0 && (cmdIndex = item.nav)" @click="runCommand(item)">
-              <span class="c-cmd">{{ item.cmd }}</span>
-              <span class="c-desc">{{ item.desc }}</span>
-              <span v-if="item.hint" class="c-hint">{{ item.hint }}</span>
-            </button>
-          </template>
-        </div>
-        <div v-if="consentPending" class="speech-prompt" data-testid="speech-consent">
-          <div>
-            <b>Перед первой диктовкой</b>
-            <p>Браузер может обработать звук на этом устройстве или передать своему сервису.
-              До подтверждения микрофон не включается.</p>
-          </div>
-          <div class="speech-actions">
-            <button type="button" class="speech-primary" data-testid="speech-consent-browser" @click="confirmBrowserConsent">Продолжить в браузере</button>
-            <button type="button" data-testid="speech-consent-whisper" @click="useWhisperFromPrompt">Использовать Whisper</button>
-            <button type="button" @click="stopSpeech({ cancel: true })">Отмена</button>
-          </div>
-        </div>
-        <div v-else-if="browserInstallPending" class="speech-prompt" data-testid="speech-browser-install">
-          <div>
-            <b>Нужна локальная языковая модель</b>
-            <p>Браузер может скачать её и после этого распознавать речь только на этом устройстве.</p>
-          </div>
-          <div class="speech-actions">
-            <button type="button" class="speech-primary" data-testid="speech-install-browser" @click="installBrowserLanguage">Скачать и продолжить</button>
-            <button type="button" data-testid="speech-install-whisper" @click="useWhisperFromPrompt">Использовать Whisper</button>
-            <button type="button" @click="stopSpeech({ cancel: true })">Отмена</button>
-          </div>
-        </div>
-        <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">Слышу: {{ interimSpeech }}</div>
-        <div class="composer">
-          <button class="tool" title="Приложить файл (или перетащи/вставь из буфера)" @click="fileInput.click()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
-          <input ref="fileInput" type="file" multiple hidden @change="onPick" />
-          <textarea ref="taEl" v-model="input" rows="2"
-                    :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
-                    @keydown="onKey" @paste="onPaste"></textarea>
-          <HelpTip align="right" :text="recording ? 'Остановить · Ctrl+D; отменить · Esc' : drainingSpeech ? 'Завершаю распознавание… Esc — отмена' : transcribing ? 'Расшифровываю запись…' : preparingSpeech || browserInstalling ? 'Подготавливаю… Esc — отмена' : 'Надиктовать голосом · Ctrl+D'">
-          <button class="tool mic" :class="{ rec: recording, wait: transcribing || preparingSpeech || browserInstalling || drainingSpeech }" :disabled="transcribing || drainingSpeech"
-                  :aria-label="recording ? 'Остановить диктовку' : 'Начать диктовку'" :aria-pressed="recording"
-                  @click="toggleMic">
-            <!-- Расшифровка: крутящийся спиннер -->
-            <svg v-if="transcribing || preparingSpeech || browserInstalling || drainingSpeech" class="spin-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-              <path d="M21 12a9 9 0 1 1-6.2-8.56" />
-            </svg>
-            <!-- Запись: квадрат-стоп -->
-            <svg v-else-if="recording" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
-            </svg>
-            <!-- Покой: микрофон -->
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="12" x2="12" y1="19" y2="22" />
-            </svg>
-          </button>
-          </HelpTip>
-          <!-- Пока агент работает, рядом появляется «стоп». Отправку при этом НЕ прячем:
-               следующее сообщение можно готовить и слать сразу — сервер поставит его
-               в очередь и пустит следом (раньше оно молча пропадало). -->
-          <button v-if="sess.sending || sess.compacting" class="send stop" :disabled="sess.stopping"
-                  :title="sess.stopping ? 'Останавливаю…'
-                    : sess.compacting ? 'Прервать сжатие контекста' : 'Остановить агента'" @click="chat.stop(sid)">
-            <span class="sq"></span>
-          </button>
-          <button class="send" :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
-                  :title="speechBusy ? 'Сначала заверши диктовку'
-                    : frozen ? frozenHint
-                    : sess.sending ? 'Отправить следом — уйдёт, когда агент закончит текущий ход (Enter)' : 'Отправить (Enter)'"
-                  @click="submit">↑</button>
-        </div>
-        <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
-        <div v-if="inputErr" class="in-err">{{ inputErr }}</div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 /* min-width: 0 обязателен: без него флекс-элемент не сжимается ниже min-content своего
    содержимого — одна длинная команда в ленте или во всплывашке раздувала всю колонку
@@ -1357,31 +1575,21 @@ async function openDebug() {
    и так уходит в одну колонку, где шапке разрешено расти. */
 .hrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
-.back { display: none; flex: none; width: 30px; height: 30px; margin-left: -6px; border: none; border-radius: 8px;
-  background: none; color: var(--ink-mid); font-size: 17px; line-height: 1; cursor: pointer; place-items: center; }
-.back:hover { background: var(--surface-2); color: var(--ink); }
+.back { display: none; flex: none; margin-left: -6px; place-items: center; }
 /* Название чата — как заголовок карточки, рядом карандаш переименования */
 .ttl { display: flex; align-items: center; gap: 3px; flex: 1 1 auto; min-width: 0; }
 .ctitle { font-size: 15px; font-weight: 600; cursor: default; line-height: 1.3;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Карандаш приглушён, пока не наводишь на шапку: он нужен редко, но должен быть виден
-   всегда — двойным кликом по названию переименование никто не находит. */
-.tedit { flex: none; width: 24px; height: 24px; border: none; border-radius: 6px; background: none;
-  color: var(--ink-mid); font-size: 12px; cursor: pointer; display: grid; place-items: center;
-  opacity: .5; transition: opacity .12s, color .12s, background .12s; }
-.hrow:hover .tedit { opacity: 1; }
-.tedit:hover { background: var(--surface-2); color: var(--ink); opacity: 1; }
-.tedit:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
-.ctitle-edit { width: 100%; max-width: 420px; height: 26px; background: var(--ground); border: 1px solid var(--line-2);
-  border-radius: 7px; color: var(--ink); font-size: 14px; font-weight: 600; padding: 0 8px; outline: none; font-family: inherit; }
+/* Карандаш приглушён, пока не наводишь на шапку, но остаётся виден и доступен с клавиатуры. */
+.tedit { flex: none; }
+.ctitle-edit { width: 100%; }
 .bar { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
 .spacer { flex: 1; }
 .sel { position: relative; }
 /* На странице задача делит верхний ряд с названием чата: ей — правая половина, но
    ужимается она первой (название важнее). Полное название задачи доступно по ховеру
-   в общем HelpTip — внешний overflow страницы его не обрежет. */
+   в общем UiTooltip — внешний overflow страницы его не обрежет. */
 .task-tip { flex: 0 1 420px; max-width: 520px; min-width: 150px; }
-.task-tip :deep(.ht-tr) { width: 100%; min-width: 0; cursor: default; }
 .sel.task { width: 100%; min-width: 0; }
 /* Селект модели сжимаемый: ряд «модель + эффорт + кольцо» должен оставаться
    одним рядом, а не разъезжаться на три. */
@@ -1390,46 +1598,15 @@ async function openDebug() {
    подпись-метка, значение и шеврон. Разделители — тонкие вертикальные линии. */
 .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
 .sel .lbl { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; }
-.sel::after { content: ''; position: absolute; right: 2px; top: 50%; width: 6px; height: 6px; pointer-events: none;
-  border-right: 1.5px solid var(--ink-mid); border-bottom: 1.5px solid var(--ink-mid); transform: translateY(-70%) rotate(45deg); }
-.sel select { width: 100%; height: 28px; -webkit-appearance: none; appearance: none; background: none; border: none;
-  border-bottom: 1px solid transparent; color: var(--ink); padding: 0 16px 0 0; font-size: 12.5px; font-family: inherit;
-  cursor: pointer; text-overflow: ellipsis; }
-.sel select:hover { border-bottom-color: var(--line-2); }
 /* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, слайдеру
    усилия своего disabled не заводили — гасим его вместе с рядом действий. Композер не
    трогаем: печатать во время сжатия можно, нельзя только отправить. */
-.sel select:disabled { opacity: .5; cursor: default; }
 .cs.frozen .bar :deep(.eff), .cs.frozen .cs-act { opacity: .5; pointer-events: none; }
-.sel select:focus { outline: none; border-bottom-color: var(--accent); }
-/* Раскрытый список системный — ему нужен непрозрачный фон, иначе на тёмной теме нечитаемо */
-.sel select option, .sel select optgroup { background: var(--surface); color: var(--ink); }
-.sel + .sel, .bar > .sel + :deep(.eff), .bar :deep(.eff) + .ctx-tip {
-  border-left: 1px solid var(--line); padding-left: 12px; margin-left: 4px; }
 
 /* Кольцо контекста — маленькое, кликабельное (сжатие; Alt — сброс) */
 .ctx-tip { flex: none; align-items: center; }
-.ctx-tip :deep(.ht-tr) { align-items: center; }
-.ctx-ring { width: 30px; height: 30px; flex: none; padding: 0; border: none; border-radius: 8px;
-  background: none; cursor: pointer; display: grid; place-items: center; }
-.ctx-ring svg { width: 22px; height: 22px; }
-.ctx-ring .rbg { stroke: var(--surface-2); }
-.ctx-ring .rfg { stroke: var(--good); transition: stroke-dashoffset .3s; }
-.ctx-ring.mid .rfg { stroke: var(--warn); }
-.ctx-ring.hi .rfg { stroke: var(--bad); }
-/* У Codex это не порог заполненности, а только вход последнего хода — не тревожим красным. */
-.ctx-ring.estimate .rfg { stroke: var(--accent); opacity: .8; }
-/* Сжатие идёт: у него нет ленты шагов, поэтому единственный признак работы — само
-   кольцо. Крутим его как спиннер (дуга на это время короткая — см. SPIN_DASH), иначе
-   нажатие выглядело бы как «кнопка ничего не сделала». */
-.ctx-ring.compacting { opacity: 1 !important; }
-.ctx-ring.compacting .rfg { stroke: var(--accent); }
-.ctx-ring.compacting svg { animation: ctx-spin .8s linear infinite; }
-@keyframes ctx-spin { to { transform: rotate(1turn); } }
-.ctx-ring:not([aria-disabled="true"]):hover { background: var(--surface-2); }
-.ctx-ring[aria-disabled="true"] { cursor: default; opacity: .7; }
 
-/* Форматированная подсказка кольца. Содержимое слота телепортируется HelpTip-ом в body,
+/* Форматированная подсказка кольца. Содержимое слота телепортируется UiTooltip в body,
    но сохраняет scope этого компонента, поэтому локальные стили работают и не текут. */
 .ctx-pop { display: flex; flex-direction: column; gap: 7px; width: 260px; max-width: 100%; text-align: left; }
 .ctx-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
@@ -1454,7 +1631,7 @@ async function openDebug() {
 
 /* Воздух сверху/снизу — margin'ом самого скролл-контейнера (не паддингом:
    нижний паддинг при прокрутке до конца ненадёжен). Правый паддинг меньше
-   на ширину скроллбара (11px, styles.css) — края совпадают с композером.
+   на ширину скроллбара (11px, base.css) — края совпадают с композером.
    scrollbar-gutter: stable — место под скролл зарезервировано всегда, сообщения
    не «скачут» по горизонтали, когда полоса появляется/исчезает. */
 .cs-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding: 0 11px 0 22px; margin: 26px 0; }
@@ -1471,14 +1648,6 @@ async function openDebug() {
    сообщений порядок обратный — иконка слева от пузыря. */
 .mrow { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
 .msg.user .mrow { flex-direction: row-reverse; }
-/* Копировать — просто иконка-призрак, появляется при наведении на сообщение */
-.copy { flex: none; background: none; border: none; padding: 2px; margin-bottom: 3px;
-  color: var(--ink-mid); cursor: pointer; opacity: 0; transition: opacity .15s, color .15s;
-  display: grid; place-items: center; }
-.copy svg { width: 14px; height: 14px; }
-.msg:hover .copy { opacity: 1; }
-.copy:hover { color: var(--ink); }
-.copy.done { opacity: 1; color: var(--good); }
 .msg .text { font-size: 14.5px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; min-width: 0; }
 /* Ты — справа, пузырь с акцентом; роль ясна по стороне, лейблы не нужны */
 .msg.user { align-self: flex-end; align-items: flex-end; max-width: min(78%, 720px); }
@@ -1552,8 +1721,6 @@ async function openDebug() {
    это не ошибка одного сообщения, а риск потерять весь разговор. */
 .cs-act { padding: 8px 22px; border-top: 1px solid var(--line); }
 .act-row { display: flex; align-items: center; gap: 10px; }
-.act { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; }
-.act.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .lm { font-size: 12px; }
 
 /* Вложения в сообщениях: картинка открывается в общем viewer-е, файл — как оригинал. */
@@ -1573,41 +1740,14 @@ async function openDebug() {
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
 .chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
 .chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip .x { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 14px; padding: 0 2px; }
-.chip .x:hover { color: var(--bad); }
-/* Кнопки-инструменты композера (скрепка / микрофон) */
-.tool { flex: none; width: 36px; height: 36px; background: transparent; border: none; border-radius: 10px; cursor: pointer;
-  color: var(--ink-mid); display: grid; place-items: center; }
-.tool svg { width: 18px; height: 18px; }
-.tool:hover { background: var(--surface-2); color: var(--ink); }
-.tool.mic { position: relative; isolation: isolate; overflow: visible; }
-.tool.mic > svg { position: relative; z-index: 1; }
-.tool.mic.rec { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
-.tool.mic.rec::before { content: ''; position: absolute; inset: 3px; z-index: -1; border-radius: 9px;
-  pointer-events: none; background: color-mix(in srgb, var(--bad) 48%, transparent);
-  animation: mic-pulse 1.35s ease-out infinite; }
-.tool.mic.wait { cursor: default; color: var(--accent); opacity: 1; }
-@keyframes mic-pulse {
-  0% { opacity: .72; transform: scale(.88); }
-  75%, 100% { opacity: 0; transform: scale(1.62); }
-}
-.spin-ico { animation: ico-rotate .9s linear infinite; }
-@keyframes ico-rotate { to { transform: rotate(360deg); } }
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }
 .speech-note { margin-top: 6px; }
-@media (prefers-reduced-motion: reduce) {
-  .tool.mic.rec::before { animation: none; opacity: .35; transform: scale(1.18); }
-}
 .speech-prompt { display: grid; gap: 9px; margin-bottom: 8px; padding: 11px 12px; border: 1px solid var(--line-2);
   border-radius: 11px; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 13px; }
 .speech-prompt p { margin: 3px 0 0; color: var(--ink-mid); line-height: 1.4; }
 .speech-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-.speech-actions button { border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px;
-  background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }
-.speech-actions button:hover { border-color: var(--accent); }
-.speech-actions .speech-primary { border-color: transparent; background: var(--accent); color: white; }
 
 /* Меню команд и навыков: якорится над композером */
 .cs-input .col { position: relative; }
@@ -1615,12 +1755,6 @@ async function openDebug() {
   background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden;
   max-height: min(440px, 55vh); overflow-y: auto;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
-.cmd { display: flex; align-items: baseline; gap: 12px; width: 100%; padding: 9px 14px; background: transparent;
-  border: none; cursor: pointer; text-align: left; }
-.cmd + .cmd { border-top: 1px solid var(--line); }
-.cmd.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.cmd.off { cursor: default; opacity: .55; }
-.cmd.off .c-cmd { color: var(--ink-mid); }
 .cmd-head { display: flex; align-items: center; gap: 7px; padding: 7px 14px 4px; font-size: 11px;
   text-transform: uppercase; letter-spacing: .06em; color: var(--ink-mid); border-top: 1px solid var(--line); }
 .cmd-head:first-child { border-top: none; }
@@ -1638,14 +1772,6 @@ async function openDebug() {
 
 .composer { display: flex; gap: 6px; align-items: flex-end; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
 .composer:focus-within { border-color: var(--line-2); }
-/* `--composer-h` ставит скрипт, когда человек двигал разделитель; пока не двигал —
-   переменной нет и высота прежняя (rows=2 + min-height). Потолок 46vh продублирован
-   в CSS осознанно: после поворота планшета скрипт про новую высоту окна не знает,
-   а поле не имеет права закрыть собой переписку. Цифра обязана совпадать с
-   COMPOSER_MAX_VH в скрипте — иначе у разделителя появляется мёртвый ход. */
-.cs-input textarea { flex: 1; resize: none; background: transparent; border: none; outline: none; color: var(--ink);
-  padding: 6px 0; font-family: inherit; font-size: 14px; line-height: 1.45;
-  height: var(--composer-h, auto); min-height: 48px; max-height: 46vh; }
 
 /* Разделитель высоты поля ввода — на верхней кромке блока, поверх его линии
    (как разделитель дока): собственного места не занимает, включение ресайза
@@ -1657,12 +1783,6 @@ async function openDebug() {
 .cs-resize span { width: 46px; height: 3px; border-radius: 999px;
   background: color-mix(in srgb, var(--ink-mid) 42%, transparent); transition: background .12s; }
 .cs-resize:hover span, .cs-resize:focus-visible span { background: var(--accent); }
-.send { flex: none; width: 36px; height: 36px; background: var(--accent); color: #fff; border: none; border-radius: 10px;
-  font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-.send:disabled { opacity: .5; cursor: default; }
-/* Пока агент работает — та же кнопка становится «стоп» (квадрат), как в плеере */
-.send.stop { background: var(--bad); }
-.send.stop .sq { width: 11px; height: 11px; border-radius: 2px; background: #fff; display: block; }
 
 /* ── Планшет (до 1099): ряд настроек без подписей-меток ─────────────────────────
    Рядом со списком чату остаётся ~400px, и в такую ширину ряд влезает только так.

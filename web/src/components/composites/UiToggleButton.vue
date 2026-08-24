@@ -7,8 +7,15 @@
     :variant="variant"
     :tone="tone"
     @click="toggle"
-    ><slot
-  /></UiButton>
+  >
+    <template v-if="$slots.leading" #leading>
+      <slot name="leading" />
+    </template>
+    <slot />
+    <template v-if="$slots.trailing" #trailing>
+      <slot name="trailing" />
+    </template>
+  </UiButton>
 </template>
 
 <script setup lang="ts">
@@ -32,7 +39,11 @@ const props = withDefaults(
   },
 );
 
-defineSlots<{ default(): unknown }>();
+defineSlots<{
+  default(): unknown;
+  leading?(): unknown;
+  trailing?(): unknown;
+}>();
 
 const emit = defineEmits<{ click: [event: MouseEvent] }>();
 const model = defineModel<boolean>({ default: false });

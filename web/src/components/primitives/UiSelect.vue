@@ -1,9 +1,13 @@
 <template>
-  <span class="ui-select-wrap">
+  <span
+    class="ui-select-wrap"
+    :class="{ 'ui-select-wrap--compact': compact }"
+  >
     <select
       ref="element"
       v-bind="forwardedAttrs"
       class="ui-select"
+      :class="{ 'ui-select--compact': compact }"
       :value="model ?? ''"
       :id="fieldState.id.value"
       :disabled="disabled"
@@ -34,6 +38,7 @@ const props = withDefaults(
     ariaDisabled?: boolean;
     invalid?: boolean;
     required?: boolean;
+    compact?: boolean;
   }>(),
   {
     id: undefined,
@@ -41,6 +46,7 @@ const props = withDefaults(
     ariaDisabled: false,
     invalid: false,
     required: false,
+    compact: false,
   },
 );
 
@@ -73,11 +79,11 @@ const forwardedAttrs = computed(() => {
  * Для `ariaDisabled` видимый DOM откатывается, поскольку select остаётся фокусируемым.
  */
 function onChange(event: Event): void {
-  emit('change', event);
-
   if (props.ariaDisabled) {
     event.preventDefault();
     (event.target as HTMLSelectElement).value = String(model.value ?? '');
+
+    emit('change', event);
 
     return;
   }
@@ -96,6 +102,7 @@ function onChange(event: Event): void {
   }
 
   model.value = value;
+  emit('change', event);
 }
 
 defineExpose({

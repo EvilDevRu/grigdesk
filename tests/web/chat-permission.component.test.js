@@ -1,135 +1,129 @@
-// Карточка разрешения (ChatPermission.vue): «Доработать»/«Отклонить» открывает модалку
-// с пояснением (promptDialog из shared/ui/confirm.js — настоящую, в happy-dom), текст
-// уезжает третьим аргументом события answer. Esc/отмена модалки — отказа нет.
-// «Утвердить» по-прежнему отвечает сразу, без модалки.
+// Карточка разрешения сохраняет payload решения и использует public UI facade.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  compileVue,
+  webFile,
+} from './helpers/compile-vue.js';
+import { installUiBrowser } from './helpers/ui-components.js';
 
 process.env.NODE_ENV = 'test';
 
-const PERMISSION_PATH = fileURLToPath(
-  new URL('../../web/src/views/chat/ChatPermission.vue', import.meta.url),
-);
-const CONFIRM_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/ui/confirm.js', import.meta.url),
-)).href;
-const DIFF_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/diff.js', import.meta.url),
-)).href;
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
+const PERMISSION_PATH = webFile('src/views/chat/ChatPermission.vue');
+const DIALOG_SERVICE_STUB = `
+  export const promptDialog = (options) => globalThis.__chatPermissionPrompt(options);
+  export const confirmDialog = () => Promise.resolve(false);
+  export const alertDialog = () => Promise.resolve();
+`;
 
-async function compilePermission() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(PERMISSION_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: PERMISSION_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, { id: 'data-v-perm-test', inlineTemplate: true }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    // data:-URL не резолвит относительные пути; модули без зависимостей — по file URL.
-    .replace("from '../../shared/ui/confirm.js'", `from "${CONFIRM_URL}"`)
-    .replace("from '../../shared/diff.js'", `from "${DIFF_URL}"`);
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(`${code}\n// perm ${Date.now()}`).toString('base64')}`
-  )).default;
-}
+let componentPromise;
 
-let shared = null;
+function compilePermission() {
+  componentPromise ||= compileVue(PERMISSION_PATH, {
+    stubs: {
+      './services/dialogs': DIALOG_SERVICE_STUB,
+    },
+  });
 
-async function browserHarness() {
-  if (shared) {
-    shared.document.body.innerHTML = '<div id="mount"></div>';
-    return shared;
-  }
-  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/chats' });
-  for (const [key, value] of Object.entries({
-    window: browser,
-    document: browser.document,
-    navigator: browser.navigator,
-    location: browser.location,
-    localStorage: browser.localStorage,
-    Node: browser.Node,
-    Element: browser.Element,
-    HTMLElement: browser.HTMLElement,
-    SVGElement: browser.SVGElement,
-    Document: browser.Document,
-    ShadowRoot: browser.ShadowRoot,
-    Event: browser.Event,
-    KeyboardEvent: browser.KeyboardEvent,
-    CustomEvent: browser.CustomEvent,
-    getComputedStyle: browser.getComputedStyle.bind(browser),
-  })) {
-    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  }
-  browser.document.body.innerHTML = '<div id="mount"></div>';
-  shared = browser;
-  return browser;
+  return componentPromise;
 }
 
 const PLAN_REQ = {
-  pid: 'p1', chatKey: 'c1',
+  pid: 'p1',
+  chatKey: 'c1',
   tool: 'ExitPlanMode',
-  input: { plan: 'Шаг 1. Сделать' },
+  input: {
+    plan: 'Шаг 1. Сделать',
+  },
 };
 
 async function mountPermission(t, req = PLAN_REQ) {
-  const browser = await browserHarness();
+  const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
+  globalThis.__chatPermissionPrompt = async () => null;
+
   const [{ mount, flushPromises }, ChatPermission] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compilePermission(),
   ]);
   const wrapper = mount(ChatPermission, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { req },
+    props: {
+      req,
+    },
   });
+
   t.after(() => wrapper.unmount());
   await flushPromises();
-  return { browser, wrapper, flushPromises };
+
+  return {
+    wrapper,
+    flushPromises,
+  };
 }
 
-test('«Доработать» открывает модалку, пояснение уезжает третьим аргументом answer', async (t) => {
-  const { browser, wrapper, flushPromises } = await mountPermission(t);
-  await wrapper.find('.p-no').trigger('click');
+function button(wrapper, label) {
+  return wrapper.findAll('button').find((entry) => entry.text() === label);
+}
+
+test('«Доработать» отправляет пояснение третьим аргументом answer', async (t) => {
+  const { wrapper, flushPromises } = await mountPermission(t);
+  let options;
+
+  globalThis.__chatPermissionPrompt = async (value) => {
+    options = value;
+
+    return 'убери лишний шаг';
+  };
+
+  await button(wrapper, 'Доработать').trigger('click');
   await flushPromises();
-  const ta = browser.document.querySelector('.cfm-overlay .cfm-ta');
-  assert.ok(ta, 'модалка с полем пояснения открылась');
-  ta.value = 'убери лишний шаг';
-  browser.document.querySelector('.cfm-overlay .cfm-ok').click();
-  await flushPromises();
-  assert.deepEqual(wrapper.emitted('answer'), [[false, false, 'убери лишний шаг', '']]);
-  assert.equal(Boolean(browser.document.querySelector('.cfm-overlay')), false, 'модалка закрылась');
+
+  assert.equal(options.title, 'Что доработать в плане?');
+  assert.deepEqual(
+    wrapper.emitted('answer'),
+    [[false, false, 'убери лишний шаг', '']],
+  );
 });
 
-test('Esc в модалке — отказа нет, карточка остаётся висеть', async (t) => {
-  const { browser, wrapper, flushPromises } = await mountPermission(t);
-  await wrapper.find('.p-no').trigger('click');
+test('отмена пояснения оставляет карточку без answer', async (t) => {
+  const { wrapper, flushPromises } = await mountPermission(t);
+
+  globalThis.__chatPermissionPrompt = async () => null;
+  await button(wrapper, 'Доработать').trigger('click');
   await flushPromises();
-  assert.ok(browser.document.querySelector('.cfm-overlay'));
-  browser.document.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Escape' }));
-  await flushPromises();
+
   assert.equal(wrapper.emitted('answer'), undefined);
-  assert.equal(Boolean(browser.document.querySelector('.cfm-overlay')), false, 'модалка закрылась');
 });
 
-test('«Утвердить» отвечает сразу, без модалки', async (t) => {
-  const { browser, wrapper } = await mountPermission(t);
-  await wrapper.find('.p-ok').trigger('click');
+test('«Утвердить» отвечает сразу', async (t) => {
+  const { wrapper } = await mountPermission(t);
+
+  await button(wrapper, 'Утвердить').trigger('click');
+
   assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
-  assert.equal(Boolean(browser.document.querySelector('.cfm-overlay')), false);
 });
 
-// Запрос Kimi раньше показывался голым JSON: человек не мог прочитать ни команду,
-// ни правку и решал вслепую. Проверяем, что разобранные поля видны как текст.
-test('запрос Kimi: команда и путь читаются, JSON не показывается', async (t) => {
+test('галка сессии использует checked-семантику и доезжает в allow', async (t) => {
   const { wrapper } = await mountPermission(t, {
-    pid: 'p2', chatKey: 'c1', tool: 'Bash',
+    pid: 'p-checkbox',
+    chatKey: 'c1',
+    tool: 'Bash',
+    input: {
+      command: 'npm test',
+    },
+  });
+
+  await wrapper.get('input[type="checkbox"]').setValue(true);
+  await button(wrapper, 'Разрешить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[true, true]]);
+});
+
+test('запрос Kimi показывает команду и путь вместо сырого JSON', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'p2',
+    chatKey: 'c1',
+    tool: 'Bash',
     input: {
       kind: 'execute',
       description: 'Requesting approval to run a command',
@@ -138,62 +132,90 @@ test('запрос Kimi: команда и путь читаются, JSON не 
     },
   });
   const text = wrapper.text();
+
   assert.match(text, /Requesting approval to run a command/);
   assert.equal(wrapper.find('.p-in.cmd').text(), 'npm test -- --run');
   assert.equal(wrapper.find('.p-path').text(), '/home/u/project/package.json');
-  assert.ok(!text.includes('{"kind"'), 'сырого JSON в карточке нет');
+  assert.equal(text.includes('{"kind"'), false);
 });
 
-test('правка файла показывается двухколоночным диффом, а не текстом', async (t) => {
+test('правка файла показывается двухколоночным диффом', async (t) => {
   const { wrapper } = await mountPermission(t, {
-    pid: 'p3', chatKey: 'c1', tool: 'Edit file',
+    pid: 'p3',
+    chatKey: 'c1',
+    tool: 'Edit file',
     input: {
       kind: 'edit',
       description: 'Requesting approval to edit a file',
       file_path: 'server/src/app.js',
-      diff: { old: 'const a = 1;\nconst b = 2;\n', new: 'const a = 1;\nconst b = 3;\n' },
+      diff: {
+        old: 'const a = 1;\nconst b = 2;\n',
+        new: 'const a = 1;\nconst b = 3;\n',
+      },
     },
   });
-  assert.ok(wrapper.find('.p-diff').exists(), 'блок диффа отрисован');
+
+  assert.equal(wrapper.find('.p-diff').exists(), true);
   assert.equal(wrapper.findAll('.dcell.del').length, 1);
   assert.equal(wrapper.findAll('.dcell.add').length, 1);
   assert.equal(wrapper.find('.dcell.del').text(), 'const b = 2;');
   assert.equal(wrapper.find('.dcell.add').text(), 'const b = 3;');
 });
 
-// У плана Kimi вариантов больше двух (доработать, выйти) — кнопками идут именно они,
-// а нажатая уезжает пятым аргументом: подменять чужой выбор своим нельзя.
-test('варианты плана рисуются кнопками и уезжают отдельным аргументом', async (t) => {
-  const { wrapper, browser, flushPromises } = await mountPermission(t, {
-    pid: 'p4', chatKey: 'c1', tool: 'Plan',
+test('длинные варианты плана используют choice rows и сохраняют choice id', async (t) => {
+  const { wrapper, flushPromises } = await mountPermission(t, {
+    pid: 'p4',
+    chatKey: 'c1',
+    tool: 'Plan',
     input: {
       plan: 'Шаг 1. Изучить\nШаг 2. Починить',
       choices: [
-        { id: 'plan_approve', label: 'Approve plan', kind: 'allow_once' },
-        { id: 'plan_revise', label: 'Revise plan', kind: 'reject_once' },
+        {
+          id: 'plan_approve',
+          label: 'Approve plan',
+          kind: 'allow_once',
+        },
+        {
+          id: 'plan_revise',
+          label: 'Revise plan',
+          kind: 'reject_once',
+        },
       ],
     },
   });
-  const buttons = wrapper.findAll('.p-act button');
-  assert.deepEqual(buttons.map((b) => b.text()), ['Approve plan', 'Revise plan']);
+  const choices = wrapper.findAll('.ui-choice-list__option');
+
+  assert.deepEqual(choices.map((entry) => entry.text()), [
+    'Approve plan',
+    'Revise plan',
+  ]);
   assert.match(wrapper.find('.p-in.big').text(), /Шаг 2\. Починить/);
 
-  await buttons[0].trigger('click');
-  assert.deepEqual(wrapper.emitted('answer'), [[true, false, '', 'plan_approve']]);
+  await choices[0].trigger('click');
+  assert.deepEqual(
+    wrapper.emitted('answer'),
+    [[true, false, '', 'plan_approve']],
+  );
 
-  // Вариант-отказ по-прежнему сначала спрашивает пояснение.
-  await buttons[1].trigger('click');
+  globalThis.__chatPermissionPrompt = async () => 'сначала тесты';
+  await choices[1].trigger('click');
   await flushPromises();
-  browser.document.querySelector('.cfm-overlay .cfm-ta').value = 'сначала тесты';
-  browser.document.querySelector('.cfm-overlay .cfm-ok').click();
-  await flushPromises();
-  assert.deepEqual(wrapper.emitted('answer')[1], [false, false, 'сначала тесты', 'plan_revise']);
+
+  assert.deepEqual(
+    wrapper.emitted('answer')[1],
+    [false, false, 'сначала тесты', 'plan_revise'],
+  );
 });
 
-test('незнакомая форма запроса всё же показывается — пустой карточки не бывает', async (t) => {
+test('незнакомая форма запроса не превращается в пустую карточку', async (t) => {
   const { wrapper } = await mountPermission(t, {
-    pid: 'p5', chatKey: 'c1', tool: 'Странный инструмент',
-    input: { whatever: 'значение' },
+    pid: 'p5',
+    chatKey: 'c1',
+    tool: 'Странный инструмент',
+    input: {
+      whatever: 'значение',
+    },
   });
+
   assert.match(wrapper.find('.p-in').text(), /whatever/);
 });

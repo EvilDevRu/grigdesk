@@ -30,6 +30,92 @@
   gap: 16px;
 }
 
+.ui-gallery__composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--ground);
+}
+
+.ui-gallery__composer:focus-within {
+  border-color: var(--line-2);
+}
+
+.ui-gallery__dock-actions {
+  --tool-dock-action-size: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ui-gallery__chat-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.ui-gallery__task-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 10px;
+  overflow-x: auto;
+  background: var(--surface-2);
+}
+
+.ui-gallery__task-footer > * {
+  flex: none;
+}
+
+.ui-gallery__topbar-popover-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(300px, 100%);
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.ui-gallery__dock-actions svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.ui-gallery__popover {
+  width: min(320px, calc(100vw - 16px));
+}
+
+.ui-gallery__provider-resource {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ui-gallery__disclosure {
+  width: 100%;
+}
+
+.ui-gallery__dialog-copy {
+  max-width: 58ch;
+}
+
 @media (max-width: 480px) {
   .ui-gallery { padding: 10px; }
   .ui-gallery__section { padding: 12px; }

@@ -1,37 +1,17 @@
 // Даёт тестам общие функции для компиляции SFC-компонентов компаньона и браузерную среду.
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './compile-vue.js';
 
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-let nonce = 0;
-// У data:-модуля нет базового пути, поэтому относительный импорт соседнего SFC
-// падает ERR_UNSUPPORTED_RESOLVE_REQUEST и роняет весь файл теста. Дочерний
-// компонент компилируем тем же путём и подставляем через globalThis.
-const CHILD_IMPORT = /import\s+(\w+)\s+from\s+['"]\.\/([\w-]+)\.vue['"];?/g;
+const componentPromises = new Map();
 
 export async function compileCompanionSfc(name) {
-  const { parse, compileScript } = await import(
-    '../../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const path = fileURLToPath(new URL(`../../../web/src/features/companion/${name}.vue`, import.meta.url));
-  const source = await readFile(path, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: path });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-companion-${name.toLowerCase()}-${nonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`);
-  for (const [line, local, child] of [...code.matchAll(CHILD_IMPORT)]) {
-    const key = `__companionChild_${child}_${nonce += 1}`;
-    globalThis[key] = await compileCompanionSfc(child);
-    code = code.replace(line, `const ${local} = globalThis.${key};`);
+  if (!componentPromises.has(name)) {
+    componentPromises.set(
+      name,
+      compileVue(webFile(`src/features/companion/${name}.vue`)),
+    );
   }
-  return (await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce++}`)).default;
+
+  return componentPromises.get(name);
 }
 
 export async function installCompanionBrowser(t, url = 'https://cockpit.test/#/pipeline') {
@@ -51,6 +31,12 @@ export async function installCompanionBrowser(t, url = 'https://cockpit.test/#/p
     CustomEvent: browser.CustomEvent,
     KeyboardEvent: browser.KeyboardEvent,
     getComputedStyle: browser.getComputedStyle.bind(browser),
+    requestAnimationFrame: (callback) => {
+      queueMicrotask(() => callback(Date.now()));
+
+      return 1;
+    },
+    cancelAnimationFrame: () => {},
   })) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   browser.document.body.innerHTML = '<div id="mount"></div>';
   t.after(() => browser.close());

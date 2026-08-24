@@ -16,75 +16,12 @@
 // искать её не нужно.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  compileTelegramView,
+  installBrowser,
+} from './helpers/telegram-view.js';
 
 process.env.NODE_ENV = 'test';
-
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/TelegramView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-let compileNonce = 0;
-
-// Node кэширует модуль по всему `data:`-URL, а две компиляции одного SFC дают
-// побайтово равный текст — без хвоста-nonce второй тест работал бы со сторами первого.
-async function compileTelegramView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-telegram-auto-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { useSse } from '../composables/useSse.js';", 'const useSse = () => {};')
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__tgApi;')
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = async () => true;',
-    )
-    .replace(
-      "import { usePluginsStore } from '../stores/plugins.js';",
-      'const usePluginsStore = globalThis.__tgStores.usePluginsStore;',
-    );
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
-}
-
-async function installBrowser(t) {
-  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'http://cockpit.test/#/telegram' });
-  for (const [key, value] of Object.entries({
-    window: browser,
-    document: browser.document,
-    navigator: browser.navigator,
-    location: browser.location,
-    localStorage: browser.localStorage,
-    Node: browser.Node,
-    Element: browser.Element,
-    HTMLElement: browser.HTMLElement,
-    HTMLButtonElement: browser.HTMLButtonElement,
-    HTMLInputElement: browser.HTMLInputElement,
-    HTMLSelectElement: browser.HTMLSelectElement,
-    SVGElement: browser.SVGElement,
-    Event: browser.Event,
-    CustomEvent: browser.CustomEvent,
-    getComputedStyle: browser.getComputedStyle.bind(browser),
-  })) {
-    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  }
-  browser.document.body.innerHTML = '<div id="mount"></div>';
-  t.after(() => browser.close());
-  return browser;
-}
 
 const BOT = {
   configured: true,
@@ -143,9 +80,8 @@ async function mountTelegram(t, { rules = [rule()] } = {}) {
       };
     },
   };
-  globalThis.__tgStores = {
-    usePluginsStore: () => ({ loaded: true, enabled: () => true, async load() {} }),
-  };
+  globalThis.__tgPluginsStore = () => ({ loaded: true, enabled: () => true, async load() {} });
+  globalThis.__tgConfirm = async () => true;
   const [{ mount, flushPromises }, TelegramView] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileTelegramView(),
@@ -154,7 +90,8 @@ async function mountTelegram(t, { rules = [rule()] } = {}) {
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__tgApi;
-    delete globalThis.__tgStores;
+    delete globalThis.__tgPluginsStore;
+    delete globalThis.__tgConfirm;
   });
   for (let i = 0; i < 5; i += 1) await flushPromises();
 
@@ -166,12 +103,12 @@ async function mountTelegram(t, { rules = [rule()] } = {}) {
   const toggle = async (n = 0, on = true) => {
     await autoRow(n).find('input[type="checkbox"]').setValue(on);
   };
-  // Числовые поля коммитятся по @change (blur/Enter), а не по каждому нажатию:
-  // иначе стирание поля тут же подставляло бы дефолт и уводило курсор.
+  // UiNumberInput нормализует число и пустоту в одном месте; тест отправляет тот же
+  // input-event, которым primitive обновляет model в браузере.
   const setNum = async (n, which, value) => {
     const input = autoRow(n).findAll('.num-f').at(which);
     input.element.value = value;
-    await input.trigger('change');
+    await input.trigger('input');
   };
   const save = async () => {
     await wrapper.findAll('button').find((b) => b.text() === 'Сохранить').trigger('click');

@@ -1,12 +1,590 @@
+<template>
+  <UiDialog
+    :open="Boolean(taskId)"
+    data-role="task-modal"
+    size="workspace"
+    :label="detail?.title || `Задача #${taskId || ''}`"
+    :body-inset="false"
+    fade-only
+    @update:open="onTaskDialogOpenChange"
+  >
+      <header class="mhead">
+        <div class="midentity">
+          <span class="meyebrow">Задача Битрикс24</span>
+          <span class="mid mono">#{{ taskId }}</span>
+        </div>
+        <h3 id="task-modal-title" class="mtitle">
+          <UiSpinner v-if="loading && !detail" decorative />
+          {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
+        </h3>
+        <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
+                            :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
+                            :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
+                            @toggle="toggleFavorite" />
+        <UiIconButton
+          data-context="task-modal-header"
+          label="Обновить задачу"
+          title="Обновить"
+          :loading="loading"
+          loading-label="Обновляю задачу"
+          @click="refresh"
+        >
+          ⟳
+        </UiIconButton>
+        <UiIconButton
+          data-context="task-modal-header"
+          label="Закрыть задачу"
+          title="Закрыть (Esc)"
+          @click="ui.close()"
+        >
+          ✕
+        </UiIconButton>
+      </header>
+
+      <div v-if="err || favorites.error" class="malerts" aria-live="polite">
+        <p v-if="err" class="err">{{ err }}</p>
+        <p v-if="favorites.error" class="err">Избранное: {{ favorites.error }}</p>
+      </div>
+
+      <div class="mcontext" aria-label="Состояние задачи">
+        <div class="meta">
+          <span v-if="detail?.status_label" class="tag">{{ detail.status_label }}</span>
+          <span v-if="detail?.priority_label" class="tag">{{ detail.priority_label }}</span>
+          <span v-if="boardTask?.group" class="tag">{{ boardTask.group }}</span>
+          <span v-if="boardTask?.deadline" class="tag" :class="{ over: boardTask.overdue }">до {{ boardTask.deadline }}</span>
+          <span v-if="!detail?.status_label && !detail?.priority_label && !boardTask?.group && !boardTask?.deadline"
+                class="context-empty">{{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}</span>
+        </div>
+      </div>
+
+      <div class="mbody">
+        <section class="task-pane brief-pane" aria-labelledby="task-brief-title">
+          <div class="pane-head">
+            <div>
+              <span class="pane-kicker">Постановка</span>
+              <h4 id="task-brief-title" class="pane-title">Что нужно сделать</h4>
+            </div>
+          </div>
+          <div class="brief-scroll">
+            <div v-if="cleanDesc" class="desc-box">
+              <div class="tlbl">Описание</div>
+              <p class="desc" v-html="descHtml"></p>
+            </div>
+
+            <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
+            <section v-if="tgLinks.length" class="tg">
+              <div class="tlbl">Обсуждение в Telegram</div>
+              <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
+                <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
+                     как «в чате пусто», а причина — как «сюда нет доступа». -->
+                <div v-if="!l.ok" class="tgfail">
+                  <span class="tgurl">{{ l.url }}</span>
+                  <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
+                </div>
+                <template v-else>
+                  <div class="tghead">
+                    <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
+                    <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
+                    <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
+                    <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
+                  </div>
+                  <div v-for="q in l.quotes" :key="q.messageId" class="tgq" :class="{ tgtarget: q.target }">
+                    <div class="tgmeta">
+                      <span class="tgauthor">{{ q.author }}</span>
+                      <span class="tgtime">{{ tgTime(q.at) }}</span>
+                      <span v-if="q.target" class="tgpin">← ссылка</span>
+                    </div>
+                    <div class="tgtext">{{ q.text }}<template v-if="q.trimmed">…</template></div>
+                    <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
+                  </div>
+                  <div v-if="l.more" class="tgmore">ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке</div>
+                </template>
+              </div>
+            </section>
+            <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
+              Постановка пока не загружена или в задаче нет описания.
+            </div>
+          </div>
+        </section>
+
+        <section class="task-pane work-pane" aria-labelledby="task-work-title">
+          <div class="work-head">
+            <div>
+              <span class="pane-kicker">Рабочая зона</span>
+              <h4 id="task-work-title" class="pane-title">Разбор и связь</h4>
+            </div>
+            <!-- Табы: Триаж | Комментарии -->
+            <UiTabs v-model="mtab" class="mtabs" label="Раздел карточки задачи">
+              <UiTab
+                id="task-tab-triage"
+                data-context="task-modal-tab"
+                value="triage"
+                controls="task-panel-triage"
+              >
+                Триаж
+              </UiTab>
+              <UiTab
+                id="task-tab-comments"
+                data-context="task-modal-tab"
+                value="comments"
+                controls="task-panel-comments"
+              >
+                Комментарии<template v-if="comments?.length"> ({{ comments.length }})</template>
+              </UiTab>
+            </UiTabs>
+          </div>
+
+          <div class="tab-scroll">
+            <!-- Триаж: оценка сложности/рисков без стенда -->
+            <div
+              v-show="mtab === 'triage'"
+              id="task-panel-triage"
+              class="triage"
+              role="tabpanel"
+              aria-labelledby="task-tab-triage"
+            >
+          <div class="thead2">
+            <span class="triage-summary">
+              <span class="tlbl">Триаж</span>
+              <template v-if="triage?.analysis">
+                <!-- Пока идёт переоценка, старые чипсы притушены + явный индикатор: иначе
+                     «нажал уточнить — и ничего не изменилось» (оценка-то на экране осталась). -->
+                <span class="tchips" :class="{ dim: triageBusy }">
+                  <span class="tchip" :class="triage.analysis.complexity >= 4 ? 'warn' : triage.analysis.complexity === 3 ? 'acc' : ''">сложность {{ triage.analysis.complexity }}/5</span>
+                  <span class="tchip" :class="triage.analysis.risk >= 4 ? 'bad' : triage.analysis.risk === 3 ? 'warn' : ''">риск {{ triage.analysis.risk }}/5</span>
+                  <span class="tchip">дифф {{ triage.analysis.diff_size }}</span>
+                  <span class="tchip">{{ triage.analysis.route_guess }}</span>
+                  <span v-if="triage.analysis.confidence !== 'high'" class="tchip" :class="triage.analysis.confidence === 'low' ? 'warn' : ''">уверенность: {{ triage.analysis.confidence }}</span>
+                </span>
+                <span v-if="triageBusy" class="tmuted">
+                  <UiSpinner decorative />
+                  {{ triageState === 'running' ? 'переоценка идёт…' : 'переоценка в очереди…' }}
+                </span>
+              </template>
+              <span v-else-if="triageBusy" class="tmuted">
+                <UiSpinner decorative />
+                {{ triageState === 'running' ? 'разведка идёт…' : 'в очереди…' }}
+              </span>
+              <span v-else-if="triageState === 'failed'" class="terr" :title="triage?.status?.error">триаж упал: {{ (triage?.status?.error || '').slice(0, 80) }}</span>
+              <span v-else class="tmuted">задача не оценена</span>
+            </span>
+            <UiButton
+              data-role="task-compact-action"
+              tone="accent"
+              :loading="triageBusy || busy === 'analyze'"
+              :disabled="triageBusy || busy === 'analyze'"
+              loading-label="Оцениваю задачу"
+              @click="analyzeNow"
+            >
+              {{ triage?.analysis ? '↻ Переоценить' : '🔍 Оценить' }}
+            </UiButton>
+          </div>
+
+          <template v-if="triage?.analysis">
+            <p v-if="triage.analysis.summary" class="tsum">{{ triage.analysis.summary }}</p>
+            <p v-if="triage.stale?.length" class="tstale">
+              ⚠ Код под оценкой менялся: {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? ` и ещё ${triage.stale.length - 5}` : '' }} — стоит переоценить.
+            </p>
+            <ul v-if="triage.analysis.risk_markers?.length" class="tlist">
+              <li v-for="m in triage.analysis.risk_markers" :key="m">⚠ {{ m }}</li>
+            </ul>
+            <ul v-if="triage.analysis.questions?.length" class="tlist q">
+              <li v-for="qq in triage.analysis.questions" :key="qq">? {{ qq }}</li>
+            </ul>
+            <div v-if="triage.analysis.questions?.length || triage.analysis.needs_clarification"
+                 class="clarify" :class="{ drag: clarifyDrag }"
+                 @dragover.prevent="clarifyDrag = true" @dragleave="clarifyDrag = false" @drop.prevent="onClarifyDrop">
+              <div class="clarify-row">
+                <UiTextarea
+                  v-model="clarifyText"
+                  class="clarify-text"
+                  data-role="task-clarification"
+                  rows="2"
+                  placeholder="Ответ на вопросы — сохранится локально для агентов, в B24 не уйдёт… (Ctrl+V — скрин, Ctrl+Enter — отправить)"
+                  @paste="onClarifyPaste"
+                  @keydown.ctrl.enter.prevent="sendClarify"
+                />
+                <UiTooltip
+                  text="Фото для агента: скрин переписки или бага. Можно вставить из буфера (Ctrl+V) или перетащить сюда."
+                  placement="top-end"
+                >
+                  <template #trigger>
+                    <UiFilePicker
+                      data-role="task-attachment"
+                      accept="image/*"
+                      multiple
+                      density="compact"
+                      label="Приложить фото"
+                      :busy="clarifyUploading"
+                      :show-summary="false"
+                      :show-reset="false"
+                      @change="onClarifyFiles"
+                    >
+                      <template #leading>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                      </template>
+                    </UiFilePicker>
+                  </template>
+                </UiTooltip>
+                <UiButton
+                  data-role="task-compact-action"
+                  tone="accent"
+                  :loading="busy === 'clarify' || clarifyUploading"
+                  :disabled="busy === 'clarify' || triageBusy || clarifyUploading || (!clarifyText.trim() && !clarifyAtts.length)"
+                  loading-label="Сохраняю уточнение"
+                  @click="sendClarify"
+                >
+                  ↻ Уточнить и переоценить
+                </UiButton>
+              </div>
+              <div v-if="clarifyAtts.length || clarifyUploading" class="attrow">
+                <span v-for="a in clarifyAtts" :key="a.file" class="attchip">
+                  <img :src="a.url" :alt="a.name" />
+                  <span class="attname">{{ a.name }}</span>
+                  <UiIconButton
+                    role="rail"
+                    tone="danger"
+                    :label="`Убрать ${a.name}`"
+                    title="Убрать"
+                    @click="dropClarifyAtt(a.file)"
+                  >
+                    ✕
+                  </UiIconButton>
+                </span>
+                <span v-if="clarifyUploading" class="tmuted">
+                  <UiSpinner decorative /> загрузка…
+                </span>
+              </div>
+            </div>
+            <details v-if="clarifySaved" class="clhist">
+              <summary>Внутренние уточнения (локально, для агентов — заказчик не видит)</summary>
+              <div class="clhist-body">{{ clarifySaved }}</div>
+            </details>
+            <UiDisclosureButton
+              v-if="triage.note"
+              data-role="task-note-disclosure"
+              controls="task-triage-note"
+              density="compact"
+              :open="showNote"
+              @update:open="showNote = $event"
+            >
+              Разведнота (карта кода для планировщика)
+            </UiDisclosureButton>
+            <div v-if="showNote" id="task-triage-note" class="tnote" v-html="noteHtml"></div>
+            <p class="tmeta mono">
+              {{ triage.analysis.generated_at ? new Date(triage.analysis.generated_at).toLocaleString('ru-RU') : '' }}
+              <template v-if="triage.analysis.meta">· {{ triage.analysis.meta.model }} · {{ Math.round((triage.analysis.meta.duration_ms || 0) / 60000) }} мин<template v-if="triage.analysis.meta.cost_usd"> · ${{ triage.analysis.meta.cost_usd.toFixed(2) }}</template></template>
+            </p>
+          </template>
+        </div>
+
+        <!-- Комментарии задачи (таб): список из B24 + добавление -->
+        <div
+          v-show="mtab === 'comments'"
+          id="task-panel-comments"
+          class="comtab"
+          role="tabpanel"
+          aria-labelledby="task-tab-comments"
+        >
+          <div v-if="comLoading && comments === null" class="tmuted">
+            <UiSpinner decorative /> загрузка комментариев…
+          </div>
+          <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
+          <div v-else-if="comments" class="comlist">
+            <div v-for="c in comments" :key="c.mid" class="com">
+              <div class="comhead">
+                <b>{{ c.author }}</b>
+                <span class="comtime mono">{{ c.time }}</span>
+              </div>
+              <div class="comtext">{{ c.text }}</div>
+              <div v-if="c.attachments?.length" class="comatts">
+                <span v-for="a in c.attachments" :key="a.attachedId" class="comatt">📎 {{ a.name || `файл ${a.attachedId}` }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="comment">
+            <UiTextarea
+              v-model="commentText"
+              class="comment-text"
+              data-role="task-comment"
+              rows="2"
+              placeholder="Добавить комментарий…"
+            />
+            <UiButton
+              :loading="busy === 'comment'"
+              :disabled="busy === 'comment' || !commentText.trim()"
+              loading-label="Отправляю комментарий"
+              @click="sendComment"
+            >
+              Отправить
+            </UiButton>
+          </div>
+        </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Управление -->
+      <footer class="controls" aria-label="Действия с задачей">
+          <div class="timer mono" :class="{ run: running }">
+            <span class="tclock">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
+            <span class="tstate">{{ running ? 'идёт' : 'остановлен' }}</span>
+          </div>
+          <div class="cbtns">
+            <UiButton
+              data-context="task-footer-action"
+              :tone="running ? 'warning' : 'accent'"
+              variant="solid"
+              :loading="busy === 'timer'"
+              :disabled="busy === 'timer'"
+              loading-label="Обновляю учёт времени"
+              @click="toggleTimer"
+            >
+              {{ running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
+            </UiButton>
+            <UiButton
+              data-context="task-footer-action"
+              tone="success"
+              variant="solid"
+              :loading="busy === 'complete'"
+              :disabled="busy === 'complete'"
+              loading-label="Завершаю задачу"
+              @click="complete"
+            >
+              ✓ Завершить
+            </UiButton>
+            <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован.
+                 Затык виден прямо на кнопке: карточку задачи открывают чаще, чем конвейер, а
+                 «Уже на конвейере» одинаково выглядело и у идущей задачи, и у вставшей, поэтому
+                 ожидание человека оставалось незаметным. -->
+            <UiButton
+              v-if="conveyor"
+              data-context="task-footer-action"
+              :tone="conveyor.stall ? 'danger' : 'accent'"
+              variant="outline"
+              :title="conveyor.stall
+                ? `${conveyor.stall.title} — ${conveyor.stall.hint}`
+                : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`"
+              @click="openConveyor"
+            >
+              {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
+                 : conveyor.daemonAlive ? '🏭 Идёт на конвейере' : '🏭 Уже на конвейере' }} →
+            </UiButton>
+            <UiButton
+              v-else
+              data-context="task-footer-action"
+              data-role="task-launch-open"
+              tone="accent"
+              variant="outline"
+              :loading="busy === 'launch' || launchOptionsBusy"
+              :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm"
+              loading-label="Читаю параметры запуска"
+              title="Открыть параметры запуска фабрики по задаче"
+              @click="openLaunch"
+            >
+              🏭 На конвейер
+            </UiButton>
+            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
+                 задачу, и ради одной кнопки идти в конвейер незачем. -->
+            <UiButton
+              v-if="sandbox"
+              data-context="task-footer-action"
+              tone="danger"
+              variant="outline"
+              :loading="sandboxBusy"
+              :disabled="sandboxBusy"
+              loading-label="Сношу стенд"
+              :title="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+              @click="sandboxDown"
+            >
+              ⏏ Снести стенд
+            </UiButton>
+            <OpenDiffButton
+              data-context="task-footer-action"
+              :task-id="taskId"
+            />
+          </div>
+          <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
+               видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
+          <div v-if="launchForm" class="lform">
+            <div v-if="launchOpts.profiles?.length > 1" class="lrow">
+              <label class="llbl" for="launch-profile">Профиль</label>
+              <UiSelect
+                id="launch-profile"
+                v-model="launchForm.profile"
+                data-context="task-launch"
+                compact
+                :disabled="launchOptionsBusy || busy === 'launch'"
+                @change="changeLaunchProfile"
+              >
+                <option v-for="p in launchOpts.profiles" :key="p" :value="p">{{ p }}</option>
+              </UiSelect>
+              <span v-if="launchOptionsBusy" class="lhint">
+                <UiSpinner decorative /> читаю каталог…
+              </span>
+            </div>
+            <div class="lrow">
+              <label class="llbl" for="launch-route">Маршрут</label>
+              <UiSelect
+                id="launch-route"
+                v-model="launchForm.route"
+                data-context="task-launch"
+                compact
+                :disabled="launchOptionsBusy || busy === 'launch'"
+                @change="changeLaunchRoute"
+              >
+                <option v-for="r in launchOpts.routes" :key="r" :value="r">{{ r }}</option>
+              </UiSelect>
+              <span v-if="launchRouteIsSuggested" class="lhint suggested">рекомендован триажем</span>
+              <span v-else-if="routeGuess" class="lhint">триаж предлагает: {{ routeGuess }}</span>
+            </div>
+            <div v-if="launchOpts.runners?.length" class="lrow">
+              <label class="llbl" for="launch-runner">Исполнитель</label>
+              <UiSelect
+                id="launch-runner"
+                v-model="launchForm.runner"
+                data-context="task-launch"
+                compact
+                :disabled="launchOptionsBusy || busy === 'launch'"
+              >
+                <option value="">Из профиля<template v-if="launchOpts.defaultRunner"> ({{ providerLabel(launchOpts.defaultRunner) }})</template></option>
+                <option v-for="r in launchOpts.runners" :key="r" :value="r">{{ providerLabel(r) }}</option>
+              </UiSelect>
+            </div>
+
+            <div class="lsummary" aria-label="Параметры запуска">
+              <div class="lsummary-row">
+                <span>Профиль</span>
+                <b class="mono">{{ launchForm.profile }}</b>
+              </div>
+              <div v-if="launchNeedsDelivery" class="lsummary-row">
+                <span>SHIP</span>
+                <b class="mono">{{ launchDeliverySummary }}</b>
+              </div>
+              <div v-if="launchNeedsInstrumentation" class="lsummary-row">
+                <span>Диагностика</span>
+                <b>{{ launchDiagnosisSummary }} · {{ launchInstrumentationSummary }}</b>
+              </div>
+              <p v-if="launchNeedsDelivery" class="lshipwarn">
+                После финальных одобренных ворот маршрут сделает commit, push и PR.
+              </p>
+            </div>
+
+            <label class="llbl">Критерии приёмки <span class="lopt">— необязательно</span></label>
+            <UiTextarea
+              v-model="launchForm.criteria"
+              data-role="task-launch-note"
+              rows="2"
+              placeholder="Например: экспорт не падает на выборке 10 000 строк&#10;в отчёте появилась колонка «Менеджер»"
+            />
+            <p class="lnote">
+              Если оставить пустым, критерии сформулирует этап-переводчик по постановке.
+            </p>
+
+            <details v-if="launchNeedsDelivery || launchNeedsInstrumentation" class="ladvanced">
+              <summary>Дополнительные параметры</summary>
+              <div class="ladvanced-body">
+                <template v-if="launchNeedsDelivery">
+                  <label class="llbl">Целевые ветки из конфигурации профиля</label>
+                  <div v-for="repo in launchOpts.repositories" :key="repo.name" class="lrepo">
+                    <span class="mono">{{ repo.name }}</span>
+                    <code class="mono">{{ repo.targetBranch }}</code>
+                  </div>
+                </template>
+                <template v-if="launchNeedsInstrumentation">
+                  <label class="llbl" for="launch-instrumentation">
+                    Точный scope <span class="lopt">— по одному repo:relative/path на строку</span>
+                  </label>
+                  <UiTextarea
+                    id="launch-instrumentation"
+                    v-model="launchForm.instrumentationFiles"
+                    class="mono"
+                    data-role="task-launch-note"
+                    rows="3"
+                    spellcheck="false"
+                    placeholder="service:src/path/file.ext"
+                  />
+                  <div class="lrow">
+                    <label class="llbl" for="launch-diagnosis-kind">Тип диагноза</label>
+                    <UiSelect
+                      id="launch-diagnosis-kind"
+                      v-model="launchForm.diagnosisKind"
+                      data-context="task-launch"
+                      compact
+                    >
+                      <option value="functional">functional</option>
+                      <option value="performance">performance</option>
+                      <option value="data">data</option>
+                      <option value="integration">integration</option>
+                    </UiSelect>
+                  </div>
+                  <label class="llbl" for="launch-diagnosis-signal">Наблюдаемый сигнал</label>
+                  <UiInput
+                    id="launch-diagnosis-signal"
+                    v-model="launchForm.diagnosisSignal"
+                    data-context="task-launch"
+                    maxlength="200"
+                    autocomplete="off"
+                    placeholder="Коротко: что именно воспроизводится"
+                  />
+                  <p class="lnote">
+                    Scope закрепляется на всю попытку; временные probes разрешены только в этих файлах.
+                  </p>
+                </template>
+              </div>
+            </details>
+            <p v-if="launchValidationError" class="lerror">{{ launchValidationError }}</p>
+            <div class="lbtns">
+              <UiButton :disabled="!!busy" @click="launchForm = null">
+                Отмена
+              </UiButton>
+              <UiButton
+                data-role="task-launch-submit"
+                tone="accent"
+                variant="solid"
+                aria-label="Запустить задачу"
+                :loading="busy === 'launch'"
+                :disabled="!!busy || launchOptionsBusy || !!launchOpts.error || !!launchValidationError"
+                loading-label="Запускаю задачу"
+                @click="launchSelected"
+              >
+                🏭 Запустить
+              </UiButton>
+            </div>
+          </div>
+          <div v-if="conveyor?.stall" class="convstall">
+            <b>{{ conveyor.stall.title }}</b>
+            <span>{{ conveyor.stall.hint }}</span>
+          </div>
+          <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
+          <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
+      </footer>
+  </UiDialog>
+</template>
+
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api } from '../shared/api-client.js';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
-import { confirmDialog } from '../shared/ui/confirm.js';
-import { registerLayer } from '../shared/ui/layer-stack.js';
-import HelpTip from '../shared/ui/HelpTip.vue';
+import {
+  confirmDialog,
+  UiButton,
+  UiDialog,
+  UiDisclosureButton,
+  UiFilePicker,
+  UiIconButton,
+  UiInput,
+  UiSelect,
+  UiSpinner,
+  UiTab,
+  UiTabs,
+  UiTextarea,
+  UiTooltip,
+} from '../ui';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
@@ -36,7 +614,6 @@ const commentText = ref('');
 const now = ref(Date.now());
 
 let ticker = null;
-let unregisterTaskLayer = null;
 
 // Таймер задачи — из кеша доски (там timerRunning/elapsed/startedAt).
 const boardTask = computed(() => {
@@ -141,9 +718,7 @@ const analyzeNow = () => act('analyze', async () => {
 const clarifyText = ref('');
 const clarifyAtts = ref([]);   // [{file,name,url,path}]
 const clarifyUploading = ref(false);
-async function onClarifyFiles(e) {
-  const files = [...(e.target.files || [])];
-  e.target.value = '';
+async function onClarifyFiles(files) {
   await uploadClarifyFiles(files);
 }
 function dropClarifyAtt(file) { clarifyAtts.value = clarifyAtts.value.filter((a) => a.file !== file); }
@@ -463,6 +1038,11 @@ const sendComment = () => act('comment', async () => {
 });
 const refresh = () => { loadDetail(true); board.load(true); };
 const toggleFavorite = () => favorites.toggle(taskId.value);
+function onTaskDialogOpenChange(open) {
+  if (!open) {
+    ui.close();
+  }
+}
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
@@ -506,382 +1086,10 @@ watch(() => ui.launchRequested, (requested) => {
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
   if (triageTimer) clearInterval(triageTimer);
-  unregisterTaskLayer?.();
 });
-
-watch(taskId, (id) => {
-  unregisterTaskLayer?.();
-  unregisterTaskLayer = id
-    ? registerLayer('task-modal', { priority: 100, close: () => ui.close() })
-    : null;
-}, { immediate: true });
 </script>
 
-<template>
-  <div v-if="taskId" class="overlay" @click.self="ui.close()">
-    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
-      <header class="mhead">
-        <div class="midentity">
-          <span class="meyebrow">Задача Битрикс24</span>
-          <span class="mid mono">#{{ taskId }}</span>
-        </div>
-        <h3 id="task-modal-title" class="mtitle"><span v-if="loading && !detail" class="spin"></span> {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}</h3>
-        <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
-                            :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
-                            :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
-                            @toggle="toggleFavorite" />
-        <button class="icon" title="Обновить" aria-label="Обновить задачу" @click="refresh">⟳</button>
-        <button class="icon" title="Закрыть" aria-label="Закрыть задачу" @click="ui.close()">✕</button>
-      </header>
-
-      <div v-if="err || favorites.error" class="malerts" aria-live="polite">
-        <p v-if="err" class="err">{{ err }}</p>
-        <p v-if="favorites.error" class="err">Избранное: {{ favorites.error }}</p>
-      </div>
-
-      <div class="mcontext" aria-label="Состояние задачи">
-        <div class="meta">
-          <span v-if="detail?.status_label" class="tag">{{ detail.status_label }}</span>
-          <span v-if="detail?.priority_label" class="tag">{{ detail.priority_label }}</span>
-          <span v-if="boardTask?.group" class="tag">{{ boardTask.group }}</span>
-          <span v-if="boardTask?.deadline" class="tag" :class="{ over: boardTask.overdue }">до {{ boardTask.deadline }}</span>
-          <span v-if="!detail?.status_label && !detail?.priority_label && !boardTask?.group && !boardTask?.deadline"
-                class="context-empty">{{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}</span>
-        </div>
-      </div>
-
-      <div class="mbody">
-        <section class="task-pane brief-pane" aria-labelledby="task-brief-title">
-          <div class="pane-head">
-            <div>
-              <span class="pane-kicker">Постановка</span>
-              <h4 id="task-brief-title" class="pane-title">Что нужно сделать</h4>
-            </div>
-          </div>
-          <div class="brief-scroll">
-            <div v-if="cleanDesc" class="desc-box">
-              <div class="tlbl">Описание</div>
-              <p class="desc" v-html="descHtml"></p>
-            </div>
-
-            <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
-            <section v-if="tgLinks.length" class="tg">
-              <div class="tlbl">Обсуждение в Telegram</div>
-              <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
-                <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
-                     как «в чате пусто», а причина — как «сюда нет доступа». -->
-                <div v-if="!l.ok" class="tgfail">
-                  <span class="tgurl">{{ l.url }}</span>
-                  <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
-                </div>
-                <template v-else>
-                  <div class="tghead">
-                    <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
-                    <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
-                    <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
-                    <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
-                  </div>
-                  <div v-for="q in l.quotes" :key="q.messageId" class="tgq" :class="{ tgtarget: q.target }">
-                    <div class="tgmeta">
-                      <span class="tgauthor">{{ q.author }}</span>
-                      <span class="tgtime">{{ tgTime(q.at) }}</span>
-                      <span v-if="q.target" class="tgpin">← ссылка</span>
-                    </div>
-                    <div class="tgtext">{{ q.text }}<template v-if="q.trimmed">…</template></div>
-                    <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
-                  </div>
-                  <div v-if="l.more" class="tgmore">ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке</div>
-                </template>
-              </div>
-            </section>
-            <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
-              Постановка пока не загружена или в задаче нет описания.
-            </div>
-          </div>
-        </section>
-
-        <section class="task-pane work-pane" aria-labelledby="task-work-title">
-          <div class="work-head">
-            <div>
-              <span class="pane-kicker">Рабочая зона</span>
-              <h4 id="task-work-title" class="pane-title">Разбор и связь</h4>
-            </div>
-            <!-- Табы: Триаж | Комментарии -->
-            <nav class="mtabs" aria-label="Раздел карточки задачи">
-              <button class="mtab" :class="{ active: mtab === 'triage' }" @click="mtab = 'triage'">Триаж</button>
-              <button class="mtab" :class="{ active: mtab === 'comments' }" @click="mtab = 'comments'">
-                Комментарии<template v-if="comments?.length"> ({{ comments.length }})</template>
-              </button>
-            </nav>
-          </div>
-
-          <div class="tab-scroll">
-            <!-- Триаж: оценка сложности/рисков без стенда -->
-            <div v-show="mtab === 'triage'" class="triage">
-          <div class="thead2">
-            <span class="tlbl">Триаж</span>
-            <template v-if="triage?.analysis">
-              <!-- Пока идёт переоценка, старые чипсы притушены + явный индикатор: иначе
-                   «нажал уточнить — и ничего не изменилось» (оценка-то на экране осталась). -->
-              <span class="tchips" :class="{ dim: triageBusy }">
-                <span class="tchip" :class="triage.analysis.complexity >= 4 ? 'warn' : triage.analysis.complexity === 3 ? 'acc' : ''">сложность {{ triage.analysis.complexity }}/5</span>
-                <span class="tchip" :class="triage.analysis.risk >= 4 ? 'bad' : triage.analysis.risk === 3 ? 'warn' : ''">риск {{ triage.analysis.risk }}/5</span>
-                <span class="tchip">дифф {{ triage.analysis.diff_size }}</span>
-                <span class="tchip">{{ triage.analysis.route_guess }}</span>
-                <span v-if="triage.analysis.confidence !== 'high'" class="tchip" :class="triage.analysis.confidence === 'low' ? 'warn' : ''">уверенность: {{ triage.analysis.confidence }}</span>
-              </span>
-              <span v-if="triageBusy" class="tmuted"><span class="spin"></span> {{ triageState === 'running' ? 'переоценка идёт…' : 'переоценка в очереди…' }}</span>
-            </template>
-            <span v-else-if="triageBusy" class="tmuted"><span class="spin"></span> {{ triageState === 'running' ? 'разведка идёт…' : 'в очереди…' }}</span>
-            <span v-else-if="triageState === 'failed'" class="terr" :title="triage?.status?.error">триаж упал: {{ (triage?.status?.error || '').slice(0, 80) }}</span>
-            <span v-else class="tmuted">задача не оценена</span>
-            <button class="btn tbtn" :disabled="triageBusy || busy === 'analyze'" @click="analyzeNow">
-              {{ triageBusy ? '…' : triage?.analysis ? '↻ Переоценить' : '🔍 Оценить' }}
-            </button>
-          </div>
-
-          <template v-if="triage?.analysis">
-            <p v-if="triage.analysis.summary" class="tsum">{{ triage.analysis.summary }}</p>
-            <p v-if="triage.stale?.length" class="tstale">
-              ⚠ Код под оценкой менялся: {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? ` и ещё ${triage.stale.length - 5}` : '' }} — стоит переоценить.
-            </p>
-            <ul v-if="triage.analysis.risk_markers?.length" class="tlist">
-              <li v-for="m in triage.analysis.risk_markers" :key="m">⚠ {{ m }}</li>
-            </ul>
-            <ul v-if="triage.analysis.questions?.length" class="tlist q">
-              <li v-for="qq in triage.analysis.questions" :key="qq">? {{ qq }}</li>
-            </ul>
-            <div v-if="triage.analysis.questions?.length || triage.analysis.needs_clarification"
-                 class="clarify" :class="{ drag: clarifyDrag }"
-                 @dragover.prevent="clarifyDrag = true" @dragleave="clarifyDrag = false" @drop.prevent="onClarifyDrop">
-              <div class="clarify-row">
-                <textarea v-model="clarifyText" rows="2"
-                          placeholder="Ответ на вопросы — сохранится локально для агентов, в B24 не уйдёт… (Ctrl+V — скрин, Ctrl+Enter — отправить)"
-                          @paste="onClarifyPaste"
-                          @keydown.ctrl.enter.prevent="sendClarify"></textarea>
-                <HelpTip text="Фото для агента: скрин переписки или бага. Можно вставить из буфера (Ctrl+V) или перетащить сюда." align="right">
-                  <label class="attachbtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
-                    <input type="file" accept="image/*" multiple hidden @change="onClarifyFiles" />
-                  </label>
-                </HelpTip>
-                <button class="btn tbtn" :disabled="busy === 'clarify' || triageBusy || clarifyUploading || (!clarifyText.trim() && !clarifyAtts.length)" @click="sendClarify">
-                  {{ busy === 'clarify' ? '…' : '↻ Уточнить и переоценить' }}
-                </button>
-              </div>
-              <div v-if="clarifyAtts.length || clarifyUploading" class="attrow">
-                <span v-for="a in clarifyAtts" :key="a.file" class="attchip">
-                  <img :src="a.url" :alt="a.name" />
-                  <span class="attname">{{ a.name }}</span>
-                  <button class="attx" title="Убрать" @click="dropClarifyAtt(a.file)">✕</button>
-                </span>
-                <span v-if="clarifyUploading" class="tmuted"><span class="spin"></span> загрузка…</span>
-              </div>
-            </div>
-            <details v-if="clarifySaved" class="clhist">
-              <summary>Внутренние уточнения (локально, для агентов — заказчик не видит)</summary>
-              <div class="clhist-body">{{ clarifySaved }}</div>
-            </details>
-            <button v-if="triage.note" class="tnote-toggle" @click="showNote = !showNote">
-              {{ showNote ? '▾ Свернуть разведноту' : '▸ Разведнота (карта кода для планировщика)' }}
-            </button>
-            <div v-if="showNote" class="tnote" v-html="noteHtml"></div>
-            <p class="tmeta mono">
-              {{ triage.analysis.generated_at ? new Date(triage.analysis.generated_at).toLocaleString('ru-RU') : '' }}
-              <template v-if="triage.analysis.meta">· {{ triage.analysis.meta.model }} · {{ Math.round((triage.analysis.meta.duration_ms || 0) / 60000) }} мин<template v-if="triage.analysis.meta.cost_usd"> · ${{ triage.analysis.meta.cost_usd.toFixed(2) }}</template></template>
-            </p>
-          </template>
-        </div>
-
-        <!-- Комментарии задачи (таб): список из B24 + добавление -->
-        <div v-show="mtab === 'comments'" class="comtab">
-          <div v-if="comLoading && comments === null" class="tmuted"><span class="spin"></span> загрузка комментариев…</div>
-          <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
-          <div v-else-if="comments" class="comlist">
-            <div v-for="c in comments" :key="c.mid" class="com">
-              <div class="comhead">
-                <b>{{ c.author }}</b>
-                <span class="comtime mono">{{ c.time }}</span>
-              </div>
-              <div class="comtext">{{ c.text }}</div>
-              <div v-if="c.attachments?.length" class="comatts">
-                <span v-for="a in c.attachments" :key="a.attachedId" class="comatt">📎 {{ a.name || `файл ${a.attachedId}` }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="comment">
-            <textarea v-model="commentText" rows="2" placeholder="Добавить комментарий…"></textarea>
-            <button class="btn" :disabled="busy === 'comment' || !commentText.trim()" @click="sendComment">
-              {{ busy === 'comment' ? 'Отправка…' : 'Отправить' }}
-            </button>
-          </div>
-        </div>
-          </div>
-        </section>
-      </div>
-
-      <!-- Управление -->
-      <footer class="controls" aria-label="Действия с задачей">
-          <div class="timer mono" :class="{ run: running }">
-            <span class="tclock">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
-            <span class="tstate">{{ running ? 'идёт' : 'остановлен' }}</span>
-          </div>
-          <div class="cbtns">
-            <button class="btn" :class="running ? 'warn' : 'primary'" :disabled="busy === 'timer'" @click="toggleTimer">
-              {{ busy === 'timer' ? '…' : running ? '⏸ Остановить учёт' : '▶ Начать учёт' }}
-            </button>
-            <button class="btn good" :disabled="busy === 'complete'" @click="complete">
-              {{ busy === 'complete' ? '…' : '✓ Завершить' }}
-            </button>
-            <!-- Уже на конвейере — вместо запуска показываем переход, повторный старт заблокирован.
-                 Затык виден прямо на кнопке: карточку задачи открывают чаще, чем конвейер, а
-                 «Уже на конвейере» одинаково выглядело и у идущей задачи, и у вставшей, поэтому
-                 ожидание человека оставалось незаметным. -->
-            <button v-if="conveyor" class="btn onconv" :class="{ stalled: conveyor.stall }" @click="openConveyor"
-                    :title="conveyor.stall
-                      ? `${conveyor.stall.title} — ${conveyor.stall.hint}`
-                      : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`">
-              {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
-                 : conveyor.daemonAlive ? '🏭 Идёт на конвейере' : '🏭 Уже на конвейере' }} →
-            </button>
-            <button v-else type="button" class="btn launch"
-                    :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm"
-                    @click="openLaunch" title="Открыть параметры запуска фабрики по задаче">
-              {{ busy === 'launch' || launchOptionsBusy ? '…' : '🏭 На конвейер' }}
-            </button>
-            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
-                 задачу, и ради одной кнопки идти в конвейер незачем. -->
-            <button v-if="sandbox" class="btn sbdown" :class="{ busy: sandboxBusy }" :disabled="sandboxBusy"
-                    :title="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
-                    @click="sandboxDown">
-              <span v-if="sandboxBusy"><span class="sbspin"></span> сношу стенд…</span>
-              <span v-else>⏏ Снести стенд</span>
-            </button>
-            <OpenDiffButton :task-id="taskId" />
-          </div>
-          <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
-               видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
-          <div v-if="launchForm" class="lform">
-            <div v-if="launchOpts.profiles?.length > 1" class="lrow">
-              <label class="llbl" for="launch-profile">Профиль</label>
-              <select id="launch-profile" v-model="launchForm.profile" class="lsel"
-                      :disabled="launchOptionsBusy || busy === 'launch'" @change="changeLaunchProfile">
-                <option v-for="p in launchOpts.profiles" :key="p" :value="p">{{ p }}</option>
-              </select>
-              <span v-if="launchOptionsBusy" class="lhint"><span class="spin"></span> читаю каталог…</span>
-            </div>
-            <div class="lrow">
-              <label class="llbl" for="launch-route">Маршрут</label>
-              <select id="launch-route" v-model="launchForm.route" class="lsel"
-                      :disabled="launchOptionsBusy || busy === 'launch'"
-                      @change="changeLaunchRoute">
-                <option v-for="r in launchOpts.routes" :key="r" :value="r">{{ r }}</option>
-              </select>
-              <span v-if="launchRouteIsSuggested" class="lhint good">рекомендован триажем</span>
-              <span v-else-if="routeGuess" class="lhint">триаж предлагает: {{ routeGuess }}</span>
-            </div>
-            <div v-if="launchOpts.runners?.length" class="lrow">
-              <label class="llbl" for="launch-runner">Исполнитель</label>
-              <select id="launch-runner" v-model="launchForm.runner" class="lsel"
-                      :disabled="launchOptionsBusy || busy === 'launch'">
-                <option value="">Из профиля<template v-if="launchOpts.defaultRunner"> ({{ providerLabel(launchOpts.defaultRunner) }})</template></option>
-                <option v-for="r in launchOpts.runners" :key="r" :value="r">{{ providerLabel(r) }}</option>
-              </select>
-            </div>
-
-            <div class="lsummary" aria-label="Параметры запуска">
-              <div class="lsummary-row">
-                <span>Профиль</span>
-                <b class="mono">{{ launchForm.profile }}</b>
-              </div>
-              <div v-if="launchNeedsDelivery" class="lsummary-row">
-                <span>SHIP</span>
-                <b class="mono">{{ launchDeliverySummary }}</b>
-              </div>
-              <div v-if="launchNeedsInstrumentation" class="lsummary-row">
-                <span>Диагностика</span>
-                <b>{{ launchDiagnosisSummary }} · {{ launchInstrumentationSummary }}</b>
-              </div>
-              <p v-if="launchNeedsDelivery" class="lshipwarn">
-                После финальных одобренных ворот маршрут сделает commit, push и PR.
-              </p>
-            </div>
-
-            <label class="llbl">Критерии приёмки <span class="lopt">— необязательно</span></label>
-            <textarea v-model="launchForm.criteria" rows="2"
-                      placeholder="Например: экспорт не падает на выборке 10 000 строк&#10;в отчёте появилась колонка «Менеджер»"></textarea>
-            <p class="lnote">
-              Если оставить пустым, критерии сформулирует этап-переводчик по постановке.
-            </p>
-
-            <details v-if="launchNeedsDelivery || launchNeedsInstrumentation" class="ladvanced">
-              <summary>Дополнительные параметры</summary>
-              <div class="ladvanced-body">
-                <template v-if="launchNeedsDelivery">
-                  <label class="llbl">Целевые ветки из конфигурации профиля</label>
-                  <div v-for="repo in launchOpts.repositories" :key="repo.name" class="lrepo">
-                    <span class="mono">{{ repo.name }}</span>
-                    <code class="mono">{{ repo.targetBranch }}</code>
-                  </div>
-                </template>
-                <template v-if="launchNeedsInstrumentation">
-                  <label class="llbl" for="launch-instrumentation">
-                    Точный scope <span class="lopt">— по одному repo:relative/path на строку</span>
-                  </label>
-                  <textarea id="launch-instrumentation" v-model="launchForm.instrumentationFiles" rows="3"
-                            spellcheck="false" class="mono"
-                            placeholder="service:src/path/file.ext"></textarea>
-                  <div class="lrow">
-                    <label class="llbl" for="launch-diagnosis-kind">Тип диагноза</label>
-                    <select id="launch-diagnosis-kind" v-model="launchForm.diagnosisKind" class="lsel">
-                      <option value="functional">functional</option>
-                      <option value="performance">performance</option>
-                      <option value="data">data</option>
-                      <option value="integration">integration</option>
-                    </select>
-                  </div>
-                  <label class="llbl" for="launch-diagnosis-signal">Наблюдаемый сигнал</label>
-                  <input id="launch-diagnosis-signal" v-model="launchForm.diagnosisSignal"
-                         class="linp" maxlength="200" autocomplete="off"
-                         placeholder="Коротко: что именно воспроизводится" />
-                  <p class="lnote">
-                    Scope закрепляется на всю попытку; временные probes разрешены только в этих файлах.
-                  </p>
-                </template>
-              </div>
-            </details>
-            <p v-if="launchValidationError" class="lerror">{{ launchValidationError }}</p>
-            <div class="lbtns">
-              <button type="button" class="btn" :disabled="!!busy" @click="launchForm = null">Отмена</button>
-              <button type="button" class="btn primary"
-                      aria-label="Запустить задачу"
-                      :disabled="!!busy || launchOptionsBusy || !!launchOpts.error || !!launchValidationError"
-                      @click="launchSelected">
-                {{ busy === 'launch' ? 'Запускаю…' : '🏭 Запустить' }}
-              </button>
-            </div>
-          </div>
-          <div v-if="conveyor?.stall" class="convstall">
-            <b>{{ conveyor.stall.title }}</b>
-            <span>{{ conveyor.stall.hint }}</span>
-          </div>
-          <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
-          <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
-      </footer>
-      </div>
-    </div>
-</template>
-
 <style scoped>
-.overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
-  justify-content: center; padding: 20px; overflow: hidden; background: #04060ad9;
-  backdrop-filter: blur(7px); }
-.panel { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0;
-  width: min(1240px, 100%); height: min(900px, calc(100dvh - 40px));
-  max-height: calc(100dvh - 40px); overflow: hidden; background: var(--surface);
-  border: 1px solid var(--line-2); border-radius: 16px; box-shadow: 0 26px 80px #000c; }
 .mhead { flex: none; display: flex; align-items: center; gap: 12px; min-height: 66px;
   padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .midentity { flex: none; width: 112px; display: flex; flex-direction: column; gap: 2px; }
@@ -891,10 +1099,6 @@ watch(taskId, (id) => {
 .mtitle { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ink);
   font-size: 17px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.icon { flex: none; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line);
-  border-radius: 9px; background: var(--ground); color: var(--ink-mid); cursor: pointer; }
-.icon:hover { border-color: var(--line-2); color: var(--ink); }
-.icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .malerts { flex: none; display: grid; gap: 4px; max-height: 104px; overflow-y: auto;
   padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));
   background: color-mix(in srgb, var(--bad) 9%, var(--surface)); }
@@ -964,7 +1168,9 @@ watch(taskId, (id) => {
 
 .triage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px; }
-.thead2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.thead2 { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.triage-summary { display: flex; flex: 1 1 360px; align-items: center; gap: 6px;
+  min-width: 0; flex-wrap: wrap; }
 .tlbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); margin-right: 4px; }
 .tchips { display: contents; }
 .tchips.dim { display: inline-flex; gap: 6px; flex-wrap: wrap; opacity: .45; }
@@ -975,7 +1181,7 @@ watch(taskId, (id) => {
 .tchip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .tmuted { color: var(--ink-mid); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 .terr { color: var(--bad); font-size: 12px; }
-.tbtn { margin-left: auto; height: 32px; padding: 0 12px; font-size: 12px; }
+.thead2 [data-role='task-compact-action'] { flex: none; }
 .tsum { margin: 0; font-size: 13px; color: var(--ink); line-height: 1.5; }
 .tstale { margin: 0; font-size: 12px; color: var(--warn); }
 .tlist { margin: 0; padding: 0 0 0 4px; list-style: none; font-size: 12px; color: var(--ink-mid); display: flex; flex-direction: column; gap: 3px; }
@@ -985,31 +1191,19 @@ watch(taskId, (id) => {
 .clarify-row { display: flex; gap: 8px; align-items: flex-end; }
 /* В ряду уточнения кнопка стоит вплотную к скрепке (auto-margin — только в шапке триажа),
    все контролы одной высоты. */
-.clarify-row .tbtn { margin-left: 0; height: 36px; }
-.clarify-row textarea { min-height: 58px; }
+.clarify-row [data-role='task-compact-action'] { margin-left: 0; }
+.clarify-text { flex: 1; }
 .clhist { border: 1px dashed var(--line); border-radius: 9px; padding: 7px 11px; }
 .clhist summary { cursor: pointer; font-size: 12.5px; color: var(--ink-mid); user-select: none; }
 .clhist-body { margin-top: 6px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
   max-height: 220px; overflow-y: auto; }
-.attachbtn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); cursor: pointer;
-  color: var(--ink-mid); }
-.attachbtn svg { width: 17px; height: 17px; }
-.attachbtn:hover { border-color: var(--accent); color: var(--accent); }
 .attrow { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
 .attchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
   border-radius: 8px; padding: 3px 8px 3px 3px; background: var(--surface-2); font-size: 12px; }
 .attchip img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; }
 .attname { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-mid); }
-.attx { background: none; border: none; color: var(--ink-mid); cursor: pointer; padding: 0 2px; }
-.attx:hover { color: var(--bad); }
 /* ── Табы модалки ── */
-.mtabs { align-self: stretch; display: flex; gap: 2px; border-bottom: 0; }
-.mtab { display: inline-flex; align-items: center; background: none; border: none;
-  border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--ink-mid);
-  font-size: 12.5px; padding: 0 11px; cursor: pointer; }
-.mtab:hover { color: var(--ink); }
-.mtab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.mtabs { align-self: stretch; }
 /* ── Таб комментариев ── */
 .comtab { min-height: 100%; display: flex; flex-direction: column; gap: 12px; }
 .comlist { display: flex; flex-direction: column; gap: 10px; }
@@ -1019,10 +1213,6 @@ watch(taskId, (id) => {
 .comtext { margin-top: 4px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comatts { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
 .comatt { font-size: 12px; color: var(--ink-mid); border: 1px dashed var(--line); border-radius: 7px; padding: 2px 8px; }
-.clarify textarea { flex: 1; resize: vertical; padding: 8px 10px; border: 1px solid var(--line);
-  border-radius: 9px; background: var(--surface-2); color: var(--ink); font-family: inherit; font-size: 13px; }
-.clarify textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.tnote-toggle { background: none; border: none; color: var(--accent); font-size: 12px; cursor: pointer; text-align: left; padding: 0; }
 .tnote { font-size: 13px; color: var(--ink); line-height: 1.55; max-height: 360px; overflow-y: auto;
   border-top: 1px solid var(--line); padding-top: 8px; }
 .tnote :deep(h3), .tnote :deep(h4), .tnote :deep(h5), .tnote :deep(h6) { margin: 10px 0 4px; font-size: 13px; color: var(--ink); }
@@ -1040,33 +1230,11 @@ watch(taskId, (id) => {
 .timer.run .tclock { color: var(--good); }
 .tstate { font-size: 11px; color: var(--ink-mid); }
 .cbtns { min-width: 0; display: flex; align-items: stretch; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
-.cbtns :deep(.oc) { min-height: 36px; padding: 5px 11px; }
-.btn { height: 36px; padding: 0 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground);
-  color: var(--ink); font-size: 13px; font-weight: 500; line-height: 1; cursor: pointer; white-space: nowrap;
-  display: inline-flex; align-items: center; justify-content: center; }
-.btn:disabled { opacity: .5; cursor: default; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
-.btn.warn { background: var(--warn); border-color: var(--warn); color: #241802; }
-.btn.onconv { background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
-.btn.onconv:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
-.btn.onconv.stalled { background: color-mix(in srgb, var(--bad) 16%, transparent);
-  border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); color: var(--bad); }
-.btn.onconv.stalled:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
 .convstall { display: flex; flex-direction: column; gap: 2px; width: 100%;
   padding: 7px 10px; border-radius: 8px; color: var(--bad);
   background: color-mix(in srgb, var(--bad) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); font-size: 12px; }
 .convstall span { color: var(--ink-mid); }
-/* Снос стенда — действие необратимое: обычная кнопка, краснеет под курсором (как на конвейере). */
-.btn.sbdown { color: var(--ink-mid); }
-.btn.sbdown:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
-.btn.sbdown.busy { color: var(--bad); border-color: var(--bad); opacity: .85; }
-.sbspin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--bad);
-  border-top-color: transparent; border-radius: 50%; vertical-align: -1px; margin-right: 6px;
-  animation: sbspin .8s linear infinite; }
-@keyframes sbspin { to { transform: rotate(360deg); } }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
 /* Форма запуска открывается как ограниченная по высоте панель над постоянными
    действиями: большой delivery contract не выталкивает карточку за viewport. */
@@ -1078,15 +1246,10 @@ watch(taskId, (id) => {
 .lrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .llbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); }
 .lopt { text-transform: none; letter-spacing: 0; }
-.lsel { height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--ground); color: var(--ink); font-size: 13px; }
 .lrepo { display: grid; grid-template-columns: minmax(90px, auto) 1fr; align-items: center; gap: 10px; }
 .lrepo code { color: var(--ink); overflow-wrap: anywhere; }
-.linp { min-width: 0; width: 100%; height: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--ground); color: var(--ink); font-family: inherit; font-size: 13px; }
-.linp:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .lhint { font-size: 12px; color: var(--ink-mid); }
-.lhint.good { color: var(--good); }
+.lhint.suggested { color: var(--good); }
 .lsummary { display: grid; gap: 5px; padding: 8px 10px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--ground); }
 .lsummary-row { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 10px;
@@ -1095,10 +1258,6 @@ watch(taskId, (id) => {
 .lsummary-row > b { min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
 .lshipwarn { margin: 2px 0 0; padding-top: 6px; border-top: 1px solid var(--line);
   color: var(--warn); font-size: 11.5px; line-height: 1.4; }
-.lform textarea { min-width: 0; width: 100%; box-sizing: border-box; resize: vertical;
-  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
-  background: var(--ground); color: var(--ink); font-family: inherit; font-size: 13px; }
-.lform textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .lnote { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.45; }
 .ladvanced { margin-top: 2px; border: 1px dashed var(--line); border-radius: 9px; padding: 7px 10px; }
 .ladvanced summary { color: var(--ink-mid); font-size: 12px; cursor: pointer; user-select: none; }
@@ -1107,13 +1266,9 @@ watch(taskId, (id) => {
 .lerror { margin: 0; color: var(--bad); font-size: 12px; }
 .lbtns { display: flex; gap: 8px; justify-content: flex-end; }
 .comment { display: flex; gap: 8px; align-items: flex-end; margin-top: auto; }
-.comment textarea { flex: 1; min-width: 0; resize: vertical; padding: 9px 11px; border: 1px solid var(--line);
-  border-radius: 9px; background: var(--ground); color: var(--ink); font-family: inherit; font-size: 14px; }
-.comment textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.comment-text { flex: 1; }
 
 @media (max-width: 980px) {
-  .overlay { padding: 12px; }
-  .panel { width: min(900px, 100%); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); }
   .midentity { width: 100px; }
   .mbody { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
     scrollbar-gutter: stable; }
@@ -1126,15 +1281,12 @@ watch(taskId, (id) => {
 }
 
 @media (max-width: 600px) {
-  .overlay { align-items: stretch; padding: 0; }
-  .panel { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .mhead { gap: 7px; min-height: 56px; padding: 7px 10px; }
   .midentity { width: auto; }
   .meyebrow { display: none; }
   .mid { font-size: 12px; }
   .mtitle { font-size: 14px; line-height: 1.25; }
   .mhead :deep(.favbtn) { width: 38px; height: 38px; }
-  .icon { width: 38px; height: 38px; }
   .malerts { max-height: 88px; padding: 7px 10px; }
   .mcontext { min-height: 38px; padding: 6px 10px; overflow: hidden; }
   .meta { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
@@ -1150,15 +1302,14 @@ watch(taskId, (id) => {
   .work-head { min-height: 44px; padding: 0 7px; }
   .work-head > div { display: none; }
   .mtabs { width: 100%; }
-  .mtab { flex: 1; justify-content: center; min-height: 44px; padding: 0 8px; }
   .triage { padding: 10px; }
-  .thead2 .tbtn { width: 100%; margin-left: 0; }
+  .triage-summary { flex-basis: 100%; }
+  .thead2 [data-role='task-compact-action'] { width: 100%; margin-left: 0; }
   .clarify-row { flex-wrap: wrap; }
-  .clarify-row textarea { flex-basis: 100%; }
-  .clarify-row .tbtn { flex: 1; min-height: 40px; }
-  .attachbtn { width: 40px; height: 40px; }
+  .clarify-text { flex-basis: 100%; }
+  .clarify-row [data-role='task-compact-action'] { flex: 1; }
   .comment { flex-direction: column; align-items: stretch; }
-  .comment .btn { align-self: flex-end; min-height: 40px; }
+  .comment > :last-child { align-self: flex-end; }
   .controls { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 9px;
     padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); }
   .timer { min-width: 58px; margin: 0; }
@@ -1167,16 +1318,13 @@ watch(taskId, (id) => {
   .cbtns { width: 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto;
     overscroll-behavior-x: contain; scrollbar-width: none; padding: 1px 0 3px; }
   .cbtns::-webkit-scrollbar { display: none; }
-  .cbtns > *, .cbtns :deep(.oc) { flex: none; min-height: 40px; }
-  .btn { height: 40px; }
+  .cbtns > * { flex: none; }
   .convstall, .lmsg { grid-column: 1 / -1; }
   .lform { left: -10px; right: -10px; max-height: 60dvh;
     padding: 12px 12px 14px; border-radius: 12px 12px 0 0; }
   .lrow { align-items: stretch; }
-  .lrow .lsel { flex: 1; min-width: 0; height: 38px; }
   .lsummary-row, .lrepo { grid-template-columns: 1fr; gap: 3px; }
-  .linp { height: 40px; }
-  .lbtns .btn { flex: 1; }
+  .lbtns > * { flex: 1; }
 }
 
 @media (min-width: 981px) and (max-height: 720px) {

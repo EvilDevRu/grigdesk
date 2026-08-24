@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { providerUsageView } from '../../web/src/shared/provider-usage.js';
+import { providerUsageView } from '../../web/src/features/providers/providerUsage.js';
 import {
   prepareUsageControl,
   usageControlConfirmation,
-} from '../../web/src/shared/provider-usage-actions.js';
+} from '../../web/src/features/providers/providerUsageActions.js';
 
 test('missing usage data has visible loading copy', () => {
   const view = providerUsageView(null, { name: 'Claude' });

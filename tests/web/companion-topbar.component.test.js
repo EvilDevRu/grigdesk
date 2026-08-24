@@ -1,53 +1,29 @@
 // Проверяет кнопку компаньона в верхней панели и её изолированную компиляцию в тесте.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { installCompanionBrowser } from './helpers/companion-component.js';
+import { compileVue, webFile } from './helpers/compile-vue.js';
 
-const BUTTON_PATH = fileURLToPath(new URL('../../web/src/features/companion/CompanionTopbarButton.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
+const BUTTON_PATH = webFile('src/features/companion/CompanionTopbarButton.vue');
 let compileNonce = 0;
 
-// Импорты через `../../` в data:-модуле не резолвятся вовсе, поэтому каждый
-// заменяется явной заглушкой; промах замены роняет весь файл — см. gotchas.
+// Domain-зависимости заменяются явными заглушками, общий UI бандлится реальным.
 async function compileButton(deps, t) {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(BUTTON_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: BUTTON_PATH });
-  assert.deepEqual(errors, []);
   const key = `__companionTopbarDeps${compileNonce++}`;
   globalThis[key] = deps;
   t.after(() => { delete globalThis[key]; });
   const fromDeps = `globalThis[${JSON.stringify(key)}]`;
-  const code = compileScript(descriptor, {
-    id: `data-v-companion-topbar-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { useRoute } from 'vue-router';", `const { useRoute } = ${fromDeps};`)
-    .replace(
-      "import { useCompanionStore } from '../../stores/companion.js';",
-      `const { useCompanionStore } = ${fromDeps};`,
-    )
-    .replace(
-      "import HelpTip from '../../shared/ui/HelpTip.vue';",
-      `const { HelpTip } = ${fromDeps};`,
-    )
-    .replace(
-      "import CompanionRobot from './CompanionRobot.vue';",
-      `const { CompanionRobot } = ${fromDeps};`,
-    );
-  assert.doesNotMatch(code, /from ['"]\.\.?\//, 'все зависимости кнопки — явные заглушки');
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#topbar-${compileNonce}`
-  )).default;
+
+  return compileVue(BUTTON_PATH, {
+    stubs: {
+      'vue-router': `export const useRoute = () => ${fromDeps}.useRoute();`,
+      '../../stores/companion.js': `
+        export const useCompanionStore = (...args) => ${fromDeps}.useCompanionStore(...args);
+      `,
+      './CompanionRobot.vue': `export default ${fromDeps}.CompanionRobot;`,
+    },
+  });
 }
 
 async function mountButton(t, { path = '/pipeline', deviceEnabled = true } = {}) {
@@ -71,7 +47,6 @@ async function mountButton(t, { path = '/pipeline', deviceEnabled = true } = {})
   const Button = await compileButton({
     useRoute: () => route,
     useCompanionStore: () => companion,
-    HelpTip: defineComponent({ setup: (_, { slots }) => () => h('span', slots.default?.()) }),
     CompanionRobot: defineComponent({
       props: { interaction: String, attention: String },
       setup: (props) => () => h('svg', { class: `companion-robot is-${props.interaction}` }),

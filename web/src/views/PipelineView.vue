@@ -1,3 +1,636 @@
+<template>
+  <div class="pipeline">
+    <div class="toolbar">
+      <div class="tbrow">
+        <h2 class="ttl">Задачи в работе <span class="cnt">{{ filteredTasks.length }}</span>
+          <span v-if="waitingCount" class="needme">⏳ ждут тебя: {{ waitingCount }}</span>
+          <span v-if="stalledCount" class="stalledme" :title="stalledTitles">🛑 встали: {{ stalledCount }}</span>
+        </h2>
+        <div class="tools">
+          <UiToggleButton
+            :model-value="loopsOn"
+            data-role="pipeline-toolbar"
+            tone="accent"
+            variant="outline"
+            @update:model-value="toggleLoops"
+          >
+            ↻ петли
+          </UiToggleButton>
+          <UiToggleButton
+            :model-value="compact"
+            data-role="pipeline-toolbar"
+            tone="accent"
+            variant="outline"
+            @update:model-value="toggleCompact"
+          >
+            {{ compact ? '▤ подробно' : '☰ компактно' }}
+          </UiToggleButton>
+        </div>
+      </div>
+      <div v-if="projects.length" class="projects">
+        <UiButton
+          class="pchip"
+          data-role="pipeline-project"
+          tone="accent"
+          variant="outline"
+          :pressed="activeProject === 'all'"
+          @click="setProject('all')"
+        >
+          все <b>{{ tasks.length }}</b>
+        </UiButton>
+        <UiButton
+          v-for="p in projects"
+          :key="p"
+          class="pchip"
+          data-role="pipeline-project"
+          tone="accent"
+          variant="outline"
+          :pressed="activeProject === p"
+          @click="setProject(p)"
+        >
+          {{ p }} <b>{{ tasks.filter(t => t.profile === p).length }}</b>
+        </UiButton>
+      </div>
+    </div>
+
+    <p v-if="!loaded" class="muted">Загрузка…</p>
+    <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
+    <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
+
+    <article v-for="t in filteredTasks" :key="t.task" class="card" :class="[t.readOnly ? 'readonly' : cardState(t.graph), { collapsed: isCollapsed(t.task) }]">
+      <header class="head">
+        <UiIconButton
+          v-if="!compact"
+          class="chev"
+          role="rail"
+          :label="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
+          :title="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'"
+          @click="toggleCard(t.task)"
+        >
+          {{ collapsedSet.has(t.task) ? '▸' : '▾' }}
+        </UiIconButton>
+        <UiButton
+          class="task mono"
+          data-role="pipeline-task-id"
+          title="Свернуть/развернуть"
+          variant="text"
+          @click="toggleCard(t.task)"
+        >
+          #{{ t.task }}
+        </UiButton>
+        <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
+        <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
+              :title="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
+          ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
+        </span>
+        <UiButton
+          v-if="b24Title(t.task)"
+          class="ctitle"
+          data-role="pipeline-title"
+          :title="title(t)"
+          variant="text"
+          @click="ui.openTask(t.task)"
+        >
+          {{ title(t) }}
+        </UiButton>
+        <span
+          v-else-if="title(t)"
+          class="ctitle pipeline-title-static ticket"
+          :title="title(t)"
+        >
+          {{ title(t) }}
+        </span>
+        <span v-else class="ctitle pipeline-title-static muted">
+          <UiSpinner decorative /> загрузка названия…
+        </span>
+        <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
+          {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
+        </span>
+        <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
+        <span v-if="t.graph.timing" class="elapsed mono" :title="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
+      </header>
+
+      <div class="progress">
+        <div class="pbar-wrap">
+          <div class="pbar" :class="progressClass(t.graph)"
+               :style="{ width: (t.graph.progress.done / t.graph.progress.total * 100) + '%' }"></div>
+        </div>
+        <span class="pnum mono">{{ t.graph.progress.done }}/{{ t.graph.progress.total }}</span>
+        <span class="pw">{{ currentLabel(t.graph) }}</span>
+      </div>
+
+      <!-- Ждёт тебя (видно и в свёрнутом виде) -->
+      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph).premature }">
+        ⏳ ждёт тебя: {{ waitingReason(t.graph).text }}
+        <span v-if="waitingReason(t.graph).premature" class="pm">(преждевременно — хвост не доделан)</span>
+      </div>
+
+      <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
+           пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
+           вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
+           затык надо замечать в списке, а не открывая карточку. -->
+      <div v-if="!t.readOnly && t.stall && isCollapsed(t.task)" class="stalled" :class="t.stall.kind">
+        <div class="srow">
+          <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
+          <span class="stitle">{{ t.stall.title }}</span>
+          <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
+        </div>
+        <div class="shint">{{ t.stall.hint }}</div>
+        <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
+        <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
+             Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
+             к живому порту фронта, — поэтому починка живёт в самой плашке. -->
+        <div v-if="canRetrySandbox(t) || canResume(t)" class="sfix">
+          <UiButton
+            v-if="canRetrySandbox(t)"
+            class="sbretry"
+            data-role="pipeline-compact-action"
+            tone="accent"
+            variant="outline"
+            :loading="sandboxBusy.has(t.task)"
+            :disabled="sandboxBusy.has(t.task)"
+            loading-label="Перезапускаю стенд"
+            @click="sandboxRetry(t.task)"
+          >
+            ↻ перезапустить стенд
+          </UiButton>
+          <!-- Оборвавшийся прогон: стенд на месте, продолжать нужно ту же попытку. -->
+          <UiButton
+            v-else
+            class="sbretry"
+            data-role="pipeline-compact-action"
+            tone="accent"
+            variant="outline"
+            :loading="sandboxBusy.has(t.task)"
+            :disabled="sandboxBusy.has(t.task)"
+            loading-label="Продолжаю прогон"
+            @click="resumeRun(t.task)"
+          >
+            ▶ продолжить прогон
+          </UiButton>
+          <span class="sfixhint">{{ canRetrySandbox(t)
+            ? 'снесёт остатки песочницы и продолжит конвейер с этого места'
+            : 'та же попытка поедет дальше с узла, на котором оборвалась' }}</span>
+        </div>
+      </div>
+
+      <div v-if="!isCollapsed(t.task)" class="gwrap">
+        <FactoryGraph :graph="t.graph" :loops-on="loopsOn" @node="(n) => openStage(t, n)" />
+      </div>
+
+      <footer v-if="!isCollapsed(t.task)" class="strip">
+        <span v-if="t.graph.fePort" class="chunk">
+          <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
+          стенд · <a :href="sandboxUrl(t.graph.fePort)" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
+          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort)" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
+        </span>
+        <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
+        <span v-else-if="t.graph.sandbox" class="chunk building">
+          <UiSpinner decorative />
+          стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
+        </span>
+        <!-- Развёрнутая карточка: продолжение прогона рядом с остальными действиями —
+             плашка затыка видна только у свёрнутой. -->
+        <UiButton
+          v-if="canStop(t)"
+          class="sbstop"
+          data-role="pipeline-compact-action"
+          tone="danger"
+          variant="outline"
+          :loading="sandboxBusy.has(t.task)"
+          :disabled="sandboxBusy.has(t.task)"
+          loading-label="Останавливаю прогон"
+          @click="stopRun(t.task)"
+        >
+          ■ остановить
+        </UiButton>
+        <UiButton
+          v-if="canResume(t)"
+          class="sbresume"
+          data-role="pipeline-compact-action"
+          tone="accent"
+          variant="outline"
+          :loading="sandboxBusy.has(t.task)"
+          :disabled="sandboxBusy.has(t.task)"
+          loading-label="Продолжаю прогон"
+          @click="resumeRun(t.task)"
+        >
+          ▶ продолжить прогон
+        </UiButton>
+        <UiButton
+          v-if="t.graph.fePort && canDestroySandbox(t)"
+          class="sbdown"
+          data-role="pipeline-compact-action"
+          tone="danger"
+          variant="outline"
+          :loading="sandboxBusy.has(t.task)"
+          :disabled="sandboxBusy.has(t.task)"
+          loading-label="Сношу стенд"
+          @click="sandboxDown(t.task)"
+        >
+          ⏏ снести стенд
+        </UiButton>
+        <!-- Класс sbclose — только адрес кнопки (оформление общее с «снести стенд»):
+             обе выглядят одинаково, а различать их надо и тесту, и глазами в разметке. -->
+        <UiButton
+          v-if="canCloseTask(t)"
+          class="sbdown sbclose"
+          data-role="pipeline-compact-action"
+          tone="danger"
+          variant="outline"
+          :loading="sandboxBusy.has(t.task)"
+          :disabled="sandboxBusy.has(t.task)"
+          loading-label="Закрываю задачу"
+          @click="closeTask(t)"
+        >
+          ✓ закрыть задачу
+        </UiButton>
+        <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
+        <span v-if="t.graph.halted" class="chunk halted">⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}</span>
+      </footer>
+    </article>
+
+    <!-- Таймеры вне фабрики: активные задачи B24, которых нет на конвейере -->
+    <section v-if="outsideTimers.length" class="outside">
+      <h3 class="ttl">Таймер идёт вне фабрики</h3>
+      <div v-for="t in outsideTimers" :key="t.id" class="orow">
+        <span class="oid mono">#{{ t.id }}</span>
+        <UiButton
+          class="otitle"
+          data-role="pipeline-title"
+          variant="text"
+          @click="ui.openTask(t.id)"
+        >
+          {{ t.title }}
+        </UiButton>
+        <span class="otimer mono">⏱ {{ secToHMS(outsideElapsed(t)) }}</span>
+      </div>
+    </section>
+
+    <!-- Модалка этапа (клик по узлу графа): инфо + управление -->
+    <UiDialog
+      :open="Boolean(stage)"
+      class="smodal"
+      data-role="pipeline-stage"
+      size="workspace"
+      :label="stage?.label || 'Этап конвейера'"
+      :body-inset="false"
+      fade-only
+      @update:open="onStageDialogOpenChange"
+    >
+        <header class="sh">
+          <div class="shead-copy">
+            <span class="shead-kicker">Этап конвейера</span>
+            <h3 id="stage-modal-title">{{ stage.label }}</h3>
+          </div>
+          <span class="sbadge" :class="stage.status">{{ STAGE_HINT[stage.status] || stage.status }}</span>
+          <UiIconButton
+            class="sx"
+            data-context="pipeline-stage-close"
+            label="Закрыть этап"
+            title="Закрыть (Esc)"
+            @click="closeStage()"
+          >
+            ✕
+          </UiIconButton>
+        </header>
+
+        <!-- Контекст решения: задачу и её стенд видно, пока ворота открыты. Ссылки те же,
+             что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
+        <div id="stage-task-context" class="stage-context">
+          <div class="stage-task-context">
+            <span class="stage-context-label">Задача <b class="mono">#{{ stage.task }}</b></span>
+            <span v-if="stageTaskTitle" class="stage-task-title" :title="stageTaskTitle">{{ stageTaskTitle }}</span>
+            <span v-else class="stage-task-title muted">Название загружается…</span>
+          </div>
+          <div class="stage-stand-context">
+            <span class="stage-context-label">Стенд</span>
+            <template v-if="stageGraph?.fePort">
+              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort)" target="_blank" rel="noopener">
+                Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
+              </a>
+              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort)"
+                 target="_blank" rel="noopener">
+                API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
+              </a>
+            </template>
+            <span v-else-if="stageGraph?.sandbox" class="stage-stand-state building">
+              <UiSpinner decorative />
+              строится · {{ stageGraph.sandbox.step }}/{{ stageGraph.sandbox.total }} · {{ stageGraph.sandbox.label }}
+            </span>
+            <span v-else class="stage-stand-state">не поднят</span>
+          </div>
+        </div>
+
+        <!-- Компактная строка метаданных -->
+        <div v-if="stage.meta.at || stage.meta.dur != null || stage.meta.fanout != null
+          || stage.meta.tokens || stage.meta.fails || stage.sub || stageActivity"
+          class="smeta" aria-label="Показатели этапа">
+          <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
+          <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
+          <span v-if="stage.meta.fanout != null" class="smchip">{{ stage.meta.fanout }} субаг.</span>
+          <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
+          <span v-if="stage.meta.fails" class="smchip failed">{{ stage.meta.fails }} возвр.</span>
+          <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
+          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ agentActivityLabel(stageActivity) }}</span>
+        </div>
+
+        <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.
+             Для skipped это единственное, что отличает «нечего было проверять» от
+             «агент сдался» — раньше оно оставалось в журнале прогона. -->
+        <div v-if="stage.meta.comment || stage.meta.stall" class="snotices">
+          <div
+            v-if="stage.meta.comment"
+            class="scomment"
+            :class="{ failed: ['skipbad', 'stall'].includes(stage.status) }"
+          >
+            <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
+            {{ stage.meta.comment }}
+          </div>
+          <div v-if="stage.meta.stall" class="scomment failed">
+            <span class="sclbl">Почему этап остановился</span>
+            <b>{{ stage.meta.stall.title }}</b>
+            <div>{{ stage.meta.stall.hint }}</div>
+          </div>
+        </div>
+
+        <div v-if="stageHasMain || stageHasRail" class="sworkspace"
+             :class="{ 'main-only': stageHasMain && !stageHasRail, 'rail-only': stageHasRail && !stageHasMain }">
+          <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
+               прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
+          <aside v-if="stageHasRail" class="srail">
+            <!-- Ворота: принять/отклонить. Поле пояснения принадлежит ОТКЛОНЕНИЮ и
+                 раскрывается по кнопке: при принятии текст никуда не уходит. -->
+            <div v-if="gateDecidable" class="sect gate-sect">
+              <div class="secth">Ворота — твоё решение</div>
+              <template v-if="gateRejecting">
+                <label class="gate-lbl" for="gate-note">Что доработать</label>
+                <UiTextarea
+                  id="gate-note"
+                  ref="gateNoteEl"
+                  v-model="gateComment"
+                  data-role="pipeline-stage-note"
+                  rows="6"
+                  placeholder="Что не так и что сделать иначе"
+                />
+                <p class="gate-hint">Текст станет заданием агенту на следующем заходе — целиком, вместе с разметкой и абзацами (до 20 000 символов). Можно и без него — тогда узел вернётся без пояснения.</p>
+                <div class="gbtns">
+                  <UiButton
+                    class="btn bad"
+                    tone="danger"
+                    variant="solid"
+                    :loading="stageBusy === 'gate'"
+                    :disabled="stageBusy === 'gate'"
+                    loading-label="Отправляю на доработку"
+                    @click="gateDecide('reject')"
+                  >
+                    ✗ Отправить на доработку
+                  </UiButton>
+                  <UiButton
+                    class="btn"
+                    :disabled="stageBusy === 'gate'"
+                    @click="cancelGateReject()"
+                  >
+                    Отмена
+                  </UiButton>
+                </div>
+              </template>
+              <template v-else>
+                <p class="gate-hint">Принять — маршрут пойдёт дальше. Отклонить — вернём агенту, там же напишешь, что доработать.</p>
+                <div class="gbtns">
+                  <UiButton
+                    class="btn good"
+                    tone="success"
+                    variant="solid"
+                    :loading="stageBusy === 'gate'"
+                    :disabled="stageBusy === 'gate'"
+                    loading-label="Принимаю решение"
+                    @click="gateDecide('approve')"
+                  >
+                    ✓ Принять
+                  </UiButton>
+                  <UiButton
+                    class="btn bad"
+                    tone="danger"
+                    variant="solid"
+                    :disabled="stageBusy === 'gate'"
+                    @click="startGateReject()"
+                  >
+                    ✗ Отклонить
+                  </UiButton>
+                </div>
+              </template>
+            </div>
+
+            <!-- Возврат на узел. Своя секция рядом с отправляющей его кнопкой. -->
+            <div v-if="stageHasRewind" class="sect rewind-sect">
+              <div class="secth">Вернуть конвейер сюда</div>
+              <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
+              <UiTextarea
+                v-model="rewindComment"
+                data-role="pipeline-stage-note"
+                rows="6"
+                placeholder="Указание агенту — что сделать иначе (необязательно)"
+              />
+              <UiButton
+                class="btn play"
+                tone="warning"
+                variant="outline"
+                block
+                :loading="stageBusy === 'force'"
+                :disabled="stageBusy === 'force'"
+                loading-label="Возвращаю конвейер"
+                @click="forceStatus('running')"
+              >
+                ▶ Перейти сюда
+              </UiButton>
+            </div>
+          </aside>
+
+          <main v-if="stageHasMain" class="smain">
+            <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
+            <div v-if="stage.meta.runner" class="sect runner-sect">
+              <div class="secth">
+                Исполнитель
+                <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
+              </div>
+              <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
+              <div v-if="!stage.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
+                <div class="runner-override-row">
+                  <span class="runner-override-lbl">Исполнитель этапа</span>
+                  <UiButton
+                    v-if="stage.meta.runner.source === 'task-stage'"
+                    class="btn runner-reset"
+                    data-role="pipeline-compact-action"
+                    variant="text"
+                    tone="warning"
+                    :disabled="stageBusy === 'runner-override'"
+                    @click="setStageRunner('')"
+                  >
+                    Сбросить
+                  </UiButton>
+                </div>
+                <div class="runner-picks">
+                  <UiButton
+                    v-for="id in stageRunnerOptions"
+                    :key="id"
+                    class="runner-pick"
+                    :class="{ on: id === stageRunnerActive, busy: runnerPending === id }"
+                    data-role="pipeline-runner"
+                    tone="accent"
+                    variant="outline"
+                    :pressed="id === stageRunnerActive"
+                    :loading="runnerPending === id"
+                    :disabled="stageBusy === 'runner-override'"
+                    :loading-label="`Выбираю ${providerLabel(id)}`"
+                    @click="pickStageRunner(id)"
+                  >
+                    <b>{{ providerLabel(id) }}</b>
+                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
+                  </UiButton>
+                </div>
+                <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
+                  Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
+                </p>
+                <p v-if="stage.status === 'run' && !stage.daemonAlive" class="runner-hint">
+                  Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
+                </p>
+              </div>
+              <!-- Цепочка вторична: она объясняет, кто подхватит этап при аварии, и решения не требует. -->
+              <div class="runner-chain">
+                <span class="runner-chain-lbl">цепочка</span>
+                <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
+                  <span v-if="i" class="runner-arrow">→</span>
+                  <span class="runner-hop"
+                        :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }"
+                        :title="i ? 'резерв: подхватит этап, если основной отпадёт' : 'основной исполнитель'">
+                    {{ providerLabel(id) }}
+                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
+                  </span>
+                </template>
+              </div>
+              <div v-if="stage.meta.runner.actual" class="runner-current"
+                   :class="{ switched: stage.meta.runner.switched }">
+                Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
+                <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
+              </div>
+              <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
+                <div class="runner-attempt-title">Попытки запуска</div>
+                <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
+                  <span class="mono">#{{ a.epoch ?? '—' }}</span>
+                  <b>{{ providerLabel(a.runner) }}</b>
+                  <span v-if="runnerAttemptModelLabel(a)" class="runner-attempt-model mono">{{ runnerAttemptModelLabel(a) }}</span>
+                  <span v-if="attemptCostLabel(a)" class="runner-attempt-cost mono"
+                        :title="attemptCostTitle(a)">{{ attemptCostLabel(a) }}</span>
+                  <span class="runner-result" :class="{
+                    success: a.result === 'ok',
+                    switched: a.result === 'manual_switch',
+                    failed: a.result && !['ok', 'manual_switch'].includes(a.result),
+                  }">
+                    {{ attemptResultLabel(a.result) }}
+                  </span>
+                </div>
+              </div>
+              <div v-if="!stage.readOnly && stageRunnerLive" class="runner-switches">
+                <UiButton
+                  v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
+                  :key="id"
+                  class="btn runner-switch"
+                  tone="warning"
+                  variant="outline"
+                  :loading="stageBusy === 'runner-switch'"
+                  :disabled="stageBusy === 'runner-switch'"
+                  :loading-label="`Переключаю на ${providerLabel(id)}`"
+                  @click="switchRunner(id)"
+                >
+                  Переключить сейчас на {{ providerLabel(id) }}
+                </UiButton>
+              </div>
+            </div>
+
+            <!-- Живая лента действий агента (для идущего этапа) -->
+            <div v-if="stage.status === 'run' && stageActivity?.live" class="sect content-sect">
+              <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
+              <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
+                <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
+                  <span class="lf-icon">{{ liveIcon(a) }}</span>
+                  <span class="lf-body">
+                    <template v-if="a.type === 'tool' || a.type === 'subagent'">
+                      <span class="lf-name">{{ a.name }}</span>
+                      <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
+                      <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
+                    </template>
+                    <template v-else>
+                      <span class="lf-text">{{ a.text }}</span>
+                    </template>
+                  </span>
+                  <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
+                </div>
+              </div>
+              <p v-else class="muted small">Ожидание действий агента…</p>
+              <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
+            </div>
+
+            <!-- Журнал этапов (stages.log) — сворачиваемый -->
+            <div v-if="stage.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
+              <UiDisclosureButton
+                class="stage-disclosure"
+                data-role="pipeline-section-disclosure"
+                controls="pipeline-stage-log"
+                density="compact"
+                :open="stageLogOpen"
+                @update:open="stageLogOpen = $event"
+              >
+                Журнал этапов
+                <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
+              </UiDisclosureButton>
+              <div v-if="stageLogOpen" id="pipeline-stage-log" class="log">
+                <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
+              </div>
+            </div>
+
+            <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
+            <div v-if="stageDocLoading" class="sect content-sect">
+              <div class="secth"><UiSpinner decorative /> Документ этапа</div>
+            </div>
+            <div v-else-if="stageDoc" class="sect content-sect document-sect">
+              <UiDisclosureButton
+                class="stage-disclosure"
+                data-role="pipeline-section-disclosure"
+                controls="pipeline-stage-document"
+                density="compact"
+                :open="stageDocOpen"
+                @update:open="stageDocOpen = $event"
+              >
+                Документ этапа
+              </UiDisclosureButton>
+              <div
+                v-if="stageDocOpen"
+                id="pipeline-stage-document"
+                class="sdoc md"
+                v-html="mdToHtml(stageDoc)"
+              ></div>
+            </div>
+          </main>
+        </div>
+
+        <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
+        <footer class="sactions">
+          <span class="sactions-context"><b class="mono">#{{ stage.task }}</b> · действия с задачей</span>
+          <div class="sactions-buttons">
+            <UiButton
+              class="btn"
+              @click="companion.openForTask(stage.task); closeStage()"
+            >
+              💬 Обсудить с агентом
+            </UiButton>
+            <OpenDiffButton :task-id="stage.task" />
+          </div>
+        </footer>
+    </UiDialog>
+  </div>
+</template>
+
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/api-client.js';
@@ -9,7 +642,17 @@ import { useBoardStore } from '../stores/board.js';
 import { useCompanionStore } from '../stores/companion.js';
 import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
-import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';
+import {
+  alertDialog,
+  confirmDialog,
+  UiButton,
+  UiDialog,
+  UiDisclosureButton,
+  UiIconButton,
+  UiSpinner,
+  UiTextarea,
+  UiToggleButton,
+} from '../ui';
 import { sandboxUrl } from '../shared/sandbox.js';
 import { agentActivityLabel } from '../shared/agent-activity.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
@@ -93,8 +736,14 @@ onUnmounted(() => {
 // Тумблеры (переживают перезагрузку — как в старом дашборде).
 const compact = ref(localStorage.getItem('cockpit-compact') === '1');
 const loopsOn = ref(localStorage.getItem('cockpit-loops') === '1');
-function toggleCompact() { compact.value = !compact.value; localStorage.setItem('cockpit-compact', compact.value ? '1' : '0'); }
-function toggleLoops() { loopsOn.value = !loopsOn.value; localStorage.setItem('cockpit-loops', loopsOn.value ? '1' : '0'); }
+function toggleCompact(value) {
+  compact.value = value;
+  localStorage.setItem('cockpit-compact', value ? '1' : '0');
+}
+function toggleLoops(value) {
+  loopsOn.value = value;
+  localStorage.setItem('cockpit-loops', value ? '1' : '0');
+}
 
 // Фильтр по проектам (профилям).
 const activeProject = ref(localStorage.getItem('cockpit-project') || 'all');
@@ -197,16 +846,22 @@ const RUNNER_SOURCE = {
 const LIVE_ICONS = { tool: '⚙', subagent: '🤖', text: '💬', think: '🧠' };
 function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
 
+/**
+ * FactoryGraph эмитит нормализованный `id`, а API-граф хранит метаданные по этому же ключу.
+ * Один canonical id нужен всему снимку модалки, иначе ошибка возникает ещё до её открытия.
+ */
 function openStage(t, node) {
+  const nodeId = node.id;
+
   stage.value = {
-    task: t.task, id: node.nid, key: t.graph.keys?.[node.nid] || node.nid.toUpperCase(),
-    runnerKey: t.graph.runnerKeys?.[node.nid]
-      || t.graph.keys?.[node.nid]
-      || node.nid.toUpperCase(),
-    isGate: node.nid.startsWith('gate_'), label: stripEmoji(node.label), sub: node.sub,
+    task: t.task, id: nodeId, key: t.graph.keys?.[nodeId] || nodeId.toUpperCase(),
+    runnerKey: t.graph.runnerKeys?.[nodeId]
+      || t.graph.keys?.[nodeId]
+      || nodeId.toUpperCase(),
+    isGate: nodeId.startsWith('gate_'), label: stripEmoji(node.label), sub: node.subtitle,
     readOnly: Boolean(t.readOnly || t.graph.readOnly),
     daemonAlive: Boolean(t.graph.daemonAlive),
-    status: node.status, meta: t.graph.nodeMeta?.[node.nid] || {},
+    status: node.status, meta: t.graph.nodeMeta?.[nodeId] || {},
   };
   loadFactoryRunners();
   gateComment.value = ''; gateRejecting.value = false; rewindComment.value = '';
@@ -214,7 +869,7 @@ function openStage(t, node) {
   stageActivity.value = null;
   stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
   stageLogOpen.value = false;
-  const doc = NODE_DOC[node.nid];
+  const doc = NODE_DOC[nodeId];
   if (doc) {
     stageDocLoading.value = true;
     api.get(`/api/tasks/${t.task}/doc/${doc}`)
@@ -228,6 +883,11 @@ function openStage(t, node) {
   }
 }
 function closeStage() { stage.value = null; clearInterval(actPoll); }
+function onStageDialogOpenChange(open) {
+  if (!open) {
+    closeStage();
+  }
+}
 async function pollActivity() {
   if (!stage.value) return;
   try { stageActivity.value = await api.get(`/api/tasks/${stage.value.task}/activity`); } catch { /* игнор */ }
@@ -604,402 +1264,6 @@ function cardState(g) {
 }
 </script>
 
-<template>
-  <div class="pipeline">
-    <div class="toolbar">
-      <div class="tbrow">
-        <h2 class="ttl">Задачи в работе <span class="cnt">{{ filteredTasks.length }}</span>
-          <span v-if="waitingCount" class="needme">⏳ ждут тебя: {{ waitingCount }}</span>
-          <span v-if="stalledCount" class="stalledme" :title="stalledTitles">🛑 встали: {{ stalledCount }}</span>
-        </h2>
-        <div class="tools">
-          <button :class="{ on: loopsOn }" @click="toggleLoops">↻ петли</button>
-          <button :class="{ on: compact }" @click="toggleCompact">{{ compact ? '▤ подробно' : '☰ компактно' }}</button>
-        </div>
-      </div>
-      <div v-if="projects.length" class="projects">
-        <button class="pchip" :class="{ on: activeProject === 'all' }" @click="setProject('all')">все <b>{{ tasks.length }}</b></button>
-        <button v-for="p in projects" :key="p" class="pchip" :class="{ on: activeProject === p }" @click="setProject(p)">
-          {{ p }} <b>{{ tasks.filter(t => t.profile === p).length }}</b>
-        </button>
-      </div>
-    </div>
-
-    <p v-if="!loaded" class="muted">Загрузка…</p>
-    <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
-    <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
-
-    <article v-for="t in filteredTasks" :key="t.task" class="card" :class="[t.readOnly ? 'readonly' : cardState(t.graph), { collapsed: isCollapsed(t.task) }]">
-      <header class="head">
-        <button v-if="!compact" class="chev" :title="isCollapsed(t.task) ? 'Развернуть' : 'Свернуть'" @click="toggleCard(t.task)">
-          {{ collapsedSet.has(t.task) ? '▸' : '▾' }}
-        </button>
-        <button class="task mono" title="Свернуть/развернуть" @click="toggleCard(t.task)">#{{ t.task }}</button>
-        <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
-        <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
-              :title="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
-          ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
-        </span>
-        <button v-if="b24Title(t.task)" class="ctitle" :title="title(t)" @click="ui.openTask(t.task)">{{ title(t) }}</button>
-        <span v-else-if="title(t)" class="ctitle ticket" :title="title(t)">{{ title(t) }}</span>
-        <span v-else class="ctitle muted"><span class="spin"></span> загрузка названия…</span>
-        <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
-          {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
-        </span>
-        <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
-        <span v-if="t.graph.timing" class="elapsed mono" :title="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
-      </header>
-
-      <div class="progress">
-        <div class="pbar-wrap">
-          <div class="pbar" :class="progressClass(t.graph)"
-               :style="{ width: (t.graph.progress.done / t.graph.progress.total * 100) + '%' }"></div>
-        </div>
-        <span class="pnum mono">{{ t.graph.progress.done }}/{{ t.graph.progress.total }}</span>
-        <span class="pw">{{ currentLabel(t.graph) }}</span>
-      </div>
-
-      <!-- Ждёт тебя (видно и в свёрнутом виде) -->
-      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph).premature }">
-        ⏳ ждёт тебя: {{ waitingReason(t.graph).text }}
-        <span v-if="waitingReason(t.graph).premature" class="pm">(преждевременно — хвост не доделан)</span>
-      </div>
-
-      <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
-           пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
-           вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
-           затык надо замечать в списке, а не открывая карточку. -->
-      <div v-if="!t.readOnly && t.stall && isCollapsed(t.task)" class="stalled" :class="t.stall.kind">
-        <div class="srow">
-          <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
-          <span class="stitle">{{ t.stall.title }}</span>
-          <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
-        </div>
-        <div class="shint">{{ t.stall.hint }}</div>
-        <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
-        <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
-             Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
-             к живому порту фронта, — поэтому починка живёт в самой плашке. -->
-        <div v-if="canRetrySandbox(t) || canResume(t)" class="sfix">
-          <button v-if="canRetrySandbox(t)" class="sbretry" :class="{ busy: sandboxBusy.has(t.task) }"
-                  :disabled="sandboxBusy.has(t.task)" @click="sandboxRetry(t.task)">
-            <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> перезапускаю…</span>
-            <span v-else>↻ перезапустить стенд</span>
-          </button>
-          <!-- Оборвавшийся прогон: стенд на месте, продолжать нужно ту же попытку. -->
-          <button v-else class="sbretry" :class="{ busy: sandboxBusy.has(t.task) }"
-                  :disabled="sandboxBusy.has(t.task)" @click="resumeRun(t.task)">
-            <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> продолжаю…</span>
-            <span v-else>▶ продолжить прогон</span>
-          </button>
-          <span class="sfixhint">{{ canRetrySandbox(t)
-            ? 'снесёт остатки песочницы и продолжит конвейер с этого места'
-            : 'та же попытка поедет дальше с узла, на котором оборвалась' }}</span>
-        </div>
-      </div>
-
-      <div v-if="!isCollapsed(t.task)" class="gwrap">
-        <FactoryGraph :graph="t.graph" :loops-on="loopsOn" @node="(n) => openStage(t, n)" />
-      </div>
-
-      <footer v-if="!isCollapsed(t.task)" class="strip">
-        <span v-if="t.graph.fePort" class="chunk">
-          <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <a :href="sandboxUrl(t.graph.fePort)" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
-          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort)" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
-        </span>
-        <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
-        <span v-else-if="t.graph.sandbox" class="chunk building">
-          <span class="spin"></span>
-          стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
-        </span>
-        <!-- Развёрнутая карточка: продолжение прогона рядом с остальными действиями —
-             плашка затыка видна только у свёрнутой. -->
-        <button v-if="canStop(t)" class="sbstop" :class="{ busy: sandboxBusy.has(t.task) }"
-          :disabled="sandboxBusy.has(t.task)" @click="stopRun(t.task)">
-          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> останавливаю…</span>
-          <span v-else>■ остановить</span>
-        </button>
-        <button v-if="canResume(t)" class="sbresume" :class="{ busy: sandboxBusy.has(t.task) }"
-          :disabled="sandboxBusy.has(t.task)" @click="resumeRun(t.task)">
-          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> продолжаю…</span>
-          <span v-else>▶ продолжить прогон</span>
-        </button>
-        <button v-if="t.graph.fePort && canDestroySandbox(t)" class="sbdown" :class="{ busy: sandboxBusy.has(t.task) }"
-          :disabled="sandboxBusy.has(t.task)" @click="sandboxDown(t.task)">
-          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> сношу стенд…</span>
-          <span v-else>⏏ снести стенд</span>
-        </button>
-        <!-- Класс sbclose — только адрес кнопки (оформление общее с «снести стенд»):
-             обе выглядят одинаково, а различать их надо и тесту, и глазами в разметке. -->
-        <button v-if="canCloseTask(t)" class="sbdown sbclose"
-          :class="{ busy: sandboxBusy.has(t.task) }" :disabled="sandboxBusy.has(t.task)"
-          @click="closeTask(t)">
-          <span v-if="sandboxBusy.has(t.task)"><span class="sbspin"></span> закрываю…</span>
-          <span v-else>✓ закрыть задачу</span>
-        </button>
-        <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
-        <span v-if="t.graph.halted" class="chunk bad">⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}</span>
-      </footer>
-    </article>
-
-    <!-- Таймеры вне фабрики: активные задачи B24, которых нет на конвейере -->
-    <section v-if="outsideTimers.length" class="outside">
-      <h3 class="ttl">Таймер идёт вне фабрики</h3>
-      <div v-for="t in outsideTimers" :key="t.id" class="orow">
-        <span class="oid mono">#{{ t.id }}</span>
-        <button class="otitle" @click="ui.openTask(t.id)">{{ t.title }}</button>
-        <span class="otimer mono">⏱ {{ secToHMS(outsideElapsed(t)) }}</span>
-      </div>
-    </section>
-
-    <!-- Модалка этапа (клик по узлу графа): инфо + управление -->
-    <div v-if="stage" class="soverlay" @click.self="closeStage()">
-      <section class="smodal" role="dialog" aria-modal="true" aria-labelledby="stage-modal-title"
-               aria-describedby="stage-task-context">
-        <header class="sh">
-          <div class="shead-copy">
-            <span class="shead-kicker">Этап конвейера</span>
-            <h3 id="stage-modal-title">{{ stage.label }}</h3>
-          </div>
-          <span class="sbadge" :class="stage.status">{{ STAGE_HINT[stage.status] || stage.status }}</span>
-          <button type="button" class="sx" title="Закрыть" aria-label="Закрыть" @click="closeStage()">✕</button>
-        </header>
-
-        <!-- Контекст решения: задачу и её стенд видно, пока ворота открыты. Ссылки те же,
-             что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
-        <div id="stage-task-context" class="stage-context">
-          <div class="stage-task-context">
-            <span class="stage-context-label">Задача <b class="mono">#{{ stage.task }}</b></span>
-            <span v-if="stageTaskTitle" class="stage-task-title" :title="stageTaskTitle">{{ stageTaskTitle }}</span>
-            <span v-else class="stage-task-title muted">Название загружается…</span>
-          </div>
-          <div class="stage-stand-context">
-            <span class="stage-context-label">Стенд</span>
-            <template v-if="stageGraph?.fePort">
-              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort)" target="_blank" rel="noopener">
-                Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
-              </a>
-              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort)"
-                 target="_blank" rel="noopener">
-                API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
-              </a>
-            </template>
-            <span v-else-if="stageGraph?.sandbox" class="stage-stand-state building">
-              <span class="spin"></span>
-              строится · {{ stageGraph.sandbox.step }}/{{ stageGraph.sandbox.total }} · {{ stageGraph.sandbox.label }}
-            </span>
-            <span v-else class="stage-stand-state">не поднят</span>
-          </div>
-        </div>
-
-        <!-- Компактная строка метаданных -->
-        <div v-if="stage.meta.at || stage.meta.dur != null || stage.meta.fanout != null
-          || stage.meta.tokens || stage.meta.fails || stage.sub || stageActivity"
-          class="smeta" aria-label="Показатели этапа">
-          <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
-          <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
-          <span v-if="stage.meta.fanout != null" class="smchip">{{ stage.meta.fanout }} субаг.</span>
-          <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
-          <span v-if="stage.meta.fails" class="smchip bad">{{ stage.meta.fails }} возвр.</span>
-          <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
-          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ agentActivityLabel(stageActivity) }}</span>
-        </div>
-
-        <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.
-             Для skipped это единственное, что отличает «нечего было проверять» от
-             «агент сдался» — раньше оно оставалось в журнале прогона. -->
-        <div v-if="stage.meta.comment || stage.meta.stall" class="snotices">
-          <div v-if="stage.meta.comment" class="scomment" :class="{ bad: ['skipbad', 'stall'].includes(stage.status) }">
-            <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
-            {{ stage.meta.comment }}
-          </div>
-          <div v-if="stage.meta.stall" class="scomment bad">
-            <span class="sclbl">Почему этап остановился</span>
-            <b>{{ stage.meta.stall.title }}</b>
-            <div>{{ stage.meta.stall.hint }}</div>
-          </div>
-        </div>
-
-        <div v-if="stageHasMain || stageHasRail" class="sworkspace"
-             :class="{ 'main-only': stageHasMain && !stageHasRail, 'rail-only': stageHasRail && !stageHasMain }">
-          <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
-               прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
-          <aside v-if="stageHasRail" class="srail">
-            <!-- Ворота: принять/отклонить. Поле пояснения принадлежит ОТКЛОНЕНИЮ и
-                 раскрывается по кнопке: при принятии текст никуда не уходит. -->
-            <div v-if="gateDecidable" class="sect gate-sect">
-              <div class="secth">Ворота — твоё решение</div>
-              <template v-if="gateRejecting">
-                <label class="gate-lbl" for="gate-note">Что доработать</label>
-                <textarea id="gate-note" ref="gateNoteEl" v-model="gateComment" rows="6"
-                  placeholder="Что не так и что сделать иначе"></textarea>
-                <p class="gate-hint">Текст станет заданием агенту на следующем заходе — целиком, вместе с разметкой и абзацами (до 20 000 символов). Можно и без него — тогда узел вернётся без пояснения.</p>
-                <div class="gbtns">
-                  <button class="btn bad" :disabled="stageBusy === 'gate'" @click="gateDecide('reject')">
-                    {{ stageBusy === 'gate' ? '…' : '✗ Отправить на доработку' }}
-                  </button>
-                  <button class="btn" :disabled="stageBusy === 'gate'" @click="cancelGateReject()">Отмена</button>
-                </div>
-              </template>
-              <template v-else>
-                <p class="gate-hint">Принять — маршрут пойдёт дальше. Отклонить — вернём агенту, там же напишешь, что доработать.</p>
-                <div class="gbtns">
-                  <button class="btn good" :disabled="stageBusy === 'gate'" @click="gateDecide('approve')">✓ Принять</button>
-                  <button class="btn bad" :disabled="stageBusy === 'gate'" @click="startGateReject()">✗ Отклонить</button>
-                </div>
-              </template>
-            </div>
-
-            <!-- Возврат на узел. Своя секция рядом с отправляющей его кнопкой. -->
-            <div v-if="stageHasRewind" class="sect rewind-sect">
-              <div class="secth">Вернуть конвейер сюда</div>
-              <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
-              <textarea v-model="rewindComment" rows="6"
-                placeholder="Указание агенту — что сделать иначе (необязательно)"></textarea>
-              <button class="btn play" :disabled="stageBusy === 'force'" @click="forceStatus('running')">
-                {{ stageBusy === 'force' ? '…' : '▶ Перейти сюда' }}
-              </button>
-            </div>
-          </aside>
-
-          <main v-if="stageHasMain" class="smain">
-            <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
-            <div v-if="stage.meta.runner" class="sect runner-sect">
-              <div class="secth">
-                Исполнитель
-                <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
-              </div>
-              <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
-              <div v-if="!stage.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
-                <div class="runner-override-row">
-                  <span class="runner-override-lbl">Исполнитель этапа</span>
-                  <button v-if="stage.meta.runner.source === 'task-stage'" class="btn small runner-reset"
-                          :disabled="stageBusy === 'runner-override'" @click="setStageRunner('')">
-                    Сбросить
-                  </button>
-                </div>
-                <div class="runner-picks">
-                  <button v-for="id in stageRunnerOptions" :key="id" class="runner-pick"
-                          :class="{ on: id === stageRunnerActive, busy: runnerPending === id }"
-                          :aria-pressed="id === stageRunnerActive"
-                          :disabled="stageBusy === 'runner-override'"
-                          @click="pickStageRunner(id)">
-                    <b>{{ providerLabel(id) }}</b>
-                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
-                  </button>
-                </div>
-                <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
-                  Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
-                </p>
-                <p v-if="stage.status === 'run' && !stage.daemonAlive" class="runner-hint">
-                  Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
-                </p>
-              </div>
-              <!-- Цепочка вторична: она объясняет, кто подхватит этап при аварии, и решения не требует. -->
-              <div class="runner-chain">
-                <span class="runner-chain-lbl">цепочка</span>
-                <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
-                  <span v-if="i" class="runner-arrow">→</span>
-                  <span class="runner-hop"
-                        :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }"
-                        :title="i ? 'резерв: подхватит этап, если основной отпадёт' : 'основной исполнитель'">
-                    {{ providerLabel(id) }}
-                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
-                  </span>
-                </template>
-              </div>
-              <div v-if="stage.meta.runner.actual" class="runner-current"
-                   :class="{ switched: stage.meta.runner.switched }">
-                Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
-                <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
-              </div>
-              <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
-                <div class="runner-attempt-title">Попытки запуска</div>
-                <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
-                  <span class="mono">#{{ a.epoch ?? '—' }}</span>
-                  <b>{{ providerLabel(a.runner) }}</b>
-                  <span v-if="runnerAttemptModelLabel(a)" class="runner-attempt-model mono">{{ runnerAttemptModelLabel(a) }}</span>
-                  <span v-if="attemptCostLabel(a)" class="runner-attempt-cost mono"
-                        :title="attemptCostTitle(a)">{{ attemptCostLabel(a) }}</span>
-                  <span class="runner-result" :class="{
-                    good: a.result === 'ok',
-                    switched: a.result === 'manual_switch',
-                    bad: a.result && !['ok', 'manual_switch'].includes(a.result),
-                  }">
-                    {{ attemptResultLabel(a.result) }}
-                  </span>
-                </div>
-              </div>
-              <div v-if="!stage.readOnly && stageRunnerLive" class="runner-switches">
-                <button v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
-                        :key="id" class="btn runner-switch"
-                        :disabled="stageBusy === 'runner-switch'" @click="switchRunner(id)">
-                  {{ stageBusy === 'runner-switch' ? 'переключаю…' : `Переключить сейчас на ${providerLabel(id)}` }}
-                </button>
-              </div>
-            </div>
-
-            <!-- Живая лента действий агента (для идущего этапа) -->
-            <div v-if="stage.status === 'run' && stageActivity?.live" class="sect content-sect">
-              <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
-              <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
-                <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
-                  <span class="lf-icon">{{ liveIcon(a) }}</span>
-                  <span class="lf-body">
-                    <template v-if="a.type === 'tool' || a.type === 'subagent'">
-                      <span class="lf-name">{{ a.name }}</span>
-                      <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
-                      <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
-                    </template>
-                    <template v-else>
-                      <span class="lf-text">{{ a.text }}</span>
-                    </template>
-                  </span>
-                  <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
-                </div>
-              </div>
-              <p v-else class="muted small">Ожидание действий агента…</p>
-              <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
-            </div>
-
-            <!-- Журнал этапов (stages.log) — сворачиваемый -->
-            <div v-if="stage.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
-              <div class="secth doct" @click="stageLogOpen = !stageLogOpen">
-                {{ stageLogOpen ? '▾' : '▸' }} Журнал этапов
-                <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
-              </div>
-              <div v-if="stageLogOpen" class="log">
-                <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
-              </div>
-            </div>
-
-            <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
-            <div v-if="stageDocLoading" class="sect content-sect">
-              <div class="secth"><span class="spin"></span> Документ этапа</div>
-            </div>
-            <div v-else-if="stageDoc" class="sect content-sect document-sect">
-              <div class="secth doct" @click="stageDocOpen = !stageDocOpen">
-                {{ stageDocOpen ? '▾' : '▸' }} Документ этапа
-              </div>
-              <div v-if="stageDocOpen" class="sdoc md" v-html="mdToHtml(stageDoc)"></div>
-            </div>
-          </main>
-        </div>
-
-        <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
-        <footer class="sactions">
-          <span class="sactions-context"><b class="mono">#{{ stage.task }}</b> · действия с задачей</span>
-          <div class="sactions-buttons">
-            <button class="btn" @click="companion.openForTask(stage.task); closeStage()">💬 Обсудить с агентом</button>
-            <OpenDiffButton :task-id="stage.task" />
-          </div>
-        </footer>
-      </section>
-    </div>
-  </div>
-</template>
-
 <style scoped>
 .pipeline { display: flex; flex-direction: column; gap: 14px; }
 /* Липкий тулбар: full-bleed по бокам; top:-22px компенсирует padding-top .content,
@@ -1012,17 +1276,10 @@ function cardState(g) {
 .needme { color: var(--warn); text-transform: none; letter-spacing: 0; font-size: 12px; }
 .stalledme { color: var(--bad); text-transform: none; letter-spacing: 0; font-size: 12px; margin-left: 8px; cursor: help; }
 .projects { display: flex; flex-wrap: wrap; gap: 6px; }
-.pchip { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
-  border-radius: 999px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; }
-.pchip b { color: var(--ink); margin-left: 4px; }
-.pchip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.pchip.on b { color: #fff; }
 
 /* Очередь и слоты не входят в графы: у каждого блока собственные loading/error и
    последний удачный снимок. Поэтому визуально это одна операционная полоса, но не
    одна карточка с общим условием отображения. */
-.chev { background: none; border: none; color: var(--ink-mid); cursor: pointer; font-size: 13px; padding: 0 2px; flex: none; }
-.chev:hover { color: var(--ink); }
 .waitme { margin: 6px 0 0; font-size: 12.5px; color: var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
   border-radius: 8px; padding: 6px 10px; }
@@ -1043,35 +1300,8 @@ function cardState(g) {
 .stalled .scomment { margin-top: 2px; opacity: .85; font-style: italic; }
 .stalled .sfix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .stalled .sfixhint { opacity: .75; font-size: 11.5px; }
-.sbretry { background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
-  color: var(--ink); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.sbretry:hover { border-color: var(--accent); color: var(--accent); }
-.sbretry.busy { border-color: var(--accent); color: var(--accent); cursor: default; opacity: .85; }
-.sbretry .sbspin { border-color: var(--accent); border-top-color: transparent; }
-/* Продолжение прогона — действие созидательное, поэтому акцентом, а не красным. */
-.sbresume { background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.sbresume:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.sbresume.busy { cursor: default; opacity: .85; }
-.sbresume .sbspin { border-color: var(--accent); border-top-color: transparent; }
-.sbdown { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
-  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.sbdown:hover { color: var(--bad); border-color: var(--bad); }
-.sbdown.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
-/* Остановка живого прогона — разрушительное действие, красным, как снос стенда. */
-.sbstop { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
-  border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.sbstop:hover { color: var(--bad); border-color: var(--bad); }
-.sbstop.busy { color: var(--bad); border-color: var(--bad); cursor: default; opacity: .85; }
-.sbspin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--bad);
-  border-top-color: transparent; border-radius: 50%; vertical-align: -1px;
-  animation: sbspin .8s linear infinite; }
-@keyframes sbspin { to { transform: rotate(360deg); } }
 .cnt { color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
 .tools { display: flex; gap: 6px; }
-.tools button { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
-  border-radius: 8px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
-.tools button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .err { color: var(--bad); }
 
@@ -1082,8 +1312,6 @@ function cardState(g) {
 .card.stall { border-left-color: var(--bad); }
 
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.task { font-weight: 650; font-size: 15px; background: none; border: none; color: var(--ink); cursor: pointer; padding: 0; }
-.task:hover { color: var(--accent); }
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
 .runner-policy { font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
@@ -1112,37 +1340,24 @@ function cardState(g) {
   border-top: 1px solid var(--line); padding-top: 10px; }
 .chunk { display: inline-flex; align-items: center; gap: 6px; }
 .chunk.warn { color: var(--warn); }
-.chunk.bad { color: var(--bad); }
+.chunk.halted { color: var(--bad); }
 .chunk.building { color: var(--accent); }
 .strip a { color: var(--accent); margin-left: 6px; }
 .sdot { width: 8px; height: 8px; border-radius: 50%; }
 .sdot.on { background: var(--good); }
 .sdot.off { background: var(--ink-mid); }
 
-.ctitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: none; border: none; color: var(--ink); text-align: left; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
-.ctitle:hover { color: var(--accent); }
-.ctitle.ticket { cursor: default; }
-.ctitle.ticket:hover { color: var(--ink); }
+.pipeline-title-static { flex: 1; min-width: 0; overflow: hidden; color: var(--ink);
+  font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 
 .outside { margin-top: 4px; }
 .outside .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-mid); margin: 0 0 8px; }
 .orow { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line);
   border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
 .oid { color: var(--ink-mid); font-size: 13px; flex: none; }
-.otitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: none; border: none; color: var(--ink); text-align: left; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
-.otitle:hover { color: var(--accent); }
 .otimer { color: var(--good); font-size: 15px; flex: none; }
 
 /* Модалка этапа */
-.soverlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow: hidden;
-  padding: 16px; background: #04060acc; backdrop-filter: blur(5px); }
-.smodal { width: min(1240px, calc(100vw - 32px)); min-width: 0;
-  min-height: min(560px, calc(100dvh - 32px)); max-height: min(900px, calc(100dvh - 32px));
-  display: flex; flex-direction: column; overflow: hidden;
-  background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px;
-  box-shadow: 0 26px 80px #000c, inset 0 1px 0 #ffffff08; }
 .sh { min-height: 64px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center; gap: 14px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line);
   background: var(--topbar); }
@@ -1151,9 +1366,6 @@ function cardState(g) {
   letter-spacing: .08em; }
 .sh h3 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 17px; font-weight: 650;
   line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
-.sx { width: 36px; height: 36px; flex: none; background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 9px; color: var(--ink-mid); cursor: pointer; font-size: 14px; }
-.sx:hover { color: var(--ink); border-color: var(--line-2); background: color-mix(in srgb, var(--surface-2) 80%, var(--ink-mid)); }
 
 /* Контекст открытого решения: название задачи слева, прямой вход на её стенд справа. */
 .stage-context { min-height: 56px; flex: none; display: grid;
@@ -1192,13 +1404,14 @@ function cardState(g) {
 .sbadge.skip { background: var(--surface-2); color: var(--ink-mid); }
 .smchip { flex: none; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-mid);
   font-size: 11.5px; line-height: 1.35; white-space: nowrap; }
-.smchip.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.smchip.failed { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
 .snotices { max-height: 130px; flex: none; display: flex; flex-direction: column; gap: 7px; overflow-y: auto;
   padding: 9px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .scomment { margin: 0; padding: 8px 11px; border-left: 3px solid var(--line); border-radius: 8px;
   background: var(--surface-2); color: var(--ink-mid); font-size: 12.5px; line-height: 1.45;
   white-space: pre-wrap; overflow-wrap: anywhere; }
-.scomment.bad { color: var(--ink); border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, transparent); }
+.scomment.failed { color: var(--ink); border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 9%, transparent); }
 .sclbl { display: block; margin-bottom: 2px; color: var(--ink-mid); font-size: 10px; text-transform: uppercase;
   letter-spacing: .055em; opacity: .8; }
 .jf { font-size: 11px; color: var(--ink-mid); padding: 2px 8px; border-radius: 6px;
@@ -1251,30 +1464,16 @@ function cardState(g) {
 .runner-attempt-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-attempt-cost { justify-self: end; white-space: nowrap; color: var(--ink-low); }
 .runner-result { justify-self: end; white-space: nowrap; }
-.runner-result.good { color: var(--good); }
+.runner-result.success { color: var(--good); }
 .runner-result.switched { color: var(--accent); }
-.runner-result.bad { color: var(--warn); }
+.runner-result.failed { color: var(--warn); }
 .runner-switches { display: flex; flex-wrap: wrap; gap: 7px; }
-.runner-switch { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
 /* Выбор исполнителя до запуска этапа (override) — главное действие блока, отсюда карточки. */
 .runner-override { display: flex; flex-direction: column; gap: 8px; }
 .runner-override-lbl { color: var(--ink-mid); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .runner-override-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .runner-picks { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
-.runner-pick { min-width: 126px; flex: 1 1 150px; display: flex; flex-direction: column; gap: 2px;
-  padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2);
-  color: var(--ink-mid); font: inherit; font-size: 13px; line-height: 1.25; text-align: left; cursor: pointer; }
-.runner-pick b { color: var(--ink); font-weight: 600; }
-.runner-pick small { color: var(--ink-mid); font: 10.5px/1.4 var(--mono); overflow-wrap: anywhere; }
-.runner-pick:hover:not(:disabled) { border-color: var(--line-2); }
-.runner-pick.on, .runner-pick.on b { color: var(--accent); }
-.runner-pick.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
-.runner-pick:disabled { cursor: default; }
-.runner-pick:disabled:not(.on):not(.busy) { opacity: .5; }
-.runner-pick.busy { opacity: .8; }
-.runner-reset { align-self: center; margin-left: auto; color: var(--ink-mid); }
-.runner-reset:hover:not(:disabled) { color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.runner-reset { align-self: center; margin-left: auto; }
 .runner-hint { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.4; }
 
 /* Живая лента действий */
@@ -1303,10 +1502,6 @@ function cardState(g) {
   border-radius: 8px; background: color-mix(in srgb, var(--ground) 88%, #000); }
 .logline { padding: 2px 0; font-size: 12px; overflow-wrap: anywhere; }
 .small { font-size: 12px; }
-.sect textarea { width: 100%; min-height: 112px; max-height: 220px; resize: vertical; padding: 10px 11px;
-  border: 1px solid var(--line); border-radius: 9px; background: var(--ground); color: var(--ink);
-  font-family: inherit; font-size: 13px; line-height: 1.5; }
-.secth.doct { cursor: pointer; user-select: none; }
 .sdoc { min-width: 0; overflow-x: auto; overflow-wrap: anywhere; padding: 12px 14px;
   border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--ground) 88%, #000);
   font-size: 13px; line-height: 1.55; }
@@ -1325,18 +1520,7 @@ function cardState(g) {
   background: color-mix(in srgb, var(--warn) 4%, var(--ground)); }
 .gate-lbl { font-size: 12.5px; color: var(--ink); }
 .gate-hint { margin: 0; color: var(--ink-mid); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.sect textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
-.smodal .btn { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; align-self: flex-start;
-  padding: 7px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2);
-  color: var(--ink); font-size: 13px; line-height: 1.2; cursor: pointer; }
-.smodal .btn:hover:not(:disabled) { border-color: var(--line-2); }
-.smodal .btn.good { background: var(--good); border-color: var(--good); color: #06210f; }
-.smodal .btn.bad { background: var(--bad); border-color: var(--bad); color: #2a0a0c; }
-.smodal .btn.play { width: 100%; background: color-mix(in srgb, var(--warn) 15%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); font-weight: 600; }
-.smodal .btn.small { min-height: 32px; padding: 5px 10px; font-size: 12px; }
-.smodal .btn:disabled { opacity: .5; cursor: default; }
 
 /* Чат и диф закреплены в подвале модалки. */
 .sactions { min-height: 58px; flex: none; display: flex; align-items: center; justify-content: space-between;
@@ -1344,13 +1528,9 @@ function cardState(g) {
 .sactions-context { color: var(--ink-mid); font-size: 11.5px; white-space: nowrap; }
 .sactions-context b { color: var(--ink); font-weight: 550; }
 .sactions-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.sactions :deep(.oc) { min-height: 38px; padding: 7px 13px; border-radius: 9px; font-size: 13px; }
 
 /* Планшет: одна внутренняя колонка; управление идёт первым благодаря порядку DOM. */
 @media (max-width: 980px) {
-  .smodal { width: min(860px, calc(100vw - 20px)); height: calc(100dvh - 20px);
-    min-height: 0; max-height: calc(100dvh - 20px); }
-  .soverlay { padding: 10px; }
   .sworkspace, .sworkspace.main-only, .sworkspace.rail-only { display: flex; flex-direction: column;
     gap: 12px; overflow-y: auto; padding: 12px; }
   .smain, .srail { flex: none; overflow: visible; padding: 0; border: 0; background: transparent;
@@ -1359,13 +1539,11 @@ function cardState(g) {
 
 /* Телефон: тот же fullscreen-паттерн, что у просмотра документа. */
 @media (max-width: 600px) {
-  .soverlay { padding: 0; }
-  .smodal { width: 100vw; height: 100dvh; min-height: 0; max-height: none; border: 0; border-radius: 0; }
   .sh { min-height: 66px; grid-template-columns: minmax(0, 1fr) 44px; grid-template-rows: auto auto;
     column-gap: 10px; row-gap: 5px; padding: 8px 10px 8px 14px; }
   .shead-copy { grid-column: 1; grid-row: 1; }
   .sh > .sbadge { grid-column: 1; grid-row: 2; justify-self: start; }
-  .sx { grid-column: 2; grid-row: 1 / span 2; width: 44px; height: 44px; }
+  .sx { grid-column: 2; grid-row: 1 / span 2; }
   .sh h3 { font-size: 15px; }
   .shead-kicker { font-size: 9.5px; }
   .stage-context { min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 8px 12px 9px; }
@@ -1391,19 +1569,14 @@ function cardState(g) {
      она вытолкнула бы имя исполнителя за край. */
   .runner-attempt-cost { grid-column: 3; grid-row: 2; }
   .runner-result { grid-column: 3; grid-row: 1; }
-  /* Пальцем — по одной карточке в ряд: на 320-360 px две в ряд дают 8-9 знаков имени. */
-  .runner-pick { min-width: 0; flex: 1 1 100%; min-height: 44px; }
-  .sect textarea { min-height: 96px; max-height: 160px; }
   .gbtns .btn { flex: 1 1 140px; }
   .sactions { min-height: 62px; padding: 9px 10px calc(9px + env(safe-area-inset-bottom)); }
   .sactions-context { display: none; }
   .sactions-buttons { width: 100%; }
-  .sactions-buttons > .btn, .sactions :deep(.oc) { min-height: 42px; flex: 1; }
+  .sactions-buttons > .btn, .sactions :deep(.oc) { flex: 1; }
 }
 
 @media (max-height: 700px) and (min-width: 601px) {
-  .soverlay { padding: 8px; }
-  .smodal { height: calc(100dvh - 16px); min-height: 0; max-height: calc(100dvh - 16px); }
   .sh { min-height: 56px; }
   .live-feed { max-height: 190px; }
   .runner-attempts { max-height: 200px; }

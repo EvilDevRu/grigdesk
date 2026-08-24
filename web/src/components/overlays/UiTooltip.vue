@@ -54,8 +54,9 @@
       >
         <slot v-if="slots.tip" name="tip" />
         <slot v-else-if="slots.content" name="content" />
+        <template v-else-if="text">{{ text }}</template>
         <slot v-else-if="slots.trigger" v-bind="triggerSlotProps" />
-        <template v-else>{{ text }}</template>
+        <slot v-else v-bind="triggerSlotProps" />
       </span>
     </Transition>
   </Teleport>

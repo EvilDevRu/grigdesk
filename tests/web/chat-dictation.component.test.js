@@ -2,86 +2,16 @@ import assert from 'node:assert/strict';
 globalThis.__sharedChatContextFill = (await import('../../web/src/shared/chat-context.js')).contextFill;
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  CHAT_SESSION_PATH as VIEW_PATH,
+  compileChatSession as compileChatSessionHarness,
+} from './helpers/chat-session.js';
+import { webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/chat/ChatSession.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-let compileNonce = 0;
-
-async function compileChatSession() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-chat-dictation-test-${compileNonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`);
-  code = code
-    .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
-    .replace("import { api } from '../../shared/api-client.js';", 'const api = globalThis.__dictationApi;')
-    .replace(
-      "import { useDictationController } from '../../features/speech/provider.js';",
-      'const useDictationController = globalThis.__dictationUseController;',
-    )
-    .replace(
-      "import { contextFill } from '../../shared/chat-context.js';",
-      'const contextFill = globalThis.__sharedChatContextFill;',
-    )
-    .replace(
-      "import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';",
-      'const CONTEXT_WINDOW = 200000; const useChatStore = globalThis.__dictationChatStore;',
-    )
-    .replace("import { useTasksStore } from '../../stores/tasks.js';", 'const useTasksStore = () => ({ async load() {} });')
-    .replace("import { useUiStore } from '../../stores/ui.js';", 'const useUiStore = () => ({ openTaskLaunch() {} });')
-    .replace("import { useProvidersStore } from '../../stores/providers.js';", 'const useProvidersStore = globalThis.__dictationProvidersStore;')
-    .replace("import EffortSlider from './EffortSlider.vue';", 'const EffortSlider = { template: "<span></span>" };')
-    .replace("import StepList from './StepList.vue';", 'const StepList = { template: "<span></span>" };')
-    .replace("import ChatQuestion from './ChatQuestion.vue';", 'const ChatQuestion = { template: "<span></span>" };')
-    .replace("import ChatPermission from './ChatPermission.vue';", 'const ChatPermission = { template: "<span></span>" };')
-    .replace(
-      "import HelpTip from '../../shared/ui/HelpTip.vue';",
-      `const HelpTip = {
-        props: ['text', 'align', 'triggerFocusable', 'tipStyle'],
-        template: '<span class="help-tip-stub" :data-text="text"><slot /></span>',
-      };`,
-    )
-    .replace("import { confirmDialog } from '../../shared/ui/confirm.js';", 'const confirmDialog = async () => true;')
-    .replace("import { mdToHtml } from '../../shared/md.js';", 'const mdToHtml = (text) => text;')
-    .replace(
-      "import { documentLinkFromClick } from '../../features/documents/links.js';",
-      'const documentLinkFromClick = () => "";',
-    )
-    .replace(
-      "import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';",
-      'const chatFileLinkHref = () => ""; const codeLinkFromClick = () => null;'
-      + ' const loadCodeRoots = () => Promise.resolve([]);',
-    )
-    .replace(
-      "import { useToolLauncher } from '../../shared/tools/launcher.js';",
-      'const useToolLauncher = () => ({ openTool: () => {} });',
-    )
-    .replace(
-      "import { useDocumentPreviewStore } from '../../stores/document-preview.js';",
-      'const useDocumentPreviewStore = () => ({ show() {}, showImage() {} });',
-    )
-    .replace(
-      "import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';",
-      'const lastModelRun = () => null; const modelRunView = () => ({ model: "" });',
-    );
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
-}
+const ACTIONS_PATH = webFile('src/styles/components/actions.css');
+const compileChatSession = () => compileChatSessionHarness('__dictation');
 
 async function installBrowser(t) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -176,6 +106,8 @@ async function mountChat(t, {
     },
   };
   globalThis.__dictationChatStore = () => chatStore;
+  globalThis.__dictationTasksStore = () => ({ async load() {} });
+  globalThis.__dictationUiStore = () => ({ openTaskLaunch() {} });
   const controller = createDictationController({
     settings: {
       read: () => chatStore.speech,
@@ -211,6 +143,8 @@ async function mountChat(t, {
     void controller.dispose();
     delete globalThis.__dictationApi;
     delete globalThis.__dictationChatStore;
+    delete globalThis.__dictationTasksStore;
+    delete globalThis.__dictationUiStore;
     delete globalThis.__dictationUseController;
     delete globalThis.__dictationProvidersStore;
   });
@@ -246,12 +180,15 @@ function deferred() {
 }
 
 test('индикация записи — красная пульсация кнопки Stop без нижнего meter', async () => {
-  const source = await readFile(VIEW_PATH, 'utf8');
+  const [source, actions] = await Promise.all([
+    readFile(VIEW_PATH, 'utf8'),
+    readFile(ACTIONS_PATH, 'utf8'),
+  ]);
   assert.doesNotMatch(source, /data-testid=["']speech-meter["']/);
-  assert.match(source, /\.tool\.mic\.rec::before\s*\{/);
-  assert.match(source, /animation:\s*mic-pulse\b/);
-  assert.match(source, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
-  assert.match(source, /aria-label="recording \? 'Остановить диктовку'/);
+  assert.match(actions, /data-context='chat-microphone'\]\.rec::before\s*\{/);
+  assert.match(actions, /animation:\s*ui-chat-mic-pulse\b/);
+  assert.match(actions, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(source, /:label="recording \? 'Остановить диктовку'/);
 });
 
 test('consent перед start, prefixed API, interim/final и generation после Stop', async (t) => {

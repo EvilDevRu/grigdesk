@@ -6,94 +6,9 @@
 // устройства, и один разговор не должен идти разными моделями.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileSettingsView } from './helpers/settings-view.js';
 
 process.env.NODE_ENV = 'test';
-
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/SettingsView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-const FACTORY_DEBUG_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/factory-debug.js', import.meta.url),
-)).href;
-const COMPANION_RUN_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/companion-run.js', import.meta.url),
-)).href;
-let compileNonce = 0;
-
-// Node кэширует модуль по всему `data:`-URL, а две компиляции одного SFC дают побайтово
-// равный текст — без хвоста-nonce второй тест работал бы со сторами первого.
-async function compileSettingsView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: `data-v-companion-settings-${compileNonce}`,
-    inlineTemplate: true,
-  }).content;
-  const stubStore = (name) => `const ${name} = globalThis.__settingsStores.${name};`;
-  code = code
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { useRouter } from 'vue-router';", 'const useRouter = () => ({ push() {} });')
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__settingsApi;')
-    .replace("import { useProvidersStore } from '../stores/providers.js';", stubStore('useProvidersStore'))
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ update() {}, focus() {}, blur() {}, dispose() {} });',
-    )
-    .replace(
-      "import { useToolLauncher } from '../shared/tools/launcher.js';",
-      'const useToolLauncher = () => ({ openTerminal() {} });',
-    )
-    .replace(
-      "import ProviderIcon from '../shared/ProviderIcon.vue';",
-      "const ProviderIcon = { props: ['id'], template: '<i class=\"picon\"></i>' };",
-    )
-    .replace(
-      "import AccessOverview from './settings/AccessOverview.vue';",
-      "const AccessOverview = { template: '<div class=\"access-overview-stub\"></div>' };",
-    )
-    // Тумблер настоящий по поведению, но без своей вёрстки: проверяем не его, а карточку.
-    .replace(
-      "import ToggleSwitch from '../shared/ui/ToggleSwitch.vue';",
-      "const ToggleSwitch = { props: ['modelValue', 'label'], emits: ['update:modelValue'],"
-      + " template: '<button class=\"toggle\" :aria-pressed=\"String(!!modelValue)\""
-      + " @click=\"$emit(\\'update:modelValue\\', !modelValue)\">{{ label }}</button>' };",
-    )
-    .replace(
-      "import NumberField from '../shared/ui/NumberField.vue';",
-      "const NumberField = { props: ['modelValue'], template: '<input class=\"numfield\" />' };",
-    )
-    .replace("import { useAuthStore } from '../stores/auth.js';", stubStore('useAuthStore'))
-    .replace("import { usePluginsStore } from '../stores/plugins.js';", stubStore('usePluginsStore'))
-    .replace("import { useChatStore } from '../stores/chat.js';", stubStore('useChatStore'))
-    .replace("import { useCompanionStore } from '../stores/companion.js';", stubStore('useCompanionStore'))
-    .replace("import { usePwaStore } from '../stores/pwa.js';", stubStore('usePwaStore'))
-    .replace(
-      /import \{\s*blockReasonLabel,\s*UPDATE_STAGE_LABELS,\s*useCockpitUpdateStore,\s*\} from '\.\.\/stores\/cockpit-update\.js';/,
-      'const blockReasonLabel = (v) => String(v || ""); const UPDATE_STAGE_LABELS = {};'
-      + ' const useCockpitUpdateStore = globalThis.__settingsStores.useCockpitUpdateStore;',
-    )
-    .replace("import { confirmDialog } from '../shared/ui/confirm.js';", 'const confirmDialog = async () => true;')
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = () => ({ connected: { value: false } });',
-    )
-    .replace("from '../shared/factory-debug.js';", `from "${FACTORY_DEBUG_URL}";`)
-    // Настоящий модуль, а не заглушка: правило «полупустая ссылка = дефолт реестра»
-    // должно проверяться тем же кодом, что резолвит модель перед ходом.
-    .replace("from '../shared/companion-run.js';", `from "${COMPANION_RUN_URL}";`);
-  const nonce = compileNonce++;
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce}`
-  )).default;
-}
 
 async function installBrowser(t, storage = {}) {
   globalThis.__COCKPIT_VERSION__ = '0.0.0-test';
@@ -227,7 +142,7 @@ test('COMP-SET-02: отключённый компаньон говорит об
 
 test('COMP-SET-03: тумблер подключения остаётся настройкой этого устройства', async (t) => {
   const { wrapper, device, saved, flushPromises } = await mountSettings(t, { deviceEnabled: true });
-  await wrapper.find('[data-testid="companion-device-setting"] .toggle').trigger('click');
+  await wrapper.get('[data-testid="companion-device-setting"] input[role="switch"]').setValue(false);
   await flushPromises();
   assert.equal(device.deviceEnabled, false);
   // Устройство не должно уносить свой выбор в общие prefs: на планшете компаньон свой.

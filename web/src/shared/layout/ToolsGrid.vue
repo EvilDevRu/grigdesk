@@ -1,13 +1,3 @@
-<script setup>
-import { NAV_ICONS } from '../nav-icons.js';
-
-defineProps({
-  items: { type: Array, default: () => [] },
-  badges: { type: Object, default: () => ({}) },
-});
-defineEmits(['select']);
-</script>
-
 <template>
   <nav class="tools-grid" aria-label="Инструменты">
     <router-link v-for="item in items" :key="item.id || item.to" :to="item.to"
@@ -26,6 +16,16 @@ defineEmits(['select']);
     </router-link>
   </nav>
 </template>
+
+<script setup>
+import { NAV_ICONS } from '../nav-icons.js';
+
+defineProps({
+  items: { type: Array, default: () => [] },
+  badges: { type: Object, default: () => ({}) },
+});
+defineEmits(['select']);
+</script>
 
 <style scoped>
 .tools-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }

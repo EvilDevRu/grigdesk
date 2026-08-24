@@ -66,7 +66,12 @@ test('StepList сохраняет полноширинную компактну�
     actions,
     /\.ui-disclosure-button\s+\.ui-button__label\s*\{[^}]*display:\s*inline-flex/s,
   );
-  assert.match(component, /\.head\s*\{[^}]*min-height:\s*0[^}]*padding:\s*3px 4px/s);
+  assert.match(
+    actions,
+    /\.ui-disclosure-button--compact,[^{]*\{[^}]*min-height:\s*0[^}]*padding:\s*3px 4px/s,
+  );
+  assert.match(component, /density="compact"/);
+  assert.match(component, /\.step-disclosure\s*\{[^}]*width:\s*100%/s);
 });
 
 test('StepList не схлопывает пункты обновлённого плана в одну строку', async () => {

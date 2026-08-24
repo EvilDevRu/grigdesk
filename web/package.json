@@ -11,9 +11,11 @@
     "typecheck:ui": "vue-tsc -p tsconfig.ui.json --noEmit",
     "check:readability": "node scripts/check-code-readability.mjs",
     "check:sfc": "node scripts/check-vue-sfc-order.mjs",
-    "check:ui": "node scripts/check-ui-boundary.mjs",
+    "check:ui": "node scripts/check-ui-suite.mjs",
+    "check:ui-styles": "node scripts/check-ui-control-styles.mjs",
+    "test:ui-browser": "node scripts/check-ui-geometry.mjs",
     "test:components": "node --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
-    "test": "npm run typecheck:ui && npm run check:sfc && npm run check:ui && npm run check:readability && npm run test:components"
+    "test": "npm run typecheck:ui && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

@@ -27,7 +27,6 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
 import type { UiActionTone, UiActionVariant } from '../../types/uiActions';
 import UiButton from '../primitives/UiButton.vue';
 
@@ -50,10 +49,10 @@ withDefaults(
     loading: false,
   },
 );
-defineSlots<{ default(): unknown }>();
+defineSlots<{ default?(): unknown }>();
 defineEmits<{ confirm: [] }>();
 
-const open = ref(false);
+const open = defineModel<boolean>({ default: false });
 
 defineExpose({
   close: () => {

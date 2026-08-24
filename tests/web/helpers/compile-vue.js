@@ -49,17 +49,31 @@ function dependencyPlugin(stubs) {
     name: 'cockpit-test-dependencies',
     setup(builder) {
       for (const [specifier, singletonPath] of SINGLETONS) {
+        if (Object.hasOwn(stubs, specifier)) {
+          continue;
+        }
+
         builder.onResolve({ filter: new RegExp(`^${specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }, () => ({
           path: pathToFileURL(singletonPath).href,
           external: true,
         }));
       }
       for (const [specifier, contents] of Object.entries(stubs)) {
-        builder.onResolve({ filter: new RegExp(`^${specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }, () => ({
+        const filter = new RegExp(
+          `^${specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+        );
+
+        builder.onResolve({ filter }, () => ({
           path: specifier,
           namespace: 'cockpit-stub',
         }));
-        builder.onLoad({ filter: /.*/, namespace: 'cockpit-stub' }, () => ({ contents, loader: 'js' }));
+        builder.onLoad(
+          {
+            filter,
+            namespace: 'cockpit-stub',
+          },
+          () => ({ contents, loader: 'js' }),
+        );
       }
     },
   };

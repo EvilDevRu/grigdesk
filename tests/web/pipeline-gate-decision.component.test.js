@@ -1,105 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compilePipelineView } from './helpers/pipeline-view.js';
 
 process.env.NODE_ENV = 'test';
-
-const VIEW_PATH = fileURLToPath(new URL('../../web/src/views/PipelineView.vue', import.meta.url));
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
-
-// Тот же приём, что и в остальных тестах страницы конвейера: SFC компилируется с
-// inline-шаблоном, а импорты подменяются заглушками через globalThis.
-async function compilePipelineView() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(VIEW_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: VIEW_PATH });
-  assert.deepEqual(errors, []);
-  let code = compileScript(descriptor, {
-    id: 'data-v-pipeline-gate-decision-test',
-    inlineTemplate: true,
-  }).content;
-  code = code
-    .replaceAll('from "vue"', 'from "' + VUE_URL + '"')
-    .replaceAll("from 'vue'", "from '" + VUE_URL + "'")
-    .replace(
-      "import { api } from '../shared/api-client.js';",
-      'const api = globalThis.__pipelineGateApi;',
-    )
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = () => {};',
-    )
-    .replace(
-      "import { useUiContextSource } from '../composables/useUiContextSource.js';",
-      'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
-    )
-    .replace(
-      "import { useUiStore } from '../stores/ui.js';",
-      'const useUiStore = globalThis.__pipelineGateUiStore;',
-    )
-    .replace(
-      "import { useTasksStore } from '../stores/tasks.js';",
-      'const useTasksStore = globalThis.__pipelineGateTasksStore;',
-    )
-    .replace(
-      "import { useBoardStore } from '../stores/board.js';",
-      'const useBoardStore = globalThis.__pipelineGateBoardStore;',
-    )
-    .replace(
-      "import { useCompanionStore } from '../stores/companion.js';",
-      'const useCompanionStore = globalThis.__pipelineGateCompanionStore;',
-    )
-    .replace(
-      "import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';",
-      'const liveTimerSec = () => 0; const pipelineWorkSec = () => null; const secToHMS = (n) => String(n ?? 0);',
-    )
-    .replace(
-      "import { mdToHtml } from '../shared/md.js';",
-      'const mdToHtml = (value) => String(value || "");',
-    )
-    .replace(
-      "import { confirmDialog, alertDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = globalThis.__pipelineGateConfirm;'
-      + ' const alertDialog = globalThis.__pipelineGateAlert;',
-    )
-    .replace(
-      "import { sandboxUrl } from '../shared/sandbox.js';",
-      'const sandboxUrl = (port) => "http://sandbox.test:" + port;',
-    )
-    .replace(
-      "import { agentActivityLabel } from '../shared/agent-activity.js';",
-      'const agentActivityLabel = () => "";',
-    )
-    .replace(
-      "import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';",
-      'const { waitingReason, stripEmoji } = globalThis.__pipelineGateWait;',
-    )
-    .replace(
-      /import \{[^}]*\} from '\.\.\/shared\/runner-display\.js';/,
-      'const { attemptCostLabel, attemptCostTitle, attemptResultLabel, providerLabel,'
-      + ' runnerAttemptModelLabel, runnerChainLabel,'
-      + ' runnerModelEffortLabel, runnerNodeLabel, runnerReasonLabel }'
-      + ' = globalThis.__pipelineGateDisplay;',
-    )
-    .replace(
-      "import FactoryGraph from './pipeline/FactoryGraph.vue';",
-      'const FactoryGraph = globalThis.__pipelineGateFactoryGraph;',
-    )
-    .replace(
-      "import OpenDiffButton from './OpenDiffButton.vue';",
-      'const OpenDiffButton = { props: ["taskId"], template: "<span></span>" };',
-    );
-  compilePipelineView.seq = (compilePipelineView.seq || 0) + 1;
-  return (await import(
-    'data:text/javascript;base64,'
-    + Buffer.from(`${code}\n// compile #${compilePipelineView.seq}`).toString('base64')
-  )).default;
-}
 
 // Задача №42 на маршруте feature: план пройден, ворота плана ждут решения человека.
 function makeFixture({ gateStatus = 'wait', gateComment = null, readOnly = false } = {}) {
@@ -167,10 +70,8 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
       return { ok: true, resumed: true };
     },
   };
-  globalThis.__pipelineGateConfirm = async () => true;
-  globalThis.__pipelineGateAlert = async (text) => { alerts.push(text); };
-  globalThis.__pipelineGateWait = await import('../../web/src/shared/pipeline-wait.js');
-  globalThis.__pipelineGateDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__pipelineGateConfirmDialog = async () => true;
+  globalThis.__pipelineGateAlertDialog = async (text) => { alerts.push(text); };
   globalThis.__pipelineGateFactoryGraph = {
     name: 'FactoryGraph',
     props: ['graph', 'loopsOn'],
@@ -195,18 +96,20 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
     actions: { openForTask() {} },
   });
 
-  const wrapper = mount(await compilePipelineView(), {
+  const wrapper = mount(await compilePipelineView('__pipelineGate'), {
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()] },
+    global: {
+      plugins: [createPinia()],
+      stubs: { teleport: true },
+    },
   });
   t.after(() => {
     wrapper.unmount();
     browser.close();
     for (const key of [
-      '__pipelineGateApi', '__pipelineGateConfirm', '__pipelineGateAlert',
-      '__pipelineGateWait', '__pipelineGateDisplay', '__pipelineGateFactoryGraph',
-      '__pipelineGateUiStore', '__pipelineGateTasksStore', '__pipelineGateBoardStore',
-      '__pipelineGateCompanionStore',
+      '__pipelineGateApi', '__pipelineGateConfirmDialog', '__pipelineGateAlertDialog',
+      '__pipelineGateFactoryGraph', '__pipelineGateUiStore', '__pipelineGateTasksStore',
+      '__pipelineGateBoardStore', '__pipelineGateCompanionStore',
     ]) delete globalThis[key];
   });
   await flushPromises();
@@ -215,10 +118,10 @@ async function mountPipeline(t, { factoryTask, graph, postFails = null }) {
     await flushPromises();
   };
   const openGate = (status = 'wait') => openStage({
-    nid: 'gate_plan', label: '🚦 Ворота плана', sub: '', status,
+    id: 'gate_plan', label: '🚦 Ворота плана', subtitle: '', status,
   });
   const openPlan = (status = 'done') => openStage({
-    nid: 'plan', label: '📋 План', sub: '', status,
+    id: 'plan', label: '📋 План', subtitle: '', status,
   });
   return { wrapper, flushPromises, getCalls, posts, alerts, openGate, openPlan };
 }

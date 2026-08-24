@@ -170,13 +170,10 @@
         "effect->exit: return () => listeners.delete(listener);": 1,
         "declaration->branch: if (!element) return null;": 1,
         "branch->try: try { return element(); } catch { return null; }": 1,
-        "effect->declaration: const token = Symbol(id);": 2,
-        "declaration->effect: layers.set(token, entry);": 2,
+        "effect->declaration: const token = Symbol(id);": 1,
+        "declaration->effect: layers.set(token, entry);": 1,
         "declaration->exit: return handle;": 1,
-        "branch->effect: registered = false;": 2,
-        "declaration->effect: ensureListener();": 1,
-        "declaration->effect: Object.defineProperties(unregister, { token: { value: token, enumerable: true }, handle: { value: handle, enumerable: true }, });": 1,
-        "effect->exit: return unregister;": 1
+        "branch->effect: registered = false;": 1
       },
       "unbraced-control": {
         "if (!target || typeof (target as Element).closest !== 'function') return false;": 1,
@@ -187,7 +184,7 @@
         "if (layers.size > 0 || !listeningDocument) return;": 1,
         "for (const listener of [...listeners]) listener();": 1,
         "if (!element) return null;": 1,
-        "if (!registered) return;": 2
+        "if (!registered) return;": 1
       },
       "function-explanation": {
         "function onKeydown(event: KeyboardEvent): void { if (event.key !== 'Escape' || event.defaultPrevented || targetOwnsEscape(event.target)) return; const layer = topLayer(); if (!laye": 1,
@@ -198,34 +195,10 @@
         "export function activeLayerElement(): HTMLElement | null { const element = topLayer()?.element; if (!element) return null; try { return element(); } catch { return null; } }": 1,
         "export function isTopLayerToken(token: symbol): boolean { return topLayer()?.token === token; }": 1,
         "export function registerUiLayer(id: string, options: UiLayerRegistrationOptions): UiLayerHandle { ensureListener(); const token = Symbol(id); const entry: LayerEntry = { token, id,": 1,
-        "export function registerLayer(id: string, options: LegacyLayerRegistrationOptions): LegacyLayerUnregister { const name = normalizeUiLayerName(options.name, 'dialog'); ensureListene": 1,
         "export function resetLayerStackForTests(): void { layers.clear(); listeners.clear(); sequence = 0; removeListenerWhenIdle(); }": 1
       },
       "one-line-function": {
         "() => { throw error; }": 1
-      }
-    },
-    "web/src/shared/ui/HelpTip.vue": {
-      "logical-spacing": {
-        "branch->exit: return 'top';": 1
-      },
-      "unbraced-control": {
-        "if (props.align === 'left') return 'top-start';": 1,
-        "if (props.align === 'right') return 'top-end';": 1
-      }
-    },
-    "web/src/shared/ui/NumberField.vue": {
-      "logical-spacing": {
-        "declaration->function: function set(value: UiNumberValue): void { const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 0; model.value = Math.max(props.min, normalized); }": 1,
-        "declaration->effect: model.value = Math.max(props.min, normalized);": 1
-      },
-      "packed-members": {
-        "{ min: 0, max: undefined, step: 1, placeholder: '' }": 1
-      }
-    },
-    "web/src/shared/ui/ToggleSwitch.vue": {
-      "logical-spacing": {
-        "effect->declaration: const model = defineModel<boolean>({ required: true });": 1
       }
     },
     "web/src/types/uiActions.ts": {

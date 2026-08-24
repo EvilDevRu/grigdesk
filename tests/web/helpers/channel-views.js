@@ -1,20 +1,33 @@
 // Офлайн-harness для небольших Inbox/GitHub SFC. Общий SSE
 // подменяем списком callbacks, чтобы не открывать EventSource в Node.
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compileVue, webFile } from './compile-vue.js';
 
 const VIEWS = {
-  inbox: fileURLToPath(new URL('../../../web/src/views/InboxView.vue', import.meta.url)),
-  github: fileURLToPath(new URL('../../../web/src/views/GitHubView.vue', import.meta.url)),
+  inbox: webFile('src/views/InboxView.vue'),
+  github: webFile('src/views/GitHubView.vue'),
 };
-const VUE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../../web/node_modules/vue/index.mjs', import.meta.url),
-)).href;
 const HAPPY_DOM = '../../../web/node_modules/happy-dom/lib/index.js';
 const TEST_UTILS = '../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs';
-const COMPILER_SFC = '../../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js';
-let nonce = 0;
+
+const API_STUB = `
+  export const api = {
+    get: (...args) => globalThis.__channelApi.get(...args),
+    post: (...args) => globalThis.__channelApi.post(...args),
+    put: (...args) => globalThis.__channelApi.put(...args),
+  };
+`;
+const DIALOGS_STUB = `
+  export const confirmDialog = (...args) => globalThis.__channelConfirm(...args);
+  export const promptDialog = (...args) => globalThis.__channelPrompt(...args);
+  export const alertDialog = () => Promise.resolve();
+`;
+const SSE_STUB = `
+  export const useSse = (listener) => {
+    globalThis.__channelSse.push(listener);
+    return { connected: { value: true } };
+  };
+`;
+const componentPromises = new Map();
 
 export function apiError(status, data) {
   const error = new Error(data.message || data.error || `HTTP ${status}`);
@@ -24,35 +37,17 @@ export function apiError(status, data) {
 }
 
 async function compileView(view) {
-  const path = VIEWS[view];
-  const { parse, compileScript } = await import(COMPILER_SFC);
-  const source = await readFile(path, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: path });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, {
-    id: `data-v-channel-${view}-${nonce}`,
-    inlineTemplate: true,
-  }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__channelApi;')
-    .replace(
-      "import { confirmDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = (...args) => globalThis.__channelConfirm(...args);',
-    )
-    // У data:-модуля нет базового пути, поэтому КАЖДЫЙ импорт вью обязан иметь
-    // здесь свою замену: пропущенная роняет весь файл целиком, а не один тест.
-    .replace(
-      "import { confirmDialog, promptDialog } from '../shared/ui/confirm.js';",
-      'const confirmDialog = (...args) => globalThis.__channelConfirm(...args);'
-      + '\nconst promptDialog = (...args) => globalThis.__channelPrompt(...args);',
-    )
-    .replace(
-      "import { useSse } from '../composables/useSse.js';",
-      'const useSse = (fn) => { globalThis.__channelSse.push(fn); return { connected: { value: true } }; };',
-    );
-  const own = nonce++;
-  return (await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${own}`)).default;
+  if (!componentPromises.has(view)) {
+    componentPromises.set(view, compileVue(VIEWS[view], {
+      stubs: {
+        '../shared/api-client.js': API_STUB,
+        '../composables/useSse.js': SSE_STUB,
+        './services/dialogs': DIALOGS_STUB,
+      },
+    }));
+  }
+
+  return componentPromises.get(view);
 }
 
 async function installBrowser(t, view) {

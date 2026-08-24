@@ -1,3 +1,828 @@
+<template>
+  <div class="tg">
+    <section v-if="pluginOff" class="card disabled-card">
+      <div class="disabled-mark">TG</div>
+      <div>
+        <h2 class="ttl">Телеграм пока выключен</h2>
+        <p class="muted lead">
+          Включи плагин «Телеграм» в разделе «Настройки → Плагины»,
+          затем вернись сюда — появится пошаговое подключение.
+        </p>
+      </div>
+    </section>
+
+    <template v-else>
+      <header class="tg-hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Канал Telegram</div>
+          <h2 class="ttl">
+            <template v-if="loading">Готовим рабочее пространство…</template>
+            <template v-else-if="connected">Бот подключён и хранит сообщения в своём канале</template>
+            <template v-else>Подключи бота — это займёт несколько минут</template>
+          </h2>
+          <p class="muted lead">
+            Здесь управляются подключение, архив и allowlist Telegram. Очередь и отдельный
+            переключатель приёма новых обращений находятся в общем разделе «Входящие».
+            Бот читает только явно разрешённые ниже чаты и пишет туда лишь включённые
+            подтверждения уже созданных задач.
+          </p>
+        </div>
+
+        <div v-if="!loading && connected" class="hero-stats" aria-label="Сводка Телеграма">
+          <a class="hero-stat" href="#/inbox">
+            <strong>Inbox</strong>
+            <span>приём и общая очередь</span>
+          </a>
+          <a class="hero-stat" href="#tg-chats">
+            <strong>{{ chats.length }}</strong>
+            <span>{{ plural(chats.length, ['чат пишет', 'чата пишут', 'чатов пишут']) }} боту</span>
+          </a>
+          <a class="hero-stat" href="#tg-rules">
+            <strong>{{ rules.length }}</strong>
+            <span>{{ plural(rules.length, ['правило', 'правила', 'правил']) }} доступа</span>
+          </a>
+        </div>
+
+        <div v-else-if="!loading" class="setup-summary">
+          <span class="setup-time">≈ 3 минуты</span>
+          <span>Нужен только Телеграм и токен от @BotFather</span>
+        </div>
+
+        <div v-else class="hero-loading">
+          <UiSpinner decorative /> Загружаю состояние бота
+        </div>
+      </header>
+
+      <div v-if="error || note" class="feedback" role="status" aria-live="polite">
+        <p v-if="error" class="err">{{ error }}</p>
+        <p v-if="note" class="ok">{{ note }}</p>
+      </div>
+
+      <!-- Подключённый бот: native provider lifecycle и его account-scoped настройки. -->
+      <template v-if="!loading && connected">
+        <nav class="setup-path" aria-label="Настройка Телеграма">
+          <a class="path-step done" href="#tg-bot">
+            <span class="path-mark">1</span>
+            <span class="path-copy">
+              <b>Бот подключён</b>
+              <small v-if="privacyKnown && bot.canReadAllGroupMessages">Группы доступны целиком</small>
+              <small v-else>Проверь режим приватности</small>
+            </span>
+          </a>
+          <a class="path-step" :class="{ done: chats.length }" href="#tg-chats">
+            <span class="path-mark">2</span>
+            <span class="path-copy">
+              <b>Получи сообщение</b>
+              <small>{{ chats.length ? 'Бот уже слышит чаты' : 'Добавь бота в рабочий чат' }}</small>
+            </span>
+          </a>
+          <a class="path-step" :class="{ done: rules.length, attention: dirty }" href="#tg-rules">
+            <span class="path-mark">3</span>
+            <span class="path-copy">
+              <b>Разреши чат</b>
+              <small v-if="dirty">Есть несохранённые изменения</small>
+              <small v-else>{{ rules.length ? 'Привязка к проекту настроена' : 'Выбери проект для чата' }}</small>
+            </span>
+          </a>
+        </nav>
+
+        <div class="tg-grid">
+          <!-- Подключение и здоровье опроса — отдельные provider-состояния. -->
+          <section id="tg-bot" class="card bot-card">
+            <div class="head">
+              <div class="bot-name">
+                <span class="status-dot" :class="pollState?.kind === 'good' ? 'on' : 'warn'"></span>
+                <div>
+                  <div class="section-kicker">Подключённый бот</div>
+                  <div class="name">@{{ bot.username }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="privacyKnown && bot.canReadAllGroupMessages" class="state good">
+              ✓ Режим приватности выключен — в группах бот видит переписку целиком.
+            </div>
+            <div v-else-if="privacyKnown" class="state warn">
+              <b>Бот пока не видит переписку в группах.</b>
+              {{ bot.privacyHint }}
+              Выключи режим у @BotFather и нажми «Проверить».
+            </div>
+            <div v-else class="state">
+              Состояние режима приватности неизвестно — нажми «Проверить».
+            </div>
+
+            <div v-if="pollState" class="state" :class="pollState.kind">{{ pollState.text }}</div>
+            <div v-if="providerReason" class="state warn">Причина provider: {{ providerReason }}</div>
+
+            <p class="muted sub">
+              Следующий шаг: добавь @{{ bot.username }} в рабочий чат обычным
+              «Добавить участника» и отправь тестовое сообщение.
+            </p>
+
+            <div class="bot-actions">
+              <UiButton
+                class="btn"
+                :disabled="Boolean(busy)"
+                :loading="busy === 'recheck'"
+                loading-label="Проверяю Telegram"
+                @click="recheck"
+              >
+                {{ busy === 'recheck' ? 'Проверяю…' : 'Проверить' }}
+              </UiButton>
+              <UiButton
+                class="btn danger disconnect"
+                tone="danger"
+                :disabled="Boolean(busy)"
+                @click="disconnect"
+              >
+                Отключить
+              </UiButton>
+            </div>
+
+            <details class="technical">
+              <summary>Данные подключения</summary>
+              <div class="muted sub technical-data">
+                id {{ bot.botId }} · токен {{ bot.tokenHint }}
+                <template v-if="bot.connectedAt"> · подключён {{ fmtMs(bot.connectedAt) }}</template>
+              </div>
+            </details>
+          </section>
+
+          <aside class="side-stack" aria-label="Вспомогательные настройки канала">
+            <!-- Единственный источник имён для привязки «чат/тема → проект». -->
+            <section id="tg-chats" class="card chats-card">
+              <div class="head compact-head">
+                <div>
+                  <div class="section-kicker">Источник сообщений</div>
+                  <div class="section-title">
+                    <span class="h">Что слышит бот</span>
+                    <span v-if="chats.length" class="count subtle">{{ chats.length }}</span>
+                  </div>
+                </div>
+                <UiButton class="btn compact" :disabled="loading" @click="loadChats">
+                  Обновить
+                </UiButton>
+              </div>
+
+              <div v-if="!chats.length" class="mini-empty">
+                <b>Сообщений пока не было</b>
+                <p class="muted sub">
+                  Добавь бота в рабочий чат и напиши туда что-нибудь — чат появится здесь.
+                </p>
+              </div>
+              <ul v-else class="chats">
+                <li v-for="c in chats" :key="c.id" class="chat">
+                  <div class="cname">{{ c.title || `чат ${c.id}` }}</div>
+                  <div class="muted sub">
+                    {{ chatKind(c) }} ·
+                    {{ c.messages }} {{ plural(c.messages, ['сообщение', 'сообщения', 'сообщений']) }}
+                  </div>
+                  <div class="muted chat-meta">
+                    id {{ c.id }}<template v-if="c.lastAt"> · последнее {{ fmtSec(c.lastAt) }}</template>
+                  </div>
+                </li>
+              </ul>
+
+              <p class="muted sub card-foot">
+                Этот список только показывает, откуда уже пришли сообщения. Чтобы использовать
+                их в задачах, настрой привязку «чат или тема → проект» ниже.
+              </p>
+            </section>
+
+            <!-- Необязательный фолбэк для сообщений, которых ещё нет в архиве. -->
+            <section class="card service-card">
+              <div class="head compact-head">
+                <div>
+                  <div class="section-kicker">Для старых ссылок · необязательно</div>
+                  <div class="h">Служебный чат</div>
+                </div>
+                <span class="optional-chip">Опционально</span>
+              </div>
+
+              <p class="muted sub">
+                Выбери свою личку с ботом. Через неё кокпит сможет достать сообщение,
+                которое было отправлено до подключения бота.
+              </p>
+
+              <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
+                <div class="service-control">
+                  <UiSelect v-model="serviceChoice" class="sel">
+                    <option value="">не выбран — пересылки не будет</option>
+                    <option v-for="o in serviceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </UiSelect>
+                  <UiButton
+                    v-if="serviceDirty"
+                    class="btn primary"
+                    variant="solid"
+                    tone="success"
+                    :loading="busy === 'service'"
+                    loading-label="Сохраняю служебный чат"
+                    @click="saveService"
+                  >
+                    {{ busy === 'service' ? 'Сохраняю…' : 'Сохранить' }}
+                  </UiButton>
+                </div>
+              </fieldset>
+
+              <p v-if="!serviceOptions.length" class="muted sub">
+                Выбирать пока не из чего: напиши боту в личку что угодно, и чат появится здесь.
+              </p>
+              <p v-else-if="!serviceSaved" class="muted sub">
+                Пока чат не выбран, старые ссылки останутся неразвёрнутыми — новые сообщения
+                продолжат работать как обычно.
+              </p>
+
+              <details class="explain compact-explain">
+                <summary>Зачем нужна именно личка?</summary>
+                <p class="muted sub">
+                  Бот на секунду пересылает туда исходное сообщение и сразу удаляет копию.
+                  Групповой чат не подходит: служебную копию успеют увидеть его участники.
+                </p>
+              </details>
+            </section>
+
+            <!-- Пульт срочных реакций: карточки «работа стоит на тебе» и кнопки решений
+                 в личке владельца. Владелец подтверждается 6-значным кодом. -->
+            <section id="tg-pult" class="card pult-card">
+              <div class="head compact-head">
+                <div>
+                  <div class="section-kicker">Удалённые решения · без VPS</div>
+                  <div class="h">Пульт</div>
+                </div>
+                <span v-if="pult?.confirmed" class="count">включён</span>
+                <span v-else class="optional-chip">Выключен</span>
+              </div>
+
+              <p class="muted sub">
+                Бот держит в твоей личке живую карточку каждого прогона — узел, прогресс и
+                чем занят агент, — звонит, когда маршрут доехал или работа встала на тебе
+                (ворота, вопрос агента, запрос разрешения, затык), и принимает решения
+                кнопками. Команды: /status и /status &lt;номер&gt;.
+              </p>
+
+              <template v-if="pult?.confirmed">
+                <div class="state good" data-state="pult-on">
+                  ✓ Пульт слушает личку {{ pult.chatTitle || pult.chatHint }}.
+                </div>
+                <div class="row">
+                  <UiButton
+                    class="btn danger"
+                    tone="danger"
+                    :disabled="Boolean(busy)"
+                    @click="pultDisable"
+                  >
+                    Выключить пульт
+                  </UiButton>
+                </div>
+              </template>
+              <template v-else>
+                <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
+                  <div class="service-control">
+                    <UiSelect v-model="pultChoice" class="sel">
+                      <option value="">выбери свою личку с ботом</option>
+                      <option v-for="o in pultOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                    </UiSelect>
+                    <UiButton
+                      class="btn primary"
+                      variant="solid"
+                      tone="success"
+                      :disabled="!pultChoice"
+                      :loading="busy === 'pult'"
+                      loading-label="Отправляю код"
+                      @click="pultRequest"
+                    >
+                      {{ busy === 'pult' ? 'Отправляю…' : 'Получить код' }}
+                    </UiButton>
+                  </div>
+                  <div v-if="pult?.pending" class="service-control pult-code" data-state="pult-pending">
+                    <UiInput
+                      v-model="pultCode"
+                      class="code-input"
+                      data-role="verification-code"
+                      inputmode="numeric"
+                      maxlength="6"
+                      placeholder="код из лички"
+                      @keyup.enter="pultConfirm"
+                    />
+                    <UiButton
+                      class="btn primary"
+                      variant="solid"
+                      tone="success"
+                      :disabled="!pultCode.trim()"
+                      :loading="busy === 'pult'"
+                      loading-label="Включаю пульт"
+                      @click="pultConfirm"
+                    >
+                      Включить
+                    </UiButton>
+                  </div>
+                </fieldset>
+                <p v-if="!pultOptions.length" class="muted sub">
+                  Выбирать пока не из чего: напиши боту в личку /start — она появится здесь.
+                </p>
+                <p v-else-if="pult?.configured" class="muted sub">
+                  Прежний выбор ({{ pult.chatTitle || pult.chatHint }}) сохранён; для включения
+                  запроси новый код.
+                </p>
+              </template>
+
+              <details class="explain compact-explain">
+                <summary>Границы и безопасность</summary>
+                <p class="muted sub">
+                  У ботов нет сквозного шифрования: содержимое карточек (названия задач,
+                  вопросы агента, превью команд) видит Telegram. По явному нажатию туда же
+                  отправляются ограниченные plain-text страницы плана задачи. Дифы,
+                  произвольные файлы, полные команды и деньги в пульт не выносятся никогда;
+                  всё, что стоит времени или денег, переспрашивается вторым тапом.
+                  Чужие сообщения и нажатия бот молча
+                  игнорирует. Личку пульта не привязывай правилом к проекту — команды
+                  не должны становиться обращениями Входящих.
+                </p>
+              </details>
+            </section>
+          </aside>
+
+          <!-- Allowlist: широкая карточка и явная последовательность «откуда → куда → автомат». -->
+          <section id="tg-rules" class="card rules-card">
+            <div v-if="!providerWritable" class="state warn" data-state="provider-read-only">
+              Provider не подключён для записи. Правила и архив показаны только для чтения;
+              переподключение не возобновит приём Inbox автоматически.
+            </div>
+            <fieldset class="native-editor rules-editor" :disabled="!providerWritable || !!busy">
+            <div class="head rules-head">
+              <div>
+                <div class="section-kicker">Доступ и маршрутизация</div>
+                <div class="section-title">
+                  <span class="h">Разрешённые чаты</span>
+                  <span v-if="rules.length" class="count subtle">{{ rules.length }}</span>
+                </div>
+              </div>
+              <UiButton class="btn" :disabled="Boolean(busy)" @click="addRule">
+                Добавить чат
+              </UiButton>
+            </div>
+
+            <div class="rules-callout">
+              <span class="callout-mark">!</span>
+              <div>
+                <b>Бот слышит чат, но кокпит не использует его без правила.</b>
+                <p class="muted sub">
+                  Правило одновременно разрешает читать переписку и объясняет, в какой проект
+                  создавать задачу. Всё, чего нет в списке, остаётся закрытым.
+                </p>
+              </div>
+            </div>
+
+            <div v-if="!rules.length" class="empty-rules">
+              <div>
+                <b>Ни один чат не разрешён</b>
+                <p class="muted sub">
+                  Добавь первое правило, выбери услышанный чат и проект кокпита.
+                </p>
+              </div>
+              <UiButton
+                class="btn primary"
+                variant="solid"
+                tone="success"
+                :disabled="Boolean(busy)"
+                @click="addRule"
+              >
+                Добавить первое правило
+              </UiButton>
+            </div>
+
+            <ol v-else class="rules">
+              <li v-for="(r, i) in rules" :key="i" class="rule">
+                <div class="rule-head">
+                  <div>
+                    <span class="rule-number">Правило {{ i + 1 }}</span>
+                    <b>{{ r.title || r.username || 'Новый чат' }}</b>
+                  </div>
+                  <UiIconButton
+                    class="icon-btn danger x"
+                    role="embedded"
+                    tone="danger"
+                    label="Убрать правило"
+                    title="Убрать правило"
+                    @click="rules.splice(i, 1)"
+                  >
+                    ×
+                  </UiIconButton>
+                </div>
+
+                <div class="rule-builder">
+                  <section class="rule-part">
+                    <div class="part-head">
+                      <span class="part-number">1</span>
+                      <div>
+                        <b>Откуда читать</b>
+                        <small>Рабочий чат целиком или одна тема</small>
+                      </div>
+                    </div>
+
+                    <div class="field-grid source-fields">
+                      <label class="control full">
+                        <span class="field-label">Чат</span>
+                        <UiSelect
+                          class="sel chat-select"
+                          :model-value="chatMode(r)"
+                          @update:model-value="setChat(r, $event)"
+                        >
+                          <option value="">чат не выбран</option>
+                          <option v-for="o in chatOptions" :key="o.value" :value="o.value">
+                            {{ o.label }}
+                          </option>
+                          <option value="name">публичный чат по имени…</option>
+                        </UiSelect>
+                      </label>
+                      <label v-if="chatMode(r) === 'name'" class="control">
+                        <span class="field-label">Имя публичного чата</span>
+                        <UiInput
+                          v-model="r.username"
+                          class="inp thin"
+                          spellcheck="false"
+                          placeholder="имя_чата"
+                        />
+                      </label>
+                      <div class="control topic-control">
+                        <span class="field-label">Тема <em>необязательно</em></span>
+                        <UiSelect
+                          class="sel thin topic-select"
+                          compact
+                          :disabled="!ruleChatId(r)"
+                          :model-value="topicChoice(r)"
+                          @focus="loadTopicsForRule(r, true)"
+                          @update:model-value="setThread(r, $event)"
+                        >
+                          <option value="">Вся переписка — все темы</option>
+                          <option v-for="topic in topicsOf(r)" :key="topic.id" :value="String(topic.id)">
+                            {{ topicLabel(topic) }}
+                          </option>
+                          <option
+                            v-if="topicChoice(r) && !topicKnown(r)"
+                            :value="topicChoice(r)"
+                          >
+                            Тема {{ topicChoice(r) }} · сохранена вручную
+                          </option>
+                        </UiSelect>
+
+                        <div class="topic-status muted">
+                          <span v-if="!ruleChatId(r)">Сначала выбери услышанный чат.</span>
+                          <span v-else-if="topicsBusy(r)">
+                            <UiSpinner decorative />
+                            Загружаю темы…
+                          </span>
+                          <span v-else-if="topicsError(r)">{{ topicsError(r) }}</span>
+                          <span v-else-if="topicsOf(r).length">
+                            Найдено: {{ topicsOf(r).length }}.
+                            <template v-if="topicsOf(r).some((topic) => !topic.title)">
+                              Названия появятся после нового сообщения в теме.
+                            </template>
+                            <template v-else>Список обновляется по сообщениям бота.</template>
+                          </span>
+                          <span v-else-if="topicsLoaded(r)">
+                            Тем пока не слышно — отправь сообщение в нужную тему.
+                          </span>
+                          <UiButton
+                            v-if="ruleChatId(r)"
+                            class="link-btn"
+                            variant="text"
+                            tone="accent"
+                            :disabled="topicsBusy(r)"
+                            @click="loadTopicsForRule(r, true)"
+                          >
+                            Обновить
+                          </UiButton>
+                          <a
+                            v-if="topicLink(r)"
+                            :href="topicLink(r)"
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            Открыть выбранную тему
+                          </a>
+                        </div>
+
+                        <details class="manual-topic">
+                          <summary>Темы нет в списке — ввести номер вручную</summary>
+                          <label class="manual-topic-field">
+                            <span class="field-label">Номер из ссылки на тему</span>
+                            <UiInput
+                              v-model="r.threadId"
+                              class="inp thin"
+                              inputmode="numeric"
+                              placeholder="тема: например 42"
+                            />
+                          </label>
+                        </details>
+                      </div>
+                    </div>
+
+                    <p class="muted sub part-hint">
+                      Кокпит показывает темы, в которых бот уже видел сообщения.
+                      «Вся переписка» разрешает весь чат; одна выбранная тема не открывает соседние.
+                    </p>
+
+                    <div class="agent-search-option">
+                      <UiCheckbox
+                        :checked="agentSearchStateKnown && r.agentSearch === true"
+                        :disabled="dirty || !providerWritable || !!busy || !agentSearchStateKnown || !rulesPolicyFingerprint"
+                        @change="setAgentSearch(r, $event)"
+                      >
+                        <span class="task-option-copy">
+                          <b>Разрешить агентам искать эту переписку</b>
+                          <small v-if="!agentSearchStateKnown" data-state="agent-search-unknown">
+                            Состояние доступа не подтверждено (неизвестно). Обновите правила.
+                          </small>
+                          <small v-else>
+                            Отдельный opt-in для knowledge_search. Обычный поиск человека и
+                            разворот ссылок работают по правилу независимо от этого тумблера.
+                          </small>
+                        </span>
+                      </UiCheckbox>
+                    </div>
+                  </section>
+
+                  <section class="rule-part">
+                    <div class="part-head">
+                      <span class="part-number">2</span>
+                      <div>
+                        <b>Куда создать задачу</b>
+                        <small>Проект кокпита и параметры Битрикс24</small>
+                      </div>
+                    </div>
+
+                    <div class="field-grid destination-fields">
+                      <label class="control project-control">
+                        <span class="field-label">Проект кокпита <em>обязательно</em></span>
+                        <UiSelect v-model="r.project" class="sel project-select">
+                          <option value="">проект кокпита не выбран</option>
+                          <option v-for="p in projectOptions" :key="p" :value="p">{{ p }}</option>
+                        </UiSelect>
+                      </label>
+                      <label class="control">
+                        <span class="field-label">Тип</span>
+                        <UiSelect v-model="r.kind" class="sel thin" compact>
+                          <option value="bug">Баг</option>
+                          <option value="wish">Идея</option>
+                        </UiSelect>
+                      </label>
+                      <label class="control">
+                        <span class="field-label">Проект Битрикс24 <em>необязательно</em></span>
+                        <UiSelect
+                          v-model="r.b24.groupId"
+                          class="sel thin b24-group-select"
+                          compact
+                        >
+                          <option :value="null">
+                            {{ b24GroupsFailed ? 'без проекта — список сейчас недоступен' : 'без проекта Битрикс24' }}
+                          </option>
+                          <option v-for="group in b24GroupOptions" :key="group.id" :value="group.id">
+                            {{ group.name }}
+                          </option>
+                        </UiSelect>
+                      </label>
+                      <label class="control responsible-control">
+                        <span class="field-label">Ответственный</span>
+                        <UiSelect v-model="r.b24.responsibleId" class="sel">
+                          <option :value="null">ответственный — я</option>
+                          <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                        </UiSelect>
+                      </label>
+                      <label class="control">
+                        <span class="field-label">Приоритет</span>
+                        <UiSelect v-model.number="r.b24.priority" class="sel thin" compact>
+                          <option :value="0">низкий</option>
+                          <option :value="1">средний</option>
+                          <option :value="2">высокий</option>
+                        </UiSelect>
+                      </label>
+                    </div>
+
+                    <p class="muted sub part-hint">
+                      Проект кокпита определяет, к какому коду относится переписка. Проект
+                      Битрикс24 выбирает раздел, в котором появится задача на портале.
+                    </p>
+
+                    <div class="task-reply-option">
+                      <UiCheckbox v-model="r.notifyTaskCreated">
+                        <span class="task-option-copy">
+                          <b>Сообщать в Telegram о создании задачи</b>
+                          <small>
+                            После ручной или автоматической постановки бот ответит в этот
+                            чат или тему номером задачи, её названием и ссылкой на Битрикс24.
+                          </small>
+                        </span>
+                      </UiCheckbox>
+                    </div>
+                  </section>
+                </div>
+
+                <!-- Класс rrow и подпись lbl сохранены как явный контракт тестов формы. -->
+                <div class="rrow auto-panel" :class="{ enabled: autoOf(r).enabled }">
+                  <span class="lbl">автомат</span>
+                  <div class="auto-copy">
+                    <b>Автоматизация</b>
+                    <span class="muted sub">Необязательно — сначала можно разбирать всё вручную</span>
+                  </div>
+                  <div class="chk">
+                    <UiCheckbox
+                      :checked="autoOf(r).enabled"
+                      @update:checked="setAuto(r, 'enabled', $event)"
+                    >
+                      заводить задачи без меня
+                    </UiCheckbox>
+                  </div>
+                  <template v-if="autoOf(r).enabled">
+                    <label class="num">
+                      уверенность от
+                      <UiNumberInput
+                        class="inp num-f"
+                        :model-value="pctOf(r)"
+                        min="0"
+                        max="100"
+                        @update:model-value="setPct(r, $event)"
+                      />
+                      %
+                    </label>
+                    <label class="num">
+                      не больше
+                      <UiNumberInput
+                        class="inp num-f"
+                        :model-value="autoOf(r).maxPerDay"
+                        min="0"
+                        max="100"
+                        @update:model-value="setCap(r, $event)"
+                      />
+                      задач в сутки
+                    </label>
+                  </template>
+                </div>
+              </li>
+            </ol>
+
+            <details v-if="rules.length" class="explain rules-explain">
+              <summary>Как безопасно включать автомат</summary>
+              <p class="muted sub">
+                Включай его только для чатов, где почти каждое сообщение — постановка.
+                Кокпит передаст обращение общей модели из «Настройки → Плагины → Входящие».
+                Если уверенности не хватит, задача не создастся: обращение останется в общей очереди.
+                Суточный лимит защищает портал от случайного потока задач.
+              </p>
+            </details>
+
+            <div v-if="dirty" class="savebar">
+              <span>Изменения ещё не применены</span>
+              <div class="row">
+                <UiButton
+                  class="btn primary"
+                  variant="solid"
+                  tone="success"
+                  :disabled="Boolean(busy)"
+                  :loading="busy === 'rules'"
+                  loading-label="Сохраняю правила"
+                  @click="saveRules"
+                >
+                  {{ busy === 'rules' ? 'Сохраняю…' : 'Сохранить' }}
+                </UiButton>
+                <UiButton class="btn" :disabled="Boolean(busy)" @click="loadRules">
+                  Отменить
+                </UiButton>
+              </div>
+            </div>
+            </fieldset>
+          </section>
+        </div>
+      </template>
+
+      <!-- Первое подключение: два шага стоят рядом и не требуют знания архитектуры. -->
+      <template v-else-if="!loading">
+        <div class="setup-grid">
+          <section class="card setup-card">
+            <div class="setup-card-head">
+              <span class="setup-number">1</span>
+              <div>
+                <div class="section-kicker">В Телеграме</div>
+                <div class="h">Создай отдельного бота</div>
+              </div>
+            </div>
+
+            <ol class="steps">
+              <li>
+                <span class="step-mark">1</span>
+                <span>Найди <b>@BotFather</b> с синей галочкой и отправь <code>/newbot</code>.</span>
+              </li>
+              <li>
+                <span class="step-mark">2</span>
+                <span>Задай видимое людям имя, например «Кокпит · входящие».</span>
+              </li>
+              <li>
+                <span class="step-mark">3</span>
+                <span>Задай имя пользователя латиницей с окончанием <code>bot</code>.</span>
+              </li>
+              <li>
+                <span class="step-mark">4</span>
+                <span>Скопируй присланный токен вида <code>8123456789:AA…</code>.</span>
+              </li>
+              <li>
+                <span class="step-mark">5</span>
+                <span>Отправь <code>/setprivacy</code>, выбери бота и нажми <b>Disable</b>,
+                  чтобы он видел обычные сообщения в группах.</span>
+              </li>
+            </ol>
+
+            <div class="info-note">
+              Бота нельзя создать кнопкой на сайте: Телеграм разрешает делать это только
+              в переписке с @BotFather. После выдачи токена всё остальное настроит кокпит.
+            </div>
+          </section>
+
+          <section class="card setup-card token-card">
+            <div class="setup-card-head">
+              <span class="setup-number">2</span>
+              <div>
+                <div class="section-kicker">В кокпите</div>
+                <div class="h">Вставь токен и подключи</div>
+              </div>
+            </div>
+
+            <p class="muted">
+              Кокпит сначала проверит токен у Телеграма. Если всё в порядке, покажет имя
+              бота и начнёт слушать новые сообщения.
+            </p>
+
+            <div class="state" :class="providerConnection === 'degraded' ? 'warn' : ''"
+                 data-state="provider-disconnected">
+              Telegram не подключён: новые сообщения не принимаются. Ранее принятые обращения,
+              если они есть, остаются в общем Inbox только для чтения.
+              <template v-if="providerReason"> Причина: {{ providerReason }}.</template>
+            </div>
+
+            <label class="control token-control">
+              <span class="field-label">Токен от @BotFather</span>
+              <UiInput
+                v-model="token"
+                class="inp"
+                type="password"
+                data-role="secret-token"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="8123456789:AA…"
+                @keydown.enter="connect"
+              />
+            </label>
+            <UiButton
+              class="btn primary connect-btn"
+              variant="solid"
+              tone="success"
+              :disabled="!canConnect || !token.trim() || Boolean(busy)"
+              :loading="busy === 'connect'"
+              loading-label="Проверяю токен"
+              @click="connect"
+            >
+              {{ busy === 'connect' ? 'Проверяю токен…' : 'Подключить' }}
+            </UiButton>
+
+            <div class="security-note">
+              <b>Токен останется на сервере.</b>
+              <span>
+                В браузер вернутся только последние четыре знака. Если токен утечёт,
+                отзови его у @BotFather командой <code>/revoke</code>.
+              </span>
+            </div>
+
+            <details class="technical">
+              <summary>Где хранится токен</summary>
+              <div class="muted sub technical-data">
+                В account-aware credential store <code>server/.state/telegram-account-creds.json</code>,
+                доступном только владельцу.
+              </div>
+            </details>
+          </section>
+        </div>
+
+        <section class="after-connect">
+          <div class="after-title">Что произойдёт после подключения</div>
+          <div class="after-grid">
+            <div class="after-step">
+              <span>1</span>
+              <div><b>Добавишь бота в чат</b><small>Как обычного участника группы</small></div>
+            </div>
+            <div class="after-step">
+              <span>2</span>
+              <div><b>Выберешь проект</b><small>Кокпит не откроет чат без разрешения</small></div>
+            </div>
+            <div class="after-step">
+              <span>3</span>
+              <div><b>Включишь приём в Inbox</b><small>Старая история не станет backlog</small></div>
+            </div>
+          </div>
+        </section>
+      </template>
+    </template>
+  </div>
+</template>
+
 <script setup>
 // Native-раздел канала Telegram: подключение бота, услышанные чаты, служебная
 // личка и allowlist «чат/тема → проект». Общая очередь и её activation живут
@@ -18,8 +843,17 @@
 // целиком: сервер и проверяет его целиком, одним валидатором.
 import { computed, onMounted, ref, watch } from 'vue';
 
+import {
+  confirmDialog,
+  UiButton,
+  UiCheckbox,
+  UiIconButton,
+  UiInput,
+  UiNumberInput,
+  UiSelect,
+  UiSpinner,
+} from '../ui';
 import { api } from '../shared/api-client.js';
-import { confirmDialog } from '../shared/ui/confirm.js';
 import { usePluginsStore } from '../stores/plugins.js';
 
 const plugins = usePluginsStore();
@@ -769,722 +1603,6 @@ async function disconnect() {
 }
 </script>
 
-<template>
-  <div class="tg">
-    <section v-if="pluginOff" class="card disabled-card">
-      <div class="disabled-mark">TG</div>
-      <div>
-        <h2 class="ttl">Телеграм пока выключен</h2>
-        <p class="muted lead">
-          Включи плагин «Телеграм» в разделе «Настройки → Плагины»,
-          затем вернись сюда — появится пошаговое подключение.
-        </p>
-      </div>
-    </section>
-
-    <template v-else>
-      <header class="tg-hero">
-        <div class="hero-copy">
-          <div class="eyebrow">Канал Telegram</div>
-          <h2 class="ttl">
-            <template v-if="loading">Готовим рабочее пространство…</template>
-            <template v-else-if="connected">Бот подключён и хранит сообщения в своём канале</template>
-            <template v-else>Подключи бота — это займёт несколько минут</template>
-          </h2>
-          <p class="muted lead">
-            Здесь управляются подключение, архив и allowlist Telegram. Очередь и отдельный
-            переключатель приёма новых обращений находятся в общем разделе «Входящие».
-            Бот читает только явно разрешённые ниже чаты и пишет туда лишь включённые
-            подтверждения уже созданных задач.
-          </p>
-        </div>
-
-        <div v-if="!loading && connected" class="hero-stats" aria-label="Сводка Телеграма">
-          <a class="hero-stat" href="#/inbox">
-            <strong>Inbox</strong>
-            <span>приём и общая очередь</span>
-          </a>
-          <a class="hero-stat" href="#tg-chats">
-            <strong>{{ chats.length }}</strong>
-            <span>{{ plural(chats.length, ['чат пишет', 'чата пишут', 'чатов пишут']) }} боту</span>
-          </a>
-          <a class="hero-stat" href="#tg-rules">
-            <strong>{{ rules.length }}</strong>
-            <span>{{ plural(rules.length, ['правило', 'правила', 'правил']) }} доступа</span>
-          </a>
-        </div>
-
-        <div v-else-if="!loading" class="setup-summary">
-          <span class="setup-time">≈ 3 минуты</span>
-          <span>Нужен только Телеграм и токен от @BotFather</span>
-        </div>
-
-        <div v-else class="hero-loading"><span class="spin"></span> Загружаю состояние бота</div>
-      </header>
-
-      <div v-if="error || note" class="feedback" role="status" aria-live="polite">
-        <p v-if="error" class="err">{{ error }}</p>
-        <p v-if="note" class="ok">{{ note }}</p>
-      </div>
-
-      <!-- Подключённый бот: native provider lifecycle и его account-scoped настройки. -->
-      <template v-if="!loading && connected">
-        <nav class="setup-path" aria-label="Настройка Телеграма">
-          <a class="path-step done" href="#tg-bot">
-            <span class="path-mark">1</span>
-            <span class="path-copy">
-              <b>Бот подключён</b>
-              <small v-if="privacyKnown && bot.canReadAllGroupMessages">Группы доступны целиком</small>
-              <small v-else>Проверь режим приватности</small>
-            </span>
-          </a>
-          <a class="path-step" :class="{ done: chats.length }" href="#tg-chats">
-            <span class="path-mark">2</span>
-            <span class="path-copy">
-              <b>Получи сообщение</b>
-              <small>{{ chats.length ? 'Бот уже слышит чаты' : 'Добавь бота в рабочий чат' }}</small>
-            </span>
-          </a>
-          <a class="path-step" :class="{ done: rules.length, attention: dirty }" href="#tg-rules">
-            <span class="path-mark">3</span>
-            <span class="path-copy">
-              <b>Разреши чат</b>
-              <small v-if="dirty">Есть несохранённые изменения</small>
-              <small v-else>{{ rules.length ? 'Привязка к проекту настроена' : 'Выбери проект для чата' }}</small>
-            </span>
-          </a>
-        </nav>
-
-        <div class="tg-grid">
-          <!-- Подключение и здоровье опроса — отдельные provider-состояния. -->
-          <section id="tg-bot" class="card bot-card">
-            <div class="head">
-              <div class="bot-name">
-                <span class="status-dot" :class="pollState?.kind === 'good' ? 'on' : 'warn'"></span>
-                <div>
-                  <div class="section-kicker">Подключённый бот</div>
-                  <div class="name">@{{ bot.username }}</div>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="privacyKnown && bot.canReadAllGroupMessages" class="state good">
-              ✓ Режим приватности выключен — в группах бот видит переписку целиком.
-            </div>
-            <div v-else-if="privacyKnown" class="state warn">
-              <b>Бот пока не видит переписку в группах.</b>
-              {{ bot.privacyHint }}
-              Выключи режим у @BotFather и нажми «Проверить».
-            </div>
-            <div v-else class="state">
-              Состояние режима приватности неизвестно — нажми «Проверить».
-            </div>
-
-            <div v-if="pollState" class="state" :class="pollState.kind">{{ pollState.text }}</div>
-            <div v-if="providerReason" class="state warn">Причина provider: {{ providerReason }}</div>
-
-            <p class="muted sub">
-              Следующий шаг: добавь @{{ bot.username }} в рабочий чат обычным
-              «Добавить участника» и отправь тестовое сообщение.
-            </p>
-
-            <div class="bot-actions">
-              <button class="btn" :disabled="!!busy" @click="recheck">
-                {{ busy === 'recheck' ? 'Проверяю…' : 'Проверить' }}
-              </button>
-              <button class="btn danger disconnect" :disabled="!!busy" @click="disconnect">Отключить</button>
-            </div>
-
-            <details class="technical">
-              <summary>Данные подключения</summary>
-              <div class="muted sub technical-data">
-                id {{ bot.botId }} · токен {{ bot.tokenHint }}
-                <template v-if="bot.connectedAt"> · подключён {{ fmtMs(bot.connectedAt) }}</template>
-              </div>
-            </details>
-          </section>
-
-          <aside class="side-stack" aria-label="Вспомогательные настройки канала">
-            <!-- Единственный источник имён для привязки «чат/тема → проект». -->
-            <section id="tg-chats" class="card chats-card">
-              <div class="head compact-head">
-                <div>
-                  <div class="section-kicker">Источник сообщений</div>
-                  <div class="section-title">
-                    <span class="h">Что слышит бот</span>
-                    <span v-if="chats.length" class="count subtle">{{ chats.length }}</span>
-                  </div>
-                </div>
-                <button class="btn compact" :disabled="loading" @click="loadChats">Обновить</button>
-              </div>
-
-              <div v-if="!chats.length" class="mini-empty">
-                <b>Сообщений пока не было</b>
-                <p class="muted sub">
-                  Добавь бота в рабочий чат и напиши туда что-нибудь — чат появится здесь.
-                </p>
-              </div>
-              <ul v-else class="chats">
-                <li v-for="c in chats" :key="c.id" class="chat">
-                  <div class="cname">{{ c.title || `чат ${c.id}` }}</div>
-                  <div class="muted sub">
-                    {{ chatKind(c) }} ·
-                    {{ c.messages }} {{ plural(c.messages, ['сообщение', 'сообщения', 'сообщений']) }}
-                  </div>
-                  <div class="muted chat-meta">
-                    id {{ c.id }}<template v-if="c.lastAt"> · последнее {{ fmtSec(c.lastAt) }}</template>
-                  </div>
-                </li>
-              </ul>
-
-              <p class="muted sub card-foot">
-                Этот список только показывает, откуда уже пришли сообщения. Чтобы использовать
-                их в задачах, настрой привязку «чат или тема → проект» ниже.
-              </p>
-            </section>
-
-            <!-- Необязательный фолбэк для сообщений, которых ещё нет в архиве. -->
-            <section class="card service-card">
-              <div class="head compact-head">
-                <div>
-                  <div class="section-kicker">Для старых ссылок · необязательно</div>
-                  <div class="h">Служебный чат</div>
-                </div>
-                <span class="optional-chip">Опционально</span>
-              </div>
-
-              <p class="muted sub">
-                Выбери свою личку с ботом. Через неё кокпит сможет достать сообщение,
-                которое было отправлено до подключения бота.
-              </p>
-
-              <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
-                <div class="service-control">
-                  <select v-model="serviceChoice" class="sel">
-                    <option value="">не выбран — пересылки не будет</option>
-                    <option v-for="o in serviceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-                  </select>
-                  <button v-if="serviceDirty" class="btn primary" @click="saveService">
-                    {{ busy === 'service' ? 'Сохраняю…' : 'Сохранить' }}
-                  </button>
-                </div>
-              </fieldset>
-
-              <p v-if="!serviceOptions.length" class="muted sub">
-                Выбирать пока не из чего: напиши боту в личку что угодно, и чат появится здесь.
-              </p>
-              <p v-else-if="!serviceSaved" class="muted sub">
-                Пока чат не выбран, старые ссылки останутся неразвёрнутыми — новые сообщения
-                продолжат работать как обычно.
-              </p>
-
-              <details class="explain compact-explain">
-                <summary>Зачем нужна именно личка?</summary>
-                <p class="muted sub">
-                  Бот на секунду пересылает туда исходное сообщение и сразу удаляет копию.
-                  Групповой чат не подходит: служебную копию успеют увидеть его участники.
-                </p>
-              </details>
-            </section>
-
-            <!-- Пульт срочных реакций: карточки «работа стоит на тебе» и кнопки решений
-                 в личке владельца. Владелец подтверждается 6-значным кодом. -->
-            <section id="tg-pult" class="card pult-card">
-              <div class="head compact-head">
-                <div>
-                  <div class="section-kicker">Удалённые решения · без VPS</div>
-                  <div class="h">Пульт</div>
-                </div>
-                <span v-if="pult?.confirmed" class="count">включён</span>
-                <span v-else class="optional-chip">Выключен</span>
-              </div>
-
-              <p class="muted sub">
-                Бот держит в твоей личке живую карточку каждого прогона — узел, прогресс и
-                чем занят агент, — звонит, когда маршрут доехал или работа встала на тебе
-                (ворота, вопрос агента, запрос разрешения, затык), и принимает решения
-                кнопками. Команды: /status и /status &lt;номер&gt;.
-              </p>
-
-              <template v-if="pult?.confirmed">
-                <div class="state good" data-state="pult-on">
-                  ✓ Пульт слушает личку {{ pult.chatTitle || pult.chatHint }}.
-                </div>
-                <div class="row">
-                  <button class="btn danger" :disabled="!!busy" @click="pultDisable">Выключить пульт</button>
-                </div>
-              </template>
-              <template v-else>
-                <fieldset class="native-editor" :disabled="!providerWritable || !!busy">
-                  <div class="service-control">
-                    <select v-model="pultChoice" class="sel">
-                      <option value="">выбери свою личку с ботом</option>
-                      <option v-for="o in pultOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-                    </select>
-                    <button class="btn primary" :disabled="!pultChoice" @click="pultRequest">
-                      {{ busy === 'pult' ? 'Отправляю…' : 'Получить код' }}
-                    </button>
-                  </div>
-                  <div v-if="pult?.pending" class="service-control pult-code" data-state="pult-pending">
-                    <input
-                      v-model="pultCode"
-                      class="code-input"
-                      inputmode="numeric"
-                      maxlength="6"
-                      placeholder="код из лички"
-                      @keyup.enter="pultConfirm"
-                    />
-                    <button class="btn primary" :disabled="!pultCode.trim()" @click="pultConfirm">
-                      Включить
-                    </button>
-                  </div>
-                </fieldset>
-                <p v-if="!pultOptions.length" class="muted sub">
-                  Выбирать пока не из чего: напиши боту в личку /start — она появится здесь.
-                </p>
-                <p v-else-if="pult?.configured" class="muted sub">
-                  Прежний выбор ({{ pult.chatTitle || pult.chatHint }}) сохранён; для включения
-                  запроси новый код.
-                </p>
-              </template>
-
-              <details class="explain compact-explain">
-                <summary>Границы и безопасность</summary>
-                <p class="muted sub">
-                  У ботов нет сквозного шифрования: содержимое карточек (названия задач,
-                  вопросы агента, превью команд) видит Telegram. По явному нажатию туда же
-                  отправляются ограниченные plain-text страницы плана задачи. Дифы,
-                  произвольные файлы, полные команды и деньги в пульт не выносятся никогда;
-                  всё, что стоит времени или денег, переспрашивается вторым тапом.
-                  Чужие сообщения и нажатия бот молча
-                  игнорирует. Личку пульта не привязывай правилом к проекту — команды
-                  не должны становиться обращениями Входящих.
-                </p>
-              </details>
-            </section>
-          </aside>
-
-          <!-- Allowlist: широкая карточка и явная последовательность «откуда → куда → автомат». -->
-          <section id="tg-rules" class="card rules-card">
-            <div v-if="!providerWritable" class="state warn" data-state="provider-read-only">
-              Provider не подключён для записи. Правила и архив показаны только для чтения;
-              переподключение не возобновит приём Inbox автоматически.
-            </div>
-            <fieldset class="native-editor rules-editor" :disabled="!providerWritable || !!busy">
-            <div class="head rules-head">
-              <div>
-                <div class="section-kicker">Доступ и маршрутизация</div>
-                <div class="section-title">
-                  <span class="h">Разрешённые чаты</span>
-                  <span v-if="rules.length" class="count subtle">{{ rules.length }}</span>
-                </div>
-              </div>
-              <button class="btn" :disabled="!!busy" @click="addRule">Добавить чат</button>
-            </div>
-
-            <div class="rules-callout">
-              <span class="callout-mark">!</span>
-              <div>
-                <b>Бот слышит чат, но кокпит не использует его без правила.</b>
-                <p class="muted sub">
-                  Правило одновременно разрешает читать переписку и объясняет, в какой проект
-                  создавать задачу. Всё, чего нет в списке, остаётся закрытым.
-                </p>
-              </div>
-            </div>
-
-            <div v-if="!rules.length" class="empty-rules">
-              <div>
-                <b>Ни один чат не разрешён</b>
-                <p class="muted sub">
-                  Добавь первое правило, выбери услышанный чат и проект кокпита.
-                </p>
-              </div>
-              <button class="btn primary" :disabled="!!busy" @click="addRule">Добавить первое правило</button>
-            </div>
-
-            <ol v-else class="rules">
-              <li v-for="(r, i) in rules" :key="i" class="rule">
-                <div class="rule-head">
-                  <div>
-                    <span class="rule-number">Правило {{ i + 1 }}</span>
-                    <b>{{ r.title || r.username || 'Новый чат' }}</b>
-                  </div>
-                  <button class="icon-btn danger x" title="Убрать правило" @click="rules.splice(i, 1)">×</button>
-                </div>
-
-                <div class="rule-builder">
-                  <section class="rule-part">
-                    <div class="part-head">
-                      <span class="part-number">1</span>
-                      <div>
-                        <b>Откуда читать</b>
-                        <small>Рабочий чат целиком или одна тема</small>
-                      </div>
-                    </div>
-
-                    <div class="field-grid source-fields">
-                      <label class="control full">
-                        <span class="field-label">Чат</span>
-                        <select class="sel chat-select" :value="chatMode(r)" @change="setChat(r, $event.target.value)">
-                          <option value="">чат не выбран</option>
-                          <option v-for="o in chatOptions" :key="o.value" :value="o.value">
-                            {{ o.label }}
-                          </option>
-                          <option value="name">публичный чат по имени…</option>
-                        </select>
-                      </label>
-                      <label v-if="chatMode(r) === 'name'" class="control">
-                        <span class="field-label">Имя публичного чата</span>
-                        <input
-                          v-model="r.username"
-                          class="inp thin"
-                          spellcheck="false"
-                          placeholder="имя_чата"
-                        />
-                      </label>
-                      <div class="control topic-control">
-                        <span class="field-label">Тема <em>необязательно</em></span>
-                        <select
-                          class="sel thin topic-select"
-                          :disabled="!ruleChatId(r)"
-                          :value="topicChoice(r)"
-                          @focus="loadTopicsForRule(r, true)"
-                          @change="setThread(r, $event.target.value)"
-                        >
-                          <option value="">Вся переписка — все темы</option>
-                          <option v-for="topic in topicsOf(r)" :key="topic.id" :value="String(topic.id)">
-                            {{ topicLabel(topic) }}
-                          </option>
-                          <option
-                            v-if="topicChoice(r) && !topicKnown(r)"
-                            :value="topicChoice(r)"
-                          >
-                            Тема {{ topicChoice(r) }} · сохранена вручную
-                          </option>
-                        </select>
-
-                        <div class="topic-status muted">
-                          <span v-if="!ruleChatId(r)">Сначала выбери услышанный чат.</span>
-                          <span v-else-if="topicsBusy(r)"><span class="spin mini"></span> Загружаю темы…</span>
-                          <span v-else-if="topicsError(r)">{{ topicsError(r) }}</span>
-                          <span v-else-if="topicsOf(r).length">
-                            Найдено: {{ topicsOf(r).length }}.
-                            <template v-if="topicsOf(r).some((topic) => !topic.title)">
-                              Названия появятся после нового сообщения в теме.
-                            </template>
-                            <template v-else>Список обновляется по сообщениям бота.</template>
-                          </span>
-                          <span v-else-if="topicsLoaded(r)">
-                            Тем пока не слышно — отправь сообщение в нужную тему.
-                          </span>
-                          <button
-                            v-if="ruleChatId(r)"
-                            type="button"
-                            class="link-btn"
-                            :disabled="topicsBusy(r)"
-                            @click="loadTopicsForRule(r, true)"
-                          >
-                            Обновить
-                          </button>
-                          <a
-                            v-if="topicLink(r)"
-                            :href="topicLink(r)"
-                            target="_blank"
-                            rel="noopener"
-                          >
-                            Открыть выбранную тему
-                          </a>
-                        </div>
-
-                        <details class="manual-topic">
-                          <summary>Темы нет в списке — ввести номер вручную</summary>
-                          <label class="manual-topic-field">
-                            <span class="field-label">Номер из ссылки на тему</span>
-                            <input
-                              v-model="r.threadId"
-                              class="inp thin"
-                              inputmode="numeric"
-                              placeholder="тема: например 42"
-                            />
-                          </label>
-                        </details>
-                      </div>
-                    </div>
-
-                    <p class="muted sub part-hint">
-                      Кокпит показывает темы, в которых бот уже видел сообщения.
-                      «Вся переписка» разрешает весь чат; одна выбранная тема не открывает соседние.
-                    </p>
-
-                    <label class="agent-search-option">
-                      <input
-                        type="checkbox"
-                        :checked="agentSearchStateKnown && r.agentSearch === true"
-                        :disabled="dirty || !providerWritable || !!busy || !agentSearchStateKnown || !rulesPolicyFingerprint"
-                        @change="setAgentSearch(r, $event)"
-                      />
-                      <span>
-                        <b>Разрешить агентам искать эту переписку</b>
-                        <small v-if="!agentSearchStateKnown" data-state="agent-search-unknown">
-                          Состояние доступа не подтверждено (неизвестно). Обновите правила.
-                        </small>
-                        <small v-else>
-                          Отдельный opt-in для knowledge_search. Обычный поиск человека и
-                          разворот ссылок работают по правилу независимо от этого тумблера.
-                        </small>
-                      </span>
-                    </label>
-                  </section>
-
-                  <section class="rule-part">
-                    <div class="part-head">
-                      <span class="part-number">2</span>
-                      <div>
-                        <b>Куда создать задачу</b>
-                        <small>Проект кокпита и параметры Битрикс24</small>
-                      </div>
-                    </div>
-
-                    <div class="field-grid destination-fields">
-                      <label class="control project-control">
-                        <span class="field-label">Проект кокпита <em>обязательно</em></span>
-                        <select v-model="r.project" class="sel project-select">
-                          <option value="">проект кокпита не выбран</option>
-                          <option v-for="p in projectOptions" :key="p" :value="p">{{ p }}</option>
-                        </select>
-                      </label>
-                      <label class="control">
-                        <span class="field-label">Тип</span>
-                        <select v-model="r.kind" class="sel thin">
-                          <option value="bug">Баг</option>
-                          <option value="wish">Идея</option>
-                        </select>
-                      </label>
-                      <label class="control">
-                        <span class="field-label">Проект Битрикс24 <em>необязательно</em></span>
-                        <select v-model="r.b24.groupId" class="sel thin b24-group-select">
-                          <option :value="null">
-                            {{ b24GroupsFailed ? 'без проекта — список сейчас недоступен' : 'без проекта Битрикс24' }}
-                          </option>
-                          <option v-for="group in b24GroupOptions" :key="group.id" :value="group.id">
-                            {{ group.name }}
-                          </option>
-                        </select>
-                      </label>
-                      <label class="control responsible-control">
-                        <span class="field-label">Ответственный</span>
-                        <select v-model="r.b24.responsibleId" class="sel">
-                          <option :value="null">ответственный — я</option>
-                          <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
-                        </select>
-                      </label>
-                      <label class="control">
-                        <span class="field-label">Приоритет</span>
-                        <select v-model.number="r.b24.priority" class="sel thin">
-                          <option :value="0">низкий</option>
-                          <option :value="1">средний</option>
-                          <option :value="2">высокий</option>
-                        </select>
-                      </label>
-                    </div>
-
-                    <p class="muted sub part-hint">
-                      Проект кокпита определяет, к какому коду относится переписка. Проект
-                      Битрикс24 выбирает раздел, в котором появится задача на портале.
-                    </p>
-
-                    <label class="task-reply-option">
-                      <input v-model="r.notifyTaskCreated" type="checkbox" />
-                      <span>
-                        <b>Сообщать в Telegram о создании задачи</b>
-                        <small>
-                          После ручной или автоматической постановки бот ответит в этот
-                          чат или тему номером задачи, её названием и ссылкой на Битрикс24.
-                        </small>
-                      </span>
-                    </label>
-                  </section>
-                </div>
-
-                <!-- Класс rrow и подпись lbl сохранены как явный контракт тестов формы. -->
-                <div class="rrow auto-panel" :class="{ enabled: autoOf(r).enabled }">
-                  <span class="lbl">автомат</span>
-                  <div class="auto-copy">
-                    <b>Автоматизация</b>
-                    <span class="muted sub">Необязательно — сначала можно разбирать всё вручную</span>
-                  </div>
-                  <label class="chk">
-                    <input
-                      type="checkbox"
-                      :checked="autoOf(r).enabled"
-                      @change="setAuto(r, 'enabled', $event.target.checked)"
-                    />
-                    заводить задачи без меня
-                  </label>
-                  <template v-if="autoOf(r).enabled">
-                    <label class="num">
-                      уверенность от
-                      <input class="inp num-f" :value="pctOf(r)" @change="setPct(r, $event.target.value)" />
-                      %
-                    </label>
-                    <label class="num">
-                      не больше
-                      <input
-                        class="inp num-f"
-                        :value="autoOf(r).maxPerDay"
-                        @change="setCap(r, $event.target.value)"
-                      />
-                      задач в сутки
-                    </label>
-                  </template>
-                </div>
-              </li>
-            </ol>
-
-            <details v-if="rules.length" class="explain rules-explain">
-              <summary>Как безопасно включать автомат</summary>
-              <p class="muted sub">
-                Включай его только для чатов, где почти каждое сообщение — постановка.
-                Кокпит передаст обращение общей модели из «Настройки → Плагины → Входящие».
-                Если уверенности не хватит, задача не создастся: обращение останется в общей очереди.
-                Суточный лимит защищает портал от случайного потока задач.
-              </p>
-            </details>
-
-            <div v-if="dirty" class="savebar">
-              <span>Изменения ещё не применены</span>
-              <div class="row">
-                <button class="btn primary" :disabled="!!busy" @click="saveRules">
-                  {{ busy === 'rules' ? 'Сохраняю…' : 'Сохранить' }}
-                </button>
-                <button class="btn" :disabled="!!busy" @click="loadRules">Отменить</button>
-              </div>
-            </div>
-            </fieldset>
-          </section>
-        </div>
-      </template>
-
-      <!-- Первое подключение: два шага стоят рядом и не требуют знания архитектуры. -->
-      <template v-else-if="!loading">
-        <div class="setup-grid">
-          <section class="card setup-card">
-            <div class="setup-card-head">
-              <span class="setup-number">1</span>
-              <div>
-                <div class="section-kicker">В Телеграме</div>
-                <div class="h">Создай отдельного бота</div>
-              </div>
-            </div>
-
-            <ol class="steps">
-              <li>
-                <span class="step-mark">1</span>
-                <span>Найди <b>@BotFather</b> с синей галочкой и отправь <code>/newbot</code>.</span>
-              </li>
-              <li>
-                <span class="step-mark">2</span>
-                <span>Задай видимое людям имя, например «Кокпит · входящие».</span>
-              </li>
-              <li>
-                <span class="step-mark">3</span>
-                <span>Задай имя пользователя латиницей с окончанием <code>bot</code>.</span>
-              </li>
-              <li>
-                <span class="step-mark">4</span>
-                <span>Скопируй присланный токен вида <code>8123456789:AA…</code>.</span>
-              </li>
-              <li>
-                <span class="step-mark">5</span>
-                <span>Отправь <code>/setprivacy</code>, выбери бота и нажми <b>Disable</b>,
-                  чтобы он видел обычные сообщения в группах.</span>
-              </li>
-            </ol>
-
-            <div class="info-note">
-              Бота нельзя создать кнопкой на сайте: Телеграм разрешает делать это только
-              в переписке с @BotFather. После выдачи токена всё остальное настроит кокпит.
-            </div>
-          </section>
-
-          <section class="card setup-card token-card">
-            <div class="setup-card-head">
-              <span class="setup-number">2</span>
-              <div>
-                <div class="section-kicker">В кокпите</div>
-                <div class="h">Вставь токен и подключи</div>
-              </div>
-            </div>
-
-            <p class="muted">
-              Кокпит сначала проверит токен у Телеграма. Если всё в порядке, покажет имя
-              бота и начнёт слушать новые сообщения.
-            </p>
-
-            <div class="state" :class="providerConnection === 'degraded' ? 'warn' : ''"
-                 data-state="provider-disconnected">
-              Telegram не подключён: новые сообщения не принимаются. Ранее принятые обращения,
-              если они есть, остаются в общем Inbox только для чтения.
-              <template v-if="providerReason"> Причина: {{ providerReason }}.</template>
-            </div>
-
-            <label class="control token-control">
-              <span class="field-label">Токен от @BotFather</span>
-              <input
-                v-model="token"
-                class="inp"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="8123456789:AA…"
-                @keydown.enter="connect"
-              />
-            </label>
-            <button class="btn primary connect-btn" :disabled="!canConnect || !token.trim() || !!busy" @click="connect">
-              {{ busy === 'connect' ? 'Проверяю токен…' : 'Подключить' }}
-            </button>
-
-            <div class="security-note">
-              <b>Токен останется на сервере.</b>
-              <span>
-                В браузер вернутся только последние четыре знака. Если токен утечёт,
-                отзови его у @BotFather командой <code>/revoke</code>.
-              </span>
-            </div>
-
-            <details class="technical">
-              <summary>Где хранится токен</summary>
-              <div class="muted sub technical-data">
-                В account-aware credential store <code>server/.state/telegram-account-creds.json</code>,
-                доступном только владельцу.
-              </div>
-            </details>
-          </section>
-        </div>
-
-        <section class="after-connect">
-          <div class="after-title">Что произойдёт после подключения</div>
-          <div class="after-grid">
-            <div class="after-step">
-              <span>1</span>
-              <div><b>Добавишь бота в чат</b><small>Как обычного участника группы</small></div>
-            </div>
-            <div class="after-step">
-              <span>2</span>
-              <div><b>Выберешь проект</b><small>Кокпит не откроет чат без разрешения</small></div>
-            </div>
-            <div class="after-step">
-              <span>3</span>
-              <div><b>Включишь приём в Inbox</b><small>Старая история не станет backlog</small></div>
-            </div>
-          </div>
-        </section>
-      </template>
-    </template>
-  </div>
-</template>
-
 <style scoped>
 .tg {
   --tg-soft: color-mix(in srgb, var(--accent) 9%, var(--surface));
@@ -1575,10 +1693,7 @@ async function disconnect() {
 .rules-card { grid-column: 1; grid-row: 2; }
 .pult-code { margin-top: 8px; }
 .code-input {
-  flex: 1; min-width: 0; height: var(--control-height); padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--control-radius); background: var(--surface-2); color: var(--ink);
-  font-size: 15px; letter-spacing: .2em; font-variant-numeric: tabular-nums;
+  flex: 1; min-width: 0; font-variant-numeric: tabular-nums;
 }
 [id^='tg-'] { scroll-margin-top: 16px; }
 
@@ -1602,48 +1717,7 @@ async function disconnect() {
 }
 .count.subtle { border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-mid); }
 
-.btn, .icon-btn {
-  border: 1px solid var(--line); color: var(--ink); background: var(--surface-2); cursor: pointer;
-  transition: border-color .13s, background .13s, color .13s, transform .13s;
-}
-.btn {
-  height: var(--control-height); min-height: var(--control-height); padding: 0 13px;
-  border-radius: var(--control-radius); font-size: 13px; white-space: nowrap;
-}
-.btn.compact { height: 31px; min-height: 31px; padding: 0 10px; font-size: 12px; }
-.btn:hover:not(:disabled), .icon-btn:hover:not(:disabled) { border-color: var(--line-2); background: color-mix(in srgb, var(--surface-2) 86%, #fff); }
-.btn.primary { border-color: var(--good); background: var(--good); color: #06210f; font-weight: 660; }
-.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--good) 88%, #fff); border-color: color-mix(in srgb, var(--good) 88%, #fff); }
-.btn.danger, .icon-btn.danger { color: var(--bad); }
-.btn:disabled, .icon-btn:disabled { opacity: .48; cursor: default; }
-.btn:focus-visible, .icon-btn:focus-visible, summary:focus-visible,
-.inp:focus-visible, .sel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.icon-btn {
-  width: 30px; height: 30px; flex: none; display: grid; place-items: center; padding: 0;
-  border-radius: 8px; font-size: 18px; line-height: 1;
-}
-
-/* Контролы форм — ОДНОЙ высоты с кнопками, и высота ЗАКРЕПЛЕНА переменной, а не
-   выводится из padding: разнобой уже разъезжался в строках «селект + кнопка»
-   (селект ниже, инпут кода выше). Высота берётся из глобального токена, не из padding. */
-.inp, .sel {
-  width: 100%; min-width: 0; height: var(--control-height);
-  border: 1px solid var(--line); border-radius: var(--control-radius);
-  color: var(--ink); background: var(--ground); font-family: inherit; font-size: 13px;
-}
-.inp { padding: 0 11px; }
-/* Селект стилизованный, не нативный (правило проекта): appearance:none + свой
-   шеврон с фиксированным отступом от края — системная стрелка липла к рамке. */
-.sel {
-  appearance: none; -webkit-appearance: none;
-  padding: 0 30px 0 10px; cursor: pointer;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888da8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-.inp.thin, .sel.thin { min-width: 0; }
-.inp:hover, .sel:hover { border-color: var(--line-2); }
-.sel option { color: var(--ink); background: var(--surface); }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .field-label { color: var(--ink-mid); font-size: 11.5px; font-weight: 590; }
 .field-label em { margin-left: 3px; color: var(--ink-mid); font-size: 10px; font-style: normal; font-weight: 440; }
 .control { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
@@ -1684,7 +1758,7 @@ async function disconnect() {
 .mini-empty p { margin-top: 3px; }
 .optional-chip { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-mid); font-size: 10.5px; }
 .service-control { display: flex; align-items: stretch; gap: 8px; }
-.service-control .sel { flex: 1; }
+.service-control > .ui-select-wrap { flex: 1; }
 .compact-explain { padding-top: 8px; }
 
 /* --- Правила --- */
@@ -1728,12 +1802,6 @@ async function disconnect() {
   min-height: 17px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
   font-size: 10.5px; line-height: 1.4;
 }
-.topic-status .spin.mini { width: 11px; height: 11px; border-width: 1px; }
-.link-btn {
-  padding: 0; border: 0; color: var(--accent); background: none; font: inherit;
-  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
-}
-.link-btn:disabled { opacity: .48; cursor: default; }
 .manual-topic { margin-top: 2px; }
 .manual-topic summary {
   width: fit-content; color: var(--ink-mid); font-size: 10.5px; cursor: pointer; user-select: none;
@@ -1745,10 +1813,7 @@ async function disconnect() {
   display: flex; align-items: flex-start; gap: 8px; margin-top: 11px; padding: 10px 11px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); cursor: pointer;
 }
-.task-reply-option input, .agent-search-option input {
-  width: 15px; height: 15px; flex: none; margin-top: 2px; accent-color: var(--accent); cursor: pointer;
-}
-.task-reply-option span, .agent-search-option span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.task-option-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .task-reply-option b, .agent-search-option b { font-size: 12px; }
 .task-reply-option small, .agent-search-option small { color: var(--ink-mid); font-size: 10.5px; line-height: 1.4; }
 .rrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -1758,9 +1823,7 @@ async function disconnect() {
 .auto-copy { min-width: 150px; display: flex; flex: 1; flex-direction: column; }
 .auto-copy b { font-size: 12.5px; }
 .chk, .num { display: flex; align-items: center; gap: 6px; color: var(--ink-mid); font-size: 12px; }
-.chk { cursor: pointer; }
-.chk input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
-.num-f { width: 56px; min-width: 0; padding: 6px 7px; text-align: center; }
+.num-f { width: 56px; min-width: 0; text-align: center; }
 .rules-explain { margin-top: -2px; }
 .savebar {
   position: sticky; bottom: -1px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 14px;
@@ -1790,8 +1853,7 @@ async function disconnect() {
 .token-card { background: linear-gradient(145deg, color-mix(in srgb, var(--surface) 95%, var(--accent)), var(--surface)); }
 .token-card > .muted { margin: 3px 0 6px; font-size: 13px; }
 .token-control { margin-top: auto; }
-.token-control .inp { padding: 11px 12px; font-family: var(--mono); }
-.connect-btn { width: 100%; min-height: 42px; }
+.connect-btn { width: 100%; }
 .security-note { display: flex; flex-direction: column; gap: 3px; }
 .security-note b { color: var(--ink); }
 .after-connect { padding: 2px 4px; }

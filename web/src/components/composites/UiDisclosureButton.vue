@@ -2,6 +2,8 @@
   <UiButton
     v-bind="$attrs"
     class="ui-disclosure-button"
+    :class="`ui-disclosure-button--${density}`"
+    :data-density="density"
     :variant="variant"
     :tone="tone"
     :disabled="disabled"
@@ -27,12 +29,14 @@ const props = withDefaults(
     open?: boolean;
     controls: string;
     disabled?: boolean;
+    density?: 'default' | 'compact';
     variant?: UiActionVariant;
     tone?: UiActionTone;
   }>(),
   {
     open: false,
     disabled: false,
+    density: 'default',
     variant: 'ghost',
     tone: 'neutral',
   },
