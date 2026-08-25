@@ -7,10 +7,17 @@ runner_claude_probe() {
   local version
   command -v claude >/dev/null 2>&1 || return 4
   version=$(factory_exec provider claude --version) || return
-  # Empty --setting-sources is an audited fail-closed contract of this exact
-  # native CLI. A future release stays unavailable until its parsing and sandbox
-  # schema have been reviewed instead of silently re-enabling disk settings.
-  [[ "$version" =~ ^2\.1\.220([[:space:]]|$) ]] || return 4
+  # Границу диска держат флаги запуска (пустой --setting-sources, --strict-mcp-config
+  # без конфига, --disable-slash-commands), а НЕ список разрешённых версий CLI.
+  # Список приходилось дописывать руками на каждое обновление: он успел разойтись с
+  # документацией за сутки, а до правки regex весь конвейер стоял недоступным — то есть
+  # стоил дорого и в обмен доказывал только то, что кто-то однажды прогнал эксперимент.
+  # Теперь эксперимент автоматизирован: tools/claude-contract-smoke.mjs запускает
+  # УСТАНОВЛЕННЫЙ CLI на фикстуре с хуками, .mcp.json, CLAUDE.md и приватным --settings
+  # и доказывает четыре вещи разом — hooks и MCP закрыты, память проекта жива, переданный
+  # --settings всё ещё применяется. Гонять после обновления CLI и периодически;
+  # argv-тест на фейковом claude этого доказать не может по устройству.
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || return 4
   printf '%s\n' "$version"
 }
 

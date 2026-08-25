@@ -11,9 +11,13 @@ import {
 } from './_claude-catalog.js';
 import { npmLatest } from './_npm-latest.js';
 import { withRetry } from '../retry.js';
-import { createStepSink } from '../chat/stream-steps.js';
-import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
-import { toClaudeSteps } from './_claude-steps.js';
+import { contextCacheStatus } from '../chat/context-cache.js';
+import {
+  buildClaudeTurnResult,
+  claudeSessionArgs,
+  createClaudeTurnCollector,
+  openClaudeStreamSession,
+} from './_claude-stream.js';
 
 /**
  * probe/efforts гоняют CLI — короткие таймауты, ошибки не роняют реестр.
@@ -63,7 +67,6 @@ const MODE_LABELS = {
 // обнулял входные токены хода — и размер контекста откатывался на сумму по ВСЕМ ходам,
 // кратно завышая кольцо. Отличать по ev.isApiErrorMessage нельзя: у «No response
 // requested.» он false.
-const SYNTHETIC_MODEL = '<synthetic>';
 
 // ── Лимиты подписки и доплата сверх них (в CLI это `/usage` и `/usage-credits`) ──
 // Ручки приватные, OAuth-подписочные: работают только с токеном хостового CLI
@@ -1355,93 +1358,47 @@ export default {
     for (const d of extraDirs) args.push('--add-dir', d);
 
     return new Promise((resolve, reject) => {
-      let resultEv = null;
-      let spentTokens = 0;
-      let lastTurnInput = 0;
-      let lastContextCache = null;
+      // Разбор потока общий с живой сессией (_claude-stream.js): событие CLI одно и то
+      // же, и вторая копия правил про usage, компакт и пустой ответ разошлась бы с первой.
+      const collector = createClaudeTurnCollector({ onStep, onProgress, log });
+      const { state } = collector;
       let buf = '';
-      // Лента шагов хода: копим на сервере (уедет в историю чата) и параллельно
-      // отдаём наружу через onStep — окно рисует их по мере поступления.
-      const stepSink = createStepSink(onStep);
-      const { steps } = stepSink;
-      // Модель, которой CLI ФАКТИЧЕСКИ отработал: алиас `opus` он резолвит сам,
-      // и это единственный способ увидеть рассинхрон с выбором в кокпите.
-      let actualModel = '';
-      // id сессии CLI ловим ИЗ ПОТОКА, а не только из финального result: у оборванного
-      // хода (кнопка «стоп», лимит) результата нет, и без этого id новая сессия оставалась
-      // безымянной — следующий вопрос уходил без --resume, и агент забывал разговор.
-      let streamSessionId = '';
-      const pushSteps = (ev) => {
-        stepSink.emitAll(toClaudeSteps(ev));
-      };
+
       // Своего таймаута у процесса НЕТ: лимит хода считает watchdog в modules/chat —
       // только он знает, что агент не работает, а ждёт ответа человека (это время не в счёт).
       // signal — и кнопка «стоп», и тот самый лимит: Node убивает процесс, мы отличаем
       // остановку по коду ошибки (ABORT_ERR) и возвращаем понятный текст, а не «код null».
       const child = execFile(config.claudeBin, args, { cwd, env, maxBuffer: 64 * 1024 * 1024, signal }, (err, stdout, stderr) => {
         // Подстраховка: финальная строка могла остаться в буфере без \n.
-        if (!resultEv) {
+        if (!state.resultEv) {
           for (const line of (buf + '\n' + (stdout || '')).split('\n')) {
             const t = line.trim();
             if (!t.startsWith('{')) continue;
-            try { const ev = JSON.parse(t); if (ev.type === 'result') resultEv = ev; } catch { /* мусор */ }
+            try { const ev = JSON.parse(t); if (ev.type === 'result') state.resultEv = ev; } catch { /* мусор */ }
           }
         }
-        if (!resultEv) {
+        if (!state.resultEv) {
           if (err?.code === 'ABORT_ERR' || signal?.aborted) {
             const stopped = new Error('Ход остановлен.');
             stopped.stopped = true;
-            stopped.steps = steps;
+            stopped.steps = collector.steps;
             // Сессия оборванного хода — живая: по ней продолжится следующий вопрос.
-            stopped.sessionId = streamSessionId || sessionId || null;
+            stopped.sessionId = state.streamSessionId || sessionId || null;
             // Размер контекста у оборванного хода известен: его сообщил поток. Без него
             // кольцо после «стопа» показывало прежнюю (а у свежей сессии — нулевую) цифру,
             // и чат с реальными 80k выглядел пустым.
-            stopped.contextTokens = lastTurnInput;
-            stopped.contextCache = lastContextCache || contextCacheStatus('unavailable');
+            stopped.contextTokens = state.lastTurnInput;
+            stopped.contextCache = state.lastContextCache || contextCacheStatus('unavailable');
             return reject(stopped);
           }
           if (err?.killed) return reject(new Error('Процесс агента убит извне (сигнал или переполнение буфера вывода).'));
           const tail = (stderr || '').trim().slice(-600);
           return reject(new Error(tail || `claude завершился без результата (код ${err?.code ?? '?'})`));
         }
-        const j = resultEv;
-        // Размер контекста = входные токены ПОСЛЕДНЕГО хода (из потока assistant-событий).
-        // result.usage — это СУММА за все ходы, она может многократно превышать окно.
-        const contextTokens = lastTurnInput || ((u) => (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0))(j.usage || {});
-        // Пустой result — агент завершил ход без текста (не разрешили действие, лимит шагов).
-        let reply = j.result || '';
-        // Ход, в котором не случилось НИ ОДНОГО хода модели: CLI умер на старте.
-        // Такой запуск ничего не сделал и ничего не стоил — его безопасно повторить,
-        // чем и пользуется чат (см. modules/chat: один автоповтор).
-        const emptyRun = !reply && !j.num_turns;
-        if (!reply) {
-          log?.warn({ subtype: j.subtype, turns: j.num_turns, denials: j.permission_denials, stderr: (stderr || '').trim().slice(-400) },
-            'чат: пустой result от claude');
-          // AskUserQuestion кокпит «отклоняет» намеренно — так ответ пользователя доезжает
-          // до агента (см. modules/chat). Это не отказ в действии, в текст его не тащим.
-          const denied = [...new Set((j.permission_denials || []).map((d) => d.tool_name).filter((n) => n && n !== 'AskUserQuestion'))];
-          // Причину показываем ЧЕЛОВЕКУ, а не только в журнале: «повтори вопрос» без диагноза
-          // загоняет в петлю повторов: каждый повтор создаёт новый процесс на занятую
-          // сессию и завершается с error_during_execution.
-          const why = j.subtype && j.subtype !== 'success' ? ` (${j.subtype})` : '';
-          const tail = (stderr || '').trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(-300);
-          const cliNote = tail ? `\n\nCLI сказал: ${tail}` : '';
-          if (j.subtype === 'error_max_turns') reply = '⚠ Агент упёрся в лимит шагов и не успел сформулировать ответ. Переформулируй запрос или разбей его на части.';
-          else if (denied.length) reply = `⚠ Действия не были разрешены (${denied.join(', ')}) — агент завершил ход без ответа. Разреши действие во всплывашке или переформулируй запрос.`;
-          else if (emptyRun) reply = `⚠ Агент не начал работу${why}: ни одного шага, ход пуст. Обычно это упавший запуск CLI — нет сети/VPN, лимит Anthropic или занятая сессия.${cliNote}`;
-          else reply = `⚠ Агент завершил ход без текстового ответа${why}. Повтори вопрос — контекст сохранён.${cliNote}`;
-        }
-        resolve({
-          reply, sessionId: j.session_id || sessionId || null, cost: j.total_cost_usd ?? null,
-          contextTokens,
-          contextCache: lastContextCache || contextCacheStatus('unavailable'),
-          actualModel, steps, emptyRun, subtype: j.subtype || '',
-        });
+        resolve(buildClaudeTurnResult(collector, { fallbackSessionId: sessionId, stderrTail: stderr, log }));
       });
       // stdin не используем — закрываем сразу, иначе claude ждёт ввода (3с warning, бывают зависания).
       child.stdin?.end();
-      // Стрим-парсер: считаем output-токены по assistant-событиям, ловим финальный result.
       child.stdout?.on('data', (d) => {
         buf += d;
         let nl;
@@ -1451,51 +1408,48 @@ export default {
           if (!line.startsWith('{')) continue;
           let ev;
           try { ev = JSON.parse(line); } catch { continue; }
-          pushSteps(ev);
-          // session_id CLI проставляет во всех событиях хода, начиная с init. Забираем сразу:
-          // если ход оборвут, финального result не будет, а продолжать разговор всё равно нужно.
-          if (ev.session_id) streamSessionId = ev.session_id;
-          if (ev.type === 'system' && ev.subtype === 'init' && ev.model) {
-            actualModel = ev.model;
-          } else if (ev.type === 'system' && ev.subtype === 'compact_boundary') {
-            // CLI сжал контекст сам (свой автокомпакт по CLAUDE_CODE_AUTO_COMPACT_WINDOW).
-            // Порог он проверяет НА ГРАНИЦЕ ХОДА, поэтому компакт случается в начале хода,
-            // а весь остаток хода идёт уже по сжатому контексту. Новый размер сообщит
-            // следующее же обращение к модели — lastTurnInput тут не трогаем, иначе между
-            // границей и этим обращением кольцо показывало бы пустоту.
-            log?.info({ meta: ev.compactMetadata || null }, 'чат: CLI сжал контекст сам');
-          } else if (ev.type === 'assistant' && ev.message?.usage && ev.message.model !== SYNTHETIC_MODEL) {
-            const mu = ev.message.usage;
-            spentTokens += mu.output_tokens || 0;
-            // Полный id модели хода (с датой сборки) точнее, чем алиас из init.
-            if (ev.message.model) actualModel = ev.message.model;
-            // Входные токены последнего хода — реальная заполненность окна контекста.
-            lastTurnInput = (mu.input_tokens || 0) + (mu.cache_read_input_tokens || 0) + (mu.cache_creation_input_tokens || 0);
-            // Эти поля относятся именно к ТЕКУЩЕМУ model request. result.usage ниже
-            // накопительный, поэтому для кэша его использовать нельзя.
-            const cacheFields = {};
-            if (Object.hasOwn(mu, 'cache_read_input_tokens')) {
-              cacheFields.readTokens = mu.cache_read_input_tokens;
-            }
-            if (Object.hasOwn(mu, 'cache_creation_input_tokens')) {
-              cacheFields.writeTokens = mu.cache_creation_input_tokens;
-            }
-            if (Object.hasOwn(mu, 'input_tokens')) cacheFields.uncachedTokens = mu.input_tokens;
-            lastContextCache = reportedContextCache(cacheFields);
-            // Второй аргумент — ЖИВОЙ размер контекста. Ход бывает длиной в час, а цифра
-            // в кольце до этого менялась раз в ход: после автокомпакта CLI оно светилось
-            // красным по уже сжатому контексту до самого ответа.
-            try {
-              onProgress?.(spentTokens, {
-                contextTokens: lastTurnInput,
-                contextCache: lastContextCache,
-              });
-            } catch { /* прогресс не критичен */ }
-          } else if (ev.type === 'result') {
-            resultEv = ev;
-          }
+          collector.push(ev);
         }
       });
     });
+  },
+
+  /**
+   * Живая сессия: тот же режим, в котором работает расширение VS Code
+   * (`--input-format stream-json`). Процесс переживает свой ход, поэтому фоновые
+   * команды и субагенты не гибнут вместе с ответом, а сам CLI будит модель, когда
+   * они закончились — замер: ход закрыт на 9.1 с, непрошеный ответ пришёл на 21.4 с.
+   *
+   * Всё из restartOn — флаги командной строки, зафиксированные при запуске: сменить их
+   * на лету нечем, поэтому пул переоткрывает сессию с прежним sessionId.
+   */
+  session: {
+    mode: 'persistent',
+    unsolicited: true,
+    restartOn: ['model', 'effort', 'permissionMode', 'cwd', 'extraDirs'],
+
+    open({
+      config, env, cwd, extraDirs = [], model, effort, permissionMode, sessionId,
+      mcpConfig, permissionPromptTool, providerSettings, log, hooks,
+    }) {
+      return openClaudeStreamSession({
+        bin: config.claudeBin,
+        args: claudeSessionArgs({
+          model,
+          effort,
+          permissionMode,
+          sessionId,
+          extraDirs,
+          mcpConfig,
+          permissionPromptTool,
+          providerSettingsArgs: claudeProviderSettingsArgs(providerSettings),
+        }),
+        cwd,
+        env,
+        sessionId,
+        log,
+        hooks,
+      });
+    },
   },
 };

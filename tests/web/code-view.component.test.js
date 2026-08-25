@@ -238,9 +238,11 @@ test('CodeView показывает два подписанных уровня, 
     },
   });
 
-  assert.equal(wrapper.findAll('.sels select').length, 2);
-  assert.equal(wrapper.get('label[for="code-project"]').text(), 'Проект');
-  assert.equal(wrapper.get('label[for="code-context"]').text(), 'Рабочая копия');
+  // Оба уровня выбираются в шапке раздела: панель отдана содержимому.
+  assert.equal(wrapper.findAll('.code-head select').length, 2);
+  assert.equal(wrapper.findAll('.panel select').length, 0);
+  assert.equal(wrapper.get('label[for="code-project"]').text(), 'проект');
+  assert.equal(wrapper.get('label[for="code-context"]').text(), 'рабочая копия');
   assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['web', '/work/web-preview']));
   assert.deepEqual(wrapper.findAll('#code-context optgroup').map((group) => group.attributes('label')), [
     'engine', 'web',
@@ -267,10 +269,16 @@ test('CodeView показывает два подписанных уровня, 
   assert.equal(query(latestCockpitLs).get('repo'), 'engine');
   assert.equal(query(latestCockpitLs).get('root'), '/engine');
 
+  // Переключатель рабочей копии остаётся и у проекта с единственным вариантом:
+  // человек должен видеть, где вообще меняют копию, а не угадывать.
   await wrapper.get('#code-project').setValue('solo');
   await settle(flushPromises);
-  assert.equal(wrapper.findAll('.sels select').length, 1);
-  assert.equal(wrapper.get('.context-static').text(), 'Рабочая копия: solo · Основная · trunk');
+  assert.equal(wrapper.findAll('.code-head select').length, 2);
+  assert.deepEqual(
+    wrapper.findAll('#code-context option').map((option) => option.text()),
+    ['solo · Основная · trunk'],
+  );
+  assert.equal(wrapper.find('.code-head .tlabel').exists(), false);
 
   await wrapper.get('#code-project').setValue('cockpit');
   await settle(flushPromises);
@@ -343,7 +351,12 @@ test('Git по умолчанию показан деревом, доступн�
   assert.equal(treeButton.attributes('aria-pressed'), 'false');
   assert.equal(listButton.attributes('aria-pressed'), 'true');
   assert.equal(wrapper.get('button.git-file[data-path="src/deep/b.js"]').classes().includes('sel'), true);
-  assert.equal(wrapper.get('button.git-file[data-path="src/deep/b.js"] .nm').text(), 'src/deep/b.js');
+  // Плоский список показывает имя файла и каталог отдельно: целый путь обрезался
+  // с конца, то есть съедал именно имя.
+  assert.equal(wrapper.get('button.git-file[data-path="src/deep/b.js"] .nm-base').text(), 'b.js');
+  assert.equal(wrapper.get('button.git-file[data-path="src/deep/b.js"] .nm-dir').text(), 'src/deep');
+  assert.equal(wrapper.get('button.git-file[data-path="root.md"] .nm-base').text(), 'root.md');
+  assert.equal(wrapper.find('button.git-file[data-path="root.md"] .nm-dir').exists(), false);
   assert.equal(monacoState.diffEditors[0].setCalls.length, diffSetCalls);
 
   await treeButton.trigger('click');
@@ -724,7 +737,7 @@ test('ответ revalidation не откатывает проект, выбра
   nextProjects.resolve({ projects });
   await settle(flushPromises);
   assert.equal(wrapper.get('#code-project').element.value, 'b');
-  assert.equal(wrapper.get('.context-static').text(), 'Рабочая копия: b · Основная · main');
+  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['b', '/b']));
 });
 
 test('фоновое обновление дерева не отменяет сворачивание каталога человеком', async (t) => {
@@ -967,6 +980,154 @@ test('Git показывает индекс и рабочее дерево ра�
   assert.equal(wrapper.find('button.git-file[data-group="work"][data-path="src/a.js"]').exists(), true);
 });
 
+test('Git-кнопки индексируют, генерируют сообщение, коммитят и пушат точный контекст', async (t) => {
+  const file = {
+    path: 'src/a.js',
+    status: 'M',
+    add: 1,
+    del: 0,
+    oldContent: 'old',
+    newContent: 'new',
+  };
+  let git = {
+    branch: 'main',
+    tracking: {
+      detached: false,
+      upstream: '',
+      ahead: 0,
+      behind: 0,
+    },
+    staged: [],
+    files: [{ ...file, group: 'work' }],
+    log: [],
+  };
+  const posts = [];
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return {
+          repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }],
+        };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [] };
+      }
+      if (url.includes('/git?')) {
+        return git;
+      }
+
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url, body) {
+      posts.push({ url, body });
+      if (url.includes('/unstage?')) {
+        git = {
+          ...git,
+          staged: [],
+          files: [{ ...file, group: 'work' }],
+        };
+        return { ok: true };
+      }
+      if (url.includes('/stage?')) {
+        git = {
+          ...git,
+          staged: [{ ...file, group: 'staged' }],
+          files: [],
+        };
+        return { ok: true };
+      }
+      if (url.includes('/commit-message?')) {
+        return {
+          ok: true,
+          title: 'Кокпит: добавить Git-действия',
+          model: 'claude/claude-test',
+        };
+      }
+      if (url.includes('/commit?')) {
+        git = {
+          ...git,
+          staged: [],
+          files: [],
+          tracking: {
+            ...git.tracking,
+            ahead: 1,
+          },
+          log: [{ hash: 'abc1234', subject: body.message, when: 'сейчас' }],
+        };
+        return {
+          ok: true,
+          hash: 'abc1234',
+          subject: body.message,
+        };
+      }
+      if (url.includes('/push?')) {
+        git = {
+          ...git,
+          tracking: {
+            detached: false,
+            upstream: 'origin/main',
+            ahead: 0,
+            behind: 0,
+          },
+        };
+        return {
+          ok: true,
+          branch: 'main',
+          published: true,
+        };
+      }
+
+      throw new Error(`unexpected POST ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.find('input.commit-message').exists(), false);
+  assert.equal(
+    wrapper.get('textarea.commit-message').attributes('placeholder'),
+    'Название коммита',
+  );
+
+  await wrapper.get('button.git-file-action[data-action="stage"][data-file="src/a.js"]')
+    .trigger('click');
+  await settle(flushPromises);
+  assert.deepEqual(posts[0].body, { paths: ['src/a.js'] });
+  assert.match(posts[0].url, /\/api\/code\/demo\/stage\?repo=demo&root=%2Fdemo/);
+  assert.equal(wrapper.find('button.git-file[data-group="staged"]').exists(), true);
+
+  await wrapper.get('button.git-group-action[data-action="unstage-all"]').trigger('click');
+  await settle(flushPromises);
+  assert.deepEqual(posts[1].body, { all: true });
+  assert.equal(wrapper.find('button.git-file[data-group="work"]').exists(), true);
+
+  await wrapper.get('button.git-group-action[data-action="stage-all"]').trigger('click');
+  await settle(flushPromises);
+  assert.deepEqual(posts[2].body, { all: true });
+
+  await wrapper.get('button.generate-commit').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('textarea.commit-message').element.value,
+    'Кокпит: добавить Git-действия');
+  assert.match(wrapper.get('.git-notice').text(), /claude\/claude-test/);
+
+  await wrapper.get('button.commit-action').trigger('click');
+  await settle(flushPromises);
+  assert.deepEqual(posts[4].body, { message: 'Кокпит: добавить Git-действия' });
+  assert.equal(wrapper.get('textarea.commit-message').element.value, '');
+  assert.match(wrapper.get('.git-notice').text(), /abc1234/);
+  assert.equal(wrapper.get('button.push-action').attributes('aria-label'), 'Опубликовать');
+
+  await wrapper.get('button.push-action').trigger('click');
+  await settle(flushPromises);
+  assert.match(wrapper.get('.git-notice').text(), /опубликована/);
+  assert.equal(wrapper.get('button.push-action').attributes('aria-label'), 'Пуш');
+});
+
 test('пустой индекс оставляет прежний одиночный список «Не в коммите»', async (t) => {
   const api = {
     async get(url) {
@@ -1063,6 +1224,153 @@ test('лесенка дерева: у файла зарезервировано 
   assert.equal(wrapper.get('button[data-dir-path="src/deep"] .chev').text(), '▾');
 });
 
+/**
+ * Строит панель на одном ответе `/git`, чтобы проверить строку под композером.
+ * Каждый вызов — свой браузер и свой стор, поэтому состояния тестов не смешиваются.
+ */
+async function mountGitPanel(t, gitPayload, { branch = 'main', post = null } = {}) {
+  const api = {
+    post,
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo', branch)] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return { staged: [], files: [], log: [], ...gitPayload };
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const mounted = await mountCodeView(t, { api });
+
+  await mounted.wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(mounted.flushPromises);
+
+  return mounted;
+}
+
+test('оба переключателя живут в шапке и не дублируются внутри панели', async (t) => {
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper } = await mountCodeView(t, { api });
+
+  // Раньше те же два уровня стояли внутри панели и вдобавок дублировались текстом
+  // шапки: «demo · demo · Основная · main» плюс плашка «Рабочая копия».
+  assert.equal(wrapper.findAll('.code-head select').length, 2);
+  assert.equal(wrapper.findAll('.panel select').length, 0);
+  assert.equal(wrapper.find('.panel .tlabel').exists(), false);
+  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/demo']));
+});
+
+test('композер отдаёт поле ввода целой строке, а кнопки — своей', async (t) => {
+  const { wrapper } = await mountGitPanel(t, {
+    branch: 'main',
+    tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
+  });
+
+  // Поле — прямой потомок композера: деля строку с тремя кнопками, в доке оно
+  // схлопывалось до двух букв, и набрать название коммита было негде.
+  assert.equal(wrapper.get('.git-compose > textarea.commit-message').exists(), true);
+  // Одна строка — только стартовый рост: `rows="1"` держит пустое поле в ритме кнопок.
+  assert.equal(wrapper.get('textarea.commit-message').attributes('rows'), '1');
+  assert.deepEqual(
+    wrapper.findAll('.git-compose-actions > button').map((node) => node.classes()[0]),
+    ['generate-commit', 'commit-action', 'push-action'],
+  );
+  assert.equal(wrapper.find('.git-compose-actions input').exists(), false);
+  assert.equal(wrapper.find('.git-compose-actions textarea').exists(), false);
+});
+
+test('Enter набирает тело сообщения, а коммит уходит по Ctrl+Enter', async (t) => {
+  const posts = [];
+  const staged = { path: 'src/a.js', status: 'M', add: 1, del: 0 };
+  const { wrapper, flushPromises } = await mountGitPanel(
+    t,
+    { staged: [{ ...staged, group: 'staged' }], files: [] },
+    {
+      post: async (url, body) => {
+        posts.push({ url, body });
+
+        return { ok: true, hash: 'abc1234', subject: body.message };
+      },
+    },
+  );
+  const field = wrapper.get('textarea.commit-message');
+  await field.setValue('Кокпит: правка');
+
+  // Голый Enter принадлежит тексту: иначе тело сообщения набрать нечем.
+  await field.trigger('keydown', { key: 'Enter' });
+  await settle(flushPromises);
+  assert.deepEqual(posts, []);
+
+  await field.trigger('keydown', { key: 'Enter', ctrlKey: true });
+  await settle(flushPromises);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].url, /\/api\/code\/demo\/commit\?/);
+  assert.deepEqual(posts[0].body, { message: 'Кокпит: правка' });
+});
+
+test('пустое поле сообщения остаётся в ритме композера, а не в общих 92px', async () => {
+  const skin = await readFile(webFile('src/styles/components/fields.css'), 'utf8');
+  const block = skin.match(/\.ui-textarea\[data-context='code-commit'\]\s*\{[^}]*\}/);
+
+  // happy-dom раскладку не считает, поэтому компактность стережём статически: живой
+  // замер в Chrome дал 30.1px у пустого поля и 84px у полного (потолок в четыре строки).
+  assert.ok(block, 'компактный скин поля сообщения не найден в общей библиотеке');
+  assert.match(block[0], /min-height:\s*30px/);
+  assert.match(block[0], /max-height:\s*84px/);
+
+  // Рост по мере набора — прогрессивное улучшение: без поддержки остаётся строка
+  // с прокруткой и ручным разделителем, поэтому правило стоит под @supports.
+  assert.match(
+    skin,
+    /@supports \(field-sizing: content\) \{\s*\.ui-textarea\[data-context='code-commit'\]/,
+  );
+});
+
+test('строка под композером говорит только то, чего нет в шапке раздела', async (t) => {
+  const quiet = await mountGitPanel(t, {
+    branch: 'main',
+    tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
+  });
+  // Совпавшая с remote ветка новостью не является: имя ветки шапка уже назвала.
+  assert.equal(quiet.wrapper.find('.git-notice').exists(), false);
+
+  const drifted = await mountGitPanel(t, {
+    branch: 'main',
+    tracking: { detached: false, upstream: 'origin/main', ahead: 2, behind: 1 },
+  });
+  assert.equal(drifted.wrapper.get('.git-notice').text(), 'origin/main · ↑2 ↓1');
+
+  const fresh = await mountGitPanel(t, {
+    branch: 'main',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+  });
+  assert.match(fresh.wrapper.get('.git-notice').text(), /не опубликована/);
+
+  const detached = await mountGitPanel(t, {
+    branch: '(detached)',
+    tracking: { detached: true, upstream: '', ahead: 0, behind: 0 },
+  });
+  assert.match(detached.wrapper.get('.git-notice').text(), /detached HEAD/);
+
+  // `refresh` перечитывает гит, но не список рабочих копий: после смены ветки мимо
+  // кокпита шапка устаревает, и промолчать здесь значило бы соврать.
+  const switched = await mountGitPanel(t, {
+    branch: 'task-77',
+    tracking: { detached: false, upstream: 'origin/main', ahead: 0, behind: 0 },
+  }, { branch: 'main' });
+  assert.match(switched.wrapper.get('.git-notice').text(), /ветка сменилась на task-77/);
+});
+
 test('шаг лесенки и направляющие живут в стилях панели', async () => {
   const source = await readFile(VIEW_PATH, 'utf8');
   const styles = source.slice(source.indexOf('<style'));
@@ -1072,7 +1380,22 @@ test('шаг лесенки и направляющие живут в стиля
   assert.match(styles, /--tree-step:\s*\d+px/);
   assert.match(styles, /padding-left:\s*calc\(var\(--tree-lead\)\s*\+\s*var\(--depth,\s*0\)\s*\*\s*var\(--tree-step\)\)/);
   assert.match(styles, /background-image:\s*repeating-linear-gradient\(to right, var\(--tree-guide\)/);
-  // Фон наведения и выделения — только background-color: shorthand стёр бы направляющие.
-  assert.match(styles, /\.trow:hover\s*\{\s*background-color:/);
-  assert.match(styles, /\.frow\.sel\s*\{\s*background-color:/);
+});
+
+test('фон строки дерева задаёт общий скин и только background-color', async () => {
+  const skin = await readFile(webFile('src/styles/components/actions.css'), 'utf8');
+  const row = /\.ui-pressable\[data-context='code-tree-row'\][^{]*\{[^}]*\}/g;
+  const blocks = skin.match(row) || [];
+
+  // Вид строки живёт в общей библиотеке, а не в плагине: локальную копию этих свойств
+  // ловит shrinking-baseline `check:ui-styles`.
+  assert.ok(blocks.length >= 4, 'скин строки дерева не найден в общей библиотеке');
+
+  // Фон наведения и выделения — только background-color: shorthand `background`
+  // стёр бы background-image с направляющими предков.
+  assert.match(skin, /\.ui-pressable\[data-context='code-tree-row'\]:hover\s*\{\s*background-color:/);
+  assert.match(
+    skin,
+    /\.ui-pressable\[data-context='code-tree-row'\]\[aria-pressed='true'\]\s*\{\s*background-color:/,
+  );
 });

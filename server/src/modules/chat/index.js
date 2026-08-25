@@ -22,6 +22,7 @@ import {
 } from '../../lib/chat/history-store.js';
 import { ChatSessionBindingStore } from '../../lib/chat/session-binding-store.js';
 import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
+import { ChatLiveSessions } from '../../lib/chat/live-sessions.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
 import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
 import { autoDecision } from '../../lib/chat/auto-approve.js';
@@ -374,6 +375,53 @@ async function chatModule(fastify, opts) {
   // и уже показанную ленту шагов текущего хода. ──
   const activeRuns = new Map(); // ключ чата → { startedAt, tokens, steps[], ac, compact }
 
+  // ── Живые сессии исполнителей ────────────────────────────────────────────────
+  // Процесс агента переживает свой ход, поэтому фоновые команды и субагенты не гибнут
+  // вместе с ответом, а CLI сам будит модель, когда они закончились. Такой НЕПРОШЕНЫЙ
+  // ход некому вернуть ответом на HTTP-запрос — он уезжает тем же путём, что и ответы
+  // после закрытого окна (chats/pending + SSE), поэтому доезжает во все окна разом.
+  const liveSessions = new ChatLiveSessions({
+    log: fastify.log,
+    onBackgroundStep: ({ chatKey, step }) => {
+      fastify.sse.broadcast('chat-step', { chatKey, step });
+    },
+    onBackgroundProgress: ({ chatKey, tokens, extra }) => {
+      fastify.sse.broadcast('chat-progress', {
+        chatKey,
+        tokens,
+        ...(Number.isFinite(extra?.contextTokens) ? { contextTokens: extra.contextTokens } : {}),
+      });
+    },
+    // Состав живых процессов виден человеку («Настройки → Запуски»), поэтому его
+    // изменения не должны ждать опроса. Событие означает «перечитай список», а не
+    // несёт сам список: окно с закрытой карточкой не обязано за него платить.
+    onChange: () => {
+      fastify.sse.broadcast('chat-sessions', {});
+    },
+    onBackgroundTurn: async ({ chatKey, result }) => {
+      try {
+        await writeOrphan({
+          id: `o${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+          chatKey,
+          role: 'assistant',
+          ...normalizeExecutorContextCache(result),
+          // Ход агент начал сам, значит человек его не заказывал и озвучивать нечего:
+          // speechSafe остаётся выключенным, как у любого хода с действиями.
+          speechSafe: false,
+          unsolicited: true,
+          at: Date.now(),
+        });
+        fastify.sse.broadcast('chat-orphan', { chatKey });
+        fastify.log.info({ chatKey }, 'чат: непрошеный ход агента доставлен');
+      } catch (error) {
+        fastify.log.error({ chatKey, err: error?.message }, 'чат: непрошеный ход не сохранён');
+      }
+    },
+  });
+  fastify.addHook('onClose', async () => {
+    await liveSessions.closeAll('остановка сервера');
+  });
+
   // ── Очередь ходов на чат ─────────────────────────────────────────────────────
   // ДВА CLI НА ОДНУ СЕССИЮ НЕ ЖИВУТ: второй `claude --resume <тот же id>` падает
   // мгновенно (result без текста, subtype error_during_execution, turns=0, cost=0),
@@ -444,6 +492,81 @@ async function chatModule(fastify, opts) {
   }));
 
   /**
+   * Живые процессы исполнителей: кто сейчас держит память, MCP-серверы и незакрытые
+   * фоновые команды. Отдельная ручка от `/api/chat/active`: там ИДУЩИЕ ходы, здесь —
+   * процессы, которые живут и между ходами. Свободная сессия ходом не занята, но
+   * ресурсы держит, и увидеть её иначе нечем — в `ps` она выглядит обычным CLI.
+   */
+  fastify.get('/api/chat/sessions', async () => {
+    const sessions = await Promise.all(liveSessions.stats().map(async (session) => {
+      const head = await chatHeadOf(session.chatKey);
+      return {
+        ...session,
+        chatTitle: head.title,
+        taskId: head.taskId,
+        // Ход может идти и вне живой сессии (её тумблер выключили после старта), поэтому
+        // занятость сверяем с реестром ходов, а не только с признаком самого пула.
+        running: activeRuns.has(session.chatKey) || turnLocks.isBusy({ chatKey: session.chatKey }),
+      };
+    }));
+    return {
+      enabled: (prefs?.read?.() || {}).chatLiveSessions !== false,
+      ...liveSessions.limits(),
+      sessions,
+    };
+  });
+
+  /**
+   * Погасить один процесс. По умолчанию отказываем на идущем ходе: убить процесс под
+   * работающим агентом — это потерять его работу без предупреждения. Явный `force=1`
+   * (второе нажатие человека) сначала обрывает ход, чтобы окно получило понятное
+   * «Ход остановлен», а не необъяснимый обрыв.
+   */
+  fastify.delete('/api/chat/sessions/:chatKey', async (request, reply) => {
+    const chatKey = String(request.params?.chatKey || '');
+    if (!chatKey) return reply.code(400).send({ error: 'bad_chat_key' });
+    if (!liveSessions.has(chatKey)) return reply.code(404).send({ error: 'no_live_session' });
+
+    const force = String(request.query?.force || '') === '1';
+    const busy = activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey });
+    if (busy && !force) {
+      return reply.code(409).send({
+        error: 'chat_busy',
+        message: 'в этом чате идёт ход: останови его или погаси сессию вместе с ходом',
+      });
+    }
+    if (busy) {
+      dropPending(chatKey, 'Сессия агента погашена');
+      activeRuns.get(chatKey)?.ac?.abort();
+    }
+    await liveSessions.close(chatKey, force ? 'погашена человеком вместе с ходом' : 'погашена человеком');
+    fastify.log.info({ chatKey, forced: busy }, 'чат: живая сессия погашена человеком');
+    return { ok: true, forced: busy };
+  });
+
+  /**
+   * Погасить всё свободное. Занятые ходом сессии пропускаются намеренно: массовое
+   * действие не должно молча обрывать работу, поэтому их гасят по одной и осознанно.
+   */
+  fastify.delete('/api/chat/sessions', async () => {
+    let closed = 0;
+    let skipped = 0;
+    for (const session of liveSessions.stats()) {
+      const busy = session.busy
+        || activeRuns.has(session.chatKey)
+        || turnLocks.isBusy({ chatKey: session.chatKey });
+      if (busy) {
+        skipped += 1;
+        continue;
+      }
+      await liveSessions.close(session.chatKey, 'погашены свободные сессии');
+      closed += 1;
+    }
+    fastify.log.info({ closed, skipped }, 'чат: живые сессии погашены человеком');
+    return { ok: true, closed, skipped };
+  });
+
+  /**
    * Явный «сброс памяти» из UI. Для Kimi одного client-side `sessionId = null`
    * недостаточно: resume id принадлежит sidecar-у сервера и намеренно не доверяет
    * браузеру. Поэтому пользовательское действие подтверждается отдельным API-вызовом,
@@ -461,13 +584,18 @@ async function chatModule(fastify, opts) {
         message: 'модель чата уже изменена в другом окне; перечитай чат перед сбросом памяти',
       });
     }
-    if (record.modelRef?.provider !== 'kimi') return { ok: true, reset: false };
-    if (activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey })) {
+    // Живая сессия помнит разговор ВНУТРИ процесса, а не по --resume: пока она открыта,
+    // локального обнуления sessionId в окне мало — агент продолжил бы помнить всё.
+    const hasLive = liveSessions.has(chatKey);
+    if ((hasLive || record.modelRef?.provider === 'kimi')
+      && (activeRuns.has(chatKey) || turnLocks.isBusy({ chatKey }))) {
       return reply.code(409).send({
         error: 'chat_busy',
         message: 'сначала останови текущий ход, затем сбрось память агента',
       });
     }
+    if (hasLive) await liveSessions.close(chatKey, 'сброс памяти агента');
+    if (record.modelRef?.provider !== 'kimi') return { ok: true, reset: hasLive };
     // Проверка busy и постановка собственного chat lock идут без await между ними:
     // новый ход либо успевает первым (тогда 409 выше), либо ждёт уже пустой binding.
     const binding = await turnLocks.run({ chatKey }, () => (
@@ -1256,6 +1384,26 @@ async function chatModule(fastify, opts) {
     const compactEnv = compactWindow && executor.autoCompactEnv
       ? { [executor.autoCompactEnv]: String(compactWindow) }
       : {};
+
+    // Живая сессия: процесс исполнителя переживает свой ход. Только так фоновая команда
+    // и субагент доживают до конца, а CLI получает возможность разбудить модель сам —
+    // разовый запуск умирал вместе с ответом, и обещание «сообщу, когда закончится»
+    // выполнить было физически нечем. Умеет ли исполнитель жить между ходами, объявляет
+    // он сам (executor.session), а тумблер prefs оставлен для отката: живой процесс
+    // держит память и свои MCP-серверы.
+    const liveTurn = currentPrefs.chatLiveSessions !== false
+      && executor.session?.mode === 'persistent'
+      && !!chatKey;
+    if (liveTurn) {
+      // Кнопка «стоп» остаётся прежней ручкой: она дёргает abort, а мы превращаем его
+      // в прерывание ХОДА. Убивать процесс больше нельзя — вместе с ним умрёт разговор.
+      ac.signal.addEventListener('abort', () => {
+        liveSessions.interrupt(chatKey).catch((error) => {
+          fastify.log.warn({ chatKey, err: error?.message }, 'чат: не удалось прервать ход живой сессии');
+        });
+      }, { once: true });
+    }
+
     try {
       const runArgs = {
         config,
@@ -1350,7 +1498,17 @@ async function chatModule(fastify, opts) {
           fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
         } : undefined,
       };
-      let out = await executor.run(runArgs);
+      // Один вход для обоих путей: живая сессия отдаёт то же, что разовый запуск,
+      // поэтому остальной код хода про смену модели работы ничего не знает.
+      const runTurn = () => (liveTurn
+        ? liveSessions.run({ ...runArgs, executor }, {
+          message: runArgs.message,
+          onStep: runArgs.onStep,
+          onProgress: runArgs.onProgress,
+        })
+        : executor.run(runArgs));
+
+      let out = await runTurn();
       // Пустой ход (ноль шагов, ноль стоимости) = CLI умер на старте и НИЧЕГО не сделал.
       // Повторить его безопасно — и честнее, чем отдать человеку заглушку и ждать, что
       // он пришлёт сообщение заново (а он пришлёт — и получит то же самое).
@@ -1360,7 +1518,7 @@ async function chatModule(fastify, opts) {
       // небезопасен (например claude /clear начал бы ещё одну сессию).
       if (!slash && mayRetryEmptyRun(executor, out, { compact: !!plan })) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
-        out = await executor.run(runArgs);
+        out = await runTurn();
       }
       out = normalizeExecutorContextCache(out);
       // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt
@@ -2148,6 +2306,9 @@ async function chatModule(fastify, opts) {
     }
     deletingChats.add(id);
     try {
+      // Живой процесс агента удалённого чата держать не за чем: разговора больше нет,
+      // а он занимает память и свои MCP-серверы.
+      await liveSessions.close(id, 'чат удалён');
       const removed = await history.remove(id);
       // origin в query: DELETE у нас без тела (см. shared/api-client.js).
       if (removed) {

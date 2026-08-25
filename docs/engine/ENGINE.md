@@ -888,15 +888,31 @@ Cockpit мог fail-closed сверить свой опубликованный 
 Guard не заменяет host sandbox. Рабочий запуск `state-only` запрещён, пока выбранный
 runner физически сохраняет source roots writable.
 
-Для Claude trust boundary закреплён за audited native CLI `2.1.220`: runner принимает только
-owner-only `0400` settings из `CONTROL_DIR`, а сам control tree помещает в tool-level
-`Read/Edit/Write/NotebookEdit` deny. CLI запускается с пустым `--setting-sources`,
-`--strict-mcp-config` без MCP config и `--disable-slash-commands`; `--bare` не
-используется, поэтому штатная OAuth/keychain авторизация сохраняется. `--safe-mode`
-снят намеренно: агентам конвейера нужна память проекта (CLAUDE.md с @-импортами
-знаний) из worktree — hooks, плагины, skills и произвольные MCP при этом остаются
-закрытыми перечисленными флагами. Неаудированная версия
-Claude fail-closed недоступна route engine.
+Для Claude trust boundary держат флаги запуска, а не список разрешённых версий CLI:
+runner принимает только owner-only `0400` settings из `CONTROL_DIR`, а сам control tree
+помещает в tool-level `Read/Edit/Write/NotebookEdit` deny. CLI запускается с пустым
+`--setting-sources`, `--strict-mcp-config` без MCP config и `--disable-slash-commands`;
+`--bare` не используется, поэтому штатная OAuth/keychain авторизация сохраняется.
+`--safe-mode` снят намеренно: агентам конвейера нужна память проекта (CLAUDE.md с
+@-импортами знаний) из worktree — hooks, плагины, skills и произвольные MCP при этом
+остаются закрытыми перечисленными флагами. `runner_claude_probe` требует от CLI лишь
+разборчивый номер версии: он уходит в телеметрию запуска.
+
+**Соблюдает ли флаги живой бинарь, проверяет smoke, а не allowlist.** Прежде границу
+сторожил перечень аудированных версий в probe, и он оказался дорогим ритуалом: дописывать
+его приходилось руками на каждое обновление, до правки regex весь конвейер стоял
+`runner_preflight_unavailable`, а доказывал он только то, что кто-то однажды прогнал
+эксперимент вручную. Эксперимент теперь автоматизирован —
+`tools/claude-contract-smoke.mjs` поднимает временную фикстуру с hooks
+(`SessionStart`/`UserPromptSubmit`), `.mcp.json`, `CLAUDE.md` и приватным `--settings`,
+делает три коротких хода установленным CLI и проверяет шесть инвариантов: без изолирующих
+флагов маркеры обязаны появиться (иначе проверка недействительна), `--strict-mcp-config`
+глушит MCP и не трогает hooks, а полный набор раннера закрывает hooks и MCP, оставляет
+память проекта и сохраняет действие переданного `--settings`. Вердикты — `CONTRACT_OK`,
+`CONTRACT_BROKEN`, `INVALID_FIXTURE` (коды возврата 0/1/2). Гонять после обновления CLI и
+периодически; в offline suite он не входит, потому что ходит в реальную модель.
+Юнит-тест `tests/engine/unit/claude-runner-sandbox.sh` подменяет claude фейком и по
+устройству отвечает на другой вопрос — какие флаги мы ПЕРЕДАЁМ.
 
 **Native OS sandbox временно снят — и вот почему.** Обязательный блок
 `"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false,…}`

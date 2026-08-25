@@ -18,6 +18,13 @@ export function secToHMS(s) {
   return `${H}:${p(M)}:${p(S)}`;
 }
 
+/** Секунды → «MM:SS»: таймкод внутри записи, где часов почти не бывает. */
+export function mmss(s) {
+  const sec = Math.max(0, Math.floor(Number(s) || 0));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(sec / 60))}:${p(sec % 60)}`;
+}
+
 /**
  * Чистое время работы узлов конвейера.
  *

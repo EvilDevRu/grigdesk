@@ -199,52 +199,14 @@
       }
     },
     "web/src/views/code/CodePanel.vue": {
-      ".trow": {
-        "background": {
-          "none": 1
-        },
-        "border": {
-          "none": 1
-        },
-        "color": {
-          "var(--ink)": 1
-        },
-        "padding": {
-          "4px 8px": 1
-        },
-        "border-radius": {
-          "7px": 1
-        },
-        "cursor": {
-          "pointer": 1
-        },
-        "font-size": {
-          "12.5px": 1
-        }
-      },
-      ".trow:hover": {
-        "background-color": {
-          "var(--surface)": 1
-        }
-      },
-      ".trow:focus-visible, .ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible": {
+      ".ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible": {
         "outline": {
           "2px solid color-mix(in srgb, var(--accent) 55%, transparent)": 1
-        }
-      },
-      ".trow.dir": {
-        "color": {
-          "var(--ink-mid)": 1
         }
       },
       ".tree .trow": {
         "padding-left": {
           "calc(var(--tree-lead) + var(--depth, 0) * var(--tree-step))": 1
-        }
-      },
-      ".frow.sel": {
-        "background-color": {
-          "color-mix(in srgb, var(--accent) 16%, transparent)": 1
         }
       }
     },

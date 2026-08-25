@@ -16,7 +16,10 @@ printf '{"permissions":{"allow":[],"deny":["Read(%s)","Read(%s/**)","Edit(%s)","
   "$tool_control" "$tool_control" "$tool_control" "$tool_control" >"$settings"
 chmod 400 "$settings"
 
-FAKE_CLAUDE_VERSION='2.1.220 (Claude Code)'
+# Этот файл подменяет claude фейком, поэтому доказывает только то, что раннер ПЕРЕДАЁТ
+# нужные флаги. Соблюдает ли их живой CLI — вопрос к самому бинарю: на него отвечает
+# tools/claude-contract-smoke.mjs, который гоняется после обновления CLI и периодически.
+FAKE_CLAUDE_VERSION='2.1.241 (Claude Code)'
 CAPTURE_FILE="$TEST_ROOT/claude-argv.tsv"
 factory_exec() {
   local kind=$1
@@ -37,13 +40,22 @@ factory_exec() {
 
 probe=$(runner_claude_probe)
 probe_rc=$?
-assert_rc 0 "$probe_rc" "audited Claude CLI version is available"
-assert_contains "$probe" '2.1.220' "probe returns the audited CLI version"
+assert_rc 0 "$probe_rc" "установленный Claude CLI доступен раннеру"
+assert_contains "$probe" '2.1.241' "probe отдаёт версию установленного CLI"
 
-FAKE_CLAUDE_VERSION='2.1.221 (Claude Code)'
+# Списка разрешённых версий больше нет намеренно: он дописывался руками на каждое
+# обновление, до правки regex весь конвейер стоял недоступным, а изоляцию всё это время
+# держали флаги запуска, а не список. Новая версия обязана быть доступной сразу.
+FAKE_CLAUDE_VERSION='2.2.0 (Claude Code)'
 runner_claude_probe >/dev/null 2>&1
-assert_rc 4 "$?" "unaudited Claude CLI version is fail-closed unavailable"
-FAKE_CLAUDE_VERSION='2.1.220 (Claude Code)'
+assert_rc 0 "$?" "новая версия CLI не блокируется списком аудита"
+
+# Осмысленность ответа проверять всё равно надо: без номера версии probe нечего положить
+# ни в телеметрию запуска, ни в диалект аналитики.
+FAKE_CLAUDE_VERSION='(Claude Code)'
+runner_claude_probe >/dev/null 2>&1
+assert_rc 4 "$?" "ответ без номера версии остаётся fail-closed"
+FAKE_CLAUDE_VERSION='2.1.241 (Claude Code)'
 
 export RUNNER_CLAUDE_CONTROL_DIR="$control"
 export RUNNER_CLAUDE_SETTINGS="$settings"

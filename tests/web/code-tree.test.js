@@ -14,6 +14,7 @@ import {
   normalizeGitView,
   pickCodeContext,
   reconcileGitOpenDirs,
+  splitGitPath,
 } from '../../web/src/shared/code-tree.js';
 
 function tree(path, overrides = {}) {
@@ -260,4 +261,37 @@ test('после Git refresh сохраняются старые состоян�
     [...reconcileGitOpenDirs(nextDirs, null, null)],
     ['kept-open', 'kept-closed', 'added'],
   );
+});
+
+test('путь изменения делится на имя файла и каталог над ним', () => {
+  assert.deepEqual(splitGitPath('mutants/core/build_shell.py'), {
+    name: 'build_shell.py',
+    dir: 'mutants/core',
+  });
+  assert.deepEqual(splitGitPath('uv.lock'), { name: 'uv.lock', dir: '' });
+  assert.deepEqual(splitGitPath(''), { name: '', dir: '' });
+  assert.deepEqual(splitGitPath(undefined), { name: '', dir: '' });
+
+  // Хвостовой слэш — не каталог: имя пустое, и подставлять вместо него предка нельзя.
+  assert.deepEqual(splitGitPath('src/'), { name: '', dir: 'src' });
+});
+
+test('группа изменений несёт готовые строки плоского списка в порядке ответа сервера', () => {
+  const payload = {
+    staged: [],
+    files: [
+      { path: 'src/deep/b.js', status: 'M' },
+      { path: 'root.md', status: 'D' },
+    ],
+  };
+  const [group] = buildGitGroups(payload, new Set());
+
+  assert.deepEqual(group.list.map((entry) => [entry.name, entry.dir]), [
+    ['b.js', 'src/deep'],
+    ['root.md', ''],
+  ]);
+  assert.equal(group.list[0].file, payload.files[0]);
+
+  // Чистое дерево тоже отдаёт список: шаблон не должен различать пустую группу.
+  assert.deepEqual(buildGitGroups({ staged: [], files: [] }, new Set())[0].list, []);
 });

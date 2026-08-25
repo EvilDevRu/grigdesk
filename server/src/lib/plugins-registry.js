@@ -46,9 +46,21 @@ export const SYSTEM = [
     system: true,
     name: 'Код',
     version: '1.0.0',
-    description: 'Просмотр кода и гита проектов как в VS Code: дерево файлов и несохранённые изменения любого дерева — основного репозитория или worktree. Только чтение. Пути репозиториев — в разделе «Проекты».',
+    description: 'Код и Git проектов как в VS Code: дерево файлов, staged/unstaged '
+      + 'изменения, коммиты и push для основного репозитория или worktree. Пути '
+      + 'репозиториев — в разделе «Проекты».',
     nav: { path: '/code', label: 'Код', icon: 'code', group: 'dock', order: 10 },
-    settings: [],
+    settings: [
+      {
+        key: 'commitMessageModel',
+        label: 'Модель для сообщения коммита',
+        type: 'model',
+        hint: 'Кнопка генерации читает только staged diff и предлагает одно название '
+          + 'коммита. Diff считается недоверенным вводом, поэтому подходят исполнители '
+          + 'с безопасным model-only режимом, например Claude и Ollama.',
+        default: null,
+      },
+    ],
   },
   {
     id: 'inbox',

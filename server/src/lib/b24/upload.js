@@ -47,6 +47,10 @@ const MIME_BY_EXT = {
     svg: 'image/svg+xml',
     pdf: 'application/pdf',
     txt: 'text/plain',
+    mp4: 'video/mp4',
+    m4v: 'video/mp4',
+    mov: 'video/quicktime',
+    webm: 'video/webm',
 };
 
 /**
@@ -58,6 +62,13 @@ export function detectMime(name, buffer) {
         if (buffer.length >= sig.bytes.length && sig.bytes.every((b, i) => buffer[i] === b)) {
             return sig.mime;
         }
+    }
+    // MP4/MOV: контейнер ISO-BMFF помечен боксом 'ftyp' со смещения 4. Тип важен:
+    // с application/octet-stream портал показывает вложение файлом «скачать», а
+    // фрагмент записи прикладывают затем, чтобы его посмотрели, не выходя из задачи.
+    if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+        const brand = buffer.subarray(8, 12).toString('ascii');
+        return brand.startsWith('qt') ? 'video/quicktime' : 'video/mp4';
     }
     // WEBP: 'RIFF'....'WEBP'
     if (

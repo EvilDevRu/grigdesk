@@ -2,7 +2,7 @@
 // Node-обвязка + Python whisper (venv через COCKPIT_MEDIA_PYTHON). Async job-модель:
 // ingest сразу возвращает jobId, статус читается поллингом (файлы в mediaDir/jobs).
 import path from 'node:path';
-import { extractFramesAt } from '../lib/media/ingest.js';
+import { cutClipAt, extractFramesAt } from '../lib/media/ingest.js';
 import { SpeechRuntime } from '../lib/speech/runtime.js';
 
 export class MediaAdapter {
@@ -69,6 +69,9 @@ export class MediaAdapter {
     return extractFramesAt({ filePath, seconds, destDir });
   }
 
+  /** Куда ложатся сами записи. Одно имя каталога на загрузку, уборку и подсчёт места. */
+  get uploadsDir() { return path.join(this.mediaDir, 'uploads'); }
+
   /** Корень кадров встреч. Наружу отдаётся имя внутри него, а не путь. */
   get framesRoot() { return path.join(this.mediaDir, 'meeting-frames'); }
 
@@ -81,6 +84,23 @@ export class MediaAdapter {
       filePath,
       seconds,
       destDir: path.join(this.framesRoot, run),
+      prefix: `p${part}-`,
+    });
+  }
+
+  /** Корень фрагментов записи. Наружу, как и у кадров, отдаётся имя внутри него. */
+  get clipsRoot() { return path.join(this.mediaDir, 'meeting-clips'); }
+
+  /**
+   * Кусок записи вокруг места задачи. Номер части в имени обязателен по той же причине,
+   * что и у кадров: секунды у частей локальные и совпадают между собой.
+   */
+  meetingClip({ filePath, from, seconds, run, part = 0 }) {
+    return cutClipAt({
+      filePath,
+      from,
+      seconds,
+      destDir: path.join(this.clipsRoot, run),
       prefix: `p${part}-`,
     });
   }

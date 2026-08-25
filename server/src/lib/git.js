@@ -8,7 +8,7 @@
 //
 // Отдаём по файлу содержимое ДО и ПОСЛЕ — диф строит Monaco на клиенте (тот же виджет,
 // что в VS Code: side-by-side, подсветка, сворачивание неизменённого).
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -17,16 +17,32 @@ const exec = promisify(execFile);
 // Предел на размер стороны файла — не тащить в браузер гигантские блобы.
 const MAX_BYTES = 1_500_000;
 
-async function git(cwd, args) {
+async function git(cwd, args, options = {}) {
   // core.quotePath=false обязателен: с дефолтным `true` git отдаёт не-ASCII путь
   // октальными байтами («"\321\204\320\260\320\271\320\273.txt"»), и такой файл
   // не открыть ни по имени, ни через `git show` — диф выходил пустым.
   const { stdout } = await exec(
     'git',
     ['-C', cwd, '-c', 'core.quotePath=false', ...args],
-    { maxBuffer: 64 * 1024 * 1024 },
+    {
+      maxBuffer: 64 * 1024 * 1024,
+      ...options,
+      env: {
+        ...process.env,
+        ...(options.env || {}),
+      },
+    },
   );
   return stdout;
+}
+
+export class CodeGitError extends Error {
+  constructor(code, message, status = 409) {
+    super(message);
+    this.name = 'CodeGitError';
+    this.code = code;
+    this.status = status;
+  }
 }
 
 /**
@@ -218,8 +234,9 @@ export async function worktreeChanges(cwd) {
     = await Promise.all([
       git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
       git(cwd, ['diff', '--stat', 'HEAD']).catch(() => ''),
-      git(cwd, ['diff', '--cached', '--numstat', 'HEAD']).catch(() => ''),
-      git(cwd, ['diff', '--cached', '--name-status', 'HEAD']).catch(() => ''),
+      // Без явного HEAD Git сам берёт его, а до первого коммита — пустое дерево.
+      git(cwd, ['diff', '--cached', '--numstat']).catch(() => ''),
+      git(cwd, ['diff', '--cached', '--name-status']).catch(() => ''),
       git(cwd, ['diff', '--numstat']).catch(() => ''),
       git(cwd, ['diff', '--name-status']).catch(() => ''),
       git(cwd, ['status', '--porcelain', '--untracked-files=all']).catch(() => ''),
@@ -257,4 +274,361 @@ export async function worktreeChanges(cwd) {
   });
 
   return { branch: branch.trim(), stat: stat.trim(), files, staged };
+}
+
+const ACTION_PATHS_MAX = 500;
+const COMMIT_MESSAGE_MAX = 5_000;
+const COMMIT_PATCH_MAX_BYTES = 120_000;
+
+/**
+ * Проверяет выбор файла по свежей группе Git и добавляет старый путь переименования.
+ * Клиент не может превратить кнопку строки в произвольный pathspec: принимаются только
+ * пути, которые прямо сейчас присутствуют в соответствующей группе.
+ */
+function actionPaths(files, requested) {
+  if (!Array.isArray(requested) || !requested.length || requested.length > ACTION_PATHS_MAX) {
+    throw new CodeGitError('bad_paths', 'Нужен непустой список изменённых файлов.', 400);
+  }
+
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  const selected = [];
+
+  for (const value of requested) {
+    if (typeof value !== 'string' || !value || value.includes('\0')) {
+      throw new CodeGitError('bad_paths', 'Путь изменённого файла некорректен.', 400);
+    }
+
+    const file = byPath.get(value);
+    if (!file) {
+      throw new CodeGitError(
+        'stale_changes',
+        `${value}: изменение уже исчезло или перешло в другую группу. Обнови список.`,
+      );
+    }
+
+    if (file.oldPath) {
+      selected.push(file.oldPath);
+    }
+    selected.push(file.path);
+  }
+
+  return [...new Set(selected)];
+}
+
+/**
+ * Индексирует все изменения группы либо точные строки из последнего снимка.
+ * `git add -A` нужен и для удалений; `--` отделяет pathspec от аргументов команды.
+ */
+export async function stageWorktreeChanges(cwd, { all = false, paths = [] } = {}) {
+  const changes = await worktreeChanges(cwd);
+  if (!changes.files.length) {
+    throw new CodeGitError('no_worktree_changes', 'В рабочем дереве нечего индексировать.');
+  }
+
+  const selected = all
+    ? ['.']
+    : actionPaths(changes.files, paths);
+
+  await git(cwd, ['add', '-A', '--', ...selected]);
+
+  return {
+    ok: true,
+    changed: all ? changes.files.length : paths.length,
+  };
+}
+
+/** Есть ли HEAD, из которого `git restore --staged` восстановит индекс. */
+async function hasHead(cwd) {
+  try {
+    await git(cwd, ['rev-parse', '--verify', 'HEAD']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Убирает изменения из индекса, не затрагивая рабочие файлы. В репозитории без
+ * первого коммита восстанавливать индекс неоткуда, поэтому записи удаляются из него.
+ */
+export async function unstageWorktreeChanges(cwd, { all = false, paths = [] } = {}) {
+  const changes = await worktreeChanges(cwd);
+  if (!changes.staged.length) {
+    throw new CodeGitError('no_staged_changes', 'В индексе нечего возвращать.');
+  }
+
+  const selected = all
+    ? ['.']
+    : actionPaths(changes.staged, paths);
+
+  if (await hasHead(cwd)) {
+    await git(cwd, ['restore', '--staged', '--', ...selected]);
+  } else {
+    await git(cwd, ['rm', '--cached', '-r', '-f', '--ignore-unmatch', '--', ...selected]);
+  }
+
+  return {
+    ok: true,
+    changed: all ? changes.staged.length : paths.length,
+  };
+}
+
+/**
+ * Нормализует пользовательское сообщение, сохраняя возможное тело коммита.
+ * NUL и прочие управляющие символы отвергаются до передачи аргументом процессу Git.
+ */
+function commitMessage(value) {
+  const message = typeof value === 'string'
+    ? value.replace(/\r\n?/gu, '\n').trim()
+    : '';
+
+  if (!message) {
+    throw new CodeGitError('empty_commit_message', 'Введи сообщение коммита.', 400);
+  }
+  if (message.length > COMMIT_MESSAGE_MAX) {
+    throw new CodeGitError(
+      'commit_message_too_long',
+      `Сообщение коммита длиннее ${COMMIT_MESSAGE_MAX} символов.`,
+      400,
+    );
+  }
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(message)) {
+    throw new CodeGitError(
+      'bad_commit_message',
+      'Сообщение коммита содержит недопустимые управляющие символы.',
+      400,
+    );
+  }
+
+  return message;
+}
+
+/**
+ * Создаёт один коммит строго из текущего индекса. Рабочее дерево не индексируется
+ * автоматически: кнопки `+/-` остаются единственным владельцем состава коммита.
+ */
+export async function commitStagedChanges(cwd, value) {
+  const changes = await worktreeChanges(cwd);
+  if (!changes.staged.length) {
+    throw new CodeGitError('no_staged_changes', 'Сначала добавь изменения в индекс.');
+  }
+
+  const message = commitMessage(value);
+  await git(cwd, ['commit', '-m', message], {
+    timeout: 120_000,
+    env: { GIT_TERMINAL_PROMPT: '0' },
+  });
+
+  const [hash, subject] = await Promise.all([
+    git(cwd, ['rev-parse', '--short', 'HEAD']),
+    git(cwd, ['log', '-1', '--pretty=%s']),
+  ]);
+
+  return {
+    ok: true,
+    hash: hash.trim(),
+    subject: subject.trim(),
+  };
+}
+
+/**
+ * Состояние upstream для кнопки push. Счётчики основаны на локальной remote-ref:
+ * это навигационная подсказка, а не неявный fetch с сетевым побочным эффектом.
+ */
+export async function gitTrackingStatus(cwd) {
+  const branch = (await git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    .catch(() => '')).trim();
+  const upstream = branch
+    ? (await git(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+      .catch(() => '')).trim()
+    : '';
+  let ahead = 0;
+  let behind = 0;
+
+  if (upstream) {
+    const counts = (await git(cwd, ['rev-list', '--left-right', '--count', '@{u}...HEAD'])
+      .catch(() => '')).trim().split(/\s+/u);
+    behind = Number(counts[0]) || 0;
+    ahead = Number(counts[1]) || 0;
+  }
+
+  return {
+    detached: !branch,
+    upstream,
+    ahead,
+    behind,
+  };
+}
+
+/** Возвращает первое непустое значение git-config без интерпретации shell. */
+async function gitConfig(cwd, key) {
+  return (await git(cwd, ['config', '--get', key]).catch(() => '')).trim();
+}
+
+/**
+ * Выбирает remote для первой публикации ветки тем же порядком, что ожидает человек:
+ * branch pushRemote → remote.pushDefault → branch remote → origin → единственный remote.
+ */
+async function publishRemote(cwd, branch) {
+  const remotes = (await git(cwd, ['remote']).catch(() => ''))
+    .split('\n')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const candidates = [
+    await gitConfig(cwd, `branch.${branch}.pushRemote`),
+    await gitConfig(cwd, 'remote.pushDefault'),
+    await gitConfig(cwd, `branch.${branch}.remote`),
+    remotes.includes('origin') ? 'origin' : '',
+    remotes.length === 1 ? remotes[0] : '',
+  ];
+
+  return candidates.find((candidate) => candidate && candidate !== '.'
+    && remotes.includes(candidate)) || '';
+}
+
+/**
+ * Пушит текущую ветку. Если upstream ещё нет, публикует HEAD в выбранный remote
+ * и закрепляет связь, чтобы следующие нажатия работали обычным `git push`.
+ */
+export async function pushCurrentBranch(cwd) {
+  const branch = (await git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    .catch(() => '')).trim();
+  if (!branch) {
+    throw new CodeGitError('detached_head', 'Detached HEAD нельзя пушить этой кнопкой.');
+  }
+
+  const tracking = await gitTrackingStatus(cwd);
+  let published = false;
+  let remote = '';
+
+  if (tracking.upstream) {
+    await git(cwd, ['push'], {
+      timeout: 120_000,
+      env: { GIT_TERMINAL_PROMPT: '0' },
+    });
+  } else {
+    remote = await publishRemote(cwd, branch);
+    if (!remote) {
+      throw new CodeGitError(
+        'no_push_remote',
+        'Для ветки не настроен remote. Добавь его в терминале и повтори push.',
+      );
+    }
+
+    await git(cwd, ['push', '--set-upstream', remote, 'HEAD'], {
+      timeout: 120_000,
+      env: { GIT_TERMINAL_PROMPT: '0' },
+    });
+    published = true;
+  }
+
+  return {
+    ok: true,
+    branch,
+    remote,
+    published,
+    tracking: await gitTrackingStatus(cwd),
+  };
+}
+
+/**
+ * Читает ограниченный объём stdout дочернего Git. После достижения потолка процесс
+ * останавливается: гигантский diff не должен целиком проходить через память сервера.
+ */
+async function limitedGit(cwd, args, limit = COMMIT_PATCH_MAX_BYTES) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'git',
+      ['-C', cwd, '-c', 'core.quotePath=false', ...args],
+      {
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const chunks = [];
+    const errors = [];
+    let size = 0;
+    let errorSize = 0;
+    let truncated = false;
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, 30_000);
+
+    child.stdout.on('data', (chunk) => {
+      const remaining = Math.max(0, limit - size);
+      if (remaining > 0) {
+        chunks.push(chunk.subarray(0, remaining));
+        size += Math.min(chunk.length, remaining);
+      }
+      if (chunk.length > remaining && !truncated) {
+        truncated = true;
+        child.kill('SIGTERM');
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      const remaining = Math.max(0, 32_000 - errorSize);
+      if (remaining > 0) {
+        errors.push(chunk.subarray(0, remaining));
+        errorSize += Math.min(chunk.length, remaining);
+      }
+    });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      const output = Buffer.concat(chunks).toString('utf8');
+
+      if (timedOut) {
+        reject(new CodeGitError('git_diff_timeout', 'Git слишком долго собирал staged diff.'));
+        return;
+      }
+      if (code !== 0 && !truncated) {
+        const detail = Buffer.concat(errors).toString('utf8').trim();
+        reject(new CodeGitError('git_diff_failed', detail || 'Не удалось прочитать staged diff.'));
+        return;
+      }
+
+      resolve({ output, truncated });
+    });
+  });
+}
+
+/**
+ * Снимок staged diff для генератора названия: список, статистика, ограниченный patch
+ * и несколько свежих тем коммитов для сохранения принятого в репозитории стиля.
+ */
+export async function stagedCommitContext(cwd) {
+  const nameStatus = (await git(cwd, ['diff', '--cached', '--name-status'])).trim();
+  if (!nameStatus) {
+    throw new CodeGitError('no_staged_changes', 'Сначала добавь изменения в индекс.');
+  }
+
+  const [stat, patch, recent] = await Promise.all([
+    git(cwd, ['diff', '--cached', '--stat']),
+    limitedGit(cwd, [
+      'diff',
+      '--cached',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--unified=2',
+      '--',
+    ]),
+    git(cwd, ['log', '-8', '--pretty=%s']).catch(() => ''),
+  ]);
+
+  return {
+    files: nameStatus,
+    stat: stat.trim(),
+    patch: patch.output,
+    truncated: patch.truncated,
+    recentSubjects: recent.trim(),
+  };
 }

@@ -171,7 +171,9 @@ path/owner/mode/non-symlink, отклоняет пересечение с люб
 host-channel не нужны. Сам broker остаётся host-процессом с закрытым whitelist; каталог не
 может выдавать агенту произвольный lifecycle API.
 
-Claude route runner доступен только для аудированной native CLI `2.1.220`. Engine передаёт
+Claude route runner доступен для любой native CLI, которая отвечает разборчивым номером
+версии: изоляцию держат флаги запуска, а соблюдение контракта живым бинарём проверяет
+`tools/claude-contract-smoke.mjs` (см. [ENGINE.md](ENGINE.md)). Engine передаёт
 ему один файл `--settings` из приватного `CONTROL_DIR` (regular, owner-only, mode `0400`) и
 запускает с `--setting-sources ''`, `--strict-mcp-config` без `--mcp-config`
 и `--disable-slash-commands`. Так user/project/local settings, hooks, skills и произвольные

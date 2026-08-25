@@ -1140,6 +1140,19 @@
             правки не трогаются, в результате запуска фиксируется причина пропуска).
           </p>
           <UiSwitch
+            :model-value="prefs.chatLiveSessions !== false"
+            @update:model-value="toggleLiveSessions"
+          >
+            Держать агента чата живым между ходами
+          </UiSwitch>
+          <p class="muted small">
+            Процесс исполнителя переживает свой ход, поэтому фоновые команды и субагенты
+            не гибнут вместе с ответом, а Claude сам присылает новое сообщение, когда они
+            завершились. Живой процесс держит память и свои MCP-серверы: по получасу простоя
+            он гаснет сам, а разговор продолжается с прежней сессией. Выключение возвращает
+            прежний порядок — процесс на каждое сообщение.
+          </p>
+          <UiSwitch
             :model-value="prefs.autoRecoverPipelines"
             @update:model-value="toggleAutoRecover"
           >
@@ -1226,6 +1239,88 @@
           <p v-if="prefsMsg" class="msg" :class="prefsMsg.type" aria-live="polite">{{ prefsMsg.text }}</p>
         </template>
       </div>
+
+      <!-- Живые процессы: свободную сессию в `ps` не отличить от разового запуска,
+           а память и MCP-серверы она держит. Значит увидеть и погасить её нужно отсюда. -->
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Живые процессы агентов</h3>
+            <p class="muted small">
+              Процессы исполнителей, которые держат разговор между ходами. Гаснут сами
+              по простою, но пока живут — занимают память и держат свои MCP-серверы.
+            </p>
+          </div>
+          <div class="live-head-actions">
+            <UiButton
+              class="btn"
+              variant="ghost"
+              data-role="settings-action"
+              :disabled="liveBusy"
+              @click="loadLiveSessions"
+            >
+              Обновить
+            </UiButton>
+            <UiButton
+              class="btn"
+              data-role="settings-action"
+              :disabled="liveBusy || !liveFreeCount"
+              @click="closeFreeSessions"
+            >
+              Погасить свободные
+            </UiButton>
+          </div>
+        </div>
+        <div v-if="!liveLoaded" class="muted">Загрузка…</div>
+        <template v-else>
+          <p v-if="!liveSessions.length" class="muted small">
+            Сейчас ни одного живого процесса.
+            <template v-if="!liveEnabled">
+              Режим выключен тумблером выше — процесс поднимается на каждое сообщение
+              и умирает вместе с ответом.
+            </template>
+            <template v-else>
+              Первый же ход в чате поднимет процесс, и он останется здесь до простоя.
+            </template>
+          </p>
+          <ul v-else class="live-list">
+            <li v-for="item in liveSessions" :key="item.chatKey" class="live-row">
+              <div class="live-line">
+                <span class="live-dot" :class="item.running ? 'busy' : 'idle'" aria-hidden="true"></span>
+                <span class="live-name" :title="item.chatKey">{{ liveTitle(item) }}</span>
+                <span class="live-run">{{ liveRunLabel(item) }}</span>
+                <UiButton
+                  class="btn"
+                  variant="ghost"
+                  data-role="settings-action"
+                  :disabled="liveBusy"
+                  @click="openLiveChat(item)"
+                >
+                  Открыть чат
+                </UiButton>
+                <UiButton
+                  class="btn"
+                  data-role="settings-action"
+                  :disabled="liveBusy"
+                  @click="closeLiveSession(item)"
+                >
+                  Погасить
+                </UiButton>
+              </div>
+              <div class="live-detail muted">{{ liveDetail(item) }}</div>
+              <div v-if="item.cwd" class="live-detail muted live-path" :title="item.cwd">{{ item.cwd }}</div>
+            </li>
+          </ul>
+          <p class="muted small">
+            Потолок — {{ liveLimits.maxSessions }} живых процесса, простой —
+            {{ Math.round(liveLimits.idleMs / 60000) }} мин. «Погасить» закрывает процесс,
+            но не разговор: следующий ход поднимет его заново с той же сессией. Идущий ход
+            гасится только вторым подтверждением — вместе с ним теряется работа агента.
+          </p>
+        </template>
+        <p v-if="liveMsg" class="msg" :class="liveMsg.type" aria-live="polite">{{ liveMsg.text }}</p>
+      </div>
+
       <div class="card">
         <div>
           <b>Диагностическое логирование фабрики</b>
@@ -3127,6 +3222,164 @@ async function toggleGitRefresh(v) {
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }
 
+// Живые сессии исполнителей. Тумблер оставлен для отката: живой процесс держит память
+// и свои MCP-серверы, и человеку нужен способ вернуть прежний порядок без правки кода.
+async function toggleLiveSessions(v) {
+  prefsMsg.value = null;
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { chatLiveSessions: v });
+    prefsMsg.value = {
+      type: 'ok',
+      text: v
+        ? 'Агент чата будет жить между ходами. Применится к следующему ходу.'
+        : 'Со следующего хода процесс агента снова поднимается на каждое сообщение. '
+          + 'Уже открытые погаснут по простою — или сразу, кнопкой ниже.',
+    };
+  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
+}
+
+// ── Живые процессы агентов ───────────────────────────────────────────────────
+// Свободную сессию в `ps` не отличить от разового запуска, а держит она и память,
+// и MCP-серверы, и незакрытые фоновые команды. Поэтому список и кнопка гашения — здесь.
+const liveSessions = ref([]);
+const liveLimits = ref({ maxSessions: 4, idleMs: 30 * 60 * 1000 });
+const liveEnabled = ref(true);
+const liveLoaded = ref(false);
+const liveBusy = ref(false);
+const liveMsg = ref(null);
+const liveFreeCount = computed(() => liveSessions.value.filter((item) => !item.running).length);
+
+async function loadLiveSessions() {
+  try {
+    const data = await api.get('/api/chat/sessions');
+    liveSessions.value = data.sessions || [];
+    liveLimits.value = {
+      maxSessions: Number(data.maxSessions) || 4,
+      idleMs: Number(data.idleMs) || 30 * 60 * 1000,
+    };
+    liveEnabled.value = data.enabled !== false;
+  } catch (e) {
+    liveSessions.value = [];
+    liveMsg.value = { type: 'err', text: `Список живых процессов не прочитался: ${e.message}` };
+  } finally {
+    liveLoaded.value = true;
+  }
+}
+
+function liveTitle(item) {
+  if (item.chatTitle) return item.taskId ? `${item.chatTitle} · задача ${item.taskId}` : item.chatTitle;
+  return item.taskId ? `Чат задачи ${item.taskId}` : 'Чат без названия';
+}
+
+// Подписи берём из живого реестра исполнителей, а не из своей карты: список режимов
+// даёт сам CLI, и вторая копия названий разошлась бы с ним на первом же обновлении.
+function liveRunLabel(item) {
+  const provider = prov.providers.find((p) => p.id === item.executor) || null;
+  const mode = (provider?.modes || []).find((m) => m.id === item.permissionMode) || null;
+  const parts = [provider?.name || item.executor];
+  if (item.model) parts.push(item.model);
+  if (item.effort) parts.push(`усилие ${item.effort}`);
+  if (item.permissionMode) parts.push(mode?.label || item.permissionMode);
+  return parts.join(' · ');
+}
+
+const liveNow = ref(Date.now());
+let liveTicker = null;
+
+function minutesSince(at) {
+  return Math.max(0, Math.round((liveNow.value - Number(at || 0)) / 60000));
+}
+
+function liveDetail(item) {
+  const parts = [];
+  parts.push(item.pid ? `pid ${item.pid}` : 'pid неизвестен');
+  parts.push(`открыт ${minutesSince(item.openedAt)} мин назад`);
+  if (item.running) {
+    parts.push('идёт ход');
+  } else {
+    const left = Math.max(0, Math.round((Number(item.idleAtMs || 0) - liveNow.value) / 60000));
+    parts.push(`простой ${minutesSince(item.lastUsed)} мин, погаснет через ${left} мин`);
+  }
+  // Про самопробуждение говорим только там, где оно есть: у остальных исполнителей
+  // процесс живёт, но модель сам не будит — обещать обратное нельзя.
+  if (item.unsolicited) parts.push('может заговорить сам');
+  return parts.join(' · ');
+}
+
+// Роутер сюда не тащим: настройки живут без него, а хеш-навигация — тот же переход
+// для vue-router с `createWebHashHistory`, но без инъекции в каждый тест этой страницы.
+function openLiveChat(item) {
+  if (typeof chatStore.setActive === 'function') chatStore.setActive(item.chatKey);
+  location.hash = '#/chats';
+}
+
+async function closeLiveSession(item) {
+  // Идущий ход гасим только вторым осознанным действием: вместе с процессом теряется
+  // работа агента, а «Погасить» рядом со свободными сессиями читается как безобидное.
+  if (item.running) {
+    const ok = await confirmDialog(
+      `В чате «${liveTitle(item)}» прямо сейчас идёт ход. Погасить процесс вместе с ним? `
+      + 'Всё, что агент не успел записать, потеряется.',
+      { danger: true, okText: 'Погасить с ходом' },
+    );
+    if (!ok) return;
+  }
+  liveBusy.value = true;
+  liveMsg.value = null;
+  try {
+    const query = item.running ? '?force=1' : '';
+    await api.del(`/api/chat/sessions/${encodeURIComponent(item.chatKey)}${query}`);
+    liveMsg.value = { type: 'ok', text: 'Процесс погашен. Следующий ход поднимет его заново.' };
+    await loadLiveSessions();
+  } catch (e) {
+    liveMsg.value = { type: 'err', text: e.data?.message || e.message };
+    await loadLiveSessions();
+  } finally {
+    liveBusy.value = false;
+  }
+}
+
+async function closeFreeSessions() {
+  liveBusy.value = true;
+  liveMsg.value = null;
+  try {
+    const result = await api.del('/api/chat/sessions');
+    liveMsg.value = {
+      type: 'ok',
+      text: result.skipped
+        ? `Погашено: ${result.closed}. Занятых ходом пропущено: ${result.skipped} — их гасят по одной.`
+        : `Погашено процессов: ${result.closed}.`,
+    };
+    await loadLiveSessions();
+  } catch (e) {
+    liveMsg.value = { type: 'err', text: e.data?.message || e.message };
+  } finally {
+    liveBusy.value = false;
+  }
+}
+
+// Список живёт, только пока карточка открыта: незачем держать его во всех окнах.
+// Тикер ничего не запрашивает — он лишь двигает «сейчас» для подписей времени.
+watchEffect(() => {
+  if (liveTicker) {
+    clearInterval(liveTicker);
+    liveTicker = null;
+  }
+  if (tab.value !== 'runs') return;
+  loadLiveSessions();
+  liveNow.value = Date.now();
+  liveTicker = setInterval(() => { liveNow.value = Date.now(); }, 30_000);
+});
+onUnmounted(() => {
+  if (liveTicker) clearInterval(liveTicker);
+  liveTicker = null;
+});
+useSse((name) => {
+  // Событие означает «перечитай»: состав меняется редко, а показывать мёртвый
+  // процесс живым — ровно та беда, ради которой карточку и заводили.
+  if (name === 'chat-sessions' && tab.value === 'runs') loadLiveSessions();
+});
+
 // Порог автокомпакта чатов. Правится числом, а не тумблером: подходящее значение
 // зависит от того, как человек работает, а 0 — осознанное «не вмешиваться».
 const compactWindow = ref(0);
@@ -4268,6 +4521,20 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 .prow { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; display: grid; gap: 6px; }
 /* Первый блок своей карточки — отбивать сверху не от чего */
 .prow.first { border-top: none; margin-top: 0; padding-top: 0; }
+.live-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.live-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.live-row { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line); }
+.live-row:first-child { border-top: 0; padding-top: 0; }
+.live-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.live-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-mid); }
+.live-dot.busy { background: var(--good);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
+.live-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.live-run { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-mid);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-detail { font-size: 11.5px; line-height: 1.45; padding-left: 16px; }
+.live-path { overflow-wrap: anywhere; }
 .msg { font-size: 13px; margin: 0; white-space: pre-line; }
 .small { font-size: 12px; line-height: 1.5; }
 .msg.ok { color: var(--good); }

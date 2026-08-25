@@ -27,12 +27,17 @@ test('системные инструменты имеют явные group/orde
   );
 
   const inbox = SYSTEM.find((plugin) => plugin.id === 'inbox');
+  const code = SYSTEM.find((plugin) => plugin.id === 'code');
   const telegram = SYSTEM.find((plugin) => plugin.id === 'telegram');
   const github = SYSTEM.find((plugin) => plugin.id === 'github');
   assert.equal(inbox.defaultEnabled, true);
   assert.deepEqual(
     inbox.settings.map((setting) => setting.key),
     ['triageModel', 'attachPhotos', 'attachVideos'],
+  );
+  assert.deepEqual(
+    code.settings.map((setting) => [setting.key, setting.type, setting.default]),
+    [['commitMessageModel', 'model', null]],
   );
   // Умолчания загрузки — часть контракта: фотографии в задаче полезны, видео
   // раздувает портал и уже пересказано транскриптом.

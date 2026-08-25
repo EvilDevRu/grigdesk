@@ -402,6 +402,129 @@
   height: 19px;
 }
 
+/* Строка дерева и списка изменений плагина «Код». Это плотный список, а не ряд
+   одноранговых контролов формы, поэтому у него своя высота: на общей высоте поля
+   в панель помещалось бы вдвое меньше файлов. */
+.ui-pressable[data-context='code-tree-row'] {
+  min-height: 25px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='code-tree-row']:hover {
+  background-color: var(--surface);
+}
+
+.ui-pressable[data-context='code-tree-row']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+/* Каталог узнаётся по aria-expanded: он есть ровно у раскрываемых строк, и вторым
+   признаком-классом эти два источника правды разъехались бы. */
+.ui-pressable[data-context='code-tree-row'][aria-expanded] {
+  color: var(--ink-mid);
+}
+
+.ui-pressable[data-context='code-tree-row'][aria-pressed='true'] {
+  background-color: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Кадр записи в черновике задачи раздела «Видео». Это не кнопка формы, а само превью,
+   которое открывают крупно: отступов и фона у него нет, рамка принадлежит картинке.
+   Отказ человека от кадра ОБЕСЦВЕЧИВАЕТ превью, но оставляет его на экране — решение
+   обратимо, и видно, от чего отказались. */
+.ui-pressable[data-context='meeting-frame-preview'] {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.ui-pressable[data-context='meeting-frame-preview']:hover {
+  border-color: var(--accent);
+}
+
+.ui-pressable[data-context='meeting-frame-preview'][data-muted='true'] {
+  opacity: .45;
+  filter: grayscale(1);
+}
+
+/* Индексация одной строки. На указателе кнопка появляется по наведению и лежит
+   ПОВЕРХ строки: постоянная колонка 30px отнимала место у имени файла, а список
+   изменений открывают ради имени. Наводить на планшете нечем — там она в потоке. */
+.ui-icon-button[data-context='code-row-action'] {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  border-radius: 6px;
+  color: var(--ink-mid);
+}
+
+/* Композер коммита живёт в узкой боковой панели рядом со строками в 25px, поэтому
+   у него свой ритм — 30px, как у кнопок дока. Все четыре контрола одной высоты:
+   разнобой внутри одной группы запрещён так же, как и полная высота формы. */
+.ui-button[data-context='code-commit'] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+.ui-icon-button[data-context='code-commit'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+/* Служебные кнопки заголовка группы мельче строчной: они вторичны, а место в узкой
+   панели нужно самому названию группы — иначе «Не в коммите» уезжало в многоточие. */
+.ui-icon-button[data-context='code-group-action'] {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-radius: 6px;
+  color: var(--ink-mid);
+}
+
+.ui-icon-button[data-context='code-row-action']:hover:not(:disabled),
+.ui-icon-button[data-context='code-group-action']:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-icon-button[data-context='code-group-action'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ui-icon-button[data-context='code-row-action'] {
+    position: absolute;
+    top: 50%;
+    right: 2px;
+    transform: translateY(-50%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-ui-row='code-change']:hover .ui-icon-button[data-context='code-row-action'],
+  [data-ui-row='code-change']:focus-within .ui-icon-button[data-context='code-row-action'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .ui-pressable,
 .ui-svg-pressable {
   border: 0;

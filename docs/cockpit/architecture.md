@@ -36,14 +36,14 @@ worker по полной process identity.
 | `b24` | `/api/b24/{dashboard,task/:id,users,groups}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
 | `task-favorites`, `task-seen` | `GET /api/b24/task-favorites` + `PUT/DELETE .../:taskId`, `GET/POST /api/b24/task-seen` | личные метки человека (избранное, «просмотрено») — `server/.state/task-{favorites,seen}.json` по opaque-scope аккаунта портала ([детали](b24.md#личные-метки-задач-избранное-и-просмотренное)) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
-| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame,plan-tasks,frame/:run/:file}` | общий `SpeechRuntime`, ffmpeg + локальный whisper; разбор расшифровки на черновики задач — `runUntrusted` выбранной модели, кадр записи к задаче — декоратор `mediaFramePath` ([детали](video.md)) |
+| `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame,plan-tasks,frame/:run/:file,clip,clip/:run/:file}` | общий `SpeechRuntime`, ffmpeg + локальный whisper; хранилище раздела — `lib/media/storage.js` (запись кладётся по содержимому, уборка по возрасту, занятое место в `doctor`); разбор расшифровки на черновики задач — `runUntrusted` выбранной модели, кадр и фрагмент записи к задаче — декораторы `mediaFramePath`/`mediaClipPath`, байты фрагмента отдаются с Range ([детали](video.md)) |
 | `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls,speech*}` | prefs, speech capabilities/model jobs, engine debug CLI, `CredsStore`, `LocalTls` |
-| `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission, `/api/chat/transcribe*` | выбранный executor + `chats/`; browser/локальная диктовка использует тот же speech-контракт ([детали](chat-agents.md)) |
+| `chat` | `/api/chat*`, `/api/tasks/:id/chat`, история/вложения/permission, `/api/chat/transcribe*` | выбранный executor + `chats/`; процесс исполнителя живёт между ходами (`lib/chat/live-sessions.js`; список и гашение — `/api/chat/sessions`), непрошеный ход агента едет через `chats/pending`; browser/локальная диктовка использует тот же speech-контракт ([детали](chat-agents.md)) |
 | `agents` | CRUD `/api/agents[/:id]`, `POST /api/agents/reseed` | файлы `agents/<id>.md` (ШАБЛОНЫ: метаданные + заготовка промпта) |
 | `routes` | `GET/POST /api/profiles`, immutable `/api/routes/*` (current, revisions, catalog, route+graph, publish) | v2 bundles — `~/.factory/routes` (`COCKPIT_ROUTES_DIR`); проекты кокпита — prefs |
 | `providers` | `/api/providers*` (модели, usage/resources/actions, обновления CLI) | `lib/executors/*` + локальный реестр моделей |
 | `analysis` | `/api/analysis*` | очередь и статус-файлы в `~/.factory/analysis` |
-| `projects`, `code` | `/api/projects*`, read-only `/api/code/{roots,:project/*}` (в том числе `raw` — байты растровых картинок, а `git` — изменения группами `staged`/`files`) | профили/prefs + git/worktree |
+| `projects`, `code` | `/api/projects*`, `/api/code/{roots,:project/*}`: чтение дерева/дифа, stage/unstage, commit, push и генерация названия | профили/prefs + git/worktree + выбранный `runUntrusted` executor |
 | `documents` | `/api/documents/{resolve,file}` | зарегистрированные read-only MD/TXT sources ([детали](documents.md)) |
 | `inbox` | `GET /api/inbox[/{summary,status}]`, `POST /api/inbox/channels/:channel/{activate,deactivate}`, решения `POST /api/inbox/items/:ref/{task,dismiss,reset}` | общий merge Telegram/GitHub, account-owned `inbox-state.json`, единый draft/triage/worker и B24 task service; provider credentials здесь отсутствуют |
 | `telegram` | `GET /api/telegram/{status,chats}`, `GET/PUT /api/telegram/rules`, отдельный CAS `PUT /api/telegram/rules/agent-search`, `POST /api/telegram/{connect,recheck,disconnect,expand,service-chat}`, пульт `POST /api/telegram/pult{,/confirm,/disable}` + декоратор `telegramDiscussion` | Bot API (`getMe` + account-aware long polling), active token в private state; bindings и `accounts/<accountRef>/{state.json,archive/,rules.json,bot-settings.json,pult-state.json,inbox-state.json}` — `config.telegramDir` |
@@ -323,6 +323,27 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   topbar компактнее обычной формы: 28 px внутри секции и 30 px у нижнего перехода.
   Внешние provider-resource links сохраняют вид компактной подчёркнутой ссылки и переносят
   длинный текст внутри popover через `data-context="topbar-popover-resource-link"`.
+  **Боковая панель «Кода» — только содержимое.** Проект и рабочая копия выбираются в шапке
+  раздела боксless-селектами (тот же приём, что в строке состояния чата). Оба видны ВСЕГДА,
+  даже когда вариант один: селект, спрятанный за отсутствием выбора, читается как пропавшая
+  возможность — «куда делось переключение проекта». Сжимается сначала рабочая копия (у неё
+  есть подсказка с полным путём), а container query `code-head` до 620 px убирает подписи
+  контролов: в доке они стоили проекту его имени («rd…»). Замер дока: над первым файлом было
+  258 px служебной высоты из 780 px панели, стало 138 px, а на вкладке файлов — 6 px вместо
+  141 px. Композер коммита имеет свой ритм 30 px (`data-context='code-commit'`, все четыре
+  контрола одной высоты) — общая высота формы в 36 px рядом со строками в 25 px читалась
+  огромными кнопками. Само поле — `UiTextarea` с компактным скином: сообщение бывает
+  многострочным, поэтому пустое поле ростом в строку (30 px) растёт по набору до четырёх
+  (84 px), Enter переводит строку, а коммит уходит по `Ctrl/Cmd+Enter`. Служебные кнопки списка — 26 px у строки и 24 px у заголовка группы,
+  строка дерева — 25 px; вид строки живёт в общем скине
+  `.ui-pressable[data-context='code-tree-row']`, а не в локальных стилях плагина.
+  **Кнопка индексации СТРОКИ на указателе всплывает поверх строки** по наведению
+  (`data-context='code-row-action'` + `data-ui-row='code-change'`), уступая имени файла
+  постоянную колонку в 30 px; на тач-устройстве (`hover: none`) она остаётся в потоке.
+  Container query `code-panel` при ширине панели до 250 px убирает счётчик `+N −N` и хвост
+  каталога: имя файла — то, ради чего список открывают, числа видны в самом дифе, а полный
+  путь остаётся в подсказке строки. Измеряется панель, а не окно: ширину ей задаёт
+  разделитель дерева. Итог замера в доке 218 px: имя файла выросло с 63 px до 116 px.
   **Изменения показаны группами «В индексе» и «В рабочем дереве»** (`buildGitGroups`), как
   Source Control в VS Code. Пустая группа не рисуется, поэтому при чистом индексе панель
   остаётся прежним списком «Не в коммите», а заголовок второй группы меняется только когда
@@ -330,6 +351,25 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   группах с РАЗНЫМИ сторонами дифа, поэтому и выбор файла, и раскрытие каталога адресуются
   парой `группа:путь` (`gitRef`) — иначе клик по файлу в индексе выбирал бы одноимённый файл
   рабочего дерева. Чей это диф, шапка редактора называет только при двух группах.
+  **`+/-` владеют составом индекса:** действие доступно у строки и у заголовка группы;
+  переименование передаёт Git оба пути. `commit` никогда не делает скрытый `git add`, поэтому
+  рабочая правка поверх частично staged-файла остаётся после коммита. Первый push ветки без
+  upstream выбирает `pushRemote`/`remote.pushDefault`/branch remote/`origin`/единственный remote
+  в этом порядке, выполняет `--set-upstream`, следующие — обычный `git push`; detached HEAD
+  отклоняется словами. Мутации одного worktree сериализованы сервером, чтобы два окна не
+  сталкивались через случайный `index.lock`.
+  **Название коммита генерируется только по staged snapshot:** кнопка отправляет ограниченный
+  diff и темы нескольких свежих коммитов выбранной в `pluginSettings.code.commitMessageModel`
+  модели. Репозиторий считается недоверенным вводом, поэтому разрешён только `runUntrusted`
+  без инструментов/cwd/MCP/сессии; модель и effort сверяются с живым реестром перед ходом.
+  Ответ лишь заполняет редактируемое поле — commit остаётся отдельным явным нажатием человека.
+  Поле ввода занимает свою строку композера, кнопки — свою (иначе в доке поле схлопывалось
+  до двух символов), а тонкая строка под ними говорит только то, чего нет в шапке: связь с
+  remote при расхождении, `detached HEAD` и случай, когда живая ветка разошлась с той, что
+  отдал каталог рабочих копий. Совпавшая с remote ветка новостью не является и строки не даёт.
+  **Плоский список изменений делит путь** (`splitGitPath`): имя файла целиком, каталог —
+  приглушённым хвостом, который сжимается первым (вес 999 против 1) и обрезается слева.
+  Целый путь обрезался с конца, то есть съедал именно имя.
   **Лесенка дерева: шаг живёт в CSS (`--tree-step`), скрипт присылает строке только
   `--depth`.** Место под шеврон занято и у файла (пустой `.chev`): без него имя файла уезжало
   влево на ширину стрелки и вставало вровень с каталогом уровнем ВЫШЕ — замер показывал
@@ -361,6 +401,9 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   `chat` (мультисессии, история на сервере), `companion` (только состояние компактной
   поверхности и связывание headless bridge/STT/TTS),
   `analysis`, `auth`, `diff`, `dock`, `plugins`, `providers` (реестр исполнителей),
+  `video-session` (сеанс разбора встречи: части и их job'ы, черновики задач, фоновый
+  поллинг распознавания и тонкий снимок в localStorage — раздел «Видео» это только его
+  отображение, см. [video.md](video.md)),
   `inbox` (общий счётчик новых обращений: initial read + SSE + минутный poll),
   `task-favorites` и `task-seen` (личные метки задач B24, снимок с сервера),
   `ui-context` (owner-scoped bounded prompt context и отдельный trusted `routingScope`),
@@ -460,13 +503,15 @@ InboxView, TelegramView, GitHubView и `ToolHost` для Code показываю
 настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
 действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.
 
-**Настройка типа `model`** (их две и они независимы: `triageModel` плагина Inbox и
-`triageModel` плагина video — см. [video.md](video.md)) хранит объект
+**Настройка типа `model`** (их три и они независимы: `triageModel` плагина Inbox,
+`triageModel` плагина video — см. [video.md](video.md) — и `commitMessageModel` плагина Code)
+хранит объект
 `{provider, model, effort?}`, а варианты берёт из живого реестра `/api/providers` —
 `optgroup` по исполнителям, как в чате. Строкой `<provider>:<model>` живёт только
 значение `<option>`: у локальных исполнителей id модели сам бывает со слэшами и
 двоеточиями, и разобрать склейку обратно нечем. Вендор в манифест не зашивается:
-модель у каждого своя, а зовётся она общим путём (`resolveModelRef` → адаптер → `run`).
+модель у каждого своя, а зовётся она общим путём (`resolveModelRef` → адаптер; конкретный
+сценарий выбирает безопасный transport — для Inbox, video и Code это `runUntrusted`).
 Выбор, пропавший из реестра (сняли CLI, переименовали модель), показывается отдельным
 пунктом «— нет в реестре»: молча показать «не выбрана» нельзя — в настройках он остался,
 и сервер всё ещё ходит именно ей.
@@ -475,7 +520,8 @@ InboxView, TelegramView, GitHubView и `ToolHost` для Code показываю
 работает и быстро, и вдумчиво. Лестницу объявляет сама модель (`model.efforts`), пустая
 означает «уровень передать нечем» — контрола нет вовсе, как слайдера в чате. Пустой выбор
 значит умолчание исполнителя и уезжает ОТСУТСТВИЕМ ключа, а не пустой строкой. Уровень
-сверяется с реестром перед каждым ходом (`resolveInboxTriageTarget`): настройка живёт
+сверяется с реестром перед каждым ходом (`resolveInboxTriageTarget` используется и
+model-only генератором Code): настройка живёт
 долго, а `--effort xhigh` у модели без такой ступени не игнорируется, а роняет запуск CLI.
 Устаревший уровень снимается с записью в журнал и остаётся видимым в настройках с
 пометкой «нет у этой модели».

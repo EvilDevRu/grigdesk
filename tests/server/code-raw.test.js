@@ -124,6 +124,14 @@ test('CODE-RAW-05: выключенный плагин закрывает raw и
 
   const roots = await app.inject({ method: 'GET', url: '/api/code/roots' });
   assert.equal(roots.statusCode, 403);
+
+  const stage = await app.inject({
+    method: 'POST',
+    url: '/api/code/demo/stage?repo=main',
+    payload: { all: true },
+  });
+  assert.equal(stage.statusCode, 403);
+  assert.equal(stage.json().error, 'plugin_disabled');
 });
 
 test('CODE-ROOTS-01: карта деревьев перечисляет и основное дерево, и worktree', async (t) => {

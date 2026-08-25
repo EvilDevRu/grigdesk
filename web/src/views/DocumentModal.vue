@@ -15,6 +15,7 @@
         <div class="document-dialog__title">
           <span>{{ title }}</span>
           <small v-if="preview.image" class="mono">Изображение из чата</small>
+          <small v-else-if="preview.video" class="mono">Фрагмент записи</small>
           <small v-else-if="documentValue?.displayPath" class="mono">
             {{ documentValue.displayPath }}
           </small>
@@ -41,6 +42,17 @@
 
     <div v-if="preview.image" class="image-preview">
       <img :src="preview.image.src" :alt="preview.image.name" />
+    </div>
+    <!-- Видео открывают, чтобы посмотреть, поэтому оно стартует само. Браузер вправе
+         отказать автозапуску со звуком — тогда остаются обычные controls. -->
+    <div v-else-if="preview.video" class="image-preview video-preview">
+      <video
+        :src="preview.video.src"
+        controls
+        autoplay
+        playsinline
+        preload="metadata"
+      ></video>
     </div>
     <div v-else-if="resolving" class="document-state">
       <UiSpinner decorative />
@@ -90,6 +102,7 @@ let generation = 0;
 const title = computed(
   () =>
     preview.image?.name ||
+    preview.video?.name ||
     documentValue.value?.name ||
     documentPath.value.split('/').filter(Boolean).at(-1) ||
     'Документ',
@@ -249,6 +262,17 @@ function onDialogOpenChange(open: boolean): void {
   max-height: 100%;
   object-fit: contain;
   border-radius: 8px;
+  box-shadow: 0 12px 44px #0008;
+}
+
+.video-preview video {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  border-radius: 8px;
+  background: #000;
   box-shadow: 0 12px 44px #0008;
 }
 

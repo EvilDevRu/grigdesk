@@ -367,7 +367,29 @@
   min-width: 0;
 }
 
-.ui-select[data-context='chat-session-toolbar'] {
+/* Сообщение коммита — часть того же композера в 30px, что и его кнопки, но
+   textarea: заголовок с телом через пустую строку сервер принимает как есть.
+   Общий скин textarea открывается на 92px и в боковой панели занимал бы её
+   треть, поэтому пустое поле остаётся ростом в одну строку. */
+.ui-textarea[data-context='code-commit'] {
+  min-height: 30px;
+  max-height: 84px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* Набранный текст растит поле до четырёх строк там, где браузер это умеет; дальше
+   прокрутка. Без поддержки остаётся строка с прокруткой и ручной разделитель. */
+@supports (field-sizing: content) {
+  .ui-textarea[data-context='code-commit'] {
+    field-sizing: content;
+  }
+}
+
+.ui-select[data-context='chat-session-toolbar'],
+.ui-select[data-context='code-head-select'] {
   height: 28px;
   min-height: 28px;
   padding: 0 22px 0 0;
@@ -381,15 +403,18 @@
   text-overflow: ellipsis;
 }
 
-.ui-select[data-context='chat-session-toolbar']:hover:not(:disabled) {
+.ui-select[data-context='chat-session-toolbar']:hover:not(:disabled),
+.ui-select[data-context='code-head-select']:hover:not(:disabled) {
   border-bottom-color: var(--line-2);
 }
 
-.ui-select[data-context='chat-session-toolbar']:focus {
+.ui-select[data-context='chat-session-toolbar']:focus,
+.ui-select[data-context='code-head-select']:focus {
   border-bottom-color: var(--accent);
 }
 
-.ui-select[data-context='chat-session-toolbar']:disabled {
+.ui-select[data-context='chat-session-toolbar']:disabled,
+.ui-select[data-context='code-head-select']:disabled {
   cursor: default;
   opacity: 0.5;
 }

@@ -1,4 +1,4 @@
-// Модуль code — плагин «Код»: просмотр кода и гита проектов, только чтение.
+// Модуль code — плагин «Код»: просмотр кода и управление Git рабочих копий.
 // Дерево файлов и содержимое отдаются по любому ДЕРЕВУ репозитория: основному или
 // worktree (их создаёт фабрика под задачи и слоты) — выбор дерева на клиенте.
 // Несохранённые изменения считает тот же lib/git.js, что и диф приёмки задач,
@@ -14,7 +14,16 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { PROFILE_RE, listProjects } from '../../lib/profiles.js';
 import { projectRepos } from '../../lib/projects.js';
-import { worktreeChanges } from '../../lib/git.js';
+import { generateCommitTitle } from '../../lib/code-commit-message.js';
+import {
+  CodeGitError,
+  commitStagedChanges,
+  gitTrackingStatus,
+  pushCurrentBranch,
+  stageWorktreeChanges,
+  unstageWorktreeChanges,
+  worktreeChanges,
+} from '../../lib/git.js';
 
 const exec = promisify(execFile);
 const MAX_BYTES = 1_500_000; // как в lib/git.js: гигантские блобы в браузер не тащим
@@ -81,8 +90,13 @@ async function worktrees(dir) {
 }
 
 async function codeModule(fastify, opts) {
-  const { config, prefs } = opts;
+  const {
+    config,
+    prefs,
+    resolveCommitTarget,
+  } = opts;
   const hidden = hiddenDirs(config);
+  const mutatingRoots = new Set();
 
   // Живой гейт (как у video): тумблер в настройках действует без рестарта.
   const gate = (reply) => (fastify.pluginEnabled('code') ? null
@@ -109,6 +123,57 @@ async function codeModule(fastify, opts) {
     const abs = path.resolve(root, String(rel || ''));
     if (abs !== root && !abs.startsWith(root + path.sep)) { reply.code(400).send({ error: 'bad_path' }); return null; }
     return abs;
+  }
+
+  /**
+   * Возвращает безопасный текст Git-ошибки без credential userinfo из remote URL.
+   * Полная команда из `Error.message` используется лишь когда stderr отсутствует.
+   */
+  function gitErrorMessage(error) {
+    const source = String(error?.stderr || error?.stdout || error?.message || 'Git отклонил действие.');
+    const redacted = source.replace(
+      /([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/giu,
+      '$1',
+    );
+
+    return redacted.trim().slice(-2_000) || 'Git отклонил действие.';
+  }
+
+  /** Единый HTTP-ответ для ожидаемого отказа Git и сбоя дочернего процесса. */
+  function sendGitError(reply, error) {
+    const known = error instanceof CodeGitError;
+    const status = known ? error.status : 409;
+    const code = known ? error.code : 'git_failed';
+    const message = known ? error.message : gitErrorMessage(error);
+
+    if (!known) {
+      fastify.log.warn({ err: error }, 'плагин «Код»: Git-действие не выполнено');
+    }
+
+    return reply.code(status).send({ error: code, message });
+  }
+
+  /**
+   * Сериализует мутации одного worktree. Два окна могут нажать commit/stage одновременно,
+   * но индекс должен меняться в определённом порядке, а не через случайный index.lock.
+   */
+  async function mutateRoot(ctx, reply, action) {
+    const root = ctx.tree.path;
+    if (mutatingRoots.has(root)) {
+      return reply.code(409).send({
+        error: 'git_busy',
+        message: 'В этой рабочей копии уже выполняется другое Git-действие.',
+      });
+    }
+
+    mutatingRoots.add(root);
+    try {
+      return await action(root);
+    } catch (error) {
+      return sendGitError(reply, error);
+    } finally {
+      mutatingRoots.delete(root);
+    }
   }
 
   // Карта «абсолютный корень дерева → проект/репозиторий» по всем проектам.
@@ -220,7 +285,10 @@ async function codeModule(fastify, opts) {
     if (gate(reply)) return reply;
     const ctx = await resolveRoot(req, reply);
     if (!ctx) return reply;
-    const diff = await worktreeChanges(ctx.tree.path);
+    const [diff, tracking] = await Promise.all([
+      worktreeChanges(ctx.tree.path),
+      gitTrackingStatus(ctx.tree.path),
+    ]);
     let log = [];
     try {
       const { stdout } = await exec('git', ['-C', ctx.tree.path, 'log', '-15', '--pretty=%h\t%s\t%cr'], { maxBuffer: 1024 * 1024 });
@@ -229,7 +297,97 @@ async function codeModule(fastify, opts) {
         return { hash, subject, when };
       });
     } catch { /* репозиторий без коммитов */ }
-    return { ...diff, log };
+    return { ...diff, tracking, log };
+  });
+
+  // `+` у файла или группы: рабочее дерево → индекс.
+  fastify.post('/api/code/:project/stage', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ctx = await resolveRoot(req, reply);
+    if (!ctx) return reply;
+
+    return mutateRoot(ctx, reply, (root) => stageWorktreeChanges(root, {
+      all: req.body?.all === true,
+      paths: req.body?.paths,
+    }));
+  });
+
+  // `−` у файла или группы: индекс → рабочее дерево, сами файлы не меняются.
+  fastify.post('/api/code/:project/unstage', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ctx = await resolveRoot(req, reply);
+    if (!ctx) return reply;
+
+    return mutateRoot(ctx, reply, (root) => unstageWorktreeChanges(root, {
+      all: req.body?.all === true,
+      paths: req.body?.paths,
+    }));
+  });
+
+  // Коммит берёт только индекс: неявного `git add` здесь нет.
+  fastify.post('/api/code/:project/commit', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ctx = await resolveRoot(req, reply);
+    if (!ctx) return reply;
+
+    return mutateRoot(ctx, reply, (root) => commitStagedChanges(
+      root,
+      req.body?.message,
+    ));
+  });
+
+  // Push текущей ветки; ветка без upstream публикуется и закрепляется за remote.
+  fastify.post('/api/code/:project/push', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ctx = await resolveRoot(req, reply);
+    if (!ctx) return reply;
+
+    return mutateRoot(ctx, reply, (root) => pushCurrentBranch(root));
+  });
+
+  // Модель читает только staged diff через model-only transport без инструментов.
+  fastify.post('/api/code/:project/commit-message', async (req, reply) => {
+    if (gate(reply)) return reply;
+    const ctx = await resolveRoot(req, reply);
+    if (!ctx) return reply;
+
+    const setting = fastify.pluginSettings?.('code')?.commitMessageModel ?? null;
+    let result;
+    try {
+      result = await generateCommitTitle({
+        cwd: ctx.tree.path,
+        modelRef: setting,
+        config,
+        providerSettings: prefs.read().providerSettings || {},
+        log: fastify.log,
+        ...(resolveCommitTarget ? { resolveTarget: resolveCommitTarget } : {}),
+      });
+    } catch (error) {
+      return sendGitError(reply, error);
+    }
+
+    if (result.ok) {
+      return result;
+    }
+
+    const messages = {
+      no_model: 'Выбери модель: «Настройки → Плагины → Код».',
+      invalid_model_ref: 'Настройка модели сообщения коммита повреждена — выбери её заново.',
+      unknown_provider: 'Выбранный исполнитель больше не доступен — выбери модель заново.',
+      unknown_model: 'Выбранной модели больше нет в реестре — выбери модель заново.',
+      registry_failed: 'Не удалось прочитать реестр моделей.',
+      executor_unavailable: 'Выбранный исполнитель сейчас недоступен.',
+      unsafe_model_provider: 'Этот исполнитель не умеет безопасно читать diff без инструментов.',
+      run_failed: 'Модель не смогла составить сообщение коммита.',
+      bad_model_reply: 'Модель вернула ответ не в ожидаемом формате. Повтори генерацию.',
+    };
+    const upstreamFailure = ['run_failed', 'bad_model_reply', 'registry_failed']
+      .includes(result.error);
+
+    return reply.code(upstreamFailure ? 502 : 409).send({
+      error: result.error,
+      message: messages[result.error] || 'Не удалось составить сообщение коммита.',
+    });
   });
 }
 

@@ -571,6 +571,9 @@ test('живой media upload читает video speech settings', async (t) => 
   let captured = null;
   const media = {
     mediaDir: root,
+    // Каталоги хранилища объявляет адаптер: оттуда их берут и загрузка, и уборка.
+    uploadsDir: path.join(root, 'uploads'),
+    jobsDir: path.join(root, 'jobs'),
     ingest(options) { captured = options; return { jobId: 'job-speech' }; },
     doctor() { return { ok: true }; },
     status() { return null; },

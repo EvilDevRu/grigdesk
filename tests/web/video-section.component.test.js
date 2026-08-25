@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compileVue, webFile } from './helpers/compile-vue.js';
+import { compileVue, singletonUrl, webFile } from './helpers/compile-vue.js';
 import { installBrowser, settle } from './helpers/telegram-view.js';
 
 process.env.NODE_ENV = 'test';
@@ -48,7 +48,7 @@ const PLAN_TASKS = [
 ];
 
 /** Роутер api раздела: ростер и проекты портала плюс подставные ответы. */
-function fakeApi({ users = [], groups = [], job = DONE_JOB, post = async () => ({ id: 1234 }) } = {}) {
+function fakeApi({ users = [], groups = [], job = DONE_JOB, storage = null, post = async () => ({ id: 1234 }) } = {}) {
   const calls = [];
   return {
     calls,
@@ -57,7 +57,7 @@ function fakeApi({ users = [], groups = [], job = DONE_JOB, post = async () => (
       calls.push(['GET', url]);
       if (url.endsWith('/api/b24/users')) return { users };
       if (url.endsWith('/api/b24/groups')) return { groups };
-      if (url.endsWith('/api/media/doctor')) return { ok: true };
+      if (url.endsWith('/api/media/doctor')) return { ok: true, storage };
       if (url.startsWith('/api/media/ingest/')) return job;
       return {};
     },
@@ -68,9 +68,18 @@ function fakeApi({ users = [], groups = [], job = DONE_JOB, post = async () => (
   };
 }
 
-async function mountVideoView(t, { api, planModel = null } = {}) {
+async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, restore = null } = {}) {
   const browser = await installBrowser(t);
+  // Снимок прошлого сеанса кладём ДО монтирования: так же его видит вью после F5 или
+  // обновления PWA — на сервере разбор уже идёт, а у браузера остался только jobId.
+  if (restore) {
+    browser.localStorage.setItem('cockpit-video-session', JSON.stringify(restore));
+  }
   globalThis.__vidApi = api;
+  const preview = { calls: [], showImage(v) { this.calls.push(['image', v]); }, showVideo(v) { this.calls.push(['video', v]); } };
+  const confirms = [];
+  globalThis.__vidConfirm = async (...args) => { confirms.push(args); return confirmAnswer; };
+  globalThis.__vidPreviewStore = () => preview;
   globalThis.__vidPluginsStore = () => ({
     loaded: true,
     enabled: () => true,
@@ -96,20 +105,51 @@ async function mountVideoView(t, { api, planModel = null } = {}) {
       '../stores/plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
       `,
+      // Тот же стор реестра плагинов, но импортированный ИЗ стора сеанса: заглушка
+      // ищется по точной строке импорта, и второго пути к ней у бандлера нет.
+      './plugins.js': `
+        export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
+      `,
+      '../stores/document-preview.js': `
+        export const useDocumentPreviewStore = (...args) => globalThis.__vidPreviewStore(...args);
+      `,
+      './services/dialogs': `
+        export const confirmDialog = (...args) => globalThis.__vidConfirm(...args);
+        export const alertDialog = async () => undefined;
+        export const promptDialog = async () => null;
+      `,
     },
   });
 
+  // Сеанс разбора живёт в сторе, а не во вью: своя pinia на тест, иначе разбор
+  // одной встречи протёк бы в соседний тест вместе с черновиками. Импорт ленивый:
+  // pinia тянет за собой vue, а тот запоминает глобальный `document` в момент
+  // загрузки — статический импорт забрал бы его ДО подъёма happy-dom.
+  const { createPinia, setActivePinia } = await import(singletonUrl('pinia'));
+  setActivePinia(createPinia());
+
   const { mount, flushPromises } = await import(TEST_UTILS);
-  const wrapper = mount(VideoView, { attachTo: browser.document.querySelector('#mount') });
+  const target = browser.document.querySelector('#mount');
+  let wrapper = mount(VideoView, { attachTo: target });
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__vidApi;
     delete globalThis.__vidPluginsStore;
+    delete globalThis.__vidPreviewStore;
+    delete globalThis.__vidConfirm;
   });
   await settle(flushPromises);
 
   const run = (n) => settle(flushPromises, n);
   const button = (label) => wrapper.findAll('button').find((b) => b.text().includes(label));
+
+  /** Уход в другой раздел и возврат: тот же путь, что у человека, — вью пересоздаётся. */
+  async function remount() {
+    wrapper.unmount();
+    wrapper = mount(VideoView, { attachTo: target });
+    await settle(flushPromises);
+    return wrapper;
+  }
 
   /** Тот же путь, что у человека: выбрал файл → загрузка → поллинг → готовая расшифровка. */
   async function upload() {
@@ -140,7 +180,19 @@ async function mountVideoView(t, { api, planModel = null } = {}) {
     return draft;
   }
 
-  return { browser, wrapper, run, button, upload, addDraft };
+  // wrapper переприсваивается при remount, поэтому наружу отдаём геттер: иначе тест
+  // продолжил бы искать кнопки в уже размонтированной разметке.
+  return {
+    browser,
+    get wrapper() { return wrapper; },
+    run,
+    button,
+    upload,
+    addDraft,
+    remount,
+    preview,
+    confirms,
+  };
 }
 
 test('сплошной текст собирается абзацами по паузам, реплики остаются отдельным видом', async (t) => {
@@ -294,8 +346,9 @@ test('задача уезжает с исполнителем и проекто�
   assert.equal(posted.length, 2);
   assert.deepEqual(posted[0], {
     title: 'Первая', description: '', createdById: 43, responsibleId: 42, groupId: 7, priority: 2,
-    // Ручной черновик кадра не имеет: он не привязан к месту записи.
+    // Ручной черновик не привязан к месту записи, поэтому у него нет ни кадра, ни куска.
     frames: [],
+    clips: [],
   });
   // Ноль портал понимает буквально и отвечает ошибкой о несуществующем пользователе —
   // поэтому именно null, а не 0 (docs/cockpit/b24.md).
@@ -565,4 +618,238 @@ test('без кадра черновик выглядит как раньше и
   await draftButton(view.wrapper.find('.draft')).trigger('click');
   await view.run();
   assert.deepEqual(api.posted('/api/b24/tasks')[0].frames, []);
+});
+
+test('запись видна в диалоге независимо от регистра расширения', async (t) => {
+  const view = await mountVideoView(t, { api: fakeApi() });
+
+  // `video/*` нативный диалог разворачивает в список расширений и сравнивает их
+  // ПОБУКВЕННО, поэтому `IMG_4793.MOV` из Telegram оказывался серым: выбрать запись
+  // было нечем, хотя ffmpeg и whisper разбирают её как любую другую. Отсюда явные
+  // расширения в обоих регистрах — маски одни этого не обещают.
+  const accept = view.wrapper.find('input[type="file"]').attributes('accept');
+
+  assert.match(accept, /(^|,)video\/\*(,|$)/u, 'маска типа остаётся для браузеров, фильтрующих по типу');
+  assert.match(accept, /(^|,)audio\/\*(,|$)/u);
+  for (const ext of ['.mov', '.MOV', '.mp4', '.MP4', '.m4a', '.M4A']) {
+    assert.ok(accept.split(',').includes(ext), `в accept нет ${ext}`);
+  }
+});
+
+test('запись, брошенная на карточку, уходит в распознавание', async (t) => {
+  const view = await mountVideoView(t, { api: fakeApi() });
+  const card = view.wrapper.find('.upload-card');
+
+  await card.trigger('dragenter', { dataTransfer: { types: ['Files'] } });
+  await view.run();
+  assert.ok(card.classes().includes('over'), 'карточка показывает, что примет файл');
+
+  const file = new view.browser.File(['видео'], 'IMG_4793.MOV', { type: 'video/quicktime' });
+  await card.trigger('drop', { dataTransfer: { files: [file] } });
+  await view.run();
+
+  // Перетаскивание — второй путь к тому же обработчику: если диалог всё-таки спрячет
+  // запись, бросить её на карточку остаётся единственным способом отдать файл.
+  assert.equal(card.classes().includes('over'), false, 'подсветка гаснет после броска');
+  assert.match(view.wrapper.find('.filenote').text(), /IMG_4793\.MOV/u);
+});
+
+// ── Фрагмент записи: предпросмотр и вложение ────────────────────────────────
+
+const CLIPPED_TASKS = [
+  {
+    ...PLAN_TASKS[0],
+    at: 271,
+    frame: { name: '0123456789abcdef/p0-00271s.jpg', at: 271 },
+  },
+];
+
+/** Раздел с разобранной задачей, к которой сервер вырезал кусок записи. */
+async function mountWithClip(t, { clip = undefined } = {}) {
+  const made = clip === undefined
+    ? { name: '0123456789abcdef/p0-00256-030s.mp4', at: 271, from: 256, to: 286, seconds: 30, bytes: 383371 }
+    : clip;
+  const api = fakeApi({
+    post: async (url) => {
+      if (url === '/api/media/plan-tasks') {
+        return { ok: true, model: 'claude/claude-opus-5', count: 1, truncated: false, tasks: CLIPPED_TASKS };
+      }
+      if (url === '/api/media/clip') return { clip: made };
+      return { id: 7 };
+    },
+  });
+  const view = await mountVideoView(t, {
+    api, planModel: { provider: 'claude', model: 'claude-opus-5' },
+  });
+  await view.upload();
+  await view.run(3);
+  return { api, view };
+}
+
+test('к разобранной задаче подтягивается кусок записи и его видно плеером', async (t) => {
+  const { api, view } = await mountWithClip(t);
+
+  // Кусок режется вокруг ТОЙ ЖЕ секунды, что кадр и ссылка в описании: у картинки,
+  // у ссылки и у фрагмента должно быть одно место, иначе сверять их нечем.
+  assert.deepEqual(api.posted('/api/media/clip'), [{ jobIds: ['job-1'], at: 271, window: 15 }]);
+
+  const player = view.wrapper.find('video.clip-player');
+  assert.equal(player.exists(), true, 'фрагмент показывается плеером, а не ссылкой на файл');
+  assert.match(player.attributes('src'), /\/api\/media\/clip\/0123456789abcdef\/p0-00256-030s\.mp4$/u);
+  // Байты кусков не тянем до нажатия «play»: их на экране столько же, сколько задач.
+  assert.equal(player.attributes('preload'), 'metadata');
+  assert.match(view.wrapper.find('.clip').text(), /04:16 – 04:46/u);
+  assert.match(view.wrapper.find('.clip').text(), /приложится к задаче/u);
+});
+
+test('фрагмент уезжает к задаче именем, а отказ человека его снимает', async (t) => {
+  const { api, view } = await mountWithClip(t);
+  const draft = view.wrapper.find('.draft');
+
+  const off = draft.findAll('button').filter((b) => b.text() === 'Не прикладывать');
+  // Кадр и кусок — два разных решения человека, поэтому и кнопки у них свои.
+  assert.equal(off.length, 2, 'у кадра и у фрагмента своё «не прикладывать»');
+  await off[1].trigger('click');
+  await view.run();
+
+  await draft.findAll('button').find((b) => b.text().includes('Поставить')).trigger('click');
+  await view.run();
+  assert.deepEqual(api.posted('/api/b24/tasks')[0].clips, [], 'отказ снимает вложение');
+  assert.deepEqual(api.posted('/api/b24/tasks')[0].frames, ['0123456789abcdef/p0-00271s.jpg']);
+});
+
+test('окно фрагмента расширяется кнопкой — единственная ручка у фиксированного куска', async (t) => {
+  const { api, view } = await mountWithClip(t);
+
+  await view.wrapper.findAll('button').find((b) => b.text() === 'Шире').trigger('click');
+  await view.run(2);
+
+  assert.deepEqual(api.posted('/api/media/clip').at(-1), { jobIds: ['job-1'], at: 271, window: 30 });
+});
+
+test('запись без видеодорожки оставляет задачу без фрагмента и без плашки', async (t) => {
+  // Аудиовстреча или отказ ffmpeg: задача уже разобрана, и терять её из-за куска нельзя.
+  const { api, view } = await mountWithClip(t, { clip: null });
+
+  assert.equal(view.wrapper.find('video.clip-player').exists(), false);
+  assert.equal(view.wrapper.find('.clip').exists(), false, 'пустой блок не занимает место');
+
+  await view.wrapper.findAll('button').find((b) => b.text().includes('Поставить')).trigger('click');
+  await view.run();
+  assert.deepEqual(api.posted('/api/b24/tasks')[0].clips, []);
+});
+
+test('кадр и фрагмент открываются просмотрщиком кокпита, а не новой вкладкой', async (t) => {
+  const { view } = await mountWithClip(t);
+
+  // Разбор встречи — работа в одном экране: уход на соседнюю вкладку ради картинки
+  // уносит из виду набранные черновики, а возвращаться приходится руками.
+  assert.equal(view.wrapper.find('.shot a[target="_blank"]').exists(), false);
+
+  await view.wrapper.find('.shot-open').trigger('click');
+  await view.run();
+  assert.deepEqual(view.preview.calls.at(-1), ['image', {
+    src: '/api/media/frame/0123456789abcdef/p0-00271s.jpg',
+    name: 'Кадр записи на 04:31',
+    mime: 'image/jpeg',
+  }]);
+
+  await view.wrapper.findAll('button').find((b) => b.text() === 'Крупнее').trigger('click');
+  await view.run();
+  assert.deepEqual(view.preview.calls.at(-1), ['video', {
+    src: '/api/media/clip/0123456789abcdef/p0-00256-030s.mp4',
+    name: 'Фрагмент 04:16 – 04:46',
+    mime: 'video/mp4',
+  }]);
+});
+
+test('переход в другой раздел и возврат не теряют разбор', async (t) => {
+  // Раздел — обычная страница, и до переноса сеанса в стор её размонтирование уносило
+  // id идущего распознавания: работа на сервере продолжалась, а вернуться к ней было
+  // нечем. Проверяем ровно этот путь: разобрал, ушёл, вернулся.
+  const api = fakeApi();
+  const view = await mountVideoView(t, { api });
+  await view.upload();
+  await view.addDraft({ title: 'Своя задача' });
+
+  await view.remount();
+
+  assert.match(view.wrapper.text(), /Распознавание завершено/u, 'расшифровка на месте');
+  assert.match(view.wrapper.text(), /4 реплик/u);
+  assert.equal(view.wrapper.findAll('.draft').length, 1, 'набранный черновик не пропал');
+  assert.equal(view.wrapper.find('.draft .dtitle').element.value, 'Своя задача');
+  // Файл заново не грузится: разбор уже лежит на сервере, у части есть свой jobId.
+  assert.equal(api.calls.filter(([m, url]) => m === 'POST' && url === '/api/media/upload').length, 0);
+});
+
+test('кнопка «Убрать разбор» спрашивает про черновики и очищает экран', async (t) => {
+  const view = await mountVideoView(t, { api: fakeApi(), confirmAnswer: false });
+  await view.upload();
+  await view.addDraft({ title: 'Своя задача' });
+
+  // Сеанс липкий: он переживает и переход, и перезагрузку. Значит уносить набранное
+  // молча нельзя — сначала вопрос.
+  await view.button('Убрать разбор').trigger('click');
+  await view.run();
+  assert.equal(view.confirms.length, 1, 'непоставленный черновик спрашивают');
+  assert.match(view.wrapper.text(), /Распознавание завершено/u, 'отказ ничего не тронул');
+
+  globalThis.__vidConfirm = async () => true;
+  await view.button('Убрать разбор').trigger('click');
+  await view.run();
+  assert.equal(view.wrapper.find('.result').exists(), false, 'разбор ушёл с экрана');
+  assert.equal(view.wrapper.findAll('.draft').length, 0);
+});
+
+/** Снимок сеанса, каким его оставляет прошлое открытие раздела. */
+function savedSession() {
+  return {
+    v: 1,
+    savedAt: Date.now(),
+    parts: [{ name: 'встреча.mp4', size: 2048, jobId: 'job-1' }],
+    uploaded: { name: 'встреча.mp4', size: 2048 },
+    drafts: [{ title: 'Своя задача' }],
+  };
+}
+
+test('после перезагрузки страницы разбор возвращается с сервера, а не начинается заново', async (t) => {
+  const api = fakeApi();
+  const view = await mountVideoView(t, { api, restore: savedSession() });
+
+  assert.match(view.wrapper.text(), /Распознавание завершено/u);
+  assert.match(view.wrapper.text(), /4 реплик/u, 'расшифровка дочитана по jobId');
+  assert.equal(view.wrapper.find('.draft .dtitle').element.value, 'Своя задача');
+  assert.equal(view.wrapper.find('input[type="file"]').element.value, '', 'файл заново не выбирают');
+});
+
+test('пока сервер не ответил, видно, что разбор возвращается, а не пропал', async (t) => {
+  const api = fakeApi();
+  // Ответ статуса подвешен: между открытием страницы и первым ответом раздел не имеет
+  // права выглядеть пустой формой — разбор в это время идёт на сервере.
+  api.get = async (url) => (url.startsWith('/api/media/ingest/')
+    ? new Promise(() => {})
+    : {});
+  const view = await mountVideoView(t, { api, restore: savedSession() });
+
+  assert.match(view.wrapper.find('.progress').text(), /Возвращаюсь к разбору/u);
+  assert.equal(view.wrapper.find('.result').exists(), false);
+});
+
+test('раздел говорит, сколько записей лежит на диске и когда они уйдут', async (t) => {
+  // Исходники раздел хранит ради кадров и фрагментов, поэтому рост виден только по
+  // свободному месту на диске — то есть слишком поздно. Живой замер: 1,4 ГБ за неделю.
+  const view = await mountVideoView(t, {
+    api: fakeApi({ storage: { files: 12, bytes: 1503238553, ttlMs: 7 * 24 * 60 * 60 * 1000 } }),
+  });
+
+  const note = view.wrapper.find('.storage-note').text();
+  assert.match(note, /удаляются через 7 дн/u);
+  assert.match(note, /12 на диске/u);
+  assert.match(note, /1\.4 ГБ/u);
+});
+
+test('пустое хранилище строкой не отчитывается', async (t) => {
+  const view = await mountVideoView(t, { api: fakeApi({ storage: { files: 0, bytes: 0, ttlMs: 0 } }) });
+
+  assert.equal(view.wrapper.find('.storage-note').exists(), false);
 });

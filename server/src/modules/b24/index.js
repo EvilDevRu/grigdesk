@@ -75,7 +75,21 @@ async function b24Module(fastify, opts) {
   fastify.post('/api/b24/tasks', wrap((r) => {
     const body = { ...(r.body || {}) };
     const names = Array.isArray(body.frames) ? body.frames : [];
+    const clips = Array.isArray(body.clips) ? body.clips : [];
     delete body.frames;
+    delete body.clips;
+    // Фрагмент записи — такое же вложение по ИМЕНИ, что и кадр, и путь ему так же
+    // подставляет сам media. На портал уезжает только вырезанный кусок вокруг места
+    // задачи: сама встреча остаётся в кокпите, и «залей запись целиком» этот путь не
+    // умеет — длину куска ограничивает нарезка, а имя проверяется буквально.
+    if (clips.length && typeof fastify.mediaClipPath === 'function') {
+      const paths = clips.map((name) => fastify.mediaClipPath(name)).filter(Boolean);
+      const files = paths.map((path, i) => ({
+        path,
+        name: i ? `фрагмент-${i + 1}.mp4` : 'фрагмент.mp4',
+      }));
+      if (files.length) body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
+    }
     if (names.length && typeof fastify.mediaFramePath === 'function') {
       const paths = names.map((name) => fastify.mediaFramePath(name)).filter(Boolean);
       // На портале у вложения видно ИМЯ, а служебное `p0-00272s.jpg` читается мусором.

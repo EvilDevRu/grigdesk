@@ -162,6 +162,10 @@ test('обрезанная загрузка отвергается, а не уе
   await app.register(mediaModule, {
     media: {
       mediaDir,
+      // Каталоги знает адаптер, а не модуль: у него они и спрашиваются — и для
+      // загрузки, и для уборки хранилища.
+      uploadsDir: path.join(mediaDir, 'uploads'),
+      jobsDir: path.join(mediaDir, 'jobs'),
       doctor: () => ({ ok: true }),
       status: () => null,
       ingest: (options) => { ingested.push(options); return { jobId: 'job-1' }; },

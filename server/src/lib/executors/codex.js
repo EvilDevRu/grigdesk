@@ -597,383 +597,465 @@ function codexRpcError(method, error) {
 }
 
 /**
- * Один app-server процесс обслуживает полный ход: handshake, thread, turn и все
- * промежуточные notifications. После `turn/completed` процесс нам больше не нужен;
- * следующий HTTP-ход поднимет новый и сделает `thread/resume` по сохранённому id.
+ * Живая сессия Codex: один процесс `codex app-server` держит thread и обслуживает все
+ * ходы чата. Раньше он поднимался на КАЖДЫЙ ход и убивался сразу после `turn/completed`,
+ * поэтому всё, что агент оставил после себя, умирало вместе с ответом.
+ * Замер: два `turn/start` в одном процессе — pid тот же, thread живой, память цела.
+ *
+ * Разделение простое: соединение (процесс, JSON-RPC, thread) живёт, а ход — это
+ * отрезок его потока со своей лентой шагов, своим счётчиком токенов и своим итогом.
  */
-export function runCodexAppServer({
-  config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-  signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+export function openCodexSession({
+  config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
+  log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo,
 }) {
-  if (signal?.aborted) {
-    return Promise.reject(codexStoppedError({ sessionId, steps: [] }));
+  const roots = codexWorkspaceRoots(cwd, extraDirs);
+  const pending = new Map();
+  let nextRequestId = 0;
+  let threadId = sessionId || null;
+  let actualModel = '';
+  let stderrTail = '';
+  let protocol = 'pending';
+  let exited = false;
+  let exitReason = '';
+  let turn = null;
+
+  function rememberTail(current, chunk, limit = 4_000) {
+    return `${current}${String(chunk || '')}`.slice(-limit);
   }
 
-  return new Promise((resolve, reject) => {
-    const stepSink = createStepSink(onStep);
-    const normalizeStep = createCodexStepNormalizer({ model, cwd });
-    const roots = codexWorkspaceRoots(cwd, extraDirs);
-    const pending = new Map();
-    const messageDeltas = new Map();
-    let nextRequestId = 0;
-    let threadId = sessionId || null;
-    let turnId = null;
-    let reply = '';
-    let lastCommentary = '';
-    let actualModel = '';
-    let totalInputTokens = 0;
-    let cachedInputTokens = 0;
-    let appContext = null;
-    let progressTokens = 0;
-    let stderrTail = '';
-    let settled = false;
-    let protocol = 'pending';
-    let abortRequested = false;
-    let interruptSent = false;
-    let interruptTimer = null;
+  const child = spawn(config.codexBin, ['app-server'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const lines = createInterface({ input: child.stdout });
 
-    function rememberTail(current, chunk, limit = 4_000) {
-      return `${current}${String(chunk || '')}`.slice(-limit);
+  function send(payload) {
+    if (exited || child.stdin.destroyed) throw new Error('Codex app-server stdin уже закрыт');
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  function request(method, params) {
+    return new Promise((requestResolve, requestReject) => {
+      const id = ++nextRequestId;
+      pending.set(id, { method, resolve: requestResolve, reject: requestReject });
+      try {
+        send({ method, id, ...(params !== undefined && { params }) });
+      } catch (error) {
+        pending.delete(id);
+        requestReject(error);
+      }
+    });
+  }
+
+  function rejectPending(error) {
+    const calls = [...pending.values()];
+    pending.clear();
+    for (const call of calls) call.reject(error);
+  }
+
+  /** Состояние ОДНОГО хода: лента, счётчики и итог принадлежат ходу, не сессии. */
+  function createTurn({ message, onStep, onProgress }) {
+    const stepSink = createStepSink(onStep);
+    return {
+      message,
+      stepSink,
+      normalizeStep: createCodexStepNormalizer({ model, cwd }),
+      onProgress,
+      messageDeltas: new Map(),
+      reply: '',
+      lastCommentary: '',
+      appContext: null,
+      progressTokens: 0,
+      totalInputTokens: 0,
+      cachedInputTokens: 0,
+      turnId: null,
+      settled: false,
+      abortRequested: false,
+      interruptSent: false,
+      interruptTimer: null,
+      resolve: null,
+      reject: null,
+    };
+  }
+
+  function closeTurn(current) {
+    clearTimeout(current.interruptTimer);
+    if (turn === current) turn = null;
+  }
+
+  function finishTurnError(current, error) {
+    if (!current || current.settled) return;
+    current.settled = true;
+    closeTurn(current);
+    current.reject(error);
+  }
+
+  function finishTurnStopped(current) {
+    if (!current || current.settled) return;
+    finishTurnError(current, codexStoppedError({ sessionId: threadId, steps: current.stepSink.steps }));
+  }
+
+  async function finishTurnSuccess(current) {
+    if (!current || current.settled) return;
+    // Ход, завершившийся без `final_answer`, всё равно нёс работу: его итог остался
+    // в последнем commentary. Дубль в ленте дешевле потерянного ответа, а отказ
+    // «codex не вернул ответ» на нормально закрытом turn читается как поломка.
+    if (!current.reply.trim() && current.lastCommentary.trim()) current.reply = current.lastCommentary;
+    if (!current.reply.trim()) {
+      finishTurnError(current, new Error('codex не вернул ответ'));
+      return;
+    }
+    current.settled = true;
+    closeTurn(current);
+
+    let context = current.appContext;
+    if (!context) {
+      try { context = await tokenInfoReader(threadId, { env }); } catch { /* точная метрика необязательна */ }
+    }
+    current.resolve({
+      reply: current.reply,
+      sessionId: threadId,
+      cost: null,
+      contextTokens: context?.contextTokens ?? 0,
+      contextWindow: context?.contextWindow ?? 0,
+      contextMetric: context?.contextMetric || 'unavailable',
+      contextIsEstimate: context ? context.contextIsEstimate === true : true,
+      contextCache: context?.contextCache || contextCacheStatus('unavailable'),
+      totalInputTokens: context?.totalInputTokens ?? current.totalInputTokens,
+      cachedInputTokens: context?.cachedInputTokens ?? current.cachedInputTokens,
+      actualModel,
+      steps: current.stepSink.steps,
+    });
+  }
+
+  function rememberUsage(current, params) {
+    const usage = params?.tokenUsage;
+    const last = usage?.last;
+    const total = usage?.total;
+    if (!last || !total) return;
+    const contextTokens = tokenNumber(last.inputTokens);
+    const contextWindow = tokenNumber(usage.modelContextWindow, { positive: true });
+    const cachedRequestTokens = tokenNumber(last.cachedInputTokens);
+    current.totalInputTokens = tokenNumber(total.inputTokens) || 0;
+    current.cachedInputTokens = tokenNumber(total.cachedInputTokens) || 0;
+    current.progressTokens = (tokenNumber(last.outputTokens) || 0)
+      + (tokenNumber(last.reasoningOutputTokens) || 0);
+    if (contextTokens === null || contextWindow === null) return;
+    current.appContext = {
+      contextTokens,
+      contextWindow,
+      contextMetric: CODEX_CONTEXT_METRIC,
+      contextIsEstimate: false,
+      contextCache: cachedRequestTokens === null
+        ? contextCacheStatus('unavailable')
+        : reportedContextCache({
+          readTokens: cachedRequestTokens,
+          uncachedTokens: contextTokens - cachedRequestTokens,
+        }),
+      totalInputTokens: current.totalInputTokens,
+      cachedInputTokens: current.cachedInputTokens,
+    };
+  }
+
+  function appendMessage(current, params) {
+    const id = String(params?.itemId || '');
+    if (!id || typeof params?.delta !== 'string') return;
+    current.messageDeltas.set(id, `${current.messageDeltas.get(id) || ''}${params.delta}`.slice(0, 100_000));
+  }
+
+  function maybeInterrupt(current) {
+    if (!current || !current.abortRequested || current.interruptSent || current.settled) return;
+    if (protocol === 'legacy') {
+      finishTurnStopped(current);
+      return;
+    }
+    if (!threadId || !current.turnId) return;
+    current.interruptSent = true;
+    clearTimeout(current.interruptTimer);
+    current.interruptTimer = setTimeout(() => finishTurnStopped(current), 3_000);
+    request('turn/interrupt', { threadId, turnId: current.turnId })
+      .catch(() => finishTurnStopped(current));
+  }
+
+  function consumeAppNotification(event) {
+    const method = String(event.method || '');
+    const params = event.params && typeof event.params === 'object' ? event.params : {};
+
+    if (method === 'thread/started') {
+      threadId = params.thread?.id || threadId;
     }
 
-    let child;
-    try {
-      child = spawn(config.codexBin, ['app-server'], {
-        cwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch (error) {
-      reject(error);
+    const current = turn;
+    if (!current) {
+      // Событие вне хода: у Codex это служебные уведомления открытой сессии.
+      // Ходов «сам заговорил» он не выдаёт (session.unsolicited = false).
+      return;
+    }
+    current.stepSink.emitAll(current.normalizeStep(event));
+
+    if (method === 'turn/started') {
+      current.turnId = params.turn?.id || current.turnId;
+      maybeInterrupt(current);
+    } else if (method === 'item/agentMessage/delta') {
+      appendMessage(current, params);
+    } else if (method === 'item/completed' && params.item?.type === 'agentMessage') {
+      const item = params.item;
+      const id = String(item.id || '');
+      const text = String(item.text || current.messageDeltas.get(id) || '');
+      current.messageDeltas.delete(id);
+      // Commentary уже ушёл отдельным text-шагом. Ответом считается явный final
+      // либо legacy-модель без phase, где последняя agentMessage была ответом.
+      if (item.phase === 'final_answer' || item.phase == null) {
+        if (text.trim()) current.reply = text;
+      } else if (text.trim()) {
+        current.lastCommentary = text;
+      }
+    } else if (method === 'thread/tokenUsage/updated') {
+      rememberUsage(current, params);
+    } else if (method === 'turn/completed') {
+      const status = String(params.turn?.status || 'completed');
+      current.turnId = params.turn?.id || current.turnId;
+      if (current.progressTokens > 0) {
+        try { current.onProgress?.(current.progressTokens); } catch { /* счётчик не должен ронять ход */ }
+      }
+      if (current.abortRequested || status === 'interrupted') {
+        finishTurnStopped(current);
+      } else if (status === 'failed') {
+        finishTurnError(current, codexRpcError('turn/completed', params.turn?.error || 'ход завершился ошибкой'));
+      } else {
+        void finishTurnSuccess(current);
+      }
+    }
+  }
+
+  function consumeLegacyEvent(event) {
+    protocol = 'legacy';
+    if (event.type === 'thread.started') {
+      threadId = event.thread_id || event.thread?.id || threadId;
+    }
+    if (typeof event.model === 'string' && event.model) actualModel = event.model;
+    if (typeof event.item?.model === 'string' && event.item.model) actualModel = event.item.model;
+    const current = turn;
+    if (!current) return;
+    current.stepSink.emitAll(current.normalizeStep(event));
+    if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+      const text = event.item.text || event.item.content;
+      if (typeof text === 'string' && text.trim()) current.reply = text;
+    }
+    if (event.type === 'turn.completed' && event.usage) {
+      current.totalInputTokens = codexTotalInputTokens(event.usage);
+      current.cachedInputTokens = tokenNumber(event.usage.cached_input_tokens) || 0;
+      const spent = Number(event.usage.output_tokens || 0)
+        + Number(event.usage.reasoning_output_tokens || 0);
+      if (Number.isFinite(spent) && spent > 0) {
+        try { current.onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
+      }
+    }
+  }
+
+  function consumeMessage(messageObject) {
+    if (messageObject?.id !== undefined && !messageObject?.method
+      && (Object.hasOwn(messageObject, 'result') || Object.hasOwn(messageObject, 'error'))) {
+      protocol = 'app-server';
+      const call = pending.get(messageObject.id);
+      if (!call) return;
+      pending.delete(messageObject.id);
+      if (messageObject.error) call.reject(codexRpcError(call.method, messageObject.error));
+      else call.resolve(messageObject.result);
       return;
     }
 
-    const lines = createInterface({ input: child.stdout });
-
-    function send(payload) {
-      if (settled || child.stdin.destroyed) throw new Error('Codex app-server stdin уже закрыт');
-      child.stdin.write(`${JSON.stringify(payload)}\n`);
-    }
-
-    function request(method, params) {
-      return new Promise((requestResolve, requestReject) => {
-        const id = ++nextRequestId;
-        pending.set(id, { method, resolve: requestResolve, reject: requestReject });
+    if (messageObject?.method) {
+      protocol = 'app-server';
+      // При policy=never запросов разрешения быть не должно. Не оставляем
+      // неожиданный server request висеть бесконечно — завершаем ход fail-closed.
+      if (messageObject.id !== undefined) {
         try {
-          send({ method, id, ...(params !== undefined && { params }) });
-        } catch (error) {
-          pending.delete(id);
-          requestReject(error);
-        }
-      });
+          send({
+            id: messageObject.id,
+            error: { code: -32601, message: `Cockpit не поддерживает server request ${messageObject.method}` },
+          });
+        } catch { /* основной отказ ниже */ }
+        finishTurnError(turn, new Error(`Codex запросил неподдерживаемое действие: ${messageObject.method}`));
+        return;
+      }
+      consumeAppNotification(messageObject);
+      return;
     }
 
-    function stopProcess() {
-      clearTimeout(interruptTimer);
-      signal?.removeEventListener('abort', onAbort);
+    if (messageObject?.type) consumeLegacyEvent(messageObject);
+  }
+
+  lines.on('line', (line) => {
+    const text = String(line || '').trim();
+    if (!text.startsWith('{')) return;
+    let event;
+    try { event = JSON.parse(text); } catch { return; }
+    consumeMessage(event);
+  });
+
+  child.stderr.on('data', (chunk) => { stderrTail = rememberTail(stderrTail, chunk); });
+  child.stdin.on('error', (error) => { finishTurnError(turn, error); });
+
+  child.once('error', (error) => {
+    exited = true;
+    exitReason = error?.code === 'ENOENT'
+      ? 'GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'
+      : (stderrTail || error?.message || 'codex app-server не запустился').slice(-600);
+    const failure = new Error(exitReason);
+    rejectPending(failure);
+    finishTurnError(turn, failure);
+    hooks.onExit?.({ reason: exitReason });
+  });
+
+  child.once('close', (code) => {
+    exited = true;
+    const current = turn;
+    if (current && !current.settled) {
+      if (current.abortRequested) {
+        finishTurnStopped(current);
+      } else if (protocol === 'legacy' && current.reply) {
+        void finishTurnSuccess(current);
+      } else {
+        const detail = stderrTail.trim().slice(-300);
+        finishTurnError(current, new Error(
+          `codex app-server завершился до ответа${detail ? `: ${detail}` : ` (код ${code ?? '?'})`}`,
+        ));
+      }
+    }
+    if (!exitReason) exitReason = `codex app-server завершился (код ${code ?? '?'})`;
+    rejectPending(new Error(exitReason));
+    hooks.onExit?.({ code, reason: exitReason });
+  });
+
+  const ready = (async () => {
+    await request('initialize', {
+      clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+      // `experimentalApi` открывает `runtimeWorkspaceRoots`: без него app-server
+      // отвечает «requires experimentalApi capability», и рабочим корнем остаётся
+      // один cwd (в схеме: «Omitted defaults to cwd»). `requestAttestation` —
+      // строго false: он включает server request `attestation/generate`, а любой
+      // server request кокпит завершает fail-closed, то есть уронил бы ход.
+      capabilities: { experimentalApi: true, requestAttestation: false },
+    });
+    send({ method: 'initialized' });
+
+    const common = {
+      ...(model && { model }),
+      cwd,
+      approvalPolicy: 'never',
+      sandbox: 'workspace-write',
+      // Доверенные каталоги «Настройки → Исполнители» обязаны быть рабочими корнями,
+      // а не только writable-песочницей: `codex exec --add-dir` давал агенту именно
+      // рабочую область, и после переезда на app-server она сузилась до cwd.
+      runtimeWorkspaceRoots: roots,
+      config: codexAppServerConfig(compactWindow),
+    };
+    const opened = threadId
+      ? await request('thread/resume', { threadId, ...common })
+      : await request('thread/start', { ...common, serviceName: 'cockpit' });
+    threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
+    actualModel = String(opened?.model || model || '');
+    return threadId;
+  })();
+  // Отказ handshake разбирает тот, кто делает первый ход: без этого он остался бы
+  // необработанным rejection и уронил бы процесс сервера.
+  ready.catch(() => {});
+
+  return {
+    get pid() { return child.pid; },
+    get sessionId() { return threadId; },
+    get alive() { return !exited; },
+    get busy() { return !!turn; },
+
+    async send({ message, onStep, onProgress }) {
+      if (exited) throw new Error(exitReason || 'Сессия Codex закрыта.');
+      if (turn) throw new Error('В этой сессии уже идёт ход.');
+
+      // Ход объявляется ДО ожидания handshake: «стоп» может прийти, пока app-server
+      // ещё поднимается, и прерывать тогда будет нечего — запрос повис бы до таймаута.
+      const current = createTurn({ message, onStep, onProgress });
+      turn = current;
+      const result = new Promise((resolve, reject) => {
+        current.resolve = resolve;
+        current.reject = reject;
+      });
+      // Стоп может отклонить ход РАНЬШЕ, чем этот промис вернётся вызывающему: пустой
+      // catch помечает его обработанным, не мешая настоящему await получить ту же ошибку.
+      result.catch(() => {});
+
+      try {
+        await ready;
+        if (current.settled) return result;
+        current.stepSink.emitAll(current.normalizeStep({
+          type: 'thread.started', thread_id: threadId, model: actualModel,
+        }));
+
+        const started = await request('turn/start', {
+          threadId,
+          input: [{ type: 'text', text: String(message || ''), text_elements: [] }],
+          cwd,
+          approvalPolicy: 'never',
+          sandboxPolicy: {
+            type: 'workspaceWrite',
+            writableRoots: roots,
+            networkAccess: true,
+            excludeTmpdirEnvVar: false,
+            excludeSlashTmp: false,
+          },
+          ...(model && { model }),
+          ...(effort && { effort }),
+          summary: 'detailed',
+        });
+        current.turnId = started?.turn?.id || current.turnId;
+        maybeInterrupt(current);
+      } catch (error) {
+        finishTurnError(current, error);
+      }
+      return result;
+    },
+
+    /** «Стоп» человека: прерываем ход штатным turn/interrupt, thread остаётся живым. */
+    async interrupt() {
+      const current = turn;
+      if (!current || current.settled) return;
+      current.abortRequested = true;
+      maybeInterrupt(current);
+      if (!current.interruptTimer && protocol !== 'legacy') {
+        // Если стоп пришёл до turn/started, даём app-server короткое окно сообщить id.
+        current.interruptTimer = setTimeout(() => finishTurnStopped(current), 3_000);
+      }
+    },
+
+    async close() {
+      if (exited) return;
       try { lines.close(); } catch { /* уже закрыт */ }
       try { child.stdin.end(); } catch { /* уже закрыт */ }
       try { child.kill(); } catch { /* уже завершён */ }
-    }
+      exited = true;
+    },
+  };
+}
 
-    function rejectPending(error) {
-      const calls = [...pending.values()];
-      pending.clear();
-      for (const call of calls) call.reject(error);
-    }
+/**
+ * Разовый ход: та же сессия, поднятая ради одного хода и погашенная сразу после.
+ * Остаётся для исполнителей и путей, где живая сессия не нужна или отключена.
+ */
+export async function runCodexAppServer({
+  config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
+  signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+}) {
+  if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
-    function finishError(error) {
-      if (settled) return;
-      settled = true;
-      stopProcess();
-      rejectPending(error);
-      reject(error);
-    }
-
-    function finishStopped() {
-      if (settled) return;
-      finishError(codexStoppedError({ sessionId: threadId, steps: stepSink.steps }));
-    }
-
-    async function finishSuccess() {
-      if (settled) return;
-      // Ход, завершившийся без `final_answer`, всё равно нёс работу: его итог остался
-      // в последнем commentary. Дубль в ленте дешевле потерянного ответа, а отказ
-      // «codex не вернул ответ» на нормально закрытом turn читается как поломка.
-      if (!reply.trim() && lastCommentary.trim()) reply = lastCommentary;
-      if (!reply.trim()) {
-        finishError(new Error('codex не вернул ответ'));
-        return;
-      }
-      settled = true;
-      stopProcess();
-      rejectPending(new Error('Codex app-server завершил ход'));
-      let context = appContext;
-      if (!context) {
-        try { context = await tokenInfoReader(threadId, { env }); } catch { /* точная метрика необязательна */ }
-      }
-      resolve({
-        reply, sessionId: threadId, cost: null,
-        contextTokens: context?.contextTokens ?? 0,
-        contextWindow: context?.contextWindow ?? 0,
-        contextMetric: context?.contextMetric || 'unavailable',
-        contextIsEstimate: context ? context.contextIsEstimate === true : true,
-        contextCache: context?.contextCache || contextCacheStatus('unavailable'),
-        totalInputTokens: context?.totalInputTokens ?? totalInputTokens,
-        cachedInputTokens: context?.cachedInputTokens ?? cachedInputTokens,
-        actualModel, steps: stepSink.steps,
-      });
-    }
-
-    function rememberUsage(params) {
-      const usage = params?.tokenUsage;
-      const last = usage?.last;
-      const total = usage?.total;
-      if (!last || !total) return;
-      const contextTokens = tokenNumber(last.inputTokens);
-      const contextWindow = tokenNumber(usage.modelContextWindow, { positive: true });
-      const cachedRequestTokens = tokenNumber(last.cachedInputTokens);
-      totalInputTokens = tokenNumber(total.inputTokens) || 0;
-      cachedInputTokens = tokenNumber(total.cachedInputTokens) || 0;
-      progressTokens = (tokenNumber(last.outputTokens) || 0)
-        + (tokenNumber(last.reasoningOutputTokens) || 0);
-      if (contextTokens === null || contextWindow === null) return;
-      appContext = {
-        contextTokens,
-        contextWindow,
-        contextMetric: CODEX_CONTEXT_METRIC,
-        contextIsEstimate: false,
-        contextCache: cachedRequestTokens === null
-          ? contextCacheStatus('unavailable')
-          : reportedContextCache({
-            readTokens: cachedRequestTokens,
-            uncachedTokens: contextTokens - cachedRequestTokens,
-          }),
-        totalInputTokens,
-        cachedInputTokens,
-      };
-    }
-
-    function appendMessage(params) {
-      const id = String(params?.itemId || '');
-      if (!id || typeof params?.delta !== 'string') return;
-      messageDeltas.set(id, `${messageDeltas.get(id) || ''}${params.delta}`.slice(0, 100_000));
-    }
-
-    function consumeAppNotification(event) {
-      const method = String(event.method || '');
-      const params = event.params && typeof event.params === 'object' ? event.params : {};
-      stepSink.emitAll(normalizeStep(event));
-
-      if (method === 'thread/started') {
-        threadId = params.thread?.id || threadId;
-      } else if (method === 'turn/started') {
-        turnId = params.turn?.id || turnId;
-        maybeInterrupt();
-      } else if (method === 'item/agentMessage/delta') {
-        appendMessage(params);
-      } else if (method === 'item/completed' && params.item?.type === 'agentMessage') {
-        const item = params.item;
-        const id = String(item.id || '');
-        const text = String(item.text || messageDeltas.get(id) || '');
-        messageDeltas.delete(id);
-        // Commentary уже ушёл отдельным text-шагом. Ответом считается явный final
-        // либо legacy-модель без phase, где последняя agentMessage была ответом.
-        if (item.phase === 'final_answer' || item.phase == null) {
-          if (text.trim()) reply = text;
-        } else if (text.trim()) {
-          lastCommentary = text;
-        }
-      } else if (method === 'thread/tokenUsage/updated') {
-        rememberUsage(params);
-      } else if (method === 'turn/completed') {
-        const status = String(params.turn?.status || 'completed');
-        turnId = params.turn?.id || turnId;
-        if (progressTokens > 0) {
-          try { onProgress?.(progressTokens); } catch { /* счётчик не должен ронять ход */ }
-        }
-        if (abortRequested || status === 'interrupted') {
-          finishStopped();
-        } else if (status === 'failed') {
-          finishError(codexRpcError('turn/completed', params.turn?.error || 'ход завершился ошибкой'));
-        } else {
-          void finishSuccess();
-        }
-      }
-    }
-
-    function consumeLegacyEvent(event) {
-      protocol = 'legacy';
-      if (event.type === 'thread.started') {
-        threadId = event.thread_id || event.thread?.id || threadId;
-      }
-      if (typeof event.model === 'string' && event.model) actualModel = event.model;
-      if (typeof event.item?.model === 'string' && event.item.model) actualModel = event.item.model;
-      stepSink.emitAll(normalizeStep(event));
-      if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
-        const text = event.item.text || event.item.content;
-        if (typeof text === 'string' && text.trim()) reply = text;
-      }
-      if (event.type === 'turn.completed' && event.usage) {
-        totalInputTokens = codexTotalInputTokens(event.usage);
-        cachedInputTokens = tokenNumber(event.usage.cached_input_tokens) || 0;
-        const spent = Number(event.usage.output_tokens || 0)
-          + Number(event.usage.reasoning_output_tokens || 0);
-        if (Number.isFinite(spent) && spent > 0) {
-          try { onProgress?.(spent); } catch { /* счётчик не должен ронять ход */ }
-        }
-      }
-    }
-
-    function consumeMessage(messageObject) {
-      if (messageObject?.id !== undefined && !messageObject?.method
-        && (Object.hasOwn(messageObject, 'result') || Object.hasOwn(messageObject, 'error'))) {
-        protocol = 'app-server';
-        const call = pending.get(messageObject.id);
-        if (!call) return;
-        pending.delete(messageObject.id);
-        if (messageObject.error) call.reject(codexRpcError(call.method, messageObject.error));
-        else call.resolve(messageObject.result);
-        return;
-      }
-
-      if (messageObject?.method) {
-        protocol = 'app-server';
-        // При policy=never запросов разрешения быть не должно. Не оставляем
-        // неожиданный server request висеть бесконечно — завершаем ход fail-closed.
-        if (messageObject.id !== undefined) {
-          try {
-            send({
-              id: messageObject.id,
-              error: { code: -32601, message: `Cockpit не поддерживает server request ${messageObject.method}` },
-            });
-          } catch { /* основной отказ ниже */ }
-          finishError(new Error(`Codex запросил неподдерживаемое действие: ${messageObject.method}`));
-          return;
-        }
-        consumeAppNotification(messageObject);
-        return;
-      }
-
-      if (messageObject?.type) consumeLegacyEvent(messageObject);
-    }
-
-    function consumeLine(line) {
-      const text = String(line || '').trim();
-      if (!text.startsWith('{')) return;
-      let event;
-      try { event = JSON.parse(text); } catch { return; }
-      consumeMessage(event);
-    }
-
-    function maybeInterrupt() {
-      if (!abortRequested || interruptSent || settled) return;
-      if (protocol === 'legacy') {
-        finishStopped();
-        return;
-      }
-      if (!threadId || !turnId) return;
-      interruptSent = true;
-      clearTimeout(interruptTimer);
-      interruptTimer = setTimeout(finishStopped, 3_000);
-      request('turn/interrupt', { threadId, turnId }).catch(() => finishStopped());
-    }
-
-    function onAbort() {
-      if (settled) return;
-      abortRequested = true;
-      maybeInterrupt();
-      if (!interruptTimer && protocol !== 'legacy') {
-        // Если abort пришёл во время handshake, даём app-server короткое окно
-        // сообщить thread/turn id и затем отправляем штатный interrupt.
-        interruptTimer = setTimeout(finishStopped, 3_000);
-      }
-    }
-
-    child.stderr.on('data', (chunk) => {
-      stderrTail = rememberTail(stderrTail, chunk);
-    });
-    child.stdin.on('error', (error) => {
-      if (!settled) finishError(error);
-    });
-    child.once('error', (error) => {
-      if (error?.code === 'ENOENT') {
-        finishError(new Error('GPT-исполнитель не установлен: npm i -g @openai/codex && codex login'));
-        return;
-      }
-      finishError(new Error((stderrTail || error?.message || 'codex app-server не запустился').slice(-600)));
-    });
-    child.once('close', (code) => {
-      if (settled) return;
-      if (abortRequested || signal?.aborted) {
-        finishStopped();
-      } else if (protocol === 'legacy' && reply) {
-        void finishSuccess();
-      } else {
-        const detail = stderrTail.trim().slice(-300);
-        finishError(new Error(`codex app-server завершился до ответа${detail ? `: ${detail}` : ` (код ${code ?? '?'})`}`));
-      }
-    });
-    lines.on('line', consumeLine);
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    async function bootstrap() {
-      await request('initialize', {
-        clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
-        // `experimentalApi` открывает `runtimeWorkspaceRoots`: без него app-server
-        // отвечает «requires experimentalApi capability», и рабочим корнем остаётся
-        // один cwd (в схеме: «Omitted defaults to cwd»). `requestAttestation` —
-        // строго false: он включает server request `attestation/generate`, а любой
-        // server request кокпит завершает fail-closed, то есть уронил бы ход.
-        capabilities: { experimentalApi: true, requestAttestation: false },
-      });
-      send({ method: 'initialized' });
-
-      const common = {
-        ...(model && { model }),
-        cwd,
-        approvalPolicy: 'never',
-        sandbox: 'workspace-write',
-        // Доверенные каталоги «Настройки → Исполнители» обязаны быть рабочими корнями,
-        // а не только writable-песочницей: `codex exec --add-dir` давал агенту именно
-        // рабочую область, и после переезда на app-server она сузилась до cwd.
-        runtimeWorkspaceRoots: roots,
-        config: codexAppServerConfig(compactWindow),
-      };
-      const opened = sessionId
-        ? await request('thread/resume', { threadId: sessionId, ...common })
-        : await request('thread/start', { ...common, serviceName: 'cockpit' });
-      threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
-      actualModel = String(opened?.model || model || '');
-      stepSink.emitAll(normalizeStep({
-        type: 'thread.started', thread_id: threadId, model: actualModel,
-      }));
-
-      const turnParams = {
-        threadId,
-        input: [{ type: 'text', text: String(message || ''), text_elements: [] }],
-        cwd,
-        approvalPolicy: 'never',
-        sandboxPolicy: {
-          type: 'workspaceWrite',
-          writableRoots: roots,
-          networkAccess: true,
-          excludeTmpdirEnvVar: false,
-          excludeSlashTmp: false,
-        },
-        ...(model && { model }),
-        ...(effort && { effort }),
-        summary: 'detailed',
-      };
-      const started = await request('turn/start', turnParams);
-      turnId = started?.turn?.id || turnId;
-      maybeInterrupt();
-    }
-
-    bootstrap().catch((error) => {
-      if (!settled) finishError(error);
-    });
+  const session = openCodexSession({
+    config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, tokenInfoReader,
   });
+  const onAbort = () => { void session.interrupt(); };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    return await session.send({ message, onStep, onProgress });
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    await session.close();
+  }
 }
 
 // TUI-команды Codex. `codex exec` слэш-текст отдаёт модели как обычный промпт, поэтому
@@ -1141,5 +1223,27 @@ export default {
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
       signal, onProgress, onStep, tokenInfoReader,
     });
+  },
+
+  /**
+   * Живая сессия: `codex app-server` — сам по себе сервер, и держать его между ходами
+   * дешевле, чем поднимать заново. Замер: два `turn/start` в одном процессе, pid тот же.
+   *
+   * `unsolicited: false` — Codex не будит модель сам: фоновых агентов, которые
+   * отчитались бы без запроса, у него нет. Живая сессия всё равно нужна: она сохраняет
+   * рабочее состояние процесса и позволяет разбудить агента сообщением от кокпита.
+   */
+  session: {
+    mode: 'persistent',
+    unsolicited: false,
+    restartOn: ['model', 'effort', 'cwd', 'extraDirs', 'compactWindow'],
+
+    open({
+      config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow, log, hooks,
+    }) {
+      return openCodexSession({
+        config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, log, hooks,
+      });
+    },
   },
 };

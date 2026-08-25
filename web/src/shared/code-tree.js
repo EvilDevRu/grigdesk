@@ -48,7 +48,10 @@ export function buildCodeContexts(repos) {
         branch,
         branchLabel: branchLabel(branch),
       };
-      context.label = `${repoKey} · ${worktreeLabel(context)} · ${context.branchLabel}`;
+      // Метка без ключа репозитория нужна там, где репозиторий уже назван рядом:
+      // иначе в шапке «Кода» одно и то же слово стояло дважды подряд.
+      context.treeLabel = `${worktreeLabel(context)} · ${context.branchLabel}`;
+      context.label = `${repoKey} · ${context.treeLabel}`;
       contexts.push(context);
     }
   }
@@ -137,6 +140,20 @@ export function gitDirectoryPaths(tree) {
  * «группа + путь», а не путём. Группа — фиксированное слово без двоеточий, поэтому
  * разбор однозначен даже у пути с двоеточием внутри.
  */
+/**
+ * Путь изменения — на имя файла и каталог над ним. Плоский список показывает
+ * сначала имя: обрезание с конца съедало именно его, оставляя человеку общий
+ * для десятка строк префикс каталога.
+ */
+export function splitGitPath(path) {
+  const value = String(path || '');
+  const cut = value.lastIndexOf('/');
+
+  return cut < 0
+    ? { name: value, dir: '' }
+    : { name: value.slice(cut + 1), dir: value.slice(0, cut) };
+}
+
 export function gitRef(group, path) {
   return group ? `${group}:${path}` : String(path);
 }
@@ -214,12 +231,17 @@ export function buildGitGroups(payload, openDirs) {
     .filter((source) => source.files.length)
     .map((source) => {
       const tree = buildGitTree(source.files);
-      return { ...source, tree, rows: flattenGitTree(tree, openDirs, source.id) };
+      return {
+        ...source,
+        tree,
+        rows: flattenGitTree(tree, openDirs, source.id),
+        list: source.files.map((file) => ({ file, ...splitGitPath(file.path) })),
+      };
     });
   if (groups.length) return groups;
   // Чистое дерево: одна пустая группа остаётся, чтобы панели было куда поставить
   // заголовок, переключатель вида и честное «изменений нет».
-  return [{ ...sources[1], tree: buildGitTree([]), rows: [] }];
+  return [{ ...sources[1], tree: buildGitTree([]), rows: [], list: [] }];
 }
 
 /** Все каталоги обеих групп — ключами «группа:путь», как их видит `gitOpenDirs`. */

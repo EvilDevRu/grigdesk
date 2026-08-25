@@ -2,7 +2,36 @@
   <div class="code-panel" :class="{ compact }" :aria-busy="loading ? 'true' : undefined">
     <header ref="panelHeader" class="code-head" tabindex="-1">
       <strong>Код</strong>
-      <span v-if="context" class="tlabel mono">{{ project }} · {{ context.label }}</span>
+      <!-- Выбор рабочей копии живёт в шапке, а не отдельным блоком панели: там он
+           виден и при свёрнутом дереве, а панели остаётся один смысл — содержимое. -->
+      <div class="head-ctx">
+        <div v-if="showsProjectPicker" class="head-pick project" title="Проект">
+          <label for="code-project">проект</label>
+          <UiSelect id="code-project" compact data-context="code-head-select"
+                    :model-value="project" @change="setProject($event.target.value)">
+            <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
+          </UiSelect>
+        </div>
+        <div v-if="showsContextPicker" class="head-pick tree" :title="context?.treePath || 'Рабочая копия'">
+          <label for="code-context">рабочая копия</label>
+          <UiSelect id="code-context" compact data-context="code-head-select"
+                    :model-value="contextId" @change="setContext($event.target.value)">
+            <template v-if="contextGroups.length > 1">
+              <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
+                <option v-for="item in group.items" :key="item.id" :value="item.id" :title="item.treePath">
+                  {{ item.label }}
+                </option>
+              </optgroup>
+            </template>
+            <template v-else>
+              <option v-for="item in contexts" :key="item.id" :value="item.id" :title="item.treePath">
+                {{ item.label }}
+              </option>
+            </template>
+          </UiSelect>
+        </div>
+        <span v-else-if="headContext" class="tlabel mono" :title="context?.treePath">{{ headContext }}</span>
+      </div>
       <span class="grow"></span>
       <UiButton v-if="compact" class="navigator-toggle" variant="ghost"
                 data-context="tool-dock-navigator"
@@ -28,10 +57,6 @@
         <span class="loading-rail-item"></span>
       </aside>
       <aside class="panel loading-panel" aria-hidden="true">
-        <div class="loading-selects">
-          <span class="loading-caption"></span><span class="loading-field"></span>
-          <span class="loading-caption short"></span><span class="loading-field"></span>
-        </div>
         <div class="loading-tree">
           <span v-for="index in 7" :key="index" class="loading-row"
                 :style="{ '--loading-row': `${48 + ((index * 17) % 38)}%` }"></span>
@@ -63,37 +88,10 @@
         </UiIconButton>
       </aside>
 
-      <!-- Панель: проект + единая рабочая копия, затем дерево файлов или изменения -->
+      <!-- Панель — только содержимое: дерево файлов либо изменения. Проект и рабочая
+           копия выбираются в шапке раздела. -->
       <aside class="panel">
-        <div class="sels">
-          <div class="sel-field">
-            <label for="code-project">Проект</label>
-            <UiSelect id="code-project" :model-value="project" @change="setProject($event.target.value)">
-              <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
-            </UiSelect>
-          </div>
-          <div v-if="contexts.length > 1" class="sel-field">
-            <label for="code-context">Рабочая копия</label>
-            <UiSelect id="code-context" :model-value="contextId" @change="setContext($event.target.value)">
-              <template v-if="contextGroups.length > 1">
-                <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
-                  <option v-for="item in group.items" :key="item.id" :value="item.id" :title="item.treePath">
-                    {{ item.label }}
-                  </option>
-                </optgroup>
-              </template>
-              <template v-else>
-                <option v-for="item in contexts" :key="item.id" :value="item.id" :title="item.treePath">
-                  {{ item.label }}
-                </option>
-              </template>
-            </UiSelect>
-          </div>
-          <div v-else-if="context" class="context-static" :title="context.treePath">
-            Рабочая копия: {{ context.label }}
-          </div>
-          <div v-if="contextLoading" class="context-loading">Загружаю рабочую копию…</div>
-        </div>
+        <div v-if="contextLoading" class="pnote">Загружаю рабочую копию…</div>
 
         <div v-if="error" class="perr">{{ error }}</div>
         <div v-if="!projectHasRepos" class="pnote">
@@ -107,19 +105,80 @@
           Проверь пути в разделе <router-link to="/projects">«Проекты»</router-link>.
         </div>
 
+        <!-- Как Source Control в VS Code: сообщение относится только к индексу,
+             генератор читает тот же staged diff, commit не делает скрытый git add. -->
+        <div v-if="tab === 'git' && git" class="git-compose">
+          <!-- Сообщение коммита многострочное: заголовок, пустая строка и тело —
+               обычная форма, и сервер её принимает. `rows="1"` обязателен: без него
+               textarea открывается на две строки поверх компактного min-height. -->
+          <UiTextarea
+            v-model="commitMessage"
+            class="commit-message"
+            data-context="code-commit"
+            rows="1"
+            maxlength="5000"
+            placeholder="Название коммита"
+            aria-label="Название коммита"
+            :disabled="gitActionBusy"
+            @keydown.enter="commitOnShortcut"
+          />
+          <!-- Кнопки отдельной строкой: в доке поле ввода делило 218px с тремя
+               контролами и схлопывалось до двух букв — набрать в нём было нечего. -->
+          <div class="git-compose-actions">
+            <UiIconButton
+              class="generate-commit"
+              role="embedded"
+              data-context="code-commit"
+              label="Составить сообщение по staged diff"
+              title="Составить сообщение по staged diff"
+              :loading="gitBusy === 'generate'"
+              :disabled="gitActionBusy || !git.staged.length"
+              @click="generateCommitMessage"
+            >✦</UiIconButton>
+            <UiButton
+              class="commit-action"
+              data-context="code-commit"
+              variant="solid"
+              tone="accent"
+              :loading="gitBusy === 'commit'"
+              :disabled="gitActionBusy || !git.staged.length || !commitMessage.trim()"
+              @click="commitGitChanges"
+            >Коммит</UiButton>
+            <UiIconButton
+              class="push-action"
+              role="embedded"
+              data-context="code-commit"
+              :label="pushLabel"
+              :loading="gitBusy === 'push'"
+              :disabled="gitActionBusy || git.tracking?.detached"
+              :title="pushTitle"
+              @click="pushGitChanges"
+            >{{ git.tracking?.upstream ? '↑' : '⇧' }}</UiIconButton>
+          </div>
+          <p v-if="gitNotice" class="git-notice" :class="gitNotice.type"
+             :title="gitNotice.text" role="status">
+            {{ gitNotice.text }}
+          </p>
+          <p v-else-if="trackingNote" class="git-notice" :class="trackingNote.type"
+             :title="trackingNote.hint">
+            {{ trackingNote.text }}
+          </p>
+        </div>
+
         <!-- Дерево файлов. Место под шеврон занято и у файла (пустой .chev): без него
              имя файла уезжало влево на ширину стрелки и вставало вровень с каталогом
              уровнем выше — лесенка читалась рваной. -->
         <div v-if="tab === 'files'" class="scroll tree">
           <template v-for="row in rows" :key="row.rel">
-            <UiPressable v-if="row.dir" class="trow dir" :data-dir-path="row.rel"
-                         :data-depth="row.depth"
+            <UiPressable v-if="row.dir" class="trow dir" data-context="code-tree-row"
+                         :data-dir-path="row.rel" :data-depth="row.depth"
                          :aria-expanded="openDirs.has(row.rel)" :style="rowDepth(row.depth)"
                          @click="toggleDir(row.rel)">
               <span class="chev">{{ openDirs.has(row.rel) ? '▾' : '▸' }}</span>
               <span class="dname">{{ row.name }}</span>
             </UiPressable>
-            <UiPressable v-else class="trow frow" :class="{ sel: fileSel === row.rel }"
+            <UiPressable v-else class="trow frow" data-context="code-tree-row"
+                         :class="{ sel: fileSel === row.rel }"
                          :pressed="fileSel === row.rel" :data-file-path="row.rel" :data-depth="row.depth"
                          :style="rowDepth(row.depth)" @click="openFile(row.rel)">
               <span class="chev" aria-hidden="true"></span>
@@ -136,17 +195,31 @@
           <template v-if="git">
             <template v-for="(group, groupIndex) in gitGroups" :key="group.id">
               <div class="subhead" :data-group="group.id">
-                <span :title="group.hint">{{ group.title }}</span>
+                <span class="subtitle" :title="group.hint">{{ group.title }}</span>
                 <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
                 <span class="grow"></span>
+                <UiIconButton
+                  v-if="group.files.length"
+                  class="git-group-action"
+                  role="embedded"
+                  data-context="code-group-action"
+                  :data-action="group.id === 'staged' ? 'unstage-all' : 'stage-all'"
+                  :label="gitGroupActionLabel(group.id)"
+                  :title="gitGroupActionLabel(group.id)"
+                  :loading="gitBusy === gitGroupActionKey(group.id)"
+                  :disabled="gitActionBusy"
+                  @click="changeGitGroup(group)"
+                >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
                 <!-- Переключатель вида один на панель: он про способ показа, а не про группу. -->
                 <div v-if="groupIndex === 0" class="git-view-toggle" role="group" aria-label="Вид изменений">
-                  <UiIconButton class="git-view-action" role="embedded" data-view="tree"
+                  <UiIconButton class="git-view-action" role="embedded"
+                                data-context="code-group-action" data-view="tree"
                                 title="Показать деревом" label="Показать деревом"
                                 :pressed="gitView === 'tree'" @click="setGitView('tree')">
                     <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 2.5h4v3H2zM6 4h3v1H6zM8 4h1v7H8zM8 7h2v1H8zM8 10h2v1H8zM10 6.5h4v3h-4zM10 9.5h4v3h-4z" /></svg>
                   </UiIconButton>
-                  <UiIconButton class="git-view-action" role="embedded" data-view="list"
+                  <UiIconButton class="git-view-action" role="embedded"
+                                data-context="code-group-action" data-view="list"
                                 title="Показать списком" label="Показать списком"
                                 :pressed="gitView === 'list'" @click="setGitView('list')">
                     <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2 3h2v2H2zM5 3h9v2H5zM2 7h2v2H2zM5 7h9v2H5zM2 11h2v2H2zM5 11h9v2H5z" /></svg>
@@ -157,37 +230,83 @@
               <template v-else-if="gitView === 'tree'">
                 <template v-for="row in group.rows" :key="row.key">
                   <UiPressable v-if="row.kind === 'dir'" class="trow dir git-row git-dir"
+                               data-context="code-tree-row"
                                :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
                                :aria-expanded="gitOpenDirs.has(row.ref)"
                                :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
                     <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
                     <span class="dname" :title="row.path">{{ row.name }}</span>
                   </UiPressable>
-                  <UiPressable v-else class="trow frow git-row git-file"
-                               :class="{ sel: gitSel === row.ref }" :pressed="gitSel === row.ref"
-                               :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
-                               :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
-                    <span class="chev" aria-hidden="true"></span>
-                    <span class="st" :class="row.file.status">{{ STLABEL[row.file.status] || row.file.status }}</span>
-                    <span class="nm mono" :title="row.path">{{ row.name }}</span>
-                    <span class="cnt mono"><i v-if="row.file.add" class="a">+{{ row.file.add }}</i><i v-if="row.file.del" class="d">−{{ row.file.del }}</i></span>
-                  </UiPressable>
+                  <div v-else class="git-file-line" data-ui-row="code-change">
+                    <UiPressable class="trow frow git-row git-file"
+                                 data-context="code-tree-row"
+                                 :class="{ sel: gitSel === row.ref }" :pressed="gitSel === row.ref"
+                                 :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
+                                 :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
+                      <span class="chev" aria-hidden="true"></span>
+                      <span class="st" :class="row.file.status">
+                        {{ STLABEL[row.file.status] || row.file.status }}
+                      </span>
+                      <span class="nm mono" :title="row.path">{{ row.name }}</span>
+                      <span class="cnt mono">
+                        <i v-if="row.file.add" class="a">+{{ row.file.add }}</i>
+                        <i v-if="row.file.del" class="d">−{{ row.file.del }}</i>
+                      </span>
+                    </UiPressable>
+                    <UiIconButton
+                      class="git-file-action"
+                      role="embedded"
+                      data-context="code-row-action"
+                      :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
+                      :data-file="row.path"
+                      :label="gitFileActionLabel(group.id, row.path)"
+                      :title="group.id === 'staged' ? 'Вернуть из индекса' : 'Добавить в индекс'"
+                      :loading="gitBusy === gitFileActionKey(group.id, row.path)"
+                      :disabled="gitActionBusy"
+                      @click="changeGitFile(group, row.file)"
+                    >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                  </div>
                 </template>
               </template>
+              <!-- Плоский список: сначала имя файла, каталог — приглушённым хвостом.
+                   Целый путь обрезался с конца, то есть съедал именно имя. -->
               <template v-else>
-                <UiPressable v-for="f in group.files" :key="`${group.id}:file:${f.path}`"
-                             class="trow frow git-row git-file"
-                             :class="{ sel: gitSel === gitRef(group.id, f.path) }"
-                             :pressed="gitSel === gitRef(group.id, f.path)"
-                             :data-path="f.path" :data-group="group.id"
-                             @click="selectGit(gitRef(group.id, f.path))">
-                  <span class="st" :class="f.status">{{ STLABEL[f.status] || f.status }}</span>
-                  <span class="nm mono" :title="f.path">{{ f.path }}</span>
-                  <span class="cnt mono"><i v-if="f.add" class="a">+{{ f.add }}</i><i v-if="f.del" class="d">−{{ f.del }}</i></span>
-                </UiPressable>
+                <div v-for="entry in group.list" :key="`${group.id}:file:${entry.file.path}`"
+                     class="git-file-line" data-ui-row="code-change">
+                  <UiPressable class="trow frow git-row git-file"
+                               data-context="code-tree-row"
+                               :class="{ sel: gitSel === gitRef(group.id, entry.file.path) }"
+                               :pressed="gitSel === gitRef(group.id, entry.file.path)"
+                               :data-path="entry.file.path" :data-group="group.id"
+                               @click="selectGit(gitRef(group.id, entry.file.path))">
+                    <span class="st" :class="entry.file.status">
+                      {{ STLABEL[entry.file.status] || entry.file.status }}
+                    </span>
+                    <span class="nm split mono" :title="entry.file.path">
+                      <b class="nm-base">{{ entry.name }}</b>
+                      <i v-if="entry.dir" class="nm-dir">{{ entry.dir }}</i>
+                    </span>
+                    <span class="cnt mono">
+                      <i v-if="entry.file.add" class="a">+{{ entry.file.add }}</i>
+                      <i v-if="entry.file.del" class="d">−{{ entry.file.del }}</i>
+                    </span>
+                  </UiPressable>
+                  <UiIconButton
+                    class="git-file-action"
+                    role="embedded"
+                    data-context="code-row-action"
+                    :data-action="group.id === 'staged' ? 'unstage' : 'stage'"
+                    :data-file="entry.file.path"
+                    :label="gitFileActionLabel(group.id, entry.file.path)"
+                    :title="group.id === 'staged' ? 'Вернуть из индекса' : 'Добавить в индекс'"
+                    :loading="gitBusy === gitFileActionKey(group.id, entry.file.path)"
+                    :disabled="gitActionBusy"
+                    @click="changeGitFile(group, entry.file)"
+                  >{{ group.id === 'staged' ? '−' : '+' }}</UiIconButton>
+                </div>
               </template>
             </template>
-            <div class="subhead">Коммиты</div>
+            <div class="subhead"><span class="subtitle">Коммиты</span></div>
             <div v-for="c in git.log" :key="c.hash" class="commit" :title="c.when">
               <span class="hash mono">{{ c.hash }}</span>
               <span class="subj">{{ c.subject }}</span>
@@ -256,7 +375,7 @@
 </template>
 
 <script setup>
-// Плагин «Код» — просмотр кода и гита проектов, как в VS Code, но только чтение:
+// Плагин «Код» — просмотр кода и управление Git проектов, как в VS Code:
 // слева рейка режимов (код | гит), дальше панель (дерево файлов или изменения),
 // справа Monaco. Смотреть можно ЛЮБОЕ дерево репозитория — основное или worktree
 // (их создаёт фабрика): репозиторий и worktree выбираются одним полем «Рабочая копия».
@@ -275,7 +394,11 @@ import {
   reconcileGitOpenDirs,
 } from '../../shared/code-tree.js';
 import {
-  UiButton, UiIconButton, UiPressable, UiSelect,
+  UiButton,
+  UiIconButton,
+  UiPressable,
+  UiSelect,
+  UiTextarea,
 } from '../../ui';
 
 const props = defineProps({
@@ -317,6 +440,31 @@ const contextGroups = computed(() => {
   return groups;
 });
 const projectHasRepos = computed(() => (projects.value.find((p) => p.id === project.value)?.repos || []).length > 0);
+// Оба переключателя видны всегда, как только есть что показать: даже единственный
+// вариант обязан выглядеть переключателем — иначе непонятно, где вообще менять проект
+// и рабочую копию. Скрывается только пустой селект, которому нечего предложить.
+const showsProjectPicker = computed(() => projects.value.length > 0);
+const showsContextPicker = computed(() => contexts.value.length > 0);
+/**
+ * Текст шапки на время, пока рабочих копий ещё нет: репозитории проекта не прочитаны
+ * или все оказались недоступны. Имя проекта добавляется только при живом отличии от
+ * ключа репозитория, а сам ключ пропадает, когда его уже назвал селект проекта.
+ */
+const headContext = computed(() => {
+  if (!context.value) {
+    return '';
+  }
+
+  if (showsProjectPicker.value) {
+    return context.value.repoKey === project.value
+      ? context.value.treeLabel
+      : context.value.label;
+  }
+
+  return context.value.repoKey === project.value
+    ? context.value.label
+    : `${project.value} · ${context.value.label}`;
+});
 
 // ── Дерево файлов (ленивое: каталог читается при раскрытии) ──
 const dirs = ref(new Map());     // rel ('' = корень) → entries [{name, dir}]
@@ -328,6 +476,58 @@ const fileLoading = ref(false);
 // ── Гит ──
 const git = ref(null);           // { branch, files, staged, log }
 const gitLoading = ref(false);
+const commitMessage = ref('');
+const gitBusy = ref('');
+const gitNotice = ref(null);     // { type: 'ok' | 'err', text }
+const gitActionBusy = computed(() => !!gitBusy.value);
+const pushLabel = computed(() => {
+  if (!git.value?.tracking?.upstream) {
+    return 'Опубликовать';
+  }
+
+  const ahead = Number(git.value.tracking.ahead) || 0;
+  return ahead > 0 ? `Пуш ↑${ahead}` : 'Пуш';
+});
+const pushTitle = computed(() => (git.value?.tracking?.upstream
+  ? 'Отправить текущую ветку'
+  : 'Опубликовать ветку и настроить upstream'));
+
+/**
+ * Строка под композером говорит только то, чего НЕТ в шапке раздела: связь с remote,
+ * расхождение с ним и detached HEAD. Само имя ветки шапка уже назвала, и третья его
+ * копия в одной панели была шумом.
+ *
+ * Исключение — расхождение живой ветки с той, что отдал каталог рабочих копий:
+ * `refresh` перечитывает гит, но не `/repos`, поэтому после переключения ветки мимо
+ * кокпита шапка остаётся устаревшей, и промолчать здесь значило бы соврать.
+ */
+const trackingNote = computed(() => {
+  const tracking = git.value?.tracking || null;
+  if (tracking?.detached) {
+    return { type: 'err', text: 'detached HEAD — коммит уйдёт в никуда, пуш недоступен' };
+  }
+
+  const live = String(git.value?.branch || '');
+  if (live && context.value?.branch && live !== context.value.branch) {
+    return { type: 'err', text: `ветка сменилась на ${live}`, hint: 'откройте рабочую копию заново' };
+  }
+
+  if (!tracking?.upstream) {
+    return { type: 'mid', text: 'ветка ещё не опубликована' };
+  }
+
+  const ahead = Number(tracking.ahead) || 0;
+  const behind = Number(tracking.behind) || 0;
+  if (!ahead && !behind) {
+    return null;
+  }
+
+  return {
+    type: 'mid',
+    text: `${tracking.upstream} · ↑${ahead} ↓${behind}`,
+    hint: 'расхождение с веткой отслеживания',
+  };
+});
 // Выбор адресуется парой «группа:путь»: один и тот же файл законно лежит и в индексе,
 // и в рабочем дереве, и дифы у них разные.
 const gitSel = ref('');
@@ -406,6 +606,7 @@ let contextGeneration = 0;
 let reposRequestId = 0;
 let fileRequestId = 0;
 let gitRequestId = 0;
+let gitActionId = 0;
 let fileLoadingRequestId = 0;
 let gitLoadingRequestId = 0;
 const dirRequestIds = new Map();
@@ -589,10 +790,11 @@ function resetState() {
   dirs.value = new Map(); openDirs.value = new Set();
   fileSel.value = ''; fileData.value = null; imageError.value = '';
   git.value = null; gitSel.value = '';
+  commitMessage.value = ''; gitBusy.value = ''; gitNotice.value = null;
   gitOpenDirs.value = new Set(); gitKnownDirs.value = new Set(); gitDirsReady.value = false;
   fileLoading.value = false; gitLoading.value = false;
   fileLoadingRequestId = 0; gitLoadingRequestId = 0;
-  fileRequestId += 1; gitRequestId += 1; dirRequestIds.clear();
+  fileRequestId += 1; gitRequestId += 1; gitActionId += 1; dirRequestIds.clear();
   clearFileModel(); clearDiffModels();
   error.value = '';
 }
@@ -616,6 +818,167 @@ function toggleGitDir(ref) {
   if (open.has(ref)) open.delete(ref);
   else open.add(ref);
   gitOpenDirs.value = open;
+}
+
+function gitGroupActionKey(group) {
+  return `${group === 'staged' ? 'unstage' : 'stage'}:all`;
+}
+
+function gitFileActionKey(group, path) {
+  return `${group === 'staged' ? 'unstage' : 'stage'}:${path}`;
+}
+
+function gitGroupActionLabel(group) {
+  return group === 'staged'
+    ? 'Вернуть все изменения из индекса'
+    : 'Добавить все изменения в индекс';
+}
+
+function gitFileActionLabel(group, path) {
+  return group === 'staged'
+    ? `Вернуть ${path} из индекса`
+    : `Добавить ${path} в индекс`;
+}
+
+function gitActionUrl(snapshot, action) {
+  return `/api/code/${encodeURIComponent(snapshot.project)}/${action}?${q(snapshot)}`;
+}
+
+/**
+ * Выполняет одну Git-команду для точного снимка рабочей копии и при необходимости
+ * перечитывает обе группы. Поздний ответ старого worktree не меняет новый выбор.
+ */
+async function performGitAction({
+  action,
+  body = {},
+  key,
+  refreshGit = true,
+  onSuccess = null,
+}) {
+  if (gitActionBusy.value || !treePath.value) {
+    return null;
+  }
+
+  const snapshot = captureContext();
+  const own = ++gitActionId;
+  gitBusy.value = key;
+  gitNotice.value = null;
+
+  try {
+    const result = await api.post(gitActionUrl(snapshot, action), body);
+    if (!contextIsCurrent(snapshot) || own !== gitActionId) {
+      return null;
+    }
+
+    onSuccess?.(result);
+    if (refreshGit) {
+      await loadGit(snapshot, { silent: true });
+    }
+
+    return result;
+  } catch (actionError) {
+    if (contextIsCurrent(snapshot) && own === gitActionId) {
+      gitNotice.value = {
+        type: 'err',
+        text: actionError.data?.message || actionError.message,
+      };
+    }
+    return null;
+  } finally {
+    if (contextIsCurrent(snapshot) && own === gitActionId) {
+      gitBusy.value = '';
+    }
+  }
+}
+
+function changeGitGroup(group) {
+  const action = group.id === 'staged' ? 'unstage' : 'stage';
+  return performGitAction({
+    action,
+    body: { all: true },
+    key: gitGroupActionKey(group.id),
+  });
+}
+
+function changeGitFile(group, file) {
+  const action = group.id === 'staged' ? 'unstage' : 'stage';
+  return performGitAction({
+    action,
+    body: { paths: [file.path] },
+    key: gitFileActionKey(group.id, file.path),
+  });
+}
+
+function generateCommitMessage() {
+  if (!git.value?.staged?.length) {
+    return null;
+  }
+
+  return performGitAction({
+    action: 'commit-message',
+    key: 'generate',
+    refreshGit: false,
+    onSuccess: (result) => {
+      commitMessage.value = result.title;
+      gitNotice.value = {
+        type: 'ok',
+        text: `Название составлено · ${result.model}`,
+      };
+    },
+  });
+}
+
+/**
+ * В многострочном поле Enter принадлежит тексту: им набирают тело сообщения.
+ * Коммит вешается на Ctrl/Cmd+Enter — та же пара, что в Source Control VS Code;
+ * пока поле было однострочным, ту же работу делал голый Enter.
+ */
+function commitOnShortcut(event) {
+  if (!event.ctrlKey && !event.metaKey) {
+    return;
+  }
+
+  event.preventDefault();
+  commitGitChanges();
+}
+
+function commitGitChanges() {
+  const message = commitMessage.value.trim();
+  if (!git.value?.staged?.length || !message) {
+    return null;
+  }
+
+  return performGitAction({
+    action: 'commit',
+    body: { message },
+    key: 'commit',
+    onSuccess: (result) => {
+      commitMessage.value = '';
+      gitNotice.value = {
+        type: 'ok',
+        text: `Создан коммит ${result.hash}: ${result.subject}`,
+      };
+    },
+  });
+}
+
+function pushGitChanges() {
+  if (git.value?.tracking?.detached) {
+    return null;
+  }
+
+  return performGitAction({
+    action: 'push',
+    key: 'push',
+    onSuccess: (result) => {
+      gitNotice.value = {
+        type: 'ok',
+        text: result.published
+          ? `Ветка ${result.branch} опубликована и связана с remote.`
+          : `Ветка ${result.branch} отправлена.`,
+      };
+    },
+  });
 }
 
 async function loadDir(rel, snapshot = captureContext(), { activation = null } = {}) {
@@ -1063,7 +1426,11 @@ async function processIntents() {
 
 watch(() => props.active, (active, wasActive) => {
   if (active) activate({ preserve: initialized && wasActive === false });
-  else activationId += 1;
+  else {
+    activationId += 1;
+    gitActionId += 1;
+    gitBusy.value = '';
+  }
 }, { immediate: true });
 watch(() => props.intents, processIntents, { deep: true });
 watch(
@@ -1080,6 +1447,7 @@ watch(
 );
 onBeforeUnmount(() => {
   activationId += 1;
+  gitActionId += 1;
   navigatorObserver?.disconnect?.();
   emit('context', null);
   clearFileModel(); clearDiffModels();
@@ -1092,9 +1460,31 @@ onBeforeUnmount(() => {
 .code-head {
   min-width: 0; min-height: 36px; display: flex; align-items: center; gap: 10px;
   padding: 0 4px 8px; color: var(--ink); outline: none;
+  container: code-head / inline-size;
 }
 .code-head strong { flex: none; font-size: 13px; font-weight: 650; }
 .code-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+/* Шапка — не форма: у контролов нет своих коробок, только подпись-метка, значение
+   и шеврон. Тот же приём, что в строке состояния чата. */
+.head-ctx { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.head-pick { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.head-pick label { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-mid); opacity: .75; }
+/* Проект ужимается последним: его имя короткое и целиком помещается почти всегда,
+   а метка рабочей копии длинная и у неё есть подсказка с полным путём. */
+.head-pick.project { flex: none; }
+.head-pick.project :deep(.ui-select) { min-width: 0; max-width: 180px; }
+.head-pick.tree { flex: 0 1 auto; }
+.head-pick.tree :deep(.ui-select) { min-width: 0; max-width: 280px; }
+/* Разделитель между переключателями, как в строке состояния чата: без коробок
+   два соседних значения иначе читаются одной фразой. */
+.head-pick + .head-pick { border-left: 1px solid var(--line); padding-left: 10px; }
+/* В узкой шапке дока подписи уходят: они стоили проекту его имени («rd…»), хотя
+   значение и шеврон сами говорят, что это переключатель. Полные имена — в title. */
+@container code-head (max-width: 620px) {
+  .head-pick label { display: none; }
+  .head-pick + .head-pick { padding-left: 8px; }
+}
 .tlabel { font-size: 12px; color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { color: var(--ink-mid); padding: 40px 0; text-align: center; }
 .empty a, .pnote a { color: var(--accent); }
@@ -1119,11 +1509,6 @@ onBeforeUnmount(() => {
 .code-loading { user-select: none; }
 .loading-rail-item { width: 34px; height: 34px; border-radius: 8px; background: var(--surface-2); }
 .loading-panel { gap: 0; }
-.loading-selects { display: grid; gap: 5px; padding: 11px 10px 10px; border-bottom: 1px solid var(--line); }
-.loading-caption { width: 38%; height: 7px; border-radius: 999px; background: var(--line); }
-.loading-caption.short { width: 30%; margin-top: 3px; }
-.loading-field { width: 100%; height: 29px; border-radius: 8px; background: var(--surface-2);
-  border: 1px solid var(--line); }
 .loading-tree { display: flex; flex-direction: column; gap: 11px; padding: 15px 17px; }
 .loading-row { width: var(--loading-row); height: 8px; border-radius: 999px; background: var(--line); opacity: .78; }
 .loading-editor .ehead { min-height: 37px; }
@@ -1151,30 +1536,45 @@ onBeforeUnmount(() => {
 .ic { width: 19px; height: 19px; }
 
 /* Панель */
-.panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--sidebar); }
-.sels { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
-.sel-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.sel-field label { color: var(--ink-mid); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
-.context-static { min-width: 0; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-2);
-  border-radius: 8px; padding: 6px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
-.context-loading { color: var(--ink-mid); font-size: 11px; padding: 1px 2px; }
+.panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: var(--sidebar);
+  container: code-panel / inline-size; }
 .perr { color: var(--bad); font-size: 12px; padding: 8px 12px; }
 .pnote { color: var(--ink-mid); font-size: 12px; padding: 8px 12px; }
 .context-warning { display: flex; flex-direction: column; gap: 3px; }
 .unavailable-repo { color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-compose {
+  display: flex; flex-direction: column; gap: 5px; padding: 7px 8px 8px;
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.git-compose .commit-message { width: 100%; }
+.git-compose-actions { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.git-compose-actions .commit-action { flex: 1; min-width: 0; }
+.git-compose-actions .generate-commit, .git-compose-actions .push-action { flex: none; }
+.git-notice {
+  min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; line-height: 1.35; color: var(--ink-mid);
+}
+.git-notice.ok { color: var(--good); }
+.git-notice.err { color: var(--bad); }
 .scroll { flex: 1; min-width: 0; overflow: auto; padding: 6px 8px; }
 /* Лесенка дерева: шаг задан ОДИН раз здесь, скрипт присылает строке только --depth.
    Держать шаг числом в JS нельзя — он должен сходиться с положением направляющей. */
 .tree { --tree-step: 14px; --tree-lead: 8px; --tree-guide: color-mix(in srgb, var(--line) 80%, transparent); }
 
-.trow { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none; border: none;
-  color: var(--ink); padding: 4px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
-/* Фон меняем ТОЛЬКО background-color: shorthand `background` стирает направляющие. */
-.trow:hover { background-color: var(--surface); }
-.trow:focus-visible, .ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible {
+/* Вид строки (высота, радиус, фон, состояния) живёт в общем скине
+   `.ui-pressable[data-context='code-tree-row']`: локальной копии этих свойств
+   у плагина быть не должно. Здесь — только раскладка и направляющие дерева. */
+.trow { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; }
+.ritem:focus-visible, .git-view-action:focus-visible, .diff-layout:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
-.trow.dir { color: var(--ink-mid); }
+.git-file-line { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.git-file-line .trow { flex: 1; width: auto; min-width: 0; }
+.git-file-action { flex: none; }
+/* Счётчик уступает место кнопке индексации, которая на указателе всплывает поверх
+   строки: иначе она легла бы прямо на цифры. На тач-устройстве кнопка в потоке. */
+@media (hover: hover) and (pointer: fine) {
+  .git-file-line:hover .cnt, .git-file-line:focus-within .cnt { opacity: 0; }
+}
 /* Направляющие линии предков — по одной на уровень, ровно под шевроном родителя. */
 .tree .trow {
   padding-left: calc(var(--tree-lead) + var(--depth, 0) * var(--tree-step));
@@ -1186,17 +1586,39 @@ onBeforeUnmount(() => {
 }
 .chev { flex: none; width: 12px; font-size: 10px; color: var(--ink-mid); }
 .dname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow.sel { background-color: color-mix(in srgb, var(--accent) 16%, transparent); }
 .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Плоский список: имя целиком, каталог сжимается первым и обрезается СЛЕВА —
+   у пути важен хвост рядом с файлом, а не общий для десятка строк корень.
+   Своим классом, а не общим `.nm`: у строки дерева внутри голый текст, и flex-контейнер
+   отменил бы ему многоточие. */
+.nm.split { display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.nm-base { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-weight: 400; }
+/* Вес сжатия 999 против 1 у имени: сначала уступает каталог и только когда его уже
+   не осталось — само имя. Иначе оба обрезались поровну и не читалось ни одно. */
+.nm-dir { flex: 0 999 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: rtl; text-align: left; color: var(--ink-mid); font-size: 11px; font-style: normal; }
 .st { flex: none; width: 16px; text-align: center; font-family: var(--mono); font-size: 11px; font-weight: 700; border-radius: 4px; }
 .st.A { color: var(--good); } .st.M { color: var(--warn); } .st.D { color: var(--bad); } .st.R { color: var(--accent); }
-.cnt { flex: none; font-size: 11px; display: flex; gap: 6px; }
+.cnt { flex: none; font-size: 11px; display: flex; gap: 5px; transition: opacity .1s; }
 .cnt .a { color: var(--good); } .cnt .d { color: var(--bad); }
+/* В узкой панели имени файла уступают и счётчик строк, и хвост каталога: имя — то,
+   ради чего список открывают, числа видны в самом дифе, а целый путь остаётся в
+   подсказке строки. Меряем панель, а не окно: ширину ей задаёт разделитель дерева,
+   а не размер экрана. */
+@container code-panel (max-width: 250px) {
+  .git-file .cnt, .git-file .nm-dir { display: none; }
+}
 
-.subhead { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--ink-mid); padding: 10px 8px 5px; display: flex; align-items: center; gap: 7px; }
-.git-view-toggle { display: inline-flex; gap: 2px; }
+/* Заголовок группы: капс с разрядкой был вдвое шире строчных букв и в узком доке
+   переносил «В рабочем дереве» на вторую строку вместе с кнопками. */
+.subhead { font-size: 11px; font-weight: 650; letter-spacing: .01em;
+  color: var(--ink-mid); padding: 6px 4px 2px; display: flex; align-items: center; gap: 5px;
+  min-width: 0; }
+.subtitle { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-view-toggle { display: inline-flex; gap: 1px; }
 .git-view-toggle svg { width: 15px; height: 15px; fill: currentColor; }
+.git-group-action { flex: none; }
 .commit { display: flex; align-items: baseline; gap: 8px; padding: 3px 8px; font-size: 12px; min-width: 0; }
 .hash { flex: none; color: var(--accent); font-size: 11px; }
 .subj { color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { SYSTEM } from '../../server/src/lib/plugins-registry.js';
 import { webFile } from './helpers/compile-vue.js';
 import { compileSettingsView } from './helpers/settings-view.js';
 
@@ -101,18 +102,24 @@ const TRIAGE_SETTING = {
   default: null,
 };
 
-function makePluginsStore(values) {
+const INBOX_PLUGIN = {
+  id: 'inbox',
+  system: true,
+  name: 'Входящие',
+  version: '1.0.0',
+  description: 'Единая очередь обращений из подключённых каналов.',
+  nav: { path: '/inbox', label: 'Входящие', icon: 'inbox' },
+  settings: [TRIAGE_SETTING],
+};
+const CODE_PLUGIN = SYSTEM.find((plugin) => plugin.id === 'code');
+
+function makePluginsStore(values, manifest = INBOX_PLUGIN) {
   const saved = [];
+  const setting = manifest.settings[0];
   const plugin = {
-    id: 'inbox',
-    system: true,
-    name: 'Входящие',
-    version: '1.0.0',
-    description: 'Единая очередь обращений из подключённых каналов.',
+    ...manifest,
     enabled: true,
-    nav: { path: '/inbox', label: 'Входящие', icon: 'inbox' },
-    settings: [TRIAGE_SETTING],
-    values: { triageModel: values },
+    values: { [setting.key]: values },
   };
   return {
     saved,
@@ -121,7 +128,7 @@ function makePluginsStore(values) {
       list: [plugin],
       plugin,
       enabled: () => true,
-      byId: (id) => (id === 'inbox' ? plugin : null),
+      byId: (id) => (id === plugin.id ? plugin : null),
       async load() {},
       async toggle() {},
       async saveSettings(id, next) { saved.push({ id, values: JSON.parse(JSON.stringify(next)) }); },
@@ -129,10 +136,10 @@ function makePluginsStore(values) {
   };
 }
 
-async function mountSettings(t, { value = null } = {}) {
+async function mountSettings(t, { value = null, plugin = INBOX_PLUGIN } = {}) {
   const browser = await installBrowser(t, { 'cockpit-settings-tab': 'plugins' });
   const prov = makeProvidersStore();
-  const { store: plugins, saved } = makePluginsStore(value);
+  const { store: plugins, saved } = makePluginsStore(value, plugin);
   globalThis.__settingsApi = {
     async get() { return {}; },
     async post() { return {}; },
@@ -241,6 +248,18 @@ function effortSelect(wrapper) {
   const all = wrapper.findAll('.plugrow select.inp');
   return all.length > 1 ? all[1] : null;
 }
+
+test('карточка «Код» показывает модель сообщения и effort из серверного манифеста', async (t) => {
+  const value = { provider: 'claude', model: 'claude-opus-5', effort: 'high' };
+  const { wrapper, select } = await mountSettings(t, { value, plugin: CODE_PLUGIN });
+
+  assert.equal(select.element.value, 'claude:claude-opus-5');
+  assert.deepEqual(
+    wrapper.findAll('.plugset label').map((label) => label.text()),
+    ['Модель для сообщения коммита', 'Усилие'],
+  );
+  assert.equal(effortSelect(wrapper).element.value, 'high');
+});
 
 test('усилия нет, пока не выбрана модель: выбирать уровень не у чего', async (t) => {
   const { wrapper } = await mountSettings(t);

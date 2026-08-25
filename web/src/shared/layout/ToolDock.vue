@@ -165,12 +165,6 @@ defineExpose({ focusHeader: () => expandButton.value?.focus?.() });
 }
 :deep(.code-loading-rail span) { width: 34px; height: 34px; border-radius: 8px; background: var(--surface-2); }
 :deep(.code-loading-panel) { min-width: 0; min-height: 0; background: var(--sidebar); border-right: 1px solid var(--line); }
-:deep(.code-loading-selects) { display: grid; gap: 5px; padding: 11px 10px 10px; border-bottom: 1px solid var(--line); }
-:deep(.code-loading-selects .caption) { width: 38%; height: 7px; border-radius: 999px; background: var(--line); }
-:deep(.code-loading-selects .caption.short) { width: 30%; margin-top: 3px; }
-:deep(.code-loading-selects .field) {
-  width: 100%; height: 29px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2);
-}
 :deep(.code-loading-tree) { display: flex; flex-direction: column; gap: 11px; padding: 15px 17px; }
 :deep(.code-loading-tree span) { height: 8px; border-radius: 999px; background: var(--line); opacity: .78; }
 :deep(.code-loading-split) {

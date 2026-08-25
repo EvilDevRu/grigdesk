@@ -456,6 +456,92 @@ export async function extractFramesAt({ filePath, seconds, destDir, prefix = 'fr
     return out;
 }
 
+// Ниже этого фрагмент считается несостоявшимся: у mp4 один только заголовок весит
+// сотни байт, поэтому меньше килобайта означает пустой вывод, а не короткий кусок.
+const MIN_CLIP_BYTES = 1024;
+
+/**
+ * Вырезает фрагмент записи вокруг места задачи (превью в разделе и вложение к задаче).
+ *
+ * Перекодирование, а не `-c copy`: копия режется только по ключевым кадрам, то есть
+ * начало уезжает на секунды от нужного места, а вес остаётся исходным. Замер на записи
+ * созвона 1080p: 30 секунд в 1280p дают около 400 КБ за полторы секунды работы — это и
+ * смотреть быстро, и грузить на портал не жалко.
+ *
+ * Отсутствие видеодорожки — не поломка, а обычная аудиозапись, поэтому проверяется
+ * ДО ffmpeg и называется отдельной ошибкой: иначе человек читал бы про неизвестный
+ * отказ кодека там, где резать просто нечего.
+ *
+ * @param {{filePath:string, from:number, seconds:number, destDir:string,
+ *          prefix?:string}} opts
+ * @returns {Promise<{from:number, seconds:number, path:string, bytes:number}>}
+ */
+export async function cutClipAt({ filePath, from, seconds, destDir, prefix = 'clip-' }, deps = {}) {
+    if (!existsSync(filePath)) {
+        throw new Error(`Файл не найден: ${filePath}`);
+    }
+
+    const runner = deps.runProcess || runProcess;
+    const { hasVideo } = await probeStreams(filePath, runner);
+
+    if (!hasVideo) {
+        const error = new Error('В записи нет видеодорожки — резать нечего.');
+        error.code = 'no_video';
+        throw error;
+    }
+
+    mkdirSync(destDir, { recursive: true });
+
+    const start = Math.max(0, Math.round(from));
+    const length = Math.max(1, Math.round(seconds));
+    const tag = `${String(start).padStart(5, '0')}-${String(Math.min(999, length)).padStart(3, '0')}s`;
+    const dst = join(destDir, `${prefix}${tag}.mp4`);
+
+    // -ss до -i = быстрый input-seek; с перекодированием он же остаётся точным.
+    // faststart двигает moov в начало файла: без него браузер тянет весь файл прежде,
+    // чем показать первый кадр, а портал не отдаёт превью.
+    await runner('ffmpeg', [
+        '-y', '-ss', String(start), '-i', filePath, '-t', String(length),
+        '-vf', "scale='min(1280,iw)':-2",
+        '-c:v', 'libx264', '-crf', '30', '-preset', 'veryfast',
+        '-c:a', 'aac', '-b:a', '64k', '-ac', '1',
+        '-movflags', '+faststart',
+        dst,
+    ]);
+
+    // Пустой файл при НУЛЕВОМ коде — обычный исход `-ss` за концом записи: длительность
+    // части могла не прочитаться, и кламп по ней не сработал. Проверяется именно
+    // размер, потому что иначе к задаче уехало бы вложение, которое не открывается.
+    const bytes = statSync(dst).size;
+    if (bytes < MIN_CLIP_BYTES) {
+        rmSync(dst, { force: true });
+        const error = new Error(`Фрагмент пуст: ${start} с за пределами записи.`);
+        error.code = 'empty_clip';
+        throw error;
+    }
+
+    return { from: start, seconds: length, path: dst, bytes };
+}
+
+/**
+ * Какие дорожки есть у файла. Отдельно от `probe`: тому нужна длительность вместе с
+ * аудио, а здесь важен ровно вопрос «есть ли картинка», и лишний разбор длительности
+ * на каждый фрагмент не нужен.
+ */
+async function probeStreams(file, runner, signal = undefined) {
+    const { out } = await runner('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'stream=codec_type',
+        '-of', 'json',
+        file,
+    ], { signal });
+    const streams = JSON.parse(out || '{}').streams || [];
+    return {
+        hasVideo: streams.some((s) => s.codec_type === 'video'),
+        hasAudio: streams.some((s) => s.codec_type === 'audio'),
+    };
+}
+
 /**
  * Читает состояние задачи распознавания. null — если задачи нет.
  */

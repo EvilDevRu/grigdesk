@@ -40,6 +40,7 @@ import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
 import { useTaskFavoritesStore } from './stores/task-favorites.js';
 import { useTaskSeenStore } from './stores/task-seen.js';
+import { useVideoSessionStore } from './stores/video-session.js';
 
 const auth = useAuthStore();
 
@@ -71,6 +72,9 @@ watch(() => auth.authenticated, (on, was) => {
     useSystemStore().stopPolling();
     useTaskFavoritesStore().clear();
     useTaskSeenStore().clear();
+    // Разбор встречи набран человеком и потому переживает выход, а вот его поллинг —
+    // нет: без сессии он молотил бы в закрытый API теми же 401 каждые две секунды.
+    useVideoSessionStore().stopPoll();
   }
 });
 </script>

@@ -131,7 +131,16 @@ export async function buildMeetingFrames({
  * Убирает кадры прошлых разборов. Вызывается перед новым: держать их вечно незачем,
  * а собственного момента «встреча разобрана» у раздела нет — черновик живёт в браузере.
  */
-export function sweepMeetingFrames(root, { ttlMs = MEETING_FRAME_LIMITS.ttlMs, now = Date.now } = {}) {
+export function sweepMeetingFrames(root, options = {}) {
+  return sweepRunDirs(root, { ttlMs: MEETING_FRAME_LIMITS.ttlMs, ...options });
+}
+
+/**
+ * Уборка каталогов разборов по возрасту. Общая и для кадров, и для фрагментов записи:
+ * устроены они одинаково (каталог на разбор, файлы внутри), а вторая копия обхода
+ * разошлась бы с первой на первой же правке.
+ */
+export function sweepRunDirs(root, { ttlMs = MEETING_FRAME_LIMITS.ttlMs, now = Date.now } = {}) {
   if (!root || !existsSync(root)) return 0;
   const edge = now() - ttlMs;
   let removed = 0;

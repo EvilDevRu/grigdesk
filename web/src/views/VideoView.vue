@@ -50,12 +50,26 @@
         </div>
       </div>
 
-      <section class="upload-card" :class="{ busy: uploading || job?.status === 'running', compact: job?.status === 'done' }">
+      <!-- Перетаскивание ведёт в тот же обработчик, что и диалог. Это не украшение:
+           нативный диалог прячет запись, чьё расширение записано не тем регистром,
+           и брошенный на карточку файл остаётся единственным способом её отдать. -->
+      <section
+        class="upload-card"
+        :class="{
+          busy: uploading || job?.status === 'running',
+          compact: job?.status === 'done',
+          over: dragOver,
+        }"
+        @dragenter.prevent="onDragEnter"
+        @dragover.prevent
+        @dragleave="onDragLeave"
+        @drop.prevent="onDrop"
+      >
         <!-- multiple: инструменты записи режут длинный созвон на файлы, и встреча
              законно лежит в нескольких частях. Выбранные склеиваются в одну встречу
              по времени файла — порядок каталога у браузера произвольный. -->
         <UiFilePicker
-          accept="video/*,audio/*"
+          :accept="MEDIA_ACCEPT"
           multiple
           presentation="dropzone"
           :density="job?.status === 'done' ? 'compact' : 'default'"
@@ -98,22 +112,27 @@
         </UiFilePicker>
       </section>
 
+      <p v-if="storageNote" class="muted storage-note">{{ storageNote }}</p>
+
       <div v-if="error" class="notice danger err">
         <span class="notice-icon" aria-hidden="true">!</span>
         <p>{{ error }}</p>
       </div>
 
-      <!-- Прогресс распознавания -->
-      <section v-if="job && job.status === 'running'" class="progress">
+      <!-- Прогресс распознавания. Показывается и до первого ответа сервера: разбор
+           живёт на сервере, и после возврата на страницу его состояние сначала надо
+           дочитать — молчащий экран в это время читается как «ничего не идёт». -->
+      <section v-if="restoring || (job && job.status === 'running')" class="progress">
         <div class="progress-head">
           <span class="progress-mark"><UiSpinner decorative /></span>
           <div>
             <b>Распознаю речь</b>
-            <p>Разбиваю запись на реплики и восстанавливаю таймкоды.</p>
+            <p v-if="restoring">Возвращаюсь к разбору: спрашиваю сервер, сколько уже готово.</p>
+            <p v-else>Разбиваю запись на реплики и восстанавливаю таймкоды.</p>
           </div>
-          <span v-if="job.progress" class="mono progress-count">{{ job.progress.done }}/{{ job.progress.total }}</span>
+          <span v-if="job?.progress" class="mono progress-count">{{ job.progress.done }}/{{ job.progress.total }}</span>
         </div>
-        <div class="pbar"><span :style="{ width: job.progress ? (job.progress.done / job.progress.total * 100) + '%' : '10%' }"></span></div>
+        <div class="pbar"><span :style="{ width: job?.progress ? (job.progress.done / job.progress.total * 100) + '%' : '10%' }"></span></div>
       </section>
 
       <div v-if="job && job.status === 'done'" class="result">
@@ -152,6 +171,12 @@
             <span><b>{{ segments.length }}</b><small>реплик</small></span>
             <span><b>{{ drafts.length }}</b><small>черновиков</small></span>
           </div>
+          <!-- Разбор переживает и переход в другой раздел, и перезагрузку страницы,
+               поэтому убрать его с экрана должно быть чем: иначе вчерашняя встреча
+               висит до тех пор, пока не выберешь новый файл. -->
+          <UiButton class="btn clear-session" @click="clearSession">
+            Убрать разбор
+          </UiButton>
         </section>
 
       <!-- Черновики задач -->
@@ -319,15 +344,23 @@
           </template>
           <!-- Кадр записи на том же таймкоде, что и ссылка в описании. Он и есть
                ответ на «о чём вообще шла речь»: формулировку собрала модель по чужой
-               речи, а кадр показывает место, откуда она её взяла. Клик открывает
-               полный размер — на превью в 420 px текст на экране не прочитать. -->
+               речи, а кадр показывает место, откуда она её взяла. Клик открывает его
+               крупно в общем просмотрщике: на превью в 420 px текст экрана не прочитать,
+               а уводить человека в соседнюю вкладку значит терять из виду черновики. -->
           <figure v-if="d.frame" class="shot" :class="{ off: d.frameOff }">
-            <a :href="frameUrl(d.frame.name)" target="_blank" rel="noopener">
+            <UiPressable
+              class="shot-open"
+              data-context="meeting-frame-preview"
+              :data-muted="d.frameOff ? 'true' : undefined"
+              :aria-label="`Открыть кадр записи на ${mmss(d.frame.at)} крупно`"
+              title="Открыть крупно"
+              @click="showFrame(d)"
+            >
               <!-- Пропавший кадр (истёк TTL, начат новый разбор) убираем молча:
                    показывать нечего, а задача от этого не портится. -->
               <img :src="frameUrl(d.frame.name)" :alt="`Кадр записи на ${mmss(d.frame.at)}`"
                    loading="lazy" @error="d.frame = null" />
-            </a>
+            </UiPressable>
             <figcaption>
               <span class="tc mono">{{ mmss(d.frame.at) }}</span>
               <span class="shot-note">{{ d.frameOff ? 'к задаче не приложится' : 'приложится к задаче' }}</span>
@@ -338,6 +371,65 @@
               >
                 {{ d.frameOff ? 'Приложить' : 'Не прикладывать' }}
               </UiToggleButton>
+            </figcaption>
+          </figure>
+          <!-- Фрагмент записи вокруг того же места. Кадр отвечает на «о чём шла речь»,
+               фрагмент — на «что именно и как человек сказал»: формулировку модели
+               сверяют по звуку, и он же уезжает к исполнителю задачи вложением. -->
+          <figure
+            v-if="d.clip || d.clipBusy || d.clipError"
+            class="clip"
+            :class="{ off: d.clipOff }"
+          >
+            <!-- preload=metadata: кусков на экране столько же, сколько задач, и тянуть
+                 их байты до нажатия «play» незачем. Пропавший файл (истёк TTL, начат
+                 новый разбор) убираем молча, как и кадр. -->
+            <video
+              v-if="d.clip"
+              class="clip-player"
+              :src="clipUrl(d.clip.name)"
+              controls
+              playsinline
+              preload="metadata"
+              @error="d.clip = null"
+            ></video>
+            <figcaption>
+              <template v-if="d.clip">
+                <span class="tc mono">{{ mmss(d.clip.from) }} – {{ mmss(d.clip.to) }}</span>
+                <span class="shot-note">
+                  {{ d.clipOff ? 'к задаче не приложится' : 'приложится к задаче' }}
+                  <template v-if="d.clip.bytes"> · {{ mb(d.clip.bytes) }}</template>
+                </span>
+                <UiButton
+                  class="btn compact-action"
+                  title="Открыть фрагмент крупно"
+                  @click="showClip(d)"
+                >
+                  Крупнее
+                </UiButton>
+                <UiToggleButton
+                  v-if="!d.createdId"
+                  v-model="d.clipOff"
+                  class="btn compact-action"
+                >
+                  {{ d.clipOff ? 'Приложить' : 'Не прикладывать' }}
+                </UiToggleButton>
+                <UiButton
+                  v-if="!d.createdId && canWidenClip(d)"
+                  class="btn compact-action"
+                  :loading="d.clipBusy"
+                  loading-label="Режу фрагмент"
+                  title="Взять на 15 секунд больше с каждой стороны"
+                  @click="widenClip(d)"
+                >
+                  Шире
+                </UiButton>
+              </template>
+              <template v-else-if="d.clipBusy">
+                <UiSpinner decorative />
+                <span class="shot-note">режу фрагмент записи…</span>
+              </template>
+              <span v-else class="shot-note warn-note">{{ d.clipError }}</span>
             </figcaption>
           </figure>
           <div class="drow">
@@ -515,7 +607,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { storeToRefs } from 'pinia';
 import {
   UiButton,
   UiDisclosureButton,
@@ -529,102 +622,142 @@ import {
   UiTextarea,
   UiTooltip,
   UiToggleButton,
+  confirmDialog,
 } from '../ui';
 import { api } from '../shared/api-client.js';
 import { writeClipboardText } from '../shared/clipboard.js';
+import { mmss } from '../shared/format.js';
 import { usePluginsStore } from '../stores/plugins.js';
+import { useDocumentPreviewStore } from '../stores/document-preview.js';
+import { canWidenClip, useVideoSessionStore } from '../stores/video-session.js';
 
 // Раздел — плагин «Видео → задачи»: выключенный показывает заглушку вместо формы.
 const plugins = usePluginsStore();
+const preview = useDocumentPreviewStore();
 if (!plugins.loaded) plugins.load();
 const pluginOff = computed(() => plugins.loaded && !plugins.enabled('video'));
 // Модель разбора — своя настройка этого плагина. Нет её — раздел работает как раньше,
 // вручную: кнопка авторазбора просто не предлагается.
 const planModel = computed(() => plugins.byId('video')?.values?.triageModel || null);
 
+// Сам разбор встречи живёт в сторе, а не здесь: страница — обычный route-компонент,
+// и переход в соседний раздел уносил бы вместе с ней id уже идущего распознавания.
+// Компонент остаётся отображением: расшифровка на экране, кнопки и превью.
+const session = useVideoSessionStore();
+session.hydrate();
+
+const {
+  parts,
+  uploaded,
+  uploading,
+  error,
+  drafts,
+  creating,
+  planning,
+  planHint,
+  planError,
+  planInfo,
+  defCreator,
+  defResponsible,
+  defGroup,
+  defPriority,
+  job,
+  restoring,
+  segments,
+  mediaDuration,
+  ready,
+} = storeToRefs(session);
+
+const {
+  addDraft,
+  appendSegment,
+  createAll,
+  createOne,
+  onFiles,
+  planTasks,
+  removeDraft,
+  widenClip,
+} = session;
+
 const BASE = (import.meta.env?.VITE_BRAIN_URL || '').replace(/\/$/, '');
 
+// Список расширений, а не одни MIME-маски: нативный диалог разворачивает `video/*`
+// в расширения и сравнивает их ПОБУКВЕННО, поэтому запись с айфона (`IMG_4793.MOV`)
+// в диалоге серая — выбрать её нечем, хотя конвейер разбирает такой файл как любой
+// другой. Маски оставлены для браузеров, которые фильтруют по типу, а не по имени.
+const MEDIA_EXTENSIONS = [
+  'mov', 'mp4', 'm4v', 'mkv', 'webm', 'avi', 'mpg', 'mpeg', 'ts', 'm2ts', '3gp', 'wmv', 'flv', 'ogv',
+  'mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'wma', 'amr', 'aiff', 'aif', 'caf',
+];
+const MEDIA_ACCEPT = [
+  'video/*',
+  'audio/*',
+  ...MEDIA_EXTENSIONS.flatMap((ext) => [`.${ext}`, `.${ext.toUpperCase()}`]),
+].join(',');
+
 const doctorOk = ref(null);
-const uploading = ref(false);
-const jobId = ref(null);
-const job = ref(null);       // { status, progress, result }
-const error = ref(null);
-const drafts = ref([]);      // черновики задач
-const creating = ref(false);
-const created = ref([]);
-const uploaded = ref(null);  // { name, size } выбранного файла — до отправки
+// Сколько записей лежит на диске мозга и как долго они там живут. Раздел хранит
+// исходники ради кадров и фрагментов, и без этой строки рост виден только по
+// свободному месту на диске — то есть слишком поздно.
+const storage = ref(null);
 // Расшифровка свёрнута по умолчанию: раздел отвечает на «какие задачи», а реплики
 // нужны, когда формулировку хочется сверить с записью.
 const showTranscript = ref(false);
-let poll = null;
 
 /** Байты в человеческом виде — для строки о разобранном файле. */
 function mb(bytes) {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value <= 0) return '';
+  // Гигабайты нужны не файлу, а хранилищу: записи копятся, и «1434.6 МБ» читается
+  // хуже, чем «1.4 ГБ», — а понять счёт идёт уже на гигабайты как раз и надо.
+  if (value >= 1073741824) return `${(value / 1073741824).toFixed(1)} ГБ`;
   return value >= 1048576 ? `${(value / 1048576).toFixed(1)} МБ` : `${Math.round(value / 1024)} КБ`;
 }
 
-api.get('/api/media/doctor').then((d) => { doctorOk.value = d.ok; }).catch(() => { doctorOk.value = false; });
+api.get('/api/media/doctor')
+  .then((d) => {
+    doctorOk.value = d.ok;
+    storage.value = d.storage || null;
+  })
+  .catch(() => { doctorOk.value = false; });
 
-function mmss(sec) {
-  const s = Math.max(0, Math.floor(sec || 0));
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-}
+/** Срок хранения записей словами: сервер отдаёт его миллисекундами вместе с размером. */
+const storageNote = computed(() => {
+  const value = storage.value;
+
+  if (!value?.files) return '';
+
+  const days = Math.round((Number(value.ttlMs) || 0) / 86400000);
+  const kept = days ? ` и удаляются через ${days} дн.` : '';
+
+  return `Записи остаются в Cockpit${kept} — сейчас ${value.files} на диске, ${mb(value.bytes)}`;
+});
+
 /** Байты кадра. Имя собрал сервер, путь на диске наружу не выходит вовсе. */
 function frameUrl(name) { return `${BASE}/api/media/frame/${name}`; }
-/**
- * Части одной встречи. Инструменты записи режут длинный созвон на файлы, и разбирать
- * их по отдельности значит терять поводы, начатые в одной части и договорённые в
- * другой. Пока файл один, `parts` — список из одного элемента и ничего не меняет.
- */
-const parts = ref([]);         // [{ name, size, jobId, job }]
-const partsDone = computed(() => parts.value.filter((p) => p.job?.status === 'done'));
+function clipUrl(name) { return `${BASE}/api/media/clip/${name}`; }
 
-/**
- * Реплики всех частей со СКВОЗНЫМИ таймкодами. Сдвиг берём по длительности записи,
- * а не по концу последней реплики: молчание в хвосте части — обычное дело, и по речи
- * следующая часть наехала бы на предыдущую. Ровно так же склеивает сервер перед
- * обращением к модели — иначе «04:31» в задаче и в ленте указывали бы на разные места.
- */
-const segments = computed(() => {
-  const out = [];
-  let offset = 0;
-  for (const part of parts.value) {
-    if (part.job?.status !== 'done') break;
-    const result = part.job.result || {};
-    for (const segment of result.transcript?.segments || []) {
-      out.push({
-        ...segment,
-        start: Number(segment.start || 0) + offset,
-        end: Number(segment.end ?? segment.start ?? 0) + offset,
-      });
-    }
-    const duration = Number(result.duration);
-    offset += Number.isFinite(duration) && duration > 0
-      ? duration
-      : Number(result.transcript?.segments?.at(-1)?.end || 0);
-  }
-  return out;
-});
-const fullText = computed(() => segments.value.map((s) => s.text).join(' ').trim());
+// Кадр и фрагмент открываются ОБЩИМ просмотрщиком кокпита (тем же, что показывает
+// картинки чата), а не новой вкладкой. Разбор встречи — работа в одном экране: уход
+// на соседнюю вкладку ради картинки уносит из виду набранные черновики, а возвращаться
+// приходится руками. Escape, возврат фокуса и слой поверх страницы там уже свои.
+function showFrame(d) {
+  if (!d.frame) return;
+  preview.showImage({
+    src: frameUrl(d.frame.name),
+    name: `Кадр записи на ${mmss(d.frame.at)}`,
+    mime: 'image/jpeg',
+  });
+}
 
-/**
- * Длительность ЗАПИСИ, а не расшифровки. Показывать обязательно: без неё короткий
- * разбор читается как «кокпит обрезал», хотя на самом деле загружен другой файл.
- * Живой случай: вместо 17-минутной встречи уехал соседний ролик на 1:19 — двадцать
- * минут ушло на выяснение, что резать было нечего.
- */
-const mediaDuration = computed(() => {
-  // Сумма по частям: встреча из двух файлов длится столько же, сколько сам созвон,
-  // и показывать длительность только первой части значило бы снова обещать не то.
-  let total = 0;
-  for (const part of partsDone.value) {
-    const value = Number(part.job?.result?.duration);
-    if (Number.isFinite(value) && value > 0) total += value;
-  }
-  return total > 0 ? total : null;
-});
+function showClip(d) {
+  if (!d.clip) return;
+  preview.showVideo({
+    src: clipUrl(d.clip.name),
+    name: `Фрагмент ${mmss(d.clip.from)} – ${mmss(d.clip.to)}`,
+    mime: 'video/mp4',
+  });
+}
 
 /**
  * Речь кончилась заметно раньше конца записи. Само по себе это законно (в конце
@@ -705,51 +838,40 @@ function downloadText() {
   URL.revokeObjectURL(url);
 }
 
+/** Вся расшифровка одним черновиком — запасной путь, когда разбирать модели нечем. */
+function useFullText() {
+  session.useFullText(plainText.value);
+}
+
+/**
+ * Убрать разбор с экрана. Сеанс теперь липкий: он переживает и переход в другой
+ * раздел, и перезагрузку страницы, поэтому у него обязана быть своя кнопка выхода —
+ * иначе вчерашняя встреча висит на экране, и убрать её нечем, кроме выбора нового
+ * файла. Спрашиваем только когда есть что терять: непоставленные черновики.
+ */
+async function clearSession() {
+  if (session.ready.length) {
+    const ok = await confirmDialog(
+      'Убрать разбор? Черновики, которые ещё не уехали в задачи, пропадут.',
+      { danger: true, okText: 'Убрать' },
+    );
+
+    if (!ok) return;
+  }
+
+  session.reset();
+}
+
 // --- Ростер портала: от кого, кому и в какой проект ---
 //
 // Постановщик по умолчанию — владелец портальной сессии: пустой выбор уезжает как
 // `null`, и `CREATED_BY` порталу не передаётся вовсе (docs/cockpit/b24.md). Но на
 // встрече поводы приносят разные люди, и задача «от того, кто просил» читается иначе,
 // чем «от меня»; портал такое поле принимает, поэтому выбор отдан человеку.
-
 const b24users = ref([]);
 const b24groups = ref([]);
 api.get('/api/b24/users').then((d) => { b24users.value = d.users || []; }).catch(() => {});
 api.get('/api/b24/groups').then((d) => { b24groups.value = d.groups || []; }).catch(() => {});
-
-// От кого, кому и куда ставим по умолчанию — выбирается один раз на всю встречу:
-// у задач одного созвона они обычно общие, и повторять выбор в каждом черновике
-// значит делать руками то же самое N раз.
-const defCreator = ref('');
-const defResponsible = ref('');
-const defGroup = ref('');
-const defPriority = ref(1);
-
-function emptyDraft() {
-  return {
-    title: '',
-    description: '',
-    createdById: defCreator.value,
-    responsibleId: defResponsible.value,
-    groupId: defGroup.value,
-    priority: defPriority.value,
-    confidence: null,
-    reason: '',
-    // Кадр записи на том же таймкоде, что стоит в описании: показывается до постановки
-    // и уезжает на портал вложением. `frameOff` — отказ человека от конкретного кадра;
-    // сам кадр при этом остаётся на экране, потому что решение обратимо.
-    frame: null,
-    frameOff: false,
-    // Состояние постановки живёт В САМОМ черновике: задачи ставятся по одной, и общий
-    // флаг на секцию не сказал бы, какая именно уехала, а какая ждёт.
-    creating: false,
-    createdId: null,
-    error: null,
-    // Предложенная моделью задача открывается ПРЕВЬЮ: её пришли прочитать, а не
-    // заполнить. Пустой черновик, наоборот, сразу в правке — читать в нём нечего.
-    editing: true,
-  };
-}
 
 // Смена общего выбора догоняет только те черновики, которые человек не трогал сам.
 watch(defCreator, (value, prev) => {
@@ -765,190 +887,55 @@ watch(defPriority, (value, prev) => {
   for (const d of drafts.value) if (d.priority === prev) d.priority = value;
 });
 
-async function onFiles(files) {
-  const picked = [...files];
-  if (!picked.length) return;
-  uploading.value = true; error.value = null; job.value = null; drafts.value = []; created.value = [];
-  planError.value = null; planInfo.value = null;
-  // Инструменты записи режут длинный созвон на части, и встреча законно лежит в
-  // нескольких файлах (живой случай: 17:04 и 1:18 подряд). Части сортируем по времени
-  // файла: записаны они последовательно, а браузер отдаёт выбор в порядке каталога.
-  // Имя — только тай-брейк: оно не контракт, у другого инструмента формат свой.
-  picked.sort((a, b) => (a.lastModified || 0) - (b.lastModified || 0)
-    || String(a.name).localeCompare(String(b.name), 'ru'));
-  parts.value = picked.map((file) => ({
-    name: file.name, size: file.size, jobId: null, job: null,
-  }));
-  // Что именно выбрано — запоминаем ДО отправки и показываем рядом с разбором.
-  // Файлы записи называются почти одинаково и лежат рядом; без имени и размера на
-  // экране «я выбирал другой» и «раздел обрезал» неотличимы друг от друга.
-  uploaded.value = { name: picked[0].name, size: picked[0].size };
-  try {
-    // Последовательно: распознавание всё равно идёт по одному, а параллельная
-    // отправка сотен мегабайт только отбирает канал у самой первой части.
-    for (const [i, file] of picked.entries()) {
-      const fd = new FormData();
-      fd.append('file', file);
-      // Авторизация — сессионной cookie (у fetch она уходит по умолчанию на своём origin).
-      // Заголовка `X-Cockpit-Token` здесь быть не должно: он теперь принадлежит локальным CLI,
-      // а из клиентского кода его значение пришлось бы класть в публичный бандл.
-      const res = await fetch(`${BASE}/api/media/upload`, {
-        method: 'POST', body: fd, credentials: 'include',
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
-      parts.value[i].jobId = data.jobId;
-    }
-    jobId.value = parts.value[0].jobId;
-    startPoll();
-  } catch (err) { error.value = err.message; } finally { uploading.value = false; }
+// Перетаскивание файла на карточку. Счётчик enter/leave нужен потому, что `dragleave`
+// стреляет на каждом дочернем элементе, и одиночный флаг гас бы на первой же вложенной
+// разметке (тот же приём, что у drag&drop чата).
+const dragDepth = ref(0);
+const dragOver = computed(() => dragDepth.value > 0);
+
+function onDragEnter(event) {
+  if (event.dataTransfer?.types?.includes('Files')) {
+    dragDepth.value++;
+  }
 }
 
-function startPoll() {
-  clearInterval(poll);
-  poll = setInterval(async () => {
-    try {
-      // Опрашиваем ВСЕ части: разбор запускается, только когда готова каждая, иначе
-      // модель прочитала бы половину встречи и выдала бы это за целую.
-      for (const part of parts.value) {
-        if (!part.jobId || part.job?.status === 'done' || part.job?.status === 'failed') continue;
-        part.job = await api.get(`/api/media/ingest/${part.jobId}`);
-      }
-      job.value = parts.value[0]?.job || null;
-      const failed = parts.value.find((p) => p.job?.status === 'failed');
-      if (failed) {
-        clearInterval(poll);
-        error.value = failed.job.error || 'распознавание не удалось';
-        return;
-      }
-      if (parts.value.length && parts.value.every((p) => p.job?.status === 'done')) {
-        clearInterval(poll);
-        // Разбор запускается САМ: человек пришёл за задачами, а не за расшифровкой,
-        // и лишний клик между «готово» и единственным осмысленным следующим шагом
-        // ничего не решает. Ручная кнопка остаётся — для повтора с уточнением.
-        if (planModel.value && !drafts.value.length) planTasks();
-      }
-    } catch { /* продолжаем поллинг */ }
-  }, 2000);
+function onDragLeave() {
+  if (dragDepth.value > 0) {
+    dragDepth.value--;
+  }
 }
-
-// --- Разбор расшифровки моделью ---
-
-const planning = ref(false);
-const planHint = ref('');
-const planError = ref(null);
-const planInfo = ref(null);
-
-const PLAN_ERRORS = {
-  no_model: 'Модель для разбора не выбрана — «Настройки → Плагины → Видео → задачи».',
-  unknown_model: 'Выбранной модели нет в реестре исполнителей: проверь настройку плагина.',
-  unsafe_model_provider: 'У выбранного исполнителя нет безопасного режима для чужого текста. Подходят Claude и модели Ollama.',
-  registry_failed: 'Не удалось прочитать реестр моделей.',
-  executor_unavailable: 'Исполнитель выбранной модели недоступен.',
-  run_failed: 'Модель не ответила. Можно повторить или собрать задачи вручную.',
-  bad_plan: 'Модель ответила не по формату — задачи не разобраны. Можно повторить.',
-  empty_transcript: 'В расшифровке нет ни одной реплики.',
-  not_ready: 'Расшифровка ещё не готова.',
-};
-
-async function planTasks() {
-  planning.value = true; planError.value = null; planInfo.value = null;
-  try {
-    // Все части одной посылкой: сервер склеит их со сквозными таймкодами до модели.
-    // Разбор по частям порознь терял бы поводы, начатые в одной и договорённые в другой.
-    const r = await api.post('/api/media/plan-tasks', {
-      jobIds: partsDone.value.map((p) => p.jobId),
-      hint: planHint.value,
-    });
-    // Черновики модели ДОПОЛНЯЮТ уже набранные руками, а не заменяют их: человек мог
-    // начать разбирать сам, и стереть его работу кнопкой «разобрать» — потеря данных.
-    for (const task of r.tasks || []) {
-      drafts.value.push({
-        ...emptyDraft(),
-        title: task.title,
-        description: task.description,
-        confidence: task.confidence,
-        reason: task.reason,
-        // Кадра может не быть вовсе (аудиозапись, отказ ffmpeg) — это не ошибка разбора.
-        frame: task.frame || null,
-        editing: false,
-      });
-    }
-    planInfo.value = {
-      count: (r.tasks || []).length,
-      model: r.model,
-      truncated: r.truncated,
-      shown: r.count,
-    };
-  } catch (err) {
-    // Машинный код лежит в `data.error`; фразу для человека собираем здесь, потому что
-    // сервер отдаёт только код — у «модель не выбрана» и «модель не ответила» разные выходы.
-    planError.value = PLAN_ERRORS[err?.data?.error] || err.message || 'Разбор не удался.';
-  } finally { planning.value = false; }
-}
-
-function addDraft() { drafts.value.push(emptyDraft()); }
-function removeDraft(i) { drafts.value.splice(i, 1); }
-// Перенести реплику в описание последнего черновика (ручной разбор).
-function appendSegment(seg) {
-  if (!drafts.value.length) drafts.value.push(emptyDraft());
-  const d = drafts.value[drafts.value.length - 1];
-  const line = `[${mmss(seg.start)}] ${seg.text.trim()}`;
-  d.description = (d.description ? `${d.description}\n` : '') + line;
-}
-function useFullText() {
-  drafts.value.push({ ...emptyDraft(), description: plainText.value });
-}
-
-/** Черновик, который ещё можно поставить: есть заголовок и он не уехал раньше. */
-const ready = computed(() => drafts.value.filter((d) => d.title.trim() && !d.createdId));
 
 /**
- * Ставит ОДИН черновик. Отдельная кнопка у каждого — не удобство: формулировку собрала
- * модель по чужой речи, и человек принимает решение по каждой задаче отдельно. Общая
- * кнопка заставляла бы удалять лишние черновики только затем, чтобы поставить нужный.
+ * Брошенные файлы идут тем же путём, что и выбранные в диалоге. Идущий разбор
+ * перетаскивание не перебивает: у пикера в это время `disabled`, и второй путь
+ * обязан вести себя так же, иначе запись подменялась бы на середине распознавания.
  */
-async function createOne(d) {
-  if (d.creating || d.createdId || !d.title.trim()) return null;
-  d.creating = true; d.error = null;
-  try {
-    // Пустой выбор уезжает как null, а НЕ как 0: нулевой responsibleId портал
-    // понимает буквально и отвечает ошибкой о несуществующем исполнителе
-    // (docs/cockpit/b24.md). Пропуск же означает «поставить на владельца сессии».
-    const r = await api.post('/api/b24/tasks', {
-      title: d.title.trim(),
-      description: d.description,
-      // Постановщик: пусто — значит владелец сессии, и `CREATED_BY` порталу не уезжает
-      // вовсе. Тот же запрет на ноль, что и у исполнителя.
-      createdById: d.createdById ? Number(d.createdById) : null,
-      responsibleId: d.responsibleId ? Number(d.responsibleId) : null,
-      groupId: d.groupId ? Number(d.groupId) : null,
-      priority: Number(d.priority),
-      // Кадр уезжает ИМЕНЕМ: путь на диске подставит сервер. Отказ человека от кадра
-      // и его отсутствие выглядят для портала одинаково — вложений просто нет.
-      frames: d.frame && !d.frameOff ? [d.frame.name] : [],
-    });
-    d.createdId = r.id || '✓';
-    created.value.push(d.createdId);
-    return d.createdId;
-  } catch (err) {
-    // Ошибка остаётся У СВОЕГО черновика: при постановке пачкой общая плашка не
-    // говорила бы, какая именно задача не уехала.
-    d.error = err.message;
-    return null;
-  } finally { d.creating = false; }
+function onDrop(event) {
+  dragDepth.value = 0;
+
+  if (uploading.value || job.value?.status === 'running') {
+    return;
+  }
+
+  const files = [...(event.dataTransfer?.files || [])];
+
+  if (files.length) {
+    onFiles(files);
+  }
 }
 
-async function createAll() {
-  creating.value = true; error.value = null;
-  try {
-    // Последовательно: у B24Client одна портальная сессия, и параллельные вызовы её рвут.
-    // Уже поставленные пропускаются сами — `ready` их не содержит.
-    for (const d of [...ready.value]) await createOne(d);
-  } finally { creating.value = false; }
-}
+// Возврат в раздел дочитывает статусы частей и, если разбор ещё идёт, продолжает
+// поллинг. После перезагрузки страницы у восстановленных частей есть только jobId:
+// расшифровка и прогресс лежат на сервере и приезжают этим же запросом.
+onMounted(() => { void session.resume(); });
 
-onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
+// Уход со страницы дожимает снимок сеанса: отложенная запись пережила бы саму вью и
+// сработала бы неизвестно когда. Поллинг при этом не трогаем — он принадлежит сеансу
+// и обязан продолжаться, пока распознавание идёт.
+onUnmounted(() => {
+  clearTimeout(copiedTimer);
+  session.persistNow();
+});
 </script>
 
 <style scoped>
@@ -1075,6 +1062,11 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 }
 .upload-card.compact .upload-icon { width: 42px; height: 42px; border-radius: 12px; }
 .upload-card.busy { opacity: .7; }
+.upload-card.over {
+  border-style: solid;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
 
 .progress {
   display: grid;
@@ -1118,6 +1110,8 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 .summary-metrics { display: flex; align-items: stretch; flex: none; }
 .summary-metrics > span { min-width: 76px; display: grid; gap: 1px; padding: 2px 15px; border-left: 1px solid var(--line); text-align: center; }
 .summary-metrics b { font-size: 14px; font-weight: 650; }
+.clear-session { flex: none; margin-left: 4px; }
+.storage-note { margin: -4px 0 0; font-size: 11.5px; }
 .summary-metrics small { color: var(--ink-mid); font-size: 10.5px; }
 .h { margin: 0; font-size: 15px; font-weight: 660; letter-spacing: -.01em; }
 /* min-width: 0 — длинная реплика без пробелов не имеет права раздувать колонку. */
@@ -1183,13 +1177,26 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
 /* Кадр — превью, а не иллюстрация во всю карточку: решение принимают по заголовку и
    описанию, кадр только подтверждает место записи. Полный размер — по клику. */
 .shot { margin: 0; display: flex; align-items: center; gap: 12px; }
-.shot a { display: block; flex: none; line-height: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.shot-open { flex: none; }
 .shot img { display: block; width: 100%; max-width: 260px; height: auto; }
 .shot figcaption { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .shot-note { color: var(--ink-mid); font-size: 11.5px; }
 /* Отказ от кадра ОБЕСЦВЕЧИВАЕТ его, а не убирает: решение обратимо, и человек должен
    видеть, от чего именно отказался. */
-.shot.off a { opacity: .45; filter: grayscale(1); }
+.clip { margin: 0; display: flex; align-items: flex-start; gap: 12px; }
+.clip-player {
+  display: block;
+  flex: none;
+  width: 100%;
+  max-width: 320px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #000;
+}
+.clip figcaption { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.clip.off .clip-player { opacity: .45; filter: grayscale(1); }
+.clip.off .shot-note { color: var(--warn); }
+.warn-note { color: var(--warn); }
 .shot.off .shot-note { color: var(--warn); }
 .filenote { overflow: hidden; margin: 0; color: var(--ink-mid); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .filenote b { color: var(--ink); font-weight: 560; }
@@ -1241,7 +1248,9 @@ onUnmounted(() => { clearInterval(poll); clearTimeout(copiedTimer); });
   .dhead { align-items: flex-start; }
   .draft { padding: 13px; }
   .shot { align-items: stretch; flex-direction: column; }
-  .shot a { align-self: flex-start; }
+  .shot-open { align-self: flex-start; }
+  .clip { align-items: stretch; flex-direction: column; }
+  .clip-player { max-width: none; }
   .drow { align-items: stretch; }
   .drow > .ui-select-wrap--compact { flex: 1 1 30%; width: 100%; }
   .dact { width: 100%; margin-left: 0; padding-top: 3px; }
