@@ -461,6 +461,9 @@ export class FactoryStateAdapter {
     const runnerConfig = loadRunnerConfig(this.profilesDir, profile);
     const statuses = computeNodeStatuses({
       pf: registry, pos: def.pos, keys: def.keys, optional: def.optional, mtimeMs: mtime,
+      // Узлы, чей провал ведёт маршрут вперёд, знает только закреплённый бандл;
+      // у legacy-графа их нет, и поведение остаётся прежним.
+      forwardOnFailure: def.forwardOnFailure || [],
       // Чем маршрут занят на самом деле, знает журнал, а не проекция: у прерванного
       // захода `running` в реестре остаётся навсегда и в одиночку читается как «повис».
       cursorNode: trusted?.cursor?.node || null,

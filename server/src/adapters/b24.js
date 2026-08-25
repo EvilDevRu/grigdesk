@@ -123,6 +123,9 @@ export class B24Adapter {
   // --- Действия (мутации). Все — через очередь (общая сессия). ---
 
   async createTask(opts) { return this._run(() => this.client().createTask(opts)); }
+  async updateTask(taskId, fields) {
+    return this._run(() => this.client().updateTask(taskId, fields));
+  }
   async addComment(taskId, text) { return this._run(() => this.client().addComment(taskId, text)); }
   async timer(action, taskId) { return this._run(() => this.client().timer(action, taskId)); }
   async completeTask(taskId) { return this._run(() => this.client().completeTask(taskId)); }

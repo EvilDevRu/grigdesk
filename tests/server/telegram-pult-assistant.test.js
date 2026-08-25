@@ -73,6 +73,8 @@ async function fixture(t, {
   compactWindow = 0,
   compactResponse = null,
   initiallyBusy = false,
+  readPollStatus = () => null,
+  editFailure = null,
 } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'telegram-pult-assistant-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -154,6 +156,7 @@ async function fixture(t, {
       callBotApi: async (_token, method, body) => {
         const result = { message_id: 101 + botCalls.length };
         botCalls.push({ method, body, result });
+        if (method === 'editMessageText' && editFailure) throw editFailure;
         return result;
       },
       sendChatAction: async (_token, chatId, action) => {
@@ -186,6 +189,7 @@ async function fixture(t, {
     speechRuntime,
     readSpeechPrefs: () => ({ quality: 'fast', model: 'small' }),
     readCompactWindow: () => compactWindow,
+    readPollStatus,
     subscribe: (listener) => {
       sseListener = listener;
       return () => { sseListener = null; };
@@ -278,6 +282,55 @@ test('обработчик сообщения возвращается до за
   });
 });
 
+test('прямой ответ обгоняет ожидающие фоновые карточки в общей очереди', async () => {
+  const queue = new PultSendQueue({ pauseMs: 0 });
+  const held = deferred();
+  const order = [];
+  const running = queue.push(async () => {
+    order.push('running-background');
+    await held.promise;
+  }, { priority: 'background' });
+  const background = queue.push(async () => {
+    order.push('waiting-background');
+  }, { priority: 'background' });
+  const interactive = queue.push(async () => {
+    order.push('interactive');
+  }, { priority: 'interactive' });
+
+  held.resolve();
+  await Promise.all([running, background, interactive]);
+  assert.deepEqual(order, ['running-background', 'interactive', 'waiting-background']);
+});
+
+test('готовый ответ ждёт восстановления известного сбоя poll и не тратит sendMessage', async (t) => {
+  let unavailable = true;
+  const f = await fixture(t, {
+    readPollStatus: () => ({
+      running: true,
+      lastError: unavailable ? { code: 'poll_unreachable' } : null,
+    }),
+  });
+  const { delivery } = await beginTurn(f, message('Дождись Telegram'));
+  f.model.resolve({ statusCode: 200, body: { reply: 'Сеть вернулась' } });
+  await waitFor(
+    () => f.record().messages.some((item) => item.role === 'assistant'),
+    'сохранение готового ответа',
+  );
+  const sentWhileUnavailable = f.botCalls.some((call) => (
+    call.method === 'sendMessage' && call.body.text === 'Сеть вернулась'
+  ));
+
+  unavailable = false;
+  await delivery;
+  await waitFor(
+    () => f.botCalls.some((call) => (
+      call.method === 'sendMessage' && call.body.text === 'Сеть вернулась'
+    )),
+    'отправка после восстановления poll',
+  );
+  assert.equal(sentWhileUnavailable, false);
+});
+
 test('занятый web-ход ждётся без Стопа, а новый ход берёт его свежую сессию', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = await fixture(t, { initiallyBusy: true });
@@ -353,7 +406,7 @@ test('Стоп появляется на границе 30 секунд и ос�
   });
 });
 
-test('финальный ответ удаляет сообщение Стоп до отправки результата', async (t) => {
+test('финальный ответ безопасно заменяет сообщение Стоп без нового sendMessage', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = await fixture(t);
   const { delivery } = await beginTurn(f, message('Долгий вопрос с ответом'));
@@ -368,7 +421,34 @@ test('финальный ответ удаляет сообщение Стоп �
   )).map((call) => call.method);
   assert.deepEqual({ stopShown: Boolean(stop), lifecycle }, {
     stopShown: true,
-    lifecycle: ['deleteMessage', 'sendMessage'],
+    lifecycle: ['editMessageText'],
+  });
+});
+
+test('неопределённый ответ правки не дублирует уже обновлённое сообщение Стоп', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = await fixture(t, {
+    editFailure: Object.assign(new Error('Bad Request: message is not modified'), {
+      kind: 'telegram',
+      status: 400,
+    }),
+  });
+  const { delivery } = await beginTurn(f, message('Долгий вопрос с оборванной правкой'));
+  t.mock.timers.tick(30_000);
+  await flushAsyncWork();
+  f.model.resolve({ statusCode: 200, body: { reply: 'Уже доставлено' } });
+  await delivery;
+  await flushAsyncWork();
+  assert.deepEqual({
+    edits: f.botCalls.filter((call) => call.method === 'editMessageText').length,
+    duplicateSends: f.botCalls.filter((call) => (
+      call.method === 'sendMessage' && call.body.text === 'Уже доставлено'
+    )).length,
+    turns: (await f.store.read()).turns,
+  }, {
+    edits: 1,
+    duplicateSends: 0,
+    turns: [],
   });
 });
 
@@ -420,11 +500,11 @@ test('отказ chat со статусом 5xx закрывает typing и С�
   assert.deepEqual({
     deletedStop: f.botCalls.filter((call) => call.method === 'deleteMessage').length,
     visibleErrors: f.botCalls.filter((call) => (
-      call.method === 'sendMessage'
+      ['sendMessage', 'editMessageText'].includes(call.method)
       && /ошиб|не удал|недоступ|сбой/iu.test(String(call.body.text))
     )).length,
     typingStopped: f.botCalls.filter((call) => call.method === 'sendChatAction').length === typingAfterSettle,
-  }, { deletedStop: 1, visibleErrors: 1, typingStopped: true });
+  }, { deletedStop: 0, visibleErrors: 1, typingStopped: true });
 });
 
 test('транспортный сбой chat закрывает typing и Стоп одним видимым сообщением', async (t) => {
@@ -444,11 +524,11 @@ test('транспортный сбой chat закрывает typing и Сто
   assert.deepEqual({
     deletedStop: f.botCalls.filter((call) => call.method === 'deleteMessage').length,
     visibleErrors: f.botCalls.filter((call) => (
-      call.method === 'sendMessage'
+      ['sendMessage', 'editMessageText'].includes(call.method)
       && /ошиб|не удал|связ|сбой/iu.test(String(call.body.text))
     )).length,
     typingStopped: f.botCalls.filter((call) => call.method === 'sendChatAction').length === typingAfterSettle,
-  }, { deletedStop: 1, visibleErrors: 1, typingStopped: true });
+  }, { deletedStop: 0, visibleErrors: 1, typingStopped: true });
 });
 
 test('итог хода считает файлы только после успешного tool-result и приклеивается к ответу', async (t) => {

@@ -470,6 +470,7 @@ async function build() {
       speechRuntime,
       readSpeechPrefs: () => prefs.read().speech,
       readCompactWindow: () => prefs.read().chatAutoCompactWindow,
+      readPollStatus: () => telegramPoller.status(),
       queue: pultQueue,
       log: fastify.log,
     }),

@@ -308,7 +308,7 @@ export class TelegramPultWatch {
               text: want.text,
               link_preview_options: { is_disabled: true },
               reply_markup: { inline_keyboard: want.keyboard || [] },
-            }, { timeoutMs: CALL_TIMEOUT_MS }));
+            }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
             next[key] = { ...have, ...meta, editedAt: this.now() };
           } catch (error) {
             if (isUnchangedEdit(error)) {
@@ -336,7 +336,7 @@ export class TelegramPultWatch {
             // право только то, что действительно стоит на человеке.
             ...(want.silent === true ? { disable_notification: true } : {}),
             ...(want.keyboard ? { reply_markup: { inline_keyboard: want.keyboard } } : {}),
-          }, { timeoutMs: CALL_TIMEOUT_MS }));
+          }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
           const messageId = Number(sent?.message_id);
           next[key] = {
             messageId: Number.isSafeInteger(messageId) && messageId > 0 ? messageId : null,
@@ -363,7 +363,7 @@ export class TelegramPultWatch {
           await this.queue.push(() => lease.context.botApi.callBotApi(token, 'deleteMessage', {
             chat_id: chatId,
             message_id: card.messageId,
-          }, { timeoutMs: CALL_TIMEOUT_MS }));
+          }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
         } catch (error) {
           if (isMissingMessage(error)) continue; // человек уже удалил сам — забыть достаточно
           // Не удалилось — не записываем как успех: карточка остаётся в state
@@ -397,7 +397,7 @@ export class TelegramPultWatch {
               text: want.text,
               link_preview_options: { is_disabled: true },
               reply_markup: { inline_keyboard: [] },
-            }, { timeoutMs: CALL_TIMEOUT_MS }));
+            }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
             next[liveKey] = { ...live, kind: 'done', sig: null, hash: textHash(want.text), editedAt: this.now() };
           } catch (error) {
             if (isUnchangedEdit(error)) {
@@ -419,7 +419,7 @@ export class TelegramPultWatch {
           await this.queue.push(() => lease.context.botApi.callBotApi(token, 'deleteMessage', {
             chat_id: chatId,
             message_id: live.messageId,
-          }, { timeoutMs: CALL_TIMEOUT_MS }));
+          }, { timeoutMs: CALL_TIMEOUT_MS }), { priority: 'background' });
           // Надгробие: messageId null — повторной отправки и правки не будет.
           next[liveKey] = { ...live, messageId: null };
         } catch (error) {

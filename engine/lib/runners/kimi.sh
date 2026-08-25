@@ -218,9 +218,23 @@ runner_kimi_classify() {
       return
     fi
   fi
-  # Сигнатуры лимитов/401/403/413/429 spike не доказал — classify v1 их не
-  # содержит: лимит Kimi уйдёт в unknown, стадия не переключится (fail-closed,
-  # KIMI.md). При первом живом инциденте — снять stderr/events и добавить fixture.
+  # Исчерпанная квота биллингового цикла: доказана живым инцидентом на узле совета
+  # (CLI 0.33.0, fixture kimi-usage-limit). Требуем ОБЕ части текста —
+  # сам `provider.auth_error: 403` этого не доказывает: тем же кодом отвечает
+  # отозванный или неверный токен, а он лечится не ожиданием, а входом.
+  # Условие «модель не работала» то же, что у no-login: иначе предохранитель
+  # запишет лимит по ходу, который частично выполнился, и следующий заход
+  # переиграет уже сделанное.
+  if grep -qE "provider\.auth_error: 403 .*usage limit" \
+      "$run_dir/stderr.log" "$run_dir/events.jsonl" 2>/dev/null; then
+    if _runner_kimi_no_model_activity "$run_dir"; then
+      printf 'limited\n'
+      return
+    fi
+  fi
+  # Остальные сигнатуры лимитов/401/413/429 spike не доказал: они уходят в unknown,
+  # стадия не переключается (fail-closed, KIMI.md). При новом живом инциденте —
+  # снять stderr/events и добавить fixture рядом.
   printf 'unknown\n'
 }
 

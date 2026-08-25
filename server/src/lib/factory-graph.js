@@ -77,9 +77,10 @@ export function graphForRoute(g, route) {
  * известном курсоре именно он расставляет фронт.
  */
 export function computeNodeStatuses({
-  pf, pos, keys, optional, mtimeMs, cursorNode = null,
+  pf, pos, keys, optional, mtimeMs, cursorNode = null, forwardOnFailure = [],
 }) {
   const opt = new Set(optional);
+  const forwardFail = new Set(forwardOnFailure);
   const chain = Object.keys(pos).filter((n) => n !== 'sandbox');
   const st = {};
   const unknown = new Set();
@@ -95,6 +96,11 @@ export function computeNodeStatuses({
     if ((raw === undefined || raw === 'pending') && alt !== key && pf[alt] !== undefined) raw = pf[alt];
     if (raw === undefined) { unknown.add(nid); st[nid] = 'pending'; continue; }
     if (raw === 'skipped') st[nid] = opt.has(nid) ? 'skip' : 'skipbad';
+    // Провал узла, чей контракт ведёт маршрут ВПЕРЁД, остановкой не является:
+    // так выглядит член совета, у которого кончилась квота провайдера. Красный
+    // `stall` здесь врал бы — он означает «конвейер упёрся, нужен человек», а
+    // маршрут прошёл мимо. Курсор узла проверяется ниже и вернёт ему активность.
+    else if (raw === 'failed' && forwardFail.has(nid)) st[nid] = 'skip';
     else st[nid] = ST_MAP[raw] || 'pending';
   }
 

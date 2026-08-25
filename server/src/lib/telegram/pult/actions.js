@@ -105,6 +105,7 @@ export class TelegramPultActions {
     speechRuntime = null,
     readSpeechPrefs = () => ({}),
     readCompactWindow = () => 0,
+    readPollStatus = () => null,
     queue = new PultSendQueue(),
     now = Date.now,
     log = console,
@@ -140,6 +141,7 @@ export class TelegramPultActions {
         speechRuntime,
         readSpeechPrefs,
         readCompactWindow,
+        readPollStatus,
         queue,
         now,
         log,
@@ -196,7 +198,7 @@ export class TelegramPultActions {
     if (!token) throw Object.assign(new Error('нет token'), { code: 'not_connected' });
     return this.queue.push(() => lease.context.botApi.callBotApi(token, method, body, {
       timeoutMs: 15_000,
-    }));
+    }), { priority: 'interactive' });
   }
 
   /** Служебный ответ уезжает в реестр sent: следующий /clean его снесёт. */

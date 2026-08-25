@@ -13,16 +13,20 @@ import { compilePipelineView } from './helpers/pipeline-view.js';
 process.env.NODE_ENV = 'test';
 
 // Доведённая до конца задача: все узлы пройдены, демона нет, попытка терминальна.
-function makeFixture({ workspaceMode = 'shared', fePort = 13000, sandbox = null } = {}) {
+// `daemonAlive` включает второй случай — прогон, который прямо сейчас идёт: кнопка
+// закрытия видна и под ним тоже, и обязана честно сказать, что прервёт работу.
+function makeFixture({
+  workspaceMode = 'shared', fePort = 13000, sandbox = null, daemonAlive = false,
+} = {}) {
   const factoryTask = {
     task: 90002,
     profile: 'project-alpha',
     route: 'feature',
     readOnly: false,
     workspaceMode,
-    daemonAlive: false,
+    daemonAlive,
     attempt: 'a_0ec48def',
-    result: 'completed',
+    result: daemonAlive ? null : 'completed',
     stall: null,
   };
   const graph = {
@@ -30,12 +34,15 @@ function makeFixture({ workspaceMode = 'shared', fePort = 13000, sandbox = null 
     readOnly: false,
     fePort,
     sandbox,
+    daemonAlive,
     nodes: { build: [0, '🔨 Реализация'], retro: [1, '🧾 Ретро'] },
     pos: { build: 0, retro: 1 },
     keys: { build: 'BUILD', retro: 'RETRO' },
-    statuses: { build: 'done', retro: 'done' },
+    statuses: daemonAlive ? { build: 'run', retro: 'pending' } : { build: 'done', retro: 'done' },
     nodeMeta: {},
-    progress: { done: 2, total: 2, current: null },
+    progress: daemonAlive
+      ? { done: 0, total: 2, current: 'build' }
+      : { done: 2, total: 2, current: null },
   };
   return { factoryTask, graph };
 }
@@ -69,8 +76,13 @@ async function mountPipeline(t, { factoryTask, graph }) {
   const posts = [];
   const companionCalls = [];
   globalThis.__pipelineCloseDialogs = [];
-  globalThis.__pipelineCloseConfirmDialog = async (text) => {
+  // Подпись кнопки подтверждения — часть предупреждения, а не отделка: у прерывания
+  // живого прогона она обязана отличаться от обычного закрытия. Держим её отдельным
+  // списком, чтобы не менять форму записей `dialogs`, по которым читают прежние тесты.
+  globalThis.__pipelineCloseConfirmOptions = [];
+  globalThis.__pipelineCloseConfirmDialog = async (text, options = {}) => {
     globalThis.__pipelineCloseDialogs.push(text);
+    globalThis.__pipelineCloseConfirmOptions.push(options);
 
     return true;
   };
@@ -115,6 +127,7 @@ async function mountPipeline(t, { factoryTask, graph }) {
     browser.close();
     for (const key of [
       '__pipelineCloseApi', '__pipelineCloseDialogs', '__pipelineCloseConfirmDialog',
+      '__pipelineCloseConfirmOptions',
       '__pipelineCloseAlertDialog', '__pipelineCloseFactoryGraph', '__pipelineCloseUiStore',
       '__pipelineCloseTasksStore', '__pipelineCloseBoardStore',
       '__pipelineCloseCompanionStore',
@@ -127,6 +140,7 @@ async function mountPipeline(t, { factoryTask, graph }) {
     posts,
     companionCalls,
     dialogs: globalThis.__pipelineCloseDialogs,
+    confirmOptions: globalThis.__pipelineCloseConfirmOptions,
   };
 }
 
@@ -176,6 +190,35 @@ test('стенда нет вовсе: кнопка закрытия остаёт
   await close.trigger('click');
   await flushPromises();
   assert.ok(dialogs.some((text) => /Пустая ветка будет удалена/.test(text)));
+});
+
+test('идущий прогон: подтверждение называет узел и обещает прервать работу', async (t) => {
+  const { wrapper, flushPromises, dialogs, confirmOptions } = await mountPipeline(
+    t, makeFixture({ daemonAlive: true }),
+  );
+
+  await wrapper.get('.sbclose').trigger('click');
+  await flushPromises();
+
+  const text = dialogs.find((line) => /Закрыть задачу/.test(line));
+  assert.ok(text, 'подтверждение закрытия должно быть показано');
+  assert.match(text, /Прогон ИДЁТ — узел «Реализация»/);
+  assert.match(text, /прервёт его/);
+  assert.match(text, /запускать заново/);
+  // Кнопка не имеет права называться просто «Закрыть»: человек читает её последней.
+  assert.equal(confirmOptions.at(-1)?.okText, 'Прервать и закрыть');
+});
+
+test('прогон стоит: предупреждения о прерывании нет', async (t) => {
+  const { wrapper, flushPromises, dialogs, confirmOptions } = await mountPipeline(t, makeFixture());
+
+  await wrapper.get('.sbclose').trigger('click');
+  await flushPromises();
+
+  const text = dialogs.find((line) => /Закрыть задачу/.test(line));
+  assert.ok(text);
+  assert.equal(/Прогон ИДЁТ/.test(text), false);
+  assert.equal(confirmOptions.at(-1)?.okText, 'Закрыть');
 });
 
 test('стенд ещё строится: закрывать нечего — кнопки нет', async (t) => {

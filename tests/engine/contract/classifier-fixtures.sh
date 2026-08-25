@@ -67,6 +67,12 @@ materialize_fixture() {
         'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
         >"$target/stderr.log"
       : >"$target/stdout.log" ;;
+    kimi-usage-limit)
+      printf '%s\n' \
+        "error: failed to run prompt: provider.auth_error: 403 You've reached your usage limit for this billing cycle. Your quota will be refreshed in the next cycle. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/code/#pricing" \
+        'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+        >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
     kimi-bad-model)
       printf '%s\n' \
         'error: failed to run prompt: config.invalid: Model "kimi-code/no-such-model-zz" is not configured in config.toml. Add a [models."kimi-code/no-such-model-zz"] entry with max_context_size.' \
@@ -110,6 +116,7 @@ check_fixture kimi kimi-no-login
 check_fixture kimi kimi-bad-model
 check_fixture kimi kimi-interrupted
 check_fixture kimi kimi-auth-after-work
+check_fixture kimi kimi-usage-limit
 
 unknown="$TEST_ROOT/unknown-version"
 cp -a "$fixture_root/codex-denied" "$unknown"
@@ -123,6 +130,25 @@ sed -i 's/CLI_VERSION=.*/CLI_VERSION=999.0.0/' "$kimi_unknown/meta.env"
 actual=$(runner_call kimi classify "$kimi_unknown" 1)
 assert_eq provider_unavailable "$actual" \
   "new Kimi semver preserves a proven no-activity classifier signature"
+
+# Тот же 403 без текста про квоту — это отозванный/неверный токен: ожиданием он не
+# лечится, предохранителю его отдавать нельзя.
+kimi_auth_403="$TEST_ROOT/kimi-auth-403"
+cp -a "$fixture_root/kimi-usage-limit" "$kimi_auth_403"
+printf '%s\n' \
+  'error: failed to run prompt: provider.auth_error: 403 Forbidden' \
+  'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+  >"$kimi_auth_403/stderr.log"
+actual=$(runner_call kimi classify "$kimi_auth_403" 1)
+assert_eq unknown "$actual" "Kimi 403 without a quota signature fails closed"
+
+# Лимит, догнавший уже работавшую модель, лимитом для предохранителя не считается:
+# иначе следующий заход переиграет частично выполненный ход (fixture kimi-auth-after-work).
+kimi_limit_after_work="$TEST_ROOT/kimi-limit-after-work"
+cp -a "$fixture_root/kimi-usage-limit" "$kimi_limit_after_work"
+cp -a "$fixture_root/kimi-auth-after-work/events.jsonl" "$kimi_limit_after_work/events.jsonl"
+actual=$(runner_call kimi classify "$kimi_limit_after_work" 1)
+assert_eq unknown "$actual" "Kimi quota limit after model activity stays unknown"
 
 kimi_unverified="$TEST_ROOT/kimi-unverified-fixture"
 cp -a "$fixture_root/kimi-no-login" "$kimi_unverified"

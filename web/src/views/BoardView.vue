@@ -35,18 +35,54 @@
         </div>
       </section>
 
-      <!-- Сейчас в работе -->
-      <section v-if="activeTask" class="active">
-        <span class="pulse"></span>
-        <UiPressable
-          class="atitle"
-          data-role="task-title"
-          data-emphasis="active"
-          @click="ui.openTask(activeTask.id)"
-        >
-          {{ activeTask.title }}
-        </UiPressable>
-        <span class="atimer mono">{{ secToHMS(liveElapsed(activeTask)) }}</span>
+      <!-- B24 разрешает несколько незакрытых таймеров одновременно: показываем каждый. -->
+      <section
+        v-if="activeTasks.length"
+        class="active-timers"
+        aria-labelledby="active-timers-title"
+      >
+        <div class="active-timers-head">
+          <span class="active-timers-symbol" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
+            </svg>
+            <span class="active-timers-pulse"></span>
+          </span>
+          <span class="active-timers-heading">
+            <h2 id="active-timers-title" class="active-timers-title">Активные таймеры</h2>
+            <span class="active-timers-subtitle">Время списывается сейчас</span>
+          </span>
+          <span
+            class="active-timers-count mono"
+            :aria-label="`Запущено таймеров: ${activeTasks.length}`"
+          >
+            {{ activeTasks.length }}
+          </span>
+        </div>
+        <ul class="active-timers-grid">
+          <li v-for="task in activeTasks" :key="task.id" class="active-timer-item">
+            <UiPressable
+              data-context="active-timer-card"
+              :title="task.title"
+              @click="ui.openTask(task.id)"
+            >
+              <span class="active-timer-card-head">
+                <span class="active-timer-state">
+                  <span class="active-timer-dot" aria-hidden="true"></span>
+                  таймер идёт
+                </span>
+                <span class="active-timer-time mono">{{ secToHMS(liveElapsed(task)) }}</span>
+              </span>
+              <span class="active-task-title">{{ task.title }}</span>
+              <span class="active-task-meta">
+                <span class="mono">#{{ task.id }}</span>
+                <span v-if="projectName(task)" class="active-task-project">
+                  {{ projectName(task) }}
+                </span>
+              </span>
+            </UiPressable>
+          </li>
+        </ul>
       </section>
 
       <div class="cols" :class="{ solo: !(data.toReview.length || data.created.length) }">
@@ -427,10 +463,7 @@ const monthPct = computed(() => {
   const m = data.value?.month; if (!m?.norm) return 0;
   return Math.round((m.hours / m.norm) * 100);
 });
-const activeTask = computed(() => {
-  const d = data.value; if (!d?.tasks) return null;
-  return d.tasks.find((task) => task.timerRunning) || null;
-});
+const activeTasks = computed(() => (data.value?.tasks || []).filter((task) => task.timerRunning));
 // Поиск по «Моим задачам» (88 штук — без фильтра неудобно).
 const q = ref('');
 
@@ -609,10 +642,164 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .mfoot { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; }
 .mfoot .over { color: var(--good); font-weight: 600; }
 
-.active { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; }
-.pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; animation: pulse 1.4s infinite; }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
-.atimer { color: var(--accent); font-size: 15px; }
+.active-timers {
+  padding: 12px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--good) 7%, var(--surface)),
+      var(--surface) 32%
+    );
+  border: 1px solid color-mix(in srgb, var(--good) 34%, var(--line));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.active-timers-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  margin-bottom: 11px;
+  padding: 0 2px;
+}
+.active-timers-symbol {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--good) 13%, transparent);
+  color: var(--good);
+}
+.active-timers-symbol svg {
+  width: 17px;
+  height: 17px;
+}
+.active-timers-pulse {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--good);
+  animation: active-timer-pulse 1.6s ease-in-out infinite;
+}
+.active-timers-heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.active-timers-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+.active-timers-subtitle {
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-timers-count {
+  min-width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--good) 15%, transparent);
+  color: var(--good);
+  font-size: 11.5px;
+  font-weight: 750;
+}
+.active-timers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.active-timer-item {
+  min-width: 0;
+}
+.active-timer-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.active-timer-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--good);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.active-timer-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--good) 65%, transparent);
+}
+.active-timer-time {
+  flex: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.active-task-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 620;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+  text-align: left;
+}
+.active-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  margin-top: auto;
+  color: var(--ink-mid);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.active-task-project {
+  overflow: hidden;
+  padding-left: 7px;
+  border-left: 1px solid var(--line-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes active-timer-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .active-timers-pulse { animation: none; }
+}
 
 .cols { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; min-width: 0; }
 .col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

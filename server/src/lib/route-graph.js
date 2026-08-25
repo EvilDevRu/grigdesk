@@ -142,11 +142,28 @@ export function buildRouteDef(machine, route, opts = {}) {
       && !Object.hasOwn(transition, 'stop');
   });
 
+  // Узлы, чей провал по контракту ведёт маршрут ВПЕРЁД: член совета, у которого
+  // кончилась квота провайдера, и ретро, чей отказ не отменяет публикацию. Реестр
+  // пишет им `failed` (для exhausted — тоже), и без этого списка выпадение рисуется
+  // красным «конвейер упёрся» — неотличимо от места, где маршрут действительно встал.
+  // Rewind сюда не входит: возврат назад остановкой не является, но и пропуском тоже.
+  const forwardOnFailure = chainIds.filter((id) => {
+    const node = byId.get(id);
+    if (!node || node.executor === 'gate') return false;
+    return ['failed', 'exhausted'].every((outcome) => {
+      const transition = node.on?.[outcome];
+      return transition
+        && typeof transition === 'object'
+        && typeof transition.next === 'string';
+    });
+  });
+
   return {
     nodes,
     keys,
     runnerKeys: { ...keys },
     optional,
+    forwardOnFailure,
     vb: `0 -34 ${width} ${height}`,
     pos,
     edges,

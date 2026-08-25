@@ -16,6 +16,13 @@ export const useTasksStore = defineStore('tasks', {
       return data;
     },
     title(id) { return this.details[id]?.data?.title || null; },
+    /** Сохранить частичные поля и заменить кеш свежей карточкой из ответа сервера. */
+    async update(id, fields) {
+      const data = await api.put(`/api/b24/task/${id}`, fields);
+      this.details[id] = { data, loadedAt: Date.now() };
+      await useBoardStore().load(true);
+      return data;
+    },
     /** Таймер: start|pause|stop. После — обновляем доску (состояние таймера). */
     async timer(id, action) {
       await api.post(`/api/b24/task/${id}/timer/${action}`);

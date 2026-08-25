@@ -28,6 +28,16 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.doesNotMatch(source, /\.pu-state button|\.ptip-go button|\.instbar button/u);
   assert.match(source, /data-context="topbar-popover-action"/u);
   assert.match(source, /data-context="topbar-popover-footer"/u);
+  assert.match(source, /<BoardTimerPopover/u);
+  assert.match(source, /:tasks="topbarTimerTasks"/u);
+  assert.match(source, /:busy-task-id="timerActionTaskId"/u);
+  assert.match(source, /@toggle-timer="toggleBoardTimer"/u);
+  assert.match(source, /useTasksStore/u);
+  assert.match(source, /await taskStore\.timer\(task\.id, action\)/u);
+  assert.ok(
+    source.indexOf('class="metric mono"') < source.indexOf('<BoardTimerPopover'),
+    'индикатор таймеров должен стоять после динамических CPU/RAM',
+  );
   assert.match(providerUsage, /data-context="topbar-popover-confirm"/u);
   assert.match(providerUsage, /data-context="topbar-popover-resource-link"/u);
   assert.match(
@@ -46,4 +56,9 @@ test('AppShell использует public UI controls и DOM handle тригг�
     actions,
     /data-context='topbar-popover-resource-link'\][^{]*\{[^}]*white-space:\s*normal;/u,
   );
+  assert.match(
+    actions,
+    /data-context='board-timers-topbar'\][^{]*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/u,
+  );
+  assert.match(actions, /data-context='topbar-timer-toggle'/u);
 });

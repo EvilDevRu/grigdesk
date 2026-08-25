@@ -118,19 +118,29 @@ headless-пригодность подтверждена.
 | Нет логина (`KIMI_CODE_HOME` без credentials) | 1 | stderr: `No model configured. Run \`kimi\` and use /login to sign in…` | доказано, fixture `kimi-no-login` |
 | Несуществующая модель (`-m`) | 1 | stderr: `config.invalid: Model "…" is not configured in config.toml` | доказано, fixture `kimi-bad-model` |
 | SIGTERM во время хода | 143 | events может быть пустым, если TERM до первого события | доказано, fixture `kimi-interrupted` |
-| Weekly/subscription limit | — | **не снято** (живьём не воспроизводится по команде) | НЕ доказано |
+| Исчерпана квота биллингового цикла | 1 | stderr: `provider.auth_error: 403 You've reached your usage limit for this billing cycle…` | доказано живым инцидентом, fixture `kimi-usage-limit` |
+| Weekly/subscription limit подписки | — | **не снято** (живьём не воспроизводится по команде) | НЕ доказано |
 | 5h rate window / голый 429 | — | не снято | НЕ доказано |
 | 401/403 от API (протухший токен) | — | не снято (нужен протухший credential) | НЕ доказано |
 | 413 / context overflow | — | не снято | НЕ доказано |
 | Network error | — | не снято: CLI игнорирует `HTTP(S)_PROXY` (прогон с битым прокси ответил rc=0) | НЕ доказано |
 
-**Ограничение classify v1:** сигнатуры лимитов и 401/403 от API не доказаны, поэтому
-классификатор их НЕ содержит. Лимит Kimi уйдёт в `unknown` → стадия не переключится,
-run встанет в STALLED до человека. Это fail-closed и осознанно: при первом живом
-инциденте снять stderr/events (PROVENANCE=runtime), добавить fixture и сигнатуру.
-Доказанная сигнатура `No model configured … /login` (незалогиненный CLI) классифицируется
-как `provider_unavailable` — только при доказанном отсутствии model/tool activity
-(пустой events.jsonl), по инварианту ADDING-RUNNER.md.
+**Ограничение classify v1:** остальные сигнатуры лимитов и 401/403 от API не доказаны,
+поэтому классификатор их НЕ содержит — они уходят в `unknown`, стадия не переключается,
+run встаёт в STALLED до человека. Это fail-closed и осознанно: при новом живом инциденте
+снять stderr/events (PROVENANCE=runtime), добавить fixture и сигнатуру.
+
+Две доказанные сигнатуры, обе — только при доказанном отсутствии model/tool activity
+(пустой events.jsonl), по инварианту ADDING-RUNNER.md:
+
+- `No model configured … /login` (незалогиненный CLI) → `provider_unavailable`;
+- `provider.auth_error: 403 … usage limit … billing cycle` (кончилась квота) → `limited`,
+  то есть провайдер уходит под предохранитель на cooldown, а не считается сломанным.
+  Требуются ОБЕ части текста: голый `provider.auth_error: 403` тем же кодом отвечает
+  и на отозванный токен, который ожиданием не лечится. Ограничение видно и в самом
+  классификаторе: `limited` он ставит только до первого действия модели — лимит,
+  догнавший ход в середине, остаётся `unknown`, иначе следующий заход переиграл бы
+  уже сделанную работу.
 
 ## Прерывание (доказано)
 

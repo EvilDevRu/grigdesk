@@ -584,15 +584,12 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             "lessonsRepo": (
                 f"{repos[repo_order[0]]['path']}/{lessons_dir}/t{task_id}.md"
             ),
-            # Консилиум (маршруты consilium-*): мнения/ранги членов и trusted сводка
-            # command-узла COUNCIL_AGG. Route-нейтрально: остальные маршруты ключи
-            # просто не используют.
+            # Консилиум (маршруты consilium-*): независимые мнения членов и trusted
+            # сводка состава от command-узла COUNCIL_AGG. Route-нейтрально: остальные
+            # маршруты ключи просто не используют.
             "councilOpinionA": artifact("council.opinion-a.md"),
             "councilOpinionB": artifact("council.opinion-b.md"),
             "councilOpinionC": artifact("council.opinion-c.md"),
-            "councilRankA": artifact("council.rank-a.md"),
-            "councilRankB": artifact("council.rank-b.md"),
-            "councilRankC": artifact("council.rank-c.md"),
             "councilAggregate": artifact("council.aggregate.json"),
             "councilBrief": artifact("council.brief.md"),
         },

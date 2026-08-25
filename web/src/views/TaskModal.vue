@@ -26,6 +26,7 @@
           label="Обновить задачу"
           title="Обновить"
           :loading="loading"
+          :disabled="Boolean(editForm) || busy === 'edit'"
           loading-label="Обновляю задачу"
           @click="refresh"
         >
@@ -64,46 +65,174 @@
               <span class="pane-kicker">Постановка</span>
               <h4 id="task-brief-title" class="pane-title">Что нужно сделать</h4>
             </div>
+            <UiButton
+              v-if="detail && !editForm"
+              data-role="task-edit-open"
+              :disabled="loading || busy === 'edit'"
+              @click="openTaskEdit"
+            >
+              Править
+            </UiButton>
           </div>
           <div class="brief-scroll">
-            <div v-if="cleanDesc" class="desc-box">
-              <div class="tlbl">Описание</div>
-              <p class="desc" v-html="descHtml"></p>
+            <div v-if="editForm" class="task-edit" aria-label="Редактирование задачи">
+              <UiField
+                label="Заголовок"
+                required
+                :error="editForm.title.trim() ? '' : 'Введите заголовок задачи'"
+              >
+                <UiInput
+                  v-model="editForm.title"
+                  data-role="task-edit-title"
+                  maxlength="255"
+                  autocomplete="off"
+                  :disabled="busy === 'edit'"
+                />
+              </UiField>
+
+              <UiField
+                label="Описание"
+                hint="Сохраняется обычным текстом; ссылки останутся кликабельными в карточке."
+              >
+                <UiTextarea
+                  v-model="editForm.description"
+                  data-role="task-edit-description"
+                  rows="10"
+                  :disabled="busy === 'edit'"
+                  @keydown.ctrl.enter.prevent="saveTaskEdit"
+                />
+              </UiField>
+
+              <div class="task-edit-grid">
+                <UiField label="Исполнитель">
+                  <UiSelect
+                    v-model="editForm.responsibleId"
+                    data-role="task-edit-responsible"
+                    :disabled="editOptionsBusy || busy === 'edit'"
+                  >
+                    <option v-if="!editForm.responsibleId" value="" disabled>— не указан —</option>
+                    <option
+                      v-for="user in editResponsibleOptions"
+                      :key="user.id"
+                      :value="String(user.id)"
+                    >
+                      {{ user.name }}
+                    </option>
+                  </UiSelect>
+                </UiField>
+
+                <UiField label="Проект">
+                  <UiSelect
+                    v-model="editForm.groupId"
+                    data-role="task-edit-group"
+                    :disabled="editOptionsBusy || busy === 'edit'"
+                  >
+                    <option value="">— без проекта —</option>
+                    <option
+                      v-for="group in editGroupOptions"
+                      :key="group.id"
+                      :value="String(group.id)"
+                    >
+                      {{ group.name }}
+                    </option>
+                  </UiSelect>
+                </UiField>
+
+                <UiField label="Приоритет">
+                  <UiSelect
+                    v-model.number="editForm.priority"
+                    data-role="task-edit-priority"
+                    :disabled="busy === 'edit'"
+                  >
+                    <option :value="0">низкий</option>
+                    <option :value="1">средний</option>
+                    <option :value="2">высокий</option>
+                  </UiSelect>
+                </UiField>
+              </div>
+
+              <div v-if="editOptionsBusy" class="edit-options-state">
+                <UiSpinner decorative /> Загружаю исполнителей и проекты…
+              </div>
+              <div v-else-if="editOptionsError" class="edit-options-state bad">
+                <span>{{ editOptionsError }}</span>
+                <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
+                  Повторить
+                </UiButton>
+              </div>
+
+              <UiFormActions class="task-edit-actions">
+                <UiButton
+                  data-role="task-edit-cancel"
+                  :disabled="busy === 'edit'"
+                  @click="cancelTaskEdit"
+                >
+                  Отмена
+                </UiButton>
+                <UiButton
+                  data-role="task-edit-save"
+                  tone="success"
+                  variant="solid"
+                  :loading="busy === 'edit'"
+                  :disabled="!editCanSave"
+                  loading-label="Сохраняю задачу"
+                  @click="saveTaskEdit"
+                >
+                  Сохранить в Битрикс24
+                </UiButton>
+              </UiFormActions>
             </div>
 
-            <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
-            <section v-if="tgLinks.length" class="tg">
-              <div class="tlbl">Обсуждение в Telegram</div>
-              <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
-                <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
-                     как «в чате пусто», а причина — как «сюда нет доступа». -->
-                <div v-if="!l.ok" class="tgfail">
-                  <span class="tgurl">{{ l.url }}</span>
-                  <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
-                </div>
-                <template v-else>
-                  <div class="tghead">
-                    <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
-                    <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
-                    <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
-                    <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
-                  </div>
-                  <div v-for="q in l.quotes" :key="q.messageId" class="tgq" :class="{ tgtarget: q.target }">
-                    <div class="tgmeta">
-                      <span class="tgauthor">{{ q.author }}</span>
-                      <span class="tgtime">{{ tgTime(q.at) }}</span>
-                      <span v-if="q.target" class="tgpin">← ссылка</span>
-                    </div>
-                    <div class="tgtext">{{ q.text }}<template v-if="q.trimmed">…</template></div>
-                    <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
-                  </div>
-                  <div v-if="l.more" class="tgmore">ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке</div>
-                </template>
+            <template v-else>
+              <p v-if="editMessage" class="edit-message" role="status">{{ editMessage }}</p>
+              <div v-if="cleanDesc" class="desc-box">
+                <div class="tlbl">Описание</div>
+                <p class="desc" v-html="descHtml"></p>
               </div>
-            </section>
-            <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
-              Постановка пока не загружена или в задаче нет описания.
-            </div>
+
+              <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
+              <section v-if="tgLinks.length" class="tg">
+                <div class="tlbl">Обсуждение в Telegram</div>
+                <div v-for="(l, i) in tgLinks" :key="i" class="tgitem">
+                  <!-- Нераскрытая ссылка обязана объяснить себя: молчание читается
+                       как «в чате пусто», а причина — как «сюда нет доступа». -->
+                  <div v-if="!l.ok" class="tgfail">
+                    <span class="tgurl">{{ l.url }}</span>
+                    <span class="tgwhy">{{ l.message || 'ссылка не раскрыта' }}</span>
+                  </div>
+                  <template v-else>
+                    <div class="tghead">
+                      <span class="tgchat">{{ l.chat?.title || 'Чат' }}</span>
+                      <span v-if="l.chat?.username" class="tgat">@{{ l.chat.username }}</span>
+                      <span v-if="l.thread" class="tgthread">тема {{ l.thread }}</span>
+                      <a class="tgurl" :href="l.url" target="_blank" rel="noopener">открыть</a>
+                    </div>
+                    <div
+                      v-for="q in l.quotes"
+                      :key="q.messageId"
+                      class="tgq"
+                      :class="{ tgtarget: q.target }"
+                    >
+                      <div class="tgmeta">
+                        <span class="tgauthor">{{ q.author }}</span>
+                        <span class="tgtime">{{ tgTime(q.at) }}</span>
+                        <span v-if="q.target" class="tgpin">← ссылка</span>
+                      </div>
+                      <div class="tgtext">
+                        {{ q.text }}<template v-if="q.trimmed">…</template>
+                      </div>
+                      <div v-if="q.media?.length" class="tgmedia">{{ q.media.join(', ') }}</div>
+                    </div>
+                    <div v-if="l.more" class="tgmore">
+                      ещё {{ l.more }} {{ tgPlural(l.more) }} в ветке
+                    </div>
+                  </template>
+                </div>
+              </section>
+              <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
+                Постановка пока не загружена или в задаче нет описания.
+              </div>
+            </template>
           </div>
         </section>
 
@@ -575,7 +704,9 @@ import {
   UiButton,
   UiDialog,
   UiDisclosureButton,
+  UiField,
   UiFilePicker,
+  UiFormActions,
   UiIconButton,
   UiInput,
   UiSelect,
@@ -653,6 +784,164 @@ function linkify(s) {
     (u) => `<a href="${u.replace(/&amp;/g, '&')}" target="_blank" rel="noopener">${u}</a>`);
 }
 const descHtml = computed(() => linkify(cleanDesc.value));
+
+// ── Редактирование основных полей задачи в Битрикс24 ──
+const editForm = ref(null);
+const editBaseline = ref(null);
+const editUsers = ref([]);
+const editGroups = ref([]);
+const editOptionsBusy = ref(false);
+const editOptionsError = ref(null);
+const editMessage = ref(null);
+let editOptionsRequest = 0;
+
+/**
+ * Делает редактируемый снимок из DTO портала. Описание становится обычным текстом,
+ * но уйдёт обратно только после фактического изменения человеком.
+ */
+function taskEditSnapshot(task) {
+  const responsibleId = task?.responsible?.id ?? boardTask.value?.responsibleId ?? '';
+  const groupId = Number(task?.group_id);
+  const priority = Number(task?.priority);
+
+  return {
+    title: String(task?.title || ''),
+    description: htmlToText(task?.description),
+    responsibleId: responsibleId ? String(responsibleId) : '',
+    groupId: Number.isSafeInteger(groupId) && groupId > 0 ? String(groupId) : '',
+    priority: [0, 1, 2].includes(priority) ? priority : 1,
+  };
+}
+
+/**
+ * Оставляет текущее значение доступным, даже если сотрудник или проект уже исчез
+ * из активного справочника портала. Без fallback открытие формы само меняло бы select.
+ */
+function optionsWithCurrent(items, id, name, fallback) {
+  if (!id || items.some((item) => String(item.id) === String(id))) return items;
+
+  return [{ id: Number(id), name: name || `${fallback} #${id}` }, ...items];
+}
+
+const editResponsibleOptions = computed(() => optionsWithCurrent(
+  editUsers.value,
+  editForm.value?.responsibleId,
+  detail.value?.responsible?.name,
+  'Исполнитель',
+));
+const editGroupOptions = computed(() => optionsWithCurrent(
+  editGroups.value,
+  editForm.value?.groupId,
+  detail.value?.group_name || boardTask.value?.group,
+  'Проект',
+));
+
+/**
+ * Собирает только изменённые поля. Это защищает нетронутое HTML-описание и уменьшает
+ * окно, в котором правка из Cockpit может затереть параллельную правку в портале.
+ */
+function taskEditPayload() {
+  const form = editForm.value;
+  const baseline = editBaseline.value;
+  if (!form || !baseline) return {};
+
+  const fields = {};
+  const title = form.title.trim();
+  if (title !== baseline.title) fields.title = title;
+  if (form.description !== baseline.description) fields.description = form.description;
+  if (form.groupId !== baseline.groupId) {
+    fields.groupId = form.groupId ? Number(form.groupId) : null;
+  }
+  if (form.responsibleId !== baseline.responsibleId) {
+    fields.responsibleId = Number(form.responsibleId);
+  }
+  if (Number(form.priority) !== Number(baseline.priority)) {
+    fields.priority = Number(form.priority);
+  }
+  return fields;
+}
+
+const editCanSave = computed(() => (
+  Boolean(editForm.value?.title.trim())
+  && busy.value !== 'edit'
+  && Object.keys(taskEditPayload()).length > 0
+));
+
+/**
+ * Загружает оба портальных справочника независимо. Сбой одного не закрывает форму:
+ * заголовок, описание и уже известные значения всё равно можно сохранить.
+ */
+async function loadEditOptions() {
+  if (!editForm.value) return;
+
+  const requestId = ++editOptionsRequest;
+  editOptionsBusy.value = true;
+  editOptionsError.value = null;
+  const [users, groups] = await Promise.allSettled([
+    api.get('/api/b24/users'),
+    api.get('/api/b24/groups'),
+  ]);
+  if (requestId !== editOptionsRequest || !editForm.value) return;
+
+  const failures = [];
+  if (users.status === 'fulfilled') {
+    editUsers.value = Array.isArray(users.value?.users) ? users.value.users : [];
+  } else {
+    failures.push('исполнителей');
+  }
+  if (groups.status === 'fulfilled') {
+    editGroups.value = Array.isArray(groups.value?.groups) ? groups.value.groups : [];
+  } else {
+    failures.push('проекты');
+  }
+  editOptionsError.value = failures.length
+    ? `Не удалось загрузить: ${failures.join(' и ')}`
+    : null;
+  editOptionsBusy.value = false;
+}
+
+/** Открывает форму на точном снимке показанной карточки и начинает загрузку справочников. */
+function openTaskEdit() {
+  if (!detail.value || editForm.value) return;
+
+  const snapshot = taskEditSnapshot(detail.value);
+  editBaseline.value = snapshot;
+  editForm.value = { ...snapshot };
+  editMessage.value = null;
+  editOptionsError.value = null;
+  loadEditOptions();
+}
+
+function cancelTaskEdit() {
+  editOptionsRequest += 1;
+  editOptionsBusy.value = false;
+  editOptionsError.value = null;
+  editForm.value = null;
+  editBaseline.value = null;
+}
+
+/**
+ * Сохраняет изменения, затем атомарно подменяет карточку ответом сервера.
+ * Поздний ответ другой задачи остаётся только в store-кеше и не меняет открытую модалку.
+ */
+async function saveTaskEdit() {
+  if (!editCanSave.value || !taskId.value) return;
+
+  const id = String(taskId.value);
+  const fields = taskEditPayload();
+  await act('edit', async () => {
+    const updated = await tasks.update(id, fields);
+    if (String(taskId.value) !== id) return;
+
+    detail.value = updated;
+    cancelTaskEdit();
+    editMessage.value = 'Изменения сохранены в Битрикс24.';
+    if ((Object.hasOwn(fields, 'title') || Object.hasOwn(fields, 'description'))
+        && triage.value?.analysis) {
+      editMessage.value += ' Триаж основан на прежней постановке — запустите переоценку.';
+    }
+  });
+}
 
 // ── Обсуждение в Telegram: что стоит за ссылками t.me из описания ──
 // Поле `telegram` приходит от GET /api/b24/task/:id (сервер уже применил
@@ -1046,6 +1335,8 @@ function onTaskDialogOpenChange(open) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  cancelTaskEdit();
+  editMessage.value = null;
   if (id) {
     detail.value = null; launchMsg.value = null; sandboxMsg.value = null;
     taskContext.focus({
@@ -1116,12 +1407,24 @@ onUnmounted(() => {
   padding: 14px 16px; overflow: hidden; }
 .task-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
-.pane-head { flex: none; min-height: 56px; display: flex; align-items: center; padding: 9px 13px;
+.pane-head { flex: none; min-height: 56px; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; padding: 9px 13px;
   border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 72%, var(--ground)); }
+.pane-head > div { min-width: 0; }
 .pane-title { margin: 3px 0 0; color: var(--ink); font-size: 14px; font-weight: 650; line-height: 1.25; }
 .brief-scroll, .tab-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
   overscroll-behavior: contain; scrollbar-gutter: stable; }
 .brief-scroll { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.task-edit { display: grid; gap: 13px; min-width: 0; padding: 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.task-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.task-edit-grid > :last-child { grid-column: 1 / -1; }
+.edit-options-state { display: flex; align-items: center; gap: 7px; color: var(--ink-mid);
+  font-size: 12px; line-height: 1.4; }
+.edit-options-state.bad { align-items: flex-start; justify-content: space-between; color: var(--bad); }
+.edit-message { margin: 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line));
+  border-radius: 9px; background: color-mix(in srgb, var(--good) 8%, var(--surface));
+  color: var(--good); font-size: 12px; line-height: 1.45; }
 .desc-box { min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
   background: var(--surface); }
 .desc-box .tlbl { margin-bottom: 7px; }
@@ -1296,6 +1599,10 @@ onUnmounted(() => {
   .task-pane { border-radius: 10px; }
   .pane-head { min-height: 50px; padding: 8px 11px; }
   .brief-scroll, .tab-scroll { padding: 10px; }
+  .task-edit { padding: 10px; }
+  .task-edit-grid { grid-template-columns: minmax(0, 1fr); }
+  .task-edit-grid > :last-child { grid-column: auto; }
+  .task-edit-actions > * { flex: 1; }
   .desc-box { padding: 10px; }
   .desc { font-size: 13px; line-height: 1.55; }
   .tg { max-height: 280px; padding: 9px 10px; }

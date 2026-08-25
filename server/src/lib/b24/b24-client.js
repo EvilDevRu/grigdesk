@@ -94,6 +94,89 @@ function normalizePriority(value) {
     return num;
 }
 
+const TASK_UPDATE_FIELDS = new Set([
+    'title',
+    'description',
+    'groupId',
+    'responsibleId',
+    'priority',
+]);
+
+export class B24ValidationError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'B24ValidationError';
+        this.code = 'b24_bad_request';
+    }
+}
+
+/**
+ * Приводит идентификатор задачи или пользователя к положительному safe integer.
+ * Строки из route params допустимы, но дроби, пробелы внутри и ноль отвергаются.
+ */
+function positiveId(value, label) {
+    const text = typeof value === 'string' ? value.trim() : value;
+    const id = Number(text);
+    if (!Number.isSafeInteger(id) || id <= 0 || (typeof text === 'string' && !/^\d+$/.test(text))) {
+        throw new B24ValidationError(`${label}: нужно положительное целое число`);
+    }
+    return id;
+}
+
+/**
+ * Валидирует узкий публичный контракт редактирования. Поля остаются частичными:
+ * отсутствующее поле не уходит в портал и не затирает параллельно изменённое значение.
+ */
+export function normalizeTaskUpdateFields(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new B24ValidationError('Поля задачи должны быть объектом');
+    }
+
+    const keys = Object.keys(raw);
+    const unknown = keys.filter((key) => !TASK_UPDATE_FIELDS.has(key));
+    if (unknown.length) {
+        throw new B24ValidationError(`Неизвестные поля задачи: ${unknown.join(', ')}`);
+    }
+    if (!keys.length) {
+        throw new B24ValidationError('Не передано ни одного изменения задачи');
+    }
+
+    const fields = {};
+    if (Object.hasOwn(raw, 'title')) {
+        if (typeof raw.title !== 'string' || !raw.title.trim()) {
+            throw new B24ValidationError('Заголовок задачи не может быть пустым');
+        }
+        fields.title = raw.title.trim();
+    }
+    if (Object.hasOwn(raw, 'description')) {
+        if (typeof raw.description !== 'string') {
+            throw new B24ValidationError('Описание задачи должно быть строкой');
+        }
+        fields.description = raw.description;
+    }
+    if (Object.hasOwn(raw, 'groupId')) {
+        fields.groupId = raw.groupId === null || raw.groupId === '' || Number(raw.groupId) === 0
+            ? null
+            : positiveId(raw.groupId, 'Проект');
+    }
+    if (Object.hasOwn(raw, 'responsibleId')) {
+        fields.responsibleId = positiveId(raw.responsibleId, 'Исполнитель');
+    }
+    if (Object.hasOwn(raw, 'priority')) {
+        let priority;
+        try {
+            priority = normalizePriority(raw.priority);
+        } catch (error) {
+            throw new B24ValidationError(error.message);
+        }
+        if (priority === null) {
+            throw new B24ValidationError('Приоритет задачи не может быть пустым');
+        }
+        fields.priority = priority;
+    }
+    return fields;
+}
+
 export class B24Client {
     /**
      * @param {object} opts
@@ -967,6 +1050,69 @@ export class B24Client {
             createdById: createdById ? Number(createdById) : null,
             priority,
         };
+    }
+
+    /**
+     * Частично обновляет основные поля задачи. Валидация выполняется до авторизации,
+     * поэтому некорректный запрос не тратит сетевой вызов и не меняет сессию портала.
+     */
+    async updateTask(taskId, rawFields) {
+        const id = positiveId(taskId, 'Задача');
+        const fields = normalizeTaskUpdateFields(rawFields);
+
+        await this.ensureAuth();
+        return this.sendTaskUpdate(id, fields);
+    }
+
+    /**
+     * Отправляет tasks.task.update с уже проверенным частичным набором полей.
+     * Пустое описание и нулевой GROUP_ID значимы: так описание очищают, а проект снимают.
+     */
+    async sendTaskUpdate(taskId, fields, retry = true) {
+        const sessid = await this.getSessid();
+        const body = new URLSearchParams();
+        body.set('taskId', String(taskId));
+        if (Object.hasOwn(fields, 'title')) {
+            body.set('fields[TITLE]', fields.title);
+        }
+        if (Object.hasOwn(fields, 'description')) {
+            body.set('fields[DESCRIPTION]', fields.description);
+        }
+        if (Object.hasOwn(fields, 'groupId')) {
+            body.set('fields[GROUP_ID]', String(fields.groupId ?? 0));
+        }
+        if (Object.hasOwn(fields, 'responsibleId')) {
+            body.set('fields[RESPONSIBLE_ID]', String(fields.responsibleId));
+        }
+        if (Object.hasOwn(fields, 'priority')) {
+            body.set('fields[PRIORITY]', String(fields.priority));
+        }
+        body.set('sessid', sessid || '');
+
+        const res = await this.raw('/bitrix/services/main/ajax.php?action=tasks.task.update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Bitrix-Csrf-Token': sessid || '',
+            },
+            body: body.toString(),
+        });
+        const data = await res.json().catch(() => null);
+
+        if (data?.status !== 'success') {
+            const msg = (data?.errors || [])
+                .map((error) => error.message)
+                .filter(Boolean)
+                .join('; ');
+            if (retry && /csrf|sessid|sign/i.test(msg)) {
+                await this.getSessid(true);
+                return this.sendTaskUpdate(taskId, fields, false);
+            }
+            throw new Error(msg || 'Не удалось обновить задачу');
+        }
+
+        const task = data.data?.task ?? data.data ?? {};
+        return { ok: true, id: Number(task.id ?? task.ID ?? taskId) };
     }
 
     /**

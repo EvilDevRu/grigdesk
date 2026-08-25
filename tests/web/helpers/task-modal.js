@@ -10,7 +10,9 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   const componentImports = [
     ['UiButton', 'src/components/primitives/UiButton.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
+    ['UiField', 'src/components/composites/UiField.vue'],
     ['UiFilePicker', 'src/components/composites/UiFilePicker.vue'],
+    ['UiFormActions', 'src/components/composites/UiFormActions.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
     ['UiInput', 'src/components/primitives/UiInput.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],

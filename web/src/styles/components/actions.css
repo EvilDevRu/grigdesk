@@ -594,6 +594,104 @@
   opacity: 1;
 }
 
+/* Карточка активного B24-таймера целиком открывает задачу. Геометрия и интерактивное
+   оформление общие для доски; содержимое карточки остаётся доменным и живёт в BoardView. */
+.ui-pressable[data-context='active-timer-card'] {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line-2) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  text-align: left;
+  transition:
+    border-color var(--control-motion-duration) var(--control-motion-easing),
+    background var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-pressable[data-context='active-timer-card']:hover {
+  border-color: color-mix(in srgb, var(--good) 46%, var(--line));
+  background: color-mix(in srgb, var(--good) 7%, var(--surface-2));
+}
+
+/* Таймер выглядит как статус topbar, а не как отдельная кнопка. Интерактивный элемент
+   сохраняем для клавиатуры и тач-экрана; список открывается наведением или нажатием. */
+.ui-button[data-context='board-timers-topbar'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-mid);
+  transition: color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-button[data-context='board-timers-topbar'] > .ui-button__content,
+.ui-button[data-context='board-timers-topbar'] .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-button[data-context='board-timers-topbar']:hover:not(:disabled),
+.ui-button[data-context='board-timers-topbar'][aria-expanded='true'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+}
+
+.ui-button[data-context='topbar-timer-task'] {
+  width: auto;
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 7px;
+  border-radius: 8px;
+  text-align: left;
+  transition:
+    background var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing);
+}
+
+.ui-button[data-context='topbar-timer-task'] > .ui-button__content,
+.ui-button[data-context='topbar-timer-task'] .ui-button__label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ui-button[data-context='topbar-timer-task']:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.ui-icon-button[data-context='topbar-timer-toggle'] {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  flex: none;
+  border-color: transparent;
+  background: transparent;
+}
+
+.ui-icon-button[data-context='topbar-timer-toggle']:hover:not(:disabled) {
+  background: var(--ui-action-soft);
+}
+
 /* Popover в узком topbar хранит служебные действия, а не полноразмерную форму.
    Высоты повторяют прежнюю плотность и не съедают половину карточки лимитов. */
 .ui-button[data-context='topbar-popover-action'],

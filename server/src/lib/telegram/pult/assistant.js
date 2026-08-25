@@ -20,7 +20,14 @@ const MESSAGE_LIMIT = 4_000;
 const STOP_AFTER_MS = 30_000;
 const TYPING_EVERY_MS = 4_000;
 const ACTIVE_POLL_MS = 1_000;
+const TELEGRAM_HEALTH_POLL_MS = 1_000;
 const CHAT_SAVE_ATTEMPTS = 3;
+
+/** Повторная правка тем же текстом уже достигла нужного состояния. */
+const isUnchangedEdit = (error) => /message is not modified/iu.test(String(error?.message || ''));
+
+/** Сообщение «Стоп» удалено человеком — итог надо отправить новым сообщением. */
+const isMissingMessage = (error) => /not found/iu.test(String(error?.message || ''));
 
 const positive = (value) => {
   const number = Number(value);
@@ -98,12 +105,16 @@ export class TelegramPultAssistant {
     speechRuntime = null,
     readSpeechPrefs = () => ({}),
     readCompactWindow = () => 0,
+    readPollStatus = () => null,
     now = Date.now,
     log = console,
   } = {}) {
     if (typeof callApi !== 'function' || typeof stateStoreFor !== 'function'
-        || typeof acquireLease !== 'function' || typeof now !== 'function') {
-      throw new TypeError('TelegramPultAssistant: callApi/stateStoreFor/acquireLease/now обязательны.');
+        || typeof acquireLease !== 'function' || typeof readPollStatus !== 'function'
+        || typeof now !== 'function') {
+      throw new TypeError(
+        'TelegramPultAssistant: callApi/stateStoreFor/acquireLease/readPollStatus/now обязательны.',
+      );
     }
     this.callApi = callApi;
     this.stateStoreFor = stateStoreFor;
@@ -112,6 +123,7 @@ export class TelegramPultAssistant {
     this.speechRuntime = speechRuntime;
     this.readSpeechPrefs = readSpeechPrefs;
     this.readCompactWindow = readCompactWindow;
+    this.readPollStatus = readPollStatus;
     this.now = now;
     this.log = log;
     this.runs = new Map();
@@ -430,8 +442,9 @@ export class TelegramPultAssistant {
         } else {
           await this._saveCompactResult(prepared, response.body || {});
         }
-        await this._settle(run);
-        await this._sendTo(
+        await this._settle(run, { deleteStop: false, dropTurn: false });
+        const delivery = await this._deliverText(
+          run,
           prepared.owner,
           response.body?.stopped
             ? (response.body.sessionReset
@@ -439,18 +452,32 @@ export class TelegramPultAssistant {
               : '⏹ Сжатие остановлено; память не изменена.')
             : '✓ Память разговора сжата.',
         );
+        await this._completeDelivery(run, delivery);
       } else {
         await this._saveAssistantResult(prepared, response.body || {}, run);
-        await this._settle(run);
-        await this._sendResult(prepared, response.body || {}, run);
+        await this._settle(run, { deleteStop: false, dropTurn: false });
+        const delivery = await this._sendResult(prepared, response.body || {}, run);
+        await this._completeDelivery(run, delivery);
       }
     } catch (error) {
       signalStarted();
       if (prepared.seed) await this._restoreSeed(prepared).catch(() => {});
-      if (run) await this._settle(run);
-      else await this._dropTurn(prepared.store, turn.id).catch(() => {});
       this.log.warn?.({ code: error?.code }, 'telegram-pult: ход ассистента завершился ошибкой');
-      await this._sendTo(prepared.owner, `⚠ Ошибка хода ассистента: ${error?.message || 'неизвестный сбой'}`);
+      if (run) {
+        await this._settle(run, { deleteStop: false, dropTurn: false });
+        const delivery = await this._deliverText(
+          run,
+          prepared.owner,
+          `⚠ Ошибка хода ассистента: ${error?.message || 'неизвестный сбой'}`,
+        );
+        await this._completeDelivery(run, delivery);
+      } else {
+        await this._dropTurn(prepared.store, turn.id).catch(() => {});
+        await this._sendTo(
+          prepared.owner,
+          `⚠ Ошибка хода ассистента: ${error?.message || 'неизвестный сбой'}`,
+        );
+      }
     } finally {
       if (this.runs.get(prepared.chatKey) === run) this.runs.delete(prepared.chatKey);
     }
@@ -547,7 +574,7 @@ export class TelegramPultAssistant {
     const tail = [summary, warning].filter(Boolean).join('\n');
     const budget = Math.max(1, MESSAGE_LIMIT - [...tail].length - (tail ? 2 : 0));
     const text = `${clipText(main, budget)}${tail ? `\n\n${tail}` : ''}`;
-    await this._sendTo(prepared.owner, text, warning ? [[{
+    return this._deliverText(run, prepared.owner, text, warning ? [[{
       text: '🗜 Сжать',
       callback_data: cbData.agentCompact(),
     }]] : null);
@@ -558,7 +585,7 @@ export class TelegramPultAssistant {
     run.typingInFlight = true;
     const job = this._withOwner(run.owner, (context, token) => (
       context.botApi.sendChatAction(token, run.chatId, 'typing', { timeoutMs: 15_000 })
-    ));
+    ), { priority: 'background' });
     run.typingPromise = job;
     try {
       await job;
@@ -583,13 +610,25 @@ export class TelegramPultAssistant {
     await this._patchTurn(run.store, run.id, { stopMessageId: messageId }).catch(() => {});
   }
 
-  async _settle(run) {
+  /**
+   * Остановить локальный lifecycle хода. Финальная доставка может оставить
+   * сообщение «Стоп» как стабильный адрес для безопасной правки результата.
+   */
+  async _settle(run, { deleteStop = true, dropTurn = true } = {}) {
     run.settled = true;
     if (run.stopTimer) clearTimeout(run.stopTimer);
     if (run.typingInterval) clearInterval(run.typingInterval);
     if (run.typingPromise) await run.typingPromise.catch(() => {});
     if (run.stopInFlight) await run.stopInFlight.catch(() => {});
-    if (run.stopMessageId) await this._deleteFrom(run.owner, run.stopMessageId);
+    if (deleteStop && run.stopMessageId) await this._deleteFrom(run.owner, run.stopMessageId);
+    if (dropTurn) await this._dropTurn(run.store, run.id).catch(() => {});
+  }
+
+  /** После подтверждённой доставки убрать лишний «Стоп» и durable marker хода. */
+  async _completeDelivery(run, delivery) {
+    if (run.stopMessageId && delivery?.delivered === true && delivery.replaced !== true) {
+      await this._deleteFrom(run.owner, run.stopMessageId);
+    }
     await this._dropTurn(run.store, run.id).catch(() => {});
   }
 
@@ -668,7 +707,7 @@ export class TelegramPultAssistant {
     }
   }
 
-  async _withOwner(owner, operation, { queued = true } = {}) {
+  async _withOwner(owner, operation, { queued = true, priority = 'interactive' } = {}) {
     const execute = async () => {
       const lease = this.acquireLease();
       try {
@@ -689,7 +728,44 @@ export class TelegramPultAssistant {
         await lease?.release?.();
       }
     };
-    return queued ? this.queue.push(execute) : execute();
+    return queued ? this.queue.push(execute, { priority }) : execute();
+  }
+
+  /**
+   * Не тратить единственную неидемпотентную попытку финального sendMessage,
+   * пока long polling уже знает, что api.telegram.org недоступен. После первого
+   * успешного poll lastError очищается, и ответ получает ближайший слот очереди.
+   */
+  async _waitForTelegram() {
+    while (!this.closed) {
+      const status = this.readPollStatus();
+      if (status?.running !== true || status?.lastError?.code !== 'poll_unreachable') {
+        return true;
+      }
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, TELEGRAM_HEALTH_POLL_MS);
+        timer.unref?.();
+      });
+    }
+    return false;
+  }
+
+  /**
+   * Длинный ход уже имеет сообщение «Стоп» с известным message_id. Правка этого
+   * сообщения идемпотентна по результату и не создаёт дубль при повторе после
+   * оборванного ответа Telegram; без такого адреса остаётся один sendMessage.
+   */
+  async _deliverText(run, owner, text, keyboard = null) {
+    if (!await this._waitForTelegram()) return { delivered: false, replaced: false };
+
+    if (run?.stopMessageId) {
+      const edited = await this._editTo(owner, run.stopMessageId, text, keyboard);
+      if (edited.status === 'delivered') return { delivered: true, replaced: true };
+      if (edited.status !== 'missing') return { delivered: false, replaced: false };
+    }
+
+    const sent = await this._sendTo(owner, text, keyboard);
+    return { delivered: Boolean(sent), replaced: false };
   }
 
   _sendTo(owner, text, keyboard = null) {
@@ -699,8 +775,40 @@ export class TelegramPultAssistant {
       link_preview_options: { is_disabled: true },
       ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
     }, { timeoutMs: 15_000 })).catch((error) => {
-      this.log.warn?.({ code: error?.code }, 'telegram-pult: ответ ассистента не доставлен');
+      this.log.warn?.({
+        code: error?.code,
+        kind: error?.kind,
+        reason: error?.message,
+      }, 'telegram-pult: ответ ассистента не доставлен');
       return null;
+    });
+  }
+
+  /**
+   * Править известный адрес результата с безопасными transport-повторами.
+   * Повторный успех Telegram выражает отказом «message is not modified».
+   */
+  _editTo(owner, messageId, text, keyboard = null) {
+    return this._withOwner(owner, (context, token) => context.botApi.callBotApi(
+      token,
+      'editMessageText',
+      {
+        chat_id: owner.chatId,
+        message_id: messageId,
+        text: clipText(text, MESSAGE_LIMIT),
+        link_preview_options: { is_disabled: true },
+        reply_markup: { inline_keyboard: keyboard || [] },
+      },
+      { timeoutMs: 15_000, retries: 2 },
+    )).then(() => ({ status: 'delivered' })).catch((error) => {
+      if (isUnchangedEdit(error)) return { status: 'delivered' };
+      if (isMissingMessage(error)) return { status: 'missing' };
+      this.log.warn?.({
+        code: error?.code,
+        kind: error?.kind,
+        reason: error?.message,
+      }, 'telegram-pult: сообщение Стоп не обновилось до ответа');
+      return { status: 'failed' };
     });
   }
 

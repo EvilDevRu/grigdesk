@@ -120,7 +120,7 @@ export async function mountBoardView(t, {
     import(PINIA_URL),
   ]);
   const nonce = `${prefix}-${mountNonce++}`;
-  const calls = { toggled: [], favoritesLoad: [], seenLoad: [], seenMarked: [] };
+  const calls = { opened: [], toggled: [], favoritesLoad: [], seenLoad: [], seenMarked: [] };
   const stores = {
     board: defineStore(`board-view-board-${nonce}`, {
       state: () => ({
@@ -139,7 +139,9 @@ export async function mountBoardView(t, {
       }),
       actions: { async load() {} },
     }),
-    ui: defineStore(`board-view-ui-${nonce}`, { actions: { openTask() {} } }),
+    ui: defineStore(`board-view-ui-${nonce}`, {
+      actions: { openTask(id) { calls.opened.push(String(id)); } },
+    }),
     analysis: defineStore(`board-view-analysis-${nonce}`, {
       state: () => ({ byTask: analysis }),
       actions: { startPolling() {}, async analyze() {} },

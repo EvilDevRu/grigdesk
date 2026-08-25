@@ -142,6 +142,16 @@
           </template>
         </UiTooltip>
         <span v-if="sys" class="sep" aria-hidden="true">·</span>
+        <BoardTimerPopover
+          v-if="topbarTimerTasks.length"
+          :tasks="topbarTimerTasks"
+          :busy-task-id="timerActionTaskId"
+          :error="timerActionError"
+          @open-task="openBoardTask"
+          @open-board="openBoard"
+          @toggle-timer="toggleBoardTimer"
+        />
+        <span v-if="topbarTimerTasks.length" class="sep" aria-hidden="true">·</span>
         <!-- Компаньон стоит в ряду исполнителей: на /chats плавающей фигурки нет,
              а здесь он доступен всегда. Свой разделитель рисует сам. -->
         <CompanionTopbarButton />
@@ -368,11 +378,14 @@ import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { blockReasonLabel, useCockpitUpdateStore } from '../../stores/cockpit-update.js';
 import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
+import { useTasksStore } from '../../stores/tasks.js';
+import { useUiStore } from '../../stores/ui.js';
 import { useInboxStore } from '../../stores/inbox.js';
 import { useDockStore } from '../../stores/dock.js';
 import { providerUsageView } from '../../features/providers/providerUsage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
+import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
 import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
@@ -383,6 +396,8 @@ import { TOOL_BY_ID } from '../tools/registry.js';
 import { useToolLauncher } from '../tools/launcher.js';
 
 const route = useRoute();
+const router = useRouter();
+const ui = useUiStore();
 const toolDock = useDockStore();
 const health = ref(null);
 const { data: sys } = storeToRefs(useSystemStore());
@@ -434,7 +449,6 @@ function provTitle(p) {
 }
 // Кнопка «Настройки исполнителей» во всплывашке — на вкладку «Исполнители» настроек
 // (таб настроек запоминается в localStorage, поэтому просто задаём его).
-const router = useRouter();
 const { openTerminal } = useToolLauncher();
 function toProviders() {
   localStorage.setItem('cockpit-settings-tab', 'providers');
@@ -494,7 +508,19 @@ const chatsBadgeTitle = computed(() => (waitingChats.value
 // Доска: число в чипе — задачи с живым таймером; зелёная точка — таймер идёт;
 // синяя точка — после последнего просмотра появилась новая задача.
 const boardStore = useBoardStore();
+const taskStore = useTasksStore();
+const recentPausedTimerIds = ref([]);
+const timerActionTaskId = ref(null);
+const timerActionError = ref('');
 const boardNavActivity = computed(() => boardStore.activity);
+const boardTasks = computed(() => boardStore.data?.tasks || []);
+const topbarTimerTasks = computed(() => {
+  const recentIds = new Set(recentPausedTimerIds.value);
+
+  return boardTasks.value.filter((task) => (
+    task.timerRunning || recentIds.has(String(task.id))
+  ));
+});
 const boardChipVisible = computed(() => {
   const a = boardNavActivity.value;
   return !!(a.activeTimerCount || a.unseenCount);
@@ -507,6 +533,47 @@ const boardChipTitle = computed(() => {
   if (a.unseenCount) parts.push(`новых задач: ${a.unseenCount}`);
   return parts.join(' · ');
 });
+function openBoardTask(taskId) {
+  ui.openTask(taskId);
+}
+function openBoard() {
+  router.push('/board');
+}
+
+/**
+ * Переключает таймер через общий B24-store. Поставленную здесь паузу запоминаем,
+ * чтобы строка не исчезла и человек мог сразу продолжить учёт времени кнопкой play.
+ */
+async function toggleBoardTimer(task) {
+  if (timerActionTaskId.value !== null) return;
+
+  const taskId = String(task.id);
+  const action = task.timerRunning ? 'pause' : 'start';
+  const wasRemembered = recentPausedTimerIds.value.includes(taskId);
+
+  timerActionTaskId.value = taskId;
+  timerActionError.value = '';
+
+  if (action === 'pause' && !wasRemembered) {
+    recentPausedTimerIds.value = [...recentPausedTimerIds.value, taskId];
+  }
+
+  try {
+    await taskStore.timer(task.id, action);
+
+    if (action === 'start') {
+      recentPausedTimerIds.value = recentPausedTimerIds.value.filter((id) => id !== taskId);
+    }
+  } catch (error) {
+    if (action === 'pause' && !wasRemembered) {
+      recentPausedTimerIds.value = recentPausedTimerIds.value.filter((id) => id !== taskId);
+    }
+
+    timerActionError.value = error?.message || 'Не удалось переключить таймер';
+  } finally {
+    timerActionTaskId.value = null;
+  }
+}
 
 // Конвейер: задачи, которые встали на человеке — ворота ждут решения или движок упёрся.
 // Считает вотчер оповещений: он и так обходит все задачи, второго обхода не заводим.

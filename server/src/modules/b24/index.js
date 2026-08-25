@@ -1,10 +1,26 @@
-// Модуль b24 — доска «Рабочего стола» (read-only на этом этапе).
-// Мутации (взять в работу, направить на конвейер) добавятся отдельно — у них реальные
-// побочные эффекты (таймер B24, запуск фабрики).
+// Модуль b24 — доска «Рабочего стола», детали задач и управляемые мутации портала.
+// Все действия проходят через единый сериализованный B24Adapter с общей сессией.
 import fp from 'fastify-plugin';
+import {
+  B24ValidationError,
+  normalizeTaskUpdateFields,
+} from '../../lib/b24/b24-client.js';
 
 async function b24Module(fastify, opts) {
   const { b24 } = opts;
+
+  /**
+   * Дополняет неизменённые данные портала разрешёнными Telegram-обсуждениями.
+   * Одна функция обслуживает чтение и ответ после редактирования, чтобы DTO не расходились.
+   */
+  const taskWithDiscussion = async (id) => {
+    const task = await b24.taskDetail(id);
+    if (typeof fastify.telegramDiscussion !== 'function' || !task) return task;
+
+    const text = [task.title, task.description].filter(Boolean).join('\n');
+    const telegram = await fastify.telegramDiscussion(text);
+    return telegram.links.length ? { ...task, telegram } : task;
+  };
 
   // Полный дашборд: задачи + на контроле + я поставил + показатели + графики.
   fastify.get('/api/b24/dashboard', async (request, reply) => {
@@ -30,16 +46,11 @@ async function b24Module(fastify, opts) {
   fastify.get('/api/b24/task/:id', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    let task;
     try {
-      task = await b24.taskDetail(id);
+      return await taskWithDiscussion(id);
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: err.message });
     }
-
-    if (typeof fastify.telegramDiscussion !== 'function' || !task) return task;
-    const telegram = await fastify.telegramDiscussion([task.title, task.description].filter(Boolean).join('\n'));
-    return telegram.links.length ? { ...task, telegram } : task;
   });
 
   // Поиск пользователей (для выбора исполнителя).
@@ -63,7 +74,13 @@ async function b24Module(fastify, opts) {
   // --- Действия (мутации; требуют токен, если задан). ---
   const wrap = (fn) => async (request, reply) => {
     try { return await fn(request); }
-    catch (err) { return reply.code(502).send({ error: 'b24_error', message: err.message }); }
+    catch (err) {
+      const badRequest = err instanceof B24ValidationError;
+      return reply.code(badRequest ? 400 : 502).send({
+        error: badRequest ? err.code : 'b24_error',
+        message: err.message,
+      });
+    }
   };
   const taskId = (request) => String(request.params.id).replace(/[^0-9]/g, '');
 
@@ -102,6 +119,16 @@ async function b24Module(fastify, opts) {
       if (files.length) body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
     }
     return b24.createTask(body);
+  }));
+  fastify.put('/api/b24/task/:id', wrap(async (r) => {
+    const id = taskId(r);
+    if (!id) {
+      throw new B24ValidationError('Некорректный номер задачи');
+    }
+
+    const fields = normalizeTaskUpdateFields(r.body);
+    await b24.updateTask(id, fields);
+    return taskWithDiscussion(id);
   }));
   fastify.post('/api/b24/task/:id/comment', wrap((r) => b24.addComment(taskId(r), (r.body || {}).text || '')));
   // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
