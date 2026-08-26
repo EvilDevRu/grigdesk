@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { COMPANION_DEFAULTS, normalizeCompanionSettings } from './companion-settings.js';
+import { ARBITER_DEFAULTS, normalizeArbiterSettings } from './factory-arbiter.js';
 import { SPEECH_DEFAULTS, normalizeSpeechSettings } from './speech-settings.js';
 import { normalizeStoredTrustedDirectories } from './trusted-directories.js';
 
@@ -59,6 +60,11 @@ const DEFAULTS = {
   // всех окон, поэтому один разговор не должен идти разными моделями с разных устройств.
   // Пустое значение = модель по умолчанию из реестра исполнителей.
   companion: COMPANION_DEFAULTS,
+  // Арбитр типизированной остановки конвейера: { modelRef, effort, auto }. Модель
+  // отдельная от companion — это разные решения человека, и общий ключ связал бы их.
+  // `auto: false` по умолчанию: арбитр действует САМ, двигая курсор чужой задачи, и
+  // включённым по умолчанию делал бы это там, где его решений ещё никто не читал.
+  arbiter: ARBITER_DEFAULTS,
   // Паспорта КОКПИТНЫХ проектов (раздел «Проекты»): { <id>: { repos: [{key, dir}] } }.
   // Пути локальны для машины-мозга, поэтому живут в .state, а не в гитуемой базе.
   // У проектов фабрики источник путей — их bash-профиль; сюда они не пишутся.
@@ -95,6 +101,7 @@ export class PrefsStore {
       // частичный объект затрёт новые поля defaults целиком.
       speech: normalizeSpeechSettings(loaded.speech),
       companion: normalizeCompanionSettings(loaded.companion),
+      arbiter: normalizeArbiterSettings(loaded.arbiter),
     };
   }
 
@@ -109,6 +116,7 @@ export class PrefsStore {
         // Форму настройки компаньона нормализуем на записи: она уходит в аргументы CLI,
         // и произвольный объект из тела запроса храниться здесь не должен.
         else if (k === 'companion') next[k] = normalizeCompanionSettings(patch[k]);
+        else if (k === 'arbiter') next[k] = normalizeArbiterSettings(patch[k]);
         else next[k] = patch[k];
       }
     }

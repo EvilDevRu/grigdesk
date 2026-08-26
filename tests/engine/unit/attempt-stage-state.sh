@@ -696,22 +696,34 @@ fresh_first=$(run_state_verdict_encode failed build \
   'only-first=замечание первого прохода')
 fresh_second=$(run_state_verdict_encode failed build \
   'only-second=новое замечание повторного прохода')
+fresh_third=$(run_state_verdict_encode failed build \
+  'only-third=и снова полностью новое замечание')
 attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
 fresh=$(attempt_stage_state_commit_v2 \
   65 "$fresh_attempt" check failed 6 "$fresh_first" 2)
 assert_eq ready "$(json_field "$fresh" state)" \
   "первый набор замечаний разрешает исправление"
+# ПЕРВОЕ расширение проходит по допуску дуги. Прежнее правило звало человека уже здесь,
+# и цена измерена: 13 остановок из 31 — «набор расширен новыми id», сумма ожидания
+# 59.7 часа. При этом ремонт в таких сериях работал: в разобранном живом случае автор
+# закрыл два замечания из трёх, а остановило маршрут одно новое.
+attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
+fresh_allowed=$(attempt_stage_state_commit_v2 \
+  65 "$fresh_attempt" check failed 6 "$fresh_second" 2)
+assert_eq ready "$(json_field "$fresh_allowed" state)" \
+  "первое расширение набора проходит по допуску дуги"
+# ВТОРОЕ останавливает: допуск на дугу один, и он уже потрачен.
 attempt_stage_state_commit_v2 65 "$fresh_attempt" instrument done >/dev/null
 fresh_stop=$(attempt_stage_state_commit_v2 \
-  65 "$fresh_attempt" check failed 6 "$fresh_second" 2)
+  65 "$fresh_attempt" check failed 6 "$fresh_third" 2)
 assert_eq stopped "$(json_field "$fresh_stop" state)" \
-  "новый набор не запускает второй автоматический ремонт"
+  "второе расширение не запускает ещё один автоматический ремонт"
 assert_eq no-progress "$(json_field "$fresh_stop" stop)" \
   "расширение scope останавливается у человека"
 fresh_event=$(find "$fresh_dir/stage-results" -maxdepth 1 -type f \
   -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
 assert_contains "$(json_field "$(cat "$fresh_event")" reason)" \
-  'замкнутый набор замечаний расширен новыми id: only-second' \
+  'замкнутый набор замечаний расширен новыми id: only-third' \
   "журнал называет новый id, разомкнувший scope"
 
 # Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть «сценарий не
@@ -755,20 +767,28 @@ seen_first=$(run_state_verdict_encode failed build \
 seen_second=$(run_state_verdict_encode failed build \
   'another-defect=ещё одно замечание по тому же файлу' \
   'anchor:another-defect=src/grid.js' 'reviewed:src/grid.js')
+seen_third=$(run_state_verdict_encode failed build \
+  'third-defect=третье замечание по тому же файлу' \
+  'anchor:third-defect=src/grid.js' 'reviewed:src/grid.js')
 attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
 attempt_stage_state_commit_v2 \
   72 "$seen_attempt" check failed 6 "$seen_first" 2 >/dev/null
 attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
-seen_stop=$(attempt_stage_state_commit_v2 \
+seen_allowed=$(attempt_stage_state_commit_v2 \
   72 "$seen_attempt" check failed 6 "$seen_second" 2)
+assert_eq ready "$(json_field "$seen_allowed" state)" \
+  "первая новая претензия к просмотренному артефакту проходит по допуску"
+attempt_stage_state_commit_v2 72 "$seen_attempt" instrument done >/dev/null
+seen_stop=$(attempt_stage_state_commit_v2 \
+  72 "$seen_attempt" check failed 6 "$seen_third" 2)
 assert_eq stopped "$(json_field "$seen_stop" state)" \
-  "новая претензия к просмотренному артефакту останавливается у человека"
+  "вторая новая претензия к просмотренному артефакту останавливается у человека"
 assert_eq no-progress "$(json_field "$seen_stop" stop)" \
   "остановка по просмотренному артефакту остаётся no-progress"
 seen_event=$(find "$seen_dir/stage-results" -maxdepth 1 -type f \
   -name 'event.*.json' -print0 | xargs -0 grep -l '"kind": "no-progress"')
 assert_contains "$(json_field "$(cat "$seen_event")" reason)" \
-  'замкнутый набор замечаний расширен новыми id: another-defect' \
+  'замкнутый набор замечаний расширен новыми id: third-defect' \
   "журнал называет id, разомкнувший scope по проверенному файлу"
 
 # Якорь без объявленного охвата ничего не доказывает: «не видел раньше»
@@ -783,16 +803,86 @@ noscope_first=$(run_state_verdict_encode failed build \
 noscope_second=$(run_state_verdict_encode failed build \
   'only-anchor-second=замечание по другому файлу' \
   'anchor:only-anchor-second=tests/second.spec.js')
+noscope_third=$(run_state_verdict_encode failed build \
+  'only-anchor-third=замечание по третьему файлу' \
+  'anchor:only-anchor-third=tests/third.spec.js')
 attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
 attempt_stage_state_commit_v2 \
   73 "$noscope_attempt" check failed 6 "$noscope_first" 2 >/dev/null
 attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
-noscope_stop=$(attempt_stage_state_commit_v2 \
+noscope_allowed=$(attempt_stage_state_commit_v2 \
   73 "$noscope_attempt" check failed 6 "$noscope_second" 2)
+assert_eq ready "$(json_field "$noscope_allowed" state)" \
+  "якорь без охвата тоже получает общий допуск дуги, а не своё послабление"
+attempt_stage_state_commit_v2 73 "$noscope_attempt" instrument done >/dev/null
+noscope_stop=$(attempt_stage_state_commit_v2 \
+  73 "$noscope_attempt" check failed 6 "$noscope_third" 2)
 assert_eq stopped "$(json_field "$noscope_stop" state)" \
-  "без объявленного охвата якорь не разрешает автоматический возврат"
+  "без объявленного охвата якорь не разрешает второй автоматический возврат"
 assert_eq no-progress "$(json_field "$noscope_stop" stop)" \
   "поведение без охвата остаётся прежним"
+
+# Документ САМОГО ремонтируемого узла. Отсев по `reviewed` рассчитан на дугу, где ремонт
+# СОЗДАЁТ файлы: замечание по новому файлу и есть первый проход. На дуге планирования ремонт
+# файлов не создаёт — он переписывает свой документ, а замечания указывают на давно
+# существующий код, поэтому отсев не срабатывал никогда и допуск дуги был нулевой. Замер по
+# журналам всех попыток: `skeptic → plan` — самая частая дуга типизированных остановок
+# (10 из 31), и ни у одной находки на ней якорь не указывал на созданный ремонтом файл.
+doc_attempt=$(begin_selected 74 a_44556677889900bb44556677889900bb)
+assert_rc 0 "$?" "попытка для замечания по документу ремонта подготовлена"
+attempt_stage_state_init_v2 74 "$doc_attempt" debug >/dev/null
+doc_first=$(run_state_verdict_encode failed build \
+  'plan-misses-criterion=план не покрывает критерий 3' \
+  'anchor:plan-misses-criterion=src/core.py' 'reviewed:src/core.py')
+doc_second=$(run_state_verdict_encode failed build \
+  'new-plan-step-unproven=новый шаг плана ничем не доказан' \
+  'anchor:new-plan-step-unproven=t74.instrument.md' 'reviewed:src/core.py')
+doc_third=$(run_state_verdict_encode failed build \
+  'another-plan-step-unproven=и следующая редакция плана тоже' \
+  'anchor:another-plan-step-unproven=t74.instrument.md' 'reviewed:src/core.py')
+attempt_stage_state_commit_v2 74 "$doc_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  74 "$doc_attempt" check failed 6 "$doc_first" 2 >/dev/null
+attempt_stage_state_commit_v2 74 "$doc_attempt" instrument done >/dev/null
+doc_run=$(attempt_stage_state_commit_v2 \
+  74 "$doc_attempt" check failed 6 "$doc_second" 2)
+assert_eq ready "$(json_field "$doc_run" state)" \
+  "замечание по переписанному документу ремонта не останавливает маршрут"
+# И не тратит допуск дуги: каждая новая редакция документа — новый текст, а не рост охвата.
+# Серию всё равно ограничивают hard-лимит дуги и общий бюджет возвратов попытки.
+attempt_stage_state_commit_v2 74 "$doc_attempt" instrument done >/dev/null
+doc_again=$(attempt_stage_state_commit_v2 \
+  74 "$doc_attempt" check failed 6 "$doc_third" 2)
+assert_eq ready "$(json_field "$doc_again" state)" \
+  "следующая редакция того же документа тоже остаётся первым проходом"
+
+# Граница послабления: документ ДРУГОГО узла ремонт не переписывал, поэтому замечание по
+# нему остаётся обычным расширением и тратит допуск дуги.
+other_doc_attempt=$(begin_selected 75 a_5566778899aabbcc5566778899aabbcc)
+assert_rc 0 "$?" "попытка для чужого документа подготовлена"
+attempt_stage_state_init_v2 75 "$other_doc_attempt" debug >/dev/null
+other_first=$(run_state_verdict_encode failed build \
+  'first-code-defect=замечание по коду' \
+  'anchor:first-code-defect=src/core.py' 'reviewed:src/core.py')
+other_second=$(run_state_verdict_encode failed build \
+  'foreign-doc-defect=замечание по отчёту соседнего узла' \
+  'anchor:foreign-doc-defect=t75.report.md' 'reviewed:src/core.py' 'reviewed:t75.report.md')
+other_third=$(run_state_verdict_encode failed build \
+  'foreign-doc-defect-2=ещё одно замечание по тому же отчёту' \
+  'anchor:foreign-doc-defect-2=t75.report.md' 'reviewed:src/core.py' 'reviewed:t75.report.md')
+attempt_stage_state_commit_v2 75 "$other_doc_attempt" instrument done >/dev/null
+attempt_stage_state_commit_v2 \
+  75 "$other_doc_attempt" check failed 6 "$other_first" 2 >/dev/null
+attempt_stage_state_commit_v2 75 "$other_doc_attempt" instrument done >/dev/null
+other_run=$(attempt_stage_state_commit_v2 \
+  75 "$other_doc_attempt" check failed 6 "$other_second" 2)
+assert_eq ready "$(json_field "$other_run" state)" \
+  "первое замечание по чужому документу проходит по общему допуску"
+attempt_stage_state_commit_v2 75 "$other_doc_attempt" instrument done >/dev/null
+other_stop=$(attempt_stage_state_commit_v2 \
+  75 "$other_doc_attempt" check failed 6 "$other_third" 2)
+assert_eq stopped "$(json_field "$other_stop" state)" \
+  "чужой документ послабления не получает и останавливает маршрут вторым расширением"
 
 # Суммарный бюджет возвратов в target тестируется отдельно, с выключенным
 # no-progress у примитива: в живом typed runtime свежие id раньше остановит scope guard.

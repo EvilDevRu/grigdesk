@@ -47,11 +47,6 @@ export function compilePipelineView(prefix) {
       '../stores/companion.js': (
         `export const useCompanionStore = globalThis.${prefix}CompanionStore;`
       ),
-      '../shared/format.js': [
-        'export const liveTimerSec = () => 0;',
-        'export const pipelineWorkSec = (timing) => timing?.workSec ?? null;',
-        'export const secToHMS = (value) => String(value ?? 0);',
-      ].join('\n'),
       '../shared/md.js': 'export const mdToHtml = (value) => String(value || "");',
       '../shared/sandbox.js': (
         'export const sandboxUrl = (port) => `http://sandbox.test:${port}`;'

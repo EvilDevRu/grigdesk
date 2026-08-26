@@ -41,8 +41,25 @@ import {
 import { listInstalledRunners } from '../../lib/runners-catalog.js';
 import { loadRunnerConfig, resolveProjectRunnerState } from '../../lib/runner-state.js';
 import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
+import {
+  ARBITER_ACTOR,
+  arbitrationGate,
+  buildArbiterPrompt,
+  formatArbiterReason,
+  normalizeArbiterSettings,
+  parseArbiterDecision,
+  readArbitrationContext,
+  resolveArbiterTarget,
+} from '../../lib/factory-arbiter.js';
+import { resolveModelRef } from '../../lib/chat/model-ref.js';
+import { getExecutor } from '../../lib/executors/index.js';
+import { getModelsRegistry } from '../../lib/models-registry.js';
 
 const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+// Лимит хода арбитра. `executor.run` своего таймаута не имеет by design — в чате его
+// считает watchdog, который знает, что агент ждёт ответа человека. Арбитр человека не
+// ждёт вовсе, поэтому лимит здесь простой и жёсткий.
+const ARBITER_TURN_LIMIT_MS = 10 * 60 * 1000;
 
 const registryIsMissing = (error) => error?.code === 'ENOENT';
 
@@ -1253,6 +1270,168 @@ async function factoryModule(fastify, opts) {
       resumeFailure: resumed.failure || null,
     };
   });
+
+  // Арбитр типизированной остановки: снимает тупик вместо человека и предъявляет решение.
+  //
+  // Механика ровно та, которую человек выполняет руками, и заменяется здесь именно его
+  // КУРЬЕРСКАЯ часть: собрать оба вердикта дуги, посмотреть артефакты и рабочее дерево,
+  // сформулировать указание и вернуть курсор. Замер по журналам: 28 типизированных
+  // остановок, сумма ожидания 59.7 часа, из них 53 — пять ночных стоянок.
+  //
+  // Три границы, каждая проверяется до побочного действия:
+  //   1. разбирается ТОЛЬКО `no-progress`; `human` — прямой вызов человека, не топтание;
+  //   2. решение, меняющее границу задачи, арбитр принять не вправе и отдаёт человеку;
+  //   3. потолок арбитражей на попытку, потому что возврат арбитра (как и человеческий)
+  //      обнуляет замкнутый набор дуги.
+  // Событие журнала помечается `--actor`, поэтому машинное решение не выдаёт себя за
+  // человеческое ни в ленте попытки, ни в промпте узла.
+  //
+  // Тело вынесено из роута, потому что зовут его ДВОЕ: кнопка человека и автоматический
+  // вотчер. Одно тело — одни границы: у автоматического пути не должно быть ни своей
+  // проверки остановки, ни своего потолка арбитражей.
+  const runArbitration = async (id, reply) => {
+    const managed = await managedRegistry(id, reply);
+    if (!managed) return null;
+    const { trusted } = managed;
+    if (trusted.terminal) {
+      reply.code(409).send({
+        error: 'attempt_terminal',
+        message: `попытка закрыта (${trusted.terminal})`,
+      });
+      return null;
+    }
+
+    const context = await readArbitrationContext({
+      controlDir: config.factoryControlDir, task: id, attempt: trusted.attempt,
+    });
+    const gate = arbitrationGate(context, trusted.cursor);
+    if (!gate.ok) {
+      reply.code(409).send({ error: gate.error, message: gate.message });
+      return null;
+    }
+
+    const settings = normalizeArbiterSettings(prefs?.read()?.arbiter);
+    const target = await resolveArbiterTarget({
+      modelRef: { ...(settings.modelRef || {}), effort: settings.effort },
+      config,
+      modelsRegistry: getModelsRegistry,
+      executorResolver: getExecutor,
+      resolveRef: resolveModelRef,
+      log: fastify.log,
+    });
+    if (!target.ok) {
+      reply.code(409).send({ error: target.error, message: target.message });
+      return null;
+    }
+
+    // Рабочее дерево задачи. Пустой или повреждённый реестр worktree — отказ: арбитр без
+    // дерева видит только вердикты, то есть ровно ту слепоту, ради снятия которой он есть.
+    const parsed = parseSandboxRepositories(await factoryState.readEnv(id));
+    if (parsed.kind === 'invalid' || !parsed.repos?.length) {
+      reply.code(409).send({
+        error: 'arbiter_workspace_unavailable',
+        message: 'у задачи нет рабочего дерева — арбитру нечего проверять',
+      });
+      return null;
+    }
+    const cwd = parsed.repos[0].path;
+    const extraDirs = [...parsed.repos.slice(1).map((repo) => repo.path), config.stateDir];
+
+    // Своего таймаута у `executor.run` НЕТ: лимит хода считает watchdog модуля чата, а у
+    // арбитра его нет. Без ограничения зависший ход держал бы и HTTP-запрос, и процесс CLI
+    // без конца. Десять минут — с запасом на чтение артефактов и пару опытов.
+    const ac = new AbortController();
+    const deadline = setTimeout(() => ac.abort(), ARBITER_TURN_LIMIT_MS);
+    let output;
+    try {
+      output = await target.executor.run({
+        signal: ac.signal,
+        config,
+        message: buildArbiterPrompt({
+          task: id,
+          node: context.node,
+          target: context.target,
+          reason: context.reason,
+          series: context.series,
+          stateDir: config.stateDir,
+        }),
+        cwd,
+        extraDirs,
+        model: target.ref.model,
+        effort: target.effort || undefined,
+        permissionMode: 'plan',
+        providerSettings: prefs?.read()?.providerSettings?.[target.ref.provider] || {},
+        log: fastify.log,
+      });
+    } catch (err) {
+      fastify.log.warn({ err, task: id }, 'арбитр: ход не состоялся');
+      reply.code(409).send({
+        error: 'arbiter_run_failed',
+        message: ac.signal.aborted ? 'арбитр не уложился в лимит хода' : 'арбитр не отработал',
+      });
+      return null;
+    } finally {
+      clearTimeout(deadline);
+    }
+
+    const decision = parseArbiterDecision(output?.reply);
+    if (!decision.ok) {
+      reply.code(409).send({ error: decision.error, message: decision.message });
+      return null;
+    }
+    if (decision.verdict === 'human') {
+      // Не отказ и не ошибка: арбитр отработал и вернул то, что обязан вернуть, когда
+      // решение меняет границу задачи. Карточку показываем человеку — она и есть работа.
+      return {
+        ok: true,
+        resolved: false,
+        verdict: 'human',
+        card: decision.card,
+        scopeChange: decision.scopeChange,
+        model: `${target.ref.provider}/${target.ref.model}`,
+      };
+    }
+
+    const sanitized = humanComment(formatArbiterReason(decision), { fallback: '' });
+    if (!sanitized.ok) {
+      reply.code(409).send({ error: 'comment_too_long', message: sanitized.message });
+      return null;
+    }
+    const rewound = await runRouteEngine(config, routeGotoArgs(config, {
+      task: id,
+      profile: trusted.profile,
+      attempt: trusted.attempt,
+      node: context.target,
+      reason: sanitized.value,
+      actor: ARBITER_ACTOR,
+    }));
+    if (!rewound.ok) {
+      reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+      return null;
+    }
+    const resumed = await resumeRouteAttempt(id, {
+      profile: trusted.profile, attempt: trusted.attempt, why: 'после арбитража',
+    });
+    return {
+      ok: true,
+      resolved: true,
+      verdict: 'resolve',
+      node: context.target,
+      card: decision.card,
+      model: `${target.ref.provider}/${target.ref.model}`,
+      resumed: resumed.ok,
+      resumeError: resumed.message || null,
+      resumeFailure: resumed.failure || null,
+    };
+  };
+
+  fastify.post('/api/tasks/:id/arbitrate', async (request, reply) => {
+    const id = String(request.params.id).replace(/[^0-9]/g, '');
+    if (!id) return reply.code(400).send({ error: 'bad_input' });
+    const result = await runArbitration(id, reply);
+    return result === null ? reply : result;
+  });
+  fastify.decorate('factoryArbitrate', runArbitration);
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
   // разрешённой цепочки этого этапа. Сам engine применяет CAS к run/epoch и завершает

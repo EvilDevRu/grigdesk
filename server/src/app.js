@@ -42,6 +42,7 @@ import { InboxCoordinator } from './lib/inbox/coordinator.js';
 import { InboxAttachmentAnalyzer } from './lib/inbox/attachment-analysis.js';
 import { InboxTaskService } from './lib/inbox/task-service.js';
 import { InboxAutoTasks } from './lib/inbox/auto-tasks.js';
+import { FactoryArbiterWatch } from './lib/factory-arbiter-watch.js';
 import { runInboxTriage } from './lib/inbox/triage.js';
 import { FactoryDebugSettings } from './lib/factory-debug.js';
 import { readRouteWorkTime } from './lib/factory-route-cli.js';
@@ -483,6 +484,24 @@ async function build() {
   // Там же заводим автомат «жалоба → задача»: сам модуль его только собирает.
   // Крутиться вхолостую ему нечем — выключенный плагин и невыбранная модель
   // отсеиваются в первых строках захода.
+  // Автоматический разбор типизированных остановок конвейера. Заводится безусловно и
+  // гейтится живьём (prefs `arbiter.auto`, по умолчанию выключено), как вотчер пульта:
+  // включение не должно требовать рестарта. Своего опроса состояния у него нет — он
+  // просыпается по той же шине `state-change`, что и окна.
+  const arbiterWatch = new FactoryArbiterWatch({
+    // Ленивая ссылка, как у вотчера пульта рядом: порядок регистрации плагинов не должен
+    // становиться скрытым условием работы вотчера.
+    sse: { subscribe: (listener) => fastify.sse.subscribe(listener) },
+    prefs,
+    listTasks: async () => {
+      const response = await fastify.inject({ method: 'GET', url: '/api/tasks' });
+      if (response.statusCode !== 200) return [];
+      return response.json().tasks || [];
+    },
+    arbitrate: (task, reply) => fastify.factoryArbitrate(task, reply),
+    log: fastify.log,
+  });
+
   fastify.addHook('onReady', async () => {
     await githubConnection.initialize();
     const telegramState = await telegramConnection.initialize();
@@ -498,6 +517,7 @@ async function build() {
     void telegramPult.actions.start().catch((error) => {
       fastify.log.warn({ err: error }, 'telegram-pult: восстановление после старта сорвалось');
     });
+    arbiterWatch.start();
   });
   fastify.addHook('onClose', async () => {
     githubConnection.stop();
@@ -505,6 +525,7 @@ async function build() {
     await telegramPoller.stop();
     await pultWatch.stop();
     inboxAutoTasks.stop();
+    arbiterWatch.stop();
     await speechRuntime.shutdown();
   });
 

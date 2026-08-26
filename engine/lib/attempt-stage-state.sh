@@ -650,7 +650,20 @@ def stable_core_reason(window, owner):
     return f"ремонт не снимает замечания: {shown}"
 
 
-def scope_expansion_reason(history, candidate):
+def _arc_already_expanded(typed_history, closed_ids):
+    # Было ли расширение на этой дуге раньше. Считаем по СЫРЫМ наборам id, без якорных
+    # послаблений: послабления отвечают на вопрос «эта находка законна», а здесь вопрос
+    # другой — «сколько раз проверяющий уже выходил за замкнутый набор». Смешать их
+    # значит выдать второй допуск тому, кто первый уже потратил.
+    closed = set(closed_ids)
+    for verdict in typed_history[1:]:
+        _, ids = verdict_snapshot(verdict)
+        if set(ids) - closed:
+            return True
+    return False
+
+
+def scope_expansion_reason(history, candidate, task=None, target=None):
     # Первый typed verdict после решения человека замыкает блокирующий набор дуги.
     # Иначе проверяющий может каждый раз приносить полностью новые id: точный
     # no-progress fingerprint считает это прогрессом, хотя задача только растёт.
@@ -659,9 +672,10 @@ def scope_expansion_reason(history, candidate):
     # не доказывает прогресс и требует решения человека.
     # Причинность нового дефекта ledger доказать не может, поэтому безопасный исход —
     # остановить автоматический rewind и отдать расширение человеку, не потеряв verdict.
-    # Единственное исключение — ниже: первый проход по артефакту, которого проверяющий
-    # раньше не видел. Аргументы — целые вердикты, а не снимки: снимок отвечает
-    # «что не снялось», а якоря и охват — «видел ли он этот артефакт».
+    # Исключения — ниже: первый проход по артефакту, которого проверяющий раньше не
+    # видел, документ самого ремонтируемого узла и ОДИН допуск на дугу. Аргументы —
+    # целые вердикты, а не снимки: снимок отвечает «что не снялось», а якоря и охват —
+    # «видел ли он этот артефакт».
     if candidate is None:
         return None
     typed_history = [verdict for verdict in history if verdict is not None]
@@ -680,6 +694,13 @@ def scope_expansion_reason(history, candidate):
     added = sorted(set(candidate_ids) - set(closed_ids))
     if not added:
         return None
+    # Якоря нужны обоим послаблениям ниже, поэтому считаются один раз и до них: раньше
+    # словарь строился внутри ветки `reviewed`, и второе послабление падало на вердикте
+    # без объявленного охвата.
+    anchors = {
+        finding["id"]: finding.get("anchor")
+        for finding in candidate["findings"]
+    }
     # Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть замечание
     # «сценарий не покрыт» нельзя, не написав файл. Замечание по такому файлу — первый
     # проход по новому коду, а не рост охвата: раньше его не могло быть, потому что
@@ -692,10 +713,6 @@ def scope_expansion_reason(history, candidate):
     for verdict in typed_history:
         reviewed.update(verdict.get("reviewed") or ())
     if reviewed:
-        anchors = {
-            finding["id"]: finding.get("anchor")
-            for finding in candidate["findings"]
-        }
         added = [
             finding_id
             for finding_id in added
@@ -706,6 +723,37 @@ def scope_expansion_reason(history, candidate):
         ]
         if not added:
             return None
+    # Документ самого ремонтируемого узла. Отсев по `reviewed` рассчитан на дугу
+    # «автор ↔ проверяющий», где ремонт СОЗДАЁТ файлы: замечание по новому файлу и есть
+    # первый проход. На дуге планирования ремонт файлов не создаёт — он переписывает свой
+    # документ, а замечания указывают на давно существующий код. Поэтому там отсев не
+    # срабатывал НИКОГДА, и допуск на расширение у плановой дуги был ровно нулевой: первый
+    # же новый блокирующий id останавливал маршрут. Замер по журналам всех попыток:
+    # `skeptic → plan` — самая частая дуга типизированных остановок (10 из 31), и ни у
+    # одной находки на ней якорь не указывал на созданный ремонтом файл.
+    # Замечание по документу, который ремонт только что переписал, — первый проход по
+    # новому тексту по построению, а не рост охвата.
+    if task is not None and target is not None:
+        document = f"t{task}.{target}.md"
+        added = [
+            finding_id
+            for finding_id in added
+            if (anchors.get(finding_id) or "") != document
+        ]
+        if not added:
+            return None
+    # Допуск: ПЕРВОЕ расширение на дуге проходит, второе останавливает маршрут.
+    # Прежнее правило звало человека на первом же новом id, и цена этого измерена:
+    # 13 остановок из 31 — «набор расширен новыми id», медиана ожидания человека 15 минут,
+    # сумма 59.7 часа, максимум 13.9 часа простоя стенда и слота. При этом ремонт в этих
+    # сериях РАБОТАЛ: в разобранном живом случае план закрыл два замечания из трёх, а
+    # остановило его одно новое.
+    # Допуск не бесплатный и не безграничный: он списывается из общего бюджета возвратов
+    # попытки (`target_rewind_budget`) и hard-лимита дуги, поэтому серия «каждый круг
+    # приношу новый сценарий нарушения того же контракта» по-прежнему конечна — она просто
+    # стоит на один круг дольше.
+    if not _arc_already_expanded(typed_history, closed_ids):
+        return None
     shown = ", ".join(added[:3])
     if len(added) > 3:
         shown += f" и ещё {len(added) - 3}"
@@ -777,8 +825,16 @@ def validate_event_static(
     if not isinstance(event, dict) or frozenset(event) not in {
         frozenset(required),
         frozenset(required | {"verdict"}),
+        frozenset(required | {"actor"}),
+        frozenset(required | {"verdict", "actor"}),
     }:
         fail()
+    if "actor" in event:
+        identifier(event["actor"])
+        if event["kind"] != "human-rewind" or event["actor"] == "human":
+            # `human` не пишется вовсе (это умолчание), а у прочих видов событий
+            # исполнителя нет: их вырабатывает сам доверенный рантайм.
+            fail()
     validate_static(
         event,
         task,
@@ -1030,7 +1086,7 @@ elif OP == "prepare-pause":
     dump(event)
 
 elif OP == "prepare-human-rewind":
-    runtime_path, results_dir, node, reset_csv, rewind_reason, at = ARGS
+    runtime_path, results_dir, node, reset_csv, rewind_reason, at, actor = ARGS
     runtime = regular_json(runtime_path)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
@@ -1065,6 +1121,14 @@ elif OP == "prepare-human-rewind":
         fail(10)
     sequence = integer(runtime.get("sequence")) + 1
     event = event_base(runtime, sequence, at, "human-rewind", node)
+    # Кто принял решение. Поле пишется ТОЛЬКО когда решал не человек: у обычного `goto`
+    # событие остаётся байт в байт прежним, и уже записанные события остаются валидными.
+    # Это запись аудита, а не рубеж безопасности: кокпит работает от того же пользователя
+    # и мог бы назваться человеком. Смысл в другом — машинное решение, записанное как
+    # человеческое, создаёт в журнале ложь «это обдумал человек», а весь план автономности
+    # стоит на том, что предъявленное решение можно отличить от принятого.
+    if actor != "human":
+        event["actor"] = actor
     event.update(
         {
             "outcome": None,
@@ -1181,6 +1245,8 @@ elif OP == "prepare-commit":
             progress_reason = scope_expansion_reason(
                 rewind_verdicts,
                 verdict,
+                runtime.get("taskId"),
+                action["rewind"],
             )
         if progress_reason is None:
             progress_reason = no_progress_reason(
@@ -1958,13 +2024,16 @@ attempt_stage_state_routing_transitions_v2() {
 # Появился из кнопки «перейти сюда» кокпита: у v1 она форсировала статус этапа
 # напрямую в реестре, в v2 такой путь закрыт — нужен доверенный эквивалент.
 attempt_stage_state_human_rewind_v2() {
-  local task attempt node reset reason root lock_fd runtime_tmp event_tmp now rc
+  local task attempt node reset reason actor root lock_fd runtime_tmp event_tmp now rc
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
   node=$(_attempt_stage_state_node_id "${3:-}") || return
   reset=${4:-}
   reason=${5:-}
+  # Кто решил. Умолчание `human` в событие не пишется вовсе — см. prepare-human-rewind.
+  actor=${6:-human}
   [[ -n "$reset" ]] || return 2
+  [[ "$actor" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] || return 2
   _attempt_state_reason "$reason" || return
   root=$(attempt_state_v2_task_root "$task") || return
   _attempt_state_lock "$task" lock_fd || return
@@ -1984,7 +2053,8 @@ attempt_stage_state_human_rewind_v2() {
   fi
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-human-rewind \
-      "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$reset" "$reason" "$now" >"$event_tmp"
+      "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$reset" "$reason" "$now" "$actor" \
+      >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then
       rm -f -- "$event_tmp" "$runtime_tmp"

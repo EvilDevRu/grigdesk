@@ -124,7 +124,6 @@ verify_settings=$(cat "$verify_settings")
 assert_contains "$verify_settings" '"Bash(profile-verify.sh:*)"' \
   "verify receives the trusted profile verification command"
 
-finish_tests
 
 # --- составная команда решается по САМОЙ СЛАБОЙ части ---
 # CLI разбирает `git status && cd … && git status` на части, и отказ одной запрещает
@@ -145,20 +144,60 @@ has() { [[ "$1" == *"$2"* ]] && printf 'да' || printf 'нет'; }
 assert_eq да "$(has "$check_settings" '"Bash(cd:*)"')" "cd разрешён проверяющему узлу"
 assert_eq да "$(has "$write_settings" '"Bash(cd:*)"')" "cd разрешён пишущему узлу"
 
-# `echo`/`printf` — только там, где запись и так есть. На пишущем узле они не дают
-# новой возможности: Write и Edit там уже выданы.
+# `echo`/`printf` выдаются ВСЕМ узлам. Прежде проверяющему их не давали, потому что
+# `echo x > file` префиксным правилом не выражается. Замер показал цену запрета: из 1302
+# отказов прав `echo`/`printf` участвует примерно в 610, а перенаправление содержат лишь
+# 12% из них — остальное метки-разделители и хвост `; echo "exit=$?"`, валящие составную
+# команду целиком. Рубеж переехал в PreToolUse-хук, который видит команду полностью.
 assert_eq да "$(has "$write_settings" '"Bash(echo:*)"')" "echo разрешён пишущему узлу"
 assert_eq да "$(has "$write_settings" '"Bash(printf:*)"')" "printf разрешён пишущему узлу"
+assert_eq да "$(has "$check_settings" '"Bash(echo:*)"')" "echo разрешён проверяющему узлу"
+assert_eq да "$(has "$check_settings" '"Bash(printf:*)"')" "printf разрешён проверяющему узлу"
 
-# А проверяющему нельзя: `echo x > file` правилами не выражается, и предупредительный
-# рубеж прав сменился бы посмертным сторожем, который валит узел уже после всей работы.
-assert_eq нет "$(has "$check_settings" '"Bash(echo:*)"')" \
-  "echo проверяющему узлу не выдаётся: перенаправление правилом не ловится"
-assert_eq нет "$(has "$check_settings" '"Bash(printf:*)"')" \
-  "printf проверяющему узлу не выдаётся по той же причине"
+# Разрешение без рубежа было бы разменом. Хук ставится ровно на проверяющий узел и
+# получает каталог состояния аргументом: пишущему узлу перенаправление законно.
+assert_contains "$check_settings" '"PreToolUse"' \
+  "у проверяющего узла есть превентивный сторож записи"
+assert_contains "$check_settings" "lib/stage-write-guard.sh $STATE_DIR" \
+  "сторож знает каталог состояния: туда узел писать вправе"
+assert_eq нет "$(has "$write_settings" '"PreToolUse"')" \
+  "пишущему узлу сторож перенаправления не нужен"
+
+# Опыт: узлу, которому запрещён однострочник, нужен способ проверить факт запуском.
+for label in "$check_settings" "$write_settings"; do
+  assert_contains "$label" "lib/stage-probe.sh" "опыт разрешён узлу"
+done
 
 # Узел без объявленной политики считается проверяющим по умолчанию не бывает, но и
 # послаблений не получает: неизвестная политика не должна открывать запись обходным путём.
 unknown_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY= _agent_settings REVIEW)
 unknown_settings=$(cat "$unknown_settings")
 assert_eq да "$(has "$unknown_settings" '"Bash(cd:*)"')" "cd есть и без объявленной политики"
+
+# --- питон проекта ---
+# В allowlist стоит только системный `python3`, а питон-проект живёт в venv. Замер по
+# журналам: 33 отказа на `<repo>/.venv/bin/python`, 28 из них на проверяющем узле —
+# то есть проверка отказывалась молча ровно там, где важнее всего. Спрашиваем файловую
+# систему, а не имя профиля: имя придумывает человек, каталог либо есть, либо нет.
+mkdir -p "$repo/.venv/bin"
+printf '#!/bin/sh\n' >"$repo/.venv/bin/python"
+chmod +x "$repo/.venv/bin/python"
+
+venv_check=$(FACTORY_ROUTE_FILESYSTEM_POLICY=state-only _agent_settings REVIEW)
+venv_check=$(cat "$venv_check")
+assert_contains "$venv_check" "\"Bash($repo/.venv/bin/python:*)\"" \
+  "питон venv проекта разрешён"
+# Разрешив venv, нельзя оставить в нём дыру, которой нет у системного python3.
+assert_contains "$venv_check" "\"Bash($repo/.venv/bin/python -c:*)\"" \
+  "однострочник venv-питона проверяющему узлу закрыт так же, как у python3"
+
+rm -rf "$repo/.venv"
+no_venv=$(FACTORY_ROUTE_FILESYSTEM_POLICY=state-only _agent_settings REVIEW)
+no_venv=$(cat "$no_venv")
+assert_eq нет "$(has "$no_venv" '.venv/bin/python')" \
+  "несуществующий venv в права не попадает"
+
+# `finish_tests` обязан стоять ПОСЛЕДНИМ: он печатает план и возвращает код, но
+# скрипт не завершает. Пока он стоял в середине файла, все проверки ниже исполнялись
+# впустую — их падение не попадало ни в план, ни в код возврата прогона.
+finish_tests

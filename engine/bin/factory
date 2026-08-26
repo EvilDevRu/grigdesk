@@ -44,7 +44,7 @@ usage() {
   factory TASK recover --attempt a_<32hex> --reason TEXT
                    --route ROUTE [те же общие пути]
 
-  factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT
+  factory TASK goto --attempt a_<32hex> --node NODE --reason TEXT [--actor ID]
                    [те же общие пути]
 
   factory TASK work-time --attempt a_<32hex>
@@ -237,6 +237,7 @@ CONTROL_ROOT="${FACTORY_CONTROL_ROOT:-$FACTORY_USER_HOME/.factory/control}"
 TICKET_JSON=""
 EXPECTED_ATTEMPT=""
 REASON=""
+ACTOR=""
 DIAGNOSIS_KIND=""
 DIAGNOSIS_SIGNAL=""
 RUNNER_PRIMARY_OVERRIDE=""
@@ -368,6 +369,12 @@ while (( $# > 0 )); do
       (( $# >= 2 )) || die "после --reason нужен текст"
       [[ -z "$REASON" ]] || die "--reason указан повторно"
       REASON=$2
+      shift 2
+      ;;
+    --actor)
+      (( $# >= 2 )) || die "после --actor нужен идентификатор"
+      [[ -z "$ACTOR" ]] || die "--actor указан повторно"
+      ACTOR=$2
       shift 2
       ;;
     --diagnosis-kind)
@@ -600,6 +607,15 @@ if [[ "$MODE" == abandon || "$MODE" == recover || "$MODE" == goto ]]; then
   [[ -n "$REASON" ]] || die "$MODE требует --reason"
 else
   [[ -z "$REASON" ]] || die "--reason допустим только в abandon, recover и goto"
+fi
+# Кто принял решение. Умолчание — человек, и тогда поле не пишется в событие вовсе.
+# Нужно это для одной вещи: машинное решение, записанное как человеческое, создаёт в
+# журнале ложь «это обдумал человек». Рубежом безопасности поле не является — кокпит
+# работает от того же пользователя и мог бы назваться человеком; это запись аудита.
+if [[ -n "$ACTOR" ]]; then
+  [[ "$MODE" == goto ]] || die "--actor допустим только в goto"
+  [[ "$ACTOR" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] || die "--actor: недопустимый идентификатор"
+  [[ "$ACTOR" != human ]] || die "--actor human является умолчанием и не указывается"
 fi
 if [[ "$MODE" == goto ]]; then
   [[ "$GATE_NODE" =~ ^[a-z0-9][a-z0-9_-]{0,40}$ ]] ||
@@ -3039,7 +3055,7 @@ v2_admin_main() {
       return 2
     }
     attempt_stage_state_human_rewind_v2 \
-      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" || {
+      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" "${ACTOR:-human}" || {
       rc=$?
       v2_log "goto $GATE_NODE не принят (код $rc)"
       return "$rc"

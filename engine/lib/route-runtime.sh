@@ -853,11 +853,19 @@ _route_v2_transaction_after() {
 # попадёт в промпт через render_node. Именно поэтому доставка находок не может зависеть
 # от requiredContext: это инвариант движка, а не решение автора схемы.
 #
-# Берём только `open`: `closed` — история, `deferred` адресованы человеку на воротах.
+# `closed` — история и в промпт не идёт. `open` — список к ремонту. `deferred` раньше
+# считались адресованными человеку на воротах и до узлов не доезжали вовсе — и это стоило
+# отдельной беды: проверяющий, не зная о собственной прошлой отложенной находке, НАХОДИЛ ЕЁ
+# СНОВА следующим кругом. Замер по журналам всех попыток: 8 попыток из 29 переоткрывают тот
+# же отложенный id на том же узле, одна — трижды. Каждый повтор занимает место в лимите
+# находок вердикта и требует от человека на воротах повторного «это мы уже отложили».
+# Поэтому отложенные тоже едут в промпт, но ОТДЕЛЬНЫМ списком и с обратным смыслом:
+# автору «не чини», проверяющему «не открывай заново».
+#
 # Любой сбой разбора даёт пустую строку и молчание — находки усиливают промпт, но не
 # являются условием исполнения узла, и ронять из-за них заход нельзя.
-_route_v2_open_findings_from_context() {
-  local context_file=${1:-}
+_route_v2_findings_from_context() {
+  local context_file=${1:-} section=${2:-open}
   [[ -n "$context_file" && -f "$context_file" && ! -L "$context_file" ]] || return 0
   python3 -c '
 import json, sys
@@ -871,10 +879,10 @@ if not isinstance(context, dict):
     raise SystemExit(0)
 evidence = context.get("evidence")
 findings = evidence.get("findings") if isinstance(evidence, dict) else None
-records = findings.get("open") if isinstance(findings, dict) else None
+records = findings.get(sys.argv[2]) if isinstance(findings, dict) else None
 if isinstance(records, list) and records:
     json.dump(records, sys.stdout, ensure_ascii=False)
-' "$context_file" 2>/dev/null || return 0
+' "$context_file" "$section" 2>/dev/null || return 0
 }
 
 _route_v2_run_agent_node() {
@@ -962,8 +970,9 @@ _route_v2_run_agent_node() {
   fi
 
   mkdir -p -- "$STATE_DIR/logs" || return 1
-  local _r2_open_findings
-  _r2_open_findings=$(_route_v2_open_findings_from_context "$_r2_context_file")
+  local _r2_open_findings _r2_deferred_findings
+  _r2_open_findings=$(_route_v2_findings_from_context "$_r2_context_file" open)
+  _r2_deferred_findings=$(_route_v2_findings_from_context "$_r2_context_file" deferred)
   FACTORY_ROUTE_FILESYSTEM_POLICY="$policy" \
   FACTORY_ROUTE_BROWSER_POLICY="${ROUTE_V2_NODE_BROWSER:-forbid}" \
   FACTORY_ROUTE_TIMEOUT_CLASS="${ROUTE_V2_NODE_TIMEOUT_CLASS:-}" \
@@ -974,6 +983,7 @@ _route_v2_run_agent_node() {
   FACTORY_STAGE_RETRY_REASON="${ROUTE_V2_NODE_RETRY_REASON:-}" \
   FACTORY_STAGE_HUMAN_NOTE="${ROUTE_V2_NODE_HUMAN_NOTE:-}" \
   FACTORY_STAGE_OPEN_FINDINGS="$_r2_open_findings" \
+  FACTORY_STAGE_DEFERRED_FINDINGS="$_r2_deferred_findings" \
     run_agent "$task" "$(cat "$_r2_prompt_file")" "$run_key" \
       >>"$STATE_DIR/logs/t${task}.route-v2.log" 2>&1
   local agent_rc=$?
@@ -2127,9 +2137,12 @@ route_v2_rewind_exhausted_stop() {
   [[ "$state" == stopped && "$stop" == human && "$last_outcome" == exhausted ]] ||
     return 0
   reset=$(_route_v2_reset_chain "$last_node") || return
+  # Решает здесь ДВИЖОК, а не человек: бюджет повторов исчерпан, и рантайм сам двигает
+  # курсор дальше. Пока исполнитель события не назывался, такой возврат лежал в журнале
+  # неотличимо от человеческого `goto`.
   attempt_stage_state_human_rewind_v2 \
     "$task" "$attempt" "$last_node" "$reset" \
-    "продолжение после исчерпанного бюджета повторов" >/dev/null || return
+    "продолжение после исчерпанного бюджета повторов" engine >/dev/null || return
   printf '%s\n' "$last_node"
 }
 

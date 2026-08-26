@@ -1421,6 +1421,86 @@
           {{ factoryDebugMsg.text }}
         </p>
       </div>
+
+      <!-- Арбитр типизированной остановки. Тумблер отдельно от модели намеренно: кнопка
+           «разобрать и продолжить» в плашке затыка работает всегда, а тумблер решает
+           только то, ходит ли арбитр САМ, без человека. -->
+      <div class="card run-card" data-testid="arbiter-settings">
+        <div class="card-head">
+          <div>
+            <p class="run-kicker">Автономия</p>
+            <h3>Арбитр остановок</h3>
+            <p class="muted small">
+              Когда возвраты между узлами перестают давать прогресс, движок останавливает
+              маршрут и зовёт человека. Арбитр разбирает такой тупик вместо него: читает
+              оба вердикта, проверяет спорное в рабочем дереве и возвращает узел с
+              указанием. Границу задачи он менять не вправе — такое решение отдаёт человеку.
+            </p>
+          </div>
+        </div>
+
+        <div class="mode" data-testid="arbiter-auto">
+          <UiSwitch
+            :model-value="arbiterRun.auto"
+            :disabled="arbiterBusy"
+            @update:model-value="setArbiterAuto"
+          >
+            Разбирать автоматически
+          </UiSwitch>
+          <p class="muted small">
+            Выключено — арбитр работает только по кнопке в плашке затыка. Включённый снимает
+            ночные стоянки: разбор идёт сам, не дожидаясь, пока человек подойдёт. Решение в
+            любом случае помечено в журнале попытки как машинное.
+          </p>
+        </div>
+
+        <div class="plug-model-grid" :class="{ solo: !arbiterEffortLevels.length && !arbiterEffortLost }">
+          <div class="plugrow wide">
+            <label for="arbiter-model">Модель</label>
+            <UiSelect
+              id="arbiter-model"
+              class="inp"
+              data-context="settings-field"
+              data-testid="arbiter-model-select"
+              :disabled="arbiterBusy"
+              :model-value="arbiterModelValue"
+              @change="setArbiterModel($event.target.value)"
+            >
+              <option value="">— не выбрана —</option>
+              <option v-if="arbiterModelLost" :value="arbiterModelValue">
+                {{ arbiterModelLost }} — нет в реестре
+              </option>
+              <optgroup v-for="g in modelGroups" :key="g.id"
+                        :label="g.name + (g.available ? '' : ' — недоступен')">
+                <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
+                  {{ m.name }}
+                </option>
+              </optgroup>
+            </UiSelect>
+          </div>
+          <div v-if="arbiterEffortLevels.length || arbiterEffortLost" class="plugrow effort-row">
+            <label for="arbiter-effort">Усилие</label>
+            <UiSelect
+              id="arbiter-effort"
+              class="inp"
+              data-context="settings-field"
+              :disabled="arbiterBusy"
+              :model-value="arbiterRun.effort"
+              @change="setArbiterEffort($event.target.value)"
+            >
+              <option value="">по умолчанию исполнителя</option>
+              <option v-if="arbiterEffortLost" :value="arbiterEffortLost">
+                {{ arbiterEffortLost }} — нет у этой модели
+              </option>
+              <option v-for="e in arbiterEffortLevels" :key="e" :value="e">{{ e }}</option>
+            </UiSelect>
+          </div>
+        </div>
+        <p v-if="!arbiterRun.modelRef" class="run-subnote">
+          Без выбранной модели арбитр не работает ни по кнопке, ни сам.
+        </p>
+        <p v-if="arbiterMsg" class="msg" :class="arbiterMsg.type">{{ arbiterMsg.text }}</p>
+      </div>
     </section>
 
     <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
@@ -2557,6 +2637,79 @@ function setCompanionEffort(value) {
   const modelRef = companionRun.value.modelRef;
   if (!modelRef) return null;
   return saveCompanionRun({ modelRef, effort: String(value || '') });
+}
+
+// ── Арбитр типизированной остановки конвейера ──
+// Настройка серверная: арбитр живёт на сервере и ходит сам, поэтому выбор обязан быть
+// один на все окна. Модель отдельная от компаньона — это разные решения человека.
+const arbiterMsg = ref(null);
+const arbiterBusy = ref(false);
+const arbiterRun = computed(() => {
+  const raw = prefs.value?.arbiter;
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const ref_ = source.modelRef && typeof source.modelRef === 'object' ? source.modelRef : null;
+  return {
+    modelRef: ref_?.provider && ref_?.model ? { provider: ref_.provider, model: ref_.model } : null,
+    effort: typeof source.effort === 'string' ? source.effort : '',
+    auto: source.auto === true,
+  };
+});
+const arbiterModelValue = computed(() => {
+  const ref_ = arbiterRun.value.modelRef;
+  return ref_ ? `${ref_.provider}:${ref_.model}` : '';
+});
+/** Выбор есть, а модели в реестре нет: молча показать «не выбрана» нельзя. */
+const arbiterModelLost = computed(() => {
+  const ref_ = arbiterRun.value.modelRef;
+  if (!ref_) return null;
+  const { provider, model } = prov.modelOf(ref_);
+  return provider && model ? null : `${ref_.provider}:${ref_.model}`;
+});
+const arbiterEffortLevels = computed(() => {
+  const ref_ = arbiterRun.value.modelRef;
+  if (!ref_) return [];
+  const { model } = prov.modelOf(ref_);
+  return Array.isArray(model?.efforts) ? model.efforts : [];
+});
+const arbiterEffortLost = computed(() => {
+  const effort = arbiterRun.value.effort;
+  if (!effort) return null;
+  return arbiterEffortLevels.value.includes(effort) ? null : effort;
+});
+
+async function saveArbiter(next) {
+  arbiterMsg.value = null;
+  arbiterBusy.value = true;
+  try {
+    prefs.value = await api.post('/api/settings/prefs', { arbiter: next });
+    arbiterMsg.value = { type: 'ok', text: 'Сохранено.' };
+  } catch (e) {
+    arbiterMsg.value = { type: 'err', text: e.message };
+  } finally {
+    arbiterBusy.value = false;
+  }
+}
+
+function setArbiterAuto(value) {
+  return saveArbiter({ ...arbiterRun.value, auto: value === true });
+}
+
+function setArbiterModel(value) {
+  // id исполнителя двоеточий не содержит, id модели содержит — режем по первому.
+  const at = String(value || '').indexOf(':');
+  if (at <= 0) return saveArbiter({ ...arbiterRun.value, modelRef: null, effort: '' });
+  const modelRef = { provider: value.slice(0, at), model: value.slice(at + 1) };
+  // Уровень переносим, только если новая модель его объявляет: `--effort xhigh` у модели
+  // без такой ступени роняет запуск CLI, а не игнорируется.
+  const { model } = prov.modelOf(modelRef);
+  const levels = Array.isArray(model?.efforts) ? model.efforts : [];
+  const effort = arbiterRun.value.effort;
+  return saveArbiter({ ...arbiterRun.value, modelRef, effort: levels.includes(effort) ? effort : '' });
+}
+
+function setArbiterEffort(value) {
+  if (!arbiterRun.value.modelRef) return null;
+  return saveArbiter({ ...arbiterRun.value, effort: String(value || '') });
 }
 
 const wakeLockNeedsHttps = typeof window !== 'undefined' && window.isSecureContext === false;

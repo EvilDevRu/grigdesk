@@ -111,10 +111,15 @@ export function routeGateArgs(config, {
 
 /** `goto` — доверенный возврат курсора человеком на пройденный узел. */
 export function routeGotoArgs(config, {
-  task, profile, attempt, node, reason,
+  task, profile, attempt, node, reason, actor = '',
 }) {
-  return [String(task), 'goto', '--profile', profile, '--attempt', attempt,
-    '--node', node, '--reason', reason, ...routePathArgs(config)];
+  const args = [String(task), 'goto', '--profile', profile, '--attempt', attempt,
+    '--node', node, '--reason', reason];
+  // Кто решил. Умолчание — человек, и тогда флага нет вовсе: событие журнала остаётся
+  // прежним байт в байт. Машинное решение обязано называть себя, иначе журнал попытки
+  // утверждает, что курсор вернул человек.
+  if (actor) args.push('--actor', actor);
+  return [...args, ...routePathArgs(config)];
 }
 
 export function routeAbandonArgs(config, { task, profile, attempt, reason }) {

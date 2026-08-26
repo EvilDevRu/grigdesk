@@ -106,6 +106,16 @@
         <span class="daemon" :class="t.readOnly ? 'idle' : (t.stall ? 'stall' : (t.daemonAlive ? 'alive' : 'idle'))">
           {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
         </span>
+        <span
+          v-if="b24TimerState(t)"
+          class="b24-timer mono"
+          :class="b24TimerState(t)"
+          data-role="pipeline-b24-timer"
+          :data-state="b24TimerState(t)"
+          title="Таймер Битрикс24 по этой задаче"
+        >
+          {{ b24TimerLabel(t) }}
+        </span>
         <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
         <span v-if="t.graph.timing" class="elapsed mono" :title="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
       </header>
@@ -140,6 +150,26 @@
         <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
              Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
              к живому порту фронта, — поэтому починка живёт в самой плашке. -->
+        <!-- Типизированное топтание разбирает арбитр: собирает оба вердикта дуги,
+             проверяет спорное в рабочем дереве и возвращает курсор с указанием. Это
+             замена курьерской работы человека, а не «ещё одна модель»: замер по
+             журналам — 28 таких остановок, сумма ожидания 59.7 часа. -->
+        <div v-if="canArbitrate(t)" class="sfix">
+          <UiButton
+            class="sbretry"
+            data-role="pipeline-compact-action"
+            tone="accent"
+            variant="outline"
+            :loading="arbiterBusy.has(t.task)"
+            :disabled="arbiterBusy.has(t.task)"
+            loading-label="Арбитр разбирает"
+            @click="arbitrate(t.task)"
+          >
+            ⚖ разобрать и продолжить
+          </UiButton>
+          <span class="sfixhint">арбитр проверит спор по коду и вернёт узел с указанием;
+            границу задачи он менять не вправе и отдаст её тебе</span>
+        </div>
         <div v-if="canRetrySandbox(t) || canResume(t)" class="sfix">
           <UiButton
             v-if="canRetrySandbox(t)"
@@ -702,11 +732,40 @@ function title(taskOrNum) {
   return b24Title(taskNum) || task?.title || null;
 }
 
+const boardTasksById = computed(() => new Map(
+  (board.data?.tasks || []).map((task) => [Number(task.id), task]),
+));
+
+function boardTask(t) {
+  return boardTasksById.value.get(Number(t.task));
+}
+
+/**
+ * Не превращаем отсутствие портальной задачи в ложное состояние «таймер стоит».
+ * Статус существует только для явного булева значения из снимка доски.
+ */
+function b24TimerState(t) {
+  const timerRunning = boardTask(t)?.timerRunning;
+  if (timerRunning === true) return 'running';
+  if (timerRunning === false) return 'stopped';
+  return null;
+}
+
+function b24TimerLabel(t) {
+  const task = boardTask(t);
+  if (!task || typeof task.timerRunning !== 'boolean') return '';
+  return task.timerRunning
+    ? `B24-таймер идёт · ${secToHMS(liveTimerSec(task, now.value))}`
+    : 'B24-таймер стоит';
+}
+
 // Таймеры, идущие ВНЕ фабрики: активные задачи доски, которых нет на конвейере.
 const factoryIds = computed(() => new Set(tasks.value.map((t) => Number(t.task))));
 const outsideTimers = computed(() => {
   const d = board.data; if (!d) return [];
-  return (d.tasks || []).filter((t) => t.timerRunning && !factoryIds.value.has(t.id));
+  return (d.tasks || []).filter((t) => (
+    t.timerRunning && !factoryIds.value.has(Number(t.id))
+  ));
 });
 function outsideElapsed(t) {
   return liveTimerSec(t, now.value);
@@ -1185,6 +1244,48 @@ async function sandboxRetry(task) {
   } finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
 }
 
+// Арбитр типизированной остановки. Гейт по МАШИННОМУ виду остановки (`stall.stop`), а не
+// по разбору заголовка: текст пишется человеку и меняется, а решение «можно ли отдать это
+// арбитру» обязано быть точным. `no-progress` — единственный вид, где решение выводится из
+// вердиктов дуги; `human` (упал стенд, не хватило прав) выводить не из чего.
+const arbiterBusy = ref(new Set());
+function canArbitrate(t) {
+  return !t.readOnly && !t.daemonAlive && t.stall?.stop === 'no-progress';
+}
+async function arbitrate(task) {
+  if (arbiterBusy.value.has(task)) return;
+  if (!await confirmDialog(
+    `Отдать тупик задачи #${task} арбитру? Он прочитает оба вердикта, проверит спорное по коду рабочего дерева и вернёт узел с указанием. Решение будет записано в журнал как машинное.`,
+    { okText: 'Разобрать' },
+  )) return;
+  arbiterBusy.value = new Set([...arbiterBusy.value, task]);
+  try {
+    const r = await api.post(`/api/tasks/${task}/arbitrate`);
+    await load();
+    // Два разных исхода, и путать их нельзя. `resolved: false` — не отказ: арбитр
+    // отработал и вернул то, что обязан вернуть, когда решение меняет границу задачи.
+    if (r.resolved) {
+      alertDialog(`Арбитр вернул узел «${r.node}».
+
+${r.card.what}
+
+Почему: ${r.card.why}
+Чем доказал: ${r.card.proof}
+Чем грозит ошибка: ${r.card.risk}`);
+    } else {
+      alertDialog(`Это решает человек, а не арбитр.
+
+${r.card.what}
+
+Почему: ${r.card.why}
+Чем доказал: ${r.card.proof}
+Чем грозит ошибка: ${r.card.risk}`);
+    }
+  } catch (e) {
+    alertDialog(`Арбитр не разобрал: ${e.message}`);
+  } finally { const s = new Set(arbiterBusy.value); s.delete(task); arbiterBusy.value = s; }
+}
+
 // Оборвавшийся прогон продолжает человек кнопкой: новый start движок отклонит,
 // пока у задачи есть открытая попытка. Исторические записи остаются только чтением.
 function canResume(t) {
@@ -1342,6 +1443,9 @@ function cardState(g) {
 .daemon.alive { color: var(--good); }
 .daemon.idle { color: var(--ink-mid); }
 .daemon.stall { color: var(--bad); font-weight: 600; }
+.b24-timer { flex: none; font-size: 12px; white-space: nowrap; }
+.b24-timer.running { color: var(--good); }
+.b24-timer.stopped { color: var(--ink-mid); }
 .elapsed { font-size: 12px; color: var(--ink-mid); white-space: nowrap; }
 
 .progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
