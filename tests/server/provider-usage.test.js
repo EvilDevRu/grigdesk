@@ -217,6 +217,145 @@ test('Codex app-server rate limits become generic and model-family bars', () => 
   assert.equal(bars[0].resetsAt, '2026-08-05T03:20:00.000Z');
 });
 
+test('Codex bar order is owned by Cockpit, not by the service key order', () => {
+  // `rateLimitsByLimitId` — объект, и OpenAI перетасовывает ключи от ответа к ответу
+  // (замер: шесть запросов подряд дали три разных порядка). Без своей сортировки
+  // полосы в шапке скакали на каждом минутном обновлении реестра.
+  const buckets = {
+    base_model_inference: {
+      limitId: 'base_model_inference',
+      limitName: 'gpt-reserve',
+      primary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_788_323_408 },
+    },
+    codex_bengalfox: {
+      limitId: 'codex_bengalfox',
+      limitName: 'GPT-5.3-Codex-Spark',
+      primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 1_787_736_608 },
+      secondary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 1_788_323_408 },
+    },
+    codex: {
+      limitId: 'codex',
+      primary: { usedPercent: 2, windowDurationMins: 10_080, resetsAt: 1_788_272_122 },
+    },
+  };
+
+  const shuffled = (keys) => parseCodexRateLimits({
+    rateLimitsByLimitId: Object.fromEntries(keys.map((key) => [key, buckets[key]])),
+  }).map((bar) => [bar.key, bar.group, bar.label]);
+
+  // Общая квота аккаунта первой, затем именованные вёдра по видимой подписи.
+  const expected = [
+    ['codex:primary', 'codex', 'Неделя (7д)'],
+    ['codex_bengalfox:primary', 'codex_bengalfox', 'Сессия · GPT-5.3-Codex-Spark'],
+    ['codex_bengalfox:secondary', 'codex_bengalfox', 'Неделя · GPT-5.3-Codex-Spark'],
+    ['base_model_inference:primary', 'base_model_inference', 'Неделя · gpt-reserve'],
+  ];
+
+  assert.deepEqual(shuffled(['codex', 'codex_bengalfox', 'base_model_inference']), expected);
+  assert.deepEqual(shuffled(['base_model_inference', 'codex_bengalfox', 'codex']), expected);
+  assert.deepEqual(shuffled(['codex_bengalfox', 'base_model_inference', 'codex']), expected);
+});
+
+test('An unknown window slot shows up instead of being silently dropped', () => {
+  // Схема app-server знает сегодня ровно primary и secondary, но перечислять их
+  // списком — значит потерять третий слот молча, как терялось бы новое ведро при
+  // allowlist по id. Окном считается любое поле с числовым usedPercent; `credits`
+  // и `individualLimit` под это не подходят и в полосы не превращаются.
+  const bars = parseCodexRateLimits({
+    rateLimitsByLimitId: {
+      codex: {
+        limitId: 'codex',
+        secondary: { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 1_788_272_122 },
+        tertiary: { usedPercent: 10, windowDurationMins: 43_200, resetsAt: 1_790_000_000 },
+        primary: { usedPercent: 5, windowDurationMins: 300, resetsAt: 1_787_736_608 },
+        credits: { hasCredits: false, unlimited: false, balance: '0' },
+        individualLimit: { limit: '10', used: '1', remainingPercent: 90, resetsAt: 1_790_000_000 },
+        spendControlReached: false,
+        planType: 'pro',
+      },
+    },
+  });
+
+  // Порядок — по длительности окна, а не по имени слота: имена придумывает сервис.
+  assert.deepEqual(bars.map((bar) => [bar.key, bar.label, bar.pct]), [
+    ['codex:primary', 'Сессия (5ч)', 5],
+    ['codex:secondary', 'Неделя (7д)', 40],
+    ['codex:tertiary', 'Окно (30д)', 10],
+  ]);
+});
+
+test('Claude spend limit reached is stated, not inferred from numbers', () => {
+  // Сервис сообщает это отдельным полем. Выводить из `used >= limit` нельзя:
+  // у выключенной доплаты и у режима «без потолка» чисел может не быть вовсе.
+  const [calm] = parseClaudeUsageResources({
+    extra_usage: { is_enabled: true, monthly_limit: 2000, used_credits: 100, currency: 'EUR' },
+  });
+  assert.equal(calm.tone, 'ok');
+  assert.doesNotMatch(calm.note, /потолок/i);
+
+  const [reached] = parseClaudeUsageResources({
+    extra_usage: {
+      is_enabled: true,
+      monthly_limit: 2000,
+      used_credits: 2000,
+      currency: 'EUR',
+      spend_limit_reached: true,
+    },
+  });
+  assert.equal(reached.tone, 'bad');
+  assert.match(reached.note, /Месячный потолок доплаты выбран/);
+});
+
+test('Claude bars name their bucket so scoped families stay separable', () => {
+  const bars = parseClaudeUsagePayload({
+    limits: [
+      { kind: 'session', percent: 2 },
+      { kind: 'weekly_all', percent: 60 },
+      { kind: 'weekly_scoped', percent: 0, scope: { model: { display_name: 'Fable' } } },
+    ],
+  });
+
+  assert.deepEqual(bars.map((bar) => bar.group), [
+    'subscription',
+    'subscription',
+    'scoped:Fable',
+  ]);
+});
+
+test('Codex spend control surfaces instead of stopping the account silently', () => {
+  // Поля приходили с самого начала и не показывались нигде: исчерпанный денежный
+  // потолок выглядел как «всё молча встало» без подсказки во всплывашке.
+  const quiet = parseCodexUsageResources({
+    rateLimits: { limitId: 'codex', individualLimit: null, spendControlReached: false },
+  });
+  assert.equal(quiet.find((resource) => resource.key === 'spend-control'), undefined);
+
+  const reached = parseCodexUsageResources({
+    rateLimits: {
+      limitId: 'codex',
+      individualLimit: { limit: '50.00', used: '50.00', remainingPercent: 0, resetsAt: 1_790_000_000 },
+      spendControlReached: true,
+      rateLimitReachedType: 'workspace_owner_usage_limit_reached',
+    },
+  });
+  const resource = reached.find((item) => item.key === 'spend-control');
+
+  assert.equal(resource.tone, 'bad');
+  // Деньги остаются строками как пришли: Number на них молча теряет точность.
+  assert.equal(resource.summary, '50.00 из 50.00');
+  assert.equal(resource.percent, 100);
+  assert.match(resource.note, /Лимит трат исчерпан/);
+  assert.match(resource.note, /лимит расхода владельца/);
+});
+
+test('An unknown reached reason is shown as the service word, not invented', () => {
+  const resources = parseCodexUsageResources({
+    rateLimits: { limitId: 'codex', rateLimitReachedType: 'some_future_reason' },
+  });
+
+  assert.match(resources.find((item) => item.key === 'spend-control').note, /some_future_reason/);
+});
+
 test('Codex usage distinguishes login, old CLI and an empty service response', () => {
   const login = classifyCodexUsageResponse({
     error: { code: -32000, message: 'ChatGPT login required' },

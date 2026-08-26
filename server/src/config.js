@@ -150,6 +150,10 @@ export const config = {
   // устройствах сразу.
   taskSeenPath: process.env.COCKPIT_TASK_SEEN_PATH
     || path.join(__dirname, '..', '.state', 'task-seen.json'),
+  // Когда впервые увидели каждое ведро лимитов исполнителя. Серверный файл, потому что
+  // метка «новое» обязана быть одинаковой во всех окнах.
+  providerUsageSeenPath: process.env.COCKPIT_PROVIDER_USAGE_SEEN_PATH
+    || path.join(__dirname, '..', '.state', 'provider-usage-seen.json'),
 
   // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
   // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.

@@ -47,6 +47,50 @@ test('unsupported provider usage is a normal explicit state', () => {
   assert.match(view.message, /не отдаёт/i);
 });
 
+test('bucket boundary is drawn where the group changes, not per bar', () => {
+  const view = providerUsageView({
+    state: 'ok',
+    bars: [
+      { key: 'codex:primary', group: 'codex', label: 'Неделя (7д)', pct: 2 },
+      { key: 'spark:primary', group: 'codex_spark', label: 'Сессия · Spark', pct: 0 },
+      { key: 'spark:secondary', group: 'codex_spark', label: 'Неделя · Spark', pct: 0 },
+      { key: 'reserve:primary', group: 'base_model_inference', label: 'Неделя · gpt-reserve', pct: 0 },
+    ],
+  }, { name: 'GPT (Codex)' });
+
+  // Полосы одного ведра остаются слитными; линия появляется только на его границе,
+  // и никогда — перед первой полосой.
+  assert.deepEqual(view.bars.map((bar) => bar.separated), [false, true, false, true]);
+});
+
+test('an executor that never names a bucket keeps the flat list it had before', () => {
+  // У Ollama полосы — это память машины, а не вёдра лимитов. Линия там утверждала бы
+  // структуру, о которой исполнитель ничего не сообщал.
+  const view = providerUsageView({
+    state: 'ok',
+    bars: [
+      { key: 'vram', label: 'Видеопамять', pct: 80 },
+      { key: 'ram', label: 'Оперативная память', pct: 10 },
+    ],
+  }, { name: 'Локальный ИИ' });
+
+  assert.deepEqual(view.bars.map((bar) => bar.separated), [false, false]);
+});
+
+test('an unnamed bar neither breaks a bucket nor starts one', () => {
+  const view = providerUsageView({
+    state: 'ok',
+    bars: [
+      { key: 'a', group: 'codex', label: 'Неделя (7д)', pct: 2 },
+      { key: 'b', label: 'Без ведра', pct: 0 },
+      { key: 'c', group: 'codex', label: 'Сессия (5ч)', pct: 1 },
+      { key: 'd', group: 'reserve', label: 'Неделя · gpt-reserve', pct: 0 },
+    ],
+  }, { name: 'GPT (Codex)' });
+
+  assert.deepEqual(view.bars.map((bar) => bar.separated), [false, false, false, true]);
+});
+
 test('provider usage view keeps generic resources without knowing the vendor', () => {
   const resource = {
     key: 'kimi-balance',

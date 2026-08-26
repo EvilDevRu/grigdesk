@@ -46,6 +46,20 @@ test('only explicit custom models may override live catalog efforts', () => {
   assert.deepEqual(mergeCatalogModel(live, cached).efforts, ['local']);
 });
 
+test('runtime-only context replaces a stale catalog fallback instead of preserving it', () => {
+  const cached = { id: 'gpt-next-sol', context: 400_000 };
+  const live = {
+    id: 'gpt-next-sol',
+    context: 0,
+    contextUnverified: true,
+    contextRuntimeOnly: true,
+  };
+  const merged = mergeCatalogModel(live, cached);
+
+  assert.equal(merged.context, 0);
+  assert.equal(merged.contextRuntimeOnly, true);
+});
+
 test('missing effort discovery stays empty instead of inventing levels', () => {
   assert.deepEqual(resolveModelEfforts(null, null), []);
   assert.deepEqual(resolveModelEfforts(null, ['low', 'future']), ['low', 'future']);

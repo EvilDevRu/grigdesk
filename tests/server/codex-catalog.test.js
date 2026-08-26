@@ -70,6 +70,9 @@ test('Codex model/list becomes a current picker without duplicate aliases', () =
   assert.equal(models[0].defaultEffort, 'low');
   assert.equal(models[0].isDefault, true);
   assert.deepEqual(models[0].inputModalities, ['text', 'image']);
+  assert.equal(models[0].context, 0);
+  assert.equal(models[0].contextUnverified, true);
+  assert.equal(models[0].contextRuntimeOnly, true);
   assert.deepEqual(models[1].aliases, ['codex-auto-review']);
   assert.equal(models[1].family, 'terra');
   assert.equal(models[1].extra, false);
@@ -86,4 +89,19 @@ test('Codex versioned slugs expose a stable family for model policy', () => {
 test('Codex model/list rejects an empty response so the previous catalog survives', () => {
   assert.equal(parseCodexModelList(null), null);
   assert.equal(parseCodexModelList({ data: [] }), null);
+});
+
+test('Codex keeps an explicit context window from an older app-server contract', () => {
+  const [model] = parseCodexModelList({
+    data: [{
+      id: 'gpt-context',
+      model: 'gpt-context',
+      displayName: 'GPT Context',
+      contextWindow: 256_000,
+    }],
+  });
+
+  assert.equal(model.context, 256_000);
+  assert.equal(model.contextUnverified, undefined);
+  assert.equal(model.contextRuntimeOnly, undefined);
 });

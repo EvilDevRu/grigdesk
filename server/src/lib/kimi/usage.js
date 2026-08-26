@@ -166,14 +166,40 @@ export async function requestKimiManagedUsage(config, {
   }
 }
 
+/**
+ * Имя лимита от сервиса ПРИКЛЕИВАЕТСЯ к подписи окна, а не заменяет её и не проигрывает
+ * ей. Узнаваемое окно проверялось первым, поэтому два именованных недельных лимита
+ * отрисовывались двумя одинаковыми строками «Неделя (7д)» — различить их было нечем.
+ * Приём тот же, что у Codex с `limitName`: «Неделя · gpt-reserve».
+ *
+ * У известных окон длительность в скобках дублирует само слово, поэтому уходит; у
+ * вычисленного «Окно (3д)» она и есть весь смысл подписи и остаётся.
+ */
 function windowLabel(window, name = '') {
   const duration = Number(window?.duration);
   const unit = String(window?.unit || '');
-  if (duration === 5 && unit === 'hour') return 'Сессия (5ч)';
-  if (duration === 1 && unit === 'week') return 'Неделя (7д)';
-  if (name) return String(name);
   const suffix = { minute: 'м', hour: 'ч', day: 'д', week: 'нед' }[unit] || unit;
-  return duration > 0 && suffix ? `Окно (${duration}${suffix})` : 'Лимит';
+  const named = String(name || '').trim();
+
+  let base = '';
+  let short = '';
+
+  if (duration === 5 && unit === 'hour') {
+    base = 'Сессия (5ч)';
+    short = 'Сессия';
+  } else if (duration === 1 && unit === 'week') {
+    base = 'Неделя (7д)';
+    short = 'Неделя';
+  } else if (duration > 0 && suffix) {
+    base = `Окно (${duration}${suffix})`;
+    short = base;
+  }
+
+  if (!named) {
+    return base || 'Лимит';
+  }
+
+  return short ? `${short} · ${named}` : named;
 }
 
 function resetIso(value) {
@@ -182,6 +208,14 @@ function resetIso(value) {
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 }
 
+/**
+ * Полосы приходят массивом (`summary` плюс `limits`), поэтому порядок сервиса стабилен
+ * и своей сортировки не требует — в отличие от Codex, где вёдра лежат в объекте.
+ *
+ * Ведро называет поле `group`: безымянные окна — это одна подписка (сессия и неделя
+ * одного счёта), а именованный лимит живёт своей квотой. По нему всплывашка ставит
+ * разделитель и метку «новое», не зная про Kimi ничего.
+ */
 export function parseKimiUsageBars(result) {
   if (!result || result.kind !== 'ok') return [];
   const rows = [result.summary, ...(Array.isArray(result.limits) ? result.limits : [])].filter(Boolean);
@@ -190,9 +224,11 @@ export function parseKimiUsageBars(result) {
     const limit = Number(row.limit);
     if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return [];
     const window = row.window || {};
+    const named = String(row.name || '').trim();
     return [{
       key: `kimi:${index}:${window.duration || 0}:${window.unit || 'limit'}`,
-      label: windowLabel(window, row.name),
+      group: named ? `named:${named}` : 'subscription',
+      label: windowLabel(window, named),
       pct: Math.max(0, Math.min(100, Math.round((used / limit) * 100))),
       resetsAt: resetIso(row.reset_at),
     }];

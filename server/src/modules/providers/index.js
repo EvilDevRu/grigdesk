@@ -17,6 +17,7 @@ import {
   normalizeProviderUsage,
   unsupportedProviderUsage,
 } from '../../lib/provider-usage.js';
+import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/provider-usage-seen.js';
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
@@ -134,6 +135,34 @@ async function providersModule(fastify, opts) {
   }
 
   let cache = null; // { at, providers }
+
+  // Метка «новое» — бухгалтерия кокпита, а не факт адаптера: адаптер называет ведро
+  // полем `group`, а помнит ли человек это ведро — знает только сервер.
+  const usageSeen = new ProviderUsageSeenStore({ filePath: config.providerUsageSeenPath });
+
+  /**
+   * Ставит `fresh` полосам вёдер, которых раньше не видели. Считаем только по удачному
+   * чтению: у отказа полосы приходят из прошлого ответа (`mergeProviderUsage`), и
+   * базовая линия по ним записала бы вёдра, которых сервис прямо сейчас не подтверждал.
+   */
+  function markFreshBuckets(providerId, usage) {
+    if (usage?.state !== 'ok' || !usage.bars?.length) {
+      return usage;
+    }
+
+    const firstSeen = usageSeen.observe(providerId, usage.bars.map((bar) => bar.group));
+    const now = Date.now();
+
+    return {
+      ...usage,
+      bars: usage.bars.map((bar) => (
+        bar.group && isFreshGroup(firstSeen[bar.group], now)
+          ? { ...bar, fresh: true }
+          : bar
+      )),
+    };
+  }
+
   const usageCache = createUsageReadCache(async (previousUsage) => {
     const executors = await getProviderAdapters();
     const checkedAt = Date.now();
@@ -157,7 +186,7 @@ async function providersModule(fastify, opts) {
           }, { providerName: ex.name, checkedAt });
         }
       }
-      return [ex.id, mergeProviderUsage(previousUsage?.[ex.id], current)];
+      return [ex.id, mergeProviderUsage(previousUsage?.[ex.id], markFreshBuckets(ex.id, current))];
     }));
     return Object.fromEntries(entries);
   }, { maxAgeMs: CACHE_MS });

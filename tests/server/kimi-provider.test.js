@@ -77,6 +77,28 @@ test('Kimi managed usage превращается в недельный/5ч ба
   assert.equal(classifyKimiUsageResponse({ result }).state, 'ok');
 });
 
+test('Именованные лимиты Kimi различимы и живут своими вёдрами', () => {
+  // Узнаваемое окно проверялось первым, поэтому два именованных недельных лимита
+  // рисовались двумя одинаковыми строками «Неделя (7д)» — различить их было нечем.
+  const bars = parseKimiUsageBars({
+    kind: 'ok',
+    summary: { window: { duration: 1, unit: 'week' }, used: 40, limit: 100 },
+    limits: [
+      { window: { duration: 5, unit: 'hour' }, used: 7, limit: 20 },
+      { window: { duration: 1, unit: 'week' }, used: 1, limit: 10, name: 'k2-reserve' },
+      { window: { duration: 3, unit: 'day' }, used: 1, limit: 10, name: 'превью' },
+    ],
+  });
+
+  assert.deepEqual(bars.map((bar) => [bar.label, bar.group]), [
+    ['Неделя (7д)', 'subscription'],
+    ['Сессия (5ч)', 'subscription'],
+    ['Неделя · k2-reserve', 'named:k2-reserve'],
+    // У вычисленного окна длительность и есть весь смысл подписи, поэтому остаётся.
+    ['Окно (3д) · превью', 'named:превью'],
+  ]);
+});
+
 test('Kimi usage различает истёкший login и пустой ответ', () => {
   const auth = classifyKimiUsageResponse({
     result: { kind: 'error', status: 401, message: 'Authorization failed' },

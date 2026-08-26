@@ -470,6 +470,9 @@ function creditsOf(d) {
     // Включено, но потолка нет — тратится без ограничения сверху.
     unlimited: !!x.is_enabled && x.monthly_limit === null,
     disabledReason: x.disabled_reason || null,
+    // Сервис сам сообщает, что месячный потолок выбран. Выводить это из `used >= limit`
+    // нельзя: у выключенной доплаты и у режима «без потолка» чисел может не быть вовсе.
+    limitReached: x.spend_limit_reached === true,
   };
 }
 
@@ -483,19 +486,33 @@ function creditsNote(c) {
   return `${money(c.used)} из ${money(c.limit)} ${c.currency}`.trim();
 }
 
+/**
+ * Канонический источник полос — массив `limits` ответа oauth/usage; порядок в нём
+ * задаёт сама Anthropic и он стабилен, поэтому сортировать нечего. Поле `group`
+ * отделяет общие вёдра подписки от модельных: всплывашка ставит по нему
+ * разделитель, не зная ни про Anthropic, ни про имена семейств.
+ */
 export function parseClaudeUsagePayload(d) {
   const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
   const bars = [];
   const KIND = { session: 'Сессия (5ч)', weekly_all: 'Неделя (7д)' };
 
   for (const l of d?.limits || []) {
-    if (typeof l.percent !== 'number') continue;
-    let label = KIND[l.kind] || String(l.kind || '').replace(/_/g, ' ');
-    if (l.kind === 'weekly_scoped') {
-      label = `Неделя · ${l.scope?.model?.display_name || l.scope?.surface || '?'}`;
+    if (typeof l.percent !== 'number') {
+      continue;
     }
+
+    const scoped = l.kind === 'weekly_scoped';
+    const scopeName = l.scope?.model?.display_name || l.scope?.surface || '?';
+    let label = KIND[l.kind] || String(l.kind || '').replace(/_/g, ' ');
+
+    if (scoped) {
+      label = `Неделя · ${scopeName}`;
+    }
+
     bars.push({
       key: l.kind + (l.scope?.model?.display_name || ''),
+      group: scoped ? `scoped:${scopeName}` : 'subscription',
       label,
       pct: clamp(l.percent),
       resetsAt: l.resets_at || null,
@@ -504,15 +521,20 @@ export function parseClaudeUsagePayload(d) {
 
   if (!bars.length) {
     for (const [key, value] of Object.entries(d || {})) {
-      if (!value || typeof value !== 'object' || typeof value.utilization !== 'number') continue;
+      if (!value || typeof value !== 'object' || typeof value.utilization !== 'number') {
+        continue;
+      }
+
       bars.push({
         key,
+        group: 'subscription',
         label: key.replace(/_/g, ' '),
         pct: clamp(value.utilization),
         resetsAt: value.resets_at || null,
       });
     }
   }
+
   return bars;
 }
 
@@ -529,12 +551,16 @@ export function parseClaudeUsageResources(d) {
     key: 'extra-usage',
     label: 'Extra usage (доплата)',
     summary: creditsNote(c),
-    tone: c.enabled ? 'ok' : 'muted',
+    // Выбранный потолок важнее включённости: доплата формально включена, а работа
+    // сверх лимитов подписки уже не пойдёт — молчать об этом нельзя.
+    tone: c.limitReached ? 'bad' : (c.enabled ? 'ok' : 'muted'),
     ...(c.enabled && c.utilization !== null
       && { percent: Math.max(0, Math.min(100, Math.round(c.utilization))) }),
-    note: c.unlimited
-      ? 'Потолка нет — расходы не ограничены сверху.'
-      : (c.disabledReason ? `Причина отказа: ${c.disabledReason}` : ''),
+    note: [
+      c.limitReached ? 'Месячный потолок доплаты выбран — сверх лимитов подписки работа не пойдёт.' : '',
+      c.unlimited ? 'Потолка нет — расходы не ограничены сверху.' : '',
+      c.disabledReason ? `Причина отказа: ${c.disabledReason}` : '',
+    ].filter(Boolean).join(' '),
     controls: [
       {
         id: 'extra-usage-toggle',

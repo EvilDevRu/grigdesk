@@ -44,7 +44,10 @@
         </nav>
       </aside>
 
-      <div class="settings-workspace" :class="{ wide: tab === 'providers' || tab === 'plugins' }">
+      <div
+        class="settings-workspace"
+        :class="{ wide: ['providers', 'plugins', 'runs'].includes(tab) }"
+      >
         <header class="section-intro">
           <span class="section-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1117,144 +1120,137 @@
       </div>
     </section>
 
-    <!-- Запуски: обязательные правила перед стартом триажа/конвейера -->
-    <section v-else-if="tab === 'runs'">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3>Поведение запусков</h3>
-            <p class="muted small">Действует перед триажем задачи и стартом конвейера фабрики.</p>
+    <!-- Запуски собраны как пульт: сначала правила, затем живое состояние и наблюдение.
+         Связанная настройка остаётся рядом со своим эффектом, а не в общей длинной форме. -->
+    <section v-else-if="tab === 'runs'" class="runs-section">
+      <p
+        v-if="prefsMsg"
+        class="run-feedback msg"
+        :class="prefsMsg.type"
+        aria-live="polite"
+      >
+        {{ prefsMsg.text }}
+      </p>
+
+      <div class="runs-grid" data-testid="runs-rules-grid">
+        <div class="card run-card">
+          <div class="card-head">
+            <div>
+              <p class="run-kicker">Подготовка</p>
+              <h3>Старт и восстановление</h3>
+              <p class="muted small">Что Cockpit делает до и сразу после запуска фабрики.</p>
+            </div>
+          </div>
+
+          <div v-if="!prefs" class="muted">Загрузка…</div>
+          <div v-else class="run-option-list">
+            <div class="run-option">
+              <UiSwitch
+                :model-value="prefs.gitRefreshBeforeRun"
+                @update:model-value="toggleGitRefresh"
+              >
+                Обновлять репозитории перед запуском
+              </UiSwitch>
+              <p class="muted small">
+                Всегда выполняется <code>git fetch</code>; <code>git pull --ff-only</code> —
+                только для чистого master. Ветки задач и локальные правки не трогаются.
+              </p>
+            </div>
+
+            <div class="run-option">
+              <UiSwitch
+                :model-value="prefs.autoRecoverPipelines"
+                @update:model-value="toggleAutoRecover"
+              >
+                Продолжать незакрытые конвейеры после запуска Cockpit
+              </UiSwitch>
+              <p class="muted small">
+                Возобновляется только прогон с погибшим демоном. Ворота, ручная остановка
+                и повторяющийся сбой остаются заблокированными; после трёх аварий — только вручную.
+              </p>
+            </div>
           </div>
         </div>
-        <div v-if="!prefs" class="muted">Загрузка…</div>
-        <template v-else>
-          <UiSwitch
-            :model-value="prefs.gitRefreshBeforeRun"
-            @update:model-value="toggleGitRefresh"
-          >
-            Обновлять репозитории перед запуском
-          </UiSwitch>
-          <p class="muted small">
-            Перед триажем и конвейером: <code>git fetch</code> всегда; <code>git pull --ff-only</code> —
-            только если репозиторий стоит на чистом master (ветка задачи или незакоммиченные
-            правки не трогаются, в результате запуска фиксируется причина пропуска).
-          </p>
-          <UiSwitch
-            :model-value="prefs.chatLiveSessions !== false"
-            @update:model-value="toggleLiveSessions"
-          >
-            Держать агента чата живым между ходами
-          </UiSwitch>
-          <p class="muted small">
-            Процесс исполнителя переживает свой ход, поэтому фоновые команды и субагенты
-            не гибнут вместе с ответом, а Claude сам присылает новое сообщение, когда они
-            завершились. Живой процесс держит память и свои MCP-серверы: по получасу простоя
-            он гаснет сам, а разговор продолжается с прежней сессией. Выключение возвращает
-            прежний порядок — процесс на каждое сообщение.
-          </p>
-          <UiSwitch
-            :model-value="prefs.autoRecoverPipelines"
-            @update:model-value="toggleAutoRecover"
-          >
-            Продолжать незакрытые конвейеры после запуска Cockpit
-          </UiSwitch>
-          <p class="muted small">
-            Кокпит возобновит только прогон с погибшим демоном. Ворота, остановка для
-            человека, завершённая задача и повторяющийся сбой остаются заблокированными.
-            После трёх аварийных перезапусков потребуется ручное решение.
-          </p>
-          <div class="compact-setting">
-            <label>
-              Сжимать контекст чата при
-              <UiNumberField
-                v-model="compactWindow"
-                :min="0"
-                :step="10000"
-                data-context="settings-field"
-                placeholder="0 — не вмешиваться"
-              />
-              <span class="unit">токенах</span>
-            </label>
-            <UiButton class="btn" data-role="settings-action" @click="saveCompactWindow">
-              Сохранить
-            </UiButton>
+
+        <div class="card run-card">
+          <div class="card-head">
+            <div>
+              <p class="run-kicker">Лимиты</p>
+              <h3>Контекст агентов</h3>
+              <p class="muted small">Раздельные пороги для разговора и рабочего этапа.</p>
+            </div>
           </div>
-          <p class="muted small">
-            CLI умеет сжимать разговор сам, но включает это у самого потолка своего окна:
-            на окне 1M — около 950 000 токенов. <b>0</b> — не вмешиваться. Claude получает порог через свою
-            переменную окружения, Codex — через <code>model_auto_compact_token_limit</code>.
-            Кольцо в чате считает до меньшей из двух границ: этого порога (если он не
-            нулевой) и 80% окна модели. На 80% ближайшей границы кольцо желтеет, на самой
-            границе — краснеет. Кэш показан отдельно по факту последнего запроса: долей
-            чтения и объёмами, если исполнитель их сообщает, либо честным статусом
-            «нет данных» / «без тарифа». Кэш не меняет цвет кольца.
-          </p>
-          <div class="compact-setting">
-            <label>
-              Сжимать контекст этапа конвейера при
-              <UiNumberField
-                v-model="stageCompactWindow"
-                :min="0"
-                :step="10000"
-                data-context="settings-field"
-                placeholder="0 — не вмешиваться"
-              />
-              <span class="unit">токенах</span>
-            </label>
-            <UiButton class="btn" data-role="settings-action" @click="saveStageCompactWindow">
-              Сохранить
-            </UiButton>
+
+          <div v-if="!prefs" class="muted">Загрузка…</div>
+          <div v-else class="run-threshold-list">
+            <div class="run-threshold">
+              <div class="run-threshold-copy">
+                <b>Чат с агентом</b>
+                <p class="muted small">
+                  Кольцо считает до меньшей границы: этого порога или 80% окна модели.
+                </p>
+              </div>
+              <div class="run-value-control">
+                <UiNumberField
+                  v-model="compactWindow"
+                  class="run-number"
+                  :min="0"
+                  :step="10000"
+                  data-context="settings-field"
+                  placeholder="0 — не вмешиваться"
+                  aria-label="Порог сжатия контекста чата в токенах"
+                />
+                <span class="run-unit">токенов</span>
+                <UiButton data-role="settings-action" @click="saveCompactWindow">
+                  Сохранить
+                </UiButton>
+              </div>
+            </div>
+
+            <div class="run-threshold">
+              <div class="run-threshold-copy">
+                <b>Этап конвейера</b>
+                <p class="muted small">
+                  Порог действует для новых заходов; уже идущий этап доработает как есть.
+                </p>
+              </div>
+              <div class="run-value-control">
+                <UiNumberField
+                  v-model="stageCompactWindow"
+                  class="run-number"
+                  :min="0"
+                  :step="10000"
+                  data-context="settings-field"
+                  placeholder="0 — не вмешиваться"
+                  aria-label="Порог сжатия контекста этапа в токенах"
+                />
+                <span class="run-unit">токенов</span>
+                <UiButton data-role="settings-action" @click="saveStageCompactWindow">
+                  Сохранить
+                </UiButton>
+              </div>
+            </div>
           </div>
-          <p class="muted small">
-            То же самое, но для агентов на узлах схемы, и порог отдельный: в чате сжатие
-            рвёт нить разговора с тобой, а на этапе просто ужимает рабочий контекст между
-            вызовами инструментов. Настройка ограничивает объём активного контекста и не
-            делает предположений о кэше или тарифе выбранного исполнителя. <b>0</b> — не
-            вмешиваться. Применится к новым заходам; уже идущий
-            этап доработает как есть.
+
+          <p class="run-card-note">
+            <b>0</b> оставляет собственный порог CLI. Кэш и тариф в расчёт не входят.
           </p>
-          <div class="compact-setting">
-            <label>
-              Звать, если ход конвейера молчит дольше
-              <UiNumberField
-                v-model="silenceWindowMin"
-                :min="0"
-                :step="5"
-                data-context="settings-field"
-                placeholder="0 — не звать"
-              />
-              <span class="unit">мин</span>
-            </label>
-            <UiButton class="btn" data-role="settings-action" @click="saveSilenceWindow">
-              Сохранить
-            </UiButton>
-          </div>
-          <p class="muted small">
-            Зависший вызов инструмента не выглядит аварией: демон жив, этап работает,
-            а движок вмешается только когда сгорит весь лимит этапа — это часы.
-            Порог должен пропускать долгую сборку и прогон тестов, но сработать раньше
-            таймаута зависшего MCP. <b>0</b> — не звать.
-            Кокпит только оповещает: остановить ход и решить, что с ним делать, — твоё.
-          </p>
-          <p v-if="prefsMsg" class="msg" :class="prefsMsg.type" aria-live="polite">{{ prefsMsg.text }}</p>
-        </template>
+        </div>
       </div>
 
-      <!-- Живые процессы: свободную сессию в `ps` не отличить от разового запуска,
-           а память и MCP-серверы она держит. Значит увидеть и погасить её нужно отсюда. -->
-      <div class="card">
+      <!-- Свободную живую сессию в `ps` не отличить от разового запуска. Настройка
+           жизненного цикла и сам пул поэтому показаны одной цельной областью. -->
+      <div class="card live-card" data-testid="runs-live-card">
         <div class="card-head">
           <div>
-            <h3>Живые процессы агентов</h3>
+            <p class="run-kicker">Процессы чата</p>
+            <h3>Живые агенты</h3>
             <p class="muted small">
-              Процессы исполнителей, которые держат разговор между ходами. Гаснут сами
-              по простою, но пока живут — занимают память и держат свои MCP-серверы.
+              Память разговора, фоновые команды и MCP-серверы между сообщениями.
             </p>
           </div>
           <div class="live-head-actions">
             <UiButton
-              class="btn"
-              variant="ghost"
               data-role="settings-action"
               :disabled="liveBusy"
               @click="loadLiveSessions"
@@ -1262,7 +1258,6 @@
               Обновить
             </UiButton>
             <UiButton
-              class="btn"
               data-role="settings-action"
               :disabled="liveBusy || !liveFreeCount"
               @click="closeFreeSessions"
@@ -1271,92 +1266,170 @@
             </UiButton>
           </div>
         </div>
-        <div v-if="!liveLoaded" class="muted">Загрузка…</div>
-        <template v-else>
-          <p v-if="!liveSessions.length" class="muted small">
-            Сейчас ни одного живого процесса.
-            <template v-if="!liveEnabled">
-              Режим выключен тумблером выше — процесс поднимается на каждое сообщение
-              и умирает вместе с ответом.
-            </template>
-            <template v-else>
-              Первый же ход в чате поднимет процесс, и он останется здесь до простоя.
-            </template>
+
+        <div v-if="!prefs" class="muted">Настройка режима загружается…</div>
+        <div v-else class="run-option live-mode">
+          <UiSwitch
+            :model-value="prefs.chatLiveSessions !== false"
+            @update:model-value="toggleLiveSessions"
+          >
+            Держать агента чата живым между ходами
+          </UiSwitch>
+          <p class="muted small">
+            Процесс переживает ответ, а Claude может сам сообщить о завершении фоновой работы.
+            После простоя процесс гаснет, но следующий ход продолжает прежнюю сессию.
           </p>
+        </div>
+
+        <div v-if="!liveLoaded" class="live-empty muted">Загружаю процессы…</div>
+        <template v-else>
+          <div
+            v-if="liveSessions.length"
+            class="live-stats"
+            aria-label="Сводка живых процессов"
+          >
+            <span><b>{{ liveSessions.length }}</b><small>в пуле</small></span>
+            <span class="busy"><b>{{ liveRunningCount }}</b><small>ведут ход</small></span>
+            <span><b>{{ liveFreeCount }}</b><small>свободны</small></span>
+          </div>
+
+          <div v-if="!liveSessions.length" class="live-empty">
+            <b>Сейчас ни одного живого процесса</b>
+            <p class="muted small">
+              <template v-if="!liveEnabled">
+                Режим выключен: процесс поднимается на каждое сообщение и умирает с ответом.
+              </template>
+              <template v-else>
+                Первый ход в чате поднимет процесс; здесь он останется до простоя.
+              </template>
+            </p>
+          </div>
+
           <ul v-else class="live-list">
-            <li v-for="item in liveSessions" :key="item.chatKey" class="live-row">
+            <li
+              v-for="item in liveSessions"
+              :key="item.chatKey"
+              class="live-row"
+              :class="{ 'is-running': item.running }"
+            >
               <div class="live-line">
-                <span class="live-dot" :class="item.running ? 'busy' : 'idle'" aria-hidden="true"></span>
-                <span class="live-name" :title="item.chatKey">{{ liveTitle(item) }}</span>
-                <span class="live-run">{{ liveRunLabel(item) }}</span>
-                <UiButton
-                  class="btn"
-                  variant="ghost"
-                  data-role="settings-action"
-                  :disabled="liveBusy"
-                  @click="openLiveChat(item)"
-                >
-                  Открыть чат
-                </UiButton>
-                <UiButton
-                  class="btn"
-                  data-role="settings-action"
-                  :disabled="liveBusy"
-                  @click="closeLiveSession(item)"
-                >
-                  Погасить
-                </UiButton>
+                <div class="live-identity">
+                  <span
+                    class="live-dot"
+                    :class="item.running ? 'busy' : 'idle'"
+                    aria-hidden="true"
+                  ></span>
+                  <div class="live-copy">
+                    <span class="live-name" :title="item.chatKey">{{ liveTitle(item) }}</span>
+                    <span class="live-run">{{ liveRunLabel(item) }}</span>
+                  </div>
+                </div>
+                <div class="live-row-actions">
+                  <UiButton
+                    variant="ghost"
+                    data-role="settings-action"
+                    :disabled="liveBusy"
+                    @click="openLiveChat(item)"
+                  >
+                    Открыть чат
+                  </UiButton>
+                  <UiButton
+                    data-role="settings-action"
+                    :disabled="liveBusy"
+                    @click="closeLiveSession(item)"
+                  >
+                    Погасить
+                  </UiButton>
+                </div>
               </div>
-              <div class="live-detail muted">{{ liveDetail(item) }}</div>
-              <div v-if="item.cwd" class="live-detail muted live-path" :title="item.cwd">{{ item.cwd }}</div>
+              <div class="live-meta muted">
+                <span class="live-detail">{{ liveDetail(item) }}</span>
+                <code v-if="item.cwd" class="live-path" :title="item.cwd">{{ item.cwd }}</code>
+              </div>
             </li>
           </ul>
-          <p class="muted small">
-            Потолок — {{ liveLimits.maxSessions }} живых процесса, простой —
-            {{ Math.round(liveLimits.idleMs / 60000) }} мин. «Погасить» закрывает процесс,
-            но не разговор: следующий ход поднимет его заново с той же сессией. Идущий ход
-            гасится только вторым подтверждением — вместе с ним теряется работа агента.
+
+          <p class="run-card-note live-footnote">
+            Лимит пула — {{ liveLimits.maxSessions }}, автогашение — через
+            {{ Math.round(liveLimits.idleMs / 60000) }} мин простоя. Погашение оставляет
+            разговор на месте; идущий ход требует подтверждения и теряет незаписанную работу.
           </p>
         </template>
-        <p v-if="liveMsg" class="msg" :class="liveMsg.type" aria-live="polite">{{ liveMsg.text }}</p>
+
+        <p v-if="liveMsg" class="msg" :class="liveMsg.type" aria-live="polite">
+          {{ liveMsg.text }}
+        </p>
       </div>
 
-      <div class="card">
-        <div>
-          <b>Диагностическое логирование фабрики</b>
-          <p class="muted small debug-copy">
-            Помогает разбирать выбор модели, переключение ИИ и ошибки runner-а.
-            Не меняет маршрут или результат этапа. Короткий обязательный audit остаётся
-            даже в режиме «Выключено».
-          </p>
+      <div class="card run-card run-observe-card">
+        <div class="card-head">
+          <div>
+            <p class="run-kicker">Наблюдение</p>
+            <h3>Сигналы и диагностика</h3>
+            <p class="muted small">Когда позвать человека и сколько деталей оставить в журнале.</p>
+          </div>
         </div>
-        <div v-if="!factoryDebug && !factoryDebugMsg" class="muted">Загрузка…</div>
-        <div v-else class="debug-setting">
-          <label>
-            Уровень
-            <UiSelect
-              class="settings-select"
-              data-context="settings-field"
-              :model-value="factoryDebug?.effective || 'off'"
-              :disabled="factoryDebugBusy"
-              @change="saveFactoryDebug($event.target.value)"
-            >
-              <option v-for="level in FACTORY_DEBUG_LEVELS"
-                      :key="level.value"
-                      :value="level.value">
-                {{ level.label }}
-              </option>
-            </UiSelect>
-          </label>
-          <span v-if="factoryDebug" class="debug-effective">
-            действует: <b>{{ factoryDebug.effective }}</b>
-            <span class="muted"> · источник: {{ factoryDebug.source }}</span>
-          </span>
+
+        <div class="run-observe-grid">
+          <div class="run-observe-item">
+            <div class="run-threshold-copy">
+              <b>Молчание хода</b>
+              <p class="muted small">
+                Cockpit только оповещает о тишине и никогда сам не останавливает работу.
+              </p>
+            </div>
+            <div class="run-value-control">
+              <UiNumberField
+                v-model="silenceWindowMin"
+                class="run-number"
+                :min="0"
+                :step="5"
+                data-context="settings-field"
+                placeholder="0 — не звать"
+                aria-label="Порог молчания хода конвейера в минутах"
+              />
+              <span class="run-unit">мин</span>
+              <UiButton data-role="settings-action" @click="saveSilenceWindow">
+                Сохранить
+              </UiButton>
+            </div>
+            <p class="run-subnote"><b>0</b> — не звать.</p>
+          </div>
+
+          <div class="run-observe-item">
+            <div class="run-threshold-copy">
+              <b>Логи фабрики</b>
+              <p class="muted small">
+                Выбор модели, переключение ИИ и ошибки runner-а без prompt и credentials.
+              </p>
+            </div>
+            <div v-if="!factoryDebug && !factoryDebugMsg" class="muted">Загрузка…</div>
+            <div v-else class="run-debug-control">
+              <UiSelect
+                class="run-select"
+                data-context="settings-field"
+                aria-label="Уровень диагностического логирования фабрики"
+                :model-value="factoryDebug?.effective || 'off'"
+                :disabled="factoryDebugBusy"
+                @change="saveFactoryDebug($event.target.value)"
+              >
+                <option
+                  v-for="level in FACTORY_DEBUG_LEVELS"
+                  :key="level.value"
+                  :value="level.value"
+                >
+                  {{ level.label }}
+                </option>
+              </UiSelect>
+              <span v-if="factoryDebug" class="debug-effective">
+                действует: <b>{{ factoryDebug.effective }}</b>
+                <span class="muted"> · источник: {{ factoryDebug.source }}</span>
+              </span>
+            </div>
+            <p class="run-subnote">Обязательный короткий audit сохраняется на любом уровне.</p>
+          </div>
         </div>
-        <p class="muted small">
-          Подробные журналы имеют ограничение размера и срок хранения; prompt, credentials
-          и status/control tokens в них не записываются. Выключение не удаляет уже созданные логи.
-        </p>
+
         <p v-if="factoryDebugMsg" class="msg" :class="factoryDebugMsg.type">
           {{ factoryDebugMsg.text }}
         </p>
@@ -3248,6 +3321,7 @@ const liveLoaded = ref(false);
 const liveBusy = ref(false);
 const liveMsg = ref(null);
 const liveFreeCount = computed(() => liveSessions.value.filter((item) => !item.running).length);
+const liveRunningCount = computed(() => liveSessions.value.filter((item) => item.running).length);
 
 async function loadLiveSessions() {
   try {
@@ -4496,7 +4570,6 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   font-size: 13px;
 }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
-.debug-copy { margin: 5px 0 0; }
 .trusted-copy { margin: 5px 0 0; }
 .trusted-list { display: grid; gap: 7px; }
 .trusted-item { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
@@ -4508,33 +4581,200 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 .trusted-add { display: flex; align-items: stretch; gap: 8px; }
 .trusted-add .ui-input { flex: 1; min-width: 0; box-sizing: border-box; }
 .trusted-add .ui-button { box-sizing: border-box; }
-.debug-setting { display: flex; align-items: end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.debug-setting label { min-width: 230px; }
-/* Порог автокомпакта: подпись, поле и единица в одну строку — значение читается как
-   фраза («сжимать при N токенах»), а не как безымянное число в форме. */
-.compact-setting { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.compact-setting label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.compact-setting label :deep(.nf) { width: 130px; }
-.compact-setting .unit { color: var(--ink-mid); }
-.debug-effective { font-size: 12px; padding-bottom: 8px; color: var(--ink-mid); }
+
+/* «Запуски» — не линейная форма, а небольшой пульт из независимых смысловых зон.
+   Автоподбор колонок использует всю ширину вкладки и сам схлопывается до одной. */
+.runs-section { container-type: inline-size; gap: 14px; }
+.runs-grid {
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+  gap: 14px;
+}
+.run-card { align-content: start; }
+.run-kicker {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 740;
+  letter-spacing: .09em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.run-feedback {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.run-feedback.ok {
+  border-color: color-mix(in srgb, var(--good) 35%, var(--line));
+  background: color-mix(in srgb, var(--good) 5%, var(--surface));
+}
+.run-feedback.err {
+  border-color: color-mix(in srgb, var(--bad) 38%, var(--line));
+  background: color-mix(in srgb, var(--bad) 5%, var(--surface));
+}
+.run-option-list { display: grid; }
+.run-option {
+  display: grid;
+  gap: 5px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+.run-option:first-child { padding-top: 0; border-top: 0; }
+.run-option:last-child { padding-bottom: 0; }
+.run-option > p { margin: 0 0 0 39px; }
+.run-threshold-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.run-threshold, .run-observe-item {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--ground);
+}
+.run-threshold-copy { min-width: 0; display: grid; gap: 3px; }
+.run-threshold-copy > b { font-size: 13px; font-weight: 630; }
+.run-threshold-copy > p { margin: 0; }
+.run-value-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+.run-threshold .run-value-control { grid-template-columns: minmax(0, 1fr) auto; }
+.run-threshold .run-value-control .ui-button { grid-column: 1 / -1; width: 100%; }
+.run-number, .run-select { width: 100%; min-width: 0; }
+.run-unit { color: var(--ink-mid); font-size: 11.5px; white-space: nowrap; }
+.run-card-note {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 52%, var(--line));
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--ink-mid);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.run-observe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+  gap: 10px;
+}
+.run-observe-item { grid-template-rows: auto auto 1fr; }
+.run-debug-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, .8fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.debug-effective { min-width: 0; color: var(--ink-mid); font-size: 11.5px; }
+.run-subnote { align-self: end; margin: 0; color: var(--ink-mid); font-size: 11px; }
 /* Настройка показа моделей — отделена от списка исполнителей */
 .prow { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; display: grid; gap: 6px; }
 /* Первый блок своей карточки — отбивать сверху не от чего */
 .prow.first { border-top: none; margin-top: 0; padding-top: 0; }
+
+.live-card { gap: 12px; }
 .live-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.live-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.live-row { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line); }
-.live-row:first-child { border-top: 0; padding-top: 0; }
-.live-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.live-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-mid); }
+.live-mode {
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--ground));
+}
+.live-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--ground);
+}
+.live-stats > span {
+  min-width: 0;
+  display: grid;
+  place-content: center;
+  gap: 1px;
+  padding: 8px 12px;
+  border-left: 1px solid var(--line);
+  text-align: center;
+}
+.live-stats > span:first-child { border-left: 0; }
+.live-stats b { font-size: 15px; font-weight: 680; }
+.live-stats .busy b { color: var(--good); }
+.live-stats small { color: var(--ink-mid); font-size: 9.5px; }
+.live-empty {
+  display: grid;
+  gap: 3px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--ground);
+  font-size: 13px;
+}
+.live-empty p { margin: 0; }
+.live-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.live-row {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--ground);
+}
+.live-row.is-running {
+  border-color: color-mix(in srgb, var(--good) 30%, var(--line));
+  background: color-mix(in srgb, var(--good) 3%, var(--ground));
+}
+.live-line {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.live-identity { min-width: 0; display: flex; align-items: flex-start; gap: 8px; }
+.live-copy { min-width: 0; display: grid; gap: 2px; }
+.live-row-actions { display: flex; gap: 7px; }
+.live-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ink-mid);
+}
 .live-dot.busy { background: var(--good);
   box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
-.live-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden;
+.live-name { min-width: 0; overflow: hidden; font-size: 13px; font-weight: 620;
   text-overflow: ellipsis; white-space: nowrap; }
-.live-run { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-mid);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-detail { font-size: 11.5px; line-height: 1.45; padding-left: 16px; }
-.live-path { overflow-wrap: anywhere; }
+.live-run { min-width: 0; overflow: hidden; color: var(--ink-mid); font-size: 11.5px;
+  line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.live-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  padding-left: 16px;
+}
+.live-detail { font-size: 11px; line-height: 1.45; }
+.live-path {
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-footnote { margin-top: 1px; }
 .msg { font-size: 13px; margin: 0; white-space: pre-line; }
 .small { font-size: 12px; line-height: 1.5; }
 .msg.ok { color: var(--good); }
@@ -4617,6 +4857,10 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 .update-job.done { border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
 .update-actions { align-items: center; }
 .block-reasons { margin: 0; padding-left: 18px; display: grid; gap: 5px; color: var(--ink-mid); font-size: 12px; line-height: 1.45; }
+
+@container (max-width: 840px) {
+  .runs-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* Локальный HTTPS */
 .sechead { margin: 12px 0 0; font-size: 14px; font-weight: 640; }
@@ -4781,13 +5025,23 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .plugrow label, .plugrow .inp { min-width: 0; max-width: none; }
   .row { display: grid; grid-template-columns: minmax(0, 1fr); }
   .row > .ui-button { width: 100%; }
-  .compact-setting { align-items: stretch; flex-direction: column; }
-  .compact-setting label { align-items: stretch; flex-direction: column; }
-  .compact-setting label :deep(.nf) { width: 100%; }
+  .run-value-control { grid-template-columns: minmax(0, 1fr) auto; }
+  .run-value-control .ui-button { grid-column: 1 / -1; width: 100%; }
+  .run-threshold-list { grid-template-columns: minmax(0, 1fr); }
+  .run-debug-control { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .live-head-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  }
+  .live-head-actions .ui-button { width: 100%; }
+  .live-line { grid-template-columns: minmax(0, 1fr); }
+  .live-row-actions { margin-left: 16px; }
+  .live-row-actions .ui-button { flex: 1; }
+  .live-meta { align-items: stretch; flex-direction: column; }
+  .live-path { max-width: 100%; }
   .trusted-add { flex-direction: column; }
   .trusted-add .ui-button { width: 100%; }
-  .debug-setting { align-items: stretch; flex-direction: column; }
-  .debug-setting label { min-width: 0; }
   .mode > p { margin-left: 0; padding-left: 39px; }
   .companion-audio-grid { margin-left: 0; padding-left: 39px; grid-template-columns: minmax(0, 1fr); }
   .companion-tts-consent { margin-left: 0; }

@@ -195,8 +195,21 @@
                 </span>
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
                 <span class="pu">
-                  <span v-for="b in usageOf(p).bars" :key="b.key" class="pu-row">
-                    <span class="pu-head"><span>{{ b.label }}</span><b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b></span>
+                  <span
+                    v-for="b in usageOf(p).bars"
+                    :key="b.key"
+                    class="pu-row"
+                    :class="{ 'pu-split': b.separated }"
+                  >
+                    <span class="pu-head">
+                      <span class="pu-name">
+                        {{ b.label }}
+                        <!-- Ведро, которого раньше не было: появление нового лимита
+                             иначе замечается только случайно. Гаснет само. -->
+                        <span v-if="b.fresh" class="pu-new" title="Это ведро лимитов появилось недавно">новое</span>
+                      </span>
+                      <b :class="{ hot: b.pct >= 85 }">{{ b.pct }}%</b>
+                    </span>
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                     <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
                   </span>
@@ -881,6 +894,18 @@ const { connected } = useSse((name) => {
 .pu-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .pu-fill.hot { background: var(--bad); }
 .pu-reset { font-size: 10.5px; color: var(--ink-mid); }
+/* Граница ведра лимитов. Модификатор, а не правка .pu-row: тот же класс рисует
+   полосы процессора и памяти в соседней всплывашке, где делить нечего. */
+.pu-row.pu-split { border-top: 1px solid var(--line); padding-top: 8px; }
+/* Подпись занимает свою колонку: без min-width её не сжать, и длинное имя ведра
+   вытолкнуло бы процент за край всплывашки. */
+.pu-name { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.pu-new {
+  flex: none;
+  padding: 0 5px; border-radius: 999px;
+  font-size: 9.5px; line-height: 14px; letter-spacing: .02em;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .pu-state {
   display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
   padding-top: 7px; border-top: 1px solid var(--line);

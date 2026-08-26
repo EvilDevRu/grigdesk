@@ -19,7 +19,9 @@ import { getExecutors } from './executors/index.js';
 //    из имени («есть [1m] — миллион, иначе 200k»). Прежнее правило занижало окно всему
 //    текущему поколению; деградация теперь per-model, а retired exact ids отделены
 //    от динамических CLI-алиасов.
-const CATALOG_SCHEMA = 9;
+// 10: Codex model/list не содержит окно; каталог помечает его runtime-only вместо
+//     прежней безусловной заглушки 400k, которую UI выдавал за свойство модели.
+const CATALOG_SCHEMA = 10;
 
 let cache = null; // { at, registry }
 const CACHE_MS = 60_000;
@@ -166,7 +168,7 @@ export function mergeCatalogModel(model, current) {
   // Непроверенные поля не затирают последнюю проверенную metadata. Признаки деградации
   // при этом ОСТАЮТСЯ: старое окно — полезный ориентир, но выдавать его за свежий факт
   // нельзя. Effort ниже дополнительно fail-closed, пока реестр снова не прочитается.
-  if (model.contextUnverified && current?.context > 0) {
+  if (model.contextUnverified && !model.contextRuntimeOnly && current?.context > 0) {
     merged.context = current.context;
   }
   if (model.nameUnverified && current?.name) {

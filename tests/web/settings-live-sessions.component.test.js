@@ -165,6 +165,19 @@ function closeButton(row) {
   return row.findAll('button').find((btn) => btn.text() === 'Погасить');
 }
 
+test('вкладка разделяет правила, процессы и наблюдение по смысловым зонам', async (t) => {
+  const { wrapper } = await mountRuns(t);
+  const rules = wrapper.get('[data-testid="runs-rules-grid"]');
+  const live = wrapper.get('[data-testid="runs-live-card"]');
+
+  assert.equal(rules.findAll('.run-card').length, 2);
+  assert.match(rules.text(), /Старт и восстановление/);
+  assert.match(rules.text(), /Контекст агентов/);
+  assert.match(live.text(), /Держать агента чата живым между ходами/);
+  assert.equal(live.findAll('.live-row').length, 2);
+  assert.equal(wrapper.findAll('.run-observe-item').length, 2);
+});
+
 test('строка процесса называет чат, исполнителя и pid, а занятость видна', async (t) => {
   const { wrapper } = await mountRuns(t);
   const rows = wrapper.findAll('.live-row');

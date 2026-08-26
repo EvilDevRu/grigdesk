@@ -37,36 +37,156 @@ function resetIso(value) {
 }
 
 /**
- * Documented app-server contract: account/rateLimits/read. `rateLimitsByLimitId`
- * is the current multi-bucket view; `rateLimits` remains its compatibility
- * fallback. Model names come from the service, so new Codex families do not
- * require a Cockpit release.
+ * Общая квота аккаунта (ведро без собственного имени) всегда идёт первой: в неё
+ * упираются раньше всего. Остальные сортируются по ВИДИМОЙ подписи, а не по
+ * внутреннему id: по id `base_model_inference` встал бы впереди `codex`, хотя
+ * человек читает «gpt-reserve» и «Неделя (7д)». Одинаковые подписи разводит id,
+ * чтобы порядок оставался полным.
+ */
+function compareCodexBuckets(a, b) {
+  const generalA = a.scope === '';
+  const generalB = b.scope === '';
+
+  if (generalA !== generalB) {
+    return generalA ? -1 : 1;
+  }
+
+  return a.scope.localeCompare(b.scope, 'ru') || a.id.localeCompare(b.id);
+}
+
+/**
+ * Слоты окна нельзя перечислять списком: `['primary', 'secondary']` — это снимок
+ * СЕГОДНЯШНЕЙ схемы, и третий слот выпал бы молча, как выпадало бы новое ведро при
+ * allowlist по id. Берём любое поле ведра, которое выглядит окном (числовой
+ * `usedPercent`); `credits` и `individualLimit` под это не подходят — у первого
+ * процента нет вовсе, у второго он называется `remainingPercent`.
+ *
+ * Порядок — от короткого окна к длинному (сессия перед неделей), а не по имени поля:
+ * имена придумывает сервис, смысл несёт длительность. Ведро без длительности уходит
+ * в конец, одинаковые разводит имя слота — иначе сортировка была бы неполной.
+ */
+function bucketWindows(bucket) {
+  const windows = Object.entries(bucket)
+    .filter(([, window]) => window && typeof window.usedPercent === 'number')
+    .map(([slot, window]) => ({ slot, window }));
+
+  return windows.sort((a, b) => {
+    const left = Number.isFinite(a.window.windowDurationMins) ? a.window.windowDurationMins : Infinity;
+    const right = Number.isFinite(b.window.windowDurationMins) ? b.window.windowDurationMins : Infinity;
+
+    if (left !== right) {
+      return left < right ? -1 : 1;
+    }
+
+    return a.slot.localeCompare(b.slot);
+  });
+}
+
+/**
+ * Контракт app-server: account/rateLimits/read. `rateLimitsByLimitId` — текущий
+ * многовёдерный вид, `rateLimits` остаётся совместимым запасным. Имена вёдер
+ * приходят от сервиса, поэтому новое семейство Codex появляется в шапке без
+ * релиза кокпита.
+ *
+ * Порядок полос принадлежит кокпиту, а не сервису: `rateLimitsByLimitId` — объект,
+ * и OpenAI отдаёт ключи в разном порядке на каждый ответ (замер: шесть запросов
+ * подряд — три разных порядка). Минутное обновление шапки поэтому перетасовывало
+ * полосы прямо под курсором. Поле `group` называет ведро, которому принадлежит
+ * полоса: по нему всплывашка ставит разделитель, не зная про вендора.
  */
 export function parseCodexRateLimits(result) {
   const byId = result?.rateLimitsByLimitId;
-  const buckets = byId && typeof byId === 'object' && Object.keys(byId).length
+  const source = byId && typeof byId === 'object' && Object.keys(byId).length
     ? Object.values(byId)
     : (result?.rateLimits ? [result.rateLimits] : []);
-  const bars = [];
   const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 
-  for (const bucket of buckets) {
-    if (!bucket || typeof bucket !== 'object') continue;
+  const buckets = [];
+
+  for (const bucket of source) {
+    if (!bucket || typeof bucket !== 'object') {
+      continue;
+    }
+
     const id = String(bucket.limitId || 'codex');
-    const scope = bucket.limitName || (id !== 'codex' ? id : '');
-    for (const slot of ['primary', 'secondary']) {
-      const limit = bucket[slot];
-      if (!limit || typeof limit.usedPercent !== 'number') continue;
-      const base = windowLabel(limit.windowDurationMins);
+    buckets.push({
+      id,
+      bucket,
+      scope: bucket.limitName || (id !== 'codex' ? id : ''),
+    });
+  }
+
+  buckets.sort(compareCodexBuckets);
+
+  const bars = [];
+
+  for (const { id, bucket, scope } of buckets) {
+    for (const { slot, window } of bucketWindows(bucket)) {
+      const base = windowLabel(window.windowDurationMins);
       bars.push({
         key: `${id}:${slot}`,
+        group: id,
         label: scope ? `${base.replace(/ \([^)]+\)$/, '')} · ${scope}` : base,
-        pct: clamp(limit.usedPercent),
-        resetsAt: resetIso(limit.resetsAt),
+        pct: clamp(window.usedPercent),
+        resetsAt: resetIso(window.resetsAt),
       });
     }
   }
+
   return bars;
+}
+
+// Почему аккаунт упёрся, сервис называет поимённо. Свои формулировки нужны потому,
+// что коды приходят по сети и человеку ничего не говорят; незнакомый код показывается
+// как есть — выдумывать за сервис перевод хуже, чем показать его слово.
+const CODEX_REACHED_REASON = {
+  rate_limit_reached: 'достигнут лимит запросов',
+  workspace_owner_credits_depleted: 'кончились кредиты владельца рабочей области',
+  workspace_member_credits_depleted: 'кончились кредиты участника рабочей области',
+  workspace_owner_usage_limit_reached: 'достигнут лимит расхода владельца рабочей области',
+  workspace_member_usage_limit_reached: 'достигнут лимит расхода участника рабочей области',
+};
+
+/**
+ * Отдельный ресурс про КОНТРОЛЬ ТРАТ, а не про окна лимитов: `individualLimit` — это
+ * персональный денежный потолок, а `spendControlReached` — упёрлись ли в него. Оба поля
+ * приходили в ответе с самого начала и не показывались нигде, поэтому исчерпанный
+ * потолок выглядел как «всё молча встало» без единой подсказки во всплывашке.
+ *
+ * Ресурса нет, пока сервис молчит: `null`/`false` — это «нечего сказать», и пустая
+ * строка в шапке была бы шумом. Суммы остаются СТРОКАМИ как пришли: это деньги, и
+ * `Number` на них молча теряет точность.
+ */
+function codexSpendControl(result, buckets) {
+  const limit = buckets.map((bucket) => bucket.individualLimit)
+    .find((value) => value && typeof value === 'object');
+  const reached = buckets.some((bucket) => bucket.spendControlReached === true);
+  const reason = buckets.map((bucket) => bucket.rateLimitReachedType)
+    .find((value) => typeof value === 'string' && value);
+
+  if (!limit && !reached && !reason) {
+    return null;
+  }
+
+  const remaining = Number(limit?.remainingPercent);
+  const notes = [];
+
+  if (reached) {
+    notes.push('Лимит трат исчерпан — ходы не пойдут до сброса.');
+  }
+
+  if (reason) {
+    notes.push(`Причина от сервиса: ${CODEX_REACHED_REASON[reason] || reason}.`);
+  }
+
+  return {
+    key: 'spend-control',
+    label: 'Контроль трат',
+    summary: limit ? `${limit.used} из ${limit.limit}` : (reached ? 'исчерпан' : 'достигнут лимит'),
+    tone: reached ? 'bad' : 'muted',
+    ...(Number.isFinite(remaining) && { percent: Math.max(0, Math.min(100, Math.round(100 - remaining))) }),
+    ...(notes.length && { note: notes.join(' ') }),
+  };
 }
 
 export function parseCodexUsageResources(result) {
@@ -78,6 +198,13 @@ export function parseCodexUsageResources(result) {
   const creditState = [result.credits, ...buckets.map((bucket) => bucket.credits)]
     .find((credits) => credits && typeof credits === 'object');
   const resources = [];
+
+  // Первым: он один отвечает на «почему всё встало», остальные — справка о балансе.
+  const spendControl = codexSpendControl(result, buckets);
+
+  if (spendControl) {
+    resources.push(spendControl);
+  }
 
   if (creditState) {
     const balance = creditState.balance;
@@ -199,6 +326,25 @@ export function codexModelFamily(modelId) {
   return match?.[1] || '';
 }
 
+/**
+ * `model/list` не обещает размер окна. Старый app-server мог прислать расширенное
+ * поле, и его сохраняем, но отсутствие нельзя подменять паспортным окном API:
+ * рабочий потолок Codex зависит от thread и точно приезжает только с token usage.
+ */
+function codexCatalogContext(entry) {
+  const context = Number(entry?.contextWindow);
+
+  if (Number.isSafeInteger(context) && context > 0) {
+    return { context };
+  }
+
+  return {
+    context: 0,
+    contextUnverified: true,
+    contextRuntimeOnly: true,
+  };
+}
+
 export function parseCodexModelList(result) {
   if (!Array.isArray(result?.data) || !result.data.length) return null;
 
@@ -243,7 +389,7 @@ export function parseCodexModelList(result) {
       id,
       ...(family && { family }),
       name: exact.displayName || id,
-      context: Number(exact.contextWindow) || 400_000,
+      ...codexCatalogContext(exact),
       tier: 10_000 - group.index,
       efforts: efforts.length ? efforts : null,
       defaultEffort: exact.defaultReasoningEffort || null,
@@ -1209,9 +1355,18 @@ export default {
 
   seedModels() {
     return [
-      { id: 'gpt-5.6-sol', family: 'sol', name: 'GPT-5.6-Sol', context: 400000, tier: 100, efforts: null },
-      { id: 'gpt-5.6-terra', family: 'terra', name: 'GPT-5.6-Terra', context: 400000, tier: 90, efforts: null },
-      { id: 'gpt-5.6-luna', family: 'luna', name: 'GPT-5.6-Luna', context: 400000, tier: 80, efforts: null },
+      {
+        id: 'gpt-5.6-sol', family: 'sol', name: 'GPT-5.6-Sol', tier: 100, efforts: null,
+        ...codexCatalogContext(null),
+      },
+      {
+        id: 'gpt-5.6-terra', family: 'terra', name: 'GPT-5.6-Terra', tier: 90, efforts: null,
+        ...codexCatalogContext(null),
+      },
+      {
+        id: 'gpt-5.6-luna', family: 'luna', name: 'GPT-5.6-Luna', tier: 80, efforts: null,
+        ...codexCatalogContext(null),
+      },
     ];
   },
 

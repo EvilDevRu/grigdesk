@@ -889,6 +889,96 @@ test('ChatSession показывает неподтверждённое окно
   assert.match(option.attributes('title'), /окно не подтверждено/);
 });
 
+test('ChatSession показывает рабочее окно Codex из живой сессии вместо заглушки каталога', async (t) => {
+  const browser = await browserHarness(t);
+  const { mount, flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const model = {
+    id: 'gpt-5.6-sol',
+    name: 'GPT-5.6-Sol',
+    context: 0,
+    contextUnverified: true,
+    contextRuntimeOnly: true,
+    efforts: [],
+  };
+  const provider = {
+    id: 'codex',
+    name: 'GPT (Codex)',
+    available: true,
+    models: [model],
+  };
+  const session = {
+    id: 'codex-runtime-context',
+    taskId: null,
+    title: 'Рабочее окно Codex',
+    model: model.id,
+    modelRef: { provider: provider.id, model: model.id },
+    effort: '',
+    mode: '',
+    messages: [],
+    steps: [],
+    draft: '',
+    sessionId: 'codex-thread',
+    contextTokens: 110_512,
+    contextWindow: 258_400,
+    contextMetric: 'active-input-v1',
+    contextCache: { scope: 'request', status: 'unavailable' },
+    sending: false,
+  };
+  globalThis.__chatTaskTooltipApi = { async get() { return { tasks: [] }; } };
+  globalThis.__chatTaskTooltipChatStore = () => ({
+    sessions: [session],
+    compactWindow: 0,
+    loadConveyor() {},
+    markRead() {},
+    setDraft() {},
+    permFor() { return null; },
+    questionFor() { return null; },
+    isOnConveyor() { return false; },
+    tabLabel() { return session.title; },
+  });
+  globalThis.__chatTaskTooltipRouter = { async push() {} };
+  globalThis.__chatTaskTooltipTasksStore = () => ({ async load() { return null; } });
+  globalThis.__chatTaskTooltipUiStore = () => ({ openTaskLaunch() {} });
+  globalThis.__chatTaskTooltipProvidersStore = () => ({
+    providers: [provider],
+    load() {},
+    modelOf() { return { id: model.id, model, provider }; },
+    visibleModels(value) { return value.models; },
+    modesOf() { return []; },
+  });
+  const ChatSession = await compileChatSession();
+  t.after(() => {
+    delete globalThis.__chatTaskTooltipApi;
+    delete globalThis.__chatTaskTooltipChatStore;
+    delete globalThis.__chatTaskTooltipTasksStore;
+    delete globalThis.__chatTaskTooltipUiStore;
+    delete globalThis.__chatTaskTooltipProvidersStore;
+    delete globalThis.__chatTaskTooltipRouter;
+  });
+
+  const wrapper = mount(ChatSession, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { sid: session.id },
+  });
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const select = wrapper.get('.sel.model select');
+  assert.match(select.attributes('title'), /рабочее окно 258[\s\u00a0]400 токенов/);
+  assert.doesNotMatch(select.attributes('title'), /400[\s\u00a0]?000|400K/i);
+
+  const option = wrapper.get('.sel.model option[value="gpt-5.6-sol"]');
+  assert.equal(option.text(), 'GPT-5.6-Sol');
+  assert.match(option.attributes('title'), /рабочее окно 258[\s\u00a0]400 токенов/);
+
+  const ring = wrapper.get('.ctx-ring');
+  assert.match(ring.attributes('aria-label'), /110[\s\u00a0]512 из 206[\s\u00a0]720/);
+  assert.match(ring.attributes('aria-label'), /окно модели 258[\s\u00a0]400/);
+  assert.equal(contextTooltipRows(await openContextTooltip(wrapper)).Окно, '258 400');
+});
+
 // Сторож единственного владельца выбора у компаньона. Разговор компаньона server-owned и
 // один на все окна, поэтому модель и усилие принадлежат настройке «Настройки → Приложение
 // → Голосовой компаньон». Рабочие селекты здесь дали бы вторую правду: принятый выбор

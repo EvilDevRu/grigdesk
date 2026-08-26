@@ -99,15 +99,15 @@
             data-context="chat-session-toolbar"
             :model-value="modelId"
             :disabled="frozen || isCompanion"
-            :title="currentModel ? `${currentModel.name} · контекст ${(currentModel.context / 1000).toFixed(0)}k` + (currentModel.contextUnverified ? ' · окно не подтверждено' : '') : 'Модель'"
+            :title="currentModelTitle"
             @change="onModelChange"
           >
             <template v-if="provGroups.length">
               <optgroup v-for="p in provGroups" :key="p.id" :label="p.name + (p.available ? '' : ' — недоступен')">
                 <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
                 <option v-for="m in p.models" :key="m.id" :value="m.id" :disabled="!p.available"
-                        :title="`${m.id} · контекст ${(m.context / 1000).toFixed(0)}k` + (m.contextUnverified ? ' · окно не подтверждено' : '') + (m.unknown ? ' · нет в каталоге установленного CLI' : '')">
-                  {{ m.name }}{{ m.contextUnverified ? ' · окно не подтверждено' : '' }}{{ m.unknown ? ' ?' : '' }}
+                        :title="modelOptionTitle(m)">
+                  {{ modelOptionLabel(m) }}
                 </option>
               </optgroup>
             </template>
@@ -694,6 +694,42 @@ const effortValue = computed(() => (isCompanion.value ? companionRun.value.effor
 const companionRunHint = 'Модель и усилие компаньона задаются в «Настройки → Приложение →'
   + ' Голосовой компаньон» — они общие для всех его разговоров и всех окон.';
 const currentModel = computed(() => current.value.model);
+const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+
+/**
+ * Каталог Codex намеренно не сообщает окно. Для выбранной модели точнее всего замер
+ * живой thread; до него вместо паспортной или сохранённой заглушки показываем источник
+ * будущего факта. Остальные исполнители сохраняют прежний каталожный контракт.
+ */
+function modelContextTitle(model, label) {
+  const runtimeWindow = model?.id === currentModel.value?.id
+    ? Math.max(0, Number(sess.value?.contextWindow) || 0)
+    : 0;
+
+  if (runtimeWindow) {
+    return `${label} · рабочее окно ${fmtTokens(runtimeWindow)} токенов`;
+  }
+  if (model?.contextRuntimeOnly) {
+    return `${label} · рабочее окно появится после первого хода`;
+  }
+
+  const context = Math.max(0, Number(model?.context) || 0);
+  if (!context) {
+    return `${label} · окно контекста неизвестно`;
+  }
+
+  return `${label} · контекст ${fmtTokens(context)} токенов`
+    + (model.contextUnverified ? ' · окно не подтверждено' : '');
+}
+
+const currentModelTitle = computed(() => (
+  currentModel.value ? modelContextTitle(currentModel.value, currentModel.value.name) : 'Модель'
+));
+const modelOptionTitle = (model) => modelContextTitle(model, model.id)
+  + (model.unknown ? ' · нет в каталоге установленного CLI' : '');
+const modelOptionLabel = (model) => model.name
+  + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
+  + (model.unknown ? ' ?' : '');
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь кокпит).
 const provGroups = computed(() => prov.providers
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
@@ -710,8 +746,9 @@ const currentMode = computed(() => {
   return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
 });
 const modeHint = computed(() => modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента');
-// Codex сообщает эффективное окно только в token_count конкретной сессии (например,
-// catalog 272k × 95% = 258.4k). Оно точнее каталожного fallback и потому приоритетно.
+// Codex сообщает эффективное окно только в token usage конкретной сессии (например,
+// 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
+// который не показываем человеку как свойство модели.
 const ctxWindow = computed(() => sess.value?.contextWindow || currentModel.value?.context || CONTEXT_WINDOW);
 // Модель выбрана, но установленный CLI про неё не знает (реестр помечает `unknown`):
 // полный id он обычно всё равно принимает, а вот алиас/подпись могут врать — предупреждаем.
@@ -825,14 +862,16 @@ const ctxLimit = computed(() => ctxFill.value.limit);
 // оттенок, поэтому почти пустое кольцо перевешивало предупреждение — «места ещё дофига»,
 // пока CLI уже сжимал контекст по кругу.
 const ctxPct = computed(() => ctxFill.value.pct);
+const ctxRuntimeWindowPending = computed(() => (
+  !sess.value?.contextWindow && !!currentModel.value?.contextRuntimeOnly
+));
 const ctxUnavailable = computed(() => !!sess.value?.sessionId
-  && sess.value?.contextMetric === 'legacy-unavailable');
+  && (sess.value?.contextMetric === 'legacy-unavailable' || ctxRuntimeWindowPending.value));
 const ctxClass = computed(() => (ctxUnavailable.value ? '' : ctxFill.value.tone));
 const ctxIsEstimate = computed(() => !!sess.value?.contextIsEstimate);
 const ctxWindowUnverified = computed(() => (
   !sess.value?.contextWindow && !!currentModel.value?.contextUnverified
 ));
-const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
 const fmtSessionTokens = (value) => {
   const tokens = Math.max(0, Number(value) || 0);
   if (tokens < 1_000_000) return fmtTokens(tokens);
@@ -901,7 +940,9 @@ const ctxLimitShort = computed(() => ctxFill.value.limitShort);
 const ctxTooltip = computed(() => {
   const s = sess.value;
   const modelWindow = `${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' · неточно' : ''}`;
-  const rows = [{ label: 'Окно', value: modelWindow, unverified: ctxWindowUnverified.value }];
+  const rows = ctxRuntimeWindowPending.value
+    ? []
+    : [{ label: 'Окно', value: modelWindow, unverified: ctxWindowUnverified.value }];
   const total = s?.totalInputTokens || 0;
   const addSessionRows = () => {
     if (total) rows.push({ label: 'За сессию', value: fmtSessionTokens(total) });
@@ -967,6 +1008,9 @@ const ctxTitle = computed(() => {
     const empty = s?.pendingSeed
       ? 'Контекст сжат — выжимка уедет со следующим сообщением'
       : 'Контекст: пусто';
+    if (ctxRuntimeWindowPending.value) {
+      return `${empty} · рабочее окно появится после первого хода`;
+    }
     return ctxWindowUnverified.value
       ? `${empty} · окно модели ${fmtTokens(ctxWindow.value)} (не подтверждено)`
       : empty;

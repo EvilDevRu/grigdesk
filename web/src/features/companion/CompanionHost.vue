@@ -167,9 +167,11 @@ const contextView = computed(() => {
   if (!session) return null;
   const used = (session.sending && session.liveContext) || session.contextTokens || 0;
   if (!used) return null;
+  const model = companionModel.value?.model;
+  if (!session.contextWindow && model?.contextRuntimeOnly) return null;
   const fill = contextFill({
     tokens: used,
-    window: session.contextWindow || companionModel.value?.model?.context || CONTEXT_WINDOW,
+    window: session.contextWindow || model?.context || CONTEXT_WINDOW,
     compactWindow: chat.compactWindow || 0,
   });
   return {
