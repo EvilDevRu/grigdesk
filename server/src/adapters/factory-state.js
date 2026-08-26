@@ -347,7 +347,7 @@ export class FactoryStateAdapter {
     };
   }
 
-  /** Карта статусов этапов маршрута: STAGE → { status, at, fails, dur, fanout }. */
+  /** Карта статусов этапов маршрута: STAGE → { status, at, fails, dur, fanout, denials }. */
   buildStageMap(registry) {
     const route = registry.ROUTE || 'feature';
     // v2-реестр несёт РОВНО узлы закреплённого бандла (в порядке машины) —
@@ -363,6 +363,12 @@ export class FactoryStateAdapter {
         fails: registry[`${key}_FAILS`] ? Number(registry[`${key}_FAILS`]) : 0,
         dur: registry[`DUR_${key}`] ? Number(registry[`DUR_${key}`]) : null,
         fanout: registry[`FANOUT_${key}`] ? Number(registry[`FANOUT_${key}`]) : null,
+        // Отказы политики прав внутри хода. Ключа нет — движок НЕ ЗНАЕТ (ход оборвался
+        // до события result), и это не то же самое, что записанный ноль. Строгая
+        // проверка, а не truthy: `'0'` — правдивый ноль, а мусор из реестра — не число.
+        denials: /^\d+$/.test(registry[`DENIALS_${key}`] || '')
+          ? Number(registry[`DENIALS_${key}`])
+          : null,
       };
     }
     return { route, stages, map };
@@ -553,6 +559,12 @@ export class FactoryStateAdapter {
         at: registry[`${key}_AT`] || null,
         dur: registry[`DUR_${key}`] ? Number(registry[`DUR_${key}`]) : null,
         fanout: registry[`FANOUT_${key}`] ? Number(registry[`FANOUT_${key}`]) : null,
+        // Отказы политики прав внутри хода. Ключа нет — движок НЕ ЗНАЕТ (ход оборвался
+        // до события result), и это не то же самое, что записанный ноль. Строгая
+        // проверка, а не truthy: `'0'` — правдивый ноль, а мусор из реестра — не число.
+        denials: /^\d+$/.test(registry[`DENIALS_${key}`] || '')
+          ? Number(registry[`DENIALS_${key}`])
+          : null,
         fails: registry[`${key}_FAILS`] ? Number(registry[`${key}_FAILS`]) : 0,
         tokens: registry[`TOKENS_${key}`] ? Number(registry[`TOKENS_${key}`]) : null,
         // Объяснение статуса от движка/агента: причина пропуска, замечание провалившегося

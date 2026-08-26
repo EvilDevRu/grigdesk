@@ -324,11 +324,19 @@
 
         <!-- Компактная строка метаданных -->
         <div v-if="stage.meta.at || stage.meta.dur != null || stage.meta.fanout != null
-          || stage.meta.tokens || stage.meta.fails || stage.sub || stageActivity"
+          || stage.meta.denials || stage.meta.tokens || stage.meta.fails || stage.sub || stageActivity"
           class="smeta" aria-label="Показатели этапа">
           <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
           <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
           <span v-if="stage.meta.fanout != null" class="smchip">{{ stage.meta.fanout }} субаг.</span>
+          <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
+               одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
+               обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
+               запретили нужный запуск, склонен подобрать похожий и выдать его результат за
+               доказательство. -->
+          <span v-if="stage.meta.denials" class="smchip failed"
+            title="Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.">
+            {{ stage.meta.denials }} отказ. прав</span>
           <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
           <span v-if="stage.meta.fails" class="smchip failed">{{ stage.meta.fails }} возвр.</span>
           <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>

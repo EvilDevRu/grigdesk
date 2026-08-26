@@ -365,6 +365,54 @@ print("\n".join(out))
 PYTHON
 }
 
+# Отказы политики прав внутри завершившегося хода. CLI кладёт их в `permission_denials`
+# события `result`, но движок не читал это поле вовсе — и отказ был виден только грепом
+# по потоку внутри каталога прогона.
+#
+# Опасен не потраченный вызов, а ПОДМЕНА проверки: в живом прогоне нужный запуск «был
+# заблокирован политикой», и агент в тот же ход написал «проверю через прямой запуск
+# скриптов». Результат подменённой проверки уехал дальше как требуемое доказательство.
+# Правило «нет замены — зафиксируй проверку как не выполненную» в промпте уже стояло и
+# было нарушено, поэтому нужен машинный признак, а не ещё одна строка регламента.
+#
+# Отсутствие события `result` — это ОБОРВАННЫЙ ход (таймаут, KILL, падение), а не ход без
+# отказов. Такой случай возвращает ненулевой код: движок не запишет ключ вовсе, и «не
+# знаем» не превратится в честный ноль.
+runner_claude_denial_count() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1/events.jsonl" <<'PYTHON'
+import json
+import sys
+
+try:
+    source = open(sys.argv[1], encoding="utf-8", errors="replace")
+except OSError:
+    raise SystemExit(1)
+
+seen_result = False
+total = 0
+
+with source:
+    for line in source:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if event.get("type") != "result":
+            continue
+        seen_result = True
+        denials = event.get("permission_denials")
+        if isinstance(denials, list):
+            total += len(denials)
+
+if not seen_result:
+    raise SystemExit(1)
+print(total)
+PYTHON
+}
+
 runner_claude_fanout_count() {
   grep -cE '"name":"(Agent|Task)"' "$1/events.jsonl" 2>/dev/null || printf '0\n'
 }

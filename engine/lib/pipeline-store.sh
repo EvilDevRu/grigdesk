@@ -96,7 +96,7 @@ _pipeline_strip_stage_family() {
           key == "RUNNER_FAILOVER_" stage || key == "RUNNER_OVERRIDE_STAGE_" stage ||
           key == "MODEL_FAMILY_" stage || key == "MODEL_ACTUAL_" stage ||
           key == "CATALOG_REVISION_" stage || key == "PLAN_LEVEL_" stage ||
-          key == "FANOUT_" stage)
+          key == "FANOUT_" stage || key == "DENIALS_" stage)
         next
       print
     }

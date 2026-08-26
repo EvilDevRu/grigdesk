@@ -480,17 +480,13 @@ test('STATE-09: provider-writable state can never be configured as trusted contr
   );
 });
 
-test('STATE-10: recovery endpoint inert and cannot resume anything automatically', async (t) => {
+// Автовосстановления нет вовсе: эндпоинт удалён вместе с тумблером и решателем.
+// Заглушка `enabled: false` держалась годами и читалась как «функция есть, но выключена»,
+// поэтому её отсутствие проверяется явно — иначе она вернётся следующей правкой.
+test('STATE-10: recovery endpoint is gone and nothing resumes automatically', async (t) => {
   const fx = await fixture(t);
   const app = await server(t, fx);
   const response = await app.inject({ method: 'GET', url: '/api/factory/recovery' });
-  assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), {
-    enabled: false,
-    running: false,
-    checkedAt: null,
-    items: [],
-    reason: 'manual_resume_only',
-  });
+  assert.equal(response.statusCode, 404);
   assert.equal(await missing(fx.callsLog), true);
 });

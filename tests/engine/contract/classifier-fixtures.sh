@@ -73,6 +73,12 @@ materialize_fixture() {
         'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
         >"$target/stderr.log"
       : >"$target/stdout.log" ;;
+    kimi-oauth-transport)
+      printf '%s\n' \
+        'error: failed to run prompt: internal: OAuth request to https://auth.kimi.com/api/oauth/token failed: fetch failed: Client network socket disconnected before secure TLS connection was established' \
+        'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+        >"$target/stderr.log"
+      : >"$target/stdout.log" ;;
     kimi-bad-model)
       printf '%s\n' \
         'error: failed to run prompt: config.invalid: Model "kimi-code/no-such-model-zz" is not configured in config.toml. Add a [models."kimi-code/no-such-model-zz"] entry with max_context_size.' \
@@ -117,6 +123,7 @@ check_fixture kimi kimi-bad-model
 check_fixture kimi kimi-interrupted
 check_fixture kimi kimi-auth-after-work
 check_fixture kimi kimi-usage-limit
+check_fixture kimi kimi-oauth-transport
 
 unknown="$TEST_ROOT/unknown-version"
 cp -a "$fixture_root/codex-denied" "$unknown"
@@ -149,6 +156,46 @@ cp -a "$fixture_root/kimi-usage-limit" "$kimi_limit_after_work"
 cp -a "$fixture_root/kimi-auth-after-work/events.jsonl" "$kimi_limit_after_work/events.jsonl"
 actual=$(runner_call kimi classify "$kimi_limit_after_work" 1)
 assert_eq unknown "$actual" "Kimi quota limit after model activity stays unknown"
+
+# Обрыв транспорта на токене признаётся только по ОБЕИМ частям сигнатуры. Один
+# `OAuth request … failed` покрывает и отозванный токен: тот ожиданием не лечится и
+# `transient` про него сказал бы неправду.
+kimi_oauth_denied="$TEST_ROOT/kimi-oauth-denied"
+cp -a "$fixture_root/kimi-oauth-transport" "$kimi_oauth_denied"
+printf '%s\n' \
+  'error: failed to run prompt: internal: OAuth request to https://auth.kimi.com/api/oauth/token failed: 401 invalid_grant' \
+  'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+  >"$kimi_oauth_denied/stderr.log"
+actual=$(runner_call kimi classify "$kimi_oauth_denied" 1)
+assert_eq unknown "$actual" "Kimi OAuth refusal without a transport signature fails closed"
+
+# Обрыв соединения САМ ПО СЕБЕ ничего не доказывает: те же слова печатает провайдер
+# модели, а это уже другой отказ с другой ценой.
+kimi_bare_transport="$TEST_ROOT/kimi-bare-transport"
+cp -a "$fixture_root/kimi-oauth-transport" "$kimi_bare_transport"
+printf '%s\n' \
+  'error: failed to run prompt: internal: fetch failed: Client network socket disconnected before secure TLS connection was established' \
+  'See log: /workspace/example/.kimi-code/logs/kimi-code.log' \
+  >"$kimi_bare_transport/stderr.log"
+actual=$(runner_call kimi classify "$kimi_bare_transport" 1)
+assert_eq unknown "$actual" "Kimi bare transport error without the token endpoint fails closed"
+
+# Работа модели этот класс НЕ отменяет: именно после неё отказ и случается, а
+# переключения исполнителя `transient` всё равно не вызывает.
+kimi_oauth_fresh="$TEST_ROOT/kimi-oauth-no-activity"
+cp -a "$fixture_root/kimi-oauth-transport" "$kimi_oauth_fresh"
+printf '%s\n' '{"role":"meta","type":"system.version","version":"0.33.0"}' \
+  >"$kimi_oauth_fresh/events.jsonl"
+actual=$(runner_call kimi classify "$kimi_oauth_fresh" 1)
+assert_eq transient "$actual" "Kimi token transport failure is transient with or without model activity"
+
+# Непроверенная fixture из неизвестного источника класса не получает: текст ошибки
+# приходит от чужого CLI, и доверять ему на слово нельзя.
+kimi_oauth_unverified="$TEST_ROOT/kimi-oauth-unverified"
+cp -a "$fixture_root/kimi-oauth-transport" "$kimi_oauth_unverified"
+sed -i 's/FIXTURE_VERIFIED=.*/FIXTURE_VERIFIED=0/' "$kimi_oauth_unverified/meta.env"
+actual=$(runner_call kimi classify "$kimi_oauth_unverified" 1)
+assert_eq unknown "$actual" "unverified Kimi OAuth fixture fails closed"
 
 kimi_unverified="$TEST_ROOT/kimi-unverified-fixture"
 cp -a "$fixture_root/kimi-no-login" "$kimi_unverified"

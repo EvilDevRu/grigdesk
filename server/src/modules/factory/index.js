@@ -1129,16 +1129,6 @@ async function factoryModule(fastify, opts) {
     return r.status ? reply.code(r.status).send(r.body) : r.body;
   });
 
-  // Automatic recovery used the removed legacy resume writer. Until recovery becomes
-  // an engine-owned route command, only the explicit human resume endpoint is allowed.
-  fastify.get('/api/factory/recovery', async () => ({
-    enabled: false,
-    running: false,
-    checkedAt: null,
-    items: [],
-    reason: 'manual_resume_only',
-  }));
-
   // Занятость слотов стенда: чем заняты, что зарезервировано, сколько свободно.
   // Нужна человеку, когда запуск отказал с no_slot — иначе непонятно, что освобождать.
   fastify.get('/api/factory/slots', async (request, reply) => {

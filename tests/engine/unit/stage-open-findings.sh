@@ -128,3 +128,59 @@ JSON
   assert_eq "" "$(_route_v2_open_findings_from_context "$TEST_ROOT/нет-такого.json")" \
     "отсутствующий контекст даёт пустоту"
 fi
+
+# --- Ступень 0 лестницы: движок отдаёт заходу СВОЙ диагноз, а не два числа ---
+# openedSequence и lastSeenSequence приезжали в контекст с самого начала, но как числа:
+# агент видел их и всё равно заходил на третий круг с прежним подходом. Диагноз считает
+# движок, потому что он же и остановит маршрут по этому признаку.
+LOOPED_FINDINGS='[
+  {"id":"survived-repair","sourceNode":"review","owner":"build",
+   "summary":"граница не проверяется","status":"open",
+   "openedSequence":4,"lastSeenSequence":9},
+  {"id":"just-appeared","sourceNode":"review","owner":"build",
+   "summary":"новый дефект","status":"open",
+   "openedSequence":9,"lastSeenSequence":9}
+]'
+
+prompt=$(prompt_with "$LOOPED_FINDINGS")
+assert_contains "$prompt" 'ПЕРЕЖИЛА РЕМОНТ' "пережившая ремонт находка помечена в списке"
+assert_contains "$prompt" 'Диагноз движка' "диагноз топтания вклеен в промпт"
+assert_contains "$prompt" 'Пережили ремонт: survived-repair' "диагноз называет находку поимённо"
+assert_contains "$prompt" 'объяви, что закрыть нельзя' \
+  "агенту назван законный выход, кроме ещё одного круга"
+
+# Свежая находка пометки не получает: иначе «пережила ремонт» перестанет что-либо значить.
+fresh_line=$(grep -F 'just-appeared' <<<"$prompt")
+fresh_marked=нет; [[ "$fresh_line" == *'ПЕРЕЖИЛА РЕМОНТ'* ]] && fresh_marked=да
+assert_eq нет "$fresh_marked" "свежая находка меткой топтания не помечается"
+
+# --- без признаков топтания диагноза нет вовсе ---
+# Блок «диагноз» обязан появляться только по факту. Постоянный текст про топтание в
+# каждом заходе обесценился бы к третьему разу — ровно как обесценивались числа.
+has_diagnosis() {
+  [[ "$1" == *'Диагноз движка'* ]] && printf 'да' || printf 'нет'
+}
+assert_eq нет "$(has_diagnosis "$(prompt_with "$OPEN_FINDINGS")")" \
+  "находки без номеров заходов диагноза не дают"
+FRESH_ONLY='[{"id":"only-fresh","sourceNode":"review","owner":"build",
+  "summary":"первый проход","status":"open","openedSequence":3,"lastSeenSequence":3}]'
+assert_eq нет "$(has_diagnosis "$(prompt_with "$FRESH_ONLY")")" \
+  "первый проход диагноза не даёт"
+
+# --- битые номера не выдумывают топтание ---
+# Номер захода — производная проекция ledger; строка или null означают «не знаю»,
+# а не «пережила ремонт». Ложный диагноз здесь дороже отсутствующего: он велит агенту
+# сменить подход там, где прежний ещё не пробовали.
+BROKEN_SEQ='[{"id":"broken","sourceNode":"review","owner":"build",
+  "summary":"номера сломаны","status":"open","openedSequence":"4","lastSeenSequence":null}]'
+prompt=$(prompt_with "$BROKEN_SEQ")
+assert_contains "$prompt" 'broken' "находка с битыми номерами всё равно доезжает"
+assert_eq нет "$(has_diagnosis "$prompt")" "битые номера заходов диагноза не дают"
+
+# bool в питоне является int, поэтому `true`/`false` прошли бы проверку типа и дали бы
+# `true > false` — то есть выдуманный диагноз на повреждённой проекции.
+BOOL_SEQ='[{"id":"boolish","sourceNode":"review","owner":"build",
+  "summary":"номера булевы","status":"open","openedSequence":false,"lastSeenSequence":true}]'
+prompt=$(prompt_with "$BOOL_SEQ")
+assert_contains "$prompt" 'boolish' "находка с булевыми номерами доезжает"
+assert_eq нет "$(has_diagnosis "$prompt")" "булевы номера заходов диагноза не дают"

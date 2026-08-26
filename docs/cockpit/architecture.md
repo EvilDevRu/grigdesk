@@ -231,8 +231,8 @@ main/tail задают узлы, rewind — красные рёбра, штат�
 профиля с `task-comment` в хуке `profile_delivery_actions` кокпит запускает с
 `--task-comment`: узел `ship` оставляет во внешней задаче комментарий со ссылками
 на PR (см. [b24.md](b24.md)). Тексты одинаково
-названных ворот ключуются парой `route/node`, поэтому `hunt/gate_accept` не называется
-браузерной приёмкой изменения.
+названных ворот ключуются парой `route/node`, поэтому `gate_accept` поискового маршрута не
+называется браузерной приёмкой изменения.
 
 Pin защищает только bundle (machine + prompts). `engine` и `profile.sh` читаются живыми,
 `runners.env` — при routing decision, а `server`/`web` меняются после человеческого
@@ -279,9 +279,12 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 - Статусы узлов: `lib/factory-graph.computeNodeStatuses` — порт `pipeline_statuses` из `dashboard.py`.
 - Возвраты: `parseLoops` из `logs/tNNNN.stages.log`. Порты стенда: `tNNNN.env`.
 - Стадии — глобальный каталог `lib/stages.js` (enum), профиль оверрайдит подпись/тип.
-- После запуска Cockpit модуль factory один раз проверяет незакрытые реестры. Мёртвый демон
-  возобновляется только вне ворот/human-stall и с лимитом три рестарта за 15 минут;
-  настройка `autoRecoverPipelines` отключает это поведение.
+- Автовосстановления незакрытых прогонов НЕТ: после запуска Cockpit никто не перезапускает
+  погибший демон, `resume` остаётся явным действием человека и требует exact attempt.
+  Прежние тумблер, эндпоинт `/api/factory/recovery` и чистый решатель удалены — они
+  описывали поведение, которого в runtime не было, и решали по provider-writable
+  `.pipeline`. Условия возврата автоматики — локальный черновик
+  `docs/plans/pipeline-autonomy-plan.md`.
 
 ## Веб (`web/src/`)
 

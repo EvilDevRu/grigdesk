@@ -985,29 +985,6 @@ _runner_lineage_scope_guard_v2() {
   _runner_runtime_usage_call invalidate "$prepared" counterScopeConflict >"$replacement"
 }
 
-_runner_launch_record_usage() {
-  # Расход токенов завершённого хода. Метод `usage` опционален: у kimi ACP-мост
-  # не публикует расход вовсе, и прочерк там честнее выдуманного нуля.
-  #
-  # Значения проверяются здесь, а не доверяются раннеру: meta.env читают и awk
-  # движка, и кокпит, поэтому одна строка произвольного вида из чужого CLI
-  # испортила бы диагностику всей попытки.
-  local runner_id=$1 run_dir=$2 line value
-  declare -F "runner_${runner_id}_usage" >/dev/null 2>&1 || return 0
-  while IFS= read -r line; do
-    value=${line#*=}
-    case "$line" in
-      TOKENS_IN=*|TOKENS_OUT=*|TOKENS_CACHE_READ=*|TOKENS_CACHE_WRITE=*)
-        [[ "$value" =~ ^[0-9]+$ ]] || continue ;;
-      COST_USD=*)
-        [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] || continue ;;
-      *) continue ;;
-    esac
-    printf '%s\n' "$line" >>"$run_dir/meta.env"
-  done < <(runner_call "$runner_id" usage "$run_dir" 2>/dev/null || true)
-  return 0
-}
-
 _runner_launch_restore_signal_traps() {
   local saved_term=$1 saved_int=$2 pending
   if [[ -n "$saved_term" ]]; then

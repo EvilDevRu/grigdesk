@@ -1,0 +1,4 @@
+{"role": "meta", "type": "system.version", "version": "0.33.0"}
+{"role": "assistant", "tool_calls": [{"type": "function", "id": "tool_AAAAAAAAAAAAAAAAAAAAAAAA", "function": {"name": "Edit", "arguments": "{\"path\":\"core/example.py\"}"}}]}
+{"role": "tool", "tool_call_id": "tool_AAAAAAAAAAAAAAAAAAAAAAAA", "content": "Updated core/example.py"}
+{"role": "assistant", "content": "Правка внесена, запускаю проверку."}

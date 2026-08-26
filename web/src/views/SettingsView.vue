@@ -1156,19 +1156,6 @@
                 только для чистого master. Ветки задач и локальные правки не трогаются.
               </p>
             </div>
-
-            <div class="run-option">
-              <UiSwitch
-                :model-value="prefs.autoRecoverPipelines"
-                @update:model-value="toggleAutoRecover"
-              >
-                Продолжать незакрытые конвейеры после запуска Cockpit
-              </UiSwitch>
-              <p class="muted small">
-                Возобновляется только прогон с погибшим демоном. Ворота, ручная остановка
-                и повторяющийся сбой остаются заблокированными; после трёх аварий — только вручную.
-              </p>
-            </div>
           </div>
         </div>
 
@@ -2418,7 +2405,7 @@ const TABS = [
   },
   {
     id: 'runs', label: 'Запуски', group: 'Автоматизация', short: 'Правила и контекст',
-    description: 'Правила подготовки запусков, восстановление конвейеров и диагностика фабрики.',
+    description: 'Правила подготовки запусков, контекст агентов и диагностика фабрики.',
     icon: 'M8 5v14l11-7z M4 5v14',
   },
   {
@@ -3508,18 +3495,6 @@ async function saveSilenceWindow() {
       text: value
         ? `Позовём, если ход конвейера замолчит дольше ${value / 60} мин.`
         : 'Оповещение о зависших ходах выключено.',
-    };
-  } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
-}
-async function toggleAutoRecover(v) {
-  prefsMsg.value = null;
-  try {
-    prefs.value = await api.post('/api/settings/prefs', { autoRecoverPipelines: v });
-    prefsMsg.value = {
-      type: 'ok',
-      text: v
-        ? 'Автовосстановление включено и применится при следующем запуске Cockpit.'
-        : 'Автовосстановление выключено.',
     };
   } catch (e) { prefsMsg.value = { type: 'err', text: e.message }; }
 }

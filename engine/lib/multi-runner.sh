@@ -255,6 +255,7 @@ _multi_postamble_reclassify_v2() {
 _multi_invoke() {
   local provider=$1 family=$2 model=$3
   local run_id epoch token run_dir rc result request_id target fanout_count active_reason
+  local denial_count
   if ! runner_call "$provider" probe >/dev/null 2>&1; then
     DISPATCH_INVOKE_RESULT=unavailable_preflight
     DISPATCH_INVOKE_STARTED=0
@@ -378,6 +379,15 @@ tests — дефект/неполнота теста; environment —
   fanout_count=$(runner_call "$provider" fanout_count "$run_dir" 2>/dev/null)
   [[ "$fanout_count" =~ ^[0-9]+$ ]] || fanout_count=0
   set_st "$MULTI_TASK" "FANOUT_${MULTI_STAGE}" "$fanout_count"
+
+  # Отказы политики прав внутри хода. В отличие от веера здесь НЕТ умолчания в ноль:
+  # у оборванного хода события `result` не будет вовсе, и записанный ноль означал бы
+  # «отказов не случилось» там, где мы просто не знаем. Не знаем — ключа нет, и чип в
+  # модалке узла не рисуется. Метод необязательный: раннер без него ничего не пишет.
+  denial_count=$(runner_call "$provider" denial_count "$run_dir" 2>/dev/null)
+  if [[ "$denial_count" =~ ^[0-9]+$ ]]; then
+    set_st "$MULTI_TASK" "DENIALS_${MULTI_STAGE}" "$denial_count"
+  fi
 
   if [[ -n "$MULTI_MANUAL_TARGET" ]]; then
     DISPATCH_INVOKE_RESULT=manual_switch

@@ -20,6 +20,16 @@ const RULES = [
     /^(?:[A-Z_][A-Z0-9_]*=\S+[ \t]+)*(?:\.\.\/|engine\/)?bin\/factory-check[ \t]+(?!--|<|\$)[A-Za-z0-9][A-Za-z0-9._-]*/gimu,
   ],
   ['конкретный профиль в dashboard CLI', /\bbin\/dashboard\s+(?!<|\$)[A-Za-z0-9][A-Za-z0-9._-]*/giu],
+  // Путь `profiles/<имя>` ловит правило выше, но имя профиля попадает в общий текст и
+  // прозой — «маршрут `feature` профиля <имя>». Синтетические имена разрешены явным
+  // списком: он тот же, что у `no-private-identifiers`, и держит оба guard на одном
+  // словаре. Латиница в классе не задевает обычное «профиля проекта», а разделитель —
+  // пробелы ТОЙ ЖЕ строки: при переносе следующая строка часто начинается латиницей
+  // (`routes/` в колонке структуры профиля), и `\s+` срабатывал бы на вёрстке.
+  [
+    'конкретный профиль в прозе',
+    /профил(?:ь|я|ю|е|ем)[ \t]+(?!<|\$)(?!(?:demo|demo-profile|example|example-profile|fixture|sample-profile)\b)[a-z][a-z0-9._-]*/giu,
+  ],
   ['реальный task token', /(?<![\\\w])t\d{4,}\b/giu],
   [
     'реальный task ID в прозе',
@@ -47,6 +57,29 @@ function lineAt(source, index) {
   return source.slice(0, index).split('\n').length;
 }
 
+function scan(source) {
+  const hits = [];
+
+  for (const [label, pattern] of RULES) {
+    for (const match of source.matchAll(pattern)) {
+      hits.push({ label, value: match[0], index: match.index });
+    }
+  }
+
+  return hits;
+}
+
+test('правило имени профиля в прозе отличает утечку от синтетики и вёрстки', () => {
+  assert.deepEqual(
+    scan('маршрут `feature` профиля customer-project нёс узел').map((hit) => hit.label),
+    ['конкретный профиль в прозе'],
+  );
+  assert.deepEqual(scan('профиля fixture'), []);
+  assert.deepEqual(scan('профилю `<profile>`'), []);
+  assert.deepEqual(scan('профиля проекта'), []);
+  assert.deepEqual(scan('marker профиля\n    routes/ source definitions'), []);
+});
+
 test('общая документация не содержит конкретные profile/task identifiers', async () => {
   const hits = [];
 
@@ -60,10 +93,8 @@ test('общая документация не содержит конкретн
       if (error?.code === 'ENOENT') continue;
       throw error;
     }
-    for (const [label, pattern] of RULES) {
-      for (const match of source.matchAll(pattern)) {
-        hits.push(`${file}:${lineAt(source, match.index)}: ${label}: ${match[0]}`);
-      }
+    for (const { label, value, index } of scan(source)) {
+      hits.push(`${file}:${lineAt(source, index)}: ${label}: ${value}`);
     }
   }
 

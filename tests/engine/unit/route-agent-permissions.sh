@@ -125,3 +125,40 @@ assert_contains "$verify_settings" '"Bash(profile-verify.sh:*)"' \
   "verify receives the trusted profile verification command"
 
 finish_tests
+
+# --- составная команда решается по САМОЙ СЛАБОЙ части ---
+# CLI разбирает `git status && cd … && git status` на части, и отказ одной запрещает
+# всю команду. Замер по журналам всех прогонов: 1240 отказов Bash, 88% составные, и
+# первыми блокирующими кусками идут `echo` (1178) и `cd` (357) — куски, которые сами
+# по себе ничего не делают. Цена отказа не только в потраченном вызове: агент, которому
+# запретили нужную проверку, подменяет её похожей и выдаёт результат за требуемый.
+check_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY=state-only \
+  FACTORY_ROUTE_BROWSER_POLICY=forbid _agent_settings REVIEW)
+check_settings=$(cat "$check_settings")
+write_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write \
+  FACTORY_ROUTE_BROWSER_POLICY=forbid _agent_settings BUILD)
+write_settings=$(cat "$write_settings")
+
+has() { [[ "$1" == *"$2"* ]] && printf 'да' || printf 'нет'; }
+
+# `cd` не умеет записать ничего вовсе, поэтому выдаётся всем узлам без исключения.
+assert_eq да "$(has "$check_settings" '"Bash(cd:*)"')" "cd разрешён проверяющему узлу"
+assert_eq да "$(has "$write_settings" '"Bash(cd:*)"')" "cd разрешён пишущему узлу"
+
+# `echo`/`printf` — только там, где запись и так есть. На пишущем узле они не дают
+# новой возможности: Write и Edit там уже выданы.
+assert_eq да "$(has "$write_settings" '"Bash(echo:*)"')" "echo разрешён пишущему узлу"
+assert_eq да "$(has "$write_settings" '"Bash(printf:*)"')" "printf разрешён пишущему узлу"
+
+# А проверяющему нельзя: `echo x > file` правилами не выражается, и предупредительный
+# рубеж прав сменился бы посмертным сторожем, который валит узел уже после всей работы.
+assert_eq нет "$(has "$check_settings" '"Bash(echo:*)"')" \
+  "echo проверяющему узлу не выдаётся: перенаправление правилом не ловится"
+assert_eq нет "$(has "$check_settings" '"Bash(printf:*)"')" \
+  "printf проверяющему узлу не выдаётся по той же причине"
+
+# Узел без объявленной политики считается проверяющим по умолчанию не бывает, но и
+# послаблений не получает: неизвестная политика не должна открывать запись обходным путём.
+unknown_settings=$(FACTORY_ROUTE_FILESYSTEM_POLICY= _agent_settings REVIEW)
+unknown_settings=$(cat "$unknown_settings")
+assert_eq да "$(has "$unknown_settings" '"Bash(cd:*)"')" "cd есть и без объявленной политики"
