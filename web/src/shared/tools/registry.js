@@ -19,11 +19,20 @@ export const TOOL_REGISTRY = [
     }),
   },
   {
+    id: 'shelf',
+    route: '/shelf',
+    label: 'Полка',
+    icon: 'shelf',
+    order: 20,
+    plugin: 'shelf',
+    component: defineAsyncComponent(() => import('../../views/shelf/TaskShelfPanel.vue')),
+  },
+  {
     id: 'terminal',
     route: '/terminal',
     label: 'Терминал',
     icon: 'terminal',
-    order: 20,
+    order: 30,
     component: defineAsyncComponent(() => import('../../views/terminal/TerminalPanel.vue')),
   },
 ];

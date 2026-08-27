@@ -30,6 +30,8 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const toggled = [];
+  const shelfToggled = [];
+  const acknowledged = [];
   const markedSeen = [];
   globalThis.__taskModalFavoriteApi = {
     async get(url) {
@@ -86,6 +88,34 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
       },
     },
   });
+  globalThis.__taskModalFavoriteShelfStore = defineStore('task-modal-shelf', {
+    state: () => ({
+      entries: [],
+      loaded: false,
+      loading: false,
+      error: null,
+      pending: {},
+    }),
+    getters: {
+      isOnShelf: (state) => (id) => state.entries
+        .some((entry) => entry.taskId === String(id)),
+      isPending: (state) => (id) => !!state.pending[String(id)],
+    },
+    actions: {
+      async toggle(id) { shelfToggled.push(String(id)); return true; },
+      async acknowledge(id) { acknowledged.push(String(id)); return true; },
+    },
+  });
+  globalThis.__taskModalFavoritePluginsStore = defineStore('task-modal-plugins', {
+    state: () => ({
+      loaded: true,
+      list: [{ id: 'shelf', enabled: true, values: {} }],
+    }),
+    getters: {
+      enabled: (state) => (id) => !!state.list.find((item) => item.id === id)?.enabled,
+      byId: (state) => (id) => state.list.find((item) => item.id === id) || null,
+    },
+  });
 
   // Отметка просмотра: открытая задача перестаёт быть новой. Отказ отметки не имеет
   // права мешать показу задачи, поэтому действие возвращает false и ничего не бросает.
@@ -117,6 +147,8 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
       '__taskModalFavoriteBoardStore',
       '__taskModalFavoriteAnalysisStore',
       '__taskModalFavoriteFavoritesStore',
+      '__taskModalFavoriteShelfStore',
+      '__taskModalFavoritePluginsStore',
       '__taskModalFavoriteSeenStore',
     ]) delete globalThis[key];
   });
@@ -125,6 +157,12 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
   // Метка «новая» снимается именно открытием задачи — это единственное место,
   // где кокпит узнаёт, что человек её прочитал.
   assert.deepEqual(markedSeen, [['42']]);
+  assert.deepEqual(acknowledged, []);
+  const shelfStore = globalThis.__taskModalFavoriteShelfStore(pinia);
+  shelfStore.entries = [{ taskId: '42' }];
+  shelfStore.loaded = true;
+  await flushPromises();
+  assert.deepEqual(acknowledged, ['42']);
 
   const button = wrapper.get('button.stub-modal-fav');
   assert.equal(button.attributes('aria-pressed'), 'false');
@@ -134,4 +172,21 @@ test('UI-05/06: TaskModal переключает тот же favorite store и �
 
   assert.deepEqual(toggled, ['42']);
   assert.match(wrapper.text(), /Не удалось сохранить звезду/);
+
+  const shelfButton = wrapper.findAll('button')
+    .find((candidate) => /Отложено|Отложить/.test(candidate.text()));
+  assert.ok(shelfButton, 'в карточке должна быть кнопка полки');
+  assert.equal(shelfButton.attributes('aria-pressed'), 'true');
+  await shelfButton.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual({
+    shelfToggled,
+    favoriteToggled: toggled,
+    stillFavorite: wrapper.get('button.stub-modal-fav').attributes('aria-pressed'),
+  }, {
+    shelfToggled: ['42'],
+    favoriteToggled: ['42'],
+    stillFavorite: 'false',
+  });
 });

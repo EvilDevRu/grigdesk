@@ -1,0 +1,870 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+import { compileModule, webFile } from './helpers/compile-vue.js';
+
+let sharedModule;
+let sharedModuleError;
+try {
+  sharedModule = await import('../../web/src/shared/task-shelf.js');
+} catch (error) {
+  sharedModuleError = error;
+}
+
+let storeModule;
+let storeModuleError;
+try {
+  storeModule = await import('../../web/src/stores/task-shelf.js');
+} catch (error) {
+  storeModuleError = error;
+}
+
+function decision(snapshot, observed) {
+  const operation = sharedModule?.default
+    || Object.values(sharedModule || {}).find((value) => typeof value === 'function');
+  assert.equal(
+    typeof operation,
+    'function',
+    `Единый чистый решатель полки ещё не реализован: ${sharedModuleError?.message || 'нет экспорта'}`,
+  );
+  return operation({ snapshot, observed });
+}
+
+function baseSnapshot(overrides = {}) {
+  return {
+    analysis: {
+      state: 'queued',
+      queuedAt: '2026-08-26T08:00:00.000Z',
+      startedAt: null,
+      finishedAt: null,
+      generatedAt: null,
+    },
+    pipeline: {
+      attempt: 'a1',
+      daemon: 'running',
+      result: null,
+      stall: null,
+      gateKnown: true,
+      gate: null,
+    },
+    b24: {
+      present: true,
+      status: 'IN_PROGRESS',
+      statusKind: 'active',
+      unread: 0,
+    },
+    ...overrides,
+  };
+}
+
+test('Завершившаяся оценка зажигает полку словами', () => {
+  const snapshot = baseSnapshot();
+  const result = decision(snapshot, baseSnapshot({
+    analysis: {
+      ...snapshot.analysis,
+      state: 'finished',
+      finishedAt: '2026-08-26T08:10:00.000Z',
+      generatedAt: '2026-08-26T08:10:01.000Z',
+    },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'analysis',
+    message: 'Оценка готова',
+  });
+});
+
+test('Провал оценки зажигает полку и назван словами', () => {
+  const snapshot = baseSnapshot();
+  const result = decision(snapshot, baseSnapshot({
+    analysis: {
+      ...snapshot.analysis,
+      state: 'failed',
+      finishedAt: '2026-08-26T08:10:00.000Z',
+    },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'analysis',
+    message: 'Оценка завершилась с ошибкой',
+  });
+});
+
+test('Новые ворота конвейера зажигают полку словами', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({
+    pipeline: {
+      ...baseSnapshot().pipeline,
+      gate: 'Подтвердить план',
+    },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'pipeline',
+    message: 'Конвейер ждёт решения: Подтвердить план',
+  });
+});
+
+test('Остановка конвейера зажигает полку словами', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({
+    pipeline: {
+      ...baseSnapshot().pipeline,
+      stall: 'Агент не отвечает',
+    },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'pipeline',
+    message: 'Конвейер остановился: Агент не отвечает',
+  });
+});
+
+test('Завершение прогона зажигает полку словами', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({
+    pipeline: {
+      ...baseSnapshot().pipeline,
+      daemon: 'stopped',
+      result: 'completed',
+    },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'pipeline',
+    message: 'Прогон конвейера завершён',
+  });
+});
+
+test('Текущая стадия выводит ожидание конвейера и ответа без selector причины', () => {
+  const afterAnalysis = baseSnapshot({
+    analysis: {
+      ...baseSnapshot().analysis,
+      state: 'finished',
+      finishedAt: '2026-08-26T08:10:00.000Z',
+    },
+  });
+  const pipeline = decision(afterAnalysis, afterAnalysis);
+  const answer = decision(afterAnalysis, baseSnapshot({
+    analysis: afterAnalysis.analysis,
+    pipeline: { ...afterAnalysis.pipeline, daemon: 'stopped', result: 'completed' },
+  }));
+
+  assert.deepEqual([pipeline.reasonText, answer.reasonText], [
+    'Жду конвейер',
+    'Жду ответ в задаче',
+  ]);
+});
+
+test('Рост непрочитанных комментариев зажигает полку словами', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({
+    b24: { ...baseSnapshot().b24, unread: 2 },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'comments',
+    message: 'Новые комментарии: 2',
+  });
+});
+
+test('Подтверждённое закрытие B24-задачи зажигает полку словами', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({
+    b24: { present: false, status: null, statusKind: null, unread: 0 },
+  }));
+
+  assert.deepEqual({ state: result.state, source: result.source, message: result.message }, {
+    state: 'lit',
+    source: 'b24',
+    message: 'Задача завершена или закрыта',
+  });
+});
+
+test('Недоступный источник не считается событием', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({ analysis: null }));
+
+  assert.equal(result.state, 'neutral');
+});
+
+test('Недоступные данные B24 не считаются закрытием задачи', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({ b24: null }));
+
+  assert.equal(result.state, 'neutral');
+});
+
+test('Недоступные данные конвейера не считаются его остановкой', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({ pipeline: null }));
+
+  assert.equal(result.state, 'neutral');
+});
+
+test('Неизвестное состояние ворот не зажигает полку', () => {
+  const result = decision(baseSnapshot(), baseSnapshot({
+    pipeline: {
+      ...baseSnapshot().pipeline,
+      gateKnown: false,
+      gate: 'Подтвердить план',
+    },
+  }));
+
+  assert.equal(result.state, 'neutral');
+});
+
+test('Первое появление источника создаёт базу без огонька', () => {
+  const current = baseSnapshot();
+  const result = decision(baseSnapshot({ analysis: null }), current);
+
+  assert.deepEqual({ state: result.state, snapshot: result.snapshot.analysis }, {
+    state: 'neutral',
+    snapshot: current.analysis,
+  });
+});
+
+test('После гашения новый снимок нейтрален, а следующее событие зажигает снова', () => {
+  const first = decision(baseSnapshot(), baseSnapshot({
+    b24: { ...baseSnapshot().b24, unread: 1 },
+  }));
+  const acknowledged = decision(first.snapshot, baseSnapshot({
+    b24: { ...baseSnapshot().b24, unread: 1 },
+  }));
+  const next = decision(acknowledged.snapshot, baseSnapshot({
+    b24: { ...baseSnapshot().b24, unread: 2 },
+  }));
+
+  assert.deepEqual(
+    [first.state, acknowledged.state, next.state],
+    ['lit', 'neutral', 'lit'],
+  );
+});
+
+test('Зажжённое событие не гаснет при временно недоступном источнике', () => {
+  const first = decision(baseSnapshot(), baseSnapshot({
+    b24: { ...baseSnapshot().b24, unread: 1 },
+  }));
+  const unavailable = sharedModule.default({
+    snapshot: first.snapshot,
+    observed: baseSnapshot({ b24: null }),
+    latched: first,
+  });
+
+  assert.deepEqual({ state: unavailable.state, message: unavailable.message }, {
+    state: 'lit',
+    message: 'Новые комментарии: 1',
+  });
+});
+
+async function shelfStore() {
+  assert.equal(
+    typeof storeModule?.useTaskShelfStore,
+    'function',
+    `Клиентский стор полки ещё не реализован: ${storeModuleError?.message || 'нет экспорта'}`,
+  );
+  const { createPinia, setActivePinia } = await import(
+    '../../web/node_modules/pinia/dist/pinia.mjs'
+  );
+  setActivePinia(createPinia());
+  return storeModule.useTaskShelfStore();
+}
+
+function serverSnapshot(scope, revision, taskIds) {
+  return {
+    scope,
+    revision,
+    entries: taskIds.map((taskId) => ({
+      taskId: String(taskId),
+      title: `Задача ${taskId}`,
+      addedAt: '2026-08-26T08:00:00.000Z',
+      reason: 'manual',
+      snapshot: baseSnapshot(),
+    })),
+  };
+}
+
+test('Стор игнорирует поздний снимок с меньшей revision того же аккаунта', async () => {
+  const store = await shelfStore();
+  store.applySnapshot(serverSnapshot('scope-a', 3, [42]));
+  const applied = store.applySnapshot(serverSnapshot('scope-a', 2, [77]));
+
+  assert.deepEqual({ applied, revision: store.revision, taskIds: store.entries.map((e) => e.taskId) }, {
+    applied: false,
+    revision: 3,
+    taskIds: ['42'],
+  });
+});
+
+test('Стор принимает меньшую revision только от нового account scope', async () => {
+  const store = await shelfStore();
+  store.applySnapshot(serverSnapshot('scope-a', 8, [42]));
+  const applied = store.applySnapshot(serverSnapshot('scope-b', 1, [77]));
+
+  assert.deepEqual({ applied, scope: store.scope, taskIds: store.entries.map((e) => e.taskId) }, {
+    applied: true,
+    scope: 'scope-b',
+    taskIds: ['77'],
+  });
+});
+
+test('Очистка при выходе удаляет account-scoped снимок только из памяти', async () => {
+  const store = await shelfStore();
+  store.applySnapshot(serverSnapshot('scope-a', 3, [42]));
+  store.clear();
+
+  assert.deepEqual({
+    scope: store.scope,
+    revision: store.revision,
+    entries: store.entries,
+    loaded: store.loaded,
+  }, {
+    scope: '',
+    revision: -1,
+    entries: [],
+    loaded: false,
+  });
+});
+
+async function analysisFixture({ enabled = true, autoAdd = true, shelfError = null } = {}) {
+  const calls = [];
+  let autoAddEnabled = autoAdd;
+  globalThis.__shelfAnalysisHarness = {
+    api: {
+      async post() { return { accepted: true }; },
+      async get() { return []; },
+    },
+    shelf: {
+      async autoAdd(id) {
+        calls.push(String(id));
+        if (shelfError) throw shelfError;
+        return true;
+      },
+    },
+    plugins: {
+      enabled: (id) => id === 'shelf' && enabled,
+      byId: () => ({ values: { autoAddOnAnalysis: autoAddEnabled } }),
+    },
+  };
+  const module = await compileModule(webFile('src/stores/analysis.js'), {
+    stubs: {
+      '../shared/api-client.js': 'export const api = globalThis.__shelfAnalysisHarness.api;',
+      './task-shelf.js': [
+        'export const useTaskShelfStore = () => globalThis.__shelfAnalysisHarness.shelf;',
+      ].join('\n'),
+      './plugins.js': [
+        'export const usePluginsStore = () => globalThis.__shelfAnalysisHarness.plugins;',
+      ].join('\n'),
+    },
+  });
+  const { createPinia, setActivePinia } = await import(
+    '../../web/node_modules/pinia/dist/pinia.mjs'
+  );
+  setActivePinia(createPinia());
+  return {
+    store: module.useAnalysisStore(),
+    calls,
+    setAutoAdd(value) { autoAddEnabled = value; },
+  };
+}
+
+test('Оба входа триажа автоматически ставят задачи на полку через общий analyze', async (t) => {
+  const { store, calls } = await analysisFixture();
+  t.after(() => {
+    clearTimeout(store._timer);
+    delete globalThis.__shelfAnalysisHarness;
+  });
+  await store.analyze(42);
+  await store.analyze(77);
+
+  assert.deepEqual(calls, ['42', '77']);
+});
+
+test('Живая настройка разрешает и запрещает авто-постановку', async (t) => {
+  const { store, calls, setAutoAdd } = await analysisFixture();
+  t.after(() => {
+    clearTimeout(store._timer);
+    delete globalThis.__shelfAnalysisHarness;
+  });
+  await store.analyze(42);
+  setAutoAdd(false);
+  await store.analyze(77);
+
+  assert.deepEqual(calls, ['42']);
+});
+
+test('Ошибка авто-постановки не маскирует успешный запуск триажа', async (t) => {
+  const { store, calls } = await analysisFixture({ shelfError: new Error('полка недоступна') });
+  t.after(() => {
+    clearTimeout(store._timer);
+    delete globalThis.__shelfAnalysisHarness;
+  });
+  const result = await store.analyze(42);
+
+  assert.deepEqual({ result, calls }, {
+    result: { accepted: true },
+    calls: ['42'],
+  });
+});
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((ok, fail) => {
+    resolve = ok;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+async function reactiveStoreFixture({
+  currentState = 'queued',
+  browserNotifications = true,
+  enabled = true,
+  getImpl = null,
+  putImpl = null,
+  delImpl = null,
+} = {}) {
+  const notifications = [];
+  const server = serverSnapshot('scope-a', 1, [42]);
+  const harness = {
+    apiGetCalls: 0,
+    apiCalls: [],
+    api: {
+      async get() {
+        harness.apiGetCalls += 1;
+        harness.apiCalls.push({ method: 'GET', url: '/api/b24/task-shelf' });
+        if (getImpl) return getImpl(harness.apiGetCalls);
+        return structuredClone(server);
+      },
+      async put(url, body) {
+        harness.apiCalls.push({
+          method: 'PUT',
+          url,
+          body: body === undefined ? undefined : structuredClone(body),
+        });
+        if (putImpl) return putImpl(url, body);
+        return structuredClone(server);
+      },
+      async del(url) {
+        harness.apiCalls.push({ method: 'DELETE', url });
+        if (delImpl) return delImpl(url);
+        return structuredClone(server);
+      },
+    },
+    notifications,
+    sseHandler: null,
+  };
+  globalThis.__taskShelfStoreHarness = harness;
+  const module = await compileModule(webFile('src/stores/task-shelf.js'), {
+    stubs: {
+      '../shared/api-client.js': 'export const api = globalThis.__taskShelfStoreHarness.api;',
+      '../shared/notify.js': [
+        'export const notify = (...args) => {',
+        '  globalThis.__taskShelfStoreHarness.notifications.push(args);',
+        '  return Promise.resolve(true);',
+        '};',
+      ].join('\n'),
+      '../composables/useSse.js': [
+        'export const sseSubscribe = (handler) => {',
+        '  globalThis.__taskShelfStoreHarness.sseHandler = handler;',
+        '  return () => { globalThis.__taskShelfStoreHarness.sseHandler = null; };',
+        '};',
+      ].join('\n'),
+      './analysis.js': [
+        'export const useAnalysisStore = () => globalThis.__taskShelfStoreHarness.analysis;',
+      ].join('\n'),
+      './notify-watch.js': [
+        'export const useNotifyWatchStore = () => globalThis.__taskShelfStoreHarness.pipeline;',
+      ].join('\n'),
+      './board.js': [
+        'export const useBoardStore = () => globalThis.__taskShelfStoreHarness.board;',
+      ].join('\n'),
+      './plugins.js': [
+        'export const usePluginsStore = () => globalThis.__taskShelfStoreHarness.plugins;',
+      ].join('\n'),
+    },
+  }).catch((error) => {
+    assert.fail(`Клиентский стор полки ещё не реализован или не собирается: ${error.message}`);
+  });
+  const [{ reactive }, { createPinia, setActivePinia }] = await Promise.all([
+    import('../../web/node_modules/vue/index.mjs'),
+    import('../../web/node_modules/pinia/dist/pinia.mjs'),
+  ]);
+  harness.analysis = reactive({
+    loadedAt: 1,
+    error: null,
+    byTask: {
+      42: {
+        task: 42,
+        status: {
+          task: 42,
+          state: currentState,
+          queuedAt: '2026-08-26T08:00:00.000Z',
+          startedAt: null,
+          finishedAt: currentState === 'finished' ? '2026-08-26T08:10:00.000Z' : null,
+        },
+        analysis: currentState === 'finished'
+          ? { generated_at: '2026-08-26T08:10:01.000Z' }
+          : null,
+      },
+    },
+  });
+  harness.pipeline = reactive({ loadedAt: 1, error: null, observedByTask: {} });
+  harness.board = reactive({
+    loadedAt: 1,
+    error: null,
+    data: {
+      tasks: [{
+        id: 42,
+        title: 'Задача 42',
+        status: 'IN_PROGRESS',
+        statusKind: 'active',
+        unread: 0,
+      }],
+      toReview: [],
+      created: [],
+      accomplice: [],
+      auditor: [],
+    },
+  });
+  harness.plugins = reactive({
+    loaded: true,
+    list: [{
+      id: 'shelf',
+      enabled,
+      values: { browserNotifications, autoAddOnAnalysis: true },
+    }],
+    enabled: (id) => id === 'shelf' && enabled,
+    byId: () => ({
+      values: { browserNotifications, autoAddOnAnalysis: true },
+    }),
+  });
+  setActivePinia(createPinia());
+  const store = module.useTaskShelfStore();
+
+  return { store, harness };
+}
+
+async function settleStore() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+}
+
+test('Первый снимок показывает накопленный огонь без оповещения', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'finished' });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+
+  assert.deepEqual({
+    litCount: store.litCount,
+    notifications: harness.notifications.length,
+  }, {
+    litCount: 1,
+    notifications: 0,
+  });
+});
+
+test('Новый переход в огонь отправляет ровно одно браузерное оповещение', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.analysis.byTask[42].status = {
+    ...harness.analysis.byTask[42].status,
+    state: 'finished',
+    finishedAt: '2026-08-26T08:10:00.000Z',
+  };
+  harness.analysis.byTask[42].analysis = {
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  await settleStore();
+  harness.analysis.byTask[42] = { ...harness.analysis.byTask[42] };
+  await settleStore();
+
+  assert.equal(harness.notifications.length, 1);
+});
+
+test('Рост непрочитанных после базовой линии оповещает ровно один раз', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.board.data.tasks[0].unread = 1;
+  await settleStore();
+  harness.board.data.tasks[0] = { ...harness.board.data.tasks[0] };
+  await settleStore();
+
+  assert.deepEqual({
+    litCount: store.litCount,
+    notifications: harness.notifications.map(([, message]) => message),
+  }, {
+    litCount: 1,
+    notifications: ['Новые комментарии: 1'],
+  });
+});
+
+test('Первое появление источника становится базой для следующего события', async (t) => {
+  const initial = serverSnapshot('scope-a', 1, [42]);
+  initial.entries[0].snapshot.analysis = null;
+  const { store, harness } = await reactiveStoreFixture({ getImpl: () => initial });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  harness.analysis.loadedAt = 0;
+  store.start();
+  await settleStore();
+
+  harness.analysis.loadedAt = 1;
+  await settleStore();
+  assert.equal(store.litCount, 0);
+
+  harness.analysis.byTask[42].status = {
+    ...harness.analysis.byTask[42].status,
+    state: 'finished',
+    finishedAt: '2026-08-26T08:10:00.000Z',
+  };
+  harness.analysis.byTask[42].analysis = {
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  await settleStore();
+
+  assert.deepEqual({ litCount: store.litCount, notifications: harness.notifications.length }, {
+    litCount: 1,
+    notifications: 1,
+  });
+});
+
+test('Зажжённая строка переживает отказ источника без повторного оповещения', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.analysis.byTask[42].status = {
+    ...harness.analysis.byTask[42].status,
+    state: 'finished',
+    finishedAt: '2026-08-26T08:10:00.000Z',
+  };
+  harness.analysis.byTask[42].analysis = {
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  await settleStore();
+  harness.analysis.error = new Error('триаж недоступен');
+  await settleStore();
+  harness.analysis.error = null;
+  await settleStore();
+
+  assert.deepEqual({ litCount: store.litCount, notifications: harness.notifications.length }, {
+    litCount: 1,
+    notifications: 1,
+  });
+});
+
+test('Выключенные браузерные оповещения не озвучивают новый огонь', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ browserNotifications: false });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.analysis.byTask[42].status = {
+    ...harness.analysis.byTask[42].status,
+    state: 'finished',
+    finishedAt: '2026-08-26T08:10:00.000Z',
+  };
+  harness.analysis.byTask[42].analysis = {
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  await settleStore();
+
+  assert.equal(harness.notifications.length, 0);
+});
+
+test('Выключенный плагин не читает API и скрывает вычисленное состояние', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({
+    currentState: 'finished',
+    enabled: false,
+  });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+
+  assert.deepEqual({ apiGetCalls: harness.apiGetCalls, litCount: store.litCount }, {
+    apiGetCalls: 0,
+    litCount: 0,
+  });
+});
+
+test('Недоступная доска не зажигает задачу как закрытую', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  harness.board.loadedAt = 0;
+  harness.board.error = new Error('доска недоступна');
+  harness.board.data.tasks = [];
+  store.start();
+  await settleStore();
+
+  assert.equal(store.litCount, 0);
+});
+
+test('Повторное нажатие снимает запись, а следующее возвращает её', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({
+    delImpl: () => serverSnapshot('scope-a', 2, []),
+    putImpl: () => serverSnapshot('scope-a', 3, [42]),
+  });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.applySnapshot(serverSnapshot('scope-a', 1, [42]));
+  await store.toggle(42);
+  await store.toggle(42);
+
+  assert.deepEqual(harness.apiCalls.map((call) => ({
+    method: call.method,
+    url: call.url,
+    createIfMissing: call.body?.createIfMissing,
+  })), [{
+    method: 'DELETE',
+    url: '/api/b24/task-shelf/42',
+    createIfMissing: undefined,
+  }, {
+    method: 'PUT',
+    url: '/api/b24/task-shelf/42',
+    createIfMissing: true,
+  }]);
+});
+
+test('Гашение огонька обновляет только существующую запись', async (t) => {
+  const updated = serverSnapshot('scope-a', 2, [42]);
+  const { store, harness } = await reactiveStoreFixture({ putImpl: () => updated });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.applySnapshot(serverSnapshot('scope-a', 1, [42]));
+  await store.acknowledge(42);
+  const mutation = harness.apiCalls.find((call) => call.method === 'PUT');
+
+  assert.deepEqual({
+    createIfMissing: mutation?.body?.createIfMissing,
+    taskIds: store.entries.map((entry) => entry.taskId),
+  }, {
+    createIfMissing: false,
+    taskIds: ['42'],
+  });
+});
+
+test('Наступление события зажигает строку, но не меняет серверные записи', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.applySnapshot(serverSnapshot('scope-a', 1, [42]));
+  store.start();
+  await settleStore();
+  const before = structuredClone(store.entries);
+  harness.analysis.byTask[42].status = {
+    ...harness.analysis.byTask[42].status,
+    state: 'finished',
+    finishedAt: '2026-08-26T08:10:00.000Z',
+  };
+  harness.analysis.byTask[42].analysis = {
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  await settleStore();
+
+  assert.deepEqual({ entries: store.entries, litCount: store.litCount }, {
+    entries: before,
+    litCount: 1,
+  });
+});
+
+test('Поздний ответ прежней epoch не возвращает запись после clear', async (t) => {
+  const pending = deferred();
+  const { store } = await reactiveStoreFixture({ getImpl: () => pending.promise });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  const loading = store.load();
+  await Promise.resolve();
+  store.clear();
+  pending.resolve(serverSnapshot('scope-a', 9, [42]));
+  await loading;
+
+  assert.deepEqual({ scope: store.scope, revision: store.revision, entries: store.entries }, {
+    scope: '',
+    revision: -1,
+    entries: [],
+  });
+});
+
+test('SSE во время летящего GET запускает ровно одно trailing-перечитывание', async (t) => {
+  const pending = deferred();
+  const { store, harness } = await reactiveStoreFixture({
+    getImpl: (call) => call === 1
+      ? pending.promise
+      : Promise.resolve(serverSnapshot('scope-a', 2, [42])),
+  });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await Promise.resolve();
+  harness.sseHandler?.('task-shelf-changed');
+  pending.resolve(serverSnapshot('scope-a', 1, [42]));
+  await settleStore();
+
+  assert.equal(harness.apiGetCalls, 2);
+});
+
+test('Панель, чип и оповещение не содержат второй копии правил событий', async () => {
+  let sources;
+  try {
+    sources = await Promise.all([
+      readFile(webFile('src/shared/task-shelf.js'), 'utf8'),
+      readFile(webFile('src/stores/task-shelf.js'), 'utf8'),
+      readFile(webFile('src/views/shelf/TaskShelfPanel.vue'), 'utf8'),
+      readFile(webFile('src/shared/layout/ToolHost.vue'), 'utf8'),
+    ]);
+  } catch (error) {
+    assert.fail(`Единый shared-контракт полки ещё не собран: ${error.message}`);
+  }
+  const [shared, store, panel, host] = sources;
+  const duplicateRules = [panel, host]
+    .some((source) => /gateKnown|generatedAt|finishedAt|statusKind|\bunread\b/.test(source));
+
+  assert.deepEqual({
+    sharedExportsDecision: /export\s+(?:default\s+)?(?:function|const)\b/.test(shared),
+    storeImportsDecision: /from\s+['"]\.\.\/shared\/task-shelf\.js['"]/.test(store),
+    duplicateRules,
+  }, {
+    sharedExportsDecision: true,
+    storeImportsDecision: true,
+    duplicateRules: false,
+  });
+});

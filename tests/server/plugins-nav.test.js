@@ -20,6 +20,7 @@ test('системные инструменты имеют явные group/orde
     {
       video: ['tools', 10],
       code: ['dock', 10],
+      shelf: ['dock', 20],
       inbox: ['rail', 30],
       telegram: ['tools', 20],
       github: ['tools', 30],
@@ -60,6 +61,54 @@ test('системные инструменты имеют явные group/orde
     normalizePluginNav({ path: '/no-order', order: null }, 'Без порядка'),
     { path: '/no-order', label: 'Без порядка', icon: 'plugin', group: 'rail' },
   );
+});
+
+test('Полка включена по умолчанию и объявляет обе работающие настройки', () => {
+  const shelf = SYSTEM.find((plugin) => plugin.id === 'shelf');
+
+  assert.deepEqual({
+    defaultEnabled: shelf?.defaultEnabled,
+    nav: shelf?.nav,
+    settings: shelf?.settings?.map((setting) => [
+      setting.key,
+      setting.type,
+      setting.default,
+    ]),
+    values: shelf ? settingsValues({}, shelf) : null,
+  }, {
+    defaultEnabled: true,
+    nav: {
+      path: '/shelf',
+      label: 'Полка',
+      icon: 'shelf',
+      group: 'dock',
+      order: 20,
+    },
+    settings: [
+      ['browserNotifications', 'checkbox', true],
+      ['autoAddOnAnalysis', 'checkbox', true],
+    ],
+    values: {
+      browserNotifications: true,
+      autoAddOnAnalysis: true,
+    },
+  });
+});
+
+test('Сохранённые настройки полки перекрывают значения по умолчанию', () => {
+  const shelf = SYSTEM.find((plugin) => plugin.id === 'shelf');
+
+  assert.deepEqual(shelf ? settingsValues({
+    pluginSettings: {
+      shelf: {
+        browserNotifications: false,
+        autoAddOnAnalysis: false,
+      },
+    },
+  }, shelf) : null, {
+    browserNotifications: false,
+    autoAddOnAnalysis: false,
+  });
 });
 
 test('Inbox не импортирует и не использует Telegram-owned модель как fallback', () => {

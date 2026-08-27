@@ -34,7 +34,7 @@ worker по полной process identity.
 |--------|-----------|----------|
 | `factory` | `/api/tasks*`, `/api/factory/{routes,stages,slots,runners}`, запуск (с выбором runner)/ворота/этапы/runner switch+override/стенд, `POST /api/tasks/:id/arbitrate` — арбитр типизированной остановки | `~/.factory/state` + `<factoryHome>/bin/factory` |
 | `b24` | `/api/b24/{dashboard,task/:id,users,groups}`, мутации `/api/b24/{tasks,task/:id/*}` | `B24Client` (через очередь `_run`) |
-| `task-favorites`, `task-seen` | `GET /api/b24/task-favorites` + `PUT/DELETE .../:taskId`, `GET/POST /api/b24/task-seen` | личные метки человека (избранное, «просмотрено») — `server/.state/task-{favorites,seen}.json` по opaque-scope аккаунта портала ([детали](b24.md#личные-метки-задач-избранное-и-просмотренное)) |
+| `task-favorites`, `task-shelf`, `task-seen` | `GET /api/b24/task-favorites` + `PUT/DELETE .../:taskId`, `GET/PUT/DELETE /api/b24/task-shelf[/:taskId]`, `GET/POST /api/b24/task-seen` | личное состояние человека (избранное, полка, «просмотрено») — отдельные schema-versioned файлы по opaque-scope аккаунта портала ([детали](b24.md#личное-состояние-задач-избранное-полка-и-просмотренное)) |
 | `system` | `/api/system`, `/api/system/server`, `POST /api/system/restart`, `GET/POST /api/system/web-rebuild` (пересборка web-бандла из рабочего дерева) | `/proc`, `os`, systemd/manual launcher |
 | `media` | `/api/media/{doctor,upload,ingest,ingest/:jobId,extract-frame,plan-tasks,frame/:run/:file,clip,clip/:run/:file}` | общий `SpeechRuntime`, ffmpeg + локальный whisper; хранилище раздела — `lib/media/storage.js` (запись кладётся по содержимому, уборка по возрасту, занятое место в `doctor`); разбор расшифровки на черновики задач — `runUntrusted` выбранной модели, кадр и фрагмент записи к задаче — декораторы `mediaFramePath`/`mediaClipPath`, байты фрагмента отдаются с Range ([детали](video.md)) |
 | `settings` | `/api/settings/{prefs,factory-debug,b24,trusted-directories,tls,speech*}` | prefs, speech capabilities/model jobs, engine debug CLI, `CredsStore`, `LocalTls` |
@@ -348,14 +348,15 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 
 - `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
   Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
-  Projects, Code (read-only дерево/файл/git), Documents (скрытый route просмотра MD/TXT),
+  Projects, Code (дерево/файл/git), Shelf (полка задач), Documents (скрытый route просмотра MD/TXT),
   Diff (Monaco), Tools (агрегатор), Video, Terminal,
   Settings (Приложение — включая карточку голосового компаньона / Речь / Битрикс24 /
   Исполнители / Запуски / Плагины / Сервер / Доступ), Login
   и TaskModal. Глобальный `features/companion/CompanionHost.vue` — компактная chat surface;
   полный `ChatSession` монтируется только в `ChatsView`.
-- **Code и Terminal монтирует только постоянный `shared/layout/ToolHost.vue`.** Route-компоненты
-  `/code` и `/terminal` — пустые адаптеры; `page`, `dock` и `hidden` меняют CSS одного render-site.
+- **Code, Shelf и Terminal монтирует только постоянный `shared/layout/ToolHost.vue`.**
+  Route-компоненты `/code`, `/shelf` и `/terminal` — пустые адаптеры; `page`, `dock` и
+  `hidden` меняют CSS одного render-site.
   Поэтому во вкладке бывает максимум один Monaco и один terminal WebSocket. Компоненты загружаются
   независимо через `shared/tools/registry.js`, а `stores/dock.js` держит динамические mounted-флаги,
   runtime и exact-once intent-очереди. Правая рейка и overlay-док существуют с 900 px; на
@@ -478,16 +479,28 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   поллинг распознавания и тонкий снимок в localStorage — раздел «Видео» это только его
   отображение, см. [video.md](video.md)),
   `inbox` (общий счётчик новых обращений: initial read + SSE + минутный poll),
-  `task-favorites` и `task-seen` (личные метки задач B24, снимок с сервера),
+  `task-favorites`, `task-shelf` и `task-seen` (личное состояние задач B24,
+  server-confirmed снимок с revision),
   `ui-context` (owner-scoped bounded prompt context и отдельный trusted `routingScope`),
-  `notify-watch` (что на конвейере встало на человеке).
-- **Метки задач B24 живут на сервере, а не в браузере** (`task-favorites`, `task-seen`;
-  контракт и инвариант базовой линии — [b24.md](b24.md#личные-метки-задач-избранное-и-просмотренное)).
-  Оба стора хранят снимок аккаунта (`scope`/`revision`) и применяют ответ, только если
+  `notify-watch` (что на конвейере встало на человеке и готовая наблюдаемая проекция для полки).
+- **Личное состояние задач B24 живёт на сервере, а не в браузере** (`task-favorites`,
+  `task-shelf`, `task-seen`; контракт и инвариант базовой линии —
+  [b24.md](b24.md#личное-состояние-задач-избранное-полка-и-просмотренное)).
+  Эти account-scoped stores хранят снимок аккаунта (`scope`/`revision`) и применяют ответ, только если
   он свежее: у поздних ответов и у смены аккаунта портала иначе получалось воскрешение
   чужих отметок. Базовую линию просмотра ставит ровно одно место — `board.load()` после
   первого ответа портала; открытие карточки (`TaskModal`) гасит метку «новая» у одной
-  задачи, `App.vue` грузит оба стора при входе и чистит их при потере сессии.
+  задачи. `App.vue` поднимает общие lifecycle полки/просмотренного после входа и чистит
+  личные снимки при потере сессии.
+- **Полка не является фильтром доски и не связана с избранным.** Её `entries` остаются
+  durable до явного DELETE, а `rows` строятся единственной чистой функцией
+  `shared/task-shelf.js` из снимка записи и уже загруженных `analysis`, `notify-watch`,
+  `board`. Источник без успешного снимка даёт неизвестность, а не событие. Первый
+  сопоставимый снимок каждого источника зажигает накопленное состояние молча; оповещение
+  через `shared/notify.js` уходит только на следующий переход neutral → lit. Открытие
+  `TaskModal` делает PUT с `createIfMissing:false`: пересобирает снимок и не воскрешает
+  запись, уже удалённую в другом окне. `task-shelf-changed` идёт через singleton SSE и
+  означает только «перечитай полный снимок».
 - **Фильтры доски адаптируются по ширине самой карточки, а не viewport.** Sidebar, dock и
   правая колонка оставляют `BoardView.primary` заметно уже окна, поэтому viewport-breakpoint
   уже приводил к наложению тулбара на «Ждут моего контроля» в landscape-планшете. Колонки
@@ -521,6 +534,14 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   страховка), Inbox — `GET /api/inbox/summary` + singleton SSE `inbox-changed` + минутный
   poll для созревания Telegram-связок после окна тишины. Цифра конвейера — ЗАДАЧИ,
   а не поводы: задача, которая и ждёт у ворот, и числится вставшей, считается один раз.
+- **Звонят все три беды вотчера, а не две.** Ворота, молчание и авария зовут человека
+  через `shared/notify.js` по одному правилу: только НА ПЕРЕХОДЕ и только при непервом
+  снимке — иначе каждый заход в кокпит оповещал бы о давно лежащих задачах. Ключ права
+  на звонок у аварии — `задача:вид:этап`, поэтому другой узел, вставший так же, звонит
+  отдельно, а один и тот же — один раз до явного действия человека. Авария молчала до
+  27.08.2026: её считал чип и показывал тултип, но прогон, погибший на глазах (выключили
+  машину, оборвался демон), не сообщал о себе ничем. Сторож —
+  `tests/web/notify-watch-stall.test.js`.
 - `shared/pipeline-wait.js` — единственный ответ на «чего конвейер ждёт от человека»
   (`waitingReason` + расшифровки ворот `GATE_REASON`). Общий для страницы конвейера, вотчера
   оповещений и чипа: цифра чипа обязана сходиться с «⏳ ждут тебя» на странице. Копий этой
@@ -550,11 +571,11 @@ cookie jar, чтобы два процесса не перезаписывали
 порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
 старых серверных manifest только для известных встроенных `system: true` плагинов;
 пользовательский legacy-manifest остаётся в `rail`. Реестр: `lib/plugins-registry.js` (SYSTEM =
-video, code, inbox, telegram, github) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+video, code, shelf, inbox, telegram, github) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
 в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
-системные модули (media, code, inbox, telegram, github) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
+системные модули (media, code, task-shelf, inbox, telegram, github) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
 plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ входит в плагин video — не гейтится.
 
 **Умолчание вкл/выкл объявляет манифест, а не сорт плагина.** `isEnabled(prefsData, manifest)`
@@ -567,11 +588,11 @@ Telegram и GitHub системные, но выключены: их стран�
 Серверный manifest отвечает только за размещение ссылки. Встроить Vue-компонент в правый
 док может лишь явная запись клиентского `shared/tools/registry.js`: произвольный user plugin
 не получает frontend runtime одним JSON-полем. Фронт: `stores/plugins.js`, VideoView,
-InboxView, TelegramView, GitHubView и `ToolHost` для Code показывают заглушку при выключенном плагине
+InboxView, TelegramView, GitHubView и `ToolHost` для Code/Shelf показывают заглушку при выключенном плагине
 (по `plugins.loaded && !plugins.enabled(id)`, а `404 plugin_disabled` от сервера в этом
 случае НЕ показывается красной плашкой — это состояние, а не поломка). Выключение Code
-размонтирует Monaco и закрывает его dock-mode; прямой `/code` остаётся под непрозрачной
-понятной заглушкой.
+размонтирует Monaco, выключение Shelf скрывает строки/чип, но не удаляет entries; прямые
+`/code` и `/shelf` остаются под понятной заглушкой.
 Вкладка «Настройки → Плагины»: карточки горизонтальной сеткой (auto-fill 340px), селекты
 настроек — стилизованные (appearance:none + свой шеврон), НЕ нативные. Все подтверждения
 действий (снос стенда, форс этапа) — через confirmDialog, системный confirm() запрещён.

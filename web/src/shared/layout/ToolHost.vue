@@ -13,6 +13,10 @@
       </svg>
       <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(dock.runtime.terminal?.status)"
             class="runtime-dot" :class="dock.runtime.terminal.status" aria-hidden="true"></span>
+      <span v-if="toolBadges[item.id]" class="tool-badge"
+            :class="{ wait: toolBadges[item.id].wait, pulse: toolBadges[item.id].wait }">
+        {{ toolBadges[item.id].count }}
+      </span>
     </UiIconButton>
   </aside>
 
@@ -45,6 +49,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router';
 import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';
 import { usePluginsStore } from '../../stores/plugins.js';
+import { useTaskShelfStore } from '../../stores/task-shelf.js';
 import { useUiContextSource } from '../../composables/useUiContextSource.js';
 import { NAV_ICONS } from '../nav-icons.js';
 import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';
@@ -56,6 +61,7 @@ const route = useRoute();
 const router = useRouter();
 const dock = useDockStore();
 const plugins = usePluginsStore();
+const shelf = useTaskShelfStore();
 const toolContext = useUiContextSource('tool', { layer: 'dock', active: false });
 const { dockCapable } = useDockViewport();
 
@@ -80,6 +86,11 @@ const railItems = computed(() => TOOL_REGISTRY.filter((item) => {
   if (toolAvailability(item, plugins) !== 'enabled') return false;
   if (!item.plugin) return true;
   return plugins.dockNav.some((nav) => nav.id === item.id);
+}));
+const toolBadges = computed(() => ({
+  shelf: shelf.totalCount > 0
+    ? { count: shelf.litCount || shelf.totalCount, wait: shelf.litCount > 0 }
+    : null,
 }));
 
 const contexts = reactive({});
@@ -240,11 +251,11 @@ watch(() => route.path, (path, previous) => {
 
 watch(() => [plugins.loaded, ...plugins.list.map((item) => `${item.id}:${item.enabled}:${item.nav?.group || ''}`)], () => {
   if (!plugins.loaded) return;
-  const codeState = toolAvailability(TOOL_BY_ID.get('code'), plugins);
-  if (codeState !== 'enabled') {
-    if (dock.activeTool === 'code') dock.close();
-    dock.resetRuntime('code');
-    delete contexts.code;
+  for (const item of TOOL_REGISTRY.filter((entry) => entry.plugin)) {
+    if (toolAvailability(item, plugins) === 'enabled') continue;
+    if (dock.activeTool === item.id) dock.close();
+    dock.resetRuntime(item.id);
+    delete contexts[item.id];
   }
   const valid = railItems.value.some((item) => item.id === dock.activeTool);
   if (!valid) {
@@ -286,6 +297,16 @@ onBeforeUnmount(() => {
 .runtime-dot { position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--good); box-shadow: 0 0 0 2px var(--sidebar); }
 .runtime-dot.connecting { background: var(--warn); }
+.tool-badge {
+  position: absolute; top: -2px; right: -3px; min-width: 16px; height: 16px;
+  display: inline-grid; place-items: center; box-sizing: border-box; padding: 0 4px;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-2);
+  color: var(--ink-mid); font-size: 9px; font-weight: 750; line-height: 1;
+}
+.tool-badge.wait { border-color: var(--warn); background: var(--warn); color: #17130a; }
+.tool-badge.pulse { animation: tool-badge-pulse 1.6s ease-in-out infinite; }
+@keyframes tool-badge-pulse { 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .tool-badge.pulse { animation: none; } }
 .tool-placeholder { grid-row: 2; grid-column: 2; z-index: 20; min-width: 0; min-height: 0;
   display: grid; place-items: center; padding: 24px; background: var(--ground); color: var(--ink-mid);
   text-align: center; line-height: 1.55; }

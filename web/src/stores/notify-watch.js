@@ -15,14 +15,23 @@ let started = false;
 let checking = false;
 const notified = new Set(); // задачи, о которых уже звонили (чтобы не звонить каждую проверку)
 const silenceNotified = new Set(); // то же для молчащих ходов, ключ «задача:этап»
+const stallNotified = new Set(); // и для аварий, ключ «задача:вид:этап»
 
 export const useNotifyWatchStore = defineStore('notifyWatch', {
   // Три разные беды плюс обычная работа, поэтому списки раздельные: waiting — конвейер стоит на воротах и ждёт
   // РЕШЕНИЯ (это штатно, в интерфейсе есть кнопка); stalled — движок упёрся или оборвался
-  // (кнопки нет, надо разбираться); silent — формально всё идёт, но агент молчит дольше
+  // (само не рассосётся, надо разбираться); silent — формально всё идёт, но агент молчит дольше
   // порога, и без звонка это заметно только по сгоревшему лимиту этапа. Смешивать их
   // в одну цифру нельзя. running нужен только синему сектору и в цифру внимания не входит.
-  state: () => ({ waiting: [], stalled: [], silent: [], running: [] }),
+  state: () => ({
+    waiting: [],
+    stalled: [],
+    silent: [],
+    running: [],
+    observedByTask: {},
+    loadedAt: 0,
+    error: null,
+  }),
   getters: {
     // Число в центре — только задачи, требующие человека. Обычные живые ходы участвуют
     // в синем секторе круга, но это число не увеличивают.
@@ -74,13 +83,35 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         const { tasks, silenceWindow } = await api.get('/api/tasks');
         const waiting = [];
         const stalled = [];
+        const stalledKeys = [];
         const silentRuns = [];
         const running = [];
+        const observedByTask = {};
         for (const t of tasks || []) {
           const id = String(t.task);
           if (t.daemonAlive) running.push({ task: id });
           // Затык виден уже в сводке задачи — графа для него не нужно.
-          if (t.stall) stalled.push({ task: id, kind: t.stall.kind, title: t.stall.title });
+          if (t.stall) {
+            stalled.push({
+              task: id, kind: t.stall.kind, title: t.stall.title, hint: t.stall.hint || '',
+            });
+            // Авария — самая громкая из трёх бед, и единственная, которая НЕ звонила вовсе:
+            // чип её считал, тултип показывал, а оповещения не было. Прогон, умерший на
+            // глазах (выключили машину, погиб демон), не имел права молчать.
+            // Ключ несёт вид и этап: другой узел, вставший так же, — новая беда, а не эта.
+            const key = `${id}:${t.stall.kind}:${t.stall.stage || ''}`;
+            stalledKeys.push(key);
+            if (!stallNotified.has(key) && !silent) {
+              const crashed = t.stall.kind === 'crashed';
+              // У аварии заголовок карточки общий («оборвался»), а полезное — подсказка;
+              // у затыка наоборот: заголовок называет узел и причину.
+              notify(
+                `${crashed ? 'Конвейер оборвался' : 'Конвейер встал'} — #${id}`,
+                (crashed ? t.stall.hint || t.stall.title : t.stall.title) || '',
+                `stall-${key}`,
+              );
+            }
+          }
           const q = silenceReason(t, silenceWindow);
           if (q) {
             silentRuns.push({ task: id, stage: q.stage, text: q.text });
@@ -92,8 +123,17 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
             }
           }
           let g = null;
-          try { g = await api.get(`/api/tasks/${id}/graph`); } catch { continue; }
-          const w = waitingReason(g);
+          let gateKnown = true;
+          try { g = await api.get(`/api/tasks/${id}/graph`); } catch { gateKnown = false; }
+          const w = gateKnown ? waitingReason(g) : null;
+          observedByTask[id] = {
+            attempt: t.attempt || null,
+            daemon: t.daemonAlive ? 'running' : 'stopped',
+            result: t.result || null,
+            stall: t.stall?.title || null,
+            gateKnown,
+            gate: w?.text || null,
+          };
           if (!w) continue;
           waiting.push({ task: id, text: w.text, premature: w.premature });
           if (!notified.has(id) && !silent) notify(`Конвейер ждёт тебя — #${id}`, w.text, `conveyor-${id}`);
@@ -104,11 +144,20 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         // Тем же порядком по молчанию: заговорил — забыли, замолчит снова — позвоним.
         silenceNotified.clear();
         silentRuns.forEach((x) => silenceNotified.add(`${x.task}:${x.stage}`));
+        // И по авариям: прогон продолжили — забыли, оборвался снова — позвоним снова.
+        stallNotified.clear();
+        stalledKeys.forEach((key) => stallNotified.add(key));
         this.waiting = waiting;
         this.stalled = stalled;
         this.silent = silentRuns;
         this.running = running;
-      } catch { /* сервер недоступен — оставляем прошлую картину, проверим в следующий раз */ }
+        this.observedByTask = observedByTask;
+        this.loadedAt = Date.now();
+        this.error = null;
+      } catch (error) {
+        // Сервер недоступен — оставляем прошлую картину и помечаем источник неизвестным.
+        this.error = error?.message || 'Конвейер недоступен';
+      }
       finally { checking = false; }
     },
   },

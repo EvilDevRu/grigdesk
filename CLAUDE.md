@@ -65,17 +65,19 @@
   account-scoped stores каналов), `modules/`
   (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers,
   analysis, auth, gateway, plugins, projects — реестр проектов с путями репозиториев,
-  code — плагин «Код», inbox — плагин «Входящие», telegram/github — плагины каналов).
-- **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Projects, Code, Diff,
-  Tools, Video, Inbox, Telegram, GitHub, Terminal, Settings, Login, TaskModal),
+  code — плагин «Код», task-shelf — плагин «Полка», inbox — плагин «Входящие»,
+  telegram/github — плагины каналов).
+- **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Projects, Code,
+  Shelf, Diff, Tools, Video, Inbox, Telegram, GitHub, Terminal, Settings, Login, TaskModal),
   `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
   ChatSession, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
   `features/companion/` (headless bridge, attention, browser TTS и компактный `CompanionHost`),
   `features/speech/` (единственный root-owned controller диктовки и provider),
   `stores/` (Pinia: analysis, auth, board, chat, diff, dock, notify-watch, plugins, providers, pwa,
-  system, tasks, inbox, ui, ui-context, video-session — сеанс разбора встречи), `shared/`
+  system, tasks, task-shelf, inbox, ui, ui-context, video-session — сеанс разбора встречи), `shared/`
   (api-client, layout — включая единственный `ToolHost`, tools registry/launcher, format,
-  graph-geom, route-layout, diff — построчный LCS-дифф, monaco — общая обвязка Monaco
+  graph-geom, route-layout, task-shelf — единое решение событий полки,
+  diff — построчный LCS-дифф, monaco — общая обвязка Monaco
   для дифа и «Кода», ProviderIcon, ui/).
 - **bin/b24** — CLI-обёртка к B24-API (в PATH через симлинк). **deploy/** — systemd-юнит + install.sh.
 - **engine/** — канонический движок конвейера (демон задачи, этапы, агенты, стенды), встроенный

@@ -1,0 +1,127 @@
+// Оповещение об аварии конвейера.
+//
+// У вотчера три беды, и авария — самая громкая: конвейер не «ждёт решения» и не «молчит»,
+// он лежит. При этом звонили только двое: ворота и молчание. Прогон, оборвавшийся на
+// глазах человека (выключили машину, погиб демон), не показывал ничего, кроме цифры на
+// чипе, — а именно с этого вопроса «почему он просто так взял и оборвался» всё и началось.
+//
+// Здесь стережётся и обратная сторона: звонок обязан быть НА ПЕРЕХОДЕ. Авария живёт до
+// явного действия человека, поэтому звонок на каждой проверке (раз в две минуты и на
+// каждое событие шины) превратил бы оповещение в шум, от которого отключаются.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { compileModule, webFile } from './helpers/compile-vue.js';
+
+const CRASHED = {
+  kind: 'crashed',
+  stage: null,
+  title: 'конвейер оборвался, не дойдя до конца',
+  hint: 'демона нет, а конвейер не закрыт — запусти заново (resume продолжит с этого места)',
+  since: '2026-08-27 00:59:18',
+};
+
+const NO_PROGRESS = {
+  kind: 'human',
+  stage: 'SKEPTIC',
+  title: 'SKEPTIC: замкнутый набор замечаний расширен новыми id: shared-module',
+  hint: 'блокирующие замечания пережили ремонт',
+  since: '2026-08-27 01:10:00',
+};
+
+/** Свежий модуль на каждый тест: наборы отзвонившего живут на уровне модуля. */
+async function makeWatch(t) {
+  const harness = { tasks: [], notifications: [] };
+  globalThis.__notifyWatchHarness = harness;
+  t.after(() => { delete globalThis.__notifyWatchHarness; });
+
+  const module = await compileModule(webFile('src/stores/notify-watch.js'), {
+    stubs: {
+      '../shared/api-client.js': [
+        'export const api = {',
+        '  async get(url) {',
+        '    const harness = globalThis.__notifyWatchHarness;',
+        '    if (url === "/api/tasks") return { tasks: harness.tasks, silenceWindow: 0 };',
+        '    return { nodes: {}, pos: {}, keys: {}, statuses: {} };',
+        '  },',
+        '};',
+      ].join('\n'),
+      '../shared/notify.js': [
+        'export const notify = (title, body, tag) => {',
+        '  globalThis.__notifyWatchHarness.notifications.push({ title, body, tag });',
+        '  return Promise.resolve(true);',
+        '};',
+      ].join('\n'),
+    },
+  });
+
+  const { createPinia, setActivePinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
+  setActivePinia(createPinia());
+  return { store: module.useNotifyWatchStore(), harness };
+}
+
+const task = (id, stall) => ({ task: id, daemonAlive: false, stall });
+
+test('оборвавшийся прогон звонит, и в звонке сказано, что делать', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  harness.tasks = [task(8324, CRASHED)];
+
+  await store.check();
+
+  assert.equal(harness.notifications.length, 1, 'авария обязана звонить');
+  const [call] = harness.notifications;
+  assert.match(call.title, /Конвейер оборвался — #8324/);
+  // Заголовок карточки у аварии общий, поэтому в теле — подсказка: она единственная
+  // говорит, что делать. Иначе оповещение дублировало бы само себя.
+  assert.match(call.body, /запусти заново/);
+});
+
+test('первый снимок молчит: заход в кокпит — не событие', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  harness.tasks = [task(8324, CRASHED)];
+
+  await store.check(true);
+
+  assert.equal(harness.notifications.length, 0);
+  assert.equal(store.stalled.length, 1, 'но чип аварию видит сразу');
+});
+
+test('повторная проверка той же аварии не звонит второй раз', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  harness.tasks = [task(8324, CRASHED)];
+
+  await store.check();
+  await store.check();
+  await store.check();
+
+  assert.equal(harness.notifications.length, 1);
+});
+
+test('прогон продолжили и он оборвался снова — звоним снова', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  harness.tasks = [task(8324, CRASHED)];
+  await store.check();
+
+  harness.tasks = [{ task: 8324, daemonAlive: true, stall: null }];
+  await store.check();
+  assert.equal(store.stalled.length, 0);
+
+  harness.tasks = [task(8324, CRASHED)];
+  await store.check();
+
+  assert.equal(harness.notifications.length, 2, 'новая авария — новый звонок');
+});
+
+test('другой узел, вставший так же, — отдельная беда и отдельный звонок', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  harness.tasks = [task(900022, NO_PROGRESS)];
+  await store.check();
+
+  harness.tasks = [task(900022, { ...NO_PROGRESS, stage: 'REVIEW', title: 'REVIEW: то же самое' })];
+  await store.check();
+
+  assert.equal(harness.notifications.length, 2);
+  // У затыка полезен именно заголовок: он называет узел и причину, а подсказка общая.
+  assert.match(harness.notifications[0].body, /замкнутый набор замечаний/);
+  assert.match(harness.notifications[1].title, /Конвейер встал — #900022/);
+});

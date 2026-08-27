@@ -35,6 +35,14 @@ export async function compileBoardView() {
         export const useTaskFavoritesStore = (...args) =>
           globalThis.__boardViewStores.favorites(...args);
       `,
+      '../stores/task-shelf.js': `
+        export const useTaskShelfStore = (...args) =>
+          globalThis.__boardViewStores.shelf(...args);
+      `,
+      '../stores/plugins.js': `
+        export const usePluginsStore = (...args) =>
+          globalThis.__boardViewStores.plugins(...args);
+      `,
       '../stores/task-seen.js': `
         export const useTaskSeenStore = (...args) => globalThis.__boardViewStores.seen(...args);
       `,
@@ -75,6 +83,7 @@ export async function installBrowser(t) {
     Node: browser.Node,
     Document: browser.Document,
     ShadowRoot: browser.ShadowRoot,
+    XMLSerializer: browser.XMLSerializer,
     Element: browser.Element,
     HTMLElement: browser.HTMLElement,
     SVGElement: browser.SVGElement,
@@ -110,6 +119,8 @@ export async function mountBoardView(t, {
   created = [],
   analysis = {},
   favorites = {},
+  shelf = {},
+  shelfEnabled = true,
   seen = {},
   triagePrefs,
 } = {}) {
@@ -120,7 +131,14 @@ export async function mountBoardView(t, {
     import(PINIA_URL),
   ]);
   const nonce = `${prefix}-${mountNonce++}`;
-  const calls = { opened: [], toggled: [], favoritesLoad: [], seenLoad: [], seenMarked: [] };
+  const calls = {
+    opened: [],
+    toggled: [],
+    favoritesLoad: [],
+    shelfLoad: [],
+    seenLoad: [],
+    seenMarked: [],
+  };
   const stores = {
     board: defineStore(`board-view-board-${nonce}`, {
       state: () => ({
@@ -157,6 +175,29 @@ export async function mountBoardView(t, {
       actions: {
         async load(force) { calls.favoritesLoad.push(!!force); },
         async toggle(id) { calls.toggled.push(String(id)); return true; },
+      },
+    }),
+    shelf: defineStore(`board-view-shelf-${nonce}`, {
+      state: () => ({
+        entries: [], loaded: true, loading: false, error: null, pending: {}, ...shelf,
+      }),
+      getters: {
+        isOnShelf: (state) => (id) => state.entries
+          .some((entry) => entry.taskId === String(id)),
+        isPending: (state) => (id) => !!state.pending[String(id)],
+      },
+      actions: {
+        async load(force) { calls.shelfLoad.push(!!force); },
+      },
+    }),
+    plugins: defineStore(`board-view-plugins-${nonce}`, {
+      state: () => ({
+        loaded: true,
+        list: [{ id: 'shelf', enabled: shelfEnabled, values: {} }],
+      }),
+      getters: {
+        enabled: (state) => (id) => !!state.list.find((item) => item.id === id)?.enabled,
+        byId: (state) => (id) => state.list.find((item) => item.id === id) || null,
       },
     }),
     // Отметки просмотра: `initialized` — базовая линия. Без неё новых задач не бывает

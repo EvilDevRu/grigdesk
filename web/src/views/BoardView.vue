@@ -269,7 +269,10 @@
           </div>
           <ul class="tasks scroller" @scroll="onTasksScroll">
             <li v-for="t in visibleTasks" :key="t.id" class="trow">
-              <span class="tstat" :class="{ conv: conveyor.has(String(t.id)) }"
+              <span class="tstat" :class="{
+                      conv: conveyor.has(String(t.id)),
+                      'on-shelf': shelfEnabled && shelf.isOnShelf(t.id),
+                    }"
                     :style="{ background: dotColor(t) }" :title="dotTitle(t)"></span>
               <TaskFavoriteButton :active="favorites.isFavorite(t.id)"
                                   :pending="!favorites.loaded || favorites.loading || favorites.isPending(t.id)"
@@ -367,6 +370,8 @@ import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
 import { useAnalysisStore } from '../stores/analysis.js';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
+import { useTaskShelfStore } from '../stores/task-shelf.js';
+import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
@@ -470,6 +475,9 @@ const q = ref('');
 // Триаж: бейджи оценок + сортировка/фильтры по ним. Выбор запоминается.
 const analysis = useAnalysisStore();
 const favorites = useTaskFavoritesStore();
+const shelf = useTaskShelfStore();
+const plugins = usePluginsStore();
+const shelfEnabled = computed(() => plugins.enabled('shelf'));
 const favoriteOnly = ref(false);
 const filtersOpen = ref(false);
 // Новая задача — та, которую ещё не открывали. Отметки серверные, поэтому до их
@@ -869,6 +877,7 @@ onUnmounted(() => { if (ticker) clearInterval(ticker); });
 .trow:hover { background: var(--surface); }
 .trow + .trow { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 55%, transparent); }
 .tstat { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
+.tstat.on-shelf { outline: 1px solid var(--warn); outline-offset: 3px; }
 /* Задача на конвейере: точка чуть крупнее и «дышит» — видно с первого взгляда */
 .tstat.conv { width: 9px; height: 9px; animation: convpulse 2s ease-in-out infinite; }
 @keyframes convpulse { 50% { opacity: .45; } }

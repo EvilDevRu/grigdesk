@@ -63,6 +63,32 @@ export const SYSTEM = [
     ],
   },
   {
+    id: 'shelf',
+    system: true,
+    defaultEnabled: true,
+    name: 'Полка',
+    version: '1.0.0',
+    description: 'Личный список задач Б24, по которым человек ждёт оценку, '
+      + 'событие конвейера или новые комментарии.',
+    nav: { path: '/shelf', label: 'Полка', icon: 'shelf', group: 'dock', order: 20 },
+    settings: [
+      {
+        key: 'browserNotifications',
+        label: 'Оповещать в браузере',
+        type: 'checkbox',
+        hint: 'Новое событие по задаче на полке даёт одно системное оповещение.',
+        default: true,
+      },
+      {
+        key: 'autoAddOnAnalysis',
+        label: 'Класть на полку при запуске оценки',
+        type: 'checkbox',
+        hint: 'Любой запуск триажа автоматически добавляет задачу с причиной «жду оценку».',
+        default: true,
+      },
+    ],
+  },
+  {
     id: 'inbox',
     system: true,
     defaultEnabled: true,

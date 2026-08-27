@@ -6,6 +6,7 @@ export const NAV_ICONS = {
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z',
   code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
+  shelf: 'M4 5v14 M20 5v14 M4 9h16 M4 15h16 M8 5v4 M16 9v6 M10 15v4',
   video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
   telegram: 'M20.4 5.2 4 11.6l5.3 2 1.7 5.2 2.5-3 4.1 3.1z M9.3 13.6 20.4 5.2 13.5 15.8',
   inbox: 'M4 4h16v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4z M4 13h4l2 3h4l2-3h4',

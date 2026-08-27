@@ -48,6 +48,8 @@ import { FactoryDebugSettings } from './lib/factory-debug.js';
 import { readRouteWorkTime } from './lib/factory-route-cli.js';
 import { TaskFavoritesStore } from './lib/task-favorites-store.js';
 import { TaskFavoritesService } from './lib/task-favorites-service.js';
+import { TaskShelfStore } from './lib/task-shelf-store.js';
+import { TaskShelfService } from './lib/task-shelf-service.js';
 import { TaskSeenStore } from './lib/task-seen-store.js';
 import { TaskSeenService } from './lib/task-seen-service.js';
 
@@ -63,6 +65,7 @@ import healthModule from './modules/health/index.js';
 import factoryModule from './modules/factory/index.js';
 import b24Module from './modules/b24/index.js';
 import taskFavoritesModule from './modules/task-favorites/index.js';
+import taskShelfModule from './modules/task-shelf/index.js';
 import taskSeenModule from './modules/task-seen/index.js';
 import systemModule from './modules/system/index.js';
 import mediaModule from './modules/media/index.js';
@@ -309,6 +312,8 @@ async function build() {
   const system = new SystemAdapter();
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
   const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
+  const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });
+  const taskShelf = new TaskShelfService({ store: taskShelfStore, b24 });
   const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
   const taskSeen = new TaskSeenService({ store: taskSeenStore, b24 });
   const factoryDebug = new FactoryDebugSettings({
@@ -380,6 +385,7 @@ async function build() {
   await fastify.register(systemModule, { system, config });
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, { config, prefs });
+  await fastify.register(taskShelfModule, { shelf: taskShelf });
   await fastify.register(mediaModule, {
     media,
     speechRuntime,

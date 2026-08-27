@@ -146,6 +146,9 @@ export const config = {
   // а не настройки интерфейса.
   taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH
     || path.join(__dirname, '..', '.state', 'task-favorites.json'),
+  // Личная полка B24-задач с серверными снимками наблюдаемого состояния.
+  taskShelfPath: process.env.COCKPIT_TASK_SHELF_PATH
+    || path.join(__dirname, '..', '.state', 'task-shelf.json'),
   // Просмотренные B24-задачи: набор серверный, чтобы метка «новая» снималась на всех
   // устройствах сразу.
   taskSeenPath: process.env.COCKPIT_TASK_SEEN_PATH

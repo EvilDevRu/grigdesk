@@ -42,9 +42,10 @@
         </UiIconButton>
       </header>
 
-      <div v-if="err || favorites.error" class="malerts" aria-live="polite">
+      <div v-if="err || favorites.error || shelf.error" class="malerts" aria-live="polite">
         <p v-if="err" class="err">{{ err }}</p>
         <p v-if="favorites.error" class="err">Избранное: {{ favorites.error }}</p>
+        <p v-if="shelf.error" class="err">Полка: {{ shelf.error }}</p>
       </div>
 
       <div class="mcontext" aria-label="Состояние задачи">
@@ -463,6 +464,19 @@
           </div>
           <div class="cbtns">
             <UiButton
+              v-if="shelfEnabled"
+              data-context="task-footer-action"
+              tone="neutral"
+              variant="outline"
+              :pressed="shelf.isOnShelf(taskId)"
+              :loading="shelf.isPending(taskId)"
+              :disabled="shelf.isPending(taskId)"
+              loading-label="Обновляю полку"
+              @click="toggleShelf"
+            >
+              {{ shelf.isOnShelf(taskId) ? 'Отложено' : 'Отложить' }}
+            </UiButton>
+            <UiButton
               data-context="task-footer-action"
               :tone="running ? 'warning' : 'accent'"
               variant="solid"
@@ -721,6 +735,8 @@ import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useAnalysisStore } from '../stores/analysis.js';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
+import { useTaskShelfStore } from '../stores/task-shelf.js';
+import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
@@ -734,6 +750,8 @@ const ui = useUiStore();
 const tasks = useTasksStore();
 const board = useBoardStore();
 const favorites = useTaskFavoritesStore();
+const shelf = useTaskShelfStore();
+const plugins = usePluginsStore();
 const seen = useTaskSeenStore();
 const { taskId } = storeToRefs(ui);
 
@@ -763,6 +781,7 @@ function taskContextDetails(id) {
 }
 const running = computed(() => !!boardTask.value?.timerRunning);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
+const shelfEnabled = computed(() => plugins.enabled('shelf'));
 
 // B24 отдаёт описание с HTML/entities — чистим до читаемого текста.
 function htmlToText(s) {
@@ -1327,6 +1346,17 @@ const sendComment = () => act('comment', async () => {
 });
 const refresh = () => { loadDetail(true); board.load(true); };
 const toggleFavorite = () => favorites.toggle(taskId.value);
+const toggleShelf = () => shelf.toggle(taskId.value);
+let acknowledgedShelfTask = '';
+function acknowledgeShelfOnOpen(id = taskId.value) {
+  const key = String(id || '');
+  if (!key || !shelfEnabled.value || !shelf.loaded || !shelf.isOnShelf(key)
+    || acknowledgedShelfTask === key) return;
+  acknowledgedShelfTask = key;
+  void Promise.resolve(shelf.acknowledge(key)).then((ok) => {
+    if (!ok && String(taskId.value || '') === key) acknowledgedShelfTask = '';
+  });
+}
 function onTaskDialogOpenChange(open) {
   if (!open) {
     ui.close();
@@ -1335,6 +1365,7 @@ function onTaskDialogOpenChange(open) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  acknowledgedShelfTask = '';
   cancelTaskEdit();
   editMessage.value = null;
   if (id) {
@@ -1350,6 +1381,7 @@ watch(taskId, (id) => {
     loadClarifications();
     loadDetail();
     favorites.load(true);
+    acknowledgeShelfOnOpen(id);
     // Задачу открыли — она больше не новая. Отметка серверная, поэтому метка гаснет
     // и в других окнах; ошибка отметки на показ задачи не влияет.
     seen.markSeen([id]);
@@ -1362,6 +1394,13 @@ watch(taskId, (id) => {
     if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
   }
 }, { immediate: true });
+
+// Полка загружается параллельно карточке. Если её снимок пришёл позже, открытая
+// задача всё равно должна погасить накопленный огонёк ровно один раз.
+watch(
+  () => [taskId.value, shelf.loaded, shelf.entries, shelfEnabled.value],
+  ([id]) => acknowledgeShelfOnOpen(id),
+);
 // Заголовок может приехать после открытия карточки. Обновляем bounded details, но не
 // focus revision: открытый позже Pipeline/Task overlay должен остаться верхним.
 watch(

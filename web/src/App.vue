@@ -39,6 +39,7 @@ import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
 import { useTaskFavoritesStore } from './stores/task-favorites.js';
+import { useTaskShelfStore } from './stores/task-shelf.js';
 import { useTaskSeenStore } from './stores/task-seen.js';
 import { useVideoSessionStore } from './stores/video-session.js';
 
@@ -52,6 +53,7 @@ function startPolling() {
   useTaskSeenStore().load(true);
   useBoardStore().startPolling();
   useSystemStore().startPolling();
+  useTaskShelfStore().start();
 }
 
 onMounted(async () => {
@@ -71,6 +73,8 @@ watch(() => auth.authenticated, (on, was) => {
     useBoardStore().stopPolling();
     useSystemStore().stopPolling();
     useTaskFavoritesStore().clear();
+    useTaskShelfStore().stop();
+    useTaskShelfStore().clear();
     useTaskSeenStore().clear();
     // Разбор встречи набран человеком и потому переживает выход, а вот его поллинг —
     // нет: без сессии он молотил бы в закрытый API теми же 401 каждые две секунды.

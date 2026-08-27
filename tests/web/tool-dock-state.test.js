@@ -142,6 +142,27 @@ test('launcher соблюдает route/dock state machine и кладёт inten
   assert.equal(await launchTool({ ...launcherHarness(), canDock: () => true }, 'unknown'), false);
 });
 
+test('Полка, Код и Терминал переключают один activeTool эксклюзивного дока', () => {
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: memoryStorage(),
+    configurable: true,
+  });
+  setActivePinia(createPinia());
+  const dock = useDockStore();
+  const sequence = [];
+
+  for (const id of ['shelf', 'code', 'terminal']) {
+    dock.open(id);
+    sequence.push([dock.isOpen, dock.activeTool]);
+  }
+
+  assert.deepEqual(sequence, [
+    [true, 'shelf'],
+    [true, 'code'],
+    [true, 'terminal'],
+  ]);
+});
+
 test('nav placement сортируется стабильно, invalid group остаётся в rail, а badge сохраняет приоритет', () => {
   const items = [
     normalizeNavItem({ id: 'z', nav: { path: '/z', label: 'Я', group: 'tools', order: 20 } }),

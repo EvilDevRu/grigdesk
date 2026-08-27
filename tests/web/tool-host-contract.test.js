@@ -7,30 +7,40 @@ const source = (path) => readFile(new URL(path, root), 'utf8');
 const count = (text, pattern) => (text.match(pattern) || []).length;
 
 test('AppShell держит один ToolHost, а route-adapter не монтирует вторую панель', async () => {
-  const [shell, host, codeRoute, terminalRoute] = await Promise.all([
-    source('web/src/shared/layout/AppShell.vue'),
-    source('web/src/shared/layout/ToolHost.vue'),
-    source('web/src/views/CodeView.vue'),
-    source('web/src/views/TerminalView.vue'),
-  ]);
+  let files;
+  try {
+    files = await Promise.all([
+      source('web/src/shared/layout/AppShell.vue'),
+      source('web/src/shared/layout/ToolHost.vue'),
+      source('web/src/views/CodeView.vue'),
+      source('web/src/views/ShelfView.vue'),
+      source('web/src/views/TerminalView.vue'),
+    ]);
+  } catch (error) {
+    assert.fail(`Route-adapter полки ещё не реализован: ${error.message}`);
+  }
+  const [shell, host, codeRoute, shelfRoute, terminalRoute] = files;
 
   assert.equal(count(shell, /<ToolHost\s*\/>/g), 1);
   assert.equal(count(host, /<component\s+:is="item\.component"/g), 1);
   assert.match(host, /v-for="item in TOOL_REGISTRY"/);
   assert.doesNotMatch(codeRoute, /import\s+CodePanel/);
+  assert.doesNotMatch(shelfRoute, /import\s+TaskShelfPanel/);
   assert.doesNotMatch(terminalRoute, /import\s+TerminalPanel/);
   assert.match(codeRoute, /data-tool-route="code"/);
+  assert.match(shelfRoute, /data-tool-route="shelf"/);
   assert.match(terminalRoute, /data-tool-route="terminal"/);
 });
 
-test('Code и Terminal лениво загружаются независимо', async () => {
+test('Code, Shelf и Terminal лениво загружаются независимо', async () => {
   const [registry, codeLoading] = await Promise.all([
     source('web/src/shared/tools/registry.js'),
     source('web/src/views/code/CodePanelLoading.js'),
   ]);
 
-  assert.equal(count(registry, /defineAsyncComponent\(/g), 2);
+  assert.equal(count(registry, /defineAsyncComponent\(/g), 3);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
+  assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/terminal\/TerminalPanel\.vue'\)/);
   assert.match(registry, /loadingComponent: CodePanelLoading/);
   assert.match(registry, /delay: 0/);
@@ -38,6 +48,24 @@ test('Code и Terminal лениво загружаются независимо'
   assert.match(codeLoading, /class: \['code-loading-layout', \{ compact: props\.compact \}\]/);
   assert.doesNotMatch(codeLoading, /from ['"][^'"]*monaco|import\s+.*TerminalPanel|new WebSocket/i);
   assert.doesNotMatch(registry, /Promise\.all/);
+});
+
+test('Узкий route полки объявлен как tool и не создаёт отдельный dock state', async () => {
+  const [router, registry, dock] = await Promise.all([
+    source('web/src/router.js'),
+    source('web/src/shared/tools/registry.js'),
+    source('web/src/stores/dock.js'),
+  ]);
+
+  assert.deepEqual({
+    route: /path:\s*['"]\/shelf['"][\s\S]*meta:\s*\{[^}]*tool:\s*['"]shelf['"]/.test(router),
+    registry: /id:\s*['"]shelf['"][\s\S]*route:\s*['"]\/shelf['"]/.test(registry),
+    separateShelfState: /shelf(?:Dock|Open|Mounted)\s*:/i.test(dock),
+  }, {
+    route: true,
+    registry: true,
+    separateShelfState: false,
+  });
 });
 
 test('планшет 760–899 остаётся route-only, док и третья колонка начинаются с 900', async () => {

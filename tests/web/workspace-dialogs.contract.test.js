@@ -40,7 +40,7 @@ test('TaskModal держит action триажа сверху и единый р
   );
   assert.equal(
     [...taskModal.matchAll(/data-context="task-footer-action"/gu)].length,
-    6,
+    7,
   );
   assert.match(
     actions,

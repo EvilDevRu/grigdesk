@@ -2,11 +2,14 @@
 // Поллинг адаптивный: пока есть queued/running — часто (5с), иначе редко (60с).
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
+import { useTaskShelfStore } from './task-shelf.js';
+import { usePluginsStore } from './plugins.js';
 
 export const useAnalysisStore = defineStore('analysis', {
   state: () => ({
     byTask: {},   // id → { task, analysis?, status? }
     loadedAt: 0,
+    error: null,
     _timer: null,
   }),
   getters: {
@@ -24,7 +27,11 @@ export const useAnalysisStore = defineStore('analysis', {
         for (const r of rows) map[r.task] = r;
         this.byTask = map;
         this.loadedAt = Date.now();
-      } catch { /* триаж — вторичный слой, доску не ломаем */ }
+        this.error = null;
+      } catch (error) {
+        // Прошлый снимок сохраняем: временный отказ не превращается в ложное событие.
+        this.error = error?.message || 'Триаж недоступен';
+      }
       this._schedule();
     },
     _schedule() {
@@ -38,10 +45,19 @@ export const useAnalysisStore = defineStore('analysis', {
     /** Поставить задачу в очередь; оптимистично показываем queued сразу. */
     async analyze(id) {
       const r = await api.post(`/api/tasks/${id}/analyze`);
+      const queuedAt = new Date().toISOString();
       this.byTask = {
         ...this.byTask,
-        [id]: { ...(this.byTask[id] || { task: Number(id) }), status: { task: Number(id), state: 'queued' } },
+        [id]: {
+          ...(this.byTask[id] || { task: Number(id) }),
+          status: { task: Number(id), state: 'queued', queuedAt },
+        },
       };
+      const plugins = usePluginsStore();
+      if (plugins.enabled('shelf')
+        && plugins.byId('shelf')?.values?.autoAddOnAnalysis !== false) {
+        try { await useTaskShelfStore().autoAdd(id); } catch { /* запуск оценки уже принят */ }
+      }
       this._schedule();
       return r;
     },

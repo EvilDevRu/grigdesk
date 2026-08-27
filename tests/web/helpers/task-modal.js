@@ -103,6 +103,18 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
       '../stores/task-favorites.js': (
         `export const useTaskFavoritesStore = globalThis.${prefix}FavoritesStore;`
       ),
+      '../stores/task-shelf.js': [
+        `export const useTaskShelfStore = globalThis.${prefix}ShelfStore || (() => ({`,
+        '  entries: [], rows: [], loaded: true, loading: false, error: null, pending: {},',
+        '  isOnShelf: () => false, isPending: () => false,',
+        '  async toggle() { return true; }, async acknowledge() { return true; },',
+        '}));',
+      ].join('\n'),
+      '../stores/plugins.js': [
+        `export const usePluginsStore = globalThis.${prefix}PluginsStore || (() => ({`,
+        '  loaded: true, enabled: () => false, byId: () => null,',
+        '}));',
+      ].join('\n'),
       '../stores/task-seen.js': `export const useTaskSeenStore = globalThis.${prefix}SeenStore;`,
       '../shared/format.js': [
         'export const liveTimerSec = (task) => task?.timerElapsed || 0;',

@@ -14,6 +14,7 @@ const routes = [
   { path: '/routes', name: 'routes', component: () => import('./views/RoutesView.vue'), meta: { title: 'Маршруты' } },
   { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Проекты' } },
   { path: '/code', name: 'code', component: () => import('./views/CodeView.vue'), meta: { title: 'Код', tool: 'code' } },
+  { path: '/shelf', name: 'shelf', component: () => import('./views/ShelfView.vue'), meta: { title: 'Полка', tool: 'shelf' } },
   { path: '/tools', name: 'tools', component: () => import('./views/ToolsView.vue'), meta: { title: 'Инструменты' } },
   { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { title: 'Видео' } },
   { path: '/inbox', name: 'inbox', component: () => import('./views/InboxView.vue'), meta: { title: 'Входящие' } },

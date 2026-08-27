@@ -56,6 +56,9 @@ async function compileToolHostPublisher() {
       '../../stores/plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__uiContextPluginsStore(...args);
       `,
+      '../../stores/task-shelf.js': `
+        export const useTaskShelfStore = () => globalThis.__uiContextTaskShelf;
+      `,
       '../../composables/useUiContextSource.js': `
         export const useUiContextSource = (...args) => globalThis.__uiContextSourceHelper(...args);
       `,
@@ -400,7 +403,7 @@ test('COMP-PROV-12: реальный ToolHost не публикует hidden pan
     for (const key of [
       '__uiContextToolRoute', '__uiContextDockModule', '__uiContextPluginsStore',
       '__uiContextSourceHelper', '__uiContextToolRegistry', '__uiContextDockCapable',
-      '__uiContextToolDock',
+      '__uiContextToolDock', '__uiContextTaskShelf',
     ]) delete globalThis[key];
   });
 
@@ -443,6 +446,7 @@ test('COMP-PROV-12: реальный ToolHost не публикует hidden pan
     props: ['mode', 'label', 'width', 'minWidth', 'maxWidth', 'expanded', 'expandedWidth'],
     template: '<div class="tool-dock-runtime"><slot /></div>',
   };
+  globalThis.__uiContextTaskShelf = { totalCount: 0, litCount: 0 };
 
   const dock = dockModule.useDockStore();
   dock.rememberTool('code');
