@@ -235,6 +235,7 @@
         v-model="choice"
         label="Длинные варианты"
         :options="choiceOptions"
+        selection-indicator
       />
       <UiDisclosureButton
         v-model:open="disclosureOpen"
@@ -374,7 +375,15 @@ const disclosureOpen = ref(false);
 const dialogOpen = ref(false);
 const providerUsageEnabled = ref(false);
 const choiceOptions: Array<UiSelectionOption<string>> = [
-  { value: 'approve', label: 'Подтвердить план и продолжить выполнение' },
-  { value: 'revise', label: 'Вернуть агенту с подробным замечанием, которое может занимать несколько строк' },
+  {
+    value: 'approve',
+    label: 'Подтвердить план',
+    description: 'Продолжить выполнение по предложенным шагам',
+  },
+  {
+    value: 'revise',
+    label: 'Вернуть агенту',
+    description: 'Добавить подробное замечание, которое может занимать несколько строк',
+  },
 ];
 </script>

@@ -13,6 +13,34 @@ import { usePluginsStore } from './plugins.js';
 
 const controllers = new WeakMap();
 const BOARD_LISTS = ['tasks', 'toReview', 'created', 'accomplice', 'auditor'];
+const ANALYSIS_LABELS = {
+  queued: 'В очереди',
+  running: 'Идёт',
+  done: 'Готова',
+  finished: 'Готова',
+  failed: 'Завершилась с ошибкой',
+  interrupted: 'Прервана',
+};
+const ANALYSIS_TONES = {
+  queued: 'neutral',
+  running: 'accent',
+  done: 'good',
+  finished: 'good',
+  failed: 'bad',
+  interrupted: 'warn',
+};
+const B24_TONES = {
+  todo: 'warn',
+  running: 'good',
+  in_progress: 'accent',
+  await_acceptance: 'accent',
+  my_review: 'warn',
+  done: 'good',
+  completed: 'good',
+  declined: 'bad',
+};
+const TASK_DETAIL_REFRESH_MS = 60_000;
+const TASK_DETAIL_RETRY_MS = 60_000;
 
 function taskKey(value) {
   return String(value ?? '').trim();
@@ -54,12 +82,81 @@ function ensureController(store) {
     pipeline: useNotifyWatchStore(),
     board: useBoardStore(),
     plugins: usePluginsStore(),
+    detailScope: '',
+    detailByTask: new Map(),
+    detailLoads: new Map(),
+    detailFailures: new Map(),
     started: false,
     enabled: false,
     stops: [],
   };
   controllers.set(store, controller);
   return controller;
+}
+
+function resetTaskDetails(controller, scope = '') {
+  controller.detailScope = scope;
+  controller.detailByTask.clear();
+  controller.detailLoads.clear();
+  controller.detailFailures.clear();
+}
+
+function pruneTaskDetails(controller, entries) {
+  const active = new Set(entries.map((entry) => entry.taskId));
+  for (const taskId of controller.detailByTask.keys()) {
+    if (!active.has(taskId)) controller.detailByTask.delete(taskId);
+  }
+  for (const taskId of controller.detailFailures.keys()) {
+    if (!active.has(taskId)) controller.detailFailures.delete(taskId);
+  }
+}
+
+function cachedTaskDetail(controller, taskId) {
+  return controller.detailByTask.get(taskId)?.data || null;
+}
+
+function detailProject(detail) {
+  const name = typeof detail?.group_name === 'string' ? detail.group_name.trim() : '';
+  if (name) return name;
+  const id = Number(detail?.group_id);
+  return Number.isSafeInteger(id) && id > 0 ? `Проект #${id}` : '';
+}
+
+async function hydrateTaskDetail(store, controller, taskId) {
+  const now = Date.now();
+  const cached = controller.detailByTask.get(taskId);
+  const failedAt = controller.detailFailures.get(taskId) || 0;
+  if (cached && now - cached.loadedAt < TASK_DETAIL_REFRESH_MS) return;
+  if (controller.detailLoads.has(taskId) || now - failedAt < TASK_DETAIL_RETRY_MS) return;
+
+  const scope = store.scope;
+  const epoch = store._epoch;
+  const request = api.get(`/api/b24/task/${encodeURIComponent(taskId)}`);
+  controller.detailLoads.set(taskId, request);
+  try {
+    const detail = await request;
+    const entryExists = store.entries.some((entry) => entry.taskId === taskId);
+    if (store._epoch !== epoch || store.scope !== scope || !entryExists) return;
+    controller.detailByTask.set(taskId, { data: detail || {}, loadedAt: Date.now() });
+    controller.detailFailures.delete(taskId);
+    store.reconcile({ silent: true });
+  } catch {
+    if (store._epoch === epoch && store.scope === scope) {
+      controller.detailFailures.set(taskId, Date.now());
+    }
+  } finally {
+    if (controller.detailLoads.get(taskId) === request) controller.detailLoads.delete(taskId);
+  }
+}
+
+function hydrateMissingTaskDetails(store, controller) {
+  if (!enabled(controller) || !store.scope || controller.board.loadedAt <= 0
+    || controller.board.error || !controller.board.data) return;
+  for (const entry of store.entries) {
+    if (!boardTask(controller, entry.taskId)?.group) {
+      void hydrateTaskDetail(store, controller, entry.taskId);
+    }
+  }
 }
 
 function enabled(controller) {
@@ -120,6 +217,150 @@ function availableSources(observed) {
   return sources;
 }
 
+function scale(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : null;
+}
+
+/**
+ * Сворачивает живой триаж в одну строку карточки. Оценки сложности и риска
+ * показываются только при валидной шкале, чтобы повреждённый ответ не выглядел фактом.
+ */
+function analysisActivity(controller, entry, snapshot) {
+  const row = controller.analysis.byTask?.[entry.taskId] || null;
+  const analysis = row?.analysis || null;
+  const state = row?.status?.state || snapshot?.state || (analysis ? 'done' : null);
+  if (!state && entry.reason !== 'analysis') return null;
+
+  const parts = [ANALYSIS_LABELS[state] || 'Состояние неизвестно'];
+  const complexity = scale(analysis?.complexity);
+  const risk = scale(analysis?.risk);
+  if (complexity) parts.push(`сложность ${complexity}/5`);
+  if (risk) parts.push(`риск ${risk}/5`);
+  if (typeof analysis?.diff_size === 'string' && analysis.diff_size) {
+    parts.push(`дифф ${analysis.diff_size}`);
+  }
+  const needsClarification = analysis?.needs_clarification === true
+    || analysis?.confidence === 'low';
+  if (needsClarification) parts.push('нужно уточнение');
+
+  const terminalTone = ['failed', 'interrupted'].includes(state) ? ANALYSIS_TONES[state] : null;
+  return {
+    kind: 'analysis',
+    label: 'Оценка',
+    value: parts.join(' · '),
+    tone: terminalTone || (needsClarification ? 'warn' : ANALYSIS_TONES[state] || 'neutral'),
+  };
+}
+
+/**
+ * Называет фактическое место прогона по уже прочитанному вотчером графу. При
+ * недоступном графе остаётся последний durable снимок, но без выдуманного прогресса.
+ */
+function pipelineActivity(entry, current, snapshot) {
+  const pipeline = current || snapshot;
+  if (!pipeline && entry.reason !== 'pipeline') return null;
+  if (!pipeline) {
+    return {
+      kind: 'pipeline',
+      label: 'Конвейер',
+      value: 'Данные ещё не получены',
+      tone: 'neutral',
+    };
+  }
+  if (!current && snapshot && !snapshot.result) {
+    return {
+      kind: 'pipeline',
+      label: 'Конвейер',
+      value: 'Последний прогон сейчас не виден',
+      tone: 'neutral',
+    };
+  }
+
+  let value = 'Состояние неизвестно';
+  let tone = 'neutral';
+  if (pipeline.gate) {
+    value = `Нужно решение · ${pipeline.gate}`;
+    tone = 'warn';
+  } else if (pipeline.stall) {
+    value = `Остановлен · ${pipeline.stall}`;
+    tone = 'bad';
+  } else if (pipeline.result) {
+    value = pipeline.result === 'completed' ? 'Завершён' : `Завершён · ${pipeline.result}`;
+    tone = pipeline.result === 'completed' ? 'good' : 'warn';
+  } else if (pipeline.daemon === 'running') {
+    const progress = pipeline.progress;
+    const count = Number.isSafeInteger(progress?.done)
+      && Number.isSafeInteger(progress?.total) && progress.total > 0
+      ? `${progress.done}/${progress.total}`
+      : 'Идёт';
+    value = pipeline.stage?.label ? `${count} · ${pipeline.stage.label}` : count;
+    tone = pipeline.stage?.state === 'wait' || pipeline.stage?.state === 'premature'
+      ? 'warn'
+      : 'accent';
+  } else if (pipeline.attempt) {
+    value = 'Прогон остановлен';
+  }
+
+  return { kind: 'pipeline', label: 'Конвейер', value, tone };
+}
+
+/**
+ * Добавляет статус портальной задачи и полезные метаданные из текущей доски.
+ * Сохранённый снимок используется только как fallback, если задача ушла из списка.
+ */
+function b24Activity(task, snapshot) {
+  if (task) {
+    return {
+      kind: 'b24',
+      label: 'Битрикс24',
+      value: task.statusText || task.statusLabel || 'На доске',
+      tone: B24_TONES[task.statusKind] || 'neutral',
+    };
+  }
+  if (!snapshot) return null;
+
+  return {
+    kind: 'b24',
+    label: 'Битрикс24',
+    value: snapshot.present ? 'Последний статус сохранён' : 'Не видна на текущей доске',
+    tone: B24_TONES[snapshot.statusKind] || 'neutral',
+  };
+}
+
+/**
+ * Собирает только отображаемую проекцию карточки. Она не попадает в durable snapshot
+ * и поэтому может безопасно содержать живые поля доски и подробный прогресс графа.
+ */
+function presentation(controller, entry, observed, snapshot, task) {
+  const detail = cachedTaskDetail(controller, entry.taskId);
+  const activities = [
+    b24Activity(task, snapshot.b24),
+    analysisActivity(controller, entry, snapshot.analysis),
+    pipelineActivity(entry, observed.pipeline, snapshot.pipeline),
+  ].filter(Boolean);
+
+  return {
+    title: task?.title || detail?.title || entry.title,
+    project: task?.group || detailProject(detail),
+    responsible: task?.responsible || '',
+    deadline: task?.deadline || '',
+    overdue: task?.overdue === true,
+    unread: Number.isSafeInteger(Number(task?.unread)) && Number(task.unread) > 0
+      ? Number(task.unread)
+      : 0,
+    activities,
+  };
+}
+
+function sourceIssues(controller) {
+  const issues = [];
+  if (controller.board.error) issues.push('Статусы Битрикс24 могут быть устаревшими');
+  if (controller.analysis.error) issues.push('Состояние оценки может быть устаревшим');
+  if (controller.pipeline.error) issues.push('Состояние конвейера может быть устаревшим');
+  return issues;
+}
+
 export const useTaskShelfStore = defineStore('taskShelf', {
   state: () => ({
     scope: '',
@@ -129,6 +370,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
     loaded: false,
     loading: false,
     error: null,
+    sourceIssues: [],
     pending: {},
     _runtime: {},
     _epoch: 0,
@@ -150,12 +392,16 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       if (snapshot.scope !== this.scope && seq < this._scopeRequestSeq) return false;
       if (snapshot.scope === this.scope && snapshot.revision < this.revision) return false;
 
+      const controller = ensureController(this);
+      if (controller.detailScope !== snapshot.scope) resetTaskDetails(controller, snapshot.scope);
       this.scope = snapshot.scope;
       this.revision = snapshot.revision;
       this.entries = markRaw(snapshot.entries);
+      pruneTaskDetails(controller, snapshot.entries);
       this.loaded = true;
       this._scopeRequestSeq = Math.max(this._scopeRequestSeq, seq);
       this.reconcile({ silent });
+      hydrateMissingTaskDetails(this, controller);
       return true;
     },
 
@@ -204,10 +450,12 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       const controller = ensureController(this);
       if (!enabled(controller)) {
         this.rows = [];
+        this.sourceIssues = [];
         this._runtime = {};
         return;
       }
 
+      this.sourceIssues = sourceIssues(controller);
       const nextRuntime = {};
       const rows = [];
       for (const entry of this.entries) {
@@ -247,7 +495,9 @@ export const useTaskShelfStore = defineStore('taskShelf', {
           entryVersion,
           primed: [...primed],
         };
-        rows.push({ ...entry, ...decision });
+        const task = boardTask(controller, entry.taskId);
+        const details = presentation(controller, entry, observed, decision.snapshot, task);
+        rows.push({ ...entry, ...decision, title: details.title, details });
       }
       this._runtime = nextRuntime;
       this.rows = rows;
@@ -351,7 +601,9 @@ export const useTaskShelfStore = defineStore('taskShelf', {
           if (!isEnabled) {
             controller.enabled = false;
             this.rows = [];
+            this.sourceIssues = [];
             this._runtime = {};
+            resetTaskDetails(controller);
             return;
           }
           if (!controller.enabled) {
@@ -376,7 +628,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
           controller.board.error,
           controller.board.data,
         ],
-        () => this.reconcile(),
+        () => {
+          this.reconcile();
+          hydrateMissingTaskDetails(this, controller);
+        },
         { deep: true },
       ));
     },
@@ -390,6 +645,8 @@ export const useTaskShelfStore = defineStore('taskShelf', {
     },
 
     clear() {
+      const controller = controllers.get(this);
+      if (controller) resetTaskDetails(controller);
       this._epoch += 1;
       this._requestSeq += 1;
       this._scopeRequestSeq = this._requestSeq;
@@ -400,6 +657,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       this.loaded = false;
       this.loading = false;
       this.error = null;
+      this.sourceIssues = [];
       this.pending = {};
       this._runtime = {};
       this._reloadQueued = false;

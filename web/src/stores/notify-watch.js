@@ -1,13 +1,13 @@
 // Вотчер конвейера: следит, что остановилось на человеке. Отсюда живут двое —
-// системное оповещение «конвейер отработал и ждёт тебя» и чип на пункте «Конвейер»
-// в навигации. Оповещение — только на переходе (не ждала → ждёт), чтобы не спамить;
-// состояние для чипа пересчитывается на каждой проверке.
+// системное оповещение «конвейер отработал и ждёт тебя», чип на пункте «Конвейер»
+// и общий счётчик активных прогонов в топбаре. Оповещение — только на переходе
+// (не ждала → ждёт), чтобы не спамить; сводка пересчитывается на каждой проверке.
 // Данные — те же /api/tasks + /api/tasks/:id/graph, что у страницы конвейера; дёргается
 // по SSE state-change (AppShell) + редкий страховочный интервал.
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { notify } from '../shared/notify.js';
-import { waitingReason } from '../shared/pipeline-wait.js';
+import { stripEmoji, waitingReason } from '../shared/pipeline-wait.js';
 import { silenceReason } from '../shared/agent-activity.js';
 import { pipelineBadgeSummary } from '../shared/pipeline-nav-badge.js';
 
@@ -22,7 +22,8 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
   // РЕШЕНИЯ (это штатно, в интерфейсе есть кнопка); stalled — движок упёрся или оборвался
   // (само не рассосётся, надо разбираться); silent — формально всё идёт, но агент молчит дольше
   // порога, и без звонка это заметно только по сгоревшему лимиту этапа. Смешивать их
-  // в одну цифру нельзя. running нужен только синему сектору и в цифру внимания не входит.
+  // в одну цифру нельзя. running нужен синему сектору и общему числу в топбаре,
+  // но в цифру внимания не входит.
   state: () => ({
     waiting: [],
     stalled: [],
@@ -126,6 +127,9 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
           let gateKnown = true;
           try { g = await api.get(`/api/tasks/${id}/graph`); } catch { gateKnown = false; }
           const w = gateKnown ? waitingReason(g) : null;
+          const currentStage = g?.progress?.current || null;
+          const progressDone = Number(g?.progress?.done);
+          const progressTotal = Number(g?.progress?.total);
           observedByTask[id] = {
             attempt: t.attempt || null,
             daemon: t.daemonAlive ? 'running' : 'stopped',
@@ -133,6 +137,17 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
             stall: t.stall?.title || null,
             gateKnown,
             gate: w?.text || null,
+            progress: Number.isSafeInteger(progressDone) && progressDone >= 0
+              && Number.isSafeInteger(progressTotal) && progressTotal >= 0
+              ? { done: progressDone, total: progressTotal }
+              : null,
+            stage: currentStage
+              ? {
+                id: currentStage,
+                label: stripEmoji(g?.nodes?.[currentStage]?.[1]) || currentStage,
+                state: g?.statuses?.[currentStage] || null,
+              }
+              : null,
           };
           if (!w) continue;
           waiting.push({ task: id, text: w.text, premature: w.premature });

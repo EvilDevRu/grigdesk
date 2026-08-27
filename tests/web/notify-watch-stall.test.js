@@ -31,7 +31,7 @@ const NO_PROGRESS = {
 
 /** Свежий модуль на каждый тест: наборы отзвонившего живут на уровне модуля. */
 async function makeWatch(t) {
-  const harness = { tasks: [], notifications: [] };
+  const harness = { tasks: [], graphs: {}, notifications: [] };
   globalThis.__notifyWatchHarness = harness;
   t.after(() => { delete globalThis.__notifyWatchHarness; });
 
@@ -42,6 +42,8 @@ async function makeWatch(t) {
         '  async get(url) {',
         '    const harness = globalThis.__notifyWatchHarness;',
         '    if (url === "/api/tasks") return { tasks: harness.tasks, silenceWindow: 0 };',
+        '    const taskId = url.match(/^\\/api\\/tasks\\/(\\d+)\\/graph$/)?.[1];',
+        '    if (taskId && harness.graphs[taskId]) return harness.graphs[taskId];',
         '    return { nodes: {}, pos: {}, keys: {}, statuses: {} };',
         '  },',
         '};',
@@ -124,4 +126,33 @@ test('другой узел, вставший так же, — отдельна�
   // У затыка полезен именно заголовок: он называет узел и причину, а подсказка общая.
   assert.match(harness.notifications[0].body, /замкнутый набор замечаний/);
   assert.match(harness.notifications[1].title, /Конвейер встал — #900022/);
+});
+
+test('наблюдаемая проекция несёт уже загруженные этап и прогресс графа', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  harness.tasks = [{
+    task: 8324,
+    attempt: 'a_1',
+    daemonAlive: true,
+    result: null,
+    stall: null,
+  }];
+  harness.graphs['8324'] = {
+    nodes: { review: [1, '🔎 Проверка в браузере'] },
+    statuses: { review: 'run' },
+    progress: { done: 3, total: 7, current: 'review' },
+  };
+
+  await store.check(true);
+
+  assert.deepEqual(store.observedByTask['8324'], {
+    attempt: 'a_1',
+    daemon: 'running',
+    result: null,
+    stall: null,
+    gateKnown: true,
+    gate: null,
+    progress: { done: 3, total: 7 },
+    stage: { id: 'review', label: 'Проверка в браузере', state: 'run' },
+  });
 });

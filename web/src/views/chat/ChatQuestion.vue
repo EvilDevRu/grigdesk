@@ -20,6 +20,7 @@
           :mode="question.multiSelect ? 'multiple' : 'single'"
           :model-value="pickedValue(questionIndex)"
           :options="optionsOf(question)"
+          selection-indicator
           @update:model-value="setPicked(questionIndex, $event)"
         />
 

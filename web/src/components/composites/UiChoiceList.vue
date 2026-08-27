@@ -4,6 +4,7 @@
     role="listbox"
     :aria-multiselectable="mode === 'multiple' ? 'true' : undefined"
     :aria-label="label"
+    :data-selection-indicator="selectionIndicator || undefined"
   >
     <UiPressable
       v-for="option in options"
@@ -14,10 +15,18 @@
       :aria-selected="String(selected(option.value))"
       @click="choose(option.value)"
     >
-      <span class="ui-choice-list__label">{{ option.label }}</span>
-      <span v-if="option.description" class="ui-choice-list__description">{{
-        option.description
-      }}</span>
+      <span
+        v-if="selectionIndicator"
+        class="ui-choice-list__indicator"
+        :data-mode="mode"
+        aria-hidden="true"
+      />
+      <span class="ui-choice-list__content">
+        <span class="ui-choice-list__label">{{ option.label }}</span>
+        <span v-if="option.description" class="ui-choice-list__description">{{
+          option.description
+        }}</span>
+      </span>
     </UiPressable>
     <slot />
   </div>
@@ -37,12 +46,14 @@ const props = withDefaults(
     mode?: UiChoiceMode;
     label?: string;
     disabled?: boolean;
+    selectionIndicator?: boolean;
   }>(),
   {
     options: () => [],
     mode: 'single',
     label: undefined,
     disabled: false,
+    selectionIndicator: false,
   },
 );
 

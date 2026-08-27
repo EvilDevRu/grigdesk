@@ -16,9 +16,7 @@
           <svg class="board-timers-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
           </svg>
-          <span class="board-timers-topbar-label">Таймеры</span>
           <span class="board-timers-topbar-count mono">{{ activeCount }}</span>
-          <span v-if="activeCount" class="board-timers-topbar-live" aria-hidden="true"></span>
         </UiButton>
       </template>
 
@@ -175,24 +173,10 @@ onUnmounted(() => clearInterval(ticker));
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.board-timers-topbar-label {
-  color: var(--ink-mid);
-  font-size: 11px;
-  font-weight: 600;
-}
 .board-timers-topbar-count {
   color: var(--ink);
   font-size: 11px;
   font-weight: 750;
-}
-.board-timers-topbar-live {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--good);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--good) 72%, transparent);
-  animation: board-timers-topbar-pulse 1.6s ease-in-out infinite;
 }
 .board-timers-popover {
   display: flex;
@@ -306,18 +290,5 @@ onUnmounted(() => clearInterval(ticker));
 }
 .board-timers-popover-footer {
   display: flex;
-}
-@keyframes board-timers-topbar-pulse { 50% { opacity: .35; } }
-
-@media (max-width: 1099px) {
-  .board-timers-topbar-label {
-    display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .board-timers-topbar-live {
-    animation: none;
-  }
 }
 </style>

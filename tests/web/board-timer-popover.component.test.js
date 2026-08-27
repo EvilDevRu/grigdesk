@@ -38,6 +38,9 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
   const trigger = wrapper.get('[data-context="board-timers-topbar"]');
   assert.equal(trigger.attributes('aria-expanded'), 'false');
   assert.match(trigger.attributes('aria-label'), /активных 1/u);
+  assert.equal(trigger.text(), '1');
+  assert.equal(trigger.find('.board-timers-topbar-label').exists(), false);
+  assert.equal(trigger.find('.board-timers-topbar-live').exists(), false);
 
   await trigger.trigger('mouseenter');
   await nextTick();

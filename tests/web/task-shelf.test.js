@@ -420,7 +420,9 @@ async function reactiveStoreFixture({
   currentState = 'queued',
   browserNotifications = true,
   enabled = true,
+  taskOnBoard = true,
   getImpl = null,
+  detailImpl = null,
   putImpl = null,
   delImpl = null,
 } = {}) {
@@ -428,9 +430,16 @@ async function reactiveStoreFixture({
   const server = serverSnapshot('scope-a', 1, [42]);
   const harness = {
     apiGetCalls: 0,
+    detailGetCalls: 0,
     apiCalls: [],
     api: {
-      async get() {
+      async get(url) {
+        if (/^\/api\/b24\/task\/\d+$/.test(url)) {
+          harness.detailGetCalls += 1;
+          harness.apiCalls.push({ method: 'GET', url });
+          if (detailImpl) return detailImpl(url, harness.detailGetCalls);
+          return { title: 'Задача 42', group_name: 'Кокпит' };
+        }
         harness.apiGetCalls += 1;
         harness.apiCalls.push({ method: 'GET', url: '/api/b24/task-shelf' });
         if (getImpl) return getImpl(harness.apiGetCalls);
@@ -514,13 +523,18 @@ async function reactiveStoreFixture({
     loadedAt: 1,
     error: null,
     data: {
-      tasks: [{
+      tasks: taskOnBoard ? [{
         id: 42,
         title: 'Задача 42',
+        group: 'Кокпит',
         status: 'IN_PROGRESS',
         statusKind: 'active',
+        statusText: 'В работе — таймер идёт',
         unread: 0,
-      }],
+        responsible: 'Иван Петров',
+        deadline: '29.08.2026',
+        overdue: false,
+      }] : [],
       toReview: [],
       created: [],
       accomplice: [],
@@ -728,6 +742,129 @@ test('Недоступная доска не зажигает задачу ка�
   assert.equal(store.litCount, 0);
 });
 
+test('Строка полки получает живую карточку B24, оценки и прогресса конвейера', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  harness.analysis.byTask[42].analysis = {
+    complexity: 4,
+    risk: 3,
+    diff_size: 'M',
+    generated_at: '2026-08-26T08:10:01.000Z',
+  };
+  harness.pipeline.observedByTask[42] = {
+    ...baseSnapshot().pipeline,
+    progress: { done: 3, total: 7 },
+    stage: { id: 'review', label: 'Проверка', state: 'run' },
+  };
+  store.start();
+  await settleStore();
+
+  const [row] = store.rows;
+  assert.deepEqual({
+    title: row?.title,
+    project: row?.details?.project,
+    responsible: row?.details?.responsible,
+    deadline: row?.details?.deadline,
+    detailGetCalls: harness.detailGetCalls,
+    activities: row?.details?.activities?.map((activity) => ({
+      kind: activity.kind,
+      value: activity.value,
+    })),
+  }, {
+    title: 'Задача 42',
+    project: 'Кокпит',
+    responsible: 'Иван Петров',
+    deadline: '29.08.2026',
+    detailGetCalls: 0,
+    activities: [
+      { kind: 'b24', value: 'В работе — таймер идёт' },
+      { kind: 'analysis', value: 'Готова · сложность 4/5 · риск 3/5 · дифф M' },
+      { kind: 'pipeline', value: '3/7 · Проверка' },
+    ],
+  });
+});
+
+test('Задача вне текущей доски получает проект из полной карточки B24', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({
+    taskOnBoard: false,
+    detailImpl: async () => ({
+      title: 'Журнал: исправить количество запросов',
+      group_name: 'arsenkin.ru',
+    }),
+  });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+
+  const [row] = store.rows;
+  const b24 = row?.details?.activities?.find((activity) => activity.kind === 'b24');
+  assert.deepEqual({
+    title: row?.title,
+    project: row?.details?.project,
+    b24: b24?.value,
+    detailGetCalls: harness.detailGetCalls,
+  }, {
+    title: 'Журнал: исправить количество запросов',
+    project: 'arsenkin.ru',
+    b24: 'Не видна на текущей доске',
+    detailGetCalls: 1,
+  });
+});
+
+test('Повторная сверка доски не дублирует загрузку проекта', async (t) => {
+  const detail = deferred();
+  const { store, harness } = await reactiveStoreFixture({
+    taskOnBoard: false,
+    detailImpl: () => detail.promise,
+  });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.board.loadedAt += 1;
+  await settleStore();
+
+  assert.equal(harness.detailGetCalls, 1);
+  detail.resolve({ title: 'Задача 42', group_name: 'Архивный проект' });
+  await settleStore();
+  assert.equal(store.rows[0]?.details?.project, 'Архивный проект');
+});
+
+test('Ошибка чтения проекта не скрывает карточку и не запускает цикл запросов', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({
+    taskOnBoard: false,
+    detailImpl: async () => { throw new Error('детали недоступны'); },
+  });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  harness.board.loadedAt += 1;
+  await settleStore();
+
+  assert.deepEqual({
+    taskId: store.rows[0]?.taskId,
+    project: store.rows[0]?.details?.project,
+    detailGetCalls: harness.detailGetCalls,
+    error: store.error,
+  }, {
+    taskId: '42',
+    project: '',
+    detailGetCalls: 1,
+    error: null,
+  });
+});
+
 test('Ручная кнопка отправляет фактическое done завершённого триажа', async (t) => {
   const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
   t.after(() => {
@@ -885,7 +1022,7 @@ test('Панель, чип и оповещение не содержат вто�
   }
   const [shared, store, panel, host] = sources;
   const duplicateRules = [panel, host]
-    .some((source) => /gateKnown|generatedAt|finishedAt|statusKind|\bunread\b/.test(source));
+    .some((source) => /gateKnown|generatedAt|finishedAt|statusKind|TERMINAL_ANALYSIS|TERMINAL_B24/.test(source));
 
   assert.deepEqual({
     sharedExportsDecision: /export\s+(?:default\s+)?(?:function|const)\b/.test(shared),

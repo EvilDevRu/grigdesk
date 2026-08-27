@@ -74,10 +74,11 @@ const pwa = usePwaStore();
   color: var(--ink);
 }
 
-@media (max-width: 899px) {
+/* Весь планшетный диапазон AppShell уже работает с компактными рейками. Длинная
+   подпись здесь переполняет системную часть топбара, поэтому оставляем только знак. */
+@media (max-width: 1099px) {
   .update-notice:not(.is-standalone) .update-action-label {
     display: none;
   }
-
 }
 </style>

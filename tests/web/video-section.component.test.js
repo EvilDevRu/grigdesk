@@ -1,6 +1,7 @@
 // Раздел «Видео → задачи»: что человек видит после распознавания и с чем уезжает задача.
 //
 // Обещания:
+//  - загрузка, разбор и постановка разведены по шагам, одновременно виден один;
 //  - расшифровку можно прочитать целиком, а не только построчно: сплошной текст
 //    режется на абзацы по паузам, потому что голосов распознавание не различает;
 //  - разбор моделью ДОПОЛНЯЕТ уже набранные черновики, а не затирает их;
@@ -154,6 +155,15 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
   const run = (n) => settle(flushPromises, n);
   const button = (label) => wrapper.findAll('button').find((b) => b.text().includes(label));
 
+  /** Перейти к экрану мастера тем же табом, который нажимает человек. */
+  async function openStep(label) {
+    const tab = wrapper.findAll('[role="tab"]').find((candidate) => candidate.text().includes(label));
+
+    assert.ok(tab, `шаг «${label}» доступен`);
+    await tab.trigger('click');
+    await run();
+  }
+
   /** Уход в другой раздел и возврат: тот же путь, что у человека, — вью пересоздаётся. */
   async function remount() {
     wrapper.unmount();
@@ -163,7 +173,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
   }
 
   /** Тот же путь, что у человека: выбрал файл → загрузка → поллинг → готовая расшифровка. */
-  async function upload() {
+  async function upload({ step = 'tasks' } = {}) {
     const input = wrapper.find('input[type="file"]');
     Object.defineProperty(input.element, 'files', {
       value: [new browser.File(['видео'], 'встреча.mp4', { type: 'video/mp4' })],
@@ -171,6 +181,12 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
     });
     await input.trigger('change');
     await run();
+
+    if (step === 'tasks') {
+      await openStep('Задачи');
+    } else if (step === 'record') {
+      await openStep('Запись');
+    }
   }
 
   /**
@@ -179,6 +195,10 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
    * проект, приоритет: сначала источник задачи, потом адресат.
    */
   async function addDraft({ title, createdById, responsibleId, groupId, priority } = {}) {
+    if (!wrapper.find('#video-step-tasks-panel').exists()) {
+      await openStep('Задачи');
+    }
+
     await button('+ ещё задача').trigger('click');
     const drafts = wrapper.findAll('.draft');
     const draft = drafts[drafts.length - 1];
@@ -198,6 +218,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
     get wrapper() { return wrapper; },
     run,
     button,
+    openStep,
     upload,
     addDraft,
     remount,
@@ -207,9 +228,32 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
   };
 }
 
+test('мастер разделяет запись, разбор и постановку на отдельные экраны', async (t) => {
+  const view = await mountVideoView(t, { api: fakeApi() });
+
+  assert.ok(view.wrapper.find('#video-step-record-panel').exists());
+  assert.equal(view.wrapper.findAll('[role="tabpanel"]').length, 1, 'на экране только текущий шаг');
+  assert.equal(view.wrapper.get('#video-step-review').attributes('disabled'), '');
+  assert.equal(view.wrapper.get('#video-step-tasks').attributes('disabled'), '');
+
+  await view.upload({ step: 'review' });
+
+  assert.ok(view.wrapper.find('#video-step-review-panel').exists());
+  assert.ok(view.wrapper.find('.plan').exists(), 'разбор модели относится ко второму шагу');
+  assert.ok(view.wrapper.find('.transcript').exists(), 'исходник относится ко второму шагу');
+  assert.equal(view.wrapper.find('.common').exists(), false, 'настройки постановки ещё не мешают');
+
+  await view.openStep('Задачи');
+
+  assert.ok(view.wrapper.find('#video-step-tasks-panel').exists());
+  assert.ok(view.wrapper.find('.common').exists(), 'поля Битрикс24 находятся на финальном шаге');
+  assert.equal(view.wrapper.find('.plan').exists(), false);
+  assert.equal(view.wrapper.find('.transcript').exists(), false);
+});
+
 test('сплошной текст собирается абзацами по паузам, реплики остаются отдельным видом', async (t) => {
   const view = await mountVideoView(t, { api: fakeApi() });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   // Расшифровка свёрнута: раздел отвечает на «какие задачи», а реплики нужны, когда
   // формулировку сверяют с записью. Само число реплик видно и в свёрнутом виде.
@@ -225,7 +269,6 @@ test('сплошной текст собирается абзацами по п�
   assert.equal(firstSegment.attributes('type'), 'button');
   assert.match(firstSegment.attributes('aria-label'), /Добавить реплику 00:00/u);
   await firstSegment.trigger('click');
-  assert.match(view.wrapper.get('.draft textarea').element.value, /\[00:00\] Привет/u);
 
   await view.wrapper.get('[data-option-value="text"]').trigger('click');
   const paragraphs = view.wrapper.findAll('.para');
@@ -233,15 +276,19 @@ test('сплошной текст собирается абзацами по п�
   assert.match(paragraphs[0].text(), /Привет, все на месте\?\s+Да, начинаем\./u);
   assert.match(paragraphs[1].text(), /04:31/u);
   assert.match(paragraphs[1].text(), /Надо добавить время забора.*И вторым номером приоритет/u);
+
+  await view.openStep('Задачи');
+  assert.match(view.wrapper.get('.draft textarea').element.value, /\[00:00\] Привет/u);
 });
 
 test('без выбранной модели раздел объясняет себя и не предлагает разбор', async (t) => {
   const view = await mountVideoView(t, { api: fakeApi() });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   assert.match(view.wrapper.text(), /Настройки → Плагины/u);
   assert.equal(Boolean(view.button('Разобрать на задачи')), false);
   // Ручной разбор при этом на месте — раздел не становится бесполезным.
+  await view.openStep('Задачи');
   assert.ok(view.button('+ ещё задача'));
 });
 
@@ -255,17 +302,21 @@ test('разбор моделью дополняет черновики, а не
     api,
     planModel: { provider: 'claude', model: 'claude-opus-5' },
   });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   // Разбор запускается САМ по готовности расшифровки: человек пришёл за задачами.
   assert.deepEqual(api.posted('/api/media/plan-tasks'), [{ jobIds: ['job-1'], hint: '' }],
     'части встречи уезжают одной посылкой — сервер склеит их со сквозными таймкодами');
+  await view.openStep('Задачи');
   assert.equal(view.wrapper.findAll('.draft').length, 2, 'задачи модели уже на экране');
 
   // Человек начал разбирать сам — эта работа не должна пропасть при повторе.
   await view.addDraft({ title: 'Своя задача' });
+  await view.openStep('Разбор');
   await view.button('Разобрать на задачи').trigger('click');
   await view.run();
+  assert.match(view.wrapper.text(), /предложила задач: 2/u);
+  await view.openStep('Задачи');
 
   const drafts = view.wrapper.findAll('.draft');
   assert.equal(drafts.length, 5, 'повтор дополняет, а не затирает набранное');
@@ -274,7 +325,6 @@ test('разбор моделью дополняет черновики, а не
   // Уверенность видна человеку: формулировку собрала модель, проверять её ему.
   assert.match(view.wrapper.text(), /модель: 90%/u);
   assert.match(view.wrapper.text(), /модель: 40%/u);
-  assert.match(view.wrapper.text(), /предложила задач: 2/u);
 });
 
 test('задача модели открывается ПРЕВЬЮ, а не формой', async (t) => {
@@ -310,7 +360,7 @@ test('разобранный файл назван поимённо — с ра�
     job: { status: 'done', result: { duration: 78.89, transcript: { segments: SEGMENTS } } },
   });
   const view = await mountVideoView(t, { api });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   const note = view.wrapper.find('.filenote').text();
   assert.match(note, /встреча\.mp4/u);
@@ -331,7 +381,7 @@ test('отказ разбора объясняется словами, а не �
     api,
     planModel: { provider: 'claude', model: 'claude-opus-5' },
   });
-  await view.upload();
+  await view.upload({ step: 'review' });
   await view.button('Разобрать на задачи').trigger('click');
   await view.run();
 
@@ -344,7 +394,7 @@ test('задача уезжает с исполнителем и проекто�
     groups: [{ id: 7, name: 'Проект А' }],
   });
   const view = await mountVideoView(t, { api });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   await view.addDraft({ title: 'Первая', createdById: '43', responsibleId: '42', groupId: '7', priority: '2' });
   await view.addDraft({ title: 'Вторая' });
@@ -478,7 +528,7 @@ test('отказ портала остаётся у своей задачи, с�
     },
   });
   const view = await mountVideoView(t, { api });
-  await view.upload();
+  await view.upload({ step: 'review' });
   await view.addDraft({ title: 'Плохая' });
   await view.addDraft({ title: 'Хорошая' });
 
@@ -500,7 +550,7 @@ test('шапка называет длительность ЗАПИСИ, а не
     job: { status: 'done', result: { duration: 78.89, transcript: { segments: SEGMENTS } } },
   });
   const view = await mountVideoView(t, { api });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   assert.match(view.wrapper.find('.thead').text(), /запись 01:18/u);
 });
@@ -511,7 +561,7 @@ test('длинный хвост тишины назван словами, но �
     job: { status: 'done', result: { duration: 1200, transcript: { segments: SEGMENTS } } },
   });
   const view = await mountVideoView(t, { api });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   const text = view.wrapper.text();
   assert.match(text, /Речь заканчивается на 04:39/u);
@@ -520,7 +570,7 @@ test('длинный хвост тишины назван словами, но �
 
 test('без известной длительности ничего не выдумывается', async (t) => {
   const view = await mountVideoView(t, { api: fakeApi() });
-  await view.upload();
+  await view.upload({ step: 'review' });
 
   assert.doesNotMatch(view.wrapper.find('.thead').text(), /запись/u);
   assert.doesNotMatch(view.wrapper.text(), /Речь заканчивается/u);
@@ -804,10 +854,14 @@ test('переход в другой раздел и возврат не тер�
 
   await view.remount();
 
-  assert.match(view.wrapper.text(), /Распознавание завершено/u, 'расшифровка на месте');
-  assert.match(view.wrapper.text(), /4 реплик/u);
+  assert.ok(view.wrapper.find('#video-step-tasks-panel').exists(),
+    'возврат продолжает работу с уже набранными задачами');
   assert.equal(view.wrapper.findAll('.draft').length, 1, 'набранный черновик не пропал');
   assert.equal(view.wrapper.find('.draft .dtitle').element.value, 'Своя задача');
+
+  await view.openStep('Разбор');
+  assert.match(view.wrapper.text(), /Распознавание завершено/u, 'расшифровка на месте');
+  assert.match(view.wrapper.text(), /4 реплик/u);
   // Файл заново не грузится: разбор уже лежит на сервере, у части есть свой jobId.
   assert.equal(api.calls.filter(([m, url]) => m === 'POST' && url === '/api/media/upload').length, 0);
 });
@@ -822,7 +876,7 @@ test('кнопка «Убрать разбор» спрашивает про ч�
   await view.button('Убрать разбор').trigger('click');
   await view.run();
   assert.equal(view.confirms.length, 1, 'непоставленный черновик спрашивают');
-  assert.match(view.wrapper.text(), /Распознавание завершено/u, 'отказ ничего не тронул');
+  assert.equal(view.wrapper.findAll('.draft').length, 1, 'отказ ничего не тронул');
 
   globalThis.__vidConfirm = async () => true;
   await view.button('Убрать разбор').trigger('click');
@@ -846,9 +900,15 @@ test('после перезагрузки страницы разбор возв
   const api = fakeApi();
   const view = await mountVideoView(t, { api, restore: savedSession() });
 
+  assert.ok(view.wrapper.find('#video-step-tasks-panel').exists(),
+    'сохранённый черновик возвращает на последний осмысленный этап');
+  assert.equal(view.wrapper.find('.draft .dtitle').element.value, 'Своя задача');
+
+  await view.openStep('Разбор');
   assert.match(view.wrapper.text(), /Распознавание завершено/u);
   assert.match(view.wrapper.text(), /4 реплик/u, 'расшифровка дочитана по jobId');
-  assert.equal(view.wrapper.find('.draft .dtitle').element.value, 'Своя задача');
+
+  await view.openStep('Запись');
   assert.equal(view.wrapper.find('input[type="file"]').element.value, '', 'файл заново не выбирают');
 });
 

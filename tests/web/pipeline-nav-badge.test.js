@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { pipelineBadgeSummary } from '../../web/src/shared/pipeline-nav-badge.js';
 
-test('составной чип считает число без работающих задач, но включает их в пропорции круга', () => {
+test('сводка даёт топбару числа всего / едут / стоят без повторного счёта задач', () => {
   const summary = pipelineBadgeSummary({
     stalled: [{ task: '1' }],
     waiting: [{ task: '2' }, { task: '3' }, { task: '4' }, { task: '5' }],
@@ -19,6 +19,10 @@ test('составной чип считает число без работаю�
     errorEnd: 12.5,
     waitingEnd: 62.5,
   });
+  assert.deepEqual(
+    [summary.totalCount, summary.runningCount, summary.attentionCount],
+    [8, 3, 5],
+  );
 });
 
 test('авария и ворота имеют приоритет над синим сектором и не дублируют задачу', () => {

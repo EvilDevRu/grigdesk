@@ -1,6 +1,6 @@
 <template>
   <div class="video">
-    <header class="video-hero" :class="{ compact: job?.status === 'done' }">
+    <header class="video-hero" :class="{ compact: meetingReady }">
       <div class="hero-copy">
         <p class="eyebrow">Разбор встреч</p>
         <h2 class="ttl">Видео → задачи</h2>
@@ -50,14 +50,64 @@
         </div>
       </div>
 
+      <!-- Мастер оставляет на экране только текущую работу. Шаги после записи
+           заперты до готовой расшифровки, но назад можно вернуться без потери сеанса. -->
+      <div class="wizard-bar">
+        <UiTabs v-model="wizardStep" class="video-steps" label="Шаги разбора видео">
+          <UiTab
+            id="video-step-record"
+            class="video-step"
+            value="record"
+            controls="video-step-record-panel"
+          >
+            {{ meetingReady ? '✓ Запись' : '1 · Запись' }}
+          </UiTab>
+          <UiTab
+            id="video-step-review"
+            class="video-step"
+            value="review"
+            controls="video-step-review-panel"
+            :disabled="!meetingReady"
+          >
+            2 · Разбор
+          </UiTab>
+          <UiTab
+            id="video-step-tasks"
+            class="video-step"
+            value="tasks"
+            controls="video-step-tasks-panel"
+            :disabled="!meetingReady || planning"
+          >
+            {{ allTasksCreated ? '✓ Задачи' : '3 · Задачи' }}
+          </UiTab>
+        </UiTabs>
+        <!-- Сохранённый сеанс переживает F5, поэтому выход доступен на любом шаге,
+             а не спрятан внутри уже пройденного экрана разбора. -->
+        <UiButton
+          v-if="hasVideoSession"
+          class="btn clear-session"
+          :disabled="uploading || planning || creating"
+          @click="clearSession"
+        >
+          Убрать разбор
+        </UiButton>
+      </div>
+
+      <section
+        v-if="wizardStep === 'record'"
+        id="video-step-record-panel"
+        class="wizard-panel"
+        role="tabpanel"
+        aria-labelledby="video-step-record"
+      >
       <!-- Перетаскивание ведёт в тот же обработчик, что и диалог. Это не украшение:
            нативный диалог прячет запись, чьё расширение записано не тем регистром,
            и брошенный на карточку файл остаётся единственным способом её отдать. -->
       <section
         class="upload-card"
         :class="{
-          busy: uploading || job?.status === 'running',
-          compact: job?.status === 'done',
+          busy: uploading || needsPoll,
+          compact: meetingReady,
           over: dragOver,
         }"
         @dragenter.prevent="onDragEnter"
@@ -72,8 +122,8 @@
           :accept="MEDIA_ACCEPT"
           multiple
           presentation="dropzone"
-          :density="job?.status === 'done' ? 'compact' : 'default'"
-          :disabled="Boolean(job && job.status === 'running')"
+          :density="meetingReady ? 'compact' : 'default'"
+          :disabled="needsPoll"
           :busy="uploading"
           :show-summary="false"
           :show-reset="false"
@@ -95,11 +145,11 @@
           </template>
           {{ uploading
             ? 'Загружаю запись…'
-            : job?.status === 'done'
+            : meetingReady
               ? 'Разобрать другую запись'
               : 'Выбрать видео или аудио' }}
           <template #hint>
-            <template v-if="job?.status !== 'done'">
+            <template v-if="!meetingReady">
               Сама запись останется в Cockpit — на портал уйдут только подтверждённые задачи и их кадры
             </template>
             <template v-else>
@@ -122,7 +172,7 @@
       <!-- Прогресс распознавания. Показывается и до первого ответа сервера: разбор
            живёт на сервере, и после возврата на страницу его состояние сначала надо
            дочитать — молчащий экран в это время читается как «ничего не идёт». -->
-      <section v-if="restoring || (job && job.status === 'running')" class="progress">
+      <section v-if="restoring || needsPoll" class="progress">
         <div class="progress-head">
           <span class="progress-mark"><UiSpinner decorative /></span>
           <div>
@@ -135,12 +185,26 @@
         <div class="pbar"><span :style="{ width: job?.progress ? (job.progress.done / job.progress.total * 100) + '%' : '10%' }"></span></div>
       </section>
 
-      <div v-if="job && job.status === 'done'" class="result">
+      <div v-if="meetingReady" class="wizard-actions">
+        <span class="muted">Расшифровка готова — запись можно разбирать.</span>
+        <UiButton variant="solid" tone="accent" @click="wizardStep = 'review'">
+          К разбору
+        </UiButton>
+      </div>
+      </section>
+
+      <div
+        v-if="meetingReady && wizardStep !== 'record'"
+        :id="`video-step-${wizardStep}-panel`"
+        class="result wizard-panel"
+        role="tabpanel"
+        :aria-labelledby="`video-step-${wizardStep}`"
+      >
       <!-- Что именно разобрано. Строка обязательна: файлы записи называются почти
            одинаково и лежат рядом, а без имени, размера и длительности на экране
            «я выбирал другой» и «раздел обрезал» неотличимы. Живой случай: инструмент
            разбил встречу на два файла (17:04 и 1:18), уехал второй. -->
-        <section class="meeting-summary">
+        <section v-if="wizardStep === 'review'" class="meeting-summary">
           <div class="meeting-file">
             <span class="meeting-check" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -171,12 +235,6 @@
             <span><b>{{ segments.length }}</b><small>реплик</small></span>
             <span><b>{{ drafts.length }}</b><small>черновиков</small></span>
           </div>
-          <!-- Разбор переживает и переход в другой раздел, и перезагрузку страницы,
-               поэтому убрать его с экрана должно быть чем: иначе вчерашняя встреча
-               висит до тех пор, пока не выберешь новый файл. -->
-          <UiButton class="btn clear-session" @click="clearSession">
-            Убрать разбор
-          </UiButton>
         </section>
 
       <!-- Черновики задач -->
@@ -189,17 +247,20 @@
               </svg>
             </span>
             <div>
-              <p class="section-kicker">Шаг 2</p>
-              <h3 class="h">Проверь задачи <span class="count-pill">{{ drafts.length }}</span></h3>
+              <p class="section-kicker">Шаг {{ wizardStep === 'review' ? 2 : 3 }}</p>
+              <h3 v-if="wizardStep === 'review'" class="h">Разбери встречу</h3>
+              <h3 v-else class="h">
+                Проверь и поставь задачи <span class="count-pill">{{ drafts.length }}</span>
+              </h3>
             </div>
           </div>
-          <UiButton class="btn icon-btn" @click="addDraft">
+          <UiButton v-if="wizardStep === 'tasks'" class="btn icon-btn" @click="addDraft">
             + ещё задача
           </UiButton>
         </div>
 
         <!-- Разбор моделью -->
-        <div class="plan">
+        <div v-if="wizardStep === 'review'" class="plan">
           <div class="plan-head">
             <span class="plan-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -259,6 +320,7 @@
           </p>
         </div>
 
+        <template v-else>
         <!-- Кому и куда: общий выбор на всю встречу -->
         <div class="common">
           <div class="common-head">
@@ -298,6 +360,14 @@
               <option :value="2">высокий</option>
             </UiSelect>
           </label>
+        </div>
+
+        <div v-if="!drafts.length" class="draft-empty">
+          <b>Черновиков пока нет</b>
+          <p class="muted">Вернись к разбору или добавь задачу вручную.</p>
+          <UiButton variant="solid" tone="accent" @click="addDraft">
+            Создать черновик
+          </UiButton>
         </div>
 
         <div v-for="(d, i) in drafts" :key="i" class="draft" :class="{ done: d.createdId }">
@@ -523,9 +593,14 @@
             {{ creating ? 'Ставлю…' : `Поставить все (${ready.length})` }}
           </UiButton>
         </div>
+        </template>
       </section>
       <!-- Расшифровка: свёрнута, потому что раздел отвечает на «какие задачи». -->
-      <section class="transcript" :class="{ folded: !showTranscript }">
+      <section
+        v-if="wizardStep === 'review'"
+        class="transcript"
+        :class="{ folded: !showTranscript }"
+      >
         <div class="thead">
           <UiDisclosureButton
             v-model:open="showTranscript"
@@ -613,6 +688,23 @@
         </div>
         </div>
       </section>
+
+      <div class="wizard-actions">
+        <UiButton @click="wizardStep = wizardStep === 'tasks' ? 'review' : 'record'">
+          {{ wizardStep === 'tasks' ? 'Назад к разбору' : 'Назад к записи' }}
+        </UiButton>
+        <UiButton
+          v-if="wizardStep === 'review'"
+          variant="solid"
+          tone="accent"
+          :disabled="planning"
+          :loading="planning"
+          loading-label="Жду разбор модели"
+          @click="wizardStep = 'tasks'"
+        >
+          {{ drafts.length ? `К задачам (${drafts.length})` : 'К задачам' }}
+        </UiButton>
+      </div>
       </div>
     </template>
   </div>
@@ -631,6 +723,8 @@ import {
   UiSegmentedControl,
   UiSelect,
   UiSpinner,
+  UiTab,
+  UiTabs,
   UiTextarea,
   UiTooltip,
   UiToggleButton,
@@ -677,6 +771,7 @@ const {
   defPriority,
   job,
   restoring,
+  needsPoll,
   segments,
   mediaDuration,
   ready,
@@ -692,6 +787,26 @@ const {
   removeDraft,
   widenClip,
 } = session;
+
+// Мастер не хранит отдельную копию данных: шаг — только способ показать одну фазу
+// большого сеанса. После F5 готовность выводится из восстановленных job'ов, поэтому
+// человек попадает к разбору, а не в пустую форму первого шага.
+const wizardStep = ref('record');
+const meetingReady = computed(() => parts.value.length > 0
+  && parts.value.every((part) => part.job?.status === 'done'));
+const hasVideoSession = computed(() => parts.value.length > 0 || drafts.value.length > 0);
+const allTasksCreated = computed(() => drafts.value.length > 0
+  && drafts.value.every((draft) => Boolean(draft.createdId)));
+
+watch(meetingReady, (ready, wasReady) => {
+  if (ready && !wasReady && wizardStep.value === 'record') {
+    // После F5 уже набранные черновики важнее повторного просмотра исходника;
+    // новый разбор без черновиков, наоборот, начинается с проверки расшифровки.
+    wizardStep.value = drafts.value.length ? 'tasks' : 'review';
+  } else if (!ready && wizardStep.value !== 'record') {
+    wizardStep.value = 'record';
+  }
+}, { immediate: true });
 
 const BASE = (import.meta.env?.VITE_BRAIN_URL || '').replace(/\/$/, '');
 
@@ -855,6 +970,7 @@ function downloadText() {
 /** Вся расшифровка одним черновиком — запасной путь, когда разбирать модели нечем. */
 function useFullText() {
   session.useFullText(plainText.value);
+  wizardStep.value = 'tasks';
 }
 
 /**
@@ -874,6 +990,8 @@ async function clearSession() {
   }
 
   session.reset();
+  wizardStep.value = 'record';
+  showTranscript.value = false;
 }
 
 // --- Ростер портала: от кого, кому и в какой проект ---
@@ -927,7 +1045,7 @@ function onDragLeave() {
 function onDrop(event) {
   dragDepth.value = 0;
 
-  if (uploading.value || job.value?.status === 'running') {
+  if (uploading.value || needsPoll.value) {
     return;
   }
 
@@ -960,6 +1078,32 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 16px;
 }
+.wizard-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.video-steps { width: 100%; }
+.video-step { flex: 1; justify-content: center; white-space: nowrap; }
+.wizard-panel { min-width: 0; }
+section.wizard-panel { display: grid; gap: 16px; }
+.wizard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.wizard-actions > .muted { margin-right: auto; font-size: 12px; }
+.draft-empty {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  padding: 18px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+.draft-empty p { margin: 0; font-size: 12px; }
 .video-hero {
   position: relative;
   min-height: 176px;
@@ -1240,6 +1384,11 @@ onUnmounted(() => {
   .hero-route { display: none; }
   .ttl { font-size: 25px; }
   .upload-action { display: none; }
+  .wizard-bar { align-items: stretch; flex-direction: column; }
+  .wizard-bar .clear-session { margin-left: 0; }
+  .wizard-actions { align-items: stretch; flex-direction: column-reverse; }
+  .wizard-actions > .muted { margin-right: 0; }
+  .wizard-actions .ui-button { width: 100%; }
   .meeting-summary { align-items: flex-start; flex-direction: column; }
   .meeting-file { width: 100%; }
   .summary-metrics { width: 100%; }

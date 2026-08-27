@@ -95,3 +95,12 @@ test('PWA-UPDATE-03: рабочая версия живёт в топбаре, �
   );
   assert.match(app, /<UpdateBanner v-if="!auth\.authenticated" standalone \/>/);
 });
+
+test('PWA-UPDATE-04: на планшете действие в топбаре сокращается до иконки', async () => {
+  const source = await readFile(webFile('src/features/pwa/UpdateBanner.vue'), 'utf8');
+
+  assert.match(
+    source,
+    /@media \(max-width: 1099px\)[\s\S]*\.update-notice:not\(\.is-standalone\) \.update-action-label/u,
+  );
+});

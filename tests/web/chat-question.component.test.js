@@ -62,8 +62,20 @@ test('single-вопрос заменяет выбор и отправляет п
     allowFreeText: true,
   }]);
   const choices = wrapper.findAll('.ui-choice-list__option');
+  const indicators = wrapper.findAll('.ui-choice-list__indicator');
 
   assert.equal(button(wrapper, 'Ответить').attributes('disabled'), '');
+  assert.equal(
+    wrapper.get('.ui-choice-list').attributes('data-selection-indicator'),
+    'true',
+  );
+  assert.equal(indicators.length, 2);
+  assert.equal(indicators[0].attributes('data-mode'), 'single');
+  assert.equal(choices[0].get('.ui-choice-list__label').text(), 'Быстро');
+  assert.equal(
+    choices[0].get('.ui-choice-list__description').text(),
+    'Только минимальная правка',
+  );
 
   await choices[0].trigger('click');
   await choices[1].trigger('click');
@@ -96,6 +108,11 @@ test('multiple-вопрос и свой текст сохраняются одн
     allowFreeText: true,
   }]);
   const choices = wrapper.findAll('.ui-choice-list__option');
+
+  assert.equal(
+    wrapper.get('.ui-choice-list__indicator').attributes('data-mode'),
+    'multiple',
+  );
 
   await choices[0].trigger('click');
   await choices[1].trigger('click');

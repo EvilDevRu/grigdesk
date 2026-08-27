@@ -69,11 +69,11 @@ function waitingText(reason, current) {
     return 'Жду ответ в задаче';
   }
   return {
-    manual: 'Просто веду',
+    manual: 'Наблюдаю вручную',
     analysis: 'Жду оценку',
     pipeline: 'Жду конвейер',
     comments: 'Жду ответ в задаче',
-  }[reason] || 'Просто веду';
+  }[reason] || 'Наблюдаю вручную';
 }
 
 /**

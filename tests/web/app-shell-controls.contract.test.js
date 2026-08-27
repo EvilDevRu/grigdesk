@@ -32,6 +32,15 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.match(source, /:tasks="topbarTimerTasks"/u);
   assert.match(source, /:busy-task-id="timerActionTaskId"/u);
   assert.match(source, /@toggle-timer="toggleBoardTimer"/u);
+  assert.match(source, /data-context="pipeline-topbar"/u);
+  assert.match(source, /:aria-label="pipelineTopbarTitle"/u);
+  assert.match(source, /total: summary\.totalCount/u);
+  assert.match(source, /running: summary\.runningCount/u);
+  assert.match(source, /stopped: summary\.attentionCount/u);
+  assert.match(source, /v-if="topbarTimerTasks\.length && pipelineTopbar\.total"/u);
+  assert.match(source, /pipeline-topbar-total">\{\{ pipelineTopbar\.total \}\}/u);
+  assert.match(source, /pipeline-topbar-running">\{\{ pipelineTopbar\.running \}\}/u);
+  assert.match(source, /\{\{ pipelineTopbar\.stopped \}\}<\/span>/u);
   assert.match(source, /useTasksStore/u);
   assert.match(source, /await taskStore\.timer\(task\.id, action\)/u);
   assert.ok(
