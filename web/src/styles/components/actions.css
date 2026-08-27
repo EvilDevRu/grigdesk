@@ -619,9 +619,11 @@
   background: color-mix(in srgb, var(--good) 7%, var(--surface-2));
 }
 
-/* Таймер выглядит как статус topbar, а не как отдельная кнопка. Интерактивный элемент
-   сохраняем для клавиатуры и тач-экрана; список открывается наведением или нажатием. */
-.ui-button[data-context='board-timers-topbar'] {
+/* Таймеры и конвейеры выглядят как статусы topbar, а не как отдельные кнопки.
+   Интерактивный элемент сохраняем для клавиатуры и тач-экрана; список открывается
+   наведением или нажатием. */
+.ui-button[data-context='board-timers-topbar'],
+.ui-button[data-context='pipeline-topbar'] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -636,14 +638,18 @@
 }
 
 .ui-button[data-context='board-timers-topbar'] > .ui-button__content,
-.ui-button[data-context='board-timers-topbar'] .ui-button__label {
+.ui-button[data-context='board-timers-topbar'] .ui-button__label,
+.ui-button[data-context='pipeline-topbar'] > .ui-button__content,
+.ui-button[data-context='pipeline-topbar'] .ui-button__label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
 .ui-button[data-context='board-timers-topbar']:hover:not(:disabled),
-.ui-button[data-context='board-timers-topbar'][aria-expanded='true'] {
+.ui-button[data-context='board-timers-topbar'][aria-expanded='true'],
+.ui-button[data-context='pipeline-topbar']:hover:not(:disabled),
+.ui-button[data-context='pipeline-topbar'][aria-expanded='true'] {
   border-color: transparent;
   background: transparent;
   color: var(--ink);

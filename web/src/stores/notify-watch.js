@@ -9,7 +9,10 @@ import { api } from '../shared/api-client.js';
 import { notify } from '../shared/notify.js';
 import { stripEmoji, waitingReason } from '../shared/pipeline-wait.js';
 import { silenceReason } from '../shared/agent-activity.js';
-import { pipelineBadgeSummary } from '../shared/pipeline-nav-badge.js';
+import {
+  pipelineBadgeSummary,
+  pipelineTopbarItems,
+} from '../shared/pipeline-nav-badge.js';
 
 let started = false;
 let checking = false;
@@ -37,6 +40,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
     // Число в центре — только задачи, требующие человека. Обычные живые ходы участвуют
     // в синем секторе круга, но это число не увеличивают.
     badgeSummary: (s) => pipelineBadgeSummary(s),
+    topbarItems: (s) => pipelineTopbarItems(s),
     attentionCount() { return this.badgeSummary.attentionCount; },
     // Подсказка чипа: сводка + поимённо, чтобы не открывать конвейер ради «кто именно».
     attentionTitle: (s) => {
@@ -90,11 +94,16 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         const observedByTask = {};
         for (const t of tasks || []) {
           const id = String(t.task);
-          if (t.daemonAlive) running.push({ task: id });
+          const taskTitle = String(t.title || '').trim();
+          if (t.daemonAlive) running.push({ task: id, taskTitle });
           // Затык виден уже в сводке задачи — графа для него не нужно.
           if (t.stall) {
             stalled.push({
-              task: id, kind: t.stall.kind, title: t.stall.title, hint: t.stall.hint || '',
+              task: id,
+              taskTitle,
+              kind: t.stall.kind,
+              title: t.stall.title,
+              hint: t.stall.hint || '',
             });
             // Авария — самая громкая из трёх бед, и единственная, которая НЕ звонила вовсе:
             // чип её считал, тултип показывал, а оповещения не было. Прогон, умерший на
@@ -115,7 +124,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
           }
           const q = silenceReason(t, silenceWindow);
           if (q) {
-            silentRuns.push({ task: id, stage: q.stage, text: q.text });
+            silentRuns.push({ task: id, taskTitle, stage: q.stage, text: q.text });
             // Звоним на переходе и отдельно по каждому этапу: следующий узел, зависший
             // так же, — это новая беда, а не продолжение старой.
             const key = `${id}:${q.stage}`;
@@ -150,7 +159,12 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
               : null,
           };
           if (!w) continue;
-          waiting.push({ task: id, text: w.text, premature: w.premature });
+          waiting.push({
+            task: id,
+            taskTitle,
+            text: w.text,
+            premature: w.premature,
+          });
           if (!notified.has(id) && !silent) notify(`Конвейер ждёт тебя — #${id}`, w.text, `conveyor-${id}`);
         }
         // Право на звонок возвращается, как только задача ушла с ворот.

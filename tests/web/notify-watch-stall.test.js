@@ -132,6 +132,7 @@ test('наблюдаемая проекция несёт уже загружен
   const { store, harness } = await makeWatch(t);
   harness.tasks = [{
     task: 8324,
+    title: 'Проверить всплывашку',
     attempt: 'a_1',
     daemonAlive: true,
     result: null,
@@ -155,4 +156,13 @@ test('наблюдаемая проекция несёт уже загружен
     progress: { done: 3, total: 7 },
     stage: { id: 'review', label: 'Проверка в браузере', state: 'run' },
   });
+  assert.deepEqual(store.topbarItems, [{
+    task: '8324',
+    title: 'Проверить всплывашку',
+    kind: 'running',
+    stateLabel: 'В работе',
+    detail: '',
+    stage: 'Проверка в браузере',
+    progress: { done: 3, total: 7 },
+  }]);
 });

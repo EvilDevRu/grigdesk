@@ -11,7 +11,7 @@
         <UiButton
           data-context="board-timers-topbar"
           variant="ghost"
-          :aria-label="`Таймеры задач: активных ${activeCount}`"
+          :aria-label="`Таймеры задач: активных ${activeCount}, сегодня отработано ${workedToday}`"
         >
           <svg class="board-timers-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
@@ -23,11 +23,14 @@
       <template #default="{ close }">
         <section class="board-timers-popover" aria-label="Таймеры задач">
           <header class="board-timers-popover-head">
-            <span class="board-timers-popover-heading">
-              <strong>Таймеры задач</strong>
-              <small>Активно сейчас: {{ activeCount }}</small>
+            <strong class="board-timers-popover-titlebar">Таймеры задач</strong>
+            <span class="board-timers-popover-summary">
+              Активно
+              <span class="board-timers-popover-active mono">{{ activeCount }}</span>
+              <span aria-hidden="true">·</span>
+              сегодня
+              <span class="board-timers-popover-today mono">{{ workedToday }}</span>
             </span>
-            <span class="board-timers-popover-count mono">{{ activeCount }}</span>
           </header>
 
           <ul class="board-timers-popover-list">
@@ -110,7 +113,7 @@
 <script setup>
 import { computed, onUnmounted, ref } from 'vue';
 
-import { liveTimerSec, secToHMS } from '../../shared/format.js';
+import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.js';
 import { UiButton, UiIconButton, UiInlineMessage, UiPopover } from '../../ui';
 
 const props = defineProps({
@@ -126,11 +129,16 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  workedTodayHours: {
+    type: [Number, String],
+    default: 0,
+  },
 });
 
 const emit = defineEmits(['openTask', 'openBoard', 'toggleTimer']);
 const now = ref(Date.now());
 const activeCount = computed(() => props.tasks.filter((task) => task.timerRunning).length);
+const workedToday = computed(() => hoursToHM(props.workedTodayHours));
 const timerControlsBusy = computed(() => props.busyTaskId !== null);
 const ticker = setInterval(() => {
   now.value = Date.now();
@@ -187,35 +195,33 @@ onUnmounted(() => clearInterval(ticker));
 }
 .board-timers-popover-head {
   display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.board-timers-popover-heading {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   min-width: 0;
 }
-.board-timers-popover-heading strong {
+.board-timers-popover-titlebar {
+  flex: none;
   color: var(--ink);
   font-size: 13px;
+  white-space: nowrap;
 }
-.board-timers-popover-heading small {
+.board-timers-popover-summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
   color: var(--ink-mid);
   font-size: 10.5px;
+  white-space: nowrap;
 }
-.board-timers-popover-count {
-  min-width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--good) 15%, transparent);
+.board-timers-popover-active {
   color: var(--good);
-  font-size: 11px;
   font-weight: 750;
+}
+.board-timers-popover-today {
+  color: var(--accent);
+  font-weight: 650;
 }
 .board-timers-popover-list {
   max-height: min(48vh, 360px);

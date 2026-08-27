@@ -31,13 +31,14 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
   ];
   const wrapper = mount(BoardTimerPopover, {
     attachTo: browser.document.querySelector('#mount'),
-    props: { tasks },
+    props: { tasks, workedTodayHours: 3.75 },
   });
   t.after(() => wrapper.unmount());
 
   const trigger = wrapper.get('[data-context="board-timers-topbar"]');
   assert.equal(trigger.attributes('aria-expanded'), 'false');
   assert.match(trigger.attributes('aria-label'), /активных 1/u);
+  assert.match(trigger.attributes('aria-label'), /сегодня отработано 3ч 45мин/u);
   assert.equal(trigger.text(), '1');
   assert.equal(trigger.find('.board-timers-topbar-label').exists(), false);
   assert.equal(trigger.find('.board-timers-topbar-live').exists(), false);
@@ -47,6 +48,16 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
 
   const popover = browser.document.querySelector('.board-timers-popover');
   assert.ok(popover);
+  const header = popover.querySelector('.board-timers-popover-head');
+  assert.match(
+    header?.textContent.replace(/\s+/gu, ' ').trim(),
+    /^Таймеры задач Активно 1\s*·\s*сегодня 3ч 45мин$/u,
+  );
+  assert.equal(header?.querySelector('.board-timers-popover-count'), null);
+  assert.equal(
+    popover.querySelector('.board-timers-popover-today')?.textContent.trim(),
+    '3ч 45мин',
+  );
   const taskButtons = [...popover.querySelectorAll('[data-context="topbar-timer-task"]')];
   assert.equal(taskButtons.length, 2);
   assert.deepEqual(

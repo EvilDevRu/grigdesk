@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { pipelineBadgeSummary } from '../../web/src/shared/pipeline-nav-badge.js';
+import {
+  pipelineBadgeSummary,
+  pipelineTopbarItems,
+} from '../../web/src/shared/pipeline-nav-badge.js';
 
 test('сводка даёт топбару числа всего / едут / стоят без повторного счёта задач', () => {
   const summary = pipelineBadgeSummary({
@@ -50,4 +53,42 @@ test('пустая сводка не создаёт некорректные п�
     errorEnd: 0,
     waitingEnd: 0,
   });
+});
+
+test('проекция топбара дедуплицирует задачи с тем же приоритетом, что и сводка', () => {
+  const state = {
+    stalled: [{ task: '1', taskTitle: 'Авария', title: 'Оборвался демон' }],
+    silent: [{ task: '2', taskTitle: 'Молчащий ход', text: 'Нет событий 20 минут' }],
+    waiting: [
+      { task: '1', taskTitle: 'Авария', text: 'Ждёт ворота' },
+      { task: '3', taskTitle: 'План', text: 'Принять план' },
+    ],
+    running: [
+      { task: '1', taskTitle: 'Авария' },
+      { task: '2', taskTitle: 'Молчащий ход' },
+      { task: '3', taskTitle: 'План' },
+      { task: '4', taskTitle: 'Работа' },
+    ],
+    observedByTask: {
+      1: { progress: { done: 2, total: 7 }, stage: { label: 'Проверка' } },
+      2: { progress: { done: 3, total: 7 }, stage: { label: 'Ревью' } },
+      3: { progress: { done: 1, total: 7 }, stage: { label: 'Ворота плана' } },
+      4: { progress: { done: 5, total: 7 }, stage: { label: 'Браузер' } },
+    },
+  };
+
+  const items = pipelineTopbarItems(state);
+
+  assert.deepEqual(items.map((item) => item.task), ['1', '2', '3', '4']);
+  assert.deepEqual(items.map((item) => item.kind), ['error', 'error', 'waiting', 'running']);
+  assert.deepEqual(items.map((item) => item.stateLabel), [
+    'Встал',
+    'Молчит',
+    'Ждёт решения',
+    'В работе',
+  ]);
+  assert.equal(items[0].detail, 'Оборвался демон');
+  assert.equal(items[3].stage, 'Браузер');
+  assert.deepEqual(items[3].progress, { done: 5, total: 7 });
+  assert.equal(items.length, pipelineBadgeSummary(state).totalCount);
 });

@@ -1,10 +1,40 @@
-// Сводка для составного чипа «Конвейер» в сайдбаре. Категории обязаны быть
-// взаимоисключающими: один и тот же ход может одновременно числиться живым и молчащим,
-// а задача на воротах — ещё и иметь аварийный флаг. В круге она должна занимать ровно
-// один сектор, с приоритетом аварии над воротами и ворот над обычной работой.
+// Сводка для составного чипа «Конвейер» в сайдбаре и popover в топбаре.
+// Категории обязаны быть взаимоисключающими: один ход может одновременно числиться
+// живым и молчащим, а задача на воротах — ещё и иметь аварийный флаг. В обоих
+// местах задача должна занимать ровно одно место: авария важнее ворот, ворота важнее
+// обычной работы.
 
-function taskIds(items) {
-  return new Set((items || []).map((x) => String(x.task)));
+const PIPELINE_GROUPS = [
+  { source: 'stalled', kind: 'error', label: 'Встал', detail: 'title' },
+  { source: 'silent', kind: 'error', label: 'Молчит', detail: 'text' },
+  { source: 'waiting', kind: 'waiting', label: 'Ждёт решения', detail: 'text' },
+  { source: 'running', kind: 'running', label: 'В работе', detail: null },
+];
+
+function cleanText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Один приоритетный список питает и цифры, и данные popover. Повтор задачи в более
+ * слабой категории отбрасываем, чтобы их знаменатель никогда не разошёлся.
+ */
+function classifiedTasks(state = {}) {
+  const tasks = new Map();
+
+  for (const group of PIPELINE_GROUPS) {
+    for (const entry of state[group.source] || []) {
+      const task = String(entry?.task ?? '').trim();
+
+      if (!task || tasks.has(task)) {
+        continue;
+      }
+
+      tasks.set(task, { task, entry, ...group });
+    }
+  }
+
+  return [...tasks.values()];
 }
 
 /**
@@ -13,19 +43,10 @@ function taskIds(items) {
  *   attentionCount: number, totalCount: number, errorEnd: number, waitingEnd: number}}
  */
 export function pipelineBadgeSummary(state = {}) {
-  const errors = taskIds([...(state.stalled || []), ...(state.silent || [])]);
-  const waiting = taskIds(state.waiting);
-  const running = taskIds(state.running);
-
-  errors.forEach((id) => {
-    waiting.delete(id);
-    running.delete(id);
-  });
-  waiting.forEach((id) => running.delete(id));
-
-  const errorCount = errors.size;
-  const waitingCount = waiting.size;
-  const runningCount = running.size;
+  const tasks = classifiedTasks(state);
+  const errorCount = tasks.filter((task) => task.kind === 'error').length;
+  const waitingCount = tasks.filter((task) => task.kind === 'waiting').length;
+  const runningCount = tasks.filter((task) => task.kind === 'running').length;
   const attentionCount = errorCount + waitingCount;
   const totalCount = attentionCount + runningCount;
 
@@ -38,4 +59,31 @@ export function pipelineBadgeSummary(state = {}) {
     errorEnd: totalCount ? (errorCount / totalCount) * 100 : 0,
     waitingEnd: totalCount ? ((errorCount + waitingCount) / totalCount) * 100 : 0,
   };
+}
+
+/**
+ * Добавляет к тому же дедуплицированному списку уже загруженные название, текущий
+ * этап и прогресс. Функция не делает запросов и не выдумывает отсутствующие поля.
+ */
+export function pipelineTopbarItems(state = {}) {
+  return classifiedTasks(state).map((item) => {
+    const observed = state.observedByTask?.[item.task] || {};
+    const progress = observed.progress;
+    const validProgress = Number.isSafeInteger(progress?.done)
+      && Number.isSafeInteger(progress?.total)
+      && progress.done >= 0
+      && progress.total >= 0;
+
+    return {
+      task: item.task,
+      title: cleanText(item.entry.taskTitle),
+      kind: item.kind,
+      stateLabel: item.label,
+      detail: item.detail ? cleanText(item.entry[item.detail]) : '',
+      stage: cleanText(observed.stage?.label),
+      progress: validProgress
+        ? { done: progress.done, total: progress.total }
+        : null,
+    };
+  });
 }

@@ -145,6 +145,7 @@
         <BoardTimerPopover
           v-if="topbarTimerTasks.length"
           :tasks="topbarTimerTasks"
+          :worked-today-hours="workedTodayHours"
           :busy-task-id="timerActionTaskId"
           :error="timerActionError"
           @open-task="openBoardTask"
@@ -156,28 +157,17 @@
           class="sep"
           aria-hidden="true"
         >·</span>
-        <router-link
+        <PipelineTopbarPopover
           v-if="pipelineTopbar.total"
-          to="/pipeline"
-          class="pipeline-topbar"
-          data-context="pipeline-topbar"
-          :aria-label="pipelineTopbarTitle"
-          :title="pipelineTopbarTitle"
-        >
-          <svg class="pipeline-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICONS.pipeline" />
-          </svg>
-          <span class="pipeline-topbar-counts mono" aria-hidden="true">
-            <span class="pipeline-topbar-total">{{ pipelineTopbar.total }}</span>
-            <span class="pipeline-topbar-slash">/</span>
-            <span class="pipeline-topbar-running">{{ pipelineTopbar.running }}</span>
-            <span class="pipeline-topbar-slash">/</span>
-            <span
-              class="pipeline-topbar-stopped"
-              :class="{ error: pipelineTopbar.hasErrors }"
-            >{{ pipelineTopbar.stopped }}</span>
-          </span>
-        </router-link>
+          :items="notifyWatch.topbarItems"
+          :total="pipelineTopbar.total"
+          :running-count="pipelineTopbar.running"
+          :stopped-count="pipelineTopbar.stopped"
+          :has-errors="pipelineTopbar.hasErrors"
+          :error="notifyWatch.error || ''"
+          :icon="ICONS.pipeline"
+          @open-pipeline="openPipeline"
+        />
         <span
           v-if="topbarTimerTasks.length || pipelineTopbar.total"
           class="sep"
@@ -430,6 +420,7 @@ import { providerUsageView } from '../../features/providers/providerUsage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
+import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover.vue';
 import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
@@ -558,6 +549,7 @@ const timerActionTaskId = ref(null);
 const timerActionError = ref('');
 const boardNavActivity = computed(() => boardStore.activity);
 const boardTasks = computed(() => boardStore.data?.tasks || []);
+const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
 const topbarTimerTasks = computed(() => {
   const recentIds = new Set(recentPausedTimerIds.value);
 
@@ -582,6 +574,9 @@ function openBoardTask(taskId) {
 }
 function openBoard() {
   router.push('/board');
+}
+function openPipeline() {
+  router.push('/pipeline');
 }
 
 /**
@@ -632,16 +627,6 @@ const pipelineTopbar = computed(() => {
     stopped: summary.attentionCount,
     hasErrors: summary.errorCount > 0,
   };
-});
-const pipelineTopbarTitle = computed(() => {
-  const state = pipelineTopbar.value;
-  const headline = [
-    `всего: ${state.total}`,
-    `едут: ${state.running}`,
-    `стоят: ${state.stopped}`,
-  ].join(' · ');
-
-  return `Конвейеры · ${headline}\n${notifyWatch.attentionTitle}`;
 });
 const pipelineBadgeStyle = computed(() => {
   const s = notifyWatch.badgeSummary;
@@ -917,53 +902,6 @@ const { connected } = useSse((name) => {
 .metric { color: var(--ink-mid); font-variant-numeric: tabular-nums; }
 .metric b { font-weight: 600; }
 .sep { color: var(--ink-mid); margin: 0 -4px; }
-.pipeline-topbar {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--ink);
-  transition: opacity .12s;
-}
-.pipeline-topbar:hover {
-  opacity: .82;
-}
-.pipeline-topbar:focus-visible {
-  border-radius: 4px;
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  outline-offset: 3px;
-}
-.pipeline-topbar-icon {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.9;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.pipeline-topbar-counts {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 750;
-}
-.pipeline-topbar-total {
-  color: var(--ink);
-}
-.pipeline-topbar-slash {
-  color: var(--ink-mid);
-  font-weight: 500;
-}
-.pipeline-topbar-running {
-  color: var(--accent);
-}
-.pipeline-topbar-stopped {
-  color: var(--warn);
-}
-.pipeline-topbar-stopped.error {
-  color: var(--bad);
-}
 .provbox { display: inline-flex; align-items: center; gap: 9px; }
 /* В топбаре это обычные знаки, без кнопочных контейнеров. Нулевая высота строки
    убирает baseline-зазор SVG и ставит все три логотипа на одну оптическую ось. */
