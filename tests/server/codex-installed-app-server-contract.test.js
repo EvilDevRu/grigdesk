@@ -7,10 +7,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const CODEX_BIN = process.env.COCKPIT_CODEX_BIN || 'codex';
+const DIRECT_SSH_HOOK = fileURLToPath(new URL(
+  '../../server/src/lib/executors/_direct-ssh-policy-hook.js',
+  import.meta.url,
+));
 
 function errorOutput(error) {
   return [error?.stderr, error?.stdout, error?.message]
@@ -270,6 +275,51 @@ function startThread({ capabilities, params, codexHome }) {
   });
 }
 
+function installedHooksList({ codexHome }) {
+  return new Promise((resolve) => {
+    const command = `${process.execPath} ${DIRECT_SSH_HOOK}`;
+    const policy = '[{ matcher = "^Bash$", hooks = [{ type = "command", '
+      + `command = "${command}", timeout = 5 }] }]`;
+    const child = spawn(CODEX_BIN, [
+      '--dangerously-bypass-hook-trust',
+      '-c',
+      `hooks.PreToolUse=${policy}`,
+      'app-server',
+    ], {
+      env: { ...process.env, CODEX_HOME: codexHome },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const lines = createInterface({ input: child.stdout });
+    let stderr = '';
+    const timer = setTimeout(() => finish({ timeout: true, stderr }), 25_000);
+
+    function finish(value) {
+      clearTimeout(timer);
+      try { lines.close(); } catch { /* уже закрыт */ }
+      try { child.kill(); } catch { /* уже завершён */ }
+      resolve(value);
+    }
+
+    const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-2_000); });
+    child.once('error', (error) => finish({ spawnError: error }));
+    lines.on('line', (line) => {
+      let message;
+      try { message = JSON.parse(line); } catch { return; }
+      if (message.id === 1) {
+        send({ method: 'initialized' });
+        send({ method: 'hooks/list', id: 2, params: {} });
+      } else if (message.id === 2) {
+        finish({ error: message.error ?? null, result: message.result ?? null, stderr });
+      }
+    });
+    send({ method: 'initialize', id: 1, params: {
+      clientInfo: { name: 'cockpit', title: 'Cockpit', version: '0.1.0' },
+      capabilities: { experimentalApi: true, requestAttestation: false },
+    } });
+  });
+}
+
 test('установленный Codex принимает runtimeWorkspaceRoots только с experimentalApi', {
   timeout: 60_000,
 }, async (t) => {
@@ -312,4 +362,34 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
     /experimentalApi/,
     'без experimentalApi app-server обязан отказать, а не принять поле тихо',
   );
+});
+
+test('установленный Codex объявляет process hook как enabled sessionFlags без model call', {
+  timeout: 60_000,
+}, async (t) => {
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-hooks-state-'));
+  t.after(() => fs.rm(codexHome, { recursive: true, force: true }));
+
+  const response = await installedHooksList({ codexHome });
+  if (response.spawnError?.code === 'ENOENT') {
+    return t.skip(`Codex CLI не установлен (${CODEX_BIN})`);
+  }
+  assert.equal(response.timeout, undefined, `hooks/list не ответил: ${response.stderr || ''}`);
+  assert.equal(response.error, null, JSON.stringify(response.error));
+  const hooks = (response.result?.data || []).flatMap((entry) => entry.hooks || []);
+  const directSsh = hooks.find((hook) => hook.command === `${process.execPath} ${DIRECT_SSH_HOOK}`);
+
+  assert.deepEqual({
+    eventName: directSsh?.eventName,
+    handlerType: directSsh?.handlerType,
+    matcher: directSsh?.matcher,
+    source: directSsh?.source,
+    enabled: directSsh?.enabled,
+  }, {
+    eventName: 'preToolUse',
+    handlerType: 'command',
+    matcher: '^Bash$',
+    source: 'sessionFlags',
+    enabled: true,
+  });
 });

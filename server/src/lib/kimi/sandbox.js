@@ -234,6 +234,7 @@ export async function buildKimiSandboxLaunch({
   extraDirs = [],
   attachmentDir,
   egressSocketPath,
+  workMcp = null,
   unit = `cockpit-kimi-${randomUUID()}.service`,
 } = {}) {
   await fs.mkdir(config.kimiRuntimeHome, { recursive: true, mode: 0o700 });
@@ -257,6 +258,15 @@ export async function buildKimiSandboxLaunch({
     throw new Error('kimi_egress_socket_name_mismatch');
   }
   const egressDir = path.dirname(egressSocketReal);
+  let workSocketDir = '';
+  let workScript = '';
+  if (workMcp) {
+    const workSocket = await fs.realpath(workMcp.socketPath);
+    if (!(await fs.lstat(workSocket)).isSocket()) throw new Error('kimi_work_socket_invalid');
+    workSocketDir = path.dirname(workSocket);
+    workScript = await fs.realpath(workMcp.scriptPath);
+    if (!(await fs.lstat(workScript)).isFile()) throw new Error('kimi_work_mcp_invalid');
+  }
   const certPath = await fs.realpath(config.kimiCaBundle || '/etc/ssl/certs/ca-certificates.crt');
 
   const env = assertKimiRuntimeEnv(buildKimiRuntimeEnv({ proxyUrl: 'http://127.0.0.1:3128' }), {
@@ -296,6 +306,12 @@ export async function buildKimiSandboxLaunch({
   addMount(bwrap, '--ro-bind', home.emptyFile, '/kimi-home/SYSTEM.md', madeDirs);
   addMount(bwrap, '--ro-bind', home.emptyMcp, '/kimi-home/mcp.json', madeDirs);
   addMount(bwrap, '--ro-bind', egressDir, '/run/cockpit-egress', madeDirs);
+  if (workMcp) {
+    // Только каталог одного per-scope UDS и неизменяемый bridge; сетевой egress
+    // contained Kimi этим не расширяется.
+    addMount(bwrap, '--ro-bind', workSocketDir, '/run/cockpit-work', madeDirs);
+    addMount(bwrap, '--ro-bind', workScript, '/opt/cockpit/work-mcp.js', madeDirs);
+  }
   addMount(bwrap, '--ro-bind', scripts.wrapperPath, '/opt/cockpit/run-kimi', madeDirs);
   addMount(bwrap, '--ro-bind', kimiBin, '/opt/kimi/bin/kimi', madeDirs);
   if (fdBin) addMount(bwrap, '--ro-bind', fdBin, '/opt/kimi/bin/fd', madeDirs);

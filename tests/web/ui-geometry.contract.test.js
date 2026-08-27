@@ -41,3 +41,25 @@ test('Chrome geometry matrix закрепляет viewports и overlay/disclosur
   assert.match(gallery, /data-geometry-provider-link/u);
   assert.match(gallery, /data-geometry-provider-switch/u);
 });
+
+test('Chrome geometry проверяет SSH-карточку с неразрывной командой в 10000 символов', async () => {
+  const [script, gallery] = await Promise.all([
+    readFile(SCRIPT_PATH, 'utf8'),
+    readFile(GALLERY_PATH, 'utf8'),
+  ]);
+  const commandLiteral = gallery.match(/data-geometry-ssh-command[\s\S]{0,1000}?repeat\((\d[\d_]*)\)/u);
+
+  assert.deepEqual({
+    commandLength: Number((commandLiteral?.[1] || '0').replaceAll('_', '')),
+    cardWidth: /data-geometry-ssh-card[\s\S]*?scrollWidth\s*<=\s*[^;\n]*clientWidth/u.test(script),
+    buttonsInside: /data-geometry-ssh-actions[\s\S]*?getBoundingClientRect/u.test(script),
+    fullTail: /data-geometry-ssh-command[\s\S]*?(?:endsWith|textContent)/u.test(script),
+    noEllipsis: /data-geometry-ssh-command[\s\S]*?textOverflow/u.test(script),
+  }, {
+    commandLength: 10_000,
+    cardWidth: true,
+    buttonsInside: true,
+    fullTail: true,
+    noEllipsis: true,
+  });
+});

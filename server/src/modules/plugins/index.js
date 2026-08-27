@@ -14,7 +14,7 @@ import {
 } from '../../lib/plugins-registry.js';
 
 async function pluginsModule(fastify, opts) {
-  const { config, prefs } = opts;
+  const { config, prefs, onToggle } = opts;
 
   const userPlugins = await scanUserPlugins(config.userPluginsDir, fastify.log);
   // Признак `system` объявляет сам манифест (в SYSTEM и в скане) — здесь его не
@@ -79,8 +79,15 @@ async function pluginsModule(fastify, opts) {
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
     const p = prefs.read();
-    const next = { ...(p.plugins || {}), [m.id]: !!(request.body || {}).enabled };
+    const enabled = !!(request.body || {}).enabled;
+    const next = { ...(p.plugins || {}), [m.id]: enabled };
     prefs.write({ plugins: next });
+    try {
+      await onToggle?.(m.id, enabled);
+    } catch (error) {
+      prefs.write({ plugins: p.plugins || {} });
+      throw error;
+    }
     return { ok: true, enabled: next[m.id] };
   });
 
@@ -88,10 +95,22 @@ async function pluginsModule(fastify, opts) {
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
     // Принимаем только ключи из схемы — мусор в prefs не попадает.
-    const allowed = new Set((m.settings || []).map((s) => s.key));
+    const settings = new Map((m.settings || []).map((setting) => [setting.key, setting]));
     const values = {};
     for (const [k, v] of Object.entries((request.body || {}).values || {})) {
-      if (allowed.has(k)) values[k] = v;
+      const setting = settings.get(k);
+      if (!setting) continue;
+      if (setting.type !== 'number') {
+        values[k] = v;
+        continue;
+      }
+      const numeric = Number(v);
+      if (!Number.isFinite(numeric)) continue;
+      const minimum = Number.isFinite(setting.min) ? setting.min : numeric;
+      const maximum = Number.isFinite(setting.max) ? setting.max : numeric;
+      const clamped = Math.min(maximum, Math.max(minimum, numeric));
+      const step = Number(setting.step) > 0 ? Number(setting.step) : 1;
+      values[k] = Math.min(maximum, minimum + Math.round((clamped - minimum) / step) * step);
     }
     const p = prefs.read();
     prefs.write({ pluginSettings: { ...(p.pluginSettings || {}), [m.id]: values } });

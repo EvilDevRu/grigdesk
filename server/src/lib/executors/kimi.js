@@ -17,6 +17,7 @@ import {
   requestKimiManagedUsage,
 } from '../kimi/usage.js';
 import { withRetry } from '../retry.js';
+import { directSshSetting } from './_direct-ssh-policy.js';
 
 function probe(bin) {
   return new Promise((resolve) => {
@@ -93,6 +94,7 @@ export default {
   vendor: 'Moonshot AI',
   color: '#6657d9',
   order: 3,
+  workToolsTransport: 'mcp',
   // Основной официальный способ: отдельный бинарник с проверкой SHA-256, без
   // зависимости от системного Node.js.
   install: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
@@ -103,6 +105,27 @@ export default {
   // В host-режиме ACP не умеет принять extraDirs; contained объявляет их через
   // server-owned local.toml и монтирует в sandbox. UI получает фактический режим.
   trustedDirectories(config) { return config.kimiLaunchMode === 'contained'; },
+  directSshPolicy(config) {
+    if (config?.kimiLaunchMode === 'contained') {
+      return {
+        enforcement: 'network-sandbox',
+        note: 'Contained-режим оставляет SSH закрытым сетевой песочницей при любом значении.',
+      };
+    }
+    return {
+      enforcement: 'fail-closed',
+      note: 'Host-режим не умеет обеспечить запрет и остановит ход.',
+    };
+  },
+  settings(config) {
+    const host = config?.kimiLaunchMode !== 'contained';
+    return [directSshSetting({
+      note: host
+        ? 'Host-режим не умеет обеспечить запрет и остановит ход.'
+        : 'Contained-режим закрывает SSH сетевой песочницей независимо от тумблера.',
+      extraConfirmation: 'При будущей смене contained на host разрешение останется снятым.',
+    })];
+  },
 
   bin(config) { return config.kimiBin; },
 

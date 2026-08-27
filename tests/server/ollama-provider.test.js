@@ -34,7 +34,7 @@ const SYNTHETIC_MOE_SIZE = 24 * 1024 ** 3;
 // digest). capabilities — что модель умеет (от них зависят эффорт и инструменты),
 // loaded — ответ /api/ps для всплывашки в топбаре.
 function startOllamaStub(t, {
-  chatBehavior, tagsSize, showModelInfo, digestPrefix = 'sha256:', capabilities, loaded,
+  chatBehavior, toolCall, tagsSize, showModelInfo, digestPrefix = 'sha256:', capabilities, loaded,
 } = {}) {
   const chatRequests = [];
   const server = http.createServer((req, res) => {
@@ -92,7 +92,9 @@ function startOllamaStub(t, {
               message: {
                 role: 'assistant',
                 content: 'сейчас прочитаю файл',
-                tool_calls: [{ function: { name: 'read_file', arguments: { path: 'note.txt' } } }],
+                tool_calls: [{
+                  function: toolCall || { name: 'read_file', arguments: { path: 'note.txt' } },
+                }],
               },
               done: true,
               prompt_eval_count: 100,
@@ -443,7 +445,8 @@ test('Ollama settings: numCtx — ползунок с потолком, вычи
   const mem = await systemMemory();
   const declared = await ollama.settings(fakeConfig(port));
   assert.deepEqual(declared.map((s) => [s.id, s.kind]), [
-    ['host', 'text'], ['numCtx', 'range'], ['keepAliveMin', 'range'],
+    ['blockDirectSsh', 'toggle'], ['host', 'text'], ['numCtx', 'range'],
+    ['keepAliveMin', 'range'],
     // Справочные строки: своего контрола у них нет, фронт рисует подпись + note + hint.
     ['memInfo', 'info'], ['loadedInfo', 'info'], ['ctxCostInfo', 'info'],
   ]);
@@ -614,6 +617,69 @@ test('Ollama инструменты: режим «план» не даёт пи�
   assert.deepEqual(asked, ['Bash']);
   assert.equal(denied.ok, false);
   assert.match(denied.text, /не надо/); // пояснение человека доезжает до модели
+});
+
+test('Ollama блокирует прямой SSH до permission mode и запуска процесса', async (t) => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-ollama-direct-ssh-'));
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const marker = path.join(cwd, 'ssh-ran');
+  const ssh = path.join(cwd, 'ssh');
+  await fs.writeFile(ssh, `#!/bin/sh\nprintf ran > "${marker}"\n`, { mode: 0o755 });
+  const { port } = await startOllamaStub(t, {
+    chatBehavior: 'tools',
+    capabilities: ['completion', 'tools'],
+    digestPrefix: 'sha256:direct-ssh-on-',
+    toolCall: { name: 'bash', arguments: { command: `${ssh} prod.example` } },
+  });
+  const permissions = [];
+  const steps = [];
+
+  await ollama.run({
+    config: fakeConfig(port),
+    chatKey: 'chat-direct-ssh-on',
+    message: 'подключись к серверу',
+    model: 'qwen3:14b',
+    providerSettings: {},
+    permissionMode: 'bypassPermissions',
+    chatHistory: [],
+    cwd,
+    onPermission: (request) => { permissions.push(request); return { allow: true }; },
+    onStep: (step) => steps.push(step),
+  });
+
+  assert.deepEqual({
+    processRan: await fs.access(marker).then(() => true, () => false),
+    permissionCalls: permissions.length,
+    denied: steps.some((step) => step.k === 'res' && step.ok === false
+      && /прямой ssh/i.test(step.text || '')),
+  }, { processRan: false, permissionCalls: 0, denied: true });
+});
+
+test('Ollama после явного false сохраняет прежнее выполнение bash', async (t) => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-ollama-direct-ssh-off-'));
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const marker = path.join(cwd, 'ssh-ran');
+  const ssh = path.join(cwd, 'ssh');
+  await fs.writeFile(ssh, `#!/bin/sh\nprintf ran > "${marker}"\n`, { mode: 0o755 });
+  const { port } = await startOllamaStub(t, {
+    chatBehavior: 'tools',
+    capabilities: ['completion', 'tools'],
+    digestPrefix: 'sha256:direct-ssh-off-',
+    toolCall: { name: 'bash', arguments: { command: `${ssh} prod.example` } },
+  });
+
+  await ollama.run({
+    config: fakeConfig(port),
+    chatKey: 'chat-direct-ssh-off',
+    message: 'подключись к серверу',
+    model: 'qwen3:14b',
+    providerSettings: { blockDirectSsh: false },
+    permissionMode: 'bypassPermissions',
+    chatHistory: [],
+    cwd,
+  });
+
+  assert.equal(await fs.readFile(marker, 'utf8'), 'ran');
 });
 
 test('Ollama usage: полосы памяти, загруженные модели и действие выгрузки', async (t) => {

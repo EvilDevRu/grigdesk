@@ -910,6 +910,10 @@ export const useChatStore = defineStore('chat', {
             return;
           }
           this._addPending({ ...d, kind: 'perm' });
+        } else if (name === 'ssh-permission') {
+          // SSH всегда решает человек. Событие — лишь сигнал перечитать единую
+          // серверную очередь; DTO команды не размножаем по двум источникам.
+          this._loadWaiting();
         } else if (name === 'chat-question') {
           // Вопрос агента (AskUserQuestion): не разрешение, а диалог с вариантами ответа.
           this._addPending({ ...d, kind: 'question' });
@@ -1028,7 +1032,7 @@ export const useChatStore = defineStore('chat', {
      */
     async _loadWaiting() {
       let waiting;
-      try { ({ waiting } = await api.get('/api/chat/waiting')); }
+      try { ({ waiting } = await api.get('/api/chat/waiting?include=ssh')); }
       catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
       // Сверяемся ПОЛНОСТЬЮ, а не дозаливаем: после рестарта сервера запросы умирают
       // вместе с процессами агентов, и наши всплывашки стали бы фантомами.
@@ -1217,6 +1221,17 @@ export const useChatStore = defineStore('chat', {
     async answerPerm(pid, allow, remember = false, comment = '', choice = '') {
       const p = this.pending[pid];
       if (!p) return;
+      if (p.origin === 'ssh') {
+        try {
+          await api.post(`/api/ssh/approvals/${p.pid}`, { allow, comment: String(comment || '') });
+          delete this.pending[pid];
+        } catch {
+          // Ответ мог принять другое окно. Истина — общая очередь сервера; при
+          // сетевой ошибке _loadWaiting оставит карточку на месте.
+          await this._loadWaiting();
+        }
+        return;
+      }
       delete this.pending[pid];
       if (allow && remember && p.chatKey && p.tool) {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);

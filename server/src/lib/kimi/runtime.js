@@ -236,12 +236,14 @@ export async function runContainedKimi({
   effort,
   sessionId,
   permissionMode,
+  providerSettings,
   signal,
   onStep,
   onProgress,
   onPermission,
   onSessionCreated,
   chatKey,
+  mcpServers = [],
   log,
   deps = {},
 } = {}) {
@@ -255,6 +257,14 @@ export async function runContainedKimi({
   // прежний bwrap-профиль. Отсутствие ключа трактуем как contained: старые вызовы
   // и тесты без обновлённого конфига получают прежнее, более строгое поведение.
   const launchMode = config.kimiLaunchMode === 'host' ? 'host' : 'contained';
+  if (launchMode === 'host' && providerSettings?.blockDirectSsh !== false) {
+    const error = new Error(
+      'Kimi host не умеет обеспечить запрет прямого SSH: включи contained '
+      + 'или подтверждённо выключи настройку.',
+    );
+    error.code = 'direct_ssh_policy_unavailable';
+    throw error;
+  }
   const checkVersion = deps.assertVersion || assertPinnedVersion;
   if (launchMode === 'host') {
     // Host CLI обновляется пользователем: жёсткий пин ломал бы чат при любом
@@ -308,6 +318,29 @@ export async function runContainedKimi({
   let promptState = 'pre_prompt';
   const stepSink = createStepSink(onStep);
   const normalizeStep = createKimiStepNormalizer({ model, cwd, mode: permissionMode || 'manual' });
+  let sessionMcpServers = mcpServers;
+  let containedWorkMcp = null;
+  if (launchMode === 'contained') {
+    const work = mcpServers.find((entry) => entry?.name === 'cockpit-work');
+    if (work) {
+      const socketAt = work.args?.indexOf('--socket') ?? -1;
+      const nonceAt = work.args?.indexOf('--nonce') ?? -1;
+      const scriptPath = work.args?.[0];
+      const socketPath = socketAt >= 0 ? work.args[socketAt + 1] : '';
+      const nonce = nonceAt >= 0 ? work.args[nonceAt + 1] : '';
+      if (!scriptPath || !socketPath || !nonce) throw new Error('kimi_work_mcp_invalid');
+      containedWorkMcp = { scriptPath, socketPath };
+      sessionMcpServers = mcpServers.map((entry) => (entry === work ? {
+        ...entry,
+        command: '/usr/bin/node',
+        args: [
+          '/opt/cockpit/work-mcp.js',
+          '--socket', '/run/cockpit-work/work.sock',
+          '--nonce', nonce,
+        ],
+      } : entry));
+    }
+  }
 
   try {
     if (proxy) {
@@ -358,6 +391,7 @@ export async function runContainedKimi({
         extraDirs: safeExtraDirs,
         attachmentDir: staged?.stagingDir,
         egressSocketPath,
+        workMcp: containedWorkMcp,
         unit: `cockpit-kimi-${runId}.service`,
       });
     }
@@ -427,6 +461,9 @@ export async function runContainedKimi({
       },
       async onReverseRequest(method, params) {
         if (method !== 'session/request_permission') throw new Error(`ACP reverse method не разрешён: ${method}`);
+        if (params?.toolCall?.title === 'mcp__cockpit-work__supervised_ssh') {
+          return selectPermissionOutcome(params, { allow: true });
+        }
         // Размышление, за которым последовал спрос, должно быть уже в ленте:
         // человек решает по нему, а не по одной строке действия.
         stepSink.emitAll(normalizeStep.flush());
@@ -463,9 +500,16 @@ export async function runContainedKimi({
     }
     let currentSession = sessionId || '';
     if (currentSession) {
-      await client.request('session/resume', { sessionId: currentSession, cwd: launch.cwdReal, mcpServers: [] }, 30_000);
+      await client.request('session/resume', {
+        sessionId: currentSession,
+        cwd: launch.cwdReal,
+        mcpServers: sessionMcpServers,
+      }, 30_000);
     } else {
-      const created = await client.request('session/new', { cwd: launch.cwdReal, mcpServers: [] }, 30_000);
+      const created = await client.request('session/new', {
+        cwd: launch.cwdReal,
+        mcpServers: sessionMcpServers,
+      }, 30_000);
       currentSession = String(created?.sessionId || '');
       if (!currentSession) throw new Error('Kimi ACP не вернул sessionId');
       // Binding сохраняется ДО config/prompt: окно/поддельный клиент не сможет

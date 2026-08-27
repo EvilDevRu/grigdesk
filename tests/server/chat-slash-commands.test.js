@@ -352,6 +352,46 @@ test('/api/providers берёт поддержку доверенных ката
   assert.equal(byId.get('setup')?.trustedDirectories, false, 'setup-only не получает ход');
 });
 
+test('/api/providers нормализует способ запрета SSH без списка известных исполнителей', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'providers-direct-ssh-policy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const runtimeAdapter = (id, directSshPolicy) => ({
+    ...stubAdapter(id, null),
+    run: async () => ({ reply: 'ok' }),
+    directSshPolicy,
+  });
+  const adapters = new Map([
+    ['static', runtimeAdapter('static', { enforcement: 'command-hook' })],
+    ['dynamic', runtimeAdapter('dynamic', (config) => ({
+      enforcement: config.contained ? 'network-sandbox' : 'fail-closed',
+      note: 'Режим выбирает адаптер.',
+    }))],
+    ['broken', runtimeAdapter('broken', () => { throw new Error('capability failed'); })],
+  ]);
+  const app = Fastify({ logger: false });
+  app.decorate('sse', { broadcast() {} });
+  await app.register(providersModule, {
+    config: { modelsPath: path.join(root, 'models.json'), contained: true },
+    claudeAuth: null,
+    prefs: { read: () => ({}) },
+    getProviderAdapters: async () => adapters,
+  });
+  t.after(() => app.close());
+
+  const response = await app.inject({ method: 'GET', url: '/api/providers' });
+  const byId = new Map(response.json().providers.map((provider) => [provider.id, provider]));
+  assert.deepEqual({
+    static: byId.get('static')?.directSshPolicy,
+    dynamic: byId.get('dynamic')?.directSshPolicy,
+    broken: byId.get('broken')?.directSshPolicy?.enforcement,
+  }, {
+    static: { enforcement: 'command-hook' },
+    dynamic: { enforcement: 'network-sandbox', note: 'Режим выбирает адаптер.' },
+    broken: 'unsupported',
+  });
+});
+
 // ── POST /api/chat + slashCommand ────────────────────────────────────────────
 
 async function chatFixture(t, { executor }) {

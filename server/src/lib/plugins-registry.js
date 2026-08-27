@@ -145,6 +145,27 @@ export const SYSTEM = [
     nav: { path: '/github', label: 'GitHub', icon: 'github', group: 'tools', order: 30 },
     settings: [],
   },
+  {
+    id: 'ssh',
+    system: true,
+    defaultEnabled: false,
+    name: 'SSH',
+    version: '0.1.0',
+    description: 'Терминал и SFTP для человека, надзорное выполнение команд для агента.',
+    nav: { path: '/ssh', label: 'SSH', icon: 'terminal', group: 'dock', order: 40 },
+    settings: [
+      {
+        key: 'outputLimitKiB',
+        label: 'Лимит вывода, KiB',
+        type: 'number',
+        default: 64,
+        min: 4,
+        max: 1024,
+        step: 4,
+        hint: 'Начало и конец более длинного вывода сохраняются, середина удаляется.',
+      },
+    ],
+  },
 ];
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;

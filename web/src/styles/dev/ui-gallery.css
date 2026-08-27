@@ -116,6 +116,34 @@
   max-width: 58ch;
 }
 
+.ui-gallery__ssh-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+}
+
+.ui-gallery__ssh-card pre {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ui-gallery__ssh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 @media (max-width: 480px) {
   .ui-gallery { padding: 10px; }
   .ui-gallery__section { padding: 12px; }

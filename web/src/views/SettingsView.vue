@@ -905,7 +905,7 @@
                   <UiSwitch
                     v-if="s.kind === 'toggle'"
                     :model-value="!!s.value"
-                    :disabled="s.disabled === true"
+                    :disabled="s.disabled === true || providerSettingBusy(p, s)"
                     @update:model-value="(v) => saveProviderSetting(p, s, v)"
                   >
                     {{ s.label }}
@@ -920,7 +920,7 @@
                       :max="Number(s.max)"
                       :step="Number(s.step || 1)"
                       :model-value="Number(s.value)"
-                      :disabled="s.disabled === true"
+                      :disabled="s.disabled === true || providerSettingBusy(p, s)"
                       @change="(e) => saveProviderSetting(p, s, Number(e.target.value))"
                     />
                     <span class="pvrangeval">{{ Number(s.value).toLocaleString('ru') }} / {{ Number(s.max).toLocaleString('ru') }}</span>
@@ -932,7 +932,7 @@
                       class="pvsetinput"
                       data-context="settings-field"
                       :model-value="String(s.value ?? '')"
-                      :disabled="s.disabled === true"
+                      :disabled="s.disabled === true || providerSettingBusy(p, s)"
                       @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
                       @blur="(e) => commitProviderSetting(p, s, e)"
                     />
@@ -942,7 +942,7 @@
                       data-context="settings-field"
                       :min="Number(s.min) || 512"
                       :model-value="Number(s.value)"
-                      :disabled="s.disabled === true"
+                      :disabled="s.disabled === true || providerSettingBusy(p, s)"
                       @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
                       @blur="(e) => commitProviderSetting(p, s, e)"
                     />
@@ -1630,8 +1630,17 @@
                 </div>
                 <div v-else class="plugrow">
                   <label>{{ s.label }}</label>
+                  <UiNumberInput
+                    v-if="s.type === 'number'"
+                    v-model="p.values[s.key]"
+                    class="inp"
+                    data-context="settings-field"
+                    :min="s.min"
+                    :max="s.max"
+                    :step="s.step"
+                  />
                   <UiSelect
-                    v-if="s.type === 'select'"
+                    v-else-if="s.type === 'select'"
                     v-model="p.values[s.key]"
                     class="inp"
                     data-context="settings-field"
@@ -3267,14 +3276,55 @@ function installInTerminal(p) {
   openTerminal({ insert: p.setupCommand || p.install });
 }
 
-// Свои настройки исполнителя (тумблеры в его плашке): что за ключ — знает сам исполнитель,
-// UI только передаёт выбор. Ошибку показываем у той настройки, где кликнули.
+// Свои настройки исполнителя: что за ключ и какое направление опасно — знает адаптер.
+// UI лишь исполняет generic confirm и держит строку занятой до конца confirm + POST.
 const setMsg = ref({});
+const providerSettingBusyMap = ref({});
+
+function providerSettingKey(p, s) {
+  return `${p.id}:${s.id}`;
+}
+
+function providerSettingBusy(p, s) {
+  return providerSettingBusyMap.value[providerSettingKey(p, s)] === true;
+}
+
+function setProviderSettingBusy(key, value) {
+  const next = { ...providerSettingBusyMap.value };
+  if (value) next[key] = true;
+  else delete next[key];
+  providerSettingBusyMap.value = next;
+}
+
+/**
+ * Направленное подтверждение приходит только из `setting.confirm`; id исполнителя
+ * и настройки здесь не участвуют. Отмена заканчивается до optimistic store-вызова.
+ */
 async function saveProviderSetting(p, s, value) {
-  const key = `${p.id}:${s.id}`;
+  const key = providerSettingKey(p, s);
+  if (providerSettingBusyMap.value[key]) return;
+  setProviderSettingBusy(key, true);
   setMsg.value = { ...setMsg.value, [key]: '' };
-  const r = await prov.saveSetting(p.id, s.id, value);
-  if (!r.ok) setMsg.value = { ...setMsg.value, [key]: `Не сохранилось: ${r.error}` };
+  try {
+    const confirmation = value ? s.confirm?.on : s.confirm?.off;
+    let confirmed = false;
+    if (confirmation) {
+      confirmed = await confirmDialog(String(confirmation.text || 'Подтвердить изменение?'), {
+        okText: String(confirmation.label || s.label || 'Применить'),
+        danger: confirmation.danger === true,
+      });
+      if (!confirmed) return;
+    }
+
+    const r = confirmed
+      ? await prov.saveSetting(p.id, s.id, value, true)
+      : await prov.saveSetting(p.id, s.id, value);
+    if (!r.ok) {
+      setMsg.value = { ...setMsg.value, [key]: `Не сохранилось: ${r.error}` };
+    }
+  } finally {
+    setProviderSettingBusy(key, false);
+  }
 }
 
 // Текстовые/числовые настройки: сохранение по Enter и по уходу фокуса. Enter сразу

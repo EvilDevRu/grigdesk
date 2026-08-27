@@ -63,7 +63,7 @@ test('Завершившаяся оценка зажигает полку сло
   const result = decision(snapshot, baseSnapshot({
     analysis: {
       ...snapshot.analysis,
-      state: 'finished',
+      state: 'done',
       finishedAt: '2026-08-26T08:10:00.000Z',
       generatedAt: '2026-08-26T08:10:01.000Z',
     },
@@ -143,7 +143,7 @@ test('Текущая стадия выводит ожидание конвейе
   const afterAnalysis = baseSnapshot({
     analysis: {
       ...baseSnapshot().analysis,
-      state: 'finished',
+      state: 'done',
       finishedAt: '2026-08-26T08:10:00.000Z',
     },
   });
@@ -501,9 +501,9 @@ async function reactiveStoreFixture({
           state: currentState,
           queuedAt: '2026-08-26T08:00:00.000Z',
           startedAt: null,
-          finishedAt: currentState === 'finished' ? '2026-08-26T08:10:00.000Z' : null,
+          finishedAt: currentState === 'done' ? '2026-08-26T08:10:00.000Z' : null,
         },
-        analysis: currentState === 'finished'
+        analysis: currentState === 'done'
           ? { generated_at: '2026-08-26T08:10:01.000Z' }
           : null,
       },
@@ -552,7 +552,7 @@ async function settleStore() {
 }
 
 test('Первый снимок показывает накопленный огонь без оповещения', async (t) => {
-  const { store, harness } = await reactiveStoreFixture({ currentState: 'finished' });
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
   t.after(() => {
     store.stop?.();
     delete globalThis.__taskShelfStoreHarness;
@@ -579,7 +579,7 @@ test('Новый переход в огонь отправляет ровно о
   await settleStore();
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
-    state: 'finished',
+    state: 'done',
     finishedAt: '2026-08-26T08:10:00.000Z',
   };
   harness.analysis.byTask[42].analysis = {
@@ -632,7 +632,7 @@ test('Первое появление источника становится б
 
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
-    state: 'finished',
+    state: 'done',
     finishedAt: '2026-08-26T08:10:00.000Z',
   };
   harness.analysis.byTask[42].analysis = {
@@ -656,7 +656,7 @@ test('Зажжённая строка переживает отказ источ
   await settleStore();
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
-    state: 'finished',
+    state: 'done',
     finishedAt: '2026-08-26T08:10:00.000Z',
   };
   harness.analysis.byTask[42].analysis = {
@@ -684,7 +684,7 @@ test('Выключенные браузерные оповещения не оз
   await settleStore();
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
-    state: 'finished',
+    state: 'done',
     finishedAt: '2026-08-26T08:10:00.000Z',
   };
   harness.analysis.byTask[42].analysis = {
@@ -697,7 +697,7 @@ test('Выключенные браузерные оповещения не оз
 
 test('Выключенный плагин не читает API и скрывает вычисленное состояние', async (t) => {
   const { store, harness } = await reactiveStoreFixture({
-    currentState: 'finished',
+    currentState: 'done',
     enabled: false,
   });
   t.after(() => {
@@ -726,6 +726,35 @@ test('Недоступная доска не зажигает задачу ка�
   await settleStore();
 
   assert.equal(store.litCount, 0);
+});
+
+test('Ручная кнопка отправляет фактическое done завершённого триажа', async (t) => {
+  const { store, harness } = await reactiveStoreFixture({ currentState: 'done' });
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+
+  await store.toggle(42);
+  const mutation = harness.apiCalls.find((call) => call.method === 'PUT');
+
+  assert.deepEqual({
+    reason: mutation?.body?.reason,
+    createIfMissing: mutation?.body?.createIfMissing,
+    analysis: mutation?.body?.snapshot?.analysis,
+    error: store.error,
+  }, {
+    reason: 'manual',
+    createIfMissing: true,
+    analysis: {
+      state: 'done',
+      queuedAt: '2026-08-26T08:00:00.000Z',
+      startedAt: null,
+      finishedAt: '2026-08-26T08:10:00.000Z',
+      generatedAt: '2026-08-26T08:10:01.000Z',
+    },
+    error: null,
+  });
 });
 
 test('Повторное нажатие снимает запись, а следующее возвращает её', async (t) => {
@@ -788,7 +817,7 @@ test('Наступление события зажигает строку, но 
   const before = structuredClone(store.entries);
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
-    state: 'finished',
+    state: 'done',
     finishedAt: '2026-08-26T08:10:00.000Z',
   };
   harness.analysis.byTask[42].analysis = {

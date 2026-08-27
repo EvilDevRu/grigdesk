@@ -66,9 +66,9 @@
   (factory, b24, system, media, chat, settings, health, terminal, agents, routes, providers,
   analysis, auth, gateway, plugins, projects — реестр проектов с путями репозиториев,
   code — плагин «Код», task-shelf — плагин «Полка», inbox — плагин «Входящие»,
-  telegram/github — плагины каналов).
+  telegram/github — плагины каналов, ssh — выключенный по умолчанию надзорный SSH-плагин).
 - **web/** — Vite + Vue 3 (PWA). `views/` (Board, Pipeline, Agents, Chats, Routes, Projects, Code,
-  Shelf, Diff, Tools, Video, Inbox, Telegram, GitHub, Terminal, Settings, Login, TaskModal),
+  Shelf, Diff, Tools, Video, Inbox, Telegram, GitHub, Terminal, SSH, Settings, Login, TaskModal),
   `views/pipeline/FactoryGraph.vue` (SVG-граф), `views/chat/` (ChatList,
   ChatSession, EffortSlider, StepList — лента хода агента, ChatQuestion — вопрос агента),
   `features/companion/` (headless bridge, attention, browser TTS и компактный `CompanionHost`),
@@ -595,6 +595,15 @@
   Приложение / Речь / Битрикс24 / Исполнители / Запуски / Плагины / Сервер / Доступ.
   Терминал: `GET /api/terminal` (WebSocket, настоящий PTY; сообщения `in` и `resize`,
   размер меняется через `TIOCSWINSZ` + `SIGWINCH`). Реалтайм: `GET /api/events` (SSE).
+
+### SSH-плагин
+
+Human API: `/api/ssh/connections` и `/api/ssh/host-key/:challengeId` управляют профилями
+и доверием ключу; `/api/ssh/sessions`, `/api/ssh/sessions/:sid/agent-access` и
+WebSocket `/api/ssh/sessions/:sid/terminal` — server-owned сессиями; human-only SFTP —
+`/api/ssh/sessions/:sid/files`; журнал — `/api/ssh/audit`; единый origin-aware ответ на
+команду агента — `/api/ssh/approvals/:pid`. Полный контракт и варианты endpoint-ов:
+[`docs/cockpit/ssh.md`](docs/cockpit/ssh.md).
 
 ## Ключевые решения (почему так)
 

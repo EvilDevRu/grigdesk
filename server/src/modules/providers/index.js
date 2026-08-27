@@ -21,6 +21,13 @@ import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/provider-usage-s
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
+const DIRECT_SSH_ENFORCEMENTS = new Set([
+  'command-hook',
+  'tool-filter',
+  'network-sandbox',
+  'fail-closed',
+  'unsupported',
+]);
 
 // Меню слэш-команд доверяет только валидным записям контракта (executors/index.js):
 // cmd вида '/name' (CLI-команда) либо '$name' (нативный skill Codex),
@@ -78,6 +85,26 @@ async function providersModule(fastify, opts) {
     }
   }
 
+  /**
+   * Способ запрета объявляет сам runtime-адаптер. Ошибка декларации не раскрывает
+   * возможность молча: реестр честно показывает unsupported без списка вендоров.
+   */
+  async function directSshPolicyOf(ex) {
+    if (typeof ex.run !== 'function') return { enforcement: 'unsupported' };
+    try {
+      const declared = typeof ex.directSshPolicy === 'function'
+        ? await ex.directSshPolicy(config)
+        : ex.directSshPolicy;
+      if (!DIRECT_SSH_ENFORCEMENTS.has(declared?.enforcement)) {
+        return { enforcement: 'unsupported' };
+      }
+      return { ...declared, enforcement: declared.enforcement };
+    } catch (err) {
+      fastify.log.warn({ provider: ex.id, err: err.message }, 'способ запрета SSH исполнителя не получен');
+      return { enforcement: 'unsupported' };
+    }
+  }
+
   async function buildRegistry() {
     const executors = await adaptersOf();
     const models = await getModelsRegistry(config);
@@ -110,6 +137,7 @@ async function providersModule(fastify, opts) {
         // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
         trustedDirectories: await trustedDirectoriesOf(ex),
+        directSshPolicy: await directSshPolicyOf(ex),
         installed: ok,
         install: ex.install || null,
         // Установка и login могут быть разными сценариями. Старые адаптеры пока
@@ -314,7 +342,7 @@ async function providersModule(fastify, opts) {
    * значение к типу его `kind` — чужой ключ в prefs не попадёт.
    */
   fastify.post('/api/providers/:id/settings', async (request, reply) => {
-    const ex = (await getProviderAdapters()).get(String(request.params.id));
+    const ex = (await adaptersOf()).get(String(request.params.id));
     if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
     const applied = await applyProviderSetting(ex, prefs.read().providerSettings, request.body || {}, config);
     if (!applied.ok) return reply.code(400).send({ error: applied.error, message: applied.message });

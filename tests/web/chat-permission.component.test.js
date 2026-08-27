@@ -219,3 +219,56 @@ test('незнакомая форма запроса не превращаетс
 
   assert.match(wrapper.find('.p-in').text(), /whatever/);
 });
+
+test('SSH-карточка показывает сервер пользователя root sudo и полную команду', async (t) => {
+  const command = `sudo printf '${'x'.repeat(10_000)}'`;
+  const { wrapper } = await mountPermission(t, {
+    pid: 'ssh-p1',
+    origin: 'ssh',
+    kind: 'perm',
+    tool: 'supervised_ssh',
+    server: { label: 'Боевой код', host: 'server.internal', port: 2222 },
+    user: 'root',
+    isRoot: true,
+    usesSudo: true,
+    command,
+  });
+  const server = wrapper.find('[data-ssh-server]');
+  const user = wrapper.find('[data-ssh-user]');
+  const commandElement = wrapper.find('[data-ssh-command]');
+
+  assert.deepEqual({
+    server: server.exists() ? server.text() : null,
+    user: user.exists() ? user.text() : null,
+    badges: wrapper.findAll('[data-ssh-privilege]').map((entry) => entry.text()),
+    commandLength: commandElement.exists() ? commandElement.text().length : 0,
+    fullCommand: commandElement.exists() && commandElement.text() === command,
+    remember: wrapper.find('input[type="checkbox"]').exists(),
+  }, {
+    server: 'Боевой код — server.internal:2222',
+    user: 'root',
+    badges: ['root', 'sudo'],
+    commandLength: command.length,
+    fullCommand: true,
+    remember: false,
+  });
+});
+
+test('SSH-отказ без пояснения оставляет карточку без answer', async (t) => {
+  const { wrapper, flushPromises } = await mountPermission(t, {
+    pid: 'ssh-p2',
+    origin: 'ssh',
+    kind: 'perm',
+    tool: 'supervised_ssh',
+    server: { label: 'База', host: 'db.internal', port: 22 },
+    user: 'deploy',
+    isRoot: false,
+    usesSudo: false,
+    command: 'systemctl status postgresql',
+  });
+  globalThis.__chatPermissionPrompt = async () => '   ';
+  await button(wrapper, 'Отклонить').trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.emitted('answer'), undefined);
+});

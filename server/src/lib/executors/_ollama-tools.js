@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { cut, cutMiddle, base, lineCount } from '../chat/stream-steps.js';
+import { isDirectSshCommand } from './_direct-ssh-policy.js';
 
 // Сколько текста инструмент возвращает МОДЕЛИ. Жёстче, чем лента для человека:
 // результат уезжает обратно в контекст, а у локальной модели он 32k по умолчанию —
@@ -294,8 +295,20 @@ function runProcess(cmd, argv, { cwd, signal, allowExitCode, timeoutMs = 30000 }
 }
 
 /** Декларации инструментов для поля tools запроса /api/chat. */
-export function toolDeclarations() {
-  return TOOLS.map((t) => t.schema);
+export function toolDeclarations(workTools = null) {
+  const shared = (workTools?.descriptors || []).map((descriptor) => (
+    descriptor.type === 'function'
+      ? descriptor
+      : {
+          type: 'function',
+          function: {
+            name: descriptor.name,
+            description: descriptor.description,
+            parameters: descriptor.inputSchema,
+          },
+        }
+  ));
+  return [...TOOLS.map((tool) => tool.schema), ...shared];
 }
 
 /**
@@ -318,7 +331,8 @@ export function toolModes() {
  * которым пользуется Kimi (modules/chat). sink — лента шагов.
  */
 export async function createToolbox({
-  cwd, roots = [], permissionMode = 'manual', onPermission, sink, signal,
+  cwd, roots = [], permissionMode = 'manual', blockDirectSsh = true,
+  onPermission, sink, signal, workTools,
 } = {}) {
   // Корни резолвим один раз: realpath — дорогой сисколл, а проверять их надо на каждый путь.
   const realRoots = [];
@@ -370,6 +384,21 @@ export async function createToolbox({
    * модели текстом, чтобы та исправилась сама (кроме отмены хода человеком).
    */
   async function call({ name, args }) {
+    const shared = (workTools?.descriptors || []).find((descriptor) => (
+      (descriptor.name || descriptor.function?.name) === String(name)
+    ));
+    if (shared) {
+      const id = `t${(calls += 1)}`;
+      sink?.emit({ k: 'tool', id, name: String(name), title: 'Надзорный SSH' });
+      const result = await workTools.invoke(String(name), args && typeof args === 'object' ? args : {});
+      sink?.emit({
+        k: 'res',
+        id,
+        ok: result?.ok !== false,
+        text: cut(JSON.stringify(result)),
+      });
+      return result;
+    }
     const tool = BY_NAME.get(String(name));
     const id = `t${(calls += 1)}`;
     if (!tool) {
@@ -379,6 +408,13 @@ export async function createToolbox({
     }
     const safeArgs = args && typeof args === 'object' ? args : {};
     sink?.emit({ k: 'tool', id, name: tool.ribbon, ...tool.describe(safeArgs) });
+
+    if (blockDirectSsh && tool.name === 'bash'
+        && isDirectSshCommand(String(safeArgs.command || ''))) {
+      const text = 'Прямой SSH запрещён настройкой исполнителя.';
+      sink?.emit({ k: 'res', id, ok: false, text });
+      return { ok: false, text };
+    }
 
     const verdict = await authorize(tool, safeArgs);
     if (!verdict.ok) {

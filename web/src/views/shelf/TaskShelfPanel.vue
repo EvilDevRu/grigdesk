@@ -9,9 +9,11 @@
     </header>
 
     <p v-if="shelf.loading && !shelf.loaded" class="shelf-state">Загружаю полку…</p>
-    <p v-else-if="shelf.error" class="shelf-state error" role="alert">{{ shelf.error }}</p>
-    <p v-else-if="!shelf.rows.length" class="shelf-state">На полке пока пусто</p>
-    <ul v-else class="shelf-list">
+    <p v-if="shelf.error" class="shelf-state error" role="alert">{{ shelf.error }}</p>
+    <p v-if="!shelf.loading && !shelf.error && !shelf.rows.length" class="shelf-state">
+      На полке пока пусто
+    </p>
+    <ul v-if="shelf.rows.length" class="shelf-list">
       <li v-for="row in shelf.rows" :key="row.taskId">
         <UiSelectableRow
           data-ui-task-shelf-row

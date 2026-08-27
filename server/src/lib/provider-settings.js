@@ -43,7 +43,12 @@ function coerce(kind, value) {
  * @returns {{ ok: true, providerSettings: object, settings: object[] }
  *          | { ok: false, error: string, message: string }}
  */
-export async function applyProviderSetting(executor, allSaved, { settingId, value } = {}, config) {
+export async function applyProviderSetting(
+  executor,
+  allSaved,
+  { settingId, value, confirmed } = {},
+  config,
+) {
   const decl = (await declaredSettings(executor, config)).find((s) => s.id === String(settingId || ''));
   if (!decl) {
     return {
@@ -59,10 +64,24 @@ export async function applyProviderSetting(executor, allSaved, { settingId, valu
       message: `${settingId} — справка исполнителя ${executor?.name || '?'}, а не настройка`,
     };
   }
+  const coerced = coerce(decl.kind, value);
+  const confirmation = decl.confirm?.[coerced ? 'on' : 'off'];
+  if (confirmation && confirmed !== true) {
+    return {
+      ok: false,
+      error: 'confirmation_required',
+      message: String(confirmation.text || 'Изменение требует подтверждения.'),
+    };
+  }
+
   const all = allSaved || {};
   const providerSettings = {
     ...all,
-    [executor.id]: { ...(all[executor.id] || {}), [decl.id]: coerce(decl.kind, value) },
+    [executor.id]: { ...(all[executor.id] || {}), [decl.id]: coerced },
   };
-  return { ok: true, providerSettings, settings: await resolveProviderSettings(executor, providerSettings[executor.id], config) };
+  return {
+    ok: true,
+    providerSettings,
+    settings: await resolveProviderSettings(executor, providerSettings[executor.id], config),
+  };
 }

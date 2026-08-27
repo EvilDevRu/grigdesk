@@ -120,14 +120,22 @@ export const useProvidersStore = defineStore('providers', {
      * чтобы тумблер не «отставал», и откатываем, если сервер не принял: схему настроек
      * объявляет исполнитель, фронт про смысл ключа ничего не знает.
      */
-    async saveSetting(providerId, settingId, value) {
+    async saveSetting(providerId, settingId, value, confirmed) {
       const p = this.providers.find((x) => x.id === providerId);
       const s = (p?.settings || []).find((x) => x.id === settingId);
       if (!s) return { ok: false, error: 'настройка не объявлена исполнителем' };
       const before = s.value;
       s.value = value;
       try {
-        const r = await api.post(`/api/providers/${encodeURIComponent(providerId)}/settings`, { settingId, value });
+        const body = {
+          settingId,
+          value,
+          ...(confirmed === true ? { confirmed: true } : {}),
+        };
+        const r = await api.post(
+          `/api/providers/${encodeURIComponent(providerId)}/settings`,
+          body,
+        );
         if (!r?.ok) { s.value = before; return { ok: false, error: r?.message || 'сервер не принял значение' }; }
         if (r.settings) p.settings = r.settings;
         return { ok: true };

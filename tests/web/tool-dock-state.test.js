@@ -43,10 +43,14 @@ test('dock store клампит ширину, запоминает геомет�
   dock.setExpanded(true);
   assert.equal(dock.isExpanded, true);
   assert.equal(dock.expandedPreference, true);
-  assert.equal(storage.value('cockpit-dock-expanded'), '1');
+  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), {
+    terminal: true,
+  });
   assert.equal(dock.width, 590, 'разворачивание не подменяет сохранённую обычную ширину');
   dock.open('code');
-  assert.equal(dock.isExpanded, true, 'переключение инструмента сохраняет геометрию открытого дока');
+  assert.equal(dock.isExpanded, false, 'Code не наследует полноэкранный режим Terminal');
+  dock.open('terminal');
+  assert.equal(dock.isExpanded, true, 'возврат к Terminal восстанавливает его геометрию');
   dock.close();
   assert.equal(dock.isExpanded, false);
   assert.equal(dock.expandedPreference, true, 'скрытие сохраняет выбранную геометрию');
@@ -67,12 +71,14 @@ test('dock store клампит ширину, запоминает геомет�
   dock.setExpanded(false, { persist: false });
   assert.equal(dock.isExpanded, false, 'смена route может временно вернуть обычную ширину');
   assert.equal(dock.expandedPreference, true, 'техническое сворачивание не меняет настройку');
-  assert.equal(storage.value('cockpit-dock-expanded'), '1');
+  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), {
+    terminal: true,
+  });
   dock.close();
   dock.open('terminal');
   assert.equal(dock.isExpanded, true, 'после временного сворачивания настройка восстанавливается');
   dock.setExpanded(false);
-  assert.equal(storage.value('cockpit-dock-expanded'), '0');
+  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), {});
   dock.close();
   dock.open('terminal');
   assert.equal(dock.isExpanded, false, 'явное сворачивание становится новой настройкой');
@@ -96,6 +102,23 @@ test('dock store клампит ширину, запоминает геомет�
   const restored = useDockStore();
   restored.open('code');
   assert.equal(restored.isExpanded, true, 'полноширинный режим восстанавливается из localStorage');
+});
+
+test('старый общий fullscreen мигрирует только к последнему инструменту', () => {
+  const storage = memoryStorage({
+    'cockpit-dock-tool': 'code',
+    'cockpit-dock-expanded': '1',
+  });
+  Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+  setActivePinia(createPinia());
+  const dock = useDockStore();
+
+  assert.deepEqual(JSON.parse(storage.value('cockpit-dock-expanded-tools')), { code: true });
+  assert.equal(storage.value('cockpit-dock-expanded'), undefined);
+  dock.open('shelf');
+  assert.equal(dock.isExpanded, false, 'Полка не наследует прежнюю настройку Code');
+  dock.open('code');
+  assert.equal(dock.isExpanded, true, 'последний инструмент сохраняет прежнюю геометрию');
 });
 
 function launcherHarness({ routeTool = null, isOpen = false, activeTool = 'code' } = {}) {

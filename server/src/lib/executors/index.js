@@ -36,7 +36,8 @@
 //   updateCmd?               — команда обновления CLI (кнопка «Обновить» в настройках)
 //   settings?                — СВОИ настройки исполнителя для его плашки в
 //                              «Настройках → Исполнители»: [{ id, kind, label, hint?,
-//                              value, disabled?, note?, min?, max?, step? }] ЛИБО
+//                              value, disabled?, note?, min?, max?, step?, confirm? }]
+//                              ЛИБО
 //                              async-функция (config) → такой же массив — для деклараций,
 //                              зависящих от живого железа/демона (потолок ползунка num_ctx
 //                              у Ollama считается от памяти машины). kind: 'toggle' |
@@ -45,7 +46,14 @@
 //                              ИИ разные, поэтому список объявляет сам executor, а UI только
 //                              рисует его по kind. `disabled: true` + `note` — ручка
 //                              объявлена, но ещё не подключена к ходу (тумблер показан и
-//                              не работает).
+//                              не работает). `confirm.on/off` — направленное подтверждение
+//                              `{ text, label?, danger? }`; сервер принимает такую смену
+//                              только с точным `confirmed: true`.
+//   directSshPolicy?         — как адаптер обеспечивает запрет прямого SSH: объект
+//                              либо `(config) => object`, где enforcement — один из
+//                              command-hook|tool-filter|network-sandbox|fail-closed|
+//                              unsupported, note? — честная режимная граница для UI.
+//                              Не объявлен или сломан → unsupported.
 //   trustedDirectories?      — применяет ли исполнитель `opts.extraDirs` как доступные
 //                              рабочие каталоги новых ходов. `true` либо
 //                              `(config) => boolean`, если поддержка зависит от режима
@@ -122,6 +130,70 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
+
+const SUPERVISED_SSH = {
+  name: 'supervised_ssh',
+  description: 'Показать разрешённые живые сессии или запросить выполнение команды под надзором.',
+  inputSchema: {
+    type: 'object',
+    required: ['action'],
+    properties: {
+      action: { type: 'string', enum: ['list', 'exec'] },
+      label: { type: 'string', description: 'Метка нужной сессии' },
+      role: { type: 'string', description: 'Роль нужной сессии' },
+      command: { type: 'string', description: 'Команда целиком; человек подтвердит её отдельно' },
+    },
+  },
+};
+
+function safeWorkResult(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => ({
+      label: String(item?.label || ''),
+      role: String(item?.role || ''),
+    }));
+  }
+  const keys = [
+    'ok', 'error', 'comment', 'output', 'shownBytes', 'totalBytes', 'truncated',
+    'notice', 'exitCode', 'signal',
+  ];
+  const result = {};
+  for (const key of keys) {
+    if (value?.[key] !== undefined) {
+      result[key] = value[key];
+    }
+  }
+  return result;
+}
+
+/**
+ * Provider-neutral рабочие инструменты замкнуты на server-owned scope. Никакое
+ * поле аргументов модели не способно назначить проект, чат или живую сессию.
+ */
+export function createWorkTools({ projectId = null, chatKey = '', invoke } = {}) {
+  const descriptors = [structuredClone(SUPERVISED_SSH)];
+
+  async function call(name, input = {}) {
+    if (name !== SUPERVISED_SSH.name) {
+      return { ok: false, error: 'tool_not_found' };
+    }
+    if (!projectId) {
+      return input.action === 'list'
+        ? []
+        : { ok: false, error: 'project_scope_unavailable' };
+    }
+    const scope = {
+      projectId: String(projectId),
+      ...(chatKey ? { chatKey: String(chatKey) } : {}),
+    };
+    const result = await invoke(scope, input);
+    return safeWorkResult(result);
+  }
+
+  return { descriptors, invoke: call };
+}
+
+export const workTools = createWorkTools;
 
 let loadedAdapters = null; // Map id → provider adapter
 let loadedExecutors = null; // Map id → adapter с run()

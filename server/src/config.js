@@ -142,6 +142,14 @@ export const config = {
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),
+  // SSH-профили, известные host keys и журнал команд агента содержат адреса боевых
+  // машин и вывод команд, поэтому живут в отдельном приватном namespace, не в prefs.
+  sshConnectionsPath: process.env.COCKPIT_SSH_CONNECTIONS_PATH
+    || path.join(__dirname, '..', '.state', 'ssh', 'connections.json'),
+  sshKnownHostsPath: process.env.COCKPIT_SSH_KNOWN_HOSTS_PATH
+    || path.join(__dirname, '..', '.state', 'ssh', 'known-hosts.json'),
+  sshAuditDir: process.env.COCKPIT_SSH_AUDIT_DIR
+    || path.join(__dirname, '..', '.state', 'ssh', 'audit'),
   // Личная подборка B24-задач. Отдельно от prefs: это пользовательские данные,
   // а не настройки интерфейса.
   taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH

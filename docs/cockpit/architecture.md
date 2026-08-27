@@ -354,10 +354,11 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   Исполнители / Запуски / Плагины / Сервер / Доступ), Login
   и TaskModal. Глобальный `features/companion/CompanionHost.vue` — компактная chat surface;
   полный `ChatSession` монтируется только в `ChatsView`.
-- **Code, Shelf и Terminal монтирует только постоянный `shared/layout/ToolHost.vue`.**
-  Route-компоненты `/code`, `/shelf` и `/terminal` — пустые адаптеры; `page`, `dock` и
+- **Code, Shelf, Terminal и SSH монтирует только постоянный `shared/layout/ToolHost.vue`.**
+  Route-компоненты `/code`, `/shelf`, `/terminal` и `/ssh` — пустые адаптеры; `page`, `dock` и
   `hidden` меняют CSS одного render-site.
-  Поэтому во вкладке бывает максимум один Monaco и один terminal WebSocket. Компоненты загружаются
+  Поэтому во вкладке бывает максимум один Monaco и по одному активному terminal/SSH WebSocket.
+  Внутренние вкладки SSH переподключают один xterm, а сессии остаются на сервере. Компоненты загружаются
   независимо через `shared/tools/registry.js`, а `stores/dock.js` держит динамические mounted-флаги,
   runtime и exact-once intent-очереди. Правая рейка и overlay-док существуют с 900 px; на
   760–899 px остаются компактный sidebar и route-страницы, до 759 px — нижняя навигация.
@@ -366,9 +367,12 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
   У overlay-дока нет отдельной дублирующей шапки: expand/close встроены поверх строки
   панели. «Во весь экран» не меняет route/history, а растягивает тот же dock
   render-site на всю ширину content-колонки; повторный клик возвращает сохранённую обычную
-  ширину. Выбор геометрии хранится в `cockpit-dock-expanded` и восстанавливается после
-  скрытия/повторного открытия и при первом явном открытии после reload; сам док после
-  загрузки не показывается. У скрытого дока активный `isExpanded` остаётся
+  ширину. Выбор геометрии хранится отдельно для каждого registry id в
+  `cockpit-dock-expanded-tools`: полноэкранный Code не разворачивает Shelf или Terminal.
+  Старый общий `cockpit-dock-expanded` один раз относится только к последнему открытому
+  инструменту. Предпочтение восстанавливается после скрытия/повторного открытия и при
+  первом явном открытии после reload; сам док после загрузки не показывается.
+  У скрытого дока активный `isExpanded` остаётся
   выключен, поэтому основной контент не блокируется. Перекрытый `<main>` на это время
   получает `inert`/`aria-hidden`, а переход в
   другой раздел сворачивает expanded до обычного дока, чтобы новая страница сразу была
@@ -571,12 +575,14 @@ cookie jar, чтобы два процесса не перезаписывали
 порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
 старых серверных manifest только для известных встроенных `system: true` плагинов;
 пользовательский legacy-manifest остаётся в `rail`. Реестр: `lib/plugins-registry.js` (SYSTEM =
-video, code, shelf, inbox, telegram, github) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
+video, code, shelf, inbox, telegram, github, ssh) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
 в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
 системные модули (media, code, task-shelf, inbox, telegram, github) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
 plugin_disabled). Диктовка чата (`/api/chat/transcribe`) НЕ входит в плагин video — не гейтится.
+SSH также гейтит каждый HTTP/WebSocket route живой проверкой; выключение закрывает его
+server-owned сессии и ожидания без рестарта. Полный контракт — [ssh.md](ssh.md).
 
 **Умолчание вкл/выкл объявляет манифест, а не сорт плагина.** `isEnabled(prefsData, manifest)`
 берёт явный выбор человека из prefs, иначе — `manifest.defaultEnabled ?? !!manifest.system`.

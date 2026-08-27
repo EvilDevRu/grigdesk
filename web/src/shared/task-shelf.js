@@ -1,6 +1,6 @@
 // Единственное решение полки: нормализует доступные источники, строит новый снимок
 // и называет наступившее событие. Панель, чип и оповещение получают уже готовый row.
-const TERMINAL_ANALYSIS = new Set(['finished', 'failed', 'interrupted']);
+const TERMINAL_ANALYSIS = new Set(['done', 'finished', 'failed', 'interrupted']);
 const TERMINAL_B24 = new Set(['completed', 'done', 'closed']);
 
 function text(value) {
@@ -99,6 +99,7 @@ export default function taskShelfDecision({
     && TERMINAL_ANALYSIS.has(current.analysis.state)
     && JSON.stringify(before.analysis) !== JSON.stringify(current.analysis)) {
     const messages = {
+      done: 'Оценка готова',
       finished: 'Оценка готова',
       failed: 'Оценка завершилась с ошибкой',
       interrupted: 'Оценка была прервана',

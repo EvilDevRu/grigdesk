@@ -473,12 +473,24 @@
             <!-- Своя кнопка у каждой задачи: человек решает по каждой отдельно, а не
                  удаляет лишние черновики ради того, чтобы уехал нужный. -->
             <span class="dact">
-              <span v-if="d.createdId" class="ok">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M5 12l4 4L19 6" />
-                </svg>
-                задача {{ d.createdId }}
-              </span>
+              <template v-if="d.createdId">
+                <span class="ok">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 12l4 4L19 6" />
+                  </svg>
+                  задача {{ d.createdId }}
+                </span>
+                <!-- Задача уже создана, и повторно ставить её нельзя. Вместо тупиковой
+                     галочки даём перейти в общую карточку Cockpit и проверить результат. -->
+                <UiButton
+                  class="btn compact-action"
+                  :aria-label="`Открыть задачу ${d.createdId}`"
+                  title="Открыть задачу в Cockpit"
+                  @click="ui.openTask(d.createdId)"
+                >
+                  Открыть
+                </UiButton>
+              </template>
               <template v-else>
                 <UiToggleButton v-model="d.editing" class="btn compact-action">
                   {{ d.editing ? 'Готово' : 'Править' }}
@@ -629,11 +641,13 @@ import { writeClipboardText } from '../shared/clipboard.js';
 import { mmss } from '../shared/format.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useDocumentPreviewStore } from '../stores/document-preview.js';
+import { useUiStore } from '../stores/ui.js';
 import { canWidenClip, useVideoSessionStore } from '../stores/video-session.js';
 
 // Раздел — плагин «Видео → задачи»: выключенный показывает заглушку вместо формы.
 const plugins = usePluginsStore();
 const preview = useDocumentPreviewStore();
+const ui = useUiStore();
 if (!plugins.loaded) plugins.load();
 const pluginOff = computed(() => plugins.loaded && !plugins.enabled('video'));
 // Модель разбора — своя настройка этого плагина. Нет её — раздел работает как раньше,

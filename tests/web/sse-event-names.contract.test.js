@@ -57,3 +57,12 @@ test('SSE: фронт подписан на все события, которы�
     `эти события сервер шлёт и фронт их ждёт, но подписки нет: ${missing.join(', ')}`,
   );
 });
+
+test('SSE: SSH-инвалидации входят в единственную подписку вкладки', async () => {
+  const names = await subscribedNames();
+
+  assert.deepEqual(
+    ['ssh-sessions', 'ssh-permission', 'ssh-audit'].filter((name) => !names.has(name)),
+    [],
+  );
+});

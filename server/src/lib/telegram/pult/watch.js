@@ -540,6 +540,9 @@ export class TelegramPultWatch {
     try {
       const waitingBody = await this._api('GET', '/api/chat/waiting');
       for (const item of Array.isArray(waitingBody?.waiting) ? waitingBody.waiting : []) {
+        // Даже грязный/устаревший snapshot не выносит адрес, пользователя и команду
+        // SSH в Telegram: надзорные решения доступны только browser-session окнам.
+        if (item?.origin === 'ssh') continue;
         const pid = String(item?.pid || '');
         if (!pid) continue;
         // Кто спрашивает: имя разговора приходит вместе с ожиданием. Без него карточка

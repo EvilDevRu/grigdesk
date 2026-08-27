@@ -15,6 +15,7 @@ import {
   claudeSessionArgs,
   openClaudeStreamSession,
 } from '../../server/src/lib/executors/_claude-stream.js';
+import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
 import { ChatLiveSessions } from '../../server/src/lib/chat/live-sessions.js';
 import chatModule from '../../server/src/modules/chat/index.js';
 
@@ -201,6 +202,30 @@ test('пул переиспользует одну сессию и переот�
   await pool.closeAll();
 });
 
+test('смена blockDirectSsh переоткрывает процесс, равное значение не переоткрывает', async () => {
+  const opened = [];
+  const executor = fakeExecutor({ opened, restartOn: ['providerSettings'] });
+  const pool = new ChatLiveSessions({ maxSessions: 4 });
+
+  await pool.run({
+    chatKey: 'c1', executor, providerSettings: { blockDirectSsh: true },
+  }, { message: 'раз' });
+  await pool.run({
+    chatKey: 'c1', executor, providerSettings: { blockDirectSsh: true },
+  }, { message: 'два' });
+  const afterSame = opened.length;
+  await pool.run({
+    chatKey: 'c1', executor, providerSettings: { blockDirectSsh: false },
+  }, { message: 'три' });
+
+  assert.deepEqual({ afterSame, afterChange: opened.length, oldClosed: opened[0].closed }, {
+    afterSame: 1,
+    afterChange: 2,
+    oldClosed: true,
+  });
+  await pool.closeAll();
+});
+
 test('умерший процесс заменяется новым с прежним id сессии', async () => {
   const opened = [];
   const executor = fakeExecutor({ opened });
@@ -283,6 +308,30 @@ test('claude и codex объявляют живую сессию, а самоп�
   // Модель и рабочие каталоги — флаги запуска: сменить их без переоткрытия нечем.
   assert.equal(claude.session.restartOn.includes('model'), true);
   assert.equal(codex.session.restartOn.includes('cwd'), true);
+  assert.equal(claude.session.restartOn.includes('providerSettings'), true);
+  assert.equal(codex.session.restartOn.includes('providerSettings'), true);
+});
+
+test('долгоживущий Claude получает те же default-on SSH-слои, что разовый ход', () => {
+  const snapshot = [undefined, true, false].map((blockDirectSsh) => {
+    const providerSettings = blockDirectSsh === undefined ? {} : { blockDirectSsh };
+    const args = claudeSessionArgs({
+      permissionMode: 'bypassPermissions',
+      providerSettingsArgs: claudeProviderSettingsArgs(providerSettings),
+    });
+    const settingsIndex = args.indexOf('--settings');
+    const settings = settingsIndex >= 0 ? JSON.parse(args[settingsIndex + 1]) : {};
+    return {
+      nativeDeny: args.includes('--disallowedTools'),
+      hook: JSON.stringify(settings.hooks || {}).includes('_direct-ssh-policy-hook.js'),
+    };
+  });
+
+  assert.deepEqual(snapshot, [
+    { nativeDeny: true, hook: true },
+    { nativeDeny: true, hook: true },
+    { nativeDeny: false, hook: false },
+  ]);
 });
 
 test('модуль чата гейтит живую сессию настройкой и не убивает процесс стопом', async () => {

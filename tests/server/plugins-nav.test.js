@@ -24,6 +24,7 @@ test('системные инструменты имеют явные group/orde
       inbox: ['rail', 30],
       telegram: ['tools', 20],
       github: ['tools', 30],
+      ssh: ['dock', 40],
     },
   );
 

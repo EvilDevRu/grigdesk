@@ -4,6 +4,7 @@
       <div class="p-row">
         <span class="p-t">
           <template v-if="isPlan">План готов — утвердить?</template>
+          <template v-else-if="isSsh">Выполнить команду на сервере?</template>
           <template v-else>
             Разрешить <span class="p-tool">{{ req.tool }}</span>?
           </template>
@@ -32,9 +33,25 @@
         @update:model-value="chooseById"
       />
 
+      <div v-if="isSsh" class="p-ssh-meta">
+        <div data-ssh-server>
+          {{ req.server?.label }} — {{ req.server?.host }}:{{ req.server?.port }}
+        </div>
+        <div>
+          Пользователь: <strong data-ssh-user>{{ req.user }}</strong>
+          <span v-if="req.isRoot" class="p-ssh-badge" data-ssh-privilege>root</span>
+          <span v-if="req.usesSudo" class="p-ssh-badge" data-ssh-privilege>sudo</span>
+        </div>
+      </div>
+
       <div v-if="description" class="p-desc">{{ description }}</div>
       <div v-if="filePath" class="p-path">{{ filePath }}</div>
-      <pre v-if="command" class="p-in cmd">{{ command }}</pre>
+      <pre
+        v-if="command"
+        class="p-in cmd"
+        :class="{ ssh: isSsh }"
+        :data-ssh-command="isSsh ? '' : undefined"
+      >{{ command }}</pre>
       <pre v-if="plan" class="p-in big">{{ plan }}</pre>
 
       <div v-if="diff" class="p-diff">
@@ -55,7 +72,7 @@
       <pre v-if="details" class="p-in">{{ details }}</pre>
       <pre v-if="rest" class="p-in">{{ rest }}</pre>
 
-      <div v-if="!isPlan" class="p-rem">
+      <div v-if="!isPlan && !isSsh" class="p-rem">
         <UiCheckbox v-model="remember">
           не спрашивать про «{{ req.tool }}» до конца сессии
         </UiCheckbox>
@@ -97,11 +114,12 @@ watch(
 );
 
 const input = computed(() => props.req?.input || {});
+const isSsh = computed(() => props.req?.origin === 'ssh');
 const isPlan = computed(() => (
   Boolean(input.value.plan) || props.req?.tool === 'ExitPlanMode'
 ));
 const plan = computed(() => String(input.value.plan || ''));
-const command = computed(() => String(input.value.command || ''));
+const command = computed(() => String(isSsh.value ? props.req?.command || '' : input.value.command || ''));
 const filePath = computed(() => String(input.value.file_path || ''));
 const details = computed(() => String(input.value.details || ''));
 const description = computed(() => String(input.value.description || ''));
@@ -182,7 +200,7 @@ const rest = computed(() => {
 async function reject(choice = '') {
   const text = await promptDialog({
     title: isPlan.value ? 'Что доработать в плане?' : 'Почему отклоняете?',
-    placeholder: 'можно оставить пустым',
+    placeholder: isSsh.value ? 'Пояснение обязательно' : 'можно оставить пустым',
   });
 
   if (text === null) {
@@ -190,6 +208,8 @@ async function reject(choice = '') {
 
     return;
   }
+
+  if (isSsh.value && !text.trim()) return;
 
   emit('answer', false, false, text.trim(), choice);
 }
@@ -232,6 +252,10 @@ function chooseById(value) {
   border-radius: 8px; color: var(--ink-mid); font-size: 11.5px; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere; max-height: 132px; overflow-y: auto; }
 .p-in.cmd { color: var(--ink); font-family: var(--mono, monospace); }
+.p-in.cmd.ssh { max-height: none; min-width: 0; max-width: 100%; word-break: break-word; }
+.p-ssh-meta { display: grid; gap: 4px; margin-top: 6px; min-width: 0; overflow-wrap: anywhere; }
+.p-ssh-badge { margin-left: 5px; padding: 1px 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 .p-in.big { max-height: 320px; color: var(--ink); font-size: 12px;
   word-break: normal; overflow-wrap: anywhere; }
 .perm.plan { border-top-color: color-mix(in srgb, var(--accent) 45%, var(--line));

@@ -7,7 +7,14 @@ import { parseB24TaskId } from './b24-task-id.js';
 
 const SCHEMA_VERSION = 1;
 const REASONS = new Set(['manual', 'analysis', 'pipeline', 'comments']);
-const ANALYSIS_STATES = new Set(['queued', 'running', 'finished', 'failed', 'interrupted']);
+const ANALYSIS_STATES = new Set([
+  'queued',
+  'running',
+  'done',
+  'finished',
+  'failed',
+  'interrupted',
+]);
 
 export class TaskShelfStoreError extends Error {
   constructor(code, message, cause = null) {

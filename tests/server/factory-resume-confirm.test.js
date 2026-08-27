@@ -56,13 +56,78 @@ test('живой юнит с ЧУЖОЙ попыткой в реестре не 
   assert.equal(res.message, 'оркестратор не подтвердил запуск попытки');
 });
 
+// Ложная тревога, ради которой окно подтверждения и появилось: реестр не успевал
+// получить ATTEMPT_ID/ORCH_PID за окно быстрых отказов, и кокпит писал «прогон не
+// поехал» над идущим прогоном. Живой замер: возврат курсора в 10:55:14, заход узла
+// в 10:55:33 — девятнадцать секунд, львиная доля на preflight исполнителей.
+test('поздняя запись реестра — не отказ: identity опрашивается после окна', async () => {
+  let reads = 0;
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => {
+      reads += 1;
+      // Первые снимки — движок ещё не дописал реестр.
+      if (reads < 4) return { attempt: '', alive: false };
+      return { attempt: ATTEMPT, alive: true };
+    },
+    unitAlive: async () => true,
+    reason: async () => 'причины нет, прогон идёт',
+    settleMs: 8, stepMs: 2, confirmMs: 400,
+  });
+  assert.deepEqual(res, { ok: true, outcome: 'running' });
+  assert.ok(reads >= 4, 'реестр перечитывается, а не снимается один раз');
+});
+
+test('нечитаемый реестр в окне подтверждения тоже дожидается движка', async () => {
+  let reads = 0;
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => {
+      reads += 1;
+      return reads < 3 ? null : { attempt: ATTEMPT, alive: true };
+    },
+    unitAlive: async () => true,
+    reason: async () => '',
+    settleMs: 8, stepMs: 2, confirmMs: 400,
+  });
+  assert.equal(res.ok, true);
+});
+
+test('чужая попытка отвечает сразу, не выбирая окно подтверждения', async () => {
+  // Ждать тут нечего: реестр назвал ДРУГУЮ попытку, и от времени это не изменится.
+  const started = Date.now();
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => ({ attempt: 'a_ffffffffffffffffffffffffffffffff', alive: true }),
+    unitAlive: async () => true,
+    reason: async () => '',
+    settleMs: 8, stepMs: 2, confirmMs: 5000,
+  });
+  assert.equal(res.outcome, 'unconfirmed');
+  assert.ok(Date.now() - started < 2000, 'авторитетный ответ не ждёт окна подтверждения');
+});
+
+test('юнит, умерший уже в окне подтверждения, — отказ с причиной', async () => {
+  let polls = 0;
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => ({ attempt: '', alive: false }),
+    unitAlive: async () => { polls += 1; return polls < 4; },
+    reason: async () => 'route: контракт попытки разошёлся с профилем',
+    settleMs: 8, stepMs: 2, confirmMs: 5000,
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'exited');
+  assert.match(res.message, /контракт попытки разошёлся/);
+});
+
 test('мёртвый оркестратор при живом юните — тоже не подтверждение', async () => {
   const res = await confirmRouteResume({
     attempt: ATTEMPT,
     identity: async () => ({ attempt: ATTEMPT, alive: false }),
     unitAlive: async () => true,
     reason: async () => 'route: прогон завершён',
-    settleMs: 8, stepMs: 4,
+    settleMs: 8, stepMs: 4, confirmMs: 20,
   });
   assert.equal(res.ok, false);
   assert.equal(res.outcome, 'unconfirmed');

@@ -385,6 +385,33 @@ const BASE_GEOMETRY_AUDIT = `(() => {
   ];
   const topbarAction = document.querySelector('[data-geometry-topbar-action]');
   const topbarFooter = document.querySelector('[data-geometry-topbar-footer]');
+  const sshCard = document.querySelector('[data-geometry-ssh-card]');
+  const sshActions = document.querySelector('[data-geometry-ssh-actions]');
+  const sshCommand = document.querySelector('[data-geometry-ssh-command]');
+
+  if (!sshCard || !sshActions || !sshCommand) {
+    errors.push('SSH approval: контрольная карточка отсутствует');
+  } else {
+    if (!(sshCard.scrollWidth <= sshCard.clientWidth + tolerance)) {
+      errors.push('SSH approval: карточка получила горизонтальный overflow');
+    }
+    const cardRect = sshCard.getBoundingClientRect();
+    const actionsRect = sshActions.getBoundingClientRect();
+    if (
+      actionsRect.left < cardRect.left - tolerance
+      || actionsRect.right > cardRect.right + tolerance
+      || !inViewport(sshActions)
+    ) {
+      errors.push('SSH approval: кнопки вышли за край карточки или viewport');
+    }
+    if (!sshCommand.textContent.endsWith('SSH_COMMAND_TAIL')) {
+      errors.push('SSH approval: хвост полной команды потерян');
+    }
+    const sshCommandStyle = getComputedStyle(sshCommand);
+    if (sshCommandStyle.textOverflow === 'ellipsis') {
+      errors.push('SSH approval: команда скрыта ellipsis');
+    }
+  }
 
   if (!idle || !loading) {
     errors.push('loading pair: отсутствуют контрольные кнопки');

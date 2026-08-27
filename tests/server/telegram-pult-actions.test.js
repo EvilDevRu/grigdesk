@@ -297,6 +297,37 @@ test('разрешение: allow/deny уезжают в permission, отказ 
   assert.match(f.sends().at(-1).body.text, /✓ .*: отклонено, пояснение уехало агенту/u);
 });
 
+test('Telegram-кнопка fail-closed не отвечает на SSH-origin ни одним endpoint', async (t) => {
+  const f = await fixture(t);
+  f.cockpit.set('GET', '/api/chat/waiting', {
+    statusCode: 200,
+    body: {
+      waiting: [{
+        pid: 'ssh-private-pid',
+        origin: 'ssh',
+        chatKey: 'chat-a',
+        server: { label: 'Боевой код', host: 'SSH_PRIVATE_HOST_91006', port: 22 },
+        user: 'SSH_PRIVATE_USER_91006',
+        command: 'SSH_PRIVATE_COMMAND_91006',
+      }],
+    },
+  });
+  f.cockpit.set('POST', '/api/chat/permission/ssh-private-pid', {
+    statusCode: 200,
+    body: { ok: true },
+  });
+  f.cockpit.set('POST', '/api/ssh/approvals/ssh-private-pid', {
+    statusCode: 200,
+    body: { ok: true },
+  });
+  await f.tap('p:ssh-private-pid:a');
+
+  assert.deepEqual(
+    f.cockpit.calls.filter((call) => call.method === 'POST'),
+    [],
+  );
+});
+
 test('чужое нажатие — молча ноль вызовов: ни answer, ни inject', async (t) => {
   const f = await fixture(t);
   await f.tap('g:4187:GATE_PLAN:a', { from: { id: 999, name: 'Некто', username: '' } });

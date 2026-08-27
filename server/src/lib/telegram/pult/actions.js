@@ -542,7 +542,9 @@ export class TelegramPultActions {
   async _waitingItem(pid) {
     const res = await this._api('GET', '/api/chat/waiting');
     if (res.statusCode >= 400) return null;
-    return (res.body?.waiting || []).find((item) => String(item?.pid) === pid) || null;
+    return (res.body?.waiting || []).find((item) => (
+      item?.origin !== 'ssh' && String(item?.pid) === pid
+    )) || null;
   }
 
   async _question({ lease, callback, chatId }, { pid, index }) {
@@ -587,12 +589,22 @@ export class TelegramPultActions {
   }
 
   async _permission({ lease, callback, chatId }, { pid, action }) {
+    const snapshot = await this._api('GET', '/api/chat/waiting');
+    const found = snapshot.statusCode < 400
+      ? (snapshot.body?.waiting || []).find((item) => String(item?.pid) === pid)
+      : { pid };
+    // Новый сервер даёт авторитетный snapshot: SSH в Telegram не показываем и
+    // не отправляем ни в generic, ни в SSH endpoint. Fallback нужен только для
+    // rolling update со старым сервером, где waiting мог быть недоступен и SSH
+    // origin ещё не существовал.
+    const pending = found?.origin === 'ssh' ? null : found;
+    if (!pending) {
+      await this._answer(lease, callback, 'Этот запрос уже закрыт.');
+      await this._delete(lease, chatId, callback.messageId);
+      this.forget(`perm:${pid}`);
+      return;
+    }
     if (action === 'deny-comment') {
-      const pending = await this._waitingItem(pid);
-      if (!pending) {
-        await this._answer(lease, callback, 'Этот запрос уже закрыт.');
-        return;
-      }
       const denySubject = chatSubject(pending);
       this._remember(this.replyWaits, callback.messageId, {
         kind: 'perm-deny', pid, chatId, subject: denySubject,

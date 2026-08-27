@@ -60,6 +60,15 @@
 
     <section class="ui-gallery__section">
       <h2>Product compositions</h2>
+      <article class="ui-gallery__ssh-card" data-geometry-ssh-card>
+        <strong>Боевой код — server.internal:22</strong>
+        <span>Пользователь: root · sudo</span>
+        <pre data-geometry-ssh-command>{{ 'x'.repeat(10_000) + 'SSH_COMMAND_TAIL' }}</pre>
+        <div class="ui-gallery__ssh-actions" data-geometry-ssh-actions>
+          <UiButton variant="solid" tone="accent">Разрешить</UiButton>
+          <UiButton tone="danger">Отказать</UiButton>
+        </div>
+      </article>
       <div class="ui-gallery__composer" data-geometry-composer>
         <UiTextarea
           v-model="composerText"

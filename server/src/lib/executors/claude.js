@@ -13,6 +13,12 @@ import { npmLatest } from './_npm-latest.js';
 import { withRetry } from '../retry.js';
 import { contextCacheStatus } from '../chat/context-cache.js';
 import {
+  CLAUDE_DIRECT_SSH_DENY,
+  DIRECT_SSH_HOOK_COMMAND,
+  DIRECT_SSH_HOOK_MATCHER,
+  directSshSetting,
+} from './_direct-ssh-policy.js';
+import {
   buildClaudeTurnResult,
   claudeSessionArgs,
   createClaudeTurnCollector,
@@ -775,9 +781,28 @@ async function configureClaudeExtraUsage(patch = {}, config = {}) {
   return { ok: true, resource: parseClaudeUsageResources(after.status === 200 ? after.data : null)[0] || null };
 }
 
-/** Аргументы CLI для настроек, которыми управляет Cockpit. */
-export function claudeProviderSettingsArgs(settings = {}) {
-  return ['--settings', JSON.stringify({ fastMode: settings.fastMode === true })];
+/**
+ * Аргументы coding-запуска Claude. Нативный deny ловит прямую форму, а PreToolUse
+ * разбирает basename, wrappers и удалённый rsync; false снимает только оба наших слоя.
+ */
+export function claudeProviderSettingsArgs(settings = {}, { directSshPolicy = true } = {}) {
+  const blockDirectSsh = directSshPolicy && settings.blockDirectSsh !== false;
+  const payload = {
+    fastMode: settings.fastMode === true,
+    ...(blockDirectSsh && {
+      hooks: {
+        PreToolUse: [{
+          matcher: DIRECT_SSH_HOOK_MATCHER,
+          hooks: [{ type: 'command', command: DIRECT_SSH_HOOK_COMMAND, timeout: 5 }],
+        }],
+      },
+    }),
+  };
+  return [
+    ...(blockDirectSsh ? ['--disallowedTools', ...CLAUDE_DIRECT_SSH_DENY] : []),
+    '--settings',
+    JSON.stringify(payload),
+  ];
 }
 
 const CLAUDE_UNTRUSTED_MEDIA_TYPES = Object.freeze([
@@ -813,7 +838,7 @@ export function buildClaudeUntrustedArgs({ model, effort, providerSettings = {} 
     '--disable-slash-commands',
     '--setting-sources', '',
     '--no-session-persistence',
-    ...claudeProviderSettingsArgs(providerSettings),
+    ...claudeProviderSettingsArgs(providerSettings, { directSshPolicy: false }),
   ];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
@@ -1101,9 +1126,11 @@ export default {
   vendor: 'Anthropic',
   color: '#d97757',
   order: 1,
+  workToolsTransport: 'mcp',
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
   trustedDirectories: true,
+  directSshPolicy: { enforcement: 'command-hook' },
   untrustedInput: Object.freeze({
     text: true,
     images: true,
@@ -1116,6 +1143,7 @@ export default {
   // Ручка живая: выбор хранится в prefs и передаётся каждому headless-запуску через
   // `--settings {"fastMode":…}`. Доступность режима окончательно проверяет сам CLI.
   settings: [
+    directSshSetting(),
     {
       id: 'fastMode',
       kind: 'toggle',
@@ -1377,6 +1405,9 @@ export default {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
     args.push(...claudeProviderSettingsArgs(providerSettings));
     if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
+    if (mcpConfig?.mcpServers?.['cockpit-work']) {
+      args.push('--allowedTools', 'mcp__cockpit-work__supervised_ssh');
+    }
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
@@ -1452,7 +1483,15 @@ export default {
   session: {
     mode: 'persistent',
     unsolicited: true,
-    restartOn: ['model', 'effort', 'permissionMode', 'cwd', 'extraDirs'],
+    restartOn: [
+      'model',
+      'effort',
+      'permissionMode',
+      'cwd',
+      'extraDirs',
+      'providerSettings',
+      'workToolScopeKey',
+    ],
 
     open({
       config, env, cwd, extraDirs = [], model, effort, permissionMode, sessionId,

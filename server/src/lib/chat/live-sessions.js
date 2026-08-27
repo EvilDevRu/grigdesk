@@ -14,7 +14,9 @@ const DEFAULT_MAX_SESSIONS = 4;
 // Что нельзя поменять на лету: это флаги командной строки, зафиксированные при запуске
 // процесса. Исполнитель вправе назвать свой набор — тогда сессия переоткроется только
 // на его полях.
-const DEFAULT_RESTART_ON = ['model', 'effort', 'permissionMode', 'cwd', 'extraDirs'];
+const DEFAULT_RESTART_ON = [
+  'model', 'effort', 'permissionMode', 'cwd', 'extraDirs', 'workToolScopeKey',
+];
 
 function fingerprintOf(spec, fields) {
   const parts = {};

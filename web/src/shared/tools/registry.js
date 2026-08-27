@@ -35,6 +35,15 @@ export const TOOL_REGISTRY = [
     order: 30,
     component: defineAsyncComponent(() => import('../../views/terminal/TerminalPanel.vue')),
   },
+  {
+    id: 'ssh',
+    route: '/ssh',
+    label: 'SSH',
+    icon: 'terminal',
+    order: 40,
+    plugin: 'ssh',
+    component: defineAsyncComponent(() => import('../../views/ssh/SshPanel.vue')),
+  },
 ];
 
 export const TOOL_BY_ID = new Map(TOOL_REGISTRY.map((item) => [item.id, item]));

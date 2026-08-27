@@ -32,16 +32,17 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
   assert.match(terminalRoute, /data-tool-route="terminal"/);
 });
 
-test('Code, Shelf и Terminal лениво загружаются независимо', async () => {
+test('Code, Shelf, Terminal и SSH лениво загружаются независимо', async () => {
   const [registry, codeLoading] = await Promise.all([
     source('web/src/shared/tools/registry.js'),
     source('web/src/views/code/CodePanelLoading.js'),
   ]);
 
-  assert.equal(count(registry, /defineAsyncComponent\(/g), 3);
+  assert.equal(count(registry, /defineAsyncComponent\(/g), 4);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/terminal\/TerminalPanel\.vue'\)/);
+  assert.match(registry, /import\('\.\.\/\.\.\/views\/ssh\/SshPanel\.vue'\)/);
   assert.match(registry, /loadingComponent: CodePanelLoading/);
   assert.match(registry, /delay: 0/);
   assert.match(codeLoading, /'aria-busy': 'true'/);
@@ -116,11 +117,13 @@ test('док использует строку инструмента, а раз
   assert.match(host, /@toggle-expanded="toggleDockExpanded"/);
   assert.doesNotMatch(host, /function maximizeTool/);
   assert.match(dockStore, /isExpanded: false/);
-  assert.match(dockStore, /DOCK_EXPANDED_KEY = 'cockpit-dock-expanded'/);
-  assert.match(dockStore, /expandedPreference: stored\(DOCK_EXPANDED_KEY\) === '1'/);
+  assert.match(dockStore, /DOCK_EXPANDED_KEY = 'cockpit-dock-expanded-tools'/);
+  assert.match(dockStore, /LEGACY_DOCK_EXPANDED_KEY = 'cockpit-dock-expanded'/);
+  assert.match(dockStore, /expandedPreferences: storedExpandedPreferences\(activeTool\)/);
+  assert.match(dockStore, /expandedPreferences\[state\.activeTool\] === true/);
   assert.match(dockStore, /setExpanded\(value, \{ persist = true \} = \{\}\)/);
   assert.match(dockStore, /close\(\)\s*{[\s\S]*this\.isExpanded = false;/);
-  assert.match(dockStore, /else if \(!wasOpen\) this\.isExpanded = this\.expandedPreference/);
+  assert.match(dockStore, /this\.isExpanded = this\.isOpen && this\.expandedPreference/);
 });
 
 test('Escape у развёрнутого дока сначала возвращает ширину и не создаёт второй слой', async () => {

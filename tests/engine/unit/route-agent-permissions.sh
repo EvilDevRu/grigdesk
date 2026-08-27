@@ -64,8 +64,21 @@ case "$settings" in
     test_fail "wrapper denies sit next to workspace writer denies" "$settings"
     ;;
 esac
-assert_contains "$settings" '"Edit('"$repo"'/**)"' \
+# Абсолютный путь в правиле прав пишется с ДВУМЯ слэшами: с одним CLI считает его
+# относительным проекту, и запрет не совпадает ни с чем — молча. Прежняя редакция теста
+# пиннила именно сломанную форму и потому дала ложную уверенность: проверяющий узел
+# инструментом Write вернул env-файл песочницы к базовой ветке при живом на вид запрете.
+assert_contains "$settings" '"Edit(/'"$repo"'/**)"' \
   "state-only route node denies direct edits in its workspace"
+# И прямо наоборот: прежней однослэшевой формы в правах быть НЕ должно.
+case "$settings" in
+  *'"Edit('"$repo"'/**)"'*)
+    test_fail "no single-slash workspace deny survives (it matches nothing)" "$settings" ;;
+  *)
+    test_ok "no single-slash workspace deny survives (it matches nothing)" ;;
+esac
+assert_contains "$settings" '"Edit(/'"$repo"')"' \
+  "state-only deny covers the workspace directory entry itself"
 assert_contains "$settings" '"mcp__playwright"' \
   "browser-forbid policy reaches provider permissions"
 

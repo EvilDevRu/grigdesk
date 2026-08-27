@@ -93,6 +93,18 @@ async function upload(path, formData, { timeoutMs = 0, signal = null } = {}) {
   return handle(res, path);
 }
 
+// Пароль SSH уходит только как непрозрачные байты: общий JSON-клиент здесь
+// использовать нельзя, иначе секрет окажется в сериализуемом объекте.
+async function postBytes(path, body) {
+  const res = await fetch(url(path), {
+    ...FETCH_OPTS,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body,
+  });
+  return handle(res, path);
+}
+
 export const api = {
   base: BASE,
   url,
@@ -103,5 +115,6 @@ export const api = {
   post: (path, body) => request('POST', path, body),
   put: (path, body) => request('PUT', path, body),
   del: (path) => request('DELETE', path),
+  postBytes,
   upload,
 };

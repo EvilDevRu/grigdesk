@@ -52,6 +52,13 @@ import { TaskShelfStore } from './lib/task-shelf-store.js';
 import { TaskShelfService } from './lib/task-shelf-service.js';
 import { TaskSeenStore } from './lib/task-seen-store.js';
 import { TaskSeenService } from './lib/task-seen-service.js';
+import { createPermissionQueue } from './lib/chat/permission-queue.js';
+import { createSshStore } from './lib/ssh/store.js';
+import { createHostKeyStore } from './lib/ssh/host-keys.js';
+import { createSshTransport } from './lib/ssh/transport.js';
+import { createSshSessionManager } from './lib/ssh/session-manager.js';
+import { createSshAudit } from './lib/ssh/audit.js';
+import { createSshBroker } from './lib/ssh/broker.js';
 
 import authPlugin from './plugins/auth.js';
 import httpScopePlugin from './plugins/http-scope.js';
@@ -85,6 +92,7 @@ import telegramModule from './modules/telegram/index.js';
 import githubModule from './modules/github/index.js';
 import inboxModule from './modules/inbox/index.js';
 import documentsModule from './modules/documents/index.js';
+import sshModule from './modules/ssh/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 import { DocumentReader } from './lib/documents/reader.js';
 
@@ -150,6 +158,115 @@ async function build() {
     profilesDir: config.profilesDir,
     controlDir: config.factoryControlDir,
     workTimeReader: (identity) => readRouteWorkTime(config, identity),
+  });
+  const permissionQueue = createPermissionQueue();
+  const sshConnections = await createSshStore({
+    file: config.sshConnectionsPath,
+    projects: async () => (await listProjects(config, prefs)).map((id) => ({ id })),
+  });
+  const sshHostKeys = await createHostKeyStore({ file: config.sshKnownHostsPath });
+  const sshTransport = createSshTransport();
+  const sshSessions = createSshSessionManager({ transport: sshTransport });
+  const sshAuditStore = await createSshAudit({ dir: config.sshAuditDir });
+  const sshAudit = {
+    async append(entry) {
+      const result = await sshAuditStore.append(entry);
+      fastify.sse.broadcast('ssh-audit', { at: result.at });
+      return result;
+    },
+  };
+  const sshBroker = createSshBroker({
+    pluginEnabled: (id) => fastify.pluginEnabled?.(id) === true,
+    sessions: sshSessions,
+    permissionQueue,
+    audit: sshAudit,
+    outputLimitBytes: () => (
+      Math.max(4, Math.min(1_024, Number(fastify.pluginSettings?.('ssh')?.outputLimitKiB) || 64))
+      * 1_024
+    ),
+  });
+  fastify.decorate('sshBroker', sshBroker);
+
+  sshSessions.subscribe((event) => {
+    if (event.type === 'lost' || (event.type === 'access' && !event.session.agentAllowed)) {
+      permissionQueue.cancelWhere(
+        (entry) => entry.origin === 'ssh' && entry.sessionId === event.session.id,
+        { allow: false, error: event.type === 'lost' ? 'session_lost' : 'access_revoked' },
+      );
+    }
+    fastify.sse.broadcast('ssh-sessions', { sessionId: event.session.id });
+  });
+
+  const sshService = {
+    listConnections: () => sshConnections.list(),
+    createConnection: (input) => sshConnections.create(input),
+    updateConnection: (id, input) => sshConnections.update(id, input),
+    async deleteConnection(id) {
+      await Promise.all(sshSessions.list()
+        .filter((session) => session.connectionId === id)
+        .map((session) => sshSessions.close(session.id)));
+      return sshConnections.remove(id);
+    },
+    async probeHostKey(id) {
+      const connection = sshConnections.get(id);
+      if (!connection) {
+        const error = new Error('SSH-соединение не найдено');
+        error.code = 'not_found';
+        throw error;
+      }
+      return sshHostKeys.check(await sshTransport.probe(connection));
+    },
+    decideHostKey: (challengeId, decision) => sshHostKeys.decide(challengeId, decision),
+    async openSession(id, password) {
+      const connection = sshConnections.get(id);
+      if (!connection) {
+        const error = new Error('SSH-соединение не найдено');
+        error.code = 'not_found';
+        throw error;
+      }
+      const trusted = sshHostKeys.get(connection.host, connection.port);
+      if (!trusted) {
+        const error = new Error('Сначала подтвердите host key');
+        error.code = 'trust_required';
+        throw error;
+      }
+      const session = await sshSessions.open({
+        connection,
+        password,
+        hostVerifier: (fingerprint) => fingerprint === trusted.fingerprint,
+      });
+      return { session };
+    },
+    listSessions: () => sshSessions.list(),
+    setAgentAccess: (id, allowed) => sshSessions.setAgentAccess(id, allowed),
+    closeSession: (id) => sshSessions.close(id),
+    attachTerminal: (id, socket) => sshSessions.attach(id, socket),
+    writeTerminal: (id, data) => sshSessions.write(id, data),
+    resizeTerminal: (id, cols, rows) => sshSessions.resize(id, cols, rows),
+    listFiles: (id, remotePath) => sshSessions.listFiles(id, remotePath),
+    downloadFile: (id, remotePath) => sshSessions.downloadFile(id, remotePath),
+    async uploadFile(id, request) {
+      const part = await request.file();
+      if (!part) {
+        const error = new Error('Файл не передан');
+        error.code = 'invalid_connection';
+        throw error;
+      }
+      const remotePath = String(part.fields?.path?.value || part.filename || '');
+      return sshSessions.uploadFile(id, remotePath, part.file);
+    },
+    listAudit: (query) => sshAuditStore.list(query),
+    answerApproval: (pid, body) => permissionQueue.answer(pid, 'ssh', body),
+    async disable() {
+      permissionQueue.cancelWhere(
+        (entry) => entry.origin === 'ssh',
+        { allow: false, error: 'plugin_disabled' },
+      );
+      await sshSessions.closeAll('plugin_disabled');
+    },
+  };
+  fastify.addHook('onClose', async () => {
+    await sshSessions.closeAll('server_shutdown');
   });
   const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
   const telegramBindings = new TelegramAccountBindings({
@@ -384,7 +501,15 @@ async function build() {
   await fastify.register(taskSeenModule, { seen: taskSeen });
   await fastify.register(systemModule, { system, config });
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
-  await fastify.register(pluginsModule, { config, prefs });
+  await fastify.register(pluginsModule, {
+    config,
+    prefs,
+    onToggle: async (id, enabled) => {
+      if (id === 'ssh' && !enabled) {
+        await sshService.disable();
+      }
+    },
+  });
   await fastify.register(taskShelfModule, { shelf: taskShelf });
   await fastify.register(mediaModule, {
     media,
@@ -414,9 +539,12 @@ async function build() {
   });
   await fastify.register(documentsModule, { reader: documentReader });
   await fastify.register(projectsModule, { config, prefs });
+  await fastify.register(sshModule, { service: sshService });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
     taskExists: companionTaskExists,
+    permissionQueue,
+    sshBroker,
   });
   await fastify.register(settingsModule, {
     credsStore, b24, claudeAuth, config, prefs, factoryDebug, localTls, tlsRuntime,

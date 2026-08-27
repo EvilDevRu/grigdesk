@@ -1,0 +1,124 @@
+import { createConnection } from 'node:net';
+import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
+
+function toolDeclaration(descriptor) {
+  return {
+    name: descriptor.name,
+    description: descriptor.description,
+    inputSchema: descriptor.inputSchema,
+  };
+}
+
+/** MCP handler сериализует только уже очищенный provider-neutral результат. */
+export function createWorkMcpHandler({ workTools }) {
+  async function request(message) {
+    const base = { jsonrpc: '2.0', id: message?.id };
+    if (message?.method === 'initialize') {
+      return {
+        ...base,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'cockpit-work', version: '1.0.0' },
+        },
+      };
+    }
+    if (message?.method === 'tools/list') {
+      return {
+        ...base,
+        result: { tools: workTools.descriptors.map(toolDeclaration) },
+      };
+    }
+    if (message?.method === 'tools/call') {
+      const result = await workTools.invoke(
+        String(message.params?.name || ''),
+        message.params?.arguments || {},
+      );
+      return {
+        ...base,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify(result) }],
+          isError: false,
+        },
+      };
+    }
+    return {
+      ...base,
+      error: { code: -32601, message: `Метод ${message?.method || '?'} не поддерживается` },
+    };
+  }
+
+  return { request, handle: request };
+}
+
+async function ipcRequest(socketPath, nonce, name, input) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    let buffer = '';
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      socket.end(`${JSON.stringify({ nonce, name, input })}\n`);
+    });
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+    });
+    socket.once('error', reject);
+    socket.once('close', () => {
+      try {
+        const response = JSON.parse(buffer || '{}');
+        if (response.error) {
+          reject(new Error(response.error));
+        } else {
+          resolve(response.result);
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+async function runCli() {
+  const socketIndex = process.argv.indexOf('--socket');
+  const nonceIndex = process.argv.indexOf('--nonce');
+  const socketPath = socketIndex >= 0 ? process.argv[socketIndex + 1] : '';
+  const nonce = nonceIndex >= 0 ? process.argv[nonceIndex + 1] : '';
+  const handler = createWorkMcpHandler({
+    workTools: {
+      descriptors: [{
+        name: 'supervised_ssh',
+        description: 'Надзорное выполнение команды',
+        inputSchema: {
+          type: 'object',
+          required: ['action'],
+          properties: { action: { enum: ['list', 'exec'] } },
+        },
+      }],
+      invoke: (name, input) => ipcRequest(socketPath, nonce, name, input),
+    },
+  });
+  const lines = createInterface({ input: process.stdin });
+  for await (const line of lines) {
+    if (!line.trim()) {
+      continue;
+    }
+    let response;
+    try {
+      response = await handler.request(JSON.parse(line));
+    } catch (error) {
+      response = {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32603, message: String(error?.message || error) },
+      };
+    }
+    process.stdout.write(`${JSON.stringify(response)}\n`);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runCli();
+}
+
+export default createWorkMcpHandler;

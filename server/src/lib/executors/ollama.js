@@ -19,6 +19,7 @@ import path from 'node:path';
 
 import { contextCacheStatus } from '../chat/context-cache.js';
 import { createStepSink, cut } from '../chat/stream-steps.js';
+import { directSshSetting } from './_direct-ssh-policy.js';
 import {
   DEFAULT_KEEP_ALIVE_MIN,
   DEFAULT_NUM_CTX,
@@ -312,6 +313,7 @@ export default {
   install: 'curl -fsSL https://ollama.com/install.sh | sh',
   // Файловые инструменты Cockpit принимают opts.extraDirs как разрешённые realpath-корни.
   trustedDirectories: true,
+  directSshPolicy: { enforcement: 'tool-filter' },
   untrustedInput: Object.freeze({
     text: true,
     images: true,
@@ -373,6 +375,7 @@ export default {
       : 'ничего не загружено — ближайший ход оплатит чтение весов модели с диска';
 
     return [
+      directSshSetting(),
       {
         id: 'host', kind: 'text', label: 'Адрес демона Ollama', value: 'http://127.0.0.1:11434',
         hint: 'Где слушает ollama serve (у всех по-разному: localhost, локальная сеть, машина за VPN).',
@@ -487,6 +490,7 @@ export default {
   async run({
     config, chatKey, signal, message, model, effort, sessionId, chatHistory, providerSettings,
     cwd, extraDirs = [], attachmentPaths = [], permissionMode, onPermission, onProgress, onStep,
+    workTools,
   }) {
     const baseUrl = resolveBaseUrl(config);
     const nextSessionId = sessionId || (chatKey ? `ollama:${chatKey}` : null);
@@ -523,7 +527,14 @@ export default {
     }
 
     const toolbox = await createToolbox({
-      cwd, roots: extraDirs, permissionMode: mode, onPermission, sink, signal,
+      cwd,
+      roots: extraDirs,
+      permissionMode: mode,
+      blockDirectSsh: providerSettings?.blockDirectSsh !== false,
+      onPermission,
+      sink,
+      signal,
+      workTools,
     });
     const docs = await readProjectDocs(cwd);
     const messages = buildMessages({
@@ -563,7 +574,7 @@ export default {
         const rawCalls = [];
 
         const body = { model, messages, stream: true, keep_alive: keepAlive, options: { num_ctx: numCtx } };
-        if (toolsAllowed) body.tools = toolDeclarations();
+        if (toolsAllowed) body.tools = toolDeclarations(workTools);
         if (supportsThinking && think !== undefined) body.think = think;
 
         await postChatStream(baseUrl, body, {

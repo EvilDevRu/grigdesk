@@ -329,6 +329,29 @@ test('чат: запрос разрешения показывает инстр�
   });
 });
 
+test('Telegram-вотчер fail-closed не показывает SSH-подтверждение даже из грязного snapshot', async (t) => {
+  const { world, watch, store, messages } = await fixture(t);
+  await watch.check();
+  world.waiting = [{
+    pid: 'ssh-private-pid',
+    origin: 'ssh',
+    chatKey: 'chat-a',
+    at: T0,
+    server: { label: 'Боевой код', host: 'SSH_PRIVATE_HOST_91006', port: 22 },
+    user: 'SSH_PRIVATE_USER_91006',
+    command: 'SSH_PRIVATE_COMMAND_91006',
+  }];
+  await watch.check();
+
+  assert.deepEqual({
+    messages: messages().length,
+    cards: Object.keys((await store.read()).cards),
+  }, {
+    messages: 0,
+    cards: [],
+  });
+});
+
 test('отказ Telegram не роняет вотчер и не портит state: карточка уходит следующим обходом', async (t) => {
   const { world, watch, store, messages, setFailSends } = await fixture(t);
   await watch.check();

@@ -11,6 +11,7 @@ import { api } from '../shared/api-client.js';
 const EVENT_NAMES = [
   'hello', 'state-change', 'providers-update', 'cockpit-update',
   'chat-permission', 'chat-question', 'chat-permission-done',
+  'ssh-permission', 'ssh-sessions', 'ssh-audit',
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan', 'chat-turn-start', 'chat-sessions',
   'chat-store', 'chat-store-meta',
   'speech-settings',

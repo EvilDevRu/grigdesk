@@ -22,7 +22,15 @@ const ADD_DIFF = '@@ -0,0 +1,2 @@\n+export function ready() {\n+  return true;\n
 function runFixture() {
   const traceFile = process.env.COCKPIT_CODEX_FIXTURE_TRACE || '';
   const scenario = process.env.COCKPIT_CODEX_FIXTURE_SCENARIO || 'rich';
+  const expectHook = process.env.COCKPIT_CODEX_FIXTURE_EXPECT_HOOK !== '0';
+  const hookState = process.env.COCKPIT_CODEX_FIXTURE_HOOK_STATE || 'enabled';
   const argv = process.argv.slice(2);
+  const hookConfigIndex = argv.findIndex((value, index) => (
+    argv[index - 1] === '-c' && String(value).startsWith('hooks.PreToolUse=')
+  ));
+  const hookConfig = hookConfigIndex >= 0 ? String(argv[hookConfigIndex]) : '';
+  const hookCommand = hookConfig.match(/command\s*=\s*"([^"]+)"/)?.[1] || '';
+  const hookMatcher = hookConfig.match(/matcher\s*=\s*"([^"]+)"/)?.[1] || '';
   let phase = 'initialize';
   let resumed = false;
 
@@ -44,8 +52,21 @@ function runFixture() {
   }
 
   trace({ direction: 'process', argv, compatibility: CODEX_APP_SERVER_COMPATIBILITY, scenario });
-  if (argv.length !== 1 || argv[0] !== 'app-server') {
-    fail(`Codex transport: получена подкоманда ${argv[0] || '<пусто>'}; требуется app-server`);
+  if (argv.at(-1) !== 'app-server') {
+    fail(`Codex transport: последним аргументом требуется app-server, получено ${argv.join(' ')}`);
+    return;
+  }
+  if (argv.includes('--strict-config')) {
+    fail('Codex transport: chat policy не должна валидировать чужой config через --strict-config');
+    return;
+  }
+  if (expectHook && (!argv.includes('--dangerously-bypass-hook-trust')
+    || !hookConfig.includes('_direct-ssh-policy-hook.js'))) {
+    fail('Codex transport: default-on запуск не получил доверенный server-owned SSH hook');
+    return;
+  }
+  if (!expectHook && (argv.includes('--dangerously-bypass-hook-trust') || hookConfig)) {
+    fail('Codex transport: explicit false не должен подключать SSH hook');
     return;
   }
 
@@ -274,6 +295,41 @@ function runFixture() {
         fail('после initialize response нужна initialized notification без params');
         return;
       }
+      phase = expectHook ? 'policy' : 'thread';
+      return;
+    }
+
+    if (phase === 'policy') {
+      if (message.method !== 'hooks/list' || message.id === undefined) {
+        fail('после handshake default-on запуск обязан проверить hooks/list до thread');
+        return;
+      }
+      send({ id: message.id, result: {
+        data: [{
+          cwd: process.cwd(),
+          hooks: hookState === 'enabled' ? [{
+            key: '/<session-flags>/config.toml:pre_tool_use:0:0',
+            eventName: 'preToolUse',
+            handlerType: 'command',
+            command: hookCommand,
+            async: false,
+            matcher: hookMatcher,
+            timeoutSec: 5,
+            statusMessage: null,
+            additionalContextLimit: null,
+            sourcePath: '/<session-flags>/config.toml',
+            source: 'sessionFlags',
+            pluginId: null,
+            displayOrder: 0,
+            enabled: true,
+            isManaged: false,
+            currentHash: 'sha256:fixture',
+            trustStatus: 'untrusted',
+          }] : [],
+          warnings: [],
+          errors: [],
+        }],
+      } });
       phase = 'thread';
       return;
     }
@@ -323,10 +379,39 @@ function runFixture() {
       }
       send({ id: message.id, result: { turn: runningTurn } });
       send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
-      phase = scenario === 'interrupt' ? 'interrupt' : 'complete';
+      phase = scenario === 'interrupt' ? 'interrupt' : scenario === 'ssh-tool' ? 'ssh-tool' : 'complete';
       if (scenario === 'interrupt') emitInterruptibleTurn();
       else if (scenario === 'commentary-only') emitCommentaryOnlyTurn();
+      else if (scenario === 'ssh-tool') {
+        send({
+          id: 91006,
+          method: 'item/tool/call',
+          params: {
+            threadId: THREAD_ID,
+            turnId: TURN_ID,
+            callId: 'ssh-call-1',
+            tool: 'supervised_ssh',
+            arguments: {
+              action: 'exec', label: 'Боевой код', role: 'code', command: 'id',
+            },
+          },
+        });
+      }
       else emitRichTurn();
+      return;
+    }
+
+    if (phase === 'ssh-tool') {
+      if (message.id !== 91006 || message.method) {
+        fail('item/tool/call ожидает ровно один JSON-RPC ответ');
+        return;
+      }
+      if (message.error || message.result?.error !== 'denied') {
+        fail('supervised_ssh обязан вернуть типизированный broker-result');
+        return;
+      }
+      phase = 'complete';
+      emitRichTurn();
       return;
     }
 

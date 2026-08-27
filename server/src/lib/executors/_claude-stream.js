@@ -177,6 +177,9 @@ export function claudeSessionArgs({
   ];
   args.push(...providerSettingsArgs);
   if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
+  if (mcpConfig?.mcpServers?.['cockpit-work']) {
+    args.push('--allowedTools', 'mcp__cockpit-work__supervised_ssh');
+  }
   if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);

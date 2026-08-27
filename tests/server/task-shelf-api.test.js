@@ -134,6 +134,35 @@ test('PUT и DELETE всегда возвращают полный снимок 
   });
 });
 
+test('Полка принимает фактическое состояние done завершённого триажа', async (t) => {
+  const { app } = await fixture(t);
+  const done = await app.inject({
+    method: 'PUT',
+    url: '/api/b24/task-shelf/42',
+    payload: payload({
+      snapshot: {
+        analysis: {
+          state: 'done',
+          queuedAt: null,
+          startedAt: '2026-08-26T08:00:00.000Z',
+          finishedAt: '2026-08-26T08:10:00.000Z',
+          generatedAt: '2026-08-26T08:10:01.000Z',
+        },
+        pipeline: null,
+        b24: null,
+      },
+    }),
+  });
+
+  assert.deepEqual({
+    statusCode: done.statusCode,
+    state: done.json().entries?.[0]?.snapshot?.analysis?.state,
+  }, {
+    statusCode: 200,
+    state: 'done',
+  });
+});
+
 test('Клиент не может выбрать чужой scope через query или body', async (t) => {
   const { app } = await fixture(t);
   const response = await app.inject({

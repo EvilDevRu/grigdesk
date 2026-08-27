@@ -19,7 +19,7 @@ function row(overrides = {}) {
   };
 }
 
-async function mountPanel(t, rows) {
+async function mountPanel(t, rows, { error = null } = {}) {
   const browser = await installBrowser(t);
   const [{ mount }, { reactive }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -31,7 +31,7 @@ async function mountPanel(t, rows) {
       rows,
       loading: false,
       loaded: true,
-      error: null,
+      error,
       async remove(id) { calls.removed.push(String(id)); },
     },
     ui: { openTask(id) { calls.opened.push(String(id)); } },
@@ -92,7 +92,7 @@ test('Наступившее событие зажигает строку и н�
 
 test('Клик строки открывает карточку и не удаляет запись', async (t) => {
   const { wrapper, calls } = await mountPanel(t, [row()]);
-  await wrapper.get('[data-task-id="42"]').trigger('click');
+  await wrapper.get('[data-task-id="42"] .ui-selectable-row__primary').trigger('click');
 
   assert.deepEqual(calls, { opened: ['42'], removed: [] });
 });
@@ -102,6 +102,20 @@ test('Крестик удаляет запись явно и не открыва
   await wrapper.get('[data-task-id="42"] button[aria-label="Убрать с полки"]').trigger('click');
 
   assert.deepEqual(calls, { opened: [], removed: ['42'] });
+});
+
+test('Ошибка обновления не скрывает уже загруженные задачи', async (t) => {
+  const { wrapper } = await mountPanel(t, [row()], {
+    error: 'Не удалось обновить полку',
+  });
+
+  assert.deepEqual({
+    alert: wrapper.get('[role="alert"]').text(),
+    task: wrapper.get('[data-task-id="42"]').text(),
+  }, {
+    alert: 'Не удалось обновить полку',
+    task: 'Проверить поставку Жду оценку',
+  });
 });
 
 function hostDock() {

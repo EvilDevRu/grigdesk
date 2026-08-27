@@ -15,6 +15,11 @@ import { withRetry } from '../retry.js';
 import { createStepSink } from '../chat/stream-steps.js';
 import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { createCodexStepNormalizer } from './_codex-steps.js';
+import {
+  DIRECT_SSH_HOOK_COMMAND,
+  DIRECT_SSH_HOOK_MATCHER,
+  directSshSetting,
+} from './_direct-ssh-policy.js';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 
@@ -722,6 +727,44 @@ function codexAppServerConfig(compactWindow) {
   };
 }
 
+function codexProcessArgs(providerSettings) {
+  if (providerSettings?.blockDirectSsh === false) return ['app-server'];
+  const hook = '[{ matcher = "^Bash$", hooks = [{ type = "command", '
+    + `command = "${DIRECT_SSH_HOOK_COMMAND}", timeout = 5 }] }]`;
+  return [
+    '--dangerously-bypass-hook-trust',
+    '-c',
+    `hooks.PreToolUse=${hook}`,
+    'app-server',
+  ];
+}
+
+function directSshPolicyError(message) {
+  const error = new Error(message);
+  error.code = 'direct_ssh_policy_unavailable';
+  return error;
+}
+
+/**
+ * Process flags недостаточно принять на веру: app-server мог отбросить их. До
+ * thread/start сверяем опубликованный enabled sessionFlags-hook по всем опорным полям.
+ */
+function assertDirectSshHook(result) {
+  const hooks = (Array.isArray(result?.data) ? result.data : [])
+    .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []));
+  const found = hooks.some((hook) => (
+    hook?.eventName === 'preToolUse'
+    && hook?.handlerType === 'command'
+    && hook?.command === DIRECT_SSH_HOOK_COMMAND
+    && hook?.matcher === DIRECT_SSH_HOOK_MATCHER
+    && hook?.source === 'sessionFlags'
+    && hook?.enabled === true
+  ));
+  if (!found) {
+    throw directSshPolicyError('Codex не подтвердил server-owned запрет прямого SSH.');
+  }
+}
+
 function codexWorkspaceRoots(cwd, extraDirs) {
   return [...new Set([cwd, ...(extraDirs || [])].filter(Boolean).map(String))];
 }
@@ -753,7 +796,7 @@ function codexRpcError(method, error) {
  */
 export function openCodexSession({
   config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-  log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo,
+  providerSettings, log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo, workTools,
 }) {
   const roots = codexWorkspaceRoots(cwd, extraDirs);
   const pending = new Map();
@@ -765,12 +808,18 @@ export function openCodexSession({
   let exited = false;
   let exitReason = '';
   let turn = null;
+  const handledWorkCalls = new Set();
 
   function rememberTail(current, chunk, limit = 4_000) {
     return `${current}${String(chunk || '')}`.slice(-limit);
   }
 
-  const child = spawn(config.codexBin, ['app-server'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const blockDirectSsh = providerSettings?.blockDirectSsh !== false;
+  const child = spawn(config.codexBin, codexProcessArgs(providerSettings), {
+    cwd,
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   const lines = createInterface({ input: child.stdout });
 
   function send(payload) {
@@ -1011,6 +1060,42 @@ export function openCodexSession({
 
     if (messageObject?.method) {
       protocol = 'app-server';
+      if (messageObject.id !== undefined && messageObject.method === 'item/tool/call') {
+        const params = messageObject.params || {};
+        const descriptor = (workTools?.descriptors || []).find((item) => (
+          item.name === params.tool
+        ));
+        const valid = descriptor
+          && turn
+          && params.threadId === threadId
+          && params.turnId === turn.turnId
+          && !handledWorkCalls.has(String(params.callId || messageObject.id));
+        if (!valid) {
+          send({
+            id: messageObject.id,
+            error: { code: -32602, message: 'Некорректный вызов рабочего инструмента' },
+          });
+          finishTurnError(turn, new Error('Codex прислал некорректный вызов рабочего инструмента'));
+          return;
+        }
+        handledWorkCalls.add(String(params.callId || messageObject.id));
+        let input = params.arguments;
+        if (typeof input === 'string') {
+          try {
+            input = JSON.parse(input);
+          } catch {
+            input = null;
+          }
+        }
+        Promise.resolve(workTools.invoke(params.tool, input || {})).then(
+          (result) => send({ id: messageObject.id, result }),
+          (error) => send({
+            id: messageObject.id,
+            error: { code: -32603, message: String(error?.message || error) },
+          }),
+        );
+        return;
+      }
       // При policy=never запросов разрешения быть не должно. Не оставляем
       // неожиданный server request висеть бесконечно — завершаем ход fail-closed.
       if (messageObject.id !== undefined) {
@@ -1083,6 +1168,9 @@ export function openCodexSession({
       capabilities: { experimentalApi: true, requestAttestation: false },
     });
     send({ method: 'initialized' });
+    if (blockDirectSsh) {
+      assertDirectSshHook(await request('hooks/list', {}));
+    }
 
     const common = {
       ...(model && { model }),
@@ -1094,6 +1182,9 @@ export function openCodexSession({
       // рабочую область, и после переезда на app-server она сузилась до cwd.
       runtimeWorkspaceRoots: roots,
       config: codexAppServerConfig(compactWindow),
+      ...((workTools?.descriptors || []).length
+        ? { dynamicTools: workTools.descriptors }
+        : {}),
     };
     const opened = threadId
       ? await request('thread/resume', { threadId, ...common })
@@ -1187,12 +1278,14 @@ export function openCodexSession({
  */
 export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-  signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+  providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+  workTools,
 }) {
   if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
   const session = openCodexSession({
-    config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, tokenInfoReader,
+    config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, providerSettings,
+    tokenInfoReader, workTools,
   });
   const onAbort = () => { void session.interrupt(); };
   signal?.addEventListener('abort', onAbort, { once: true });
@@ -1278,6 +1371,8 @@ export default {
   install: 'npm i -g @openai/codex && codex login',
   // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
   trustedDirectories: true,
+  directSshPolicy: { enforcement: 'command-hook' },
+  settings: [directSshSetting()],
 
   // Ручной компакт пока идёт универсальной выжимкой текстом. Автокомпакт родной:
   // thread config передаёт app-server-у официальный model_auto_compact_token_limit.
@@ -1372,11 +1467,12 @@ export default {
 
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-    signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+    providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
+    workTools,
   }) {
     return runCodexAppServer({
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
-      signal, onProgress, onStep, tokenInfoReader,
+      providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools,
     });
   },
 
@@ -1391,13 +1487,23 @@ export default {
   session: {
     mode: 'persistent',
     unsolicited: false,
-    restartOn: ['model', 'effort', 'cwd', 'extraDirs', 'compactWindow'],
+    restartOn: [
+      'model',
+      'effort',
+      'cwd',
+      'extraDirs',
+      'compactWindow',
+      'providerSettings',
+      'workToolScopeKey',
+    ],
 
     open({
-      config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow, log, hooks,
+      config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
+      providerSettings, log, hooks, workTools,
     }) {
       return openCodexSession({
-        config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, log, hooks,
+        config, env, cwd, extraDirs, model, effort, sessionId, compactWindow,
+        providerSettings, log, hooks, workTools,
       });
     },
   },

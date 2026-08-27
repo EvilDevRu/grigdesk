@@ -2052,6 +2052,45 @@ print(",".join(chain[chain.index(target):]))
 ' "$node"
 }
 
+# Лежит ли узел ВНУТРИ транзакционной зоны маршрута: строго после instrument и не
+# дальше proof. Ровно этот отрезок исполняется внутри ОДНОЙ транзакции инструментации —
+# её открывает instrument, намеренно не закрывает, и закрывает за собой proof.
+#
+# Зона СЧИТАЕТСЯ ПО ЗАКРЕПЛЁННОЙ ЦЕПОЧКЕ, а не перечисляется именами узлов. Перечисление
+# уже стоило прогона: список `diagnose|hyposkeptic|proof` в восстановлении был слепком
+# топологии маршрута `debug`, а консилиум поставил в ту же зону ещё пять узлов (три
+# мнения, свод и председателя). Обрыв на председателе восстановление не узнавало, прогон
+# продолжался и через час работы падал на proof кодом 78 без единого слова о причине.
+#
+# Печатает `inside` либо `outside`. Маршрут без пары instrument/proof зоны не имеет.
+# Ненулевой код — цепочку прочитать не удалось; оба потребителя считают это `outside`,
+# потому что выдуманный возврат хуже отсутствующего.
+_route_v2_transaction_zone() {
+  local node=$1 chain_json
+  node=$(_attempt_stage_state_node_id "$node") || return 1
+  chain_json=$("$FACTORY_HOME/bin/factory-route" \
+    --routes-dir "$ROUTE_V2_ROUTES_DIR" \
+    --profile "$ROUTE_V2_PROFILE" \
+    describe-route \
+    --catalog-hash "$ROUTE_V2_CATALOG" \
+    --route "$ROUTE_V2_ROUTE") || return 1
+  printf '%s' "$chain_json" | python3 -c '
+import json
+import sys
+
+machine = json.load(sys.stdin)["machine"]
+target = sys.argv[1]
+chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
+if "instrument" not in chain or "proof" not in chain or target not in chain:
+    print("outside")
+    raise SystemExit(0)
+first = chain.index("instrument")
+last = chain.index("proof")
+index = chain.index(target)
+print("inside" if first < index <= last else "outside")
+' "$node"
+}
+
 # Возврат курсора в зону instrument→proof при закрытой транзакции делает proof
 # НЕИСПОЛНИМЫМ. Топология такая: instrument открывает транзакцию инструментации и
 # намеренно её не закрывает (`_route_v2_transaction_after`), proof работает внутри
@@ -2068,33 +2107,12 @@ print(",".join(chain[chain.index(target):]))
 # Возвращает 0, если возврат безопасен; 1 — если цель лежит в зоне, а транзакции
 # нет. Третий аргумент (опционально) — имя переменной для текста отказа.
 _route_v2_goto_transaction_guard() {
-  local task=$1 node=$2 out_var=${3:-} zone chain_json
+  local task=$1 node=$2 out_var=${3:-} zone
   node=$(_attempt_stage_state_node_id "$node") || return 0
   # Транзакция открыта — возврат куда угодно безопасен, proof её унаследует.
   _route_v2_transaction_active_id "$task" >/dev/null 2>&1 && return 0
-  chain_json=$("$FACTORY_HOME/bin/factory-route" \
-    --routes-dir "$ROUTE_V2_ROUTES_DIR" \
-    --profile "$ROUTE_V2_PROFILE" \
-    describe-route \
-    --catalog-hash "$ROUTE_V2_CATALOG" \
-    --route "$ROUTE_V2_ROUTE") || return 0
-  zone=$(printf '%s' "$chain_json" | python3 -c '
-import json
-import sys
-
-machine = json.load(sys.stdin)["machine"]
-target = sys.argv[1]
-chain = list(machine["sequence"]["main"]) + list(machine["sequence"]["tail"])
-# Маршрут без этой пары узлов транзакционной зоны не имеет — гард не применяется.
-if "instrument" not in chain or "proof" not in chain or target not in chain:
-    print("safe")
-    raise SystemExit(0)
-first = chain.index("instrument")
-last = chain.index("proof")
-index = chain.index(target)
-print("blocked" if first < index <= last else "safe")
-' "$node") || return 0
-  [[ "$zone" == blocked ]] || return 0
+  zone=$(_route_v2_transaction_zone "$node") || return 0
+  [[ "$zone" == inside ]] || return 0
   if [[ -n "$out_var" ]]; then
     printf -v "$out_var" '%s' "возврат на «$node» невозможен: узел proof обязан исполняться внутри
 транзакции инструментации, а её открывает только instrument. Транзакцию закрыл
@@ -2353,7 +2371,7 @@ _route_v2_quiesce_runner_before_recovery() {
 # инструментации, сначала завершается очистка, затем переход `failed` закреплённого
 # маршрута CAS-возвратом переводит курсор на `instrument`.
 route_v2_recover_instrumentation() {
-  local task attempt cleanup_rc cursor_tmp state node sequence completed rc
+  local task attempt cleanup_rc cursor_tmp state node sequence completed rc reset
   _route_v2_require_isolation || return
   task=$(_attempt_state_task_id "${1:-}") || return
   attempt=$(_attempt_state_attempt_id "${2:-}") || return
@@ -2381,19 +2399,32 @@ route_v2_recover_instrumentation() {
   # является правильной точкой повтора, поэтому фиктивный переход журнала не нужен.
   [[ "$state" == ready ]] || return 0
   [[ "$node" != instrument ]] || return 0
-  case "$node" in
-    diagnose|hyposkeptic|proof)
-      if (( cleanup_rc == 3 )); then
-        completed=$(_route_v2_completed_instrumentation_for_attempt "$task" "$attempt")
-        rc=$?
-        (( rc == 0 )) || return "$rc"
-        [[ "$completed" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 78
-      fi
-      # Восьмым аргументом помечаем коммит как восстановительный: узел закрывается за
-      # снятую разметку, а не за свой заход, поэтому указание человека остаётся висеть
-      # на нём и доедет до настоящего исполнения после повторной инструментации.
-      _route_v2_commit_and_project "$task" "$attempt" "$node" failed 0 '' 0 1 >/dev/null ||
-        return
-      ;;
-  esac
+  [[ "$(_route_v2_transaction_zone "$node")" == inside ]] || return 0
+  if (( cleanup_rc == 3 )); then
+    completed=$(_route_v2_completed_instrumentation_for_attempt "$task" "$attempt")
+    rc=$?
+    (( rc == 0 )) || return "$rc"
+    [[ "$completed" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 78
+  fi
+  # Курсор возвращается на instrument НАПРЯМУЮ, а не через коммит `failed` на текущем узле.
+  # Разница принципиальная: `failed` означает «работа узла не удалась», и каждый маршрут
+  # ведёт этот исход по-своему — у консилиума `council_a` по failed идёт ВПЕРЁД (`next`),
+  # то есть глубже в зону, чьей транзакции уже нет, а `chairman` встаёт на человеке. Совпал
+  # с нужным поведением только маршрут `debug`, где все узлы зоны и так возвращаются на
+  # instrument. Здесь же случилось не «узел не справился», а «транзакцию, внутри которой он
+  # работал, сняли после обрыва», и законный адрес у этого один — instrument, единственный,
+  # кто открывает транзакцию заново.
+  #
+  # Указание человека при этом переживает возврат само: оно живёт в журнале событием
+  # human-rewind на своём узле и снимается ПЕРВЫМ КОММИТОМ этого узла, а мы его не
+  # коммитим вовсе. Прежнему пути ради того же свойства нужен был отдельный флаг
+  # восстановительного коммита.
+  reset=$(_route_v2_reset_chain instrument) || return
+  attempt_stage_state_human_rewind_v2 \
+    "$task" "$attempt" instrument "$reset" \
+    "инструментация снята после обрыва прогона на узле $node: зона instrument→proof переигрывается" \
+    engine >/dev/null || return
+  declare -F v2_log >/dev/null &&
+    v2_log "восстановление: инструментация снята, курсор возвращён на instrument (был $node)"
+  return 0
 }

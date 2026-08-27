@@ -43,6 +43,7 @@ async function fixture(t, scenario = 'rich') {
       ...process.env,
       COCKPIT_CODEX_FIXTURE_TRACE: trace,
       COCKPIT_CODEX_FIXTURE_SCENARIO: scenario,
+      COCKPIT_CODEX_FIXTURE_EXPECT_HOOK: '1',
     },
   };
 }
@@ -75,6 +76,7 @@ function runOptions(f, overrides = {}) {
     effort: 'medium',
     sessionId: null,
     compactWindow: 120_000,
+    providerSettings: {},
     tokenInfoReader: async () => null,
     ...overrides,
   };
@@ -196,6 +198,88 @@ test('Codex run использует app-server и не теряет rich events
       excludeSlashTmp: false,
     });
   }
+});
+
+test('Codex проверяет sessionFlags SSH-hook до создания thread', async (t) => {
+  const f = await fixture(t);
+  await codex.run(runOptions(f));
+  const trace = await readTrace(f.trace);
+  const processEntry = trace.find((entry) => entry.direction === 'process');
+  const hookConfig = processEntry?.argv.find((value, index) => (
+    processEntry.argv[index - 1] === '-c'
+      && String(value).startsWith('hooks.PreToolUse=')
+  ));
+  const methods = trace
+    .filter((entry) => entry.direction === 'client')
+    .map((entry) => entry.message?.method);
+
+  assert.deepEqual({
+    bypassTrust: processEntry?.argv.includes('--dangerously-bypass-hook-trust'),
+    hookInProcessArgs: processEntry?.argv.some((value, index) => (
+      processEntry.argv[index - 1] === '-c'
+        && String(value).includes('_direct-ssh-policy-hook.js')
+    )),
+    hookMatcher: String(hookConfig || '').match(/matcher\s*=\s*"([^"]+)"/)?.[1],
+    strictConfig: processEntry?.argv.includes('--strict-config'),
+    policyBeforeThread: methods.indexOf('hooks/list') < methods.indexOf('thread/start'),
+  }, {
+    bypassTrust: true,
+    hookInProcessArgs: true,
+    hookMatcher: '^Bash$',
+    strictConfig: false,
+    policyBeforeThread: true,
+  });
+});
+
+test('Codex отказывает до thread и turn, если app-server не подтвердил SSH-hook', async (t) => {
+  const f = await fixture(t);
+  f.env.COCKPIT_CODEX_FIXTURE_HOOK_STATE = 'missing';
+  let error;
+  try {
+    await codex.run(runOptions(f));
+  } catch (caught) {
+    error = caught;
+  }
+  const methods = (await readTrace(f.trace))
+    .filter((entry) => entry.direction === 'client')
+    .map((entry) => entry.message?.method);
+
+  assert.deepEqual({
+    typedError: /^direct_ssh_policy/.test(String(error?.code || '')),
+    hooksList: methods.includes('hooks/list'),
+    thread: methods.some((method) => method === 'thread/start' || method === 'thread/resume'),
+    turn: methods.includes('turn/start'),
+  }, {
+    typedError: true,
+    hooksList: true,
+    thread: false,
+    turn: false,
+  });
+});
+
+test('Codex при explicit false запускает прежний app-server без SSH-hook', async (t) => {
+  const f = await fixture(t);
+  f.env.COCKPIT_CODEX_FIXTURE_EXPECT_HOOK = '0';
+  const result = await codex.run(runOptions(f, {
+    providerSettings: { blockDirectSsh: false },
+  }));
+  const trace = await readTrace(f.trace);
+  const processEntry = trace.find((entry) => entry.direction === 'process');
+  const methods = trace
+    .filter((entry) => entry.direction === 'client')
+    .map((entry) => entry.message?.method);
+
+  assert.deepEqual({
+    reply: result.reply,
+    bypassTrust: processEntry?.argv.includes('--dangerously-bypass-hook-trust'),
+    hookConfig: processEntry?.argv.some((value) => String(value).startsWith('hooks.PreToolUse=')),
+    hooksList: methods.includes('hooks/list'),
+  }, {
+    reply: 'Готово: изменения сохранены.',
+    bypassTrust: false,
+    hookConfig: false,
+    hooksList: false,
+  });
 });
 
 test('ход без final_answer отдаёт последний commentary, а не ошибку «нет ответа»', async (t) => {

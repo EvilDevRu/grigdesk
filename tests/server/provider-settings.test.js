@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { applyProviderSetting, resolveProviderSettings } from '../../server/src/lib/provider-settings.js';
-import claude, { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
+import claude, {
+  buildClaudeUntrustedArgs,
+  claudeProviderSettingsArgs,
+} from '../../server/src/lib/executors/claude.js';
+import codex from '../../server/src/lib/executors/codex.js';
+import kimi from '../../server/src/lib/executors/kimi.js';
 import ollama from '../../server/src/lib/executors/ollama.js';
 
 const EXECUTOR = {
@@ -13,6 +18,35 @@ const EXECUTOR = {
     { id: 'window', kind: 'number', label: 'Окно', value: 10 },
   ],
 };
+
+const CONFIRMED_EXECUTOR = {
+  id: 'guarded',
+  name: 'Guarded',
+  settings: [{
+    id: 'blockDirectSsh',
+    kind: 'toggle',
+    label: 'Запретить прямой SSH',
+    value: true,
+    confirm: {
+      off: {
+        text: 'Агент сможет запускать прямой SSH без журнала инструмента.',
+        label: 'Разрешить прямой SSH',
+        danger: true,
+      },
+    },
+  }],
+};
+
+function settingsPayload(args) {
+  const index = args.indexOf('--settings');
+  assert.notEqual(index, -1, 'Claude обязан получить --settings');
+  return JSON.parse(args[index + 1]);
+}
+
+async function directSshPolicyOf(executor, config = {}) {
+  const declaration = executor.directSshPolicy;
+  return typeof declaration === 'function' ? declaration(config) : declaration;
+}
 
 test('декларация исполнителя дополняется выбором человека, а не подменяется им', async () => {
   const fresh = await resolveProviderSettings(EXECUTOR, undefined);
@@ -41,6 +75,52 @@ test('значение приводится к типу настройки и н
   assert.equal(applied.providerSettings.demo.window, 10);
   assert.deepEqual(applied.providerSettings.other, { keep: 'me' });
   assert.equal(applied.settings.find((s) => s.id === 'fastMode').value, true);
+});
+
+test('опасное направление настройки без точного confirmed отклоняется без записи', async () => {
+  const before = { guarded: { blockDirectSsh: true }, other: { keep: 'me' } };
+  const applied = await applyProviderSetting(
+    CONFIRMED_EXECUTOR,
+    before,
+    { settingId: 'blockDirectSsh', value: false, confirmed: 'true' },
+  );
+
+  assert.deepEqual({
+    applied: { ok: applied.ok, error: applied.error },
+    before,
+  }, {
+    applied: { ok: false, error: 'confirmation_required' },
+    before: { guarded: { blockDirectSsh: true }, other: { keep: 'me' } },
+  });
+});
+
+test('безопасное включение запрета сохраняется без confirmed', async () => {
+  const applied = await applyProviderSetting(
+    CONFIRMED_EXECUTOR,
+    { guarded: { blockDirectSsh: false } },
+    { settingId: 'blockDirectSsh', value: true },
+  );
+
+  assert.deepEqual({
+    ok: applied.ok,
+    value: applied.providerSettings?.guarded?.blockDirectSsh,
+  }, {
+    ok: true,
+    value: true,
+  });
+});
+
+test('точное confirmed сохраняет только значение, а не метаданные подтверждения', async () => {
+  const applied = await applyProviderSetting(
+    CONFIRMED_EXECUTOR,
+    { other: { keep: 'me' } },
+    { settingId: 'blockDirectSsh', value: false, confirmed: true },
+  );
+
+  assert.deepEqual(applied.providerSettings, {
+    guarded: { blockDirectSsh: false },
+    other: { keep: 'me' },
+  });
 });
 
 test('декларация async-функцией (ollama-стиль): await-им её, config доезжает, range — число', async () => {
@@ -79,17 +159,95 @@ test('ускоренный вывод Claude объявлен выключенн
 });
 
 test('настройка fastMode явно передаётся каждому headless-запуску Claude', () => {
-  assert.deepEqual(claudeProviderSettingsArgs({ fastMode: true }), [
-    '--settings',
-    '{"fastMode":true}',
+  assert.deepEqual([
+    settingsPayload(claudeProviderSettingsArgs({ fastMode: true })).fastMode,
+    settingsPayload(claudeProviderSettingsArgs({ fastMode: false })).fastMode,
+    settingsPayload(claudeProviderSettingsArgs()).fastMode,
+  ], [true, false, false]);
+});
+
+test('Claude включает нативный deny и PreToolUse по умолчанию, а false снимает оба слоя', () => {
+  const snapshot = [undefined, true, false].map((blockDirectSsh) => {
+    const args = claudeProviderSettingsArgs(
+      blockDirectSsh === undefined ? {} : { blockDirectSsh },
+    );
+    const payload = settingsPayload(args);
+    return {
+      nativeDeny: args.some((value, index) => (
+        args[index - 1] === '--disallowedTools' && String(value).includes('Bash(ssh:*)')
+      )),
+      commandHook: JSON.stringify(payload.hooks || {}).includes('_direct-ssh-policy-hook.js'),
+      overwritesUserDeny: Array.isArray(payload.permissions?.deny),
+    };
+  });
+
+  assert.deepEqual(snapshot, [
+    { nativeDeny: true, commandHook: true, overwritesUserDeny: false },
+    { nativeDeny: true, commandHook: true, overwritesUserDeny: false },
+    { nativeDeny: false, commandHook: false, overwritesUserDeny: false },
   ]);
-  assert.deepEqual(claudeProviderSettingsArgs({ fastMode: false }), [
-    '--settings',
-    '{"fastMode":false}',
+});
+
+test('model-only запуск Claude не получает SSH-hook', () => {
+  const args = buildClaudeUntrustedArgs({ providerSettings: { blockDirectSsh: true } });
+  assert.deepEqual({
+    nativeDeny: args.includes('--disallowedTools'),
+    commandHook: JSON.stringify(settingsPayload(args).hooks || {}).includes('PreToolUse'),
+  }, { nativeDeny: false, commandHook: false });
+});
+
+test('четыре адаптера объявляют default-on настройку запрета прямого SSH', async () => {
+  const declarations = await Promise.all([
+    resolveProviderSettings(claude),
+    resolveProviderSettings(codex),
+    resolveProviderSettings(kimi, undefined, { kimiLaunchMode: 'host' }),
+    resolveProviderSettings(ollama),
   ]);
-  assert.deepEqual(claudeProviderSettingsArgs(), [
-    '--settings',
-    '{"fastMode":false}',
+
+  assert.deepEqual(declarations.map((settings) => {
+    const directSsh = settings.find((setting) => setting.id === 'blockDirectSsh');
+    return [directSsh?.kind, directSsh?.value, directSsh?.confirm?.off?.danger];
+  }), [
+    ['toggle', true, true],
+    ['toggle', true, true],
+    ['toggle', true, true],
+    ['toggle', true, true],
+  ]);
+});
+
+for (const [name, executor, config] of [
+  ['Claude', claude],
+  ['Codex', codex],
+  ['Kimi', kimi, { kimiLaunchMode: 'host' }],
+  ['Ollama', ollama],
+]) {
+  test(`${name} называет в подтверждении последствия снятия запрета`, async () => {
+    const settings = await resolveProviderSettings(executor, undefined, config);
+    const text = settings.find((setting) => setting.id === 'blockDirectSsh')?.confirm?.off?.text;
+
+    assert.equal([
+      'Агент сможет запускать прямые SSH-клиенты с правами процесса Cockpit.',
+      'Режим прав Bash не заменяет этот запрет.',
+      'Подтверждений и журнала SSH-инструмента не будет.',
+    ].every((consequence) => String(text || '').includes(consequence)), true);
+  });
+}
+
+test('способ запрета объявляет сам адаптер с учётом режима Kimi', async () => {
+  const policies = await Promise.all([
+    directSshPolicyOf(claude),
+    directSshPolicyOf(codex),
+    directSshPolicyOf(ollama),
+    directSshPolicyOf(kimi, { kimiLaunchMode: 'contained' }),
+    directSshPolicyOf(kimi, { kimiLaunchMode: 'host' }),
+  ]);
+
+  assert.deepEqual(policies.map((policy) => policy?.enforcement), [
+    'command-hook',
+    'command-hook',
+    'tool-filter',
+    'network-sandbox',
+    'fail-closed',
   ]);
 });
 
@@ -98,7 +256,8 @@ test('настройки Ollama: numCtx приводится к числу, чу
   // честным «демон не отвечает» внутри — иначе таб настроек пустел бы при выключенном демоне.
   const declared = (await ollama.settings()).map((s) => [s.id, s.kind]);
   assert.deepEqual(declared, [
-    ['host', 'text'], ['numCtx', 'range'], ['keepAliveMin', 'range'],
+    ['blockDirectSsh', 'toggle'], ['host', 'text'], ['numCtx', 'range'],
+    ['keepAliveMin', 'range'],
     ['memInfo', 'info'], ['loadedInfo', 'info'], ['ctxCostInfo', 'info'],
   ]);
 

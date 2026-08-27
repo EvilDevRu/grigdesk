@@ -140,7 +140,7 @@ async function fixture(t) {
   };
 }
 
-test('contained runtime соблюдает lifecycle, permission и session durability без реального model call', async (t) => {
+test('contained runtime даже при false сохраняет сетевую границу и ACP lifecycle', async (t) => {
   const f = await fixture(t);
   const process = new FakeAcpProcess();
   const order = [];
@@ -154,6 +154,7 @@ test('contained runtime соблюдает lifecycle, permission и session dura
     model: 'kimi-code/k3',
     effort: 'high',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onSessionCreated: async (id) => { order.push(`bound:${id}`); },
     onPermission: async (presentation) => {
       order.push(`permission:${presentation.tool}`);
@@ -352,6 +353,7 @@ test('host runtime: CLI без Context в /status добирает размер 
     message: 'offline fake prompt',
     model: 'kimi-code/k3',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onPermission: async () => ({ allow: true }),
     deps: {
       assertVersion: async () => { throw new Error('host: версия не пинится'); },
@@ -385,6 +387,7 @@ test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-хо�
     model: 'kimi-code/k3',
     effort: 'high',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onPermission: async () => ({ allow: true }),
     deps: {
       // Host-режим: расхождение pinned версии — предупреждение, а не падение хода.
@@ -421,6 +424,45 @@ test('host runtime: прямой spawn без proxy/preflight/systemd, ACP-хо�
   assert.deepEqual(calls, { preflight: 0, proxy: 0, buildLaunch: 0, buildHost: 1, stopUnit: 0 });
 });
 
+test('host runtime при default-on запрете отказывает до сборки запуска и spawn', async (t) => {
+  const snapshots = [];
+  for (const providerSettings of [undefined, { blockDirectSsh: true }]) {
+    const f = await fixture(t);
+    const calls = { buildHost: 0, spawn: 0 };
+    let error;
+    try {
+      await runContainedKimi({
+        config: { ...f.config, kimiLaunchMode: 'host' },
+        chatKey: 'chat-host-blocked',
+        cwd: f.cwd,
+        message: 'offline fake prompt',
+        model: 'kimi-code/k3',
+        effort: 'high',
+        providerSettings,
+        deps: {
+          assertVersion: async () => {},
+          buildHostLaunch: async () => {
+            calls.buildHost += 1;
+            throw new Error('host launch не должен собираться');
+          },
+          spawn: () => {
+            calls.spawn += 1;
+            throw new Error('process не должен запускаться');
+          },
+        },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    snapshots.push({ code: error?.code, calls });
+  }
+
+  assert.deepEqual(snapshots, [
+    { code: 'direct_ssh_policy_unavailable', calls: { buildHost: 0, spawn: 0 } },
+    { code: 'direct_ssh_policy_unavailable', calls: { buildHost: 0, spawn: 0 } },
+  ]);
+});
+
 test('host runtime: вложения идут по исходным путям, чужой корень отклоняется', async (t) => {
   const f = await fixture(t);
   const attachments = [path.join(f.config.chatsDir, 'attachments', 'note.txt')];
@@ -434,6 +476,7 @@ test('host runtime: вложения идут по исходным путям, 
     attachmentPaths: attachments,
     model: 'kimi-code/k3',
     permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
     onPermission: async () => ({ allow: true }),
     deps: {
       assertVersion: async () => '0.31.1',
@@ -456,6 +499,7 @@ test('host runtime: вложения идут по исходным путям, 
       message: 'x',
       attachmentPaths: ['/etc/passwd'],
       model: 'kimi-code/k3',
+      providerSettings: { blockDirectSsh: false },
       deps: {
         assertVersion: async () => '0.31.1',
         buildHostLaunch: async () => { throw new Error('до launch недоходим'); },

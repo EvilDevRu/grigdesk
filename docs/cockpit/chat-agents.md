@@ -279,6 +279,20 @@ coverage и error policy; он описан в [multi-AI контракте дв
   (`read`/`search`/`edit`/`execute`/`delete`); исполнитель обязан лишь назвать свой вызов
   одним из этих типов, а не заводить вторую политику рядом.
 
+### Рабочий инструмент Cockpit: supervised SSH
+
+`supervised_ssh` — первый рабочий tool самого Cockpit. Он доставляется Claude через MCP,
+Codex как app-server dynamic tool, Kimi через ACP/MCP, Ollama через общий toolbox, но
+descriptor и dispatcher едины. Scope строится только из trusted attempt ledger и
+authoritative project membership; UI-context, body и история его выбрать не могут.
+Свободный чат получает null scope.
+
+Агент видит у доступной живой сессии только `label`/`role`. Любой `exec`, независимо от
+permission mode/auto/remember, создаёт `origin:'ssh'` в общей `pendingPerms`; ответ идёт
+только через `/api/ssh/approvals/:pid`. Human shell отделён от exec-channel агента, SFTP
+в tool отсутствует. Lifecycle, DTO и остаточный риск недоверенного вывода описаны в
+[ssh.md](ssh.md).
+
 #### Что рисует всплывашка разрешения (контракт `input`)
 
 `ChatPermission.vue` показывает не сырой запрос, а РАЗОБРАННЫЙ: `description` (что просят),
@@ -1210,12 +1224,29 @@ fallback при пустом `limits[]`, который остаётся кан�
   (авторизация, версия, каталог, обновление) и блок **своих настроек исполнителя**; общее
   для всех («показывать все модели», «Перепроверить», доверенные каталоги) — карточками ниже.
 - **Свои настройки исполнителя объявляет сам executor** — поле `settings`:
-  `[{ id, kind, label, hint?, value, disabled?, note? }]`. Схема приходит от исполнителя,
+  `[{ id, kind, label, hint?, value, disabled?, note?, confirm? }]`. Схема приходит от исполнителя,
   выбор человека лежит в prefs (`providerSettings`), склейка — `lib/provider-settings.js`;
   сохранение — `POST /api/providers/:id/settings` (`{ settingId, value }`). Ядро про смысл
   ключа не знает: принимает ТОЛЬКО объявленный id и приводит значение к типу `kind`, поэтому
   чужой ключ в prefs не попадёт. Фронт рисует по `kind` (`stores/providers.saveSetting`,
   оптимистично с откатом).
+- **Запрет прямого SSH — настройка каждого исполнителя, а не общая политика UI.** Адаптер
+  объявляет capability `directSshPolicy` и свой toggle `blockDirectSsh`; выбор хранится
+  только как `providerSettings.<id>.blockDirectSsh`. Отсутствующий ключ означает
+  «по умолчанию включено» (`true`) и для старых установок. Выключение объявлено через
+  `settings[].confirm.off`: существующий `POST /api/providers/:id/settings` принимает
+  `{ settingId: "blockDirectSsh", value: false, confirmed: true }`, а без точного
+  `confirmed: true` отвечает `confirmation_required` и prefs не меняет. Включение обратно
+  подтверждения не требует. У Claude и Codex `providerSettings` входит в `restartOn`,
+  поэтому следующая попытка получить сессию переоткрывает процесс с новой policy.
+
+  | исполнитель / режим | `directSshPolicy.enforcement` | как держится запрет |
+  |---|---|---|
+  | Claude | `command-hook` | нативный deny для прямой формы и server-owned PreToolUse |
+  | Codex | `command-hook` | process hook, подтверждённый через `hooks/list` до thread |
+  | Ollama | `tool-filter` | фильтр Cockpit до permission mode и запуска `bash` |
+  | Kimi contained | `network-sandbox` | egress разрешён только API Kimi |
+  | Kimi host | `fail-closed` | при включённом запрете весь ход отклоняется до spawn |
 - **MCP-серверы исполнителя — блок в той же плашке** (как панель «MCP servers» в расширении
   VS Code): секции по области видимости («Свои» — `mcpServers` в `~/.claude.json`, «Проект» —
   `.mcp.json` рабочего каталога и `projects[<путь>].mcpServers`, «claude.ai» — аккаунтные

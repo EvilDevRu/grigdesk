@@ -6,7 +6,8 @@
 //  - разбор моделью ДОПОЛНЯЕТ уже набранные черновики, а не затирает их;
 //  - без выбранной модели раздел работает как раньше и объясняет, где её включить;
 //  - задача уезжает с исполнителем, проектом и приоритетом, а пустой выбор идёт как
-//    null: нулевой responsibleId портал понимает буквально и отвечает ошибкой.
+//    null: нулевой responsibleId портал понимает буквально и отвечает ошибкой;
+//  - поставленная задача открывается общей карточкой Cockpit прямо из черновика.
 //
 // Состояние `<script setup>` наружу не выдаётся (`inlineTemplate` держит биндинги в
 // замыкании), и это к лучшему: проверяем тот же путь, что проходит человек — загрузка
@@ -80,6 +81,12 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
   const confirms = [];
   globalThis.__vidConfirm = async (...args) => { confirms.push(args); return confirmAnswer; };
   globalThis.__vidPreviewStore = () => preview;
+  const openedTasks = [];
+  globalThis.__vidUiStore = () => ({
+    openTask(id) {
+      openedTasks.push(String(id));
+    },
+  });
   globalThis.__vidPluginsStore = () => ({
     loaded: true,
     enabled: () => true,
@@ -113,6 +120,9 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
       '../stores/document-preview.js': `
         export const useDocumentPreviewStore = (...args) => globalThis.__vidPreviewStore(...args);
       `,
+      '../stores/ui.js': `
+        export const useUiStore = (...args) => globalThis.__vidUiStore(...args);
+      `,
       './services/dialogs': `
         export const confirmDialog = (...args) => globalThis.__vidConfirm(...args);
         export const alertDialog = async () => undefined;
@@ -136,6 +146,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
     delete globalThis.__vidApi;
     delete globalThis.__vidPluginsStore;
     delete globalThis.__vidPreviewStore;
+    delete globalThis.__vidUiStore;
     delete globalThis.__vidConfirm;
   });
   await settle(flushPromises);
@@ -192,6 +203,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
     remount,
     preview,
     confirms,
+    openedTasks,
   };
 }
 
@@ -428,6 +440,24 @@ test('у каждой задачи своя кнопка, и она ставит
   assert.match(after[0].text(), /задача 5150/u, 'номер показан у своего черновика');
   assert.equal(Boolean(draftButton(after[0])), false, 'поставленную задачу нельзя поставить второй раз');
   assert.ok(draftButton(after[1]), 'у нерешённой кнопка остаётся');
+});
+
+test('поставленную задачу можно сразу открыть общей карточкой Cockpit', async (t) => {
+  const view = await mountVideoView(t, {
+    api: fakeApi({ post: async () => ({ id: 5150 }) }),
+  });
+  await view.upload();
+  await view.addDraft({ title: 'Проверить результат' });
+
+  await draftButton(view.wrapper.find('.draft')).trigger('click');
+  await view.run();
+
+  const open = view.wrapper.findAll('.draft button').find((button) => button.text() === 'Открыть');
+  assert.ok(open, 'после успешной постановки рядом с номером появляется действие');
+  assert.equal(open.attributes('aria-label'), 'Открыть задачу 5150');
+
+  await open.trigger('click');
+  assert.deepEqual(view.openedTasks, ['5150'], 'используется единая TaskModal, а не новая вкладка');
 });
 
 test('черновик без заголовка поставить нечем', async (t) => {

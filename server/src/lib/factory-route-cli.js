@@ -379,21 +379,43 @@ export async function readLogSince(file, offset, { lines = 3, limit = 400 } = {}
  * окно быстрых отказов пройдёт целиком, и только потом считаем прогон поднятым;
  * смерть юнита внутри окна — отказ с причиной из журнала этапов.
  *
+ * Второе окно — на ЗАПИСЬ identity, и оно оплачено ложной тревогой. Раньше после
+ * settle делался ОДИН снимок реестра: не успел движок дописать `ATTEMPT_ID`/`ORCH_PID`
+ * за шесть секунд — и кокпит отвечал «оркестратор не подтвердил запуск», хотя прогон
+ * поехал. Живой замер: возврат курсора записан в 10:55:14, узел зашёл в 10:55:33 —
+ * девятнадцать секунд, из них львиная доля на preflight исполнителей. Человек при этом
+ * видел плашку «Записано, но прогон не поехал» над идущим прогоном.
+ *
+ * Ждём только НЕОПРЕДЕЛЁННОСТЬ (реестр не прочитан, попытка ещё не записана, демона
+ * пока нет). ЧУЖАЯ непустая попытка в реестре — ответ авторитетный и мгновенный: ждать
+ * тут нечего, ситуация от времени не изменится.
+ *
  * @returns {Promise<{ ok: boolean, outcome: 'running'|'exited'|'unconfirmed', message?: string }>}
  */
 export async function confirmRouteResume({
   attempt, identity, unitAlive, reason,
-  settleMs = 6000, stepMs = 250,
+  settleMs = 6000, stepMs = 250, confirmMs = 20000,
 }) {
-  const deadline = Date.now() + settleMs;
-  while (Date.now() < deadline) {
+  const settleDeadline = Date.now() + settleMs;
+  while (Date.now() < settleDeadline) {
     await sleep(stepMs);
     if (!(await unitAlive())) {
       return { ok: false, outcome: 'exited', message: await reason() || 'прогон вышел сразу после запуска' };
     }
   }
-  const current = await identity();
-  if (current && current.alive && current.attempt === attempt) return { ok: true, outcome: 'running' };
+
+  const confirmDeadline = Date.now() + confirmMs;
+  for (;;) {
+    const current = await identity();
+    if (current && current.alive && current.attempt === attempt) return { ok: true, outcome: 'running' };
+    // Реестр назвал другую попытку — это факт, а не задержка записи.
+    const foreign = Boolean(current && current.attempt && current.attempt !== attempt);
+    if (foreign || Date.now() >= confirmDeadline) break;
+    await sleep(stepMs);
+    if (!(await unitAlive())) {
+      return { ok: false, outcome: 'exited', message: await reason() || 'прогон вышел сразу после запуска' };
+    }
+  }
   return {
     ok: false,
     outcome: 'unconfirmed',

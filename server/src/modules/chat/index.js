@@ -11,7 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeCompanionSettings } from '../../lib/companion-settings.js';
-import { getExecutor } from '../../lib/executors/index.js';
+import { createWorkTools, getExecutor } from '../../lib/executors/index.js';
+import { createWorkIpc } from '../../lib/executors/work-ipc.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { resolveRequestedEffort } from '../../lib/model-effort.js';
 import {
@@ -23,6 +24,7 @@ import {
 import { ChatSessionBindingStore } from '../../lib/chat/session-binding-store.js';
 import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
 import { ChatLiveSessions } from '../../lib/chat/live-sessions.js';
+import { createPermissionQueue } from '../../lib/chat/permission-queue.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
 import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
 import { autoDecision } from '../../lib/chat/auto-approve.js';
@@ -50,6 +52,7 @@ import {
   withChatTitleHook,
 } from '../../lib/chat/title-hook.js';
 import { parseSandboxRepositories } from '../../lib/sandbox-env.js';
+import { PROFILE_RE, listProjects } from '../../lib/profiles.js';
 import { normalizeSpeechSettings, speechSettingsRevision } from '../../lib/speech-settings.js';
 import {
   SPEECH_STREAM_AUDIO,
@@ -156,6 +159,9 @@ async function chatModule(fastify, opts) {
   const {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
   } = opts;
+  const sshBroker = opts.sshBroker || fastify.sshBroker || null;
+  const permissionQueue = opts.permissionQueue || createPermissionQueue();
+  const workIpcs = new Map();
   const speechStreamStartTimeoutMs = Number.isInteger(opts.speechStreamStartTimeoutMs)
     && opts.speechStreamStartTimeoutMs > 0
     ? opts.speechStreamStartTimeoutMs
@@ -172,6 +178,44 @@ async function chatModule(fastify, opts) {
   // Несколько вкладок могут одновременно запросить одну логическую идентичность. Проверка задачи
   // способна обратиться к живому трекеру, поэтому объединяем только текущую проверку без устаревающего кэша.
   const taskVerificationJobs = new Map();
+
+  /** Project scope рабочего инструмента берётся только из trusted attempt ledger. */
+  async function trustedWorkProject(taskId) {
+    if (!taskId || typeof factoryState?.readTrustedAttempt !== 'function') {
+      return null;
+    }
+    try {
+      const registry = typeof factoryState.readRegistry === 'function'
+        ? (await factoryState.readRegistry(taskId))?.registry
+        : undefined;
+      const attempt = await factoryState.readTrustedAttempt(taskId, registry);
+      const projectId = String(attempt?.profile || '');
+      if (!PROFILE_RE.test(projectId)) {
+        return null;
+      }
+      const projects = await listProjects(config, prefs);
+      return projects.includes(projectId) ? projectId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Один UDS живёт вместе с chat scope и переиспользуется живым CLI-процессом. */
+  async function ensureWorkIpc(scopeKey, workToolsValue) {
+    const current = workIpcs.get(scopeKey);
+    if (current) {
+      return current;
+    }
+    const ipc = await createWorkIpc({ workTools: workToolsValue });
+    workIpcs.set(scopeKey, ipc);
+    return ipc;
+  }
+
+  fastify.addHook('onClose', async () => {
+    const values = [...workIpcs.values()];
+    workIpcs.clear();
+    await Promise.all(values.map((ipc) => ipc.close().catch(() => {})));
+  });
 
   async function companionTaskExists(taskId) {
     if (taskId == null) return true;
@@ -625,16 +669,32 @@ async function chatModule(fastify, opts) {
   // `direct` — исполнитель ждёт ответа сам (kimi по ACP, ollama внутри цикла инструментов),
   // без локального HTTP MCP-процесса Claude. От него зависит только ФОРМА ответа, поэтому
   // вендорных веток здесь нет: новый исполнитель ничего не добавляет в ядро.
-  const pendingPerms = new Map();
+  const pendingPerms = permissionQueue.entries;
   // Ждём ответ СКОЛЬКО НУЖНО: «не успел за 4 минуты» — не повод продолжать без человека.
   // Сутки — верхняя граница здравого смысла, столько же держит вызов сам CLI
   // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
   const PERM_WAIT_MS = 24 * 60 * 60 * 1000;
 
+  permissionQueue.subscribe?.((event) => {
+    if (event.origin !== 'ssh' && event.entry?.origin !== 'ssh') {
+      return;
+    }
+    if (event.type === 'waiting') {
+      fastify.sse.broadcast('ssh-permission', { pid: event.entry.pid });
+    } else {
+      fastify.sse.broadcast('chat-permission-done', { pid: event.pid });
+      fastify.sse.broadcast('ssh-permission', { pid: event.pid });
+    }
+  });
+
   /** Снять висящие запросы чата: ход кончился или остановлен — отвечать уже некому. */
   function dropPending(chatKey, message) {
     for (const [pid, p] of pendingPerms) {
       if (p.chatKey !== chatKey) continue;
+      if (p.origin === 'ssh') {
+        permissionQueue.cancel(pid, { allow: false, error: 'session_lost' });
+        continue;
+      }
       pendingPerms.delete(pid);
       p.resolve(p.direct
         ? { outcome: { outcome: 'cancelled' }, allow: false, message }
@@ -718,17 +778,35 @@ async function chatModule(fastify, opts) {
 
   // Что сейчас ждёт человека — чтобы окно после F5 (и второе окно) подняло всплывашки:
   // SSE доставляет событие один раз, а запрос висит, пока на него не ответят.
-  fastify.get('/api/chat/waiting', async () => ({
-    waiting: await Promise.all([...pendingPerms.entries()].map(async ([pid, p]) => {
+  fastify.get('/api/chat/waiting', async (request) => {
+    const includeSsh = request.query?.include === 'ssh' && request.authKind === 'session';
+    const entries = [...pendingPerms.entries()].filter(([, pending]) => (
+      pending.origin !== 'ssh' || includeSsh
+    ));
+    return {
+      waiting: await Promise.all(entries.map(async ([pid, p]) => {
       const head = await chatHeadOf(p.chatKey);
+      if (p.origin === 'ssh') {
+        return {
+          pid,
+          origin: 'ssh',
+          chatKey: p.chatKey,
+          at: p.at,
+          chatTitle: head.title,
+          taskId: head.taskId,
+          canRemember: false,
+          ...p.presentation,
+        };
+      }
       return {
         pid, chatKey: p.chatKey, at: p.at,
         chatTitle: head.title,
         taskId: head.taskId,
         ...(p.isQuestion ? { questions: p.input?.questions || [] } : { tool: p.tool, input: p.input }),
       };
-    })),
-  }));
+      })),
+    };
+  });
 
   /**
    * Ответ пользователя на вопрос агента (AskUserQuestion) в виде текста для агента.
@@ -803,6 +881,9 @@ async function chatModule(fastify, opts) {
     const pid = String(request.params.pid);
     const p = pendingPerms.get(pid);
     if (!p) return reply.code(404).send({ error: 'not_found' });
+    if (p.origin === 'ssh') {
+      return reply.code(409).send({ error: 'origin_mismatch' });
+    }
     pendingPerms.delete(pid);
     fastify.sse.broadcast('chat-permission-done', { pid });
     const body = request.body || {};
@@ -1263,6 +1344,19 @@ async function chatModule(fastify, opts) {
     const permissionMode = target.strictPermissionMode || await allowedMode(executor, wantMode);
     if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
 
+    const workProjectId = await trustedWorkProject(id);
+    const workToolScopeKey = `${workProjectId || 'none'}:${chatKey || id || 'free'}`;
+    const workToolsValue = createWorkTools({
+      projectId: workProjectId,
+      chatKey,
+      invoke: (scope, input) => (sshBroker
+        ? sshBroker.invoke(scope, input)
+        : Promise.resolve({ ok: false, error: 'not_available' })),
+    });
+    const workIpc = executor.workToolsTransport === 'mcp'
+      ? await ensureWorkIpc(workToolScopeKey, workToolsValue)
+      : null;
+
     // Уровень эффорта CLI не прощает: неизвестное значение приводит к ошибке
     // валидации. Не придумываем замену — принимаем только точное значение каталога.
     const levels = info?.model?.efforts || [];
@@ -1350,6 +1444,7 @@ async function chatModule(fastify, opts) {
             COCKPIT_INTERNAL: internalToken || '',
           },
         },
+        ...(workIpc ? { 'cockpit-work': workIpc.mcpServer } : {}),
       },
     };
 
@@ -1419,7 +1514,10 @@ async function chatModule(fastify, opts) {
         attachmentPaths: attachPaths,
         permissionMode,
         mcpConfig,
+        mcpServers: workIpc ? [{ name: 'cockpit-work', ...workIpc.mcpServer }] : [],
         permissionPromptTool: 'mcp__cockpit-perm__approve',
+        workTools: workToolsValue,
+        workToolScopeKey,
         providerSettings: currentPrefs.providerSettings?.[executor.id] || {},
         // Server-owned снапшот истории чата: stateless HTTP-исполнители (Ollama)
         // реплеят из него разговор; CLI-исполнители поле игнорируют. Содержит и
