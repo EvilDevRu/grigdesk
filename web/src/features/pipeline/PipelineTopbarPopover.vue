@@ -17,12 +17,14 @@
             <path :d="icon" />
           </svg>
           <span class="pipeline-topbar-counts mono" aria-hidden="true">
-            <span class="pipeline-topbar-total">{{ total }}</span>
-            <span class="pipeline-topbar-slash">/</span>
             <span class="pipeline-topbar-running">{{ runningCount }}</span>
             <span class="pipeline-topbar-slash">/</span>
-            <span class="pipeline-topbar-stopped" :class="{ error: hasErrors }">
-              {{ stoppedCount }}
+            <span class="pipeline-topbar-waiting" :class="{ empty: !waitingCount }">
+              {{ waitingCount }}
+            </span>
+            <span class="pipeline-topbar-slash">/</span>
+            <span class="pipeline-topbar-issues" :class="{ empty: !issueCount }">
+              {{ issueCount }}
             </span>
           </span>
         </UiButton>
@@ -152,22 +154,6 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  total: {
-    type: Number,
-    default: 0,
-  },
-  runningCount: {
-    type: Number,
-    default: 0,
-  },
-  stoppedCount: {
-    type: Number,
-    default: 0,
-  },
-  hasErrors: {
-    type: Boolean,
-    default: false,
-  },
   error: {
     type: String,
     default: '',
@@ -179,19 +165,24 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['openPipeline']);
+const total = computed(() => props.items.length);
+const runningCount = computed(() => (
+  props.items.filter((item) => item.kind === 'running').length
+));
+const waitingCount = computed(() => (
+  props.items.filter((item) => item.kind === 'waiting').length
+));
+const issueCount = computed(() => (
+  props.items.filter((item) => item.kind === 'error').length
+));
 const triggerLabel = computed(() => (
-  `Конвейеры: всего ${props.total}, едут ${props.runningCount}, стоят ${props.stoppedCount}`
+  `Конвейеры: в работе ${runningCount.value}, ждут решения ${waitingCount.value}, `
+  + `проблемы ${issueCount.value}`
 ));
 const attentionItems = computed(() => props.items.filter((item) => item.kind !== 'running'));
 const visibleAttentionItems = computed(() => attentionItems.value.slice(0, ATTENTION_LIMIT));
 const hiddenAttentionCount = computed(() => (
   Math.max(0, attentionItems.value.length - visibleAttentionItems.value.length)
-));
-const waitingCount = computed(() => (
-  attentionItems.value.filter((item) => item.kind === 'waiting').length
-));
-const issueCount = computed(() => (
-  attentionItems.value.filter((item) => item.kind === 'error').length
 ));
 const aggregateProgress = computed(() => {
   let done = 0;
@@ -218,7 +209,7 @@ const aggregateProgress = computed(() => {
   return observed ? { done, total, observed } : null;
 });
 const progressLabel = computed(() => (
-  aggregateProgress.value?.observed === props.total
+  aggregateProgress.value?.observed === total.value
     ? 'Этапы выполнены'
     : 'Известный прогресс'
 ));
@@ -251,9 +242,6 @@ function openPipeline(close) {
   font-size: 11px;
   font-weight: 750;
 }
-.pipeline-topbar-total {
-  color: var(--ink);
-}
 .pipeline-topbar-slash {
   color: var(--ink-mid);
   font-weight: 500;
@@ -261,11 +249,15 @@ function openPipeline(close) {
 .pipeline-topbar-running {
   color: var(--accent);
 }
-.pipeline-topbar-stopped {
+.pipeline-topbar-waiting {
   color: var(--warn);
 }
-.pipeline-topbar-stopped.error {
+.pipeline-topbar-issues {
   color: var(--bad);
+}
+.pipeline-topbar-waiting.empty,
+.pipeline-topbar-issues.empty {
+  color: var(--ink-mid);
 }
 .pipeline-topbar-popover {
   display: flex;

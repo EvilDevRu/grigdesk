@@ -238,13 +238,13 @@ async function sshModule(fastify, options = {}) {
   });
 
   fastify.post('/api/ssh/approvals/:pid', async (request, reply) => {
+    // Пояснение необязательно: трение стоит на разрешении, а не на отказе. Требование
+    // текста заворачивало пустой отказ в 400, клиент молча перечитывал очередь, и
+    // карточка возвращалась на экран без единого слова о причине.
     const body = {
       allow: request.body?.allow === true,
       comment: String(request.body?.comment || '').trim().slice(0, 4_000),
     };
-    if (!body.allow && !body.comment) {
-      return reply.code(400).send({ error: 'comment_required' });
-    }
     try {
       const result = await call.answerApproval(service, String(request.params.pid), body);
       if (result?.ok === false) {

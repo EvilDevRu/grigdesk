@@ -53,7 +53,7 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
     header?.textContent.replace(/\s+/gu, ' ').trim(),
     /^Таймеры задач Активно 1\s*·\s*сегодня 3ч 45мин$/u,
   );
-  assert.equal(header?.querySelector('.board-timers-popover-count'), null);
+  assert.equal(Boolean(header?.querySelector('.board-timers-popover-count')), false);
   assert.equal(
     popover.querySelector('.board-timers-popover-today')?.textContent.trim(),
     '3ч 45мин',

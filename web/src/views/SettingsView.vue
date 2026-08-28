@@ -2439,6 +2439,7 @@ import { useProvidersStore } from '../stores/providers.js';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { useToolLauncher } from '../shared/tools/launcher.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
+import { NAV_ICONS } from '../shared/nav-icons.js';
 import AccessOverview from './settings/AccessOverview.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
@@ -4210,17 +4211,8 @@ const pluginStats = computed(() => {
 // Иконка относится к назначению плагина, а не к его происхождению. Встроенные
 // повторяют навигацию Cockpit; неизвестному пользовательскому модулю достаётся
 // нейтральный знак плагина — манифест не получает права передавать произвольный SVG.
-const PLUGIN_ICON_PATHS = {
-  video: 'M15 8l6-4v16l-6-4V8z M3 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
-  code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
-  shelf: 'M4 5v14 M20 5v14 M4 9h16 M4 15h16 M8 5v4 M16 9v6 M10 15v4',
-  inbox: 'M4 4h16v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4z M4 13h4l2 3h4l2-3h4',
-  telegram: 'M20.4 5.2 4 11.6l5.3 2 1.7 5.2 2.5-3 4.1 3.1z M9.3 13.6 20.4 5.2 13.5 15.8',
-  github: 'M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z',
-  plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
-};
 function pluginIconPath(plugin) {
-  return PLUGIN_ICON_PATHS[plugin?.nav?.icon] || PLUGIN_ICON_PATHS[plugin?.id] || PLUGIN_ICON_PATHS.plugin;
+  return NAV_ICONS[plugin?.nav?.icon] || NAV_ICONS[plugin?.id] || NAV_ICONS.plugin;
 }
 
 async function savePlugin(p) {

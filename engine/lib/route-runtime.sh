@@ -1564,6 +1564,12 @@ route_v2_dispatch_bootstrap() {
     execution_open=0
     tries_left=$(( tries_left - 1 ))
     if (( tries_left <= 0 )); then
+      # Отказ обязан назвать себя — то же правило, что у соседней ветки 78. Пока сюда
+      # уходило одно «bootstrap не подтверждён (код 75)», человек читал строку, из
+      # которой не следует ровно ничего: ни что виноват bootstrap-scout, ни что он
+      # молчал, ни сколько раз его пробовали. Живых случаев три, и каждый резюмился
+      # вручную наугад.
+      v2_log "bootstrap scout: $attempt_no заход(а) подряд без результата — агент не записал исход; смотри артефакты SCOUT в logs/runs и повтори resume"
       runtime_lifecycle_node_visit_finish_v2 \
         interrupted exhausted attempt_interrupted '' '' >/dev/null || true
       runtime_lifecycle_attempt_span_finish_v2 \

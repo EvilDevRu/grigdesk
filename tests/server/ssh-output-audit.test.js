@@ -190,3 +190,53 @@ test('журнал пишет ограниченный результат без
     fileMode: 0o600,
   });
 });
+
+test('срез ставит видимую метку разрыва и не склеивает голову с хвостом', async () => {
+  const module = await loadModule(
+    '../../server/src/lib/ssh/output.js',
+    'ограничитель SSH-вывода ещё не реализован',
+  );
+  const limit = exportedFunction(
+    module,
+    ['limitSshOutput', 'limitOutput'],
+    'модуль SSH-вывода обязан экспортировать ограничитель',
+  );
+  const lines = Array.from({ length: 400 }, (_, index) => `line-${index}-${'y'.repeat(40)}`);
+  const result = limit(lines.join('\n'), 4_096);
+  const [head, tail] = result.text.split('\n… середина удалена …\n');
+
+  assert.deepEqual({
+    halves: result.text.split('\n… середина удалена …\n').length,
+    withinLimit: result.shownBytes <= 4_096,
+    headKeepsStart: head.startsWith('line-0-'),
+    tailKeepsEnd: tail.endsWith(`line-399-${'y'.repeat(40)}`),
+    truncated: result.truncated,
+  }, {
+    halves: 2,
+    withinLimit: true,
+    headKeepsStart: true,
+    tailKeepsEnd: true,
+    truncated: true,
+  });
+});
+
+test('на крошечном лимите метка разрыва не съедает сам вывод', async () => {
+  const module = await loadModule(
+    '../../server/src/lib/ssh/output.js',
+    'ограничитель SSH-вывода ещё не реализован',
+  );
+  const limit = exportedFunction(module, ['limitSshOutput', 'limitOutput'], 'нет ограничителя вывода');
+  const result = limit('НАЧАЛО-' + 'x'.repeat(80) + '-ФИНАЛ', 32);
+
+  assert.deepEqual({
+    gap: result.text.includes('середина удалена'),
+    shownBytes: result.shownBytes,
+    begins: result.text.startsWith('НАЧАЛО-'),
+    ends: result.text.endsWith('-ФИНАЛ'),
+  }, {
+    gap: false,
+    shownBytes: 32,
+    begins: true,
+    ends: true,
+  });
+});

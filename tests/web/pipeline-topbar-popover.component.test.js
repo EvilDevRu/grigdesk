@@ -64,10 +64,6 @@ test('клик по конвейерам раскрывает агрегиров
     attachTo: browser.document.querySelector('#mount'),
     props: {
       items,
-      total: 5,
-      runningCount: 1,
-      stoppedCount: 4,
-      hasErrors: true,
       error: 'сервер временно недоступен',
       icon: 'M6 3v12',
     },
@@ -77,7 +73,14 @@ test('клик по конвейерам раскрывает агрегиров
   const trigger = wrapper.get('[data-context="pipeline-topbar"]');
   assert.equal(trigger.element.tagName, 'BUTTON');
   assert.equal(trigger.attributes('aria-expanded'), 'false');
-  assert.match(trigger.attributes('aria-label'), /всего 5, едут 1, стоят 4/u);
+  assert.match(
+    trigger.attributes('aria-label'),
+    /в работе 1, ждут решения 2, проблемы 2/u,
+  );
+  assert.equal(
+    trigger.find('.pipeline-topbar-counts').text().replace(/\s+/gu, ''),
+    '1/2/2',
+  );
   assert.equal(browser.location.hash, '#/chats');
 
   await trigger.trigger('click');
@@ -123,10 +126,6 @@ test('клик по конвейерам раскрывает агрегиров
       stage: 'Проверка',
       progress: { done: 4, total: 7 },
     }],
-    total: 1,
-    runningCount: 1,
-    stoppedCount: 0,
-    hasErrors: false,
     error: '',
   });
   await wrapper.get('[data-context="pipeline-topbar"]').trigger('click');
@@ -137,4 +136,8 @@ test('клик по конвейерам раскрывает агрегиров
   assert.match(healthyPopover.textContent, /Все конвейеры работают/u);
   assert.match(healthyPopover.textContent, /Этапы выполнены\s*4 \/ 7/u);
   assert.equal(healthyPopover.querySelectorAll('[data-task-id]').length, 0);
+  assert.equal(
+    wrapper.get('.pipeline-topbar-counts').text().replace(/\s+/gu, ''),
+    '1/0/0',
+  );
 });

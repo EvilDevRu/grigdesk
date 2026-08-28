@@ -6,9 +6,15 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 const PANEL_PATH = webFile('src/views/ssh/SshPanel.vue');
 
-async function mountPanel(t, { pending = {} } = {}) {
+async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props = {} } = {}) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/ssh');
+  const savedConnections = [];
   const store = {
+    connections: [],
+    projects: [
+      { id: 'cockpit', factory: false },
+      { id: 'factory-project', factory: true },
+    ],
     sessions: [
       { id: 'session-a', label: 'Боевой код', role: 'code', agentAllowed: true },
       { id: 'session-b', label: 'База', role: 'db', agentAllowed: false },
@@ -16,8 +22,11 @@ async function mountPanel(t, { pending = {} } = {}) {
     activeId: 'session-a',
     approvals: [],
     async load() {},
+    async loadProjects() {},
+    async saveConnection(connection) { savedConnections.push(connection); },
     activate(id) { this.activeId = id; },
     detach() {},
+    ...storeOverrides,
   };
   const answers = [];
   const chatStore = {
@@ -43,10 +52,17 @@ async function mountPanel(t, { pending = {} } = {}) {
         `,
         '@xterm/xterm': `
           export class Terminal {
-            constructor() { globalThis.__sshPanelTerminals.push(this); }
+            constructor() {
+              this.cols = 100;
+              this.rows = 30;
+              globalThis.__sshPanelTerminals.push(this);
+            }
+            loadAddon() {}
             open() {}
             dispose() {}
             write() {}
+            focus() {}
+            onData() { return { dispose() {} }; }
           }
         `,
         '@xterm/addon-fit': 'export class FitAddon { fit() {} }',
@@ -58,7 +74,10 @@ async function mountPanel(t, { pending = {} } = {}) {
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  const wrapper = mount(component, { attachTo: browser.document.querySelector('#mount') });
+  const wrapper = mount(component, {
+    attachTo: browser.document.querySelector('#mount'),
+    props,
+  });
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__sshPanelStore;
@@ -67,7 +86,7 @@ async function mountPanel(t, { pending = {} } = {}) {
     delete globalThis.__chatPermissionPrompt;
   });
   await flushPromises();
-  return { wrapper, store, chatStore, answers, flushPromises };
+  return { wrapper, store, chatStore, answers, savedConnections, flushPromises };
 }
 
 test('две server-owned сессии показаны вкладками при одном xterm', async (t) => {
@@ -93,6 +112,90 @@ test('переключение внутренней вкладки переис�
     activeId: 'session-b',
     terminals: 1,
   });
+});
+
+test('без активной сессии панель показывает подсказку вместо пустого xterm', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    store: {
+      sessions: [],
+      activeId: '',
+    },
+  });
+
+  assert.deepEqual({
+    terminals: globalThis.__sshPanelTerminals.length,
+    message: wrapper.find('.ssh-console__empty').text(),
+  }, {
+    terminals: 0,
+    message: 'Нет активной SSH-сессииВыберите сохранённое соединение ниже — '
+      + 'терминал появится после входа.',
+  });
+});
+
+test('мобильная page-панель не резервирует место под кнопки дока', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    props: {
+      compact: true,
+      presentation: 'page',
+    },
+  });
+
+  assert.deepEqual({
+    compact: wrapper.classes().includes('is-compact'),
+    dock: wrapper.classes().includes('is-dock'),
+  }, {
+    compact: true,
+    dock: false,
+  });
+});
+
+test('медленная загрузка не открывает терминал после unmount', async (t) => {
+  let finishLoad;
+  const loading = new Promise((resolve) => {
+    finishLoad = resolve;
+  });
+  const activations = [];
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      async load() { await loading; },
+      activate(id) { activations.push(id); },
+    },
+  });
+
+  wrapper.unmount();
+  finishLoad();
+  await flushPromises();
+
+  assert.deepEqual({
+    activations,
+    terminals: globalThis.__sshPanelTerminals.length,
+  }, {
+    activations: [],
+    terminals: 0,
+  });
+});
+
+test('новое соединение выбирает проект из реестра и сохраняет его id', async (t) => {
+  const { wrapper, savedConnections, flushPromises } = await mountPanel(t);
+  const project = wrapper.find('[data-ssh-project-select]');
+
+  assert.deepEqual(
+    project.findAll('option').map((option) => ({
+      value: option.element.value,
+      text: option.text(),
+    })),
+    [
+      { value: '', text: 'Выберите проект' },
+      { value: 'cockpit', text: 'cockpit' },
+      { value: 'factory-project', text: 'factory-project' },
+    ],
+  );
+
+  await project.setValue('cockpit');
+  await wrapper.find('.ssh-profile-form').trigger('submit');
+  await flushPromises();
+
+  assert.equal(savedConnections[0]?.projectId, 'cockpit');
 });
 
 test('SSH-панель показывает карточку из общего chat.pending', async (t) => {
@@ -147,4 +250,24 @@ test('SSH-панель отвечает через ту же chat.answerPerm', a
     button: true,
     answers: [['ssh-pid-1', true, false, '', '']],
   });
+});
+
+test('SSH-панель разрешает отказ без пояснения', async (t) => {
+  const pending = {
+    'ssh-pid-1': {
+      pid: 'ssh-pid-1',
+      origin: 'ssh',
+      kind: 'perm',
+      chatKey: 'chat-a',
+      tool: 'supervised_ssh',
+      server: { label: 'Боевой код', host: 'server.internal', port: 22 },
+      user: 'deploy',
+      command: 'id',
+    },
+  };
+  const { wrapper, answers } = await mountPanel(t, { pending });
+  const deny = wrapper.findAll('button').find((entry) => entry.text() === 'Отказать');
+  await deny?.trigger('click');
+
+  assert.deepEqual(answers, [['ssh-pid-1', false, false, '', '']]);
 });

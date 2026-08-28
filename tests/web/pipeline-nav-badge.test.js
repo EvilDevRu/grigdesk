@@ -6,7 +6,7 @@ import {
   pipelineTopbarItems,
 } from '../../web/src/shared/pipeline-nav-badge.js';
 
-test('сводка даёт топбару числа всего / едут / стоят без повторного счёта задач', () => {
+test('сводка даёт топбару взаимоисключающие числа работы / ожидания / проблем', () => {
   const summary = pipelineBadgeSummary({
     stalled: [{ task: '1' }],
     waiting: [{ task: '2' }, { task: '3' }, { task: '4' }, { task: '5' }],
@@ -23,8 +23,8 @@ test('сводка даёт топбару числа всего / едут / с
     waitingEnd: 62.5,
   });
   assert.deepEqual(
-    [summary.totalCount, summary.runningCount, summary.attentionCount],
-    [8, 3, 5],
+    [summary.runningCount, summary.waitingCount, summary.errorCount],
+    [3, 4, 1],
   );
 });
 

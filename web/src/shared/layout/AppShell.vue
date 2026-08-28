@@ -160,10 +160,6 @@
         <PipelineTopbarPopover
           v-if="pipelineTopbar.total"
           :items="notifyWatch.topbarItems"
-          :total="pipelineTopbar.total"
-          :running-count="pipelineTopbar.running"
-          :stopped-count="pipelineTopbar.stopped"
-          :has-errors="pipelineTopbar.hasErrors"
           :error="notifyWatch.error || ''"
           :icon="ICONS.pipeline"
           @open-pipeline="openPipeline"
@@ -614,18 +610,13 @@ async function toggleBoardTimer(task) {
   }
 }
 
-// Конвейер: одна сводка питает и число всех актуальных прогонов в топбаре, и составной
-// чип внимания в навигации. Вотчер уже обходит все задачи, второго запроса не заводим.
+// Конвейер: один классифицированный список питает и три числа popover, и его видимость.
+// Чип внимания использует сводку того же классификатора; второго запроса не заводим.
 const notifyWatch = useNotifyWatchStore();
 notifyWatch.start();
 const pipelineTopbar = computed(() => {
-  const summary = notifyWatch.badgeSummary;
-
   return {
-    total: summary.totalCount,
-    running: summary.runningCount,
-    stopped: summary.attentionCount,
-    hasErrors: summary.errorCount > 0,
+    total: notifyWatch.topbarItems.length,
   };
 });
 const pipelineBadgeStyle = computed(() => {

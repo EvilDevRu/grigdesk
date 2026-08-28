@@ -39,7 +39,7 @@ export const TOOL_REGISTRY = [
     id: 'ssh',
     route: '/ssh',
     label: 'SSH',
-    icon: 'terminal',
+    icon: 'ssh',
     order: 40,
     plugin: 'ssh',
     component: defineAsyncComponent(() => import('../../views/ssh/SshPanel.vue')),

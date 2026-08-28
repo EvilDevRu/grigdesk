@@ -13,10 +13,12 @@ async function sshStore(t, api, sockets = []) {
     constructor(url) {
       this.url = url;
       this.closed = false;
+      this.sent = [];
       sockets.push(this);
     }
 
     close() { this.closed = true; }
+    send(payload) { this.sent.push(payload); }
   };
   let module;
   try {
@@ -87,6 +89,40 @@ test('raw API не ставит JSON Content-Type на парольный connec
   });
 });
 
+test('ошибка каталога проектов не скрывает SSH-соединения и сессии', async (t) => {
+  const store = await sshStore(t, {
+    async get(path) {
+      if (path === '/api/projects') {
+        throw new Error('Профиль проекта повреждён');
+      }
+      if (path === '/api/ssh/connections') {
+        return { connections: [{ id: 'connection-a', projectId: 'cockpit' }] };
+      }
+      if (path === '/api/ssh/sessions') {
+        return { sessions: [{ id: 'session-a', label: 'Боевой код' }] };
+      }
+
+      return { items: [{ at: '2026-08-28T00:00:00.000Z', command: 'id' }] };
+    },
+  });
+
+  await Promise.all([store.load(), store.loadProjects()]);
+
+  assert.deepEqual({
+    connections: store.connections.map((item) => item.id),
+    sessions: store.sessions.map((item) => item.id),
+    audit: store.audit.map((item) => item.command),
+    error: store.error,
+    projectsError: store.projectsError,
+  }, {
+    connections: ['connection-a'],
+    sessions: ['session-a'],
+    audit: ['id'],
+    error: '',
+    projectsError: 'Профиль проекта повреждён',
+  });
+});
+
 test('переключение вкладки держит только один attach WebSocket', async (t) => {
   const sockets = [];
   const store = await sshStore(t, {
@@ -109,6 +145,23 @@ test('переключение вкладки держит только один
     ],
     closed: [true, false],
   });
+});
+
+test('последний размер PTY отправляется после открытия WebSocket', async (t) => {
+  const sockets = [];
+  const store = await sshStore(t, {
+    wsUrl: (path) => `ws://cockpit.test${path}`,
+  }, sockets);
+  store.activate('session-a');
+  sockets[0].readyState = 0;
+  store.resize(132, 41);
+
+  assert.deepEqual(sockets[0].sent, []);
+
+  sockets[0].readyState = 1;
+  sockets[0].onopen();
+
+  assert.deepEqual(sockets[0].sent, [JSON.stringify({ t: 'resize', cols: 132, rows: 41 })]);
 });
 
 test('detach панели не удаляет server-owned сессию', async (t) => {

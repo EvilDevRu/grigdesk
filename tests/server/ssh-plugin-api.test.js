@@ -45,7 +45,7 @@ test('SSH зарегистрирован системным плагином и 
     nav: {
       path: '/ssh',
       label: 'SSH',
-      icon: 'terminal',
+      icon: 'ssh',
       group: 'dock',
       order: 40,
     },
@@ -272,5 +272,48 @@ test('агентский broker отказывает сразу после жи�
     before: [{ label: 'Боевой код', role: 'code' }],
     after: { ok: false, error: 'plugin_disabled' },
     sessionReads: 1,
+  });
+});
+
+test('отказ без пояснения принимается и доезжает до очереди', async (t) => {
+  let sshModule;
+  try {
+    sshModule = await import('../../server/src/modules/ssh/index.js');
+  } catch (error) {
+    assert.fail(`live-gated SSH API ещё не реализован: ${error.message}`);
+  }
+  const answers = [];
+  const app = Fastify({ logger: false });
+  app.decorateRequest('authKind', null);
+  app.addHook('onRequest', async (request) => { request.authKind = 'session'; });
+  app.decorate('pluginEnabled', (id) => id === 'ssh');
+  const service = {
+    async answerApproval(pid, decision) {
+      answers.push([pid, decision.allow, decision.comment]);
+      return { ok: true };
+    },
+  };
+  await app.register(sshModule.default, { service });
+  t.after(() => app.close());
+
+  const silent = await app.inject({
+    method: 'POST',
+    url: '/api/ssh/approvals/pid-a',
+    payload: { allow: false },
+  });
+  const explained = await app.inject({
+    method: 'POST',
+    url: '/api/ssh/approvals/pid-b',
+    payload: { allow: false, comment: '  не на проде  ' },
+  });
+
+  assert.deepEqual({
+    silentStatus: silent.statusCode,
+    explainedStatus: explained.statusCode,
+    answers,
+  }, {
+    silentStatus: 200,
+    explainedStatus: 200,
+    answers: [['pid-a', false, ''], ['pid-b', false, 'не на проде']],
   });
 });

@@ -40,13 +40,11 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.match(source, /@toggle-timer="toggleBoardTimer"/u);
   assert.match(source, /<PipelineTopbarPopover/u);
   assert.match(source, /:items="notifyWatch\.topbarItems"/u);
-  assert.match(source, /:running-count="pipelineTopbar\.running"/u);
-  assert.match(source, /:stopped-count="pipelineTopbar\.stopped"/u);
+  assert.doesNotMatch(source, /:(?:running|stopped)-count=/u);
+  assert.doesNotMatch(source, /:has-errors=/u);
   assert.match(source, /@open-pipeline="openPipeline"/u);
   assert.doesNotMatch(source, /<router-link[^>]*data-context="pipeline-topbar"/u);
-  assert.match(source, /total: summary\.totalCount/u);
-  assert.match(source, /running: summary\.runningCount/u);
-  assert.match(source, /stopped: summary\.attentionCount/u);
+  assert.match(source, /total: notifyWatch\.topbarItems\.length/u);
   assert.match(source, /v-if="topbarTimerTasks\.length && pipelineTopbar\.total"/u);
   assert.match(source, /useTasksStore/u);
   assert.match(source, /await taskStore\.timer\(task\.id, action\)/u);
@@ -59,6 +57,9 @@ test('AppShell использует public UI controls и DOM handle тригг�
   assert.match(providerUsage, /data-context="topbar-popover-resource-link"/u);
   assert.match(pipelinePopover, /<UiPopover/u);
   assert.match(pipelinePopover, /data-context="pipeline-topbar"/u);
+  assert.match(pipelinePopover, /pipeline-topbar-running">\{\{ runningCount \}\}/u);
+  assert.match(pipelinePopover, /pipeline-topbar-waiting"[^>]*>\s*\{\{ waitingCount \}\}/u);
+  assert.match(pipelinePopover, /pipeline-topbar-issues"[^>]*>\s*\{\{ issueCount \}\}/u);
   assert.match(pipelinePopover, /trigger-mode="both"/u);
   assert.match(pipelinePopover, /@click="openPipeline\(close\)"/u);
   assert.match(

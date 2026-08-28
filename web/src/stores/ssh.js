@@ -12,6 +12,7 @@ function runtimeOf(store) {
       socket: null,
       generation: 0,
       terminal: null,
+      size: null,
       off: null,
     };
     runtimes.set(store, runtime);
@@ -22,13 +23,16 @@ function runtimeOf(store) {
 const useSshStoreBase = defineStore('ssh', {
   state: () => ({
     connections: [],
+    projects: [],
     sessions: [],
     activeId: '',
     files: [],
     remotePath: '.',
     audit: [],
     loading: false,
+    projectsLoading: false,
     error: '',
+    projectsError: '',
   }),
 
   actions: {
@@ -51,6 +55,20 @@ const useSshStoreBase = defineStore('ssh', {
         this.error = error?.message || 'Не удалось загрузить SSH';
       } finally {
         this.loading = false;
+      }
+    },
+
+    async loadProjects() {
+      this.projectsLoading = true;
+      this.projectsError = '';
+
+      try {
+        const result = await api.get('/api/projects');
+        this.projects = result?.projects || [];
+      } catch (error) {
+        this.projectsError = error?.message || 'Не удалось загрузить проекты';
+      } finally {
+        this.projectsLoading = false;
       }
     },
 
@@ -95,6 +113,13 @@ const useSshStoreBase = defineStore('ssh', {
       if (!sid || !runtime.WebSocket) return;
       const socket = new runtime.WebSocket(api.wsUrl(`/api/ssh/sessions/${sid}/terminal`));
       runtime.socket = socket;
+      socket.onopen = () => {
+        if (runtime.generation !== generation || runtime.socket !== socket || !runtime.size) {
+          return;
+        }
+
+        socket.send?.(JSON.stringify(runtime.size));
+      };
       socket.onmessage = (event) => {
         if (runtime.generation !== generation) return;
         const data = event?.data;
@@ -118,7 +143,12 @@ const useSshStoreBase = defineStore('ssh', {
     },
 
     resize(cols, rows) {
-      runtimeOf(this).socket?.send?.(JSON.stringify({ t: 'resize', cols, rows }));
+      const runtime = runtimeOf(this);
+      runtime.size = { t: 'resize', cols, rows };
+      const socket = runtime.socket;
+      if (socket?.readyState === undefined || socket.readyState === 1) {
+        socket?.send?.(JSON.stringify(runtime.size));
+      }
     },
 
     detach() {

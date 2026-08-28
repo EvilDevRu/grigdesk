@@ -628,8 +628,18 @@ async function build() {
     sse: { subscribe: (listener) => fastify.sse.subscribe(listener) },
     prefs,
     listTasks: async () => {
-      const response = await fastify.inject({ method: 'GET', url: '/api/tasks' });
-      if (response.statusCode !== 200) return [];
+      // Гард закрывает ВЕСЬ /api, включая GET, поэтому inject без заголовка получает
+      // 401, а вотчер молча читает пустой список: ни одной задачи, ни одной строки в
+      // журнале. Внутренний токен — тот же приём, что у пульта и permission-mcp чата.
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/api/tasks',
+        headers: { 'x-cockpit-internal': internalToken },
+      });
+      if (response.statusCode !== 200) {
+        fastify.log.warn({ status: response.statusCode }, 'арбитр: список задач не прочитан');
+        return [];
+      }
       return response.json().tasks || [];
     },
     arbitrate: (task, reply) => fastify.factoryArbitrate(task, reply),

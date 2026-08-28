@@ -152,7 +152,7 @@ export const SYSTEM = [
     name: 'SSH',
     version: '0.1.0',
     description: 'Терминал и SFTP для человека, надзорное выполнение команд для агента.',
-    nav: { path: '/ssh', label: 'SSH', icon: 'terminal', group: 'dock', order: 40 },
+    nav: { path: '/ssh', label: 'SSH', icon: 'ssh', group: 'dock', order: 40 },
     settings: [
       {
         key: 'outputLimitKiB',

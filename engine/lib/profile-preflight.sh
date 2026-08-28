@@ -21,6 +21,47 @@ _profile_preflight_providers() {
   )
 }
 
+# Пауза между попытками пробы. Отдельной функцией — чтобы тест мог подменить её
+# no-op и не платить секундами за проверку самого правила повтора.
+_profile_preflight_probe_sleep() {
+  sleep "$1"
+}
+
+# Проба CLI идемпотентна: она только читает версию и ничего не меняет ни на хосте,
+# ни у провайдера, — поэтому право на повтор у неё есть. Повторяется ТОЛЬКО
+# транзиент. Детерминированные ответы (`4` — CLI нет вовсе, `2` — контракт раннера
+# не выполнен, `126` — офлайн-гвард) ожиданием не лечатся, а лишние попытки задержали
+# бы старт. Пауза обязательна: две попытки в одну миллисекунду попадают в одно и то
+# же моргание и повтором не являются.
+#
+# Цена одиночной пробы измерена инцидентом 27.08.2026: снимок покрытия ОБЩИЙ на
+# профиль, поэтому моргнувшая проба чужого resume записала `UNAVAILABLE=2` — и
+# идущий рядом прогон встал fail-closed на следующем же узле (`coverage_unavailable`).
+# Через минуту повторный preflight прошёл без единой правки хоста.
+_profile_preflight_probe() {
+  local provider=${1:?provider} attempt=0 rc output
+  local -a delays=(0.5 1.5)
+  while :; do
+    # Код пробы снимается СРАЗУ после вызова, а не после `fi`: у `if` без `else`
+    # значение конструкции равно нулю при ложном условии, и `rc=$?` там всегда
+    # давал бы 0 — то есть недоступный CLI считался бы исправным.
+    output=$(runner_call "$provider" probe 2>/dev/null)
+    rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      [[ "$attempt" -eq 0 ]] ||
+        printf 'preflight: проба %s ответила с попытки %s\n' "$provider" "$((attempt + 1))" >&2
+      printf '%s\n' "$output"
+      return 0
+    fi
+    case "$rc" in
+      2|4|126) return "$rc" ;;
+    esac
+    [[ "$attempt" -lt "${#delays[@]}" ]] || return "$rc"
+    _profile_preflight_probe_sleep "${delays[attempt]}"
+    attempt=$((attempt + 1))
+  done
+}
+
 profile_preflight_ttl() {
   local ttl=${1:-${FACTORY_HOST_PREFLIGHT_TTL:-21600}}
   [[ "$ttl" =~ ^[0-9]+$ && "$ttl" -gt 0 && "$ttl" -le 86400 ]] || return 2
@@ -75,7 +116,7 @@ profile_runner_host_preflight() {
     fi
     [[ -n "$version" ]] || version=latest
     [[ -n "$variant" ]] || variant=auto
-    if probe_output=$(runner_call "$provider" probe 2>/dev/null); then
+    if probe_output=$(_profile_preflight_probe "$provider"); then
       preflight_probe_ready["$provider"]=1
     else
       probe_output=""
