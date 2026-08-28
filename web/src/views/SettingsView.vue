@@ -1597,7 +1597,7 @@
                       <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
                         {{ pluginModelLost(p, s.key) }} — нет в реестре
                       </option>
-                      <optgroup v-for="g in modelGroups" :key="g.id"
+                      <optgroup v-for="g in pluginModelGroups(s)" :key="g.id"
                                 :label="g.name + (g.available ? '' : ' — недоступен')">
                         <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
                           {{ m.name }}
@@ -4227,6 +4227,12 @@ async function savePlugin(p) {
 const modelGroups = computed(() => prov.providers
   .map((p) => ({ ...p, models: prov.visibleModels(p) }))
   .filter((p) => p.models.length));
+
+function pluginModelGroups(setting) {
+  const capability = String(setting?.requiresCapability || '');
+  if (!capability) return modelGroups.value;
+  return modelGroups.value.filter((provider) => provider.capabilities?.[capability] === true);
+}
 
 /** Сохранённая пара → значение опции «исполнитель:модель»; пусто — не выбрана. */
 function pluginModelValue(p, key) {

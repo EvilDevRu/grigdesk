@@ -1126,6 +1126,7 @@ export default {
   vendor: 'Anthropic',
   color: '#d97757',
   order: 1,
+  scopedWorkspace: true,
   workToolsTransport: 'mcp',
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
@@ -1401,18 +1402,70 @@ export default {
    * и размышлений в чате, как в VS Code).
    * Возвращает { reply, sessionId, contextTokens, cost, actualModel, steps } или бросает Error.
    */
-  run({ config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode, mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal }) {
+  run({
+    config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
+    mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal,
+    workspaceAccess,
+  }) {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
-    args.push(...claudeProviderSettingsArgs(providerSettings));
+    const scoped = workspaceAccess && typeof workspaceAccess === 'object';
+    const readableRoots = scoped
+      ? [...new Set((workspaceAccess.readableRoots || []).map(String))]
+      : extraDirs;
+    const writableRoots = scoped
+      ? [...new Set((workspaceAccess.writableRoots || []).map(String))]
+      : [];
+    const accessibleRoots = [...new Set([...readableRoots, ...writableRoots])];
+    const protectedRoots = readableRoots.filter((root) => !writableRoots.includes(root));
+    const requestedTools = new Set(workspaceAccess?.tools || []);
+    const scopedTools = ['Read', 'Glob', 'Grep', 'Write', 'Edit']
+      .filter((tool) => requestedTools.has(tool));
+    const scopedPermissions = scoped ? {
+      permissions: {
+        allow: [
+          ...accessibleRoots.flatMap((root) => [
+            `Read(//${root.replace(/^\/+/, '')}/**)`,
+            `Glob(//${root.replace(/^\/+/, '')}/**)`,
+            `Grep(//${root.replace(/^\/+/, '')}/**)`,
+          ]),
+          ...writableRoots.flatMap((root) => [
+            `Write(//${root.replace(/^\/+/, '')}/**)`,
+            `Edit(//${root.replace(/^\/+/, '')}/**)`,
+          ]),
+        ],
+        deny: protectedRoots.flatMap((root) => [
+          `Write(//${root.replace(/^\/+/, '')}/**)`,
+          `Edit(//${root.replace(/^\/+/, '')}/**)`,
+          `NotebookEdit(//${root.replace(/^\/+/, '')}/**)`,
+        ]),
+      },
+    } : null;
+    const providerArgs = claudeProviderSettingsArgs(providerSettings);
+    if (scopedPermissions) {
+      const settingsAt = providerArgs.lastIndexOf('--settings');
+      const current = JSON.parse(providerArgs[settingsAt + 1]);
+      providerArgs[settingsAt + 1] = JSON.stringify({ ...current, ...scopedPermissions });
+      args.push(
+        '--tools', scopedTools.join(','),
+        '--strict-mcp-config',
+        '--setting-sources', '',
+        '--no-session-persistence',
+      );
+    }
+    args.push(...providerArgs);
     if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
     if (mcpConfig?.mcpServers?.['cockpit-work']) {
-      args.push('--allowedTools', 'mcp__cockpit-work__supervised_ssh');
+      args.push('--allowedTools', scoped
+        ? 'mcp__cockpit-work__repo_history'
+        : 'mcp__cockpit-work__supervised_ssh');
     }
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
     if (model) args.push('--model', model);
     if (effort) args.push('--effort', effort);
     if (sessionId) args.push('--resume', sessionId);
-    for (const d of extraDirs) args.push('--add-dir', d);
+    for (const d of readableRoots) {
+      if (d !== cwd) args.push('--add-dir', d);
+    }
 
     return new Promise((resolve, reject) => {
       // Разбор потока общий с живой сессией (_claude-stream.js): событие CLI одно и то

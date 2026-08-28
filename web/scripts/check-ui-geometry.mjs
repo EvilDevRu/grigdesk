@@ -376,6 +376,7 @@ const BASE_GEOMETRY_AUDIT = `(() => {
   const composer = document.querySelector('[data-geometry-composer]');
   const composerInput = document.querySelector('[data-geometry-composer-input]');
   const contextRing = document.querySelector('[data-geometry-context-ring]');
+  const chatToolbarSelect = document.querySelector('[data-geometry-chat-toolbar-select]');
   const dockActions = [...document.querySelectorAll('[data-geometry-dock-action]')];
   const chatListButtons = [
     ...document.querySelectorAll('[data-geometry-chat-list-button]'),
@@ -501,6 +502,23 @@ const BASE_GEOMETRY_AUDIT = `(() => {
       || svg.getBoundingClientRect().height > label.getBoundingClientRect().height + tolerance
     ) {
       errors.push('context ring: SVG не помещается в label');
+    }
+  }
+
+  if (!chatToolbarSelect) {
+    errors.push('toolbar select: контрольный селект чата отсутствует');
+  } else {
+    const chatRect = chatToolbarSelect.getBoundingClientRect();
+    const chatStyle = getComputedStyle(chatToolbarSelect);
+
+    if (
+      Math.abs(chatRect.height - 28) > tolerance
+      || parseFloat(chatStyle.borderTopLeftRadius) > tolerance
+      || parseFloat(chatStyle.borderTopWidth) > tolerance
+      || Math.abs(parseFloat(chatStyle.borderBottomWidth) - 1) > tolerance
+      || chatStyle.backgroundColor !== 'rgba(0, 0, 0, 0)'
+    ) {
+      errors.push('toolbar select: чат потерял плоский skin');
     }
   }
 

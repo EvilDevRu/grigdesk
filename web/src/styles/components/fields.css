@@ -330,6 +330,12 @@
   padding: 0;
 }
 
+/* Подпись скрыта клипом, но её пустая обёртка остаётся flex-элементом и забирает
+   gap: без обнуления знак встаёт на 3.5px левее центра квадратной кнопки. */
+.ui-file-picker[data-role='task-attachment'] .ui-button__content {
+  gap: 0;
+}
+
 .ui-file-picker[data-role='task-attachment'] .ui-file-picker__copy {
   position: absolute;
   width: 1px;

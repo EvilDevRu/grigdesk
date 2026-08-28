@@ -10,6 +10,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import codex from '../../server/src/lib/executors/codex.js';
+
 const execFileAsync = promisify(execFile);
 const CODEX_BIN = process.env.COCKPIT_CODEX_BIN || 'codex';
 const DIRECT_SSH_HOOK = fileURLToPath(new URL(
@@ -201,6 +203,11 @@ test('установленный Codex сохраняет необходимый
     assertSchemaPattern(sandboxPolicy, new RegExp(`\\b${field}\\s*:`), field, version,
       'SandboxPolicy.workspaceWrite');
   }
+  assert.equal(
+    await codex.scopedWorkspace({ codexBin: CODEX_BIN }),
+    /\breadOnlyAccess\b/.test(sandboxPolicy),
+    `Codex ${version}: capability scopedWorkspace не совпадает с живой схемой`,
+  );
 
   assertField(itemStarted, 'item', 'ThreadItem', version, 'ItemStartedNotification');
   assertField(itemCompleted, 'item', 'ThreadItem', version, 'ItemCompletedNotification');

@@ -106,14 +106,14 @@ import {
 const analysis = useAnalysisStore();
 
 // Шапка живёт на всех экранах, а startPolling у store идемпотентен.
-analysis.startPolling();
+if (!analysis.disabled) analysis.startPolling();
 
 const busy = ref(null);
 const popoverStyle = {
   width: 'min(400px, calc(100vw - 20px))',
 };
 
-const items = computed(() => analysis.issues.map((issue) => ({
+const items = computed(() => (analysis.disabled ? [] : analysis.issues).map((issue) => ({
   task: issue.task,
   reason: issue.status?.error || (
     issue.status?.state === 'interrupted' ? 'прерван' : 'упал'

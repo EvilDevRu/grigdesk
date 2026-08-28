@@ -51,6 +51,7 @@ function providers() {
       id: 'claude',
       name: 'Claude',
       available: true,
+      capabilities: { scopedWorkspace: true },
       // Лестницы эффорта у моделей РАЗНЫЕ — на этом и держится проверка переноса.
       models: [
         { id: 'claude-opus-5', name: 'Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -61,10 +62,17 @@ function providers() {
       id: 'ollama',
       name: 'Ollama',
       available: true,
+      capabilities: { scopedWorkspace: false },
       // У локального эффорт бинарный: `xhigh` ему передать нельзя.
       models: [{ id: 'hf.co/unsloth/qwen3.6:latest', name: 'qwen3.6 (hf)', efforts: ['low', 'high'] }],
     },
-    { id: 'codex', name: 'GPT (Codex)', available: false, models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }] },
+    {
+      id: 'codex',
+      name: 'GPT (Codex)',
+      available: false,
+      capabilities: { scopedWorkspace: true },
+      models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }],
+    },
   ];
 }
 
@@ -112,6 +120,18 @@ const INBOX_PLUGIN = {
   settings: [TRIAGE_SETTING],
 };
 const CODE_PLUGIN = SYSTEM.find((plugin) => plugin.id === 'code');
+const ANALYSIS_PLUGIN = {
+  id: 'analysis',
+  system: true,
+  name: 'Триаж',
+  version: '1.0.0',
+  description: 'Оценка сложности и рисков по коду.',
+  settings: [{
+    ...TRIAGE_SETTING,
+    label: 'Модель триажа',
+    requiresCapability: 'scopedWorkspace',
+  }],
+};
 
 function makePluginsStore(values, manifest = INBOX_PLUGIN) {
   const saved = [];
@@ -194,6 +214,15 @@ test('модели берутся из общего реестра исполн�
   // Подсказка манифеста должна доехать до экрана: она объясняет, почему без модели
   // автоматических задач не будет вовсе.
   assert.match(wrapper.find('.plughint').text(), /автоматические задачи не создаются/);
+});
+
+test('карточка триажа предлагает только исполнителей с изолированным рабочим каталогом', async (t) => {
+  const { wrapper } = await mountSettings(t, { plugin: ANALYSIS_PLUGIN });
+
+  assert.deepEqual(
+    wrapper.findAll('.plugrow optgroup').map((group) => group.attributes('label')),
+    ['Claude', 'GPT (Codex) — недоступен'],
+  );
 });
 
 test('выбор сохраняется парой «исполнитель + модель», а id со слэшем не рвётся', async (t) => {

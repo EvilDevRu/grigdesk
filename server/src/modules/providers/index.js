@@ -6,7 +6,7 @@
 // Не путать с /api/agents — там база агентов-стадий конвейера (промпты).
 import fp from 'fastify-plugin';
 import { execFile } from 'node:child_process';
-import { getProviderAdapters } from '../../lib/executors/index.js';
+import { getProviderAdapters, supportsScopedWorkspace } from '../../lib/executors/index.js';
 import { getModelsRegistry } from '../../lib/models-registry.js';
 import { isOutdated } from '../../lib/executors/_npm-latest.js';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/provider-settings.js';
@@ -134,6 +134,9 @@ async function providersModule(fastify, opts) {
         available: ok && auth.available,
         // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
         chatEnabled: typeof ex.run === 'function',
+        capabilities: {
+          scopedWorkspace: await supportsScopedWorkspace(ex, config),
+        },
         // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
         trustedDirectories: await trustedDirectoriesOf(ex),
@@ -163,6 +166,15 @@ async function providersModule(fastify, opts) {
   }
 
   let cache = null; // { at, providers }
+
+  fastify.decorate('providerRegistry', async () => {
+    const providers = await buildRegistry();
+    return Object.fromEntries(
+      providers.filter((provider) => provider.available && provider.chatEnabled)
+        .map((provider) => [provider.id, provider.models]),
+    );
+  });
+  fastify.decorate('executorFor', async (id) => (await adaptersOf()).get(String(id)) || null);
 
   // Метка «новое» — бухгалтерия кокпита, а не факт адаптера: адаптер называет ведро
   // полем `group`, а помнит ли человек это ведро — знает только сервер.

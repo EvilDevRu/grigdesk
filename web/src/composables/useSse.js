@@ -15,7 +15,7 @@ const EVENT_NAMES = [
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan', 'chat-turn-start', 'chat-sessions',
   'chat-store', 'chat-store-meta',
   'speech-settings',
-  'inbox-changed', 'telegram-status', 'task-shelf-changed',
+  'inbox-changed', 'telegram-status', 'task-shelf-changed', 'arbiter-live',
   'gateway-setup',
 ];
 

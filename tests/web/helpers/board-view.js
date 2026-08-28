@@ -121,6 +121,7 @@ export async function mountBoardView(t, {
   favorites = {},
   shelf = {},
   shelfEnabled = true,
+  analysisEnabled = true,
   seen = {},
   triagePrefs,
 } = {}) {
@@ -193,7 +194,10 @@ export async function mountBoardView(t, {
     plugins: defineStore(`board-view-plugins-${nonce}`, {
       state: () => ({
         loaded: true,
-        list: [{ id: 'shelf', enabled: shelfEnabled, values: {} }],
+        list: [
+          { id: 'shelf', enabled: shelfEnabled, values: {} },
+          { id: 'analysis', enabled: analysisEnabled, values: {} },
+        ],
       }),
       getters: {
         enabled: (state) => (id) => !!state.list.find((item) => item.id === id)?.enabled,

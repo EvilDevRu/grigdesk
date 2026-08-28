@@ -32,7 +32,7 @@
         <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[a.diff_size] || '' }}</span>
         <span class="trow muted">маршрут: {{ a.route_guess }} · уверенность: {{ CONF_RU[a.confidence] || a.confidence }}</span>
         <span v-if="a.summary" class="trow sum clamp">{{ a.summary }}</span>
-        <span v-for="q in (a.questions || []).slice(0, 2)" :key="q" class="trow q clamp2">? {{ q }}</span>
+        <span v-for="(q, index) in (a.questions || []).slice(0, 2)" :key="q?.id || index" class="trow q clamp2">? {{ questionText(q) }}</span>
         <span v-if="(a.questions || []).length > 2" class="trow muted">…ещё {{ (a.questions || []).length - 2 }} — в карточке задачи</span>
       </span>
     </template>
@@ -75,6 +75,9 @@ const CONF_RU = { high: 'высокая', medium: 'средняя', low: 'низ
 function tone(kind, v) {
   if (kind === 'risk') return v >= 4 ? 'bad' : v === 3 ? 'warn' : 'dim';
   return v >= 4 ? 'warn' : v === 3 ? 'acc' : 'dim';
+}
+function questionText(question) {
+  return typeof question === 'string' ? question : String(question?.text || '');
 }
 const needsInfo = computed(() => a.value && (a.value.needs_clarification || a.value.confidence === 'low'));
 // Итог тяжести задачи — осторожная свёртка: максимум из сложности и риска.

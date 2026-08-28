@@ -14,6 +14,8 @@ import { buildRouteDef, routeStageKeys } from '../lib/route-graph.js';
 import { RoutesStore } from '../modules/routes/store.js';
 import { parseSandboxRepositories } from '../lib/sandbox-env.js';
 import { routeInstrumentationMode } from '../lib/factory-launch-contract.js';
+import { readNodeVerdicts, stopVerdictOf } from '../lib/factory-node-verdicts.js';
+import { stopIsArbitrable } from '../lib/factory-arbiter.js';
 import {
   readFactoryAttemptLedger,
   verifyFactoryAttemptEnvironment,
@@ -70,11 +72,15 @@ export class FactoryStateAdapter {
    */
   constructor({
     stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
+    arbiterCards = null,
   }) {
     this.stateDir = stateDir;
     this.profilesDir = profilesDir;
     this.routesDir = routesDir;
     this.controlDir = controlDir;
+    // Разбор арбитра последней остановки. Только чтение: пишет его модуль factory после
+    // хода, а карточка задачи и модалка узла обязаны его видеть, а не терять.
+    this.arbiterCards = arbiterCards;
     this.workTimeReader = workTimeReader;
     this._workTimeCache = new Map();
     this._routesStore = null;
@@ -415,7 +421,7 @@ export class FactoryStateAdapter {
       daemonAlive,
       needsRun: registry.NEEDS_RUN === '1',
       stalledHuman: registry.STALLED_HUMAN === '1',
-      stall: detectStall({ registry, timeline, daemonAlive }),
+      stall: await this.summaryStall({ registry, timeline, daemonAlive, trusted, task }),
       // Молчание идущего хода. detectStall сюда не дотягивается по устройству: он
       // отвечает на «почему конвейер СТОИТ», а зависший агент формально работает —
       // демон жив, этап running, флага остановки нет. Порог не применяем, отдаём
@@ -424,6 +430,35 @@ export class FactoryStateAdapter {
       stages,
       stageMap: map,
       updatedAt: mtime,
+    };
+  }
+
+  /**
+   * Остановка для СПИСКА задач вместе с признаком «за это берётся арбитр».
+   *
+   * Журнал попытки читается только у остановленной задачи: список опрашивается часто, и
+   * платить чтением событий за каждую живую задачу нельзя (та же грабля, что убила
+   * карточку «Слоты запуска», — дорогое чтение на частом пути).
+   */
+  async summaryStall({ registry, timeline, daemonAlive, trusted, task }) {
+    const stall = detectStall({ registry, timeline, daemonAlive });
+    if (!stall || trusted?.cursor?.state !== 'stopped') return stall;
+
+    const verdicts = await readNodeVerdicts({
+      controlDir: this.controlDir,
+      task,
+      attempt: trusted.attempt,
+    });
+    const stopVerdict = stopVerdictOf(verdicts, trusted.cursor.stop);
+    return {
+      ...stall,
+      // Узел остановки нужен и в СВОДКЕ, а не только в графе: по нему автоматический
+      // арбитр отличает «эту остановку я уже отдал человеку» от «маршрут встал в другом
+      // месте». Полного `stallNodeId` здесь нет по цене — он требует определения схемы, —
+      // но вердикт остановки уже прочитан строкой выше, и узел лежит прямо в нём.
+      node: stopVerdict?.node || null,
+      arbitrable: stopIsArbitrable(trusted.cursor.stop, stopVerdict?.owner || null),
+      arbiter: this.arbiterCards?.read(task, trusted.attempt) || null,
     };
   }
 
@@ -495,13 +530,49 @@ export class FactoryStateAdapter {
       else if (trusted.cursor.state === 'ready' && alive) statuses[cursorNode] = 'run';
     }
     const sandbox = env.FE_PORT ? null : await this.readSandboxStage(task);
+    // Что каждый узел СКАЗАЛ, закрывая заход: класс владельца провала и типизированные
+    // находки с якорями на файлы. В провайдерскую проекцию попадает только однострочный
+    // дайджест `<КЛЮЧ>_COMMENT`, поэтому вопрос, ради которого маршрут встал на человеке,
+    // читался лишь из `stage-results/` руками. Одно чтение на весь граф, а не на узел.
+    const verdicts = trusted
+      ? await readNodeVerdicts({
+        controlDir: this.controlDir,
+        task,
+        attempt: trusted.attempt,
+      })
+      : {};
+
     const detectedStall = detectStall({
       registry,
       timeline: await this.readTimeline(task),
       daemonAlive: alive,
     });
-    const stallNode = stallNodeId(def, statuses, detectedStall?.stage);
-    const stall = detectedStall ? { ...detectedStall, node: stallNode } : null;
+
+    // Узел, чей вердикт объявил текущую остановку. Их в журнале может остаться
+    // несколько — прежнюю остановку могли снять возвратом на соседний узел, — поэтому
+    // берём событие с наибольшим номером.
+    const cursorStop = trusted?.cursor?.state === 'stopped' ? trusted.cursor.stop : null;
+    const stopVerdict = stopVerdictOf(verdicts, cursorStop);
+
+    // Имя узла остановки берём у журнала, когда строка журнала его не назвала: старые
+    // записи движка писали остановку без узла, и подсвечивать на схеме было нечего.
+    const stallNode = stallNodeId(def, statuses, detectedStall?.stage)
+      || (stopVerdict && def.pos[stopVerdict.node] !== undefined ? stopVerdict.node : null);
+
+    // Берётся ли за неё арбитр — решает ОДНО правило, общее с его собственным гейтом.
+    // Кнопка, за которой стоит отказ, хуже отсутствующей кнопки.
+    const arbitrable = Boolean(cursorStop)
+      && stopIsArbitrable(cursorStop, stopVerdict?.owner || null);
+
+    const stall = detectedStall
+      ? {
+        ...detectedStall,
+        node: stallNode,
+        arbitrable,
+        // Человеческая формулировка того же затыка, если арбитр его уже разбирал.
+        arbiter: this.arbiterCards?.read(task, trusted?.attempt) || null,
+      }
+      : null;
     // Реестр остаётся `running`, когда движок после исчерпания попыток ставит
     // STALLED_HUMAN. Для схемы это не «идёт»: красим точный узел остановкой/обрывом.
     if (stallNode) statuses[stallNode] = stall.kind === 'human' ? 'stall' : 'fail';
@@ -573,6 +644,9 @@ export class FactoryStateAdapter {
         // Причина привязана к конкретному узлу, чтобы модалка этапа и сам SVG не
         // пытались повторно угадывать её по строкам журнала.
         stall: stall?.node === nid ? stall : null,
+        // Вердикт последнего захода: `owner`, находки, просмотренные файлы. Текст пишет
+        // агент — недоверенные данные, рисуются только интерполяцией.
+        verdict: verdicts[nid] || null,
       };
       // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
@@ -622,6 +696,11 @@ export class FactoryStateAdapter {
       // Для route-v2 это сумма реальных runner-запусков; при утраченной телеметрии
       // возвращаем null, а не заведомо ложный календарный интервал из старого ledger.
       timing,
+      // Что арбитр решил по дороге, пока человека не звали. Ворота — теперь единственная
+      // точка его контроля, а карточка разбора живёт в плашке ОСТАНОВКИ, которой у ворот
+      // нет: без этой сводки человек принимал бы план и результат, не зная, сколько раз
+      // конвейер разворачивался сам и какие развилки закрыли за него.
+      arbiterLog: this.arbiterCards?.read(task, trusted?.attempt)?.history || [],
       updatedAt: mtime,
     };
   }

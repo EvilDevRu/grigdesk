@@ -3,6 +3,14 @@
 const TERMINAL_ANALYSIS = new Set(['done', 'finished', 'failed', 'interrupted']);
 const TERMINAL_B24 = new Set(['completed', 'done', 'closed']);
 
+/**
+ * Узнаёт завершённую B24-задачу по живому статусу или подтверждённому уходу с доски.
+ * Недоступный источник сюда не попадает: вызывающая сторона подставляет durable snapshot.
+ */
+export function isShelfTaskCompleted(value) {
+  return value?.present === false || TERMINAL_B24.has(value?.statusKind);
+}
+
 function text(value) {
   return typeof value === 'string' && value ? value : null;
 }

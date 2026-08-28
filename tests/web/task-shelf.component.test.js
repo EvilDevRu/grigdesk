@@ -16,6 +16,7 @@ function row(overrides = {}) {
     addedAt: new Date().toISOString(),
     reasonText: 'Жду оценку',
     state: 'neutral',
+    completed: false,
     message: '',
     source: null,
     details: {
@@ -160,6 +161,36 @@ test('События собраны перед обычным ожиданием
     groups: ['attention', 'waiting'],
     attention: '22',
     waiting: '11',
+  });
+});
+
+test('Завершённые задачи собраны внизу и показаны приглушёнными', async (t) => {
+  const completed = row({
+    taskId: '33',
+    title: 'Завершённая задача',
+    state: 'lit',
+    completed: true,
+    source: 'b24',
+    message: 'Задача завершена или закрыта',
+  });
+  const waiting = row({ taskId: '11', title: 'Ждущая задача' });
+  const attention = row({
+    taskId: '22',
+    title: 'Нужна реакция',
+    state: 'lit',
+    message: 'Пришёл ответ',
+  });
+  const { wrapper } = await mountPanel(t, [completed, waiting, attention]);
+  const completedCard = wrapper.get('[data-shelf-group="completed"] [data-task-id="33"]');
+
+  assert.deepEqual({
+    groups: wrapper.findAll('.shelf-group').map((group) => group.attributes('data-shelf-group')),
+    title: completedCard.get('.shelf-title').text(),
+    muted: completedCard.attributes('data-shelf-completed'),
+  }, {
+    groups: ['attention', 'waiting', 'completed'],
+    title: 'Завершённая задача',
+    muted: 'true',
   });
 });
 

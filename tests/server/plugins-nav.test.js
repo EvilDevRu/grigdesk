@@ -14,7 +14,9 @@ import {
 
 test('системные инструменты имеют явные group/order, а неизвестная группа нормализуется в rail', () => {
   assert.deepEqual(NAV_GROUPS, ['rail', 'tools', 'dock']);
-  const placement = Object.fromEntries(SYSTEM.map((plugin) => [plugin.id, plugin.nav]));
+  const placement = Object.fromEntries(
+    SYSTEM.filter((plugin) => plugin.nav).map((plugin) => [plugin.id, plugin.nav]),
+  );
   assert.deepEqual(
     Object.fromEntries(Object.entries(placement).map(([id, nav]) => [id, [nav.group, nav.order]])),
     {
@@ -62,6 +64,33 @@ test('системные инструменты имеют явные group/orde
     normalizePluginNav({ path: '/no-order', order: null }, 'Без порядка'),
     { path: '/no-order', label: 'Без порядка', icon: 'plugin', group: 'rail' },
   );
+});
+
+test('Триаж объявлен включённым системным плагином с моделью и выключенным авторазбором', () => {
+  const analysis = SYSTEM.find((plugin) => plugin.id === 'analysis');
+
+  assert.deepEqual({
+    system: analysis?.system,
+    defaultEnabled: analysis?.defaultEnabled,
+    settings: analysis?.settings?.map((setting) => [
+      setting.key,
+      setting.type,
+      setting.default,
+      setting.requiresCapability || null,
+    ]),
+    values: analysis ? settingsValues({}, analysis) : null,
+  }, {
+    system: true,
+    defaultEnabled: true,
+    settings: [
+      ['triageModel', 'model', null, 'scopedWorkspace'],
+      ['autoArbitrate', 'checkbox', false, null],
+    ],
+    values: {
+      triageModel: null,
+      autoArbitrate: false,
+    },
+  });
 });
 
 test('Полка включена по умолчанию и объявляет обе работающие настройки', () => {

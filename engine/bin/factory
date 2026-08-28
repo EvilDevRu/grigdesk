@@ -3078,12 +3078,27 @@ v2_admin_main() {
       v2_log "goto: human intervention lifecycle не закрыт (код $rc)"
       return "$rc"
     }
+    # Телеметрия визита узла идёт ПОСЛЕ решения и не вправе его отменить: событие
+    # human-rewind уже лежит в immutable журнале попытки, курсор сдвинут, lifecycle
+    # человека закрыт. Прежние молчаливые `return` роняли goto после успешной записи —
+    # человек получал отказ поверх сделанной работы, проекция реестра оставалась
+    # старой, и прогон выглядел непродолженным (случай 28.08.2026).
+    # Отказ аналитики называем в журнале и идём дальше: потерянная строка телеметрии
+    # дешевле потерянного решения человека.
     if [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
-      stage_hash=$(v2_lifecycle_latest_stage_hash "$EXPECTED_ATTEMPT") || return
-      transition="tr_${stage_hash:0:32}"
-      runtime_lifecycle_node_visit_finish_v2 \
-        succeeded manual_resume human_rewind "$transition" "$stage_hash" \
-        >/dev/null || return
+      stage_hash=$(v2_lifecycle_latest_stage_hash "$EXPECTED_ATTEMPT")
+      rc=$?
+      if (( rc == 0 )) && [[ -n "$stage_hash" ]]; then
+        transition="tr_${stage_hash:0:32}"
+        runtime_lifecycle_node_visit_finish_v2 \
+          succeeded manual_resume human_rewind "$transition" "$stage_hash" \
+          >/dev/null || {
+            rc=$?
+            v2_log "goto $GATE_NODE записан; визит узла не закрыт в телеметрии (код $rc)"
+          }
+      else
+        v2_log "goto $GATE_NODE записан; hash последнего события этапа не прочитан (код $rc)"
+      fi
     fi
     route_v2_project_latest_reset "$TASK" "$EXPECTED_ATTEMPT" || {
       rc=$?

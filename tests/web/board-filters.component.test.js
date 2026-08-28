@@ -131,3 +131,27 @@ test('BOARD-FILTERS-04: раскладка зависит от контейне�
   assert.doesNotMatch(source, /@media\s*\(min-width:\s*860px\)/,
     'две колонки не должны включаться по viewport без учёта sidebar и dock');
 });
+
+test('выключенный триаж убирает массовый запуск, свои фильтры и сортировку с доски', async (t) => {
+  const { wrapper } = await mountBoardView(t, {
+    prefix: 'board-analysis-disabled',
+    tasks: TASKS,
+    analysisEnabled: false,
+    analysis: {
+      22: { analysis: { risk: 5, needs_clarification: true, confidence: 'low' } },
+    },
+  });
+
+  assert.deepEqual({
+    batch: wrapper.findAll('.triage-all').length,
+    filters: wrapper.findAll('[data-option-value="unrated"]').length
+      + wrapper.findAll('[data-option-value="needs-info"]').length,
+    sort: wrapper.findAll('.trisort').length,
+    placeholder: /Триаж выключен/u.test(wrapper.text()),
+  }, {
+    batch: 0,
+    filters: 0,
+    sort: 0,
+    placeholder: true,
+  });
+});

@@ -1,15 +1,116 @@
-// Триаж задач: очередь + одиночный headless-запуск claude на задачу (read-only разведка
+// Триаж задач: очередь + одиночный headless-запуск выбранной модели (read-only разведка
 // кода, без стенда). Агент сам пишет результат в каталог анализа (t<ID>.analysis.json +
 // t<ID>.md), раннер валидирует и обогащает (SHA репозиториев, стоимость, время).
 // Очередь in-process (конкуренция 1): анализ идёт минуты, при рестарте сервера
 // незавершённые помечаются failed — кнопка «Оценить» запускает заново.
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadTriageProfile } from './profile.js';
 import { buildTriagePrompt } from './prompt.js';
+import { createRepoHistoryTools } from './repo-history.js';
+import { supportsScopedWorkspace } from '../executors/index.js';
+import { createWorkIpc } from '../executors/work-ipc.js';
 import { refreshRepos } from '../git-refresh.js';
+import {
+  resolveChatAttachment,
+  resolveLegacyChatAttachment,
+} from '../chat/attachments.js';
+import { resolveLegacyModel, resolveModelRef } from '../chat/model-ref.js';
 import { stripDiscussionSection } from '../telegram/discussion.js';
+
+const CLARIFICATION_MARKER_RE = /<!-- cockpit-clarification:v1 ([A-Za-z0-9_-]+) -->/g;
+
+function boundedText(value, limit = 4000) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function stableId(prefix, value) {
+  return `${prefix}-${createHash('sha256').update(String(value)).digest('hex').slice(0, 12)}`;
+}
+
+/**
+ * Старые строки и новый объектный контракт приводятся к одному представлению только
+ * в памяти. Чтение старого файла при этом не является миграцией и не меняет байты.
+ */
+export function normalizeAnalysisQuestions(values) {
+  const result = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(values) ? values : []) {
+    const text = boundedText(typeof raw === 'string' ? raw : raw?.text, 1000);
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+
+    const questionId = boundedText(raw?.id, 80) || stableId('q', text);
+    const options = [];
+    const optionLabels = new Set();
+    for (const option of Array.isArray(raw?.options) ? raw.options : []) {
+      const label = boundedText(typeof option === 'string' ? option : option?.label, 300);
+      if (!label || optionLabels.has(label)) {
+        continue;
+      }
+      optionLabels.add(label);
+      options.push({
+        id: boundedText(option?.id, 80) || stableId('o', `${questionId}\0${label}`),
+        label,
+        ...(boundedText(option?.description, 600)
+          ? { description: boundedText(option.description, 600) }
+          : {}),
+      });
+    }
+
+    const recommendation = raw?.recommendation && typeof raw.recommendation === 'object'
+      ? {
+        option: boundedText(raw.recommendation.option, 300),
+        reason: boundedText(raw.recommendation.reason, 800),
+      }
+      : null;
+    result.push({
+      id: questionId,
+      text,
+      options,
+      ...(recommendation?.option || recommendation?.reason ? { recommendation } : {}),
+    });
+  }
+  return result;
+}
+
+function clarificationEntries(markdown) {
+  const entries = [];
+  for (const match of String(markdown || '').matchAll(CLARIFICATION_MARKER_RE)) {
+    try {
+      const parsed = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8'));
+      if (!parsed?.questionId || !['human', 'cockpit-arbiter'].includes(parsed.actor)) {
+        continue;
+      }
+      entries.push({
+        id: boundedText(parsed.id, 100),
+        questionId: boundedText(parsed.questionId, 100),
+        actor: parsed.actor,
+        status: parsed.status === 'human_required' ? 'human_required' : 'answered',
+        selection: Array.isArray(parsed.selection)
+          ? parsed.selection.map((value) => boundedText(value, 100)).filter(Boolean)
+          : [],
+        text: boundedText(parsed.text, 6000),
+        attachments: Array.isArray(parsed.attachments)
+          ? parsed.attachments.map((item) => ({
+            file: boundedText(item?.file, 180),
+            name: boundedText(item?.name, 180),
+          })).filter((item) => item.file)
+          : [],
+        proof: Array.isArray(parsed.proof)
+          ? parsed.proof.map((value) => boundedText(value, 500)).filter(Boolean)
+          : [],
+      });
+    } catch {
+      // Старый или повреждённый комментарий остаётся видимым markdown-текстом.
+    }
+  }
+  return entries;
+}
 
 export class Analyzer {
   /**
@@ -19,7 +120,10 @@ export class Analyzer {
    *   раньше, чем регистрируется модуль telegram с его декоратором, — так что
    *   функция обязана искать декоратор в момент вызова, а не при сборке.
    */
-  constructor({ config, claudeAuth, b24, factoryState, prefs, log, discussion }) {
+  constructor({
+    config, claudeAuth, b24, factoryState, prefs, log, discussion,
+    pluginEnabled, pluginSettings, providerRegistry, executorFor,
+  }) {
     this.config = config;
     this.claudeAuth = claudeAuth;
     this.b24 = b24;
@@ -27,10 +131,18 @@ export class Analyzer {
     this.prefs = prefs;
     this.log = log;
     this.discussion = discussion || null;
+    this.pluginEnabled = pluginEnabled || (() => true);
+    this.pluginSettings = pluginSettings || (() => ({
+      triageModel: null,
+      autoArbitrate: false,
+    }));
+    this.providerRegistry = providerRegistry || (async () => ({}));
+    this.executorFor = executorFor || (async () => null);
     this.dir = config.analysisDir;
     this._queue = [];
     this._jobs = new Map(); // id → 'queued' | 'running'
     this._profile = null;   // кеш профиля триажа
+    this._started = false;
     this._ready = this._init();
   }
 
@@ -41,6 +153,44 @@ export class Analyzer {
       if (f.endsWith('.json.tmp')) await fs.rm(path.join(this.dir, f), { force: true }).catch(() => {});
     }
     await this._sweepOrphans();
+  }
+
+  /**
+   * Завершает одноразовую миграцию старого env-алиаса и только после неё разрешает
+   * восстановленной очереди запускать модели через живые зависимости приложения.
+   */
+  async start() {
+    await this._ready;
+    await this._migrateLegacyModel();
+    this._started = true;
+    this._pump();
+    return { ok: true };
+  }
+
+  async _migrateLegacyModel() {
+    if (!this.prefs?.write) {
+      return;
+    }
+    const stored = this.prefs.readStored?.() || this.prefs.read?.() || {};
+    const analysis = stored.pluginSettings?.analysis || {};
+    if (Object.hasOwn(analysis, 'triageModel')) {
+      return;
+    }
+
+    const registry = await this.providerRegistry();
+    const legacy = process.env.COCKPIT_ANALYSIS_MODEL || 'sonnet';
+    const resolved = resolveLegacyModel(legacy, { claude: registry?.claude || [] });
+    this._legacyMigrationUnavailable = !resolved.ok;
+    const next = {
+      ...analysis,
+      triageModel: resolved.ok ? resolved.modelRef : null,
+    };
+    this.prefs.write({
+      pluginSettings: {
+        ...(stored.pluginSettings || {}),
+        analysis: next,
+      },
+    });
   }
 
   /**
@@ -82,7 +232,6 @@ export class Analyzer {
         this._queue.push(r.id);
       }
       this.log?.info({ count: requeue.length }, 'триаж: очередь восстановлена после рестарта');
-      this._pump();
     }
   }
 
@@ -105,6 +254,10 @@ export class Analyzer {
     try { return await fs.readFile(this._paths(id).clarify, 'utf8'); } catch { return ''; }
   }
 
+  async readClarificationEntries(id) {
+    return clarificationEntries(await this.readClarifications(id));
+  }
+
   /**
    * Открытые вопросы (questions) и технические неизвестные (unknowns) последнего
    * триажа. Это мост «триаж → конвейер»: запуск вклеивает их в тикет, и планировщик
@@ -114,7 +267,14 @@ export class Analyzer {
     const analysis = await this._readJson(this._paths(id).json);
     if (!analysis) return null;
     const clean = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : []);
-    const questions = clean(analysis.questions);
+    const answered = new Set(
+      (await this.readClarificationEntries(id))
+        .filter((entry) => entry.status === 'answered')
+        .map((entry) => entry.questionId),
+    );
+    const questions = normalizeAnalysisQuestions(analysis.questions)
+      .filter((question) => !answered.has(question.id))
+      .map((question) => question.text);
     const unknowns = clean(analysis.unknowns);
     return questions.length || unknowns.length ? { questions, unknowns } : null;
   }
@@ -125,6 +285,84 @@ export class Analyzer {
     await fs.mkdir(this.dir, { recursive: true });
     await fs.writeFile(this._paths(id).clarify, `${cur}${cur ? '\n' : ''}## ${stamp}\n${text.trim()}\n`);
     return this.readClarifications(id);
+  }
+
+  /**
+   * Сервер сверяет вопрос, варианты и token вложения с текущей оценкой, сам назначает
+   * actor/status и дописывает единственный локальный clarification markdown.
+   */
+  async appendClarificationBatch(id, answers, { actor = 'human' } = {}) {
+    const analysis = await this._readJson(this._paths(id).json);
+    const questions = new Map(
+      normalizeAnalysisQuestions(analysis?.questions).map((question) => [question.id, question]),
+    );
+    if (!Array.isArray(answers) || !answers.length) {
+      return { ok: false, error: 'empty_answers' };
+    }
+
+    const entries = [];
+    for (const answer of answers) {
+      const question = questions.get(boundedText(answer?.questionId, 100));
+      if (!question) {
+        return { ok: false, error: 'invalid_question' };
+      }
+      const allowedOptions = new Set(question.options.map((option) => option.id));
+      const selection = Array.isArray(answer?.optionIds)
+        ? answer.optionIds.map((value) => boundedText(value, 100)).filter(Boolean)
+        : [];
+      if (selection.some((optionId) => !allowedOptions.has(optionId))) {
+        return { ok: false, error: 'invalid_option' };
+      }
+
+      const attachments = [];
+      for (const attachment of Array.isArray(answer?.attachments) ? answer.attachments : []) {
+        if (Object.hasOwn(attachment || {}, 'path')) {
+          return { ok: false, error: 'invalid_attachment' };
+        }
+        const resolved = await resolveChatAttachment(
+          path.join(this.config.chatsDir || '', 'attachments'),
+          attachment?.file,
+        );
+        if (!resolved) {
+          return { ok: false, error: 'invalid_attachment' };
+        }
+        attachments.push({
+          file: resolved.file,
+          name: boundedText(attachment?.name, 180) || resolved.file,
+        });
+      }
+
+      const machine = actor === 'cockpit-arbiter';
+      const status = machine && answer?.status === 'human_required'
+        ? 'human_required'
+        : 'answered';
+      entries.push({
+        id: boundedText(answer?.id, 100) || `answer-${randomUUID()}`,
+        questionId: question.id,
+        actor: machine ? 'cockpit-arbiter' : 'human',
+        status,
+        selection,
+        text: status === 'human_required' ? '' : boundedText(answer?.text, 6000),
+        attachments,
+        proof: machine && Array.isArray(answer?.proof)
+          ? answer.proof.map((value) => boundedText(value, 500)).filter(Boolean)
+          : [],
+      });
+    }
+
+    const current = await this.readClarifications(id);
+    const blocks = entries.map((entry) => {
+      const heading = entry.actor === 'cockpit-arbiter'
+        ? 'Разбор арбитра — машинный'
+        : 'Ответ человека';
+      const visible = entry.text || 'Нужно решение человека.';
+      const marker = Buffer.from(JSON.stringify(entry)).toString('base64url');
+      return `## ${heading}\n${visible}\n<!-- cockpit-clarification:v1 ${marker} -->`;
+    });
+    const next = `${current}${current ? '\n' : ''}${blocks.join('\n\n')}\n`;
+    await fs.mkdir(this.dir, { recursive: true });
+    await fs.writeFile(this._paths(id).clarify, next);
+    return { ok: true, text: next, entries };
   }
 
   async _writeStatus(id, st) {
@@ -178,11 +416,15 @@ export class Analyzer {
     let note = null;
     try { note = await fs.readFile(p.note, 'utf8'); } catch { /* разведноты может не быть */ }
     const live = this._jobs.get(String(id));
+    const normalizedAnalysis = analysis ? {
+      ...analysis,
+      questions: normalizeAnalysisQuestions(analysis.questions),
+    } : analysis;
     return {
       task: Number(id),
-      analysis,
+      analysis: normalizedAnalysis,
       note,
-      stale: analysis ? await this._staleFiles(analysis) : null,
+      stale: normalizedAnalysis ? await this._staleFiles(normalizedAnalysis) : null,
       status: live ? { ...(status || {}), task: Number(id), state: live } : status,
     };
   }
@@ -233,6 +475,9 @@ export class Analyzer {
   async enqueue(id) {
     await this._ready;
     id = String(id);
+    if (!this.pluginEnabled('analysis')) {
+      return { outcome: 'plugin_disabled' };
+    }
     if (this._jobs.has(id)) return { outcome: 'already_' + this._jobs.get(id) };
     this._jobs.set(id, 'queued');
     this._queue.push(id);
@@ -242,19 +487,37 @@ export class Analyzer {
   }
 
   _pump() {
+    if (!this.pluginEnabled('analysis')) {
+      return;
+    }
     // Конкуренция настраиваемая: большая очередь при одном воркере обрабатывается часами.
     const max = Math.max(1, Number(this.config.analysisConcurrency) || 1);
     this._active = this._active || 0;
     while (this._active < max && this._queue.length) {
       const id = this._queue.shift();
       this._active += 1;
+      let result = null;
       this.analyze(id)
+        .then((value) => {
+          result = value;
+        })
         .catch((e) => this.log?.error({ task: id, err: e.message }, 'триаж упал вне раннера'))
         .finally(() => {
           this._jobs.delete(id);
           this._active -= 1;
           this._pump();
+          if (result?.ok) {
+            Promise.resolve(this.onAnalyzed?.(id)).catch((error) => {
+              this.log?.warn({ task: id, err: error?.message }, 'авторазбор вопросов не запущен');
+            });
+          }
         });
+    }
+  }
+
+  pluginToggled(enabled) {
+    if (enabled) {
+      this._pump();
     }
   }
 
@@ -264,9 +527,17 @@ export class Analyzer {
     id = String(id);
     const p = this._paths(id);
     const startedAt = Date.now();
+    if (!this.pluginEnabled('analysis')) {
+      return { ok: false, error: 'plugin_disabled' };
+    }
     this._jobs.set(id, 'running');
     await this._writeStatus(id, { state: 'running', startedAt });
+    let staging = null;
     try {
+      const selected = await this._resolveRunSelection();
+      if (!selected.ok) {
+        throw Object.assign(new Error(selected.error), { analysisCode: selected.error });
+      }
       const profile = await this.profile();
       // Оцениваем свежий код: перед запуском подтягиваем изменения (правило кокпита,
       // выключается в настройках). Безопасно: ff-only и только чистый master.
@@ -281,33 +552,196 @@ export class Analyzer {
       }
       this._gitRefresh = gitRefresh;
       const ticket = await this._fetchTicket(id);
+      staging = await fs.mkdtemp(path.join(this.dir, `.t${id}.run-`));
+      const inputDir = path.join(staging, 'input');
+      const outputDir = path.join(staging, 'output');
+      await Promise.all([
+        fs.mkdir(inputDir),
+        fs.mkdir(outputDir),
+      ]);
+      const clarifications = await this._materializeClarifications(id, inputDir);
+      const outputJson = path.join(outputDir, `t${id}.analysis.json`);
+      const outputNote = path.join(outputDir, `t${id}.md`);
       const prompt = buildTriagePrompt({
         task: id,
         title: ticket.title,
         description: ticket.description,
         comments: ticket.comments,
-        clarifications: await this.readClarifications(id),
+        clarifications,
         discussion: await this._discussion(id, ticket),
         profile,
-        jsonPath: p.json,
-        notePath: p.note,
+        jsonPath: outputJson,
+        notePath: outputNote,
       });
-      // Старый результат убираем, чтобы не принять его за свежий при молчании агента.
-      await fs.rm(p.json, { force: true });
-      const run = await this._runClaude(id, prompt, profile);
-      const analysis = await this._readJson(p.json);
-      if (!analysis) {
-        throw new Error(`агент не записал валидный ${path.basename(p.json)}: ${run.tail}`);
+      const readableRoots = await this._readableRoots(profile, inputDir);
+      const workspaceAccess = {
+        readableRoots,
+        writableRoots: [await fs.realpath(outputDir)],
+        networkAccess: false,
+        excludeTmpdirEnvVar: true,
+        excludeSlashTmp: true,
+        allowExternalMcp: false,
+        allowBash: false,
+        tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'repo_history'],
+      };
+      const workTools = createRepoHistoryTools(profile.repos || []);
+      const workIpc = selected.executor.workToolsTransport === 'mcp'
+        ? await createWorkIpc({ workTools, root: staging })
+        : null;
+      let run;
+      try {
+        run = await selected.executor.run({
+          config: this.config,
+          env: this.claudeAuth ? this.claudeAuth.env() : process.env,
+          message: prompt,
+          prompt,
+          cwd: outputDir,
+          model: selected.model,
+          effort: selected.effort,
+          sessionId: null,
+          permissionMode: 'acceptEdits',
+          providerSettings: this.prefs?.read?.().providerSettings?.[selected.provider] || {},
+          workspaceAccess,
+          workTools,
+          ...(workIpc ? { mcpConfig: { mcpServers: { 'cockpit-work': workIpc.mcpServer } } } : {}),
+        });
+      } finally {
+        await workIpc?.close().catch(() => {});
       }
-      await this._enrich(p.json, analysis, { ticket, profile, run, startedAt });
+      const analysis = await this._readJson(outputJson);
+      if (!analysis || Number(analysis.task) !== Number(id)) {
+        throw new Error(`агент не записал валидный ${path.basename(outputJson)}`);
+      }
+      const normalized = {
+        ...analysis,
+        task: Number(id),
+        questions: normalizeAnalysisQuestions(analysis.questions),
+      };
+      await this._enrich(outputJson, normalized, {
+        ticket,
+        profile,
+        run,
+        startedAt,
+        selected,
+      });
+      await fs.rename(outputJson, p.json);
+      if (await fs.stat(outputNote).then(() => true, () => false)) {
+        await fs.rename(outputNote, p.note);
+      }
       await this._writeStatus(id, { state: 'done', startedAt, finishedAt: Date.now(), durationMs: Date.now() - startedAt });
-      this.log?.info({ task: id, ms: Date.now() - startedAt, cost: run.costUsd }, 'триаж готов');
+      this.log?.info({ task: id, ms: Date.now() - startedAt, cost: run.cost }, 'триаж готов');
       return { ok: true };
     } catch (e) {
-      await this._writeStatus(id, { state: 'failed', startedAt, finishedAt: Date.now(), error: String(e.message || e).slice(0, 600) });
+      const error = e.analysisCode || String(e.message || e).slice(0, 600);
+      await this._writeStatus(id, { state: 'failed', startedAt, finishedAt: Date.now(), error });
       this.log?.warn({ task: id, err: e.message }, 'триаж упал');
-      return { ok: false, error: e.message };
+      return { ok: false, error };
+    } finally {
+      if (staging) {
+        await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+      }
     }
+  }
+
+  async _resolveRunSelection() {
+    const setting = this.pluginSettings('analysis')?.triageModel;
+    if (!setting) {
+      return {
+        ok: false,
+        error: this._legacyMigrationUnavailable
+          ? 'analysis_model_unavailable'
+          : 'analysis_model_unset',
+      };
+    }
+
+    const registry = await this.providerRegistry();
+    const resolved = resolveModelRef(setting, registry);
+    if (!resolved.ok) {
+      return { ok: false, error: 'analysis_model_unavailable' };
+    }
+    const executor = await this.executorFor(resolved.modelRef.provider);
+    if (!await supportsScopedWorkspace(executor, this.config)) {
+      return { ok: false, error: 'analysis_model_unsafe' };
+    }
+
+    const efforts = Array.isArray(resolved.model?.efforts) ? resolved.model.efforts : null;
+    const requestedEffort = boundedText(setting.effort, 80) || null;
+    const effort = requestedEffort && efforts?.includes(requestedEffort) ? requestedEffort : null;
+    return {
+      ok: true,
+      provider: resolved.modelRef.provider,
+      model: resolved.modelRef.model,
+      effort,
+      warning: requestedEffort && effort === null ? 'analysis_effort_unavailable' : null,
+      executor,
+    };
+  }
+
+  async _readableRoots(profile, inputDir) {
+    const values = [
+      profile.cwd,
+      ...(profile.dirs || []),
+      ...(profile.repos || []).map((repo) => repo.dir),
+      inputDir,
+    ].filter(Boolean);
+    const roots = [];
+    for (const value of values) {
+      const canonical = await fs.realpath(value).catch(() => null);
+      if (canonical && !roots.includes(canonical)) {
+        roots.push(canonical);
+      }
+    }
+    return roots;
+  }
+
+  /**
+   * К конкретному запуску копируются только token-ы из локальных server-owned marker-ов.
+   * В prompt попадает путь копии; общий каталог вложений исполнителю не раскрывается.
+   */
+  async _materializeClarifications(id, inputDir) {
+    const markdown = await this.readClarifications(id);
+    const lines = [];
+    const root = path.join(this.config.chatsDir || '', 'attachments');
+    const copyResolved = async (resolved, requestedName) => {
+      const name = path.basename(requestedName || resolved.file);
+      const safeName = name && name !== '.' && name !== '..' ? name : resolved.file;
+      let target = path.join(inputDir, safeName);
+      if (await fs.stat(target).then(() => true, () => false)) {
+        target = path.join(inputDir, `${lines.length + 1}-${safeName}`);
+      }
+      await fs.copyFile(resolved.path, target);
+      lines.push(`[приложено фото: ${target}]`);
+    };
+    for (const entry of clarificationEntries(markdown)) {
+      for (const attachment of entry.attachments) {
+        const resolved = await resolveChatAttachment(root, attachment.file);
+        if (!resolved) {
+          lines.push('[вложение недоступно]');
+          continue;
+        }
+        await copyResolved(resolved, attachment.name);
+      }
+    }
+
+    const legacy = /\[приложено фото:\s*([^\]\n]+)\]/g;
+    let sanitized = '';
+    let cursor = 0;
+    for (const match of String(markdown || '').matchAll(legacy)) {
+      sanitized += String(markdown).slice(cursor, match.index);
+      const resolved = await resolveLegacyChatAttachment(root, match[1]);
+      if (resolved) {
+        await copyResolved(resolved, resolved.file);
+        sanitized += `[старое вложение: ${resolved.file}]`;
+      } else {
+        sanitized += '[вложение недоступно]';
+      }
+      cursor = match.index + match[0].length;
+    }
+    sanitized += String(markdown || '').slice(cursor);
+    if (lines.length) {
+      sanitized += `${sanitized ? '\n' : ''}${lines.join('\n')}`;
+    }
+    return sanitized;
   }
 
   /** Тикет из B24: заголовок + описание + несистемные комментарии. Комментарии — best effort. */
@@ -374,62 +808,8 @@ export class Analyzer {
     }
   }
 
-  /** Allow/deny для агента: читать можно всё, писать — только в каталог анализа. */
-  async _writeSettings(profile) {
-    const allow = [
-      'Read(//**)',
-      `Write(${this.dir}/**)`, `Edit(${this.dir}/**)`,
-      'Bash(git:*)', 'Bash(git -C:*)', 'Bash(grep:*)', 'Bash(rg:*)', 'Bash(ls:*)', 'Bash(cat:*)',
-      'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)', 'Bash(find:*)', 'Bash(sed:*)', 'Bash(awk:*)',
-    ];
-    const deny = [];
-    for (const d of profile.dirs) {
-      deny.push(`Write(${d}/**)`, `Edit(${d}/**)`, `NotebookEdit(${d}/**)`);
-    }
-    const f = path.join(this.dir, 'agent-settings.json');
-    await fs.writeFile(f, JSON.stringify({ permissions: { allow, deny } }, null, 2));
-    return f;
-  }
-
-  async _runClaude(id, prompt, profile) {
-    const p = this._paths(id);
-    const settings = await this._writeSettings(profile);
-    const args = [
-      '-p', prompt,
-      '--model', this.config.analysisModel,
-      '--settings', settings,
-      '--permission-mode', 'acceptEdits',
-      '--output-format', 'json',
-      '--add-dir', this.dir,
-      // Вложения из кокпита (фото к уточнениям триажа): в комментариях лежат
-      // абсолютные пути к файлам этой папки — агент открывает их Read'ом.
-      '--add-dir', path.join(this.config.chatsDir, 'attachments'),
-    ];
-    for (const d of profile.dirs) args.push('--add-dir', d);
-    const cwd = profile.cwd || this.config.factoryHome;
-    const env = this.claudeAuth ? this.claudeAuth.env() : process.env;
-    return new Promise((resolve, reject) => {
-      execFile(this.config.claudeBin, args, {
-        cwd, env, timeout: this.config.analysisTimeoutMs, maxBuffer: 32 * 1024 * 1024,
-      }, async (err, stdout, stderr) => {
-        // Сырой вывод — в лог-файл: единственный источник при разборе «агент промолчал».
-        await fs.writeFile(p.log, `--- stdout ---\n${stdout || ''}\n--- stderr ---\n${stderr || ''}`).catch(() => {});
-        if (err && !stdout) {
-          return reject(new Error(`claude не отработал: ${(stderr || err.message).slice(-400)}`));
-        }
-        let j = {};
-        try { j = JSON.parse(stdout); } catch { /* результат берём из файлов агента */ }
-        resolve({
-          costUsd: j.total_cost_usd ?? null,
-          contextTokens: (j.usage?.input_tokens || 0) + (j.usage?.cache_read_input_tokens || 0) + (j.usage?.cache_creation_input_tokens || 0),
-          tail: String(j.result || stderr || '').slice(-300),
-        });
-      });
-    });
-  }
-
   /** Дописывает в analysis.json то, что агенту знать неоткуда: SHA репо, стоимость, время. */
-  async _enrich(jsonPath, analysis, { ticket, profile, run, startedAt }) {
+  async _enrich(jsonPath, analysis, { ticket, profile, run, startedAt, selected }) {
     const repos = {};
     for (const r of profile.repos) {
       repos[r.key] = { dir: r.dir, sha: await gitSha(r.dir) };
@@ -440,10 +820,16 @@ export class Analyzer {
       generated_at: new Date().toISOString(),
       repos,
       meta: {
-        model: this.config.analysisModel,
+        provider: selected.provider,
+        model: run.actualModel || selected.model,
+        effort: selected.effort,
+        ...(run.actualModel && run.actualModel !== selected.model
+          ? { requestedModel: selected.model }
+          : {}),
+        ...(selected.warning ? { warning: selected.warning } : {}),
         duration_ms: Date.now() - startedAt,
-        cost_usd: run.costUsd,
-        context_tokens: run.contextTokens,
+        cost_usd: run.cost ?? run.costUsd ?? null,
+        context_tokens: run.contextTokens ?? null,
         git_refresh: this._gitRefresh,
       },
     };

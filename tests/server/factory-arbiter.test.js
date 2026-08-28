@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,6 +19,7 @@ import {
   normalizeArbiterSettings,
   parseArbiterDecision,
   readArbitrationContext,
+  stopIsArbitrable,
 } from '../../server/src/lib/factory-arbiter.js';
 import { routeGotoArgs } from '../../server/src/lib/factory-route-cli.js';
 
@@ -57,6 +58,117 @@ const noProgress = (node, target, reason, findings = null) => ({
 });
 
 const cursorStopped = (stop) => ({ state: 'stopped', currentNode: null, stop });
+
+// Остановку, объявленную САМИМ маршрутом (`on`/`onFailure` узла), движок пишет обычным
+// коммитом с `action.stop` — у движковых `no-progress`/`rewind-limit` для этого свой
+// `kind`. Класс владельца провала называет агент, и он же решает, есть ли что разбирать.
+const humanStop = (node, owner, findings) => ({
+  kind: 'commit',
+  node,
+  outcome: 'failed',
+  action: { stop: 'human' },
+  verdict: { owner, findings, reviewed: [] },
+});
+
+const finding = (id, summary) => ({ id, summary, severity: 'blocking' });
+
+test('вызов человека узлом разбирается, и возврат ведёт в тот же узел', async () => {
+  const controlDir = await ledger([
+    humanStop('skeptic', 'human', [finding('unproven', 'утверждение не проверено')]),
+  ]);
+  const context = await readArbitrationContext({ controlDir, task: TASK, attempt: ATTEMPT });
+
+  assert.equal(context.stop, 'human');
+  assert.equal(context.node, 'skeptic');
+  // Точки возврата маршрут для такой остановки не предлагает, и придумывать её нельзя:
+  // узел не проиграл спор соседу, а сам позвал человека — переигрывать надо его же.
+  assert.equal(context.target, 'skeptic');
+  assert.equal(context.series.length, 1);
+  assert.equal(arbitrationGate(context, cursorStopped('human')).ok, true);
+});
+
+// Класс владельца отделяет спор о коде от беды среды. Упавший стенд не становится
+// решаемым оттого, что его прочитали, и звать на него живого агента — трата денег.
+test('остановка по отказу среды или сборки арбитру не отдаётся', async () => {
+  for (const owner of ['environment', 'build', 'tests']) {
+    const controlDir = await ledger([
+      humanStop('build', owner, [finding('broken', 'сборка не поднялась')]),
+    ]);
+    const context = await readArbitrationContext({ controlDir, task: TASK, attempt: ATTEMPT });
+    const gate = arbitrationGate(context, cursorStopped('human'));
+
+    assert.equal(gate.ok, false, `класс ${owner} не должен разбираться`);
+    assert.equal(gate.error, 'not_arbitrable');
+    assert.equal(gate.message.includes(owner), true, 'класс назван человеку словами');
+  }
+});
+
+// Класс не назван — 9 остановок и 5 часов простоя по замеру, в том числе на `ship`,
+// `skeptic` и `review`. Отказ по формальному признаку стоил дороже попытки: содержимое
+// вердикта у арбитра перед глазами, и если разбирать нечего, он скажет это сам.
+test('остановка без объявленного класса владельца разбирается', async () => {
+  const controlDir = await ledger([humanStop('skeptic', null, [finding('x', 'что-то')])]);
+  const context = await readArbitrationContext({ controlDir, task: TASK, attempt: ATTEMPT });
+  const gate = arbitrationGate(context, cursorStopped('human'));
+
+  assert.equal(gate.ok, true);
+});
+
+// Завершение маршрута приезжает тем же событием с `action.stop`, и принять его за
+// разбираемую остановку нельзя: работа сделана, разбирать нечего.
+test('успешное завершение маршрута остановкой для арбитра не является', async () => {
+  const controlDir = await ledger([
+    { kind: 'commit', node: 'ship', outcome: 'done', action: { stop: 'done' }, verdict: { owner: 'human', findings: [], reviewed: [] } },
+  ]);
+  const context = await readArbitrationContext({ controlDir, task: TASK, attempt: ATTEMPT });
+
+  assert.equal(context.stop, 'done');
+  assert.equal(arbitrationGate(context, cursorStopped('done')).ok, false);
+});
+
+// Правило одно на всех: гейт арбитра, кнопка карточки и автоматический вотчер.
+test('правило арбитрабельности одно и учитывает класс владельца', () => {
+  assert.equal(stopIsArbitrable('no-progress', null), true);
+  assert.equal(stopIsArbitrable('human', 'human'), true);
+  // Принятый план не выдержал проверки — ответом служит новая гипотеза, а она собирается
+  // из отчёта узла и кода, то есть чтением (замер 8507).
+  assert.equal(stopIsArbitrable('human', 'plan'), true);
+  assert.equal(stopIsArbitrable('human', null), true);
+  // Тот же счётчик топтания, только кончился он у движка, а не у набора замечаний.
+  assert.equal(stopIsArbitrable('rewind-limit', 'human'), true);
+  assert.equal(stopIsArbitrable('rewind-limit', null), true);
+
+  // Осталось запретным: упавший стенд и несобравшаяся сборка чтением кода не лечатся, а
+  // запускать команды арбитр не умеет — он ходит в режиме `plan`.
+  assert.equal(stopIsArbitrable('human', 'environment'), false);
+  assert.equal(stopIsArbitrable('human', 'build'), false);
+  assert.equal(stopIsArbitrable('human', 'tests'), false);
+  assert.equal(stopIsArbitrable('done', 'human'), false);
+});
+
+// Вводная промпта у двух остановок разная по существу: в одной спорят два узла, в другой
+// узел никому не проиграл и вопрос ровно один — точно ли это выбор человека.
+test('промпт вызова человека говорит о переигрывании того же узла', () => {
+  const args = {
+    task: TASK,
+    node: 'skeptic',
+    target: 'skeptic',
+    reason: null,
+    series: [{ node: 'skeptic', owner: 'human', findings: [finding('x', 'нужна рамка')], reviewed: [] }],
+    stateDir: '/state',
+  };
+
+  const human = buildArbiterPrompt({ ...args, stop: 'human' });
+  assert.equal(human.includes('САМ вернул решение человеку'), true);
+  assert.equal(human.includes('это тот же узел'), true);
+  // Частая причина такой остановки — узлу не дали проверить факт правами, а не спор по существу.
+  assert.equal(human.includes('state-only'), true);
+
+  const arc = buildArbiterPrompt({ ...args, target: 'build', stop: 'no-progress' });
+  assert.equal(arc.includes('несколько раз подряд возвращал'), true);
+  assert.equal(arc.includes('это тот же узел'), false);
+});
+
 
 test('журнал попытки разбирается в дугу возвратов', async () => {
   const root = await ledger([
@@ -112,7 +224,7 @@ test('решение человека начинает новую серию, а
   assert.equal(context.arbitrations, 1, 'возврат арбитра отличается от человеческого полем actor');
 });
 
-test('арбитр берётся только за остановку по отсутствию прогресса', async () => {
+test('арбитр берётся за оба вида топтания и не берётся за идущий маршрут', async () => {
   const root = await ledger([
     failedCommit('skeptic', 'plan', [{ id: 'a', summary: 'раз' }]),
     noProgress('skeptic', 'plan', 'причина'),
@@ -120,10 +232,9 @@ test('арбитр берётся только за остановку по от
   const context = await readArbitrationContext({ controlDir: root, task: TASK, attempt: ATTEMPT });
 
   assert.equal(arbitrationGate(context, cursorStopped('no-progress')).ok, true);
-  // `human` — прямой вызов человека (упал стенд, не хватило прав): решение оттуда не
-  // выводится из вердиктов дуги, и подставлять туда модель нечем.
-  assert.equal(arbitrationGate(context, cursorStopped('human')).error, 'not_arbitrable');
-  assert.equal(arbitrationGate(context, cursorStopped('rewind-limit')).error, 'not_arbitrable');
+  // Тот же спор, но счётчик автоматических возвратов кончился у движка: 4 остановки и
+  // 8.7 часа простоя по замеру уходили человеку только из-за вида остановки.
+  assert.equal(arbitrationGate(context, cursorStopped('rewind-limit')).ok, true);
   // Идущий маршрут не арбитрируют: возврат курсора отменил бы работу, которая идёт.
   assert.equal(arbitrationGate(context, { state: 'ready', currentNode: 'plan' }).error, 'not_arbitrable');
 });
@@ -188,20 +299,38 @@ test('решение арбитра разбирается строго', () => 
   assert.equal(parseArbiterDecision(JSON.stringify({ card, instruction: 'x' })).ok, false);
 });
 
-test('границу задачи арбитр не решает', () => {
+// Решение, задевающее границу задачи, больше не останавливает конвейер: у развилки часто
+// есть минимальный вариант (не расширять объём, не снимать проверок, не добавлять нового
+// элемента), и проверить такой выбор человек всё равно может только на воротах — там он и
+// так принимает план и результат. Будильник посреди работы за это не платит.
+test('решение о границе задачи едет с пометкой, а не останавливает конвейер', () => {
   const card = {
     what: 'что', why: 'почему', proof: 'чем доказал', risk: 'чем грозит',
   };
-  // Признака два, и проверяются оба: объявленный самим арбитром `scope_change` честнее
-  // (он видел контекст), а вердикт страхует ответ, где поле забыли.
   const declared = parseArbiterDecision(JSON.stringify({
-    verdict: 'resolve', scope_change: true, card, instruction: 'снять критерий 5',
+    verdict: 'resolve', scope_change: true, card, instruction: 'оставить как есть',
   }));
-  assert.equal(declared.verdict, 'human');
-  assert.equal(declared.instruction, '', 'указание с изменением границы до узла не едет');
+  assert.equal(declared.verdict, 'deferred', 'пометка отличает такое решение от обычного');
+  assert.equal(declared.scopeChange, true);
+  assert.equal(declared.instruction, 'оставить как есть', 'указание доезжает до узла');
 
+  // Остановка осталась ровно одна: её объявляет САМ арбитр, когда минимального варианта
+  // нет и любой его выбор пришлось бы переделывать.
   const chosen = parseArbiterDecision(JSON.stringify({ verdict: 'human', card, instruction: '' }));
   assert.equal(chosen.verdict, 'human');
+  assert.equal(chosen.instruction, '', 'отказ узлу ничего не доставляет');
+});
+
+// Пустое указание при `resolve` по-прежнему означает «решения нет»: узел получил бы пустое
+// задание, а журнал утверждал бы, что решение принято и обосновано.
+test('решение о границе задачи без указания узлу не принимается', () => {
+  const card = {
+    what: 'что', why: 'почему', proof: 'чем доказал', risk: 'чем грозит',
+  };
+  const empty = parseArbiterDecision(JSON.stringify({
+    verdict: 'resolve', scope_change: true, card, instruction: '   ',
+  }));
+  assert.equal(empty.ok, false);
 });
 
 test('карточка решения подписана машиной и читается сверху вниз', () => {
@@ -242,9 +371,12 @@ test('промпт арбитра называет обе стороны спо�
   assert.match(prompt, /\/state/);
   // Инвариант, ради которого арбитр и существует: он обязан проверить, а не рассудить.
   assert.match(prompt, /проверь ПО КОДУ/);
-  // И обязан знать границу своих возможностей: режим только для чтения команд не запускает,
-  // а вопрос, который без запуска не решается, — законный повод отдать решение человеку.
-  assert.match(prompt, /Запускать команды ты НЕ/);
+  // И обязан знать границу своих возможностей. Она проходит не там, где её долго
+  // описывал промпт: замер живым CLI показал, что plan разрешает read-only Bash и
+  // блокирует только нативные правки и запись перенаправлением. Настоящая граница —
+  // рабочее дерево остановленной попытки, и держится она прямым запретом.
+  assert.match(prompt, /ЗАПУСКАТЬ КОМАНДЫ/);
+  assert.match(prompt, /рабочее дерево задачи менять НЕЛЬЗЯ ВООБЩЕ/i);
 });
 
 test('настройка арбитра отвергает мусор и по умолчанию выключена', () => {
@@ -280,6 +412,7 @@ test('возврат курсора называет исполнителя то
 async function watcher({ auto = true, tasks = [], arbitrate } = {}) {
   const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
   const calls = [];
+  const notes = [];
   const instance = new FactoryArbiterWatch({
     sse: { subscribe: () => () => {} },
     prefs: { read: () => ({ arbiter: { auto } }) },
@@ -288,13 +421,17 @@ async function watcher({ auto = true, tasks = [], arbitrate } = {}) {
       calls.push(id);
       return arbitrate ? arbitrate(id, reply) : { ok: true, resolved: true, node: 'plan' };
     },
-    log: { warn() {}, info() {} },
+    log: { warn() {}, info(fields, message) { notes.push(message); } },
   });
-  return { instance, calls };
+  return { instance, calls, notes };
 }
 
+// Признак «за это берётся арбитр» считает сервер одним правилом вместе с гейтом самого
+// арбитра (`stopIsArbitrable`), а вотчер и кнопка его только читают. Своя копия сравнения
+// с `no-progress` разъехалась бы с ними при первом расширении набора остановок — оно и
+// случилось 28.08.2026, когда арбитру отдали вызов человека узлом.
 const stalledTask = (task) => ({
-  task, readOnly: false, daemonAlive: false, stall: { stop: 'no-progress' },
+  task, readOnly: false, daemonAlive: false, stall: { stop: 'no-progress', arbitrable: true },
 });
 
 test('выключенная настройка означает полное бездействие', async () => {
@@ -310,6 +447,9 @@ test('автомат берёт только остановленную зада
       { ...stalledTask(2), readOnly: true },
       { task: 3, readOnly: false, daemonAlive: false, stall: { stop: 'rewind-limit' } },
       { task: 4, readOnly: false, daemonAlive: false, stall: null },
+      // Остановка на человеке, которую сервер разбирать не дал: класс владельца — отказ
+      // среды или сборки, а он чтением кода не снимается.
+      { task: 6, readOnly: false, daemonAlive: false, stall: { stop: 'human', arbitrable: false } },
       stalledTask(5),
     ],
   });
@@ -363,6 +503,62 @@ test('решение о границе задачи автомат не повт
   assert.deepEqual(calls, ['1'], 'карточка уже у человека, второй раз спрашивать нечего');
 });
 
+// Тот же запрет, но через ЕДИНСТВЕННЫЙ путь, которым он работает в бою: карточка приезжает
+// со сводкой задачи, а не остаётся в памяти вотчера. Прежний тест этого не проверял — оба
+// его прогона попадали в часовой cooldown, и запрет мог не работать вовсе. Так и вышло:
+// сводка `/api/tasks` узла не несла, сравнение с `decided.node` не совпадало никогда, и в
+// живом прогоне 28.08.2026 арбитр через час взял ту же остановку и решил её сам.
+test('сохранённый разбор запрещает повтор и после перезапуска сервера', async () => {
+  const decided = { verdict: 'human', node: 'build', stop: 'human' };
+  const { instance, calls } = await watcher({
+    tasks: [{
+      task: 7,
+      readOnly: false,
+      daemonAlive: false,
+      stall: { stop: 'human', arbitrable: true, node: 'build', arbiter: decided },
+    }],
+  });
+  await instance.tick();
+  assert.deepEqual(calls, [], 'вопрос уже задан человеку — второй ответ отменял бы первый');
+});
+
+// Человек ответил, маршрут поехал и встал в другом месте. Это другая остановка: запрет
+// привязан к той, которую арбитр уже разбирал, а не ко всей попытке.
+test('остановка на другом узле разбирается несмотря на прежний отказ', async () => {
+  const decided = { verdict: 'human', node: 'build', stop: 'human' };
+  const { instance, calls } = await watcher({
+    tasks: [{
+      task: 8,
+      readOnly: false,
+      daemonAlive: false,
+      stall: { stop: 'human', arbitrable: true, node: 'review', arbiter: decided },
+    }],
+  });
+  await instance.tick();
+  assert.deepEqual(calls, ['8']);
+});
+
+// Узел известен не всегда: старые записи движка называли остановку без него. Тогда
+// запрет остаётся в силе — лишний запрет стоит нажатия кнопки, лишний разбор стоит часа
+// живого агента и решения, принятого за человека.
+test('неизвестный узел не снимает запрет', async () => {
+  const { instance, calls } = await watcher({
+    tasks: [{
+      task: 9,
+      readOnly: false,
+      daemonAlive: false,
+      stall: {
+        stop: 'human',
+        arbitrable: true,
+        node: null,
+        arbiter: { verdict: 'human', node: 'build', stop: 'human' },
+      },
+    }],
+  });
+  await instance.tick();
+  assert.deepEqual(calls, [], 'сравнить нечем — считаем остановку той же');
+});
+
 test('падение разбора не роняет обход', async () => {
   const { instance, calls } = await watcher({
     tasks: [stalledTask(1)],
@@ -372,4 +568,71 @@ test('падение разбора не роняет обход', async () => {
   assert.deepEqual(calls, ['1']);
   await instance.tick();
   assert.deepEqual(calls, ['1'], 'после падения задача тоже под cooldown');
+});
+
+// Молчащий вотчер неотличим от неработающего. 28.08.2026 остановка задачи была для
+// арбитра подходящей, автомат включён, а в журнале сервера не нашлось ни строки —
+// установить постфактум, дошло ли до разбора, оказалось нечем.
+test('взятие остановки в разбор и отказ в пользу человека видны в журнале', async () => {
+  const { instance, notes } = await watcher({
+    tasks: [stalledTask(1)],
+    arbitrate: () => ({ ok: true, resolved: false, verdict: 'human', card: {} }),
+  });
+  await instance.tick();
+  assert.equal(notes.length, 2, 'вход в разбор и его исход — две отдельные строки');
+  assert.match(notes[0], /беру остановку в разбор/);
+  assert.match(notes[1], /отдано человеку/);
+});
+
+test('снятый тупик тоже называет себя одной строкой', async () => {
+  const { instance, notes } = await watcher({ tasks: [stalledTask(1)] });
+  await instance.tick();
+  assert.match(notes[0], /беру остановку в разбор/);
+  assert.match(notes[1], /тупик снят/);
+});
+
+// Промпт утверждал «запускать команды ты НЕ можешь — режим только для чтения», а замер
+// живым CLI показал обратное: plan разрешает read-only Bash (34 успешные команды в одном
+// разборе) и блокирует лишь нативные правки и перенаправление в файл. Ложное ограничение
+// прямо сужало арбитра — он отказывался от проверок, которые ему доступны.
+test('промпт не врёт про возможности и называет бюджет времени', async () => {
+  const { buildArbiterPrompt } = await import('../../server/src/lib/factory-arbiter.js');
+  const prompt = buildArbiterPrompt({
+    task: '8507',
+    node: 'build',
+    target: 'build',
+    reason: 'узел вернул решение человеку',
+    series: [{
+      node: 'build',
+      owner: 'plan',
+      findings: [{ id: 'x', summary: 'принятый план опровергнут' }],
+      reviewed: [],
+    }],
+    stateDir: '/tmp/state',
+    stop: 'human',
+    budgetMin: 20,
+  });
+
+  assert.equal(prompt.includes('Запускать команды ты НЕ'), false, 'ложный запрет снят');
+  assert.match(prompt, /ЗАПУСКАТЬ КОМАНДЫ/);
+  // Запись через запущенную программу режимом НЕ блокируется (замер: node -e writeFileSync
+  // создал файл), поэтому единственная защита рабочего дерева — прямой запрет в промпте.
+  assert.match(prompt, /рабочее дерево задачи менять НЕЛЬЗЯ ВООБЩЕ/i);
+  // Оборванный по времени ход не даёт ничего: потраченные минуты живого агента пропадают
+  // целиком, а задача уходит в часовой cooldown. Знающий бюджет закругляется сам.
+  assert.match(prompt, /У тебя 20 минут/);
+  assert.match(prompt, /verdict = "human" с тем, что успел/);
+});
+
+// Число живёт в одном месте (`ARBITER_TURN_LIMIT_MIN` рядом с самим таймаутом): вторая
+// копия в тексте промпта разошлась бы с резаком, и агент планировал бы не тот бюджет.
+test('бюджет промпта берётся из лимита хода, а не из второй копии числа', async () => {
+  const source = await readFile(
+    new URL('../../server/src/modules/factory/index.js', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /const ARBITER_TURN_LIMIT_MIN = (\d+);/);
+  assert.match(source, /ARBITER_TURN_LIMIT_MS = ARBITER_TURN_LIMIT_MIN \* 60 \* 1000/);
+  assert.match(source, /budgetMin: ARBITER_TURN_LIMIT_MIN/);
 });

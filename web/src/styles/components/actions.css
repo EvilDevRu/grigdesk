@@ -805,36 +805,6 @@
   font-size: 12px;
 }
 
-.ui-button[data-role='pipeline-toolbar'] {
-  height: 30px;
-  min-height: 30px;
-  padding: 0 11px;
-  font-size: 12px;
-}
-
-.ui-button[data-role='pipeline-project'] {
-  height: 28px;
-  min-height: 28px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 12.5px;
-}
-
-.ui-button[data-role='pipeline-project'] b {
-  margin-left: 4px;
-  color: var(--ink);
-}
-
-.ui-button[data-role='pipeline-project'][aria-pressed='true'] {
-  --ui-action-background: var(--accent);
-  --ui-action-border: var(--accent);
-  --ui-action-color: var(--ground);
-}
-
-.ui-button[data-role='pipeline-project'][aria-pressed='true'] b {
-  color: inherit;
-}
-
 .ui-button[data-role='pipeline-task-id'],
 .ui-button[data-role='pipeline-title'] {
   height: auto;

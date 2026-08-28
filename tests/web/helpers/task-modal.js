@@ -9,6 +9,7 @@ export const TASK_MODAL_PATH = webFile('src/views/TaskModal.vue');
 function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   const componentImports = [
     ['UiButton', 'src/components/primitives/UiButton.vue'],
+    ['UiChoiceList', 'src/components/composites/UiChoiceList.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiField', 'src/components/composites/UiField.vue'],
     ['UiFilePicker', 'src/components/composites/UiFilePicker.vue'],
@@ -116,6 +117,19 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         '}));',
       ].join('\n'),
       '../stores/task-seen.js': `export const useTaskSeenStore = globalThis.${prefix}SeenStore;`,
+      '../features/speech/provider.js': [
+        'const fallbackController = {',
+        '  acquire() {',
+        '    return {',
+        '      state: { phase: "idle", busy: false, prompt: null, notice: "" },',
+        '      async start() { return false; }, async stop() {}, async cancel() {},',
+        '      async release() {},',
+        '    };',
+        '  },',
+        '};',
+        'export const useDictationController = () =>',
+        `  globalThis.${prefix}DictationController || fallbackController;`,
+      ].join('\n'),
       '../shared/format.js': [
         'export const liveTimerSec = (task) => task?.timerElapsed || 0;',
         'export const secToHMS = (value) => String(value ?? 0);',

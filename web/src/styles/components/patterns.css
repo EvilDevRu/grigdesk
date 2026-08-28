@@ -337,6 +337,16 @@
   background: color-mix(in srgb, var(--warn) 8%, var(--surface));
 }
 
+[data-ui-task-shelf-row][data-shelf-completed='true'] {
+  opacity: .62;
+  transition: opacity .15s ease;
+}
+
+[data-ui-task-shelf-row][data-shelf-completed='true']:hover,
+[data-ui-task-shelf-row][data-shelf-completed='true']:focus-within {
+  opacity: .82;
+}
+
 [data-ui-task-shelf-row] .ui-icon-button svg {
   width: 14px;
   height: 14px;

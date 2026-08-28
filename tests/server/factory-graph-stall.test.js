@@ -166,3 +166,44 @@ test('маршрут, не отпустивший shared lease, остаётся
   assert.equal(stall.kind, 'crashed');
   assert.match(stall.detail, /shared lease не освобождён/);
 });
+
+// Узел остановки нужен и в СВОДКЕ, которую читает `/api/tasks`, а не только в графе.
+// По нему автоматический арбитр отличает «эту остановку я уже отдал человеку» от
+// «маршрут встал в другом месте». Пока сводка узла не несла, сравнение не совпадало
+// никогда: 28.08.2026 арбитр вернул решение человеку, через час взял ту же остановку
+// повторно и решил её сам, сдвинув курсор задачи, о которой человека только что спросили.
+test('сводка задачи называет узел остановки, а не только граф', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-stall-summary-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const attempt = 'a_06d6476159f1ff19374909045f71ade7';
+  const hash = 'f'.repeat(64);
+  const results = path.join(root, 'control', 'protocol-v2', 'tasks', 't8507', 'attempts', attempt,
+    'stage-results');
+  await mkdir(results, { recursive: true });
+  await writeFile(path.join(results, `event.${'0'.repeat(20)}.${hash}.json`), JSON.stringify({
+    kind: 'commit',
+    node: 'build',
+    outcome: 'failed',
+    action: { stop: 'human' },
+    at: '2026-08-28T17:03:40Z',
+    verdict: { owner: 'plan', reviewed: [], findings: [] },
+  }));
+
+  const adapter = new FactoryStateAdapter({
+    stateDir: path.join(root, 'state'),
+    profilesDir: path.join(root, 'profiles'),
+    controlDir: path.join(root, 'control'),
+  });
+  const stall = await adapter.summaryStall({
+    registry: { STALLED_HUMAN: '1', BUILD: 'running' },
+    timeline: [{ ts: '2026-08-28 20:03:40', event: 'route: BUILD: маршрут остановлен: human' }],
+    daemonAlive: false,
+    trusted: { attempt, cursor: { state: 'stopped', stop: 'human' } },
+    task: '8507',
+  });
+
+  assert.equal(stall.stage, 'BUILD');
+  assert.equal(stall.node, 'build', 'узел берётся у вердикта остановки — он уже прочитан');
+  assert.equal(stall.arbitrable, true);
+});

@@ -4,7 +4,7 @@ import { markRaw, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { notify } from '../shared/notify.js';
-import taskShelfDecision from '../shared/task-shelf.js';
+import taskShelfDecision, { isShelfTaskCompleted } from '../shared/task-shelf.js';
 import { sseSubscribe } from '../composables/useSse.js';
 import { useAnalysisStore } from './analysis.js';
 import { useNotifyWatchStore } from './notify-watch.js';
@@ -356,7 +356,9 @@ function presentation(controller, entry, observed, snapshot, task) {
 function sourceIssues(controller) {
   const issues = [];
   if (controller.board.error) issues.push('Статусы Битрикс24 могут быть устаревшими');
-  if (controller.analysis.error) issues.push('Состояние оценки может быть устаревшим');
+  if (controller.analysis.error && controller.analysis.disabled !== true) {
+    issues.push('Состояние оценки может быть устаревшим');
+  }
   if (controller.pipeline.error) issues.push('Состояние конвейера может быть устаревшим');
   return issues;
 }
@@ -497,7 +499,8 @@ export const useTaskShelfStore = defineStore('taskShelf', {
         };
         const task = boardTask(controller, entry.taskId);
         const details = presentation(controller, entry, observed, decision.snapshot, task);
-        rows.push({ ...entry, ...decision, title: details.title, details });
+        const completed = isShelfTaskCompleted(observed.b24 || decision.snapshot.b24);
+        rows.push({ ...entry, ...decision, title: details.title, completed, details });
       }
       this._runtime = nextRuntime;
       this.rows = rows;

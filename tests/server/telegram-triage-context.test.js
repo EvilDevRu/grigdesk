@@ -112,8 +112,6 @@ async function fixture(t, {
   const analyzer = new Analyzer({
     config: {
       analysisDir: path.join(root, 'analysis'),
-      analysisModel: 'claude-test',
-      claudeBin: 'true',
       chatsDir: path.join(root, 'chats'),
       factoryHome: root,
       // Профиля триажа нет: проектных путей у пустого стенда не бывает, а
@@ -139,6 +137,27 @@ async function fixture(t, {
     prefs: { read: () => ({}) },
     log: logStub(),
     discussion: discussionStub ?? ((text, opts) => app.telegramDiscussion?.(text, opts)),
+    pluginEnabled: () => true,
+    pluginSettings: () => ({
+      triageModel: { provider: 'claude', model: 'claude-test' },
+      autoArbitrate: false,
+    }),
+    providerRegistry: async () => ({
+      claude: [{ id: 'claude-test', efforts: null }],
+    }),
+    executorFor: async () => ({
+      id: 'claude',
+      scopedWorkspace: true,
+      async run(options) {
+        const prompt = String(options.message || '');
+        captured.prompt = prompt;
+        const jsonPath = prompt.match(/(?:- |\[Схема )([^\s\]]+\.analysis\.json)/)?.[1];
+        const notePath = prompt.match(/- ([^\s]+\/t\d+\.md)/)?.[1];
+        await writeFile(jsonPath, JSON.stringify({ task: TASK.id, complexity: 1 }));
+        await writeFile(notePath, '# Разведка\n');
+        return { cost: 0, contextTokens: 0, actualModel: 'claude-test' };
+      },
+    }),
   });
 
   const nativeBotApi = {
@@ -156,13 +175,7 @@ async function fixture(t, {
   await app.ready();
   t.after(() => app.close());
 
-  // Модель в тесте не зовём: перехватываем промпт и пишем результат за агента.
   const captured = {};
-  analyzer._runClaude = async (id, prompt) => {
-    captured.prompt = prompt;
-    await writeFile(analyzer._paths(id).json, JSON.stringify({ task: Number(id), complexity: 1 }));
-    return { costUsd: 0, contextTokens: 0, tail: '' };
-  };
 
   return {
     async run(id = String(TASK.id)) {

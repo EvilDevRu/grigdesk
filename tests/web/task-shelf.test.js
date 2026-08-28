@@ -787,6 +787,26 @@ test('Строка полки получает живую карточку B24, 
   });
 });
 
+test('Строка полки помечается завершённой по живому состоянию B24', async (t) => {
+  const { store, harness } = await reactiveStoreFixture();
+  t.after(() => {
+    store.stop?.();
+    delete globalThis.__taskShelfStoreHarness;
+  });
+  store.start();
+  await settleStore();
+  const before = store.rows[0]?.completed;
+
+  harness.board.data.tasks[0].statusKind = 'done';
+  harness.board.data.tasks[0].statusText = 'Завершена';
+  await settleStore();
+
+  assert.deepEqual({ before, after: store.rows[0]?.completed }, {
+    before: false,
+    after: true,
+  });
+});
+
 test('Задача вне текущей доски получает проект из полной карточки B24', async (t) => {
   const { store, harness } = await reactiveStoreFixture({
     taskOnBoard: false,
@@ -808,11 +828,13 @@ test('Задача вне текущей доски получает проек�
     title: row?.title,
     project: row?.details?.project,
     b24: b24?.value,
+    completed: row?.completed,
     detailGetCalls: harness.detailGetCalls,
   }, {
     title: 'Журнал: исправить количество запросов',
     project: 'arsenkin.ru',
     b24: 'Не видна на текущей доске',
+    completed: true,
     detailGetCalls: 1,
   });
 });

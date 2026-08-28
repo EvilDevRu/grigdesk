@@ -273,6 +273,10 @@
               role="tabpanel"
               aria-labelledby="task-tab-triage"
             >
+          <div v-if="!analysisEnabled" class="triage-disabled">
+            Триаж выключен в настройках плагинов. Сохранённые оценки и уточнения не удалены.
+          </div>
+          <template v-else>
           <div class="thead2">
             <span class="triage-summary">
               <span class="tlbl">Триаж</span>
@@ -318,76 +322,190 @@
             <ul v-if="triage.analysis.risk_markers?.length" class="tlist">
               <li v-for="m in triage.analysis.risk_markers" :key="m">⚠ {{ m }}</li>
             </ul>
-            <ul v-if="triage.analysis.questions?.length" class="tlist q">
-              <li v-for="qq in triage.analysis.questions" :key="qq">? {{ qq }}</li>
-            </ul>
-            <div v-if="triage.analysis.questions?.length || triage.analysis.needs_clarification"
-                 class="clarify" :class="{ drag: clarifyDrag }"
-                 @dragover.prevent="clarifyDrag = true" @dragleave="clarifyDrag = false" @drop.prevent="onClarifyDrop">
-              <div class="clarify-row">
-                <UiTextarea
-                  v-model="clarifyText"
-                  class="clarify-text"
-                  data-role="task-clarification"
-                  rows="2"
-                  placeholder="Ответ на вопросы — сохранится локально для агентов, в B24 не уйдёт… (Ctrl+V — скрин, Ctrl+Enter — отправить)"
-                  @paste="onClarifyPaste"
-                  @keydown.ctrl.enter.prevent="sendClarify"
-                />
-                <UiTooltip
-                  text="Фото для агента: скрин переписки или бага. Можно вставить из буфера (Ctrl+V) или перетащить сюда."
-                  placement="top-end"
-                >
-                  <template #trigger>
-                    <UiFilePicker
-                      data-role="task-attachment"
-                      accept="image/*"
-                      multiple
-                      density="compact"
-                      label="Приложить фото"
-                      :busy="clarifyUploading"
-                      :show-summary="false"
-                      :show-reset="false"
-                      @change="onClarifyFiles"
+            <section
+              v-if="triageQuestions.length"
+              class="clarify"
+              aria-labelledby="task-triage-questions-title"
+            >
+              <header class="clarify-head">
+                <span class="clarify-head-icon" aria-hidden="true">?</span>
+                <div>
+                  <h5 id="task-triage-questions-title">Нужно ваше решение</h5>
+                  <p>Выберите подходящий вариант. При необходимости добавьте пояснение.</p>
+                </div>
+              </header>
+              <div class="clarify-list">
+              <article
+                v-for="(question, questionIndex) in triageQuestions"
+                :key="question.id"
+                class="clarify-card"
+                :class="{ 'is-answered': answerFor(question.id) }"
+              >
+                <div class="clarify-question">
+                  <span class="clarify-index" aria-hidden="true">{{ questionIndex + 1 }}</span>
+                  <div class="clarify-question-copy">
+                    <h6>{{ question.text }}</h6>
+                    <span
+                      v-if="answerFor(question.id)"
+                      class="clarify-status"
+                      :class="{
+                        warn: answerFor(question.id).status === 'human_required',
+                      }"
                     >
-                      <template #leading>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
-                      </template>
-                    </UiFilePicker>
-                  </template>
-                </UiTooltip>
-                <UiButton
-                  data-role="task-compact-action"
-                  tone="accent"
-                  :loading="busy === 'clarify' || clarifyUploading"
-                  :disabled="busy === 'clarify' || triageBusy || clarifyUploading || (!clarifyText.trim() && !clarifyAtts.length)"
-                  loading-label="Сохраняю уточнение"
-                  @click="sendClarify"
-                >
-                  ↻ Уточнить и переоценить
-                </UiButton>
-              </div>
-              <div v-if="clarifyAtts.length || clarifyUploading" class="attrow">
-                <span v-for="a in clarifyAtts" :key="a.file" class="attchip">
-                  <img :src="a.url" :alt="a.name" />
-                  <span class="attname">{{ a.name }}</span>
-                  <UiIconButton
-                    role="rail"
-                    tone="danger"
-                    :label="`Убрать ${a.name}`"
-                    title="Убрать"
-                    @click="dropClarifyAtt(a.file)"
+                      {{ answerFor(question.id).status === 'human_required'
+                        ? 'Арбитр оставил вопрос человеку'
+                        : answerFor(question.id).actor === 'cockpit-arbiter'
+                          ? 'Арбитр — машинный ответ'
+                          : 'Ответил человек' }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="question.recommendation" class="clarify-recommendation">
+                  <span class="clarify-recommendation-label">Рекомендация</span>
+                  <strong v-if="recommendationOption(question)">
+                    {{ recommendationOption(question) }}
+                  </strong>
+                  <span v-if="question.recommendation.reason">
+                    {{ question.recommendation.reason }}
+                  </span>
+                </div>
+                <UiChoiceList
+                  v-if="question.options.length"
+                  class="clarify-options"
+                  data-role="task-clarification-options"
+                  :label="question.text"
+                  :model-value="selectedClarifyOption(question.id)"
+                  :options="clarifyOptions(question)"
+                  selection-indicator
+                  @update:model-value="selectClarifyOption(question.id, $event)"
+                />
+                <div v-if="question.options.length" class="clarify-compose-row">
+                  <UiDisclosureButton
+                    :controls="`task-clarification-extra-${questionIndex}`"
+                    density="compact"
+                    variant="text"
+                    :open="composerOpenFor(question)"
+                    @update:open="setComposerOpen(question.id, $event)"
                   >
-                    ✕
-                  </UiIconButton>
-                </span>
-                <span v-if="clarifyUploading" class="tmuted">
-                  <UiSpinner decorative /> загрузка…
-                </span>
+                    {{ composerOpenFor(question) ? 'Скрыть пояснение' : 'Добавить пояснение' }}
+                  </UiDisclosureButton>
+                </div>
+                <div
+                  v-show="composerOpenFor(question)"
+                  :id="`task-clarification-extra-${questionIndex}`"
+                  class="clarify-answer"
+                >
+                  <div class="clarify-answer-head">
+                    <span>{{ question.options.length ? 'Пояснение к выбору' : 'Ваш ответ' }}</span>
+                    <small>{{ question.options.length ? 'необязательно' : 'своими словами' }}</small>
+                  </div>
+                  <UiTextarea
+                    v-model="clarifyDrafts[question.id].text"
+                    class="clarify-text"
+                    data-role="task-clarification"
+                    rows="2"
+                    :placeholder="question.options.length
+                      ? 'Добавьте детали, если одного варианта недостаточно'
+                      : 'Ответьте на вопрос триажа'"
+                    @focus="activeQuestionId = question.id"
+                    @paste="onClarifyPaste(question.id, $event)"
+                    @keydown.ctrl.enter.prevent="sendClarify"
+                  />
+                  <div class="clarify-answer-tools">
+                    <span>Локально, не в B24 · Ctrl+Enter — отправить</span>
+                    <div class="clarify-card-actions">
+                      <UiFilePicker
+                        data-role="task-attachment"
+                        accept="image/*"
+                        multiple
+                        density="compact"
+                        label="Приложить фото"
+                        loading-label="Прикладываю фото"
+                        title="Приложить фото к ответу"
+                        :busy="clarifyUploading"
+                        :show-summary="false"
+                        :show-reset="false"
+                        @change="onClarifyFiles(question.id, $event)"
+                      >
+                        <template #leading>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <rect x="3" y="3" width="18" height="18" rx="2.5" />
+                            <circle cx="8.6" cy="8.6" r="1.4" />
+                            <path d="m20 16-4.5-4.5L7 19" />
+                          </svg>
+                        </template>
+                      </UiFilePicker>
+                      <UiIconButton
+                        :label="`Начать диктовку ответа на вопрос: ${question.text}`"
+                        title="Начать диктовку"
+                        @click="startClarifyDictation(question.id)"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <rect x="9" y="3" width="6" height="11" rx="3" />
+                          <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6" />
+                        </svg>
+                      </UiIconButton>
+                    </div>
+                  </div>
+                  <div v-if="draftFor(question.id).attachments.length" class="attrow">
+                    <span
+                      v-for="attachment in draftFor(question.id).attachments"
+                      :key="attachment.file"
+                      class="attchip"
+                    >
+                      <img :src="attachment.url" :alt="attachment.name" />
+                      <span class="attname">{{ attachment.name }}</span>
+                      <UiIconButton
+                        :label="`Убрать ${attachment.name}`"
+                        title="Убрать"
+                        @click="dropClarifyAtt(question.id, attachment.file)"
+                      >
+                        ✕
+                      </UiIconButton>
+                    </span>
+                  </div>
+                </div>
+              </article>
               </div>
-            </div>
+              <div class="clarify-submit">
+                <UiFormActions align="start">
+                  <UiButton
+                    data-role="task-compact-action"
+                    tone="accent"
+                    variant="solid"
+                    :loading="busy === 'clarify' || clarifyUploading"
+                    :disabled="busy === 'clarify' || triageBusy || clarifyUploading || !hasClarifyAnswers"
+                    loading-label="Сохраняю уточнения"
+                    @click="sendClarify"
+                  >
+                    ↻ Уточнить и переоценить
+                  </UiButton>
+                  <UiButton
+                    v-if="analysisManifest"
+                    :loading="busy === 'arbitrate'"
+                    :disabled="busy === 'arbitrate' || triageBusy"
+                    @click="arbitrateQuestions"
+                  >
+                    Разобрать арбитром
+                  </UiButton>
+                </UiFormActions>
+              </div>
+            </section>
             <details v-if="clarifySaved" class="clhist">
               <summary>Внутренние уточнения (локально, для агентов — заказчик не видит)</summary>
               <div class="clhist-body">{{ clarifySaved }}</div>
@@ -405,8 +523,15 @@
             <div v-if="showNote" id="task-triage-note" class="tnote" v-html="noteHtml"></div>
             <p class="tmeta mono">
               {{ triage.analysis.generated_at ? new Date(triage.analysis.generated_at).toLocaleString('ru-RU') : '' }}
-              <template v-if="triage.analysis.meta">· {{ triage.analysis.meta.model }} · {{ Math.round((triage.analysis.meta.duration_ms || 0) / 60000) }} мин<template v-if="triage.analysis.meta.cost_usd"> · ${{ triage.analysis.meta.cost_usd.toFixed(2) }}</template></template>
+              <template v-if="triage.analysis.meta">
+                · {{ triage.analysis.meta.provider || '' }}
+                · {{ triage.analysis.meta.model }}
+                <template v-if="triage.analysis.meta.effort"> · {{ triage.analysis.meta.effort }}</template>
+                · {{ Math.round((triage.analysis.meta.duration_ms || 0) / 60000) }} мин
+                <template v-if="triage.analysis.meta.cost_usd"> · ${{ triage.analysis.meta.cost_usd.toFixed(2) }}</template>
+              </template>
             </p>
+          </template>
           </template>
         </div>
 
@@ -716,6 +841,7 @@ import { useUiContextSource } from '../composables/useUiContextSource.js';
 import {
   confirmDialog,
   UiButton,
+  UiChoiceList,
   UiDialog,
   UiDisclosureButton,
   UiField,
@@ -738,6 +864,7 @@ import { useTaskFavoritesStore } from '../stores/task-favorites.js';
 import { useTaskShelfStore } from '../stores/task-shelf.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
+import { useDictationController } from '../features/speech/provider.js';
 import { liveTimerSec, secToHMS } from '../shared/format.js';
 import { mdToHtml } from '../shared/md.js';
 import { providerLabel } from '../shared/runner-display.js';
@@ -999,13 +1126,101 @@ const analysisStore = useAnalysisStore();
 const triage = ref(null);        // ответ /api/analysis/:id
 const showNote = ref(false);     // разведнота развёрнута
 let triageTimer = null;
+const analysisManifest = computed(() => plugins.byId('analysis'));
+// Старый сервер ещё не отдаёт manifest триажа: до ручного рестарта считаем его включённым.
+const analysisEnabled = computed(() => analysisManifest.value?.enabled !== false);
 const triageState = computed(() => triage.value?.status?.state || null);
 const triageBusy = computed(() => triageState.value === 'queued' || triageState.value === 'running');
 const noteHtml = computed(() => (triage.value?.note ? mdToHtml(triage.value.note) : ''));
 
+function normalizeTriageQuestions(values) {
+  return (Array.isArray(values) ? values : []).map((raw, index) => {
+    const text = typeof raw === 'string' ? raw.trim() : String(raw?.text || '').trim();
+    const id = typeof raw === 'object' && raw?.id
+      ? String(raw.id)
+      : `legacy-${index}-${text.slice(0, 40)}`;
+    return {
+      id,
+      text,
+      options: (Array.isArray(raw?.options) ? raw.options : []).map((option, optionIndex) => ({
+        id: String(option?.id || `legacy-option-${optionIndex}`),
+        label: String(option?.label || option || ''),
+        description: String(option?.description || ''),
+      })).filter((option) => option.label),
+      recommendation: raw?.recommendation || null,
+    };
+  }).filter((question) => question.text);
+}
+
+const triageQuestions = computed(() => normalizeTriageQuestions(triage.value?.analysis?.questions));
+const clarifyDrafts = ref({});
+const clarifyEntries = ref([]);
+const clarifyComposerOpen = ref({});
+const activeQuestionId = ref(null);
+
+function syncClarifyDrafts() {
+  const next = {};
+  const nextComposerOpen = {};
+  for (const question of triageQuestions.value) {
+    next[question.id] = clarifyDrafts.value[question.id] || {
+      text: '',
+      optionIds: [],
+      attachments: [],
+    };
+    nextComposerOpen[question.id] = question.options.length === 0
+      || clarifyComposerOpen.value[question.id] === true;
+  }
+  clarifyDrafts.value = next;
+  clarifyComposerOpen.value = nextComposerOpen;
+  if (!next[activeQuestionId.value]) {
+    activeQuestionId.value = triageQuestions.value[0]?.id || null;
+  }
+}
+
+function draftFor(questionId) {
+  return clarifyDrafts.value[questionId] || { text: '', optionIds: [], attachments: [] };
+}
+
+function answerFor(questionId) {
+  for (let index = clarifyEntries.value.length - 1; index >= 0; index -= 1) {
+    if (clarifyEntries.value[index].questionId === questionId) {
+      return clarifyEntries.value[index];
+    }
+  }
+  return null;
+}
+
+function clarifyOptions(question) {
+  return question.options.map((option) => ({
+    value: option.id,
+    label: option.label,
+    description: option.description || undefined,
+  }));
+}
+
+function selectedClarifyOption(questionId) {
+  return draftFor(questionId).optionIds[0] || null;
+}
+
+function recommendationOption(question) {
+  const option = String(question.recommendation?.option || '').trim();
+  return question.options.find((candidate) => candidate.id === option)?.label || option;
+}
+
+function composerOpenFor(question) {
+  return question.options.length === 0 || clarifyComposerOpen.value[question.id] === true;
+}
+
+function setComposerOpen(questionId, open) {
+  clarifyComposerOpen.value[questionId] = open;
+}
+
 async function loadTriage() {
-  if (!taskId.value) return;
-  try { triage.value = await analysisStore.detail(taskId.value); } catch { /* блок триажа не ломает модалку */ }
+  if (!taskId.value || !analysisEnabled.value) return;
+  try {
+    triage.value = await analysisStore.detail(taskId.value);
+    syncClarifyDrafts();
+  } catch { /* блок триажа не ломает модалку */ }
   // Пока идёт — подтягиваем статус; закончилось — останавливаемся.
   if (triageBusy.value && !triageTimer) {
     triageTimer = setInterval(loadTriage, 6000);
@@ -1014,63 +1229,122 @@ async function loadTriage() {
   }
 }
 const analyzeNow = () => act('analyze', async () => {
+  if (!analysisEnabled.value) return;
   await analysisStore.analyze(taskId.value);
   await loadTriage();
 });
 
-// Ответ на вопросы триажа: уходит комментарием в B24 (агент читает комментарии
-// вместе с тикетом) и сразу запускает переоценку — цикл уточнения в один клик.
-// К уточнению можно приложить фото (скрин переписки/бага): файл сохраняется в
-// chats/attachments, в комментарий вписывается абсолютный путь — агент переоценки
-// открывает его Read'ом (папка выдана ему через --add-dir).
-const clarifyText = ref('');
-const clarifyAtts = ref([]);   // [{file,name,url,path}]
 const clarifyUploading = ref(false);
-async function onClarifyFiles(files) {
-  await uploadClarifyFiles(files);
+async function onClarifyFiles(questionId, files) {
+  await uploadClarifyFiles(questionId, files);
 }
-function dropClarifyAtt(file) { clarifyAtts.value = clarifyAtts.value.filter((a) => a.file !== file); }
+function dropClarifyAtt(questionId, file) {
+  const draft = draftFor(questionId);
+  draft.attachments = draft.attachments.filter((attachment) => attachment.file !== file);
+}
 // Скрин из буфера обмена (Ctrl+V прямо в поле) и перетаскивание файлов — как в чате.
-async function uploadClarifyFiles(files) {
+async function uploadClarifyFiles(questionId, files) {
   if (!files.length) return;
   clarifyUploading.value = true;
   try {
     for (const f of files) {
       const fd = new FormData();
       fd.append('file', f, f.name || 'clipboard.png');
-      clarifyAtts.value.push(await api.upload('/api/chat/upload', fd));
+      draftFor(questionId).attachments.push(await api.upload('/api/chat/upload', fd));
     }
   } catch (e2) { err.value = e2.message; }
   finally { clarifyUploading.value = false; }
 }
-function onClarifyPaste(e) {
+function onClarifyPaste(questionId, e) {
   const files = [...(e.clipboardData?.items || [])]
     .filter((i) => i.kind === 'file' && i.type.startsWith('image/'))
     .map((i) => i.getAsFile()).filter(Boolean);
-  if (files.length) { e.preventDefault(); uploadClarifyFiles(files); }
-}
-const clarifyDrag = ref(false);
-function onClarifyDrop(e) {
-  clarifyDrag.value = false;
-  uploadClarifyFiles([...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/')));
+  if (files.length) { e.preventDefault(); uploadClarifyFiles(questionId, files); }
 }
 // Сохраняются ЛОКАЛЬНО (t<id>.clarify.md), НЕ комментарием в B24: комментарии
 // видит заказчик, а рабочие пояснения — внутренняя кухня. Их читают триаж и конвейер.
 const clarifySaved = ref('');
 async function loadClarifications() {
-  try { clarifySaved.value = (await api.get(`/api/tasks/${taskId.value}/clarifications`)).text || ''; }
-  catch { clarifySaved.value = ''; }
+  try {
+    const response = await api.get(`/api/tasks/${taskId.value}/clarifications`);
+    clarifySaved.value = response.text || '';
+    clarifyEntries.value = response.entries || [];
+  } catch {
+    clarifySaved.value = '';
+    clarifyEntries.value = [];
+  }
 }
+const hasClarifyAnswers = computed(() => triageQuestions.value.some((question) => {
+  const draft = draftFor(question.id);
+  return draft.text.trim() || draft.optionIds.length || draft.attachments.length;
+}));
+
+function selectClarifyOption(questionId, optionId) {
+  draftFor(questionId).optionIds = optionId == null ? [] : [String(optionId)];
+}
+
 const sendClarify = () => act('clarify', async () => {
-  const photos = clarifyAtts.value.map((a) => `[приложено фото: ${a.path}]`).join('\n');
+  const answers = triageQuestions.value.map((question) => {
+    const draft = draftFor(question.id);
+    return {
+      questionId: question.id,
+      optionIds: [...draft.optionIds],
+      text: draft.text.trim(),
+      attachments: draft.attachments.map((attachment) => ({
+        file: attachment.file,
+        name: attachment.name,
+      })),
+    };
+  }).filter((answer) => answer.text || answer.optionIds.length || answer.attachments.length);
+  const legacyText = answers.map((answer) => {
+    const draft = draftFor(answer.questionId);
+    return [
+      answer.text,
+      ...draft.attachments
+        .map((attachment) => attachment.path
+          ? `[приложено фото: ${attachment.path}]`
+          : '')
+        .filter(Boolean),
+    ].filter(Boolean).join('\n');
+  }).filter(Boolean).join('\n\n');
   const r = await api.post(`/api/tasks/${taskId.value}/clarifications`, {
-    text: `${clarifyText.value.trim()}${photos ? `\n${photos}` : ''}`,
+    answers,
+    text: legacyText,
   });
   clarifySaved.value = r.text || '';
-  clarifyText.value = ''; clarifyAtts.value = [];
+  clarifyEntries.value = r.entries || clarifyEntries.value;
+  clarifyDrafts.value = {};
+  syncClarifyDrafts();
   await analysisStore.analyze(taskId.value);
   await loadTriage();
 });
+
+const arbitrateQuestions = () => act('arbitrate', async () => {
+  await api.post(`/api/tasks/${taskId.value}/analysis/arbitrate`, {});
+  await Promise.all([loadClarifications(), loadTriage()]);
+});
+
+const dictationController = useDictationController();
+const dictationLease = dictationController.acquire('task-modal-analysis', {
+  onCommit(text) {
+    const questionId = activeQuestionId.value;
+    if (!questionId || !clarifyDrafts.value[questionId]) return;
+    const current = clarifyDrafts.value[questionId].text.trimEnd();
+    clarifyDrafts.value[questionId].text = current ? `${current} ${text}` : String(text || '');
+  },
+});
+
+async function startClarifyDictation(questionId) {
+  if (activeQuestionId.value && activeQuestionId.value !== questionId) {
+    await dictationLease.cancel();
+  }
+  activeQuestionId.value = questionId;
+  try {
+    await dictationLease.start();
+  } catch (error) {
+    err.value = error?.message || 'Микрофон недоступен';
+  }
+}
 
 // ── Табы модалки: Триаж | Комментарии ──
 const mtab = ref('triage');
@@ -1377,8 +1651,11 @@ watch(taskId, (id) => {
     launchForm.value = null; launchOpts.value = null;
     launchOptionsRequest += 1; launchOptionsBusy.value = false;
     triage.value = null; showNote.value = false;
-    mtab.value = 'triage'; comments.value = null; clarifyAtts.value = []; clarifySaved.value = '';
-    loadClarifications();
+    mtab.value = 'triage'; comments.value = null; clarifyDrafts.value = {}; clarifySaved.value = '';
+    clarifyEntries.value = [];
+    clarifyComposerOpen.value = {};
+    activeQuestionId.value = null;
+    if (analysisEnabled.value) loadClarifications();
     loadDetail();
     favorites.load(true);
     acknowledgeShelfOnOpen(id);
@@ -1389,6 +1666,7 @@ watch(taskId, (id) => {
     loadTriage();
     if (!ticker) ticker = setInterval(() => { now.value = Date.now(); }, 1000);
   } else {
+    void dictationLease.cancel();
     taskContext.blur();
     if (ticker) { clearInterval(ticker); ticker = null; }
     if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
@@ -1401,6 +1679,17 @@ watch(
   () => [taskId.value, shelf.loaded, shelf.entries, shelfEnabled.value],
   ([id]) => acknowledgeShelfOnOpen(id),
 );
+watch(analysisEnabled, (enabled) => {
+  if (!enabled) {
+    void dictationLease.cancel();
+    if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
+    return;
+  }
+  if (taskId.value) {
+    loadClarifications();
+    loadTriage();
+  }
+});
 // Заголовок может приехать после открытия карточки. Обновляем bounded details, но не
 // focus revision: открытый позже Pipeline/Task overlay должен остаться верхним.
 watch(
@@ -1416,6 +1705,7 @@ watch(() => ui.launchRequested, (requested) => {
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
   if (triageTimer) clearInterval(triageTimer);
+  void dictationLease.release();
 });
 </script>
 
@@ -1508,9 +1798,10 @@ onUnmounted(() => {
 .tgmedia { font-size: 11px; color: var(--ink-mid); overflow-wrap: anywhere; }
 .tgmore { font-size: 11px; color: var(--ink-mid); }
 
-.triage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
-  display: flex; flex-direction: column; gap: 8px; }
-.thead2 { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.triage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.thead2 { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+  padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); }
 .triage-summary { display: flex; flex: 1 1 360px; align-items: center; gap: 6px;
   min-width: 0; flex-wrap: wrap; }
 .tlbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); margin-right: 4px; }
@@ -1524,17 +1815,57 @@ onUnmounted(() => {
 .tmuted { color: var(--ink-mid); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 .terr { color: var(--bad); font-size: 12px; }
 .thead2 [data-role='task-compact-action'] { flex: none; }
-.tsum { margin: 0; font-size: 13px; color: var(--ink); line-height: 1.5; }
-.tstale { margin: 0; font-size: 12px; color: var(--warn); }
+.tsum { margin: 0 2px; font-size: 13px; color: var(--ink); line-height: 1.5; }
+.tstale { margin: 0 2px; font-size: 12px; color: var(--warn); }
 .tlist { margin: 0; padding: 0 0 0 4px; list-style: none; font-size: 12px; color: var(--ink-mid); display: flex; flex-direction: column; gap: 3px; }
-.tlist.q li { color: var(--warn); }
-.clarify { display: flex; flex-direction: column; gap: 8px; border-radius: 10px; }
-.clarify.drag { outline: 2px dashed var(--accent); outline-offset: 3px; }
-.clarify-row { display: flex; gap: 8px; align-items: flex-end; }
-/* В ряду уточнения кнопка стоит вплотную к скрепке (auto-margin — только в шапке триажа),
-   все контролы одной высоты. */
-.clarify-row [data-role='task-compact-action'] { margin-left: 0; }
-.clarify-text { flex: 1; }
+.clarify { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line);
+  border-radius: 11px; background: var(--surface); }
+.triage-disabled { color: var(--ink-mid); font-size: 13px; padding: 6px 2px; }
+.clarify-head { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border-radius: 10px 10px 0 0; }
+.clarify-head-icon { display: grid; flex: none; place-items: center; width: 24px; height: 24px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line)); border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent);
+  font-family: var(--mono); font-size: 13px; font-weight: 700; }
+.clarify-head h5 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 650; line-height: 1.35; }
+.clarify-head p { margin: 2px 0 0; color: var(--ink-mid); font-size: 11.5px; line-height: 1.45; }
+.clarify-list { min-width: 0; }
+.clarify-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; }
+.clarify-card + .clarify-card { border-top: 1px solid var(--line); }
+.clarify-question { display: grid; align-items: start; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
+.clarify-index { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px;
+  background: var(--surface-2); color: var(--ink-mid); font-family: var(--mono); font-size: 11px; }
+.clarify-card.is-answered .clarify-index { background: color-mix(in srgb, var(--good) 12%, var(--surface-2));
+  color: var(--good); }
+.clarify-question-copy { min-width: 0; }
+.clarify-question h6 { margin: 1px 0 0; color: var(--ink); font-size: 13px;
+  font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
+.clarify-status { display: inline-flex; margin-top: 5px; padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line)); border-radius: 999px;
+  color: var(--good); font-size: 10.5px; font-weight: 500; line-height: 1.35; }
+.clarify-status.warn { border-color: color-mix(in srgb, var(--warn) 38%, var(--line)); color: var(--warn); }
+.clarify-recommendation { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px;
+  min-width: 0; margin-left: 34px; padding: 8px 10px; border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--ink-mid); font-size: 11.5px; line-height: 1.45; }
+.clarify-recommendation-label { color: var(--accent); font-size: 10px; font-weight: 650;
+  letter-spacing: .06em; text-transform: uppercase; }
+.clarify-recommendation strong { color: var(--ink); font-weight: 600; }
+.clarify-options { margin-left: 34px; }
+.clarify-compose-row { margin-left: 34px; }
+.clarify-answer { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin-left: 34px; }
+.clarify-answer-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  color: var(--ink); font-size: 11.5px; font-weight: 550; }
+.clarify-answer-head small { color: var(--ink-mid); font-size: 10.5px; font-weight: 400; }
+.clarify-text { width: 100%; min-width: 0; }
+.clarify-answer-tools { display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; color: var(--ink-mid); font-size: 10.5px; line-height: 1.35; }
+.clarify-card-actions { display: flex; flex: none; align-items: center; gap: 6px; }
+.clarify-submit { position: sticky; z-index: 1; bottom: -12px; padding: 10px 12px;
+  border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; background: var(--surface);
+  box-shadow: 0 -12px 24px color-mix(in srgb, var(--ground) 72%, transparent); }
 .clhist { border: 1px dashed var(--line); border-radius: 9px; padding: 7px 11px; }
 .clhist summary { cursor: pointer; font-size: 12.5px; color: var(--ink-mid); user-select: none; }
 .clhist-body { margin-top: 6px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
@@ -1617,6 +1948,7 @@ onUnmounted(() => {
   .task-pane { flex: none; min-height: auto; overflow: visible; }
   .brief-scroll, .tab-scroll { flex: none; min-height: auto; overflow: visible; scrollbar-gutter: auto; }
   .tg { max-height: 320px; }
+  .clarify-submit { position: static; box-shadow: none; }
   .controls { gap: 10px; }
   .timer { min-width: 82px; }
   .cbtns { flex: 1; }
@@ -1648,12 +1980,13 @@ onUnmounted(() => {
   .work-head { min-height: 44px; padding: 0 7px; }
   .work-head > div { display: none; }
   .mtabs { width: 100%; }
-  .triage { padding: 10px; }
   .triage-summary { flex-basis: 100%; }
   .thead2 [data-role='task-compact-action'] { width: 100%; margin-left: 0; }
-  .clarify-row { flex-wrap: wrap; }
-  .clarify-text { flex-basis: 100%; }
-  .clarify-row [data-role='task-compact-action'] { flex: 1; }
+  .clarify-head, .clarify-card { padding: 11px; }
+  .clarify-recommendation, .clarify-options, .clarify-compose-row, .clarify-answer {
+    margin-left: 0;
+  }
+  .clarify-answer-tools { align-items: flex-start; }
   .comment { flex-direction: column; align-items: stretch; }
   .comment > :last-child { align-self: flex-end; }
   .controls { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 9px;

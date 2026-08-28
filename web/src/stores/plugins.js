@@ -68,7 +68,18 @@ export const usePluginsStore = defineStore('plugins', {
       const p = this.byId(id);
       if (!p) return;
       p.enabled = enabled; // оптимистично — мгновенный отклик тумблера
-      try { await api.post(`/api/plugins/${id}/toggle`, { enabled }); }
+      try {
+        await api.post(`/api/plugins/${id}/toggle`, { enabled });
+        if (id === 'analysis') {
+          const { useAnalysisStore } = await import('./analysis.js');
+          const analysis = useAnalysisStore();
+          if (enabled) analysis.startPolling();
+          else {
+            analysis.error = null;
+            analysis.stopPolling();
+          }
+        }
+      }
       catch { p.enabled = !enabled; }
     },
     async saveSettings(id, values) {

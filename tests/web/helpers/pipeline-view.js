@@ -8,9 +8,9 @@ function uiFacadeStub(prefix) {
     ['UiDialog', 'src/components/overlays/UiDialog.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
+    ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
-    ['UiToggleButton', 'src/components/composites/UiToggleButton.vue'],
   ];
   const imports = componentImports.map(([name, file]) => (
     `import ${name} from ${JSON.stringify(webFile(file))};`
@@ -33,7 +33,12 @@ export function compilePipelineView(prefix) {
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/api-client.js': `export const api = globalThis.${prefix}Api;`,
-      '../composables/useSse.js': 'export function useSse() {}',
+      '../composables/useSse.js': [
+        'export function useSse(onEvent) {',
+        `  globalThis.${prefix}SseHandler = onEvent;`,
+        '  return { connected: { value: true } };',
+        '}',
+      ].join('\n'),
       '../composables/useUiContextSource.js': [
         'export function useUiContextSource(...args) {',
         `  const helper = globalThis.${prefix}ContextSource;`,
@@ -51,7 +56,21 @@ export function compilePipelineView(prefix) {
       '../shared/sandbox.js': (
         'export const sandboxUrl = (port) => `http://sandbox.test:${port}`;'
       ),
-      '../shared/agent-activity.js': 'export const agentActivityLabel = () => "";',
+      '../shared/agent-activity.js': [
+        'export const agentActivityLabel = () => "";',
+        'export function silenceReason(task, window) {',
+        '  const silence = task?.silence;',
+        '  if (!window || !silence || !Number.isFinite(silence.sec)',
+        '    || silence.sec < window) return null;',
+        '  const stage = String(silence.stage || "").toLowerCase();',
+        '  return {',
+        '    stage: silence.stage,',
+        '    sec: silence.sec,',
+        '    tool: silence.tool || null,',
+        '    text: `${stage}: молчит ${Math.max(1, Math.floor(silence.sec / 60))} мин`,',
+        '  };',
+        '}',
+      ].join('\n'),
       '../ui': uiFacadeStub(prefix),
       './pipeline/FactoryGraph.vue': `export default globalThis.${prefix}FactoryGraph;`,
       './OpenDiffButton.vue': [

@@ -132,7 +132,7 @@
 
           <div id="board-task-filters" class="filterbar" :class="{ expanded: filtersOpen }"
                role="region" aria-label="Фильтры задач">
-            <label class="filter-section sort-filter">
+            <label v-if="analysisEnabled" class="filter-section sort-filter">
               <span class="filter-caption">Сортировка</span>
               <UiSelect v-model="sortBy" class="trisort">
                 <option value="b24">порядок B24</option>
@@ -193,7 +193,7 @@
               </UiToggleButton>
             </div>
 
-            <div class="filter-section triage-filter" role="group" aria-labelledby="board-triage-filter-label">
+            <div v-if="analysisEnabled" class="filter-section triage-filter" role="group" aria-labelledby="board-triage-filter-label">
               <span id="board-triage-filter-label" class="filter-caption">Триаж</span>
               <UiSegmentedControl
                 v-model="triageMode"
@@ -202,6 +202,7 @@
                 :options="TRIAGE_OPTIONS"
               />
             </div>
+            <div v-else class="filter-section triage-disabled">Триаж выключен</div>
 
             <div class="filter-actions">
               <UiButton
@@ -213,7 +214,7 @@
               >
                 Сбросить
               </UiButton>
-              <div v-if="unrated.length" class="batch-actions" role="group"
+              <div v-if="analysisEnabled && unrated.length" class="batch-actions" role="group"
                    aria-label="Массовые действия с задачами">
                 <UiButton
                   class="batch-action triage-all"
@@ -478,6 +479,10 @@ const favorites = useTaskFavoritesStore();
 const shelf = useTaskShelfStore();
 const plugins = usePluginsStore();
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
+const analysisEnabled = computed(() => {
+  const manifest = plugins.byId('analysis');
+  return manifest ? manifest.enabled !== false : true;
+});
 const favoriteOnly = ref(false);
 const filtersOpen = ref(false);
 // Новая задача — та, которую ещё не открывали. Отметки серверные, поэтому до их
@@ -522,6 +527,7 @@ watch([sortBy, triageMode], () => {
 const triageOf = (t) => analysis.byTask[t.id] || null;
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
 const unrated = computed(() => (data.value?.tasks || []).filter((t) => {
+  if (!analysisEnabled.value) return false;
   const r = triageOf(t);
   return !r?.analysis && !['queued', 'running'].includes(r?.status?.state);
 }));
@@ -542,9 +548,9 @@ const myTasks = computed(() => {
     tasks: data.value?.tasks || [],
     analysisByTask: analysis.byTask,
     query: q.value,
-    sortBy: sortBy.value,
-    onlyUnrated: onlyUnrated.value,
-    onlyNeedsInfo: onlyNeedsInfo.value,
+    sortBy: analysisEnabled.value ? sortBy.value : 'b24',
+    onlyUnrated: analysisEnabled.value && onlyUnrated.value,
+    onlyNeedsInfo: analysisEnabled.value && onlyNeedsInfo.value,
     favoriteOnly: favoriteOnly.value,
     favoriteTaskIds: favorites.taskIds,
     newOnly: newOnly.value && seen.ready,
@@ -562,13 +568,14 @@ const currentNewCount = computed(() => {
   return (data.value?.tasks || []).filter((task) => !seen.isSeen(task.id)).length;
 });
 const activeFilterCount = computed(() => [
-  sortBy.value !== 'b24',
+  analysisEnabled.value && sortBy.value !== 'b24',
   favoriteOnly.value,
   newOnly.value,
-  triageMode.value !== 'all',
+  analysisEnabled.value && triageMode.value !== 'all',
 ].filter(Boolean).length);
 const hasListFilters = computed(() => !!q.value.trim()
-  || favoriteOnly.value || newOnly.value || triageMode.value !== 'all');
+  || favoriteOnly.value || newOnly.value
+  || (analysisEnabled.value && triageMode.value !== 'all'));
 function resetTaskFilters() {
   q.value = '';
   sortBy.value = 'b24';
@@ -610,7 +617,7 @@ onMounted(() => {
   board.load();
   favorites.load(true);
   seen.load(true);
-  analysis.startPolling();
+  if (analysisEnabled.value) analysis.startPolling();
   loadConveyor();
   ticker = setInterval(() => { now.value = Date.now(); }, 1000);
 });

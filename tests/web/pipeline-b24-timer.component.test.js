@@ -278,7 +278,22 @@ test('карточки конвейера различают три состоя
   await runningCard?.get('.chev').trigger('click');
   await flushPromises();
   const afterCollapse = timerSnapshot(runningCard);
+  // Кнопки, чей доступный текст — ДАННЫЕ задачи, сторожу не подходят: название придумывает
+  // человек на портале, а подсказка фильтра состояний перечисляет задачи поимённо. Задача
+  // «Остановить таймер» зажигала бы тревогу, которой на странице нет. Сторож обязан читать
+  // машинную роль кнопки, а не текст, приехавший снаружи, — та же грабля, что с гейтом
+  // арбитра по заголовку остановки.
+  const dataDrivenRoles = new Set([
+    'pipeline-title',
+    'pipeline-project',
+    'pipeline-project-overflow-option',
+    'pipeline-status-filter',
+  ]);
   const timerButtons = wrapper.findAll('button').filter((button) => {
+    if (dataDrivenRoles.has(button.attributes('data-role'))) {
+      return false;
+    }
+
     const accessibleText = [
       button.text(),
       button.attributes('aria-label'),

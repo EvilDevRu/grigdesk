@@ -22,6 +22,7 @@ test('Chrome geometry matrix закрепляет viewports и overlay/disclosur
   assert.match(script, /data-geometry-dialog-trigger/u);
   assert.match(script, /data-geometry-composer-input/u);
   assert.match(script, /data-geometry-context-ring/u);
+  assert.match(script, /data-geometry-chat-toolbar-select/u);
   assert.match(script, /data-geometry-dock-action/u);
   assert.match(script, /data-geometry-chat-list-button/u);
   assert.match(script, /data-geometry-task-footer-action/u);
@@ -33,6 +34,7 @@ test('Chrome geometry matrix закрепляет viewports и overlay/disclosur
   assert.match(gallery, /data-geometry-dialog/u);
   assert.match(gallery, /data-geometry-composer/u);
   assert.match(gallery, /data-geometry-context-ring/u);
+  assert.match(gallery, /data-geometry-chat-toolbar-select/u);
   assert.match(gallery, /data-geometry-dock-actions/u);
   assert.match(gallery, /data-geometry-chat-list-button/u);
   assert.match(gallery, /data-geometry-task-footer-action/u);

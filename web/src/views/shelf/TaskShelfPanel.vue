@@ -45,6 +45,7 @@
               data-ui-task-shelf-row
               :data-task-id="row.taskId"
               :data-shelf-state="row.state"
+              :data-shelf-completed="row.completed ? 'true' : undefined"
               :aria-label="rowAriaLabel(row)"
               @select="ui.openTask(row.taskId)"
             >
@@ -160,12 +161,17 @@ const groups = computed(() => [
   {
     id: 'attention',
     title: 'Требуют внимания',
-    rows: shelf.rows.filter((row) => row.state === 'lit'),
+    rows: shelf.rows.filter((row) => row.state === 'lit' && !row.completed),
   },
   {
     id: 'waiting',
     title: 'В ожидании',
-    rows: shelf.rows.filter((row) => row.state !== 'lit'),
+    rows: shelf.rows.filter((row) => row.state !== 'lit' && !row.completed),
+  },
+  {
+    id: 'completed',
+    title: 'Завершённые',
+    rows: shelf.rows.filter((row) => row.completed),
   },
 ].filter((group) => group.rows.length));
 
@@ -366,6 +372,10 @@ defineExpose({ focus: () => panel.value?.focus?.() });
 
 [data-shelf-group='attention'] .shelf-group-head span {
   background: color-mix(in srgb, var(--warn) 13%, transparent);
+}
+
+[data-shelf-group='completed'] .shelf-group-head {
+  opacity: .62;
 }
 
 .shelf-list {

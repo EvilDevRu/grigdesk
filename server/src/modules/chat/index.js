@@ -26,6 +26,7 @@ import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
 import { ChatLiveSessions } from '../../lib/chat/live-sessions.js';
 import { createPermissionQueue } from '../../lib/chat/permission-queue.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
+import { resolveChatAttachment } from '../../lib/chat/attachments.js';
 import { stoppedTurnBrief } from '../../lib/chat/stopped-brief.js';
 import { autoDecision } from '../../lib/chat/auto-approve.js';
 import { normalizeContextCache } from '../../lib/chat/context-cache.js';
@@ -1272,9 +1273,9 @@ async function chatModule(fastify, opts) {
     // Вложения: клиент присылает имена файлов, ранее загруженных через /api/chat/upload.
     // Пути строим сами (только внутри attachDir) и открываем агенту доступ через --add-dir.
     let attachBlock = '';
-    const attachPaths = (attachments || [])
-      .map((a) => attachFile(a?.file))
-      .filter(Boolean);
+    const attachPaths = (await Promise.all(
+      (attachments || []).map((a) => attachFile(a?.file)),
+    )).filter(Boolean);
     if (attachPaths.length) {
       // Kimi получает private staging только из перечисленных файлов. Весь каталог
       // вложений в его mount namespace не попадает.
@@ -1762,10 +1763,9 @@ async function chatModule(fastify, opts) {
    * Имя файла вложения (от клиента) → абсолютный путь строго внутри attachDir.
    * Защита от подстановки произвольного пути в --add-dir/сообщение.
    */
-  function attachFile(file) {
-    if (!file) return null;
-    const p = path.join(attachDir, safeName(path.basename(String(file))));
-    return p.startsWith(attachDir + path.sep) ? p : null;
+  async function attachFile(file) {
+    const resolved = await resolveChatAttachment(attachDir, file, { imageOnly: false });
+    return resolved?.path || null;
   }
 
   // Загрузка вложения (картинка и т.п.) → { file, name, url }. Файл потом
@@ -1784,7 +1784,7 @@ async function chatModule(fastify, opts) {
   // Отдача вложения (превью в истории чата).
   const ATTACH_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', pdf: 'application/pdf' };
   fastify.get('/api/chat/attachment/:file', async (request, reply) => {
-    const p = attachFile(request.params.file);
+    const p = await attachFile(request.params.file);
     if (!p) return reply.code(400).send({ error: 'bad_file' });
     try {
       const buf = await fs.readFile(p);

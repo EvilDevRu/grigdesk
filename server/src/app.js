@@ -11,6 +11,7 @@ import websocket from '@fastify/websocket';
 import { config } from './config.js';
 import { AuthStore } from './lib/auth-store.js';
 import { FactoryStateAdapter } from './adapters/factory-state.js';
+import { ArbiterCardsStore } from './lib/arbiter-cards.js';
 import { B24Adapter } from './adapters/b24.js';
 import { SystemAdapter } from './adapters/system.js';
 import { MediaAdapter } from './adapters/media.js';
@@ -43,6 +44,7 @@ import { InboxAttachmentAnalyzer } from './lib/inbox/attachment-analysis.js';
 import { InboxTaskService } from './lib/inbox/task-service.js';
 import { InboxAutoTasks } from './lib/inbox/auto-tasks.js';
 import { FactoryArbiterWatch } from './lib/factory-arbiter-watch.js';
+import { FactoryArbiterLive } from './lib/factory-arbiter-live.js';
 import { runInboxTriage } from './lib/inbox/triage.js';
 import { FactoryDebugSettings } from './lib/factory-debug.js';
 import { readRouteWorkTime } from './lib/factory-route-cli.js';
@@ -94,6 +96,7 @@ import inboxModule from './modules/inbox/index.js';
 import documentsModule from './modules/documents/index.js';
 import sshModule from './modules/ssh/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
+import { AnalysisArbiter } from './lib/analysis/arbiter.js';
 import { DocumentReader } from './lib/documents/reader.js';
 
 // Настройки нужны ещё до сборки приложения: тумблер режима доступа решает, поднимать ли
@@ -152,12 +155,23 @@ async function build() {
   await fastify.register(websocket, { options: { maxPayload: 1 * 1024 ** 2 } });
 
   // Адаптеры (изоляция источников).
+  // Разбор арбитра: единственное место, где машинный вердикт узла превращается в
+  // человеческую формулировку. Раньше он показывался одноразовым диалогом, а у
+  // автоматического пути пропадал совсем — теперь переживает перезапуск и виден в карточке.
+  const arbiterCards = new ArbiterCardsStore(config.arbiterCardsPath);
+  // Идущий разбор виден всем окнам, а не только нажавшему кнопку: пока арбитр работает,
+  // задача снаружи неотличима от вставшей, и человек берётся за неё руками. Событие шины
+  // шлём ленивой ссылкой — плагин sse регистрируется позже этого места.
+  const arbiterLive = new FactoryArbiterLive({
+    onChange: (task) => fastify.sse?.broadcast?.('arbiter-live', { task, at: Date.now() }),
+  });
   const factoryState = new FactoryStateAdapter({
     stateDir: config.stateDir,
     routesDir: config.routesDir,
     profilesDir: config.profilesDir,
     controlDir: config.factoryControlDir,
     workTimeReader: (identity) => readRouteWorkTime(config, identity),
+    arbiterCards,
   });
   const permissionQueue = createPermissionQueue();
   const sshConnections = await createSshStore({
@@ -445,6 +459,10 @@ async function build() {
     // момент вызова. Триаж случается много позже `ready()`, так что к тому
     // времени он уже на месте; нет модуля — оценка просто идёт без переписки.
     discussion: (text, opts) => fastify.telegramDiscussion?.(text, opts),
+    pluginEnabled: (id) => fastify.pluginEnabled?.(id) === true,
+    pluginSettings: (id) => fastify.pluginSettings?.(id) || {},
+    providerRegistry: () => fastify.providerRegistry?.() || {},
+    executorFor: (id) => fastify.executorFor?.(id) || null,
   });
   const authStore = new AuthStore({
     accountPath: config.authAccountPath,
@@ -494,7 +512,7 @@ async function build() {
   await fastify.register(gatewayModule, { config, prefs });
   await fastify.register(healthModule, { config, factoryState });
   await fastify.register(factoryModule, {
-    factoryState, config, prefs, b24, analyzer, internalToken,
+    factoryState, config, prefs, b24, analyzer, internalToken, arbiterCards, arbiterLive,
   });
   await fastify.register(b24Module, { b24 });
   await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
@@ -507,6 +525,9 @@ async function build() {
     onToggle: async (id, enabled) => {
       if (id === 'ssh' && !enabled) {
         await sshService.disable();
+      }
+      if (id === 'analysis') {
+        analyzer.pluginToggled(enabled);
       }
     },
   });
@@ -554,7 +575,17 @@ async function build() {
   await fastify.register(agentsModule, { config });
   await fastify.register(routesModule, { config, prefs });
   await fastify.register(providersModule, { config, claudeAuth, prefs });
-  await fastify.register(analysisModule, { analyzer });
+  const analysisArbiter = new AnalysisArbiter({
+    analyzer,
+    pluginEnabled: (id) => fastify.pluginEnabled(id),
+    pluginSettings: (id) => fastify.pluginSettings(id),
+    providerRegistry: () => fastify.providerRegistry(),
+    executorFor: (id) => fastify.executorFor(id),
+    log: fastify.log,
+  });
+  analyzer.onAnalyzed = (id) => analysisArbiter.arbitrate(id, { automatic: true });
+  await analyzer.start();
+  await fastify.register(analysisModule, { analyzer, arbiter: analysisArbiter });
 
   // Статика — последней (SPA-fallback перехватывает не-API 404).
   await fastify.register(staticPlugin, { webDist: config.webDist, stateDir: config.stateDir });
@@ -642,7 +673,18 @@ async function build() {
       }
       return response.json().tasks || [];
     },
-    arbitrate: (task, reply) => fastify.factoryArbitrate(task, reply),
+    // Дешёвый фильтр перед дорогим обходом: реестр — плоский KEY=VALUE, остановку в нём
+    // видно без журналов попыток, вердиктов и графов. Пока остановленных задач нет,
+    // короткая пауза вотчера ничего не стоит.
+    hasStopped: async () => {
+      const ids = await factoryState.listTaskIds().catch(() => []);
+      for (const id of ids) {
+        const { registry } = await factoryState.readRegistry(id).catch(() => ({ registry: null }));
+        if (registry?.STALLED_HUMAN === '1' && !registry.ORCH_PID) return true;
+      }
+      return false;
+    },
+    arbitrate: (task, reply) => fastify.factoryArbitrate(task, reply, { actor: 'auto' }),
     log: fastify.log,
   });
 

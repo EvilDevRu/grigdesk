@@ -158,14 +158,27 @@ export function computeNodeStatuses({
     });
   }
 
-  // Возврат после отклонённой приёмки: хвост снова pending, точка возврата активна.
+  // Возврат после отклонённой приёмки: в реестре хвост остаётся `done` с прошлого
+  // круга, поэтому пройденным выглядит то, что маршруту предстоит пройти заново.
   if (pf.GATE_ACCEPT === 'rejected' && !['done', 'running'].includes(pf.SHIP)) {
-    const back = chain.includes('build') ? 'build' : chain.find((n) => !n.startsWith('gate_'));
-    if (back) {
-      const bi = chain.indexOf(back);
-      for (const n of chain.slice(bi)) st[n] = 'pending';
-      const recent = mtimeMs && Date.now() - mtimeMs < 300000;
-      st[back] = recent ? 'run' : 'wait';
+    if (cursorIndex >= 0) {
+      // Курсор знает, докуда маршрут дошёл в ЭТОМ круге: левее — пройдено, правее —
+      // предстоит. Доинферировать точку возврата при известном курсоре нельзя: подсветка
+      // build поверх журнала рисовала работу на давно пройденном узле, уводила реально
+      // идущий следом узел в pending и занижала прогресс, а по истечении пятиминутного
+      // окна объявляла build ждущим человека — карточка желтела целиком, хотя ворот,
+      // требующих решения, не было и чип «ждут тебя» её законно не считал.
+      for (const n of chain.slice(cursorIndex + 1)) st[n] = 'pending';
+    } else {
+      // Курсор неизвестен (исторический реестр v1, нечитаемый ledger): точку возврата
+      // приходится доинферировать — другого источника фронта здесь нет.
+      const back = chain.includes('build') ? 'build' : chain.find((n) => !n.startsWith('gate_'));
+      if (back) {
+        const bi = chain.indexOf(back);
+        for (const n of chain.slice(bi)) st[n] = 'pending';
+        const recent = mtimeMs && Date.now() - mtimeMs < 300000;
+        st[back] = recent ? 'run' : 'wait';
+      }
     }
   }
 

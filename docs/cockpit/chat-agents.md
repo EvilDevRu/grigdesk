@@ -18,6 +18,13 @@ coverage и error policy; он описан в [multi-AI контракте дв
   Для старых песочниц без `REPO_*` совместимо читаются `BE_WT` и `FE_WT`.
   Без задачи cwd = `config.rootDir` (корень репозитория кокпита — исполнитель сразу видит
   корневые AGENTS.md/CLAUDE.md); страница «Агенты» переопределяет его на `agents/`.
+  Отдельный trusted-run триажа использует тот же adapter-контракт, но только у исполнителей
+  с `scopedWorkspace`: readable roots профиля отделены от единственного writable output,
+  сеть и общий Bash закрыты. Claude получает private MCP только с `repo_history`, Codex —
+  тот же server-owned descriptor как dynamic tool; остальные внешние MCP в этот ход не едут.
+  У Codex capability публикуется только когда живая схема CLI содержит
+  `workspaceWrite.readOnlyAccess`; старые версии с чтением всего хоста fail-closed не
+  предлагаются для триажа.
   Codex работает с `approvalPolicy: "never"` и sandbox `workspaceWrite`: cwd и `extraDirs`
   перечисляются в `turn/start.sandboxPolicy.writableRoots`, полный доступ к хосту не выдаётся,
   сеть включена для `gh`, `git` и пакетных менеджеров. **Те же пути идут вторым, независимым
@@ -1103,8 +1110,9 @@ fallback при пустом `limits[]`, который остаётся кан�
   capability-check/явной установки языкового пакета и никогда не откатывается в auto молча.
   Если Web Speech недоступен, UI один раз объясняет переход на локальный Whisper.
 - **Один controller на окно:** authenticated composition root в `App.vue` создаёт один
-  `SpeechProvider`; полный `ChatSession` и компактный companion по очереди получают у него
-  lease. Контроллер не копируется в компоненты и уничтожается при logout. В полном чате
+  `SpeechProvider`; полный `ChatSession`, компактный companion и карточка ответа на вопрос
+  триажа в `TaskModal` по очереди получают у него lease. Контроллер не копируется в компоненты
+  и уничтожается при logout. В полном чате
   terminal `onFinal` только дописывает текст через `onCommit`; companion использует тот же
   final transcript как один push-to-talk turn и отправляет его ровно один раз. Захват нового
   lease, unmount, logout и смена exact chat инвалидируют generation, поэтому поздний callback
@@ -1213,6 +1221,8 @@ fallback при пустом `limits[]`, который остаётся кан�
 - **Подключение нового ИИ — модульное:** один файл в `server/src/lib/executors/` (контракт в
   `executors/index.js`: id/name/color/probe/auth/efforts/seedModels/catalog/run и необязательный
   `catalogCacheKey`; телеметрию последнего запроса `run` нормализует в `contextCache`).
+  Для безопасного trusted-триажа adapter отдельно объявляет `scopedWorkspace` и принимает
+  `workspaceAccess` с раздельными readable/writable roots; одного plan-mode недостаточно.
   Папка сканируется при старте — ядро (providers, chat)
   про вендоров не знает. Сейчас: `claude.js`, `codex.js`, `kimi.js`, `ollama.js`.
 - `GET /api/providers` — `{ id, name, vendor, bin, color, version, auth, authLabel, available, installed, models[], modes[], settings[] }`.

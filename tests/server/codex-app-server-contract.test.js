@@ -1,7 +1,7 @@
 // Проверяет совместимость адаптера Codex с протоколом app-server и нормализацию шагов.
 import assert from 'node:assert/strict';
 import {
-  chmod, copyFile, mkdtemp, readFile, rm,
+  chmod, copyFile, mkdir, mkdtemp, readFile, rm,
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -193,11 +193,61 @@ test('Codex run использует app-server и не теряет rich events
     assert.deepEqual(turn.params.sandboxPolicy, {
       type: 'workspaceWrite',
       writableRoots: [f.dir, path.join(f.dir, 'shared')],
+      readOnlyAccess: { type: 'fullAccess' },
       networkAccess: true,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
     });
   }
+});
+
+test('Codex разделяет читаемые и writable roots триажа и выключает сеть', async (t) => {
+  const f = await fixture(t);
+  const repo = path.join(f.dir, 'repo');
+  const input = path.join(f.dir, 'input');
+  const output = path.join(f.dir, 'output');
+  await Promise.all([mkdir(repo), mkdir(input), mkdir(output)]);
+
+  await codex.run(runOptions(f, {
+    cwd: output,
+    extraDirs: [],
+    workspaceAccess: {
+      readableRoots: [repo, input, output],
+      writableRoots: [output],
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
+      allowExternalMcp: false,
+      allowBash: false,
+      tools: ['Read', 'Glob', 'Grep', 'repo_history'],
+    },
+  }));
+  const client = (await readTrace(f.trace))
+    .filter((entry) => entry.direction === 'client')
+    .map((entry) => entry.message);
+  const opened = client.find((message) => message.method === 'thread/start');
+  const turn = client.find((message) => message.method === 'turn/start');
+
+  assert.deepEqual({
+    cwd: opened.params.cwd,
+    readableRoots: [...opened.params.runtimeWorkspaceRoots].sort(),
+    policy: turn.params.sandboxPolicy,
+  }, {
+    cwd: output,
+    readableRoots: [input, output, repo].sort(),
+    policy: {
+      type: 'workspaceWrite',
+      writableRoots: [output],
+      readOnlyAccess: {
+        type: 'restricted',
+        includePlatformDefaults: true,
+        readableRoots: [output, repo, input],
+      },
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
+    },
+  });
 });
 
 test('Codex проверяет sessionFlags SSH-hook до создания thread', async (t) => {

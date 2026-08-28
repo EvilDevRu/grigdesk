@@ -63,6 +63,32 @@ export const SYSTEM = [
     ],
   },
   {
+    id: 'analysis',
+    system: true,
+    defaultEnabled: true,
+    name: 'Триаж',
+    version: '1.0.0',
+    description: 'Оценка сложности и рисков задачи с разведкой кода перед запуском конвейера.',
+    nav: null,
+    settings: [
+      {
+        key: 'triageModel',
+        label: 'Модель для оценки задач',
+        type: 'model',
+        hint: 'Исполнитель читает репозитории профиля в изолированной рабочей области.',
+        default: null,
+        requiresCapability: 'scopedWorkspace',
+      },
+      {
+        key: 'autoArbitrate',
+        label: 'Автоматически разбирать вопросы по коду',
+        type: 'checkbox',
+        hint: 'Продуктовые решения, приоритеты и изменение границы задачи всегда остаются человеку.',
+        default: false,
+      },
+    ],
+  },
+  {
     id: 'shelf',
     system: true,
     defaultEnabled: true,

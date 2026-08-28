@@ -1,61 +1,239 @@
 <template>
   <div class="pipeline">
     <div class="toolbar">
-      <div class="tbrow">
-        <h2 class="ttl">Задачи в работе <span class="cnt">{{ filteredTasks.length }}</span>
-          <span v-if="waitingCount" class="needme">⏳ ждут тебя: {{ waitingCount }}</span>
-          <span v-if="stalledCount" class="stalledme" :title="stalledTitles">🛑 встали: {{ stalledCount }}</span>
-        </h2>
-        <div class="tools">
-          <UiToggleButton
-            :model-value="loopsOn"
-            data-role="pipeline-toolbar"
+      <!-- Проекты — главный уровень панели. Натуральные ширины кнопок измеряются в
+           невидимом ряду; непоместившийся хвост уезжает в список справа. -->
+      <div
+        ref="projectStrip"
+        class="project-strip"
+        role="group"
+        aria-label="Проекты"
+      >
+        <span
+          v-for="option in visibleProjectOptions"
+          :key="option.id"
+          class="project-button-frame"
+        >
+          <UiButton
+            class="project-option"
+            data-role="pipeline-project"
+            :data-project="option.id"
             tone="accent"
-            variant="outline"
-            @update:model-value="toggleLoops"
+            variant="ghost"
+            :pressed="activeProject === option.id"
+            :aria-label="`${option.label}: ${option.count}`"
+            :title="`${option.label} · ${option.count}`"
+            @click="setProject(option.id)"
           >
-            ↻ петли
-          </UiToggleButton>
-          <UiToggleButton
-            :model-value="compact"
-            data-role="pipeline-toolbar"
-            tone="accent"
-            variant="outline"
-            @update:model-value="toggleCompact"
+            <span class="project-option-copy">
+              <span class="project-option-label">{{ option.label }}</span>
+              <b class="project-count mono">{{ option.count }}</b>
+            </span>
+          </UiButton>
+        </span>
+
+        <UiPopover
+          v-if="hiddenProjectOptions.length"
+          class="project-overflow-popover"
+          has-popup="menu"
+          placement="bottom-end"
+          aria-label="Остальные проекты"
+          :style="{ width: 'min(320px, calc(100vw - 20px))' }"
+        >
+          <template #trigger>
+            <UiButton
+              class="project-more"
+              data-role="pipeline-project-overflow"
+              variant="ghost"
+              :aria-label="`Ещё проектов: ${hiddenProjectOptions.length}`"
+              :title="`Ещё проектов: ${hiddenProjectOptions.length}`"
+            >
+              <span class="mono">+{{ hiddenProjectOptions.length }}</span>
+              <svg class="project-more-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </UiButton>
+          </template>
+
+          <template #default="{ close }">
+            <div class="project-menu">
+              <UiButton
+                v-for="option in hiddenProjectOptions"
+                :key="option.id"
+                class="project-menu-option"
+                data-role="pipeline-project-overflow-option"
+                :data-project="option.id"
+                role="menuitem"
+                block
+                variant="ghost"
+                :title="option.label"
+                @click="setProject(option.id); close('action')"
+              >
+                <span class="project-menu-copy">
+                  <span>{{ option.label }}</span>
+                  <b class="project-count mono">{{ option.count }}</b>
+                </span>
+              </UiButton>
+            </div>
+          </template>
+        </UiPopover>
+
+        <!-- Геометрия полностью повторяет реальные project-кнопки. Absolute + hidden
+             не влияют на раскладку, overflow контейнера не даёт ряду распереть страницу. -->
+        <div ref="projectMeasure" class="project-measure" aria-hidden="true">
+          <span
+            v-for="option in projectOptions"
+            :key="`measure-${option.id}`"
+            class="project-button-frame"
+            :data-project-measure="option.id"
           >
-            {{ compact ? '▤ подробно' : '☰ компактно' }}
-          </UiToggleButton>
+            <UiButton class="project-option" tone="accent" variant="ghost" tabindex="-1">
+              <span class="project-option-copy">
+                <span class="project-option-label">{{ option.label }}</span>
+                <b class="project-count mono">{{ option.count }}</b>
+              </span>
+            </UiButton>
+          </span>
+          <UiButton
+            data-project-more-measure
+            class="project-more"
+            variant="ghost"
+            tabindex="-1"
+          >
+            <span class="mono">+{{ projectOptions.length }}</span>
+            <svg class="project-more-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </UiButton>
         </div>
       </div>
-      <div v-if="projects.length" class="projects">
-        <UiButton
-          class="pchip"
-          data-role="pipeline-project"
-          tone="accent"
-          variant="outline"
-          :pressed="activeProject === 'all'"
-          @click="setProject('all')"
-        >
-          все <b>{{ tasks.length }}</b>
-        </UiButton>
-        <UiButton
-          v-for="p in projects"
-          :key="p"
-          class="pchip"
-          data-role="pipeline-project"
-          tone="accent"
-          variant="outline"
-          :pressed="activeProject === p"
-          @click="setProject(p)"
-        >
-          {{ p }} <b>{{ tasks.filter(t => t.profile === p).length }}</b>
-        </UiButton>
+
+      <!-- Правый кластер: вторичные состояния вплотную к двум кнопкам вида. -->
+      <div class="toolbar-secondary">
+        <div class="status-scroll">
+          <div class="secondary-status-filters" role="group" aria-label="Состояние">
+            <UiButton
+              v-for="option in statusOptions"
+              :key="option.id"
+              class="status-filter"
+              data-role="pipeline-status-filter"
+              :data-status="option.id"
+              :tone="option.tone"
+              variant="text"
+              :pressed="activeStatus === option.id"
+              :aria-label="`${option.label}: ${option.count}`"
+              :title="option.hint"
+              @click="setStatus(option.id)"
+            >
+              <span class="status-filter-copy">
+                <span class="status-dot" :data-tone="option.tone" aria-hidden="true"></span>
+                <span class="status-filter-label">{{ option.label }}</span>
+                <b class="status-count mono">{{ option.count }}</b>
+              </span>
+            </UiButton>
+          </div>
+        </div>
+
+        <div class="status-menu">
+          <UiPopover
+            has-popup="menu"
+            placement="bottom-end"
+            aria-label="Состояние"
+            :style="{ width: 'min(280px, calc(100vw - 20px))' }"
+          >
+            <template #trigger>
+              <UiButton
+                class="status-menu-trigger"
+                data-role="pipeline-status-overflow"
+                :tone="currentStatusOption.tone"
+                variant="text"
+                :aria-label="`Состояние: ${currentStatusOption.label}, ${currentStatusOption.count}`"
+                :title="currentStatusOption.label"
+              >
+                <span class="status-menu-trigger-copy">
+                  <span
+                    class="status-dot"
+                    :data-tone="currentStatusOption.tone"
+                    aria-hidden="true"
+                  ></span>
+                  <b class="status-count mono">{{ currentStatusOption.count }}</b>
+                  <svg class="project-more-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="m4 6 4 4 4-4" />
+                  </svg>
+                </span>
+              </UiButton>
+            </template>
+
+            <template #default="{ close }">
+              <div class="status-menu-options">
+                <UiButton
+                  v-for="option in statusOptions"
+                  :key="option.id"
+                  data-role="pipeline-status-menu-option"
+                  :data-status="option.id"
+                  role="menuitemradio"
+                  block
+                  :tone="option.tone"
+                  variant="ghost"
+                  :aria-checked="activeStatus === option.id"
+                  @click="setStatus(option.id); close('action')"
+                >
+                  <span class="status-menu-option-copy">
+                    <span class="status-dot" :data-tone="option.tone" aria-hidden="true"></span>
+                    <span>{{ option.label }}</span>
+                    <b class="status-count mono">{{ option.count }}</b>
+                  </span>
+                </UiButton>
+              </div>
+            </template>
+          </UiPopover>
+        </div>
+
+        <div class="compact-view-controls" role="group" aria-label="Вид карточек">
+          <UiIconButton
+            data-option="loops"
+            role="peer"
+            tone="accent"
+            variant="ghost"
+            :pressed="loopsOn"
+            :disabled="compact"
+            label="Показывать все возвраты"
+            :title="compact
+              ? 'Возвраты доступны в подробном виде'
+              : 'Показывать все возможные возвратные связи на схемах'"
+            @click="toggleLoops(!loopsOn)"
+          >
+            <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 7h10l-2.5-2.5M17 17H7l2.5 2.5M17 7a5 5 0 0 1 0 10M7 17a5 5 0 0 1 0-10" />
+            </svg>
+          </UiIconButton>
+          <UiIconButton
+            data-option="compact"
+            role="peer"
+            tone="accent"
+            variant="ghost"
+            :pressed="compact"
+            label="Компактный вид"
+            title="Сворачивать все карточки до краткой сводки"
+            @click="toggleCompact(!compact)"
+          >
+            <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 7h14M5 12h14M5 17h14" />
+            </svg>
+          </UiIconButton>
+        </div>
       </div>
     </div>
 
     <p v-if="!loaded" class="muted">Загрузка…</p>
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
+    <div v-else-if="!filteredTasks.length" class="filter-empty">
+      <span>По выбранным фильтрам задач нет.</span>
+      <UiButton tone="accent" variant="text" @click="resetStatusFilter">
+        Показать все состояния
+      </UiButton>
+    </div>
 
     <article v-for="t in filteredTasks" :key="t.task" class="card" :class="[t.readOnly ? 'readonly' : cardState(t.graph), { collapsed: isCollapsed(t.task) }]">
       <header class="head">
@@ -138,15 +316,52 @@
       <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
            пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
            вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
-           затык надо замечать в списке, а не открывая карточку. -->
-      <div v-if="!t.readOnly && t.stall && isCollapsed(t.task)" class="stalled" :class="t.stall.kind">
-        <div class="srow">
-          <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
-          <span class="stitle">{{ t.stall.title }}</span>
-          <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
+           затык надо замечать в списке, а не открывая карточку.
+
+           Но и РАЗВЁРНУТУЮ карточку она покидать не вправе, а до 28.08.2026 покидала:
+           `isCollapsed` уносил вместе с ней разбор арбитра и все три кнопки действия.
+           Человек с открытой схемой видел красный узел и ничего больше — законченный
+           разбор, объясняющий остановку человеческими словами, был ему недоступен, и
+           это читалось как «арбитр молчит». Заголовок и подсказку в развёрнутом виде
+           не повторяем: их уже говорит плашка над самой схемой. -->
+      <div v-if="!t.readOnly && t.stall" class="stalled" :class="t.stall.kind">
+        <template v-if="isCollapsed(t.task)">
+          <div class="srow">
+            <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
+            <span class="stitle">{{ t.stall.title }}</span>
+            <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
+          </div>
+          <div class="shint">{{ t.stall.hint }}</div>
+          <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
+        </template>
+        <!-- Разбор арбитра в ленте — ОДНА СТРОКА-признак, а не весь текст. Полный
+             разбор занимал в карточке до 190 px: четыре абзаца, которые человек читает
+             один раз и принимает по ним решение, — а лента конвейера отвечает на вопрос
+             «где стоит и на ком». Сам текст и поле ответа живут в модалке узла, где
+             ширина позволяет их прочитать и написать ответ по-человечески. -->
+        <div v-if="t.stall.arbiter" class="sarbnote" :class="t.stall.arbiter.verdict">
+          <span class="sarbicon" aria-hidden="true">⚖</span>
+          <span class="sarbnote-text">{{ arbiterCardLabel(t.stall.arbiter) }}</span>
+          <span v-if="t.stall.arbiter.model" class="samodel mono">{{ t.stall.arbiter.model }}</span>
         </div>
-        <div class="shint">{{ t.stall.hint }}</div>
-        <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
+        <!-- Вход в решение. Сам ответ пишется в модалке узла: там разбор арбитра целиком,
+             причина остановки, вопросы узла своими полями и место под текст. До 28.08.2026
+             входа не было вовсе — карточка спрашивала решение, а отправить его можно было
+             только догадавшись кликнуть нужный узел на схеме. -->
+        <div v-if="canAnswerStall(t)" class="sfix">
+          <UiButton
+            class="sbretry"
+            data-role="pipeline-stall-answer-open"
+            tone="warning"
+            variant="outline"
+            @click="openStallAnswer(t)"
+          >
+            {{ arbiterAsksHuman(t) ? '⚖ разбор и решение' : '✍ ответить и продолжить' }}
+          </UiButton>
+          <span class="sfixhint">{{ arbiterAsksHuman(t)
+            ? 'разбор арбитра целиком и поле для твоего решения'
+            : 'откроет узел: там указание агенту и возврат конвейера на него' }}</span>
+        </div>
         <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
              Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
              к живому порту фронта, — поэтому починка живёт в самой плашке. -->
@@ -154,6 +369,13 @@
              проверяет спорное в рабочем дереве и возвращает курсор с указанием. Это
              замена курьерской работы человека, а не «ещё одна модель»: замер по
              журналам — 28 таких остановок, сумма ожидания 59.7 часа. -->
+        <!-- Разбор ИДЁТ. Плашка отвечает ровно на вопрос «стоит ли это на мне»: пока
+             арбитр читает код, работа не стоит, и браться за неё руками не нужно. -->
+        <div v-if="t.arbitrating" class="sarbrun">
+          <span class="sarbspin" aria-hidden="true"></span>
+          <span class="sarbtxt">Арбитр разбирает остановку</span>
+          <span class="sarbmeta mono">{{ arbiterRunLabel(t.arbitrating) }}</span>
+        </div>
         <div v-if="canArbitrate(t)" class="sfix">
           <UiButton
             class="sbretry"
@@ -167,8 +389,11 @@
           >
             ⚖ разобрать и продолжить
           </UiButton>
-          <span class="sfixhint">арбитр проверит спор по коду и вернёт узел с указанием;
-            границу задачи он менять не вправе и отдаст её тебе</span>
+          <span class="sfixhint">{{ arbiterAsksHuman(t)
+            ? 'арбитр уже разобрал и отдал решение тебе — повторный разбор нужен, только если'
+              + ' условия изменились'
+            : 'арбитр проверит спор по коду и вернёт узел с указанием; границу задачи он менять'
+              + ' не вправе и отдаст её тебе' }}</span>
         </div>
         <div v-if="canRetrySandbox(t) || canResume(t)" class="sfix">
           <UiButton
@@ -205,7 +430,13 @@
       </div>
 
       <div v-if="!isCollapsed(t.task)" class="gwrap">
-        <FactoryGraph :graph="t.graph" :loops-on="loopsOn" @node="(n) => openStage(t, n)" />
+        <FactoryGraph
+          :graph="t.graph"
+          :loops-on="loopsOn"
+          :arbitrating="t.arbitrating"
+          :arbitrated="arbitratedNodes(t.graph)"
+          @node="(n) => openStage(t, n)"
+        />
       </div>
 
       <footer v-if="!isCollapsed(t.task)" class="strip">
@@ -313,7 +544,17 @@
             <span class="shead-kicker">Этап конвейера</span>
             <h3 id="stage-modal-title">{{ stage.label }}</h3>
           </div>
-          <span class="sbadge" :class="stage.status">{{ STAGE_HINT[stage.status] || stage.status }}</span>
+          <!-- Статус этапа и признак жизни хода — один вопрос человека («этап идёт
+               или встал?»), поэтому они стоят рядом. Раньше ответ был разнесён по двум
+               полосам: бейдж в шапке, «нет событий 28 мин» — строкой ниже среди чипов. -->
+          <div class="shead-state">
+            <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
+              agentActivityLabel(stageActivity)
+            }}</span>
+            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage.status">{{
+              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage)
+            }}</span>
+          </div>
           <UiIconButton
             class="sx"
             data-context="pipeline-stage-close"
@@ -324,6 +565,16 @@
             ✕
           </UiIconButton>
         </header>
+
+        <!-- Разбор ИДЁТ. Стоит первой строкой тела: узел открывают с вопросом «что от
+             меня хотят», и пока арбитр читает код, честный ответ — «сейчас ничего».
+             Ниже по модалке остаются и вердикт узла, и кнопки: решение арбитра можно
+             не дожидаться, но делать это следует осознанно. -->
+        <div v-if="stageArbitrating" class="sarbrun sarbnode">
+          <span class="sarbspin" aria-hidden="true"></span>
+          <span class="sarbtxt">Арбитр разбирает эту остановку — руками браться не нужно</span>
+          <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
+        </div>
 
         <!-- Контекст решения: задачу и её стенд видно, пока ворота открыты. Ссылки те же,
              что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
@@ -352,55 +603,97 @@
           </div>
         </div>
 
-        <!-- Компактная строка метаданных -->
-        <div v-if="stage.meta.at || stage.meta.dur != null || stage.meta.fanout != null
-          || stage.meta.denials || stage.meta.tokens || stage.meta.fails || stage.sub || stageActivity"
-          class="smeta" aria-label="Показатели этапа">
-          <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
-          <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
-          <span v-if="stage.meta.fanout != null" class="smchip">{{ stage.meta.fanout }} субаг.</span>
-          <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
-               одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
-               обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
-               запретили нужный запуск, склонен подобрать похожий и выдать его результат за
-               доказательство. -->
-          <span v-if="stage.meta.denials" class="smchip failed"
-            title="Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.">
-            {{ stage.meta.denials }} отказ. прав</span>
-          <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
-          <span v-if="stage.meta.fails" class="smchip failed">{{ stage.meta.fails }} возвр.</span>
-          <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
-          <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{ agentActivityLabel(stageActivity) }}</span>
-        </div>
-
-        <!-- Объяснение статуса: причина пропуска или замечание провалившегося этапа.
-             Для skipped это единственное, что отличает «нечего было проверять» от
-             «агент сдался» — раньше оно оставалось в журнале прогона. -->
-        <div v-if="stage.meta.comment || stage.meta.stall" class="snotices">
-          <div
-            v-if="stage.meta.comment"
-            class="scomment"
-            :class="{ failed: ['skipbad', 'stall'].includes(stage.status) }"
-          >
-            <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
-            {{ stage.meta.comment }}
-          </div>
-          <div v-if="stage.meta.stall" class="scomment failed">
-            <span class="sclbl">Почему этап остановился</span>
-            <b>{{ stage.meta.stall.title }}</b>
-            <div>{{ stage.meta.stall.hint }}</div>
-          </div>
-        </div>
-
         <div v-if="stageHasMain || stageHasRail" class="sworkspace"
              :class="{ 'main-only': stageHasMain && !stageHasRail, 'rail-only': stageHasRail && !stageHasMain }">
           <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
                прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
           <aside v-if="stageHasRail" class="srail">
+            <!-- Ситуация: чем закончился заход и что от человека нужно. Стоит В ОДНОЙ
+                 колонке с решением и прямо над ним — это его условие, а не справка.
+                 Раньше причина занимала три полосы шапки, у каждой был свой потолок высоты
+                 и свой скролл: замер модалки 1230x898 показал 409 px преамбулы против 430 px
+                 рабочей области, причём «почему этап остановился» обрезалось посреди фразы. -->
+            <div v-if="stageHasSituation" class="sect situation-sect">
+              <div class="secth">Что случилось</div>
+              <!-- Разбор арбитра здесь — ПРИЗНАК со входом, а не текст. Узел отвечает на
+                   вопрос «чем занят исполнитель и чем кончился заход», разбор — на «что мне
+                   решить»; вместе они не поместились: четыре его абзаца делили колонку с
+                   причиной остановки, находками и формой, а длинный путь в «чем проверял»
+                   растягивал её в горизонтальный скролл. Текст и решение — своей модалкой. -->
+              <div v-if="stageArbiterCard" class="sarbnote sarbopen" :class="stageArbiterCard.verdict">
+                <span class="sarbicon" aria-hidden="true">⚖</span>
+                <span class="sarbnote-text">{{ arbiterCardLabel(stageArbiterCard) }}</span>
+                <UiButton
+                  class="sarbmore"
+                  data-role="pipeline-stage-arbiter-open"
+                  variant="text"
+                  tone="warning"
+                  @click="openArbiterFromStage()"
+                >
+                  разбор и решение
+                </UiButton>
+              </div>
+              <div v-if="stage.meta.stall" class="scomment failed">
+                <span class="sclbl">Почему этап остановился</span>
+                <b>{{ stage.meta.stall.title }}</b>
+                <div>{{ stage.meta.stall.hint }}</div>
+              </div>
+              <!-- Что узел СКАЗАЛ, закрывая заход: типизированные находки с якорями на файлы.
+                   Блокирующие уезжают отсюда, когда ниже стоит форма возврата: там у каждой
+                   своё поле ответа, и вторая копия того же текста показывала человеку один
+                   вопрос дважды на одном экране. Текст пишет агент, поэтому только
+                   интерполяция: `v-html` здесь запрещён. -->
+              <div
+                v-if="verdictFindings.length"
+                class="sverdict"
+                :class="{ human: stage.meta.verdict.stop === 'human' && !verdictDeferredOnly }"
+              >
+                <div class="svhead">
+                  <span class="sclbl">{{ verdictLabel(stage.meta.verdict, verdictDeferredOnly) }}</span>
+                </div>
+                <ul class="svlist">
+                  <li
+                    v-for="(f, i) in verdictFindings"
+                    :key="f.id || i"
+                    :class="f.severity"
+                  >
+                    <span v-if="f.anchor" class="svanchor mono" :title="f.anchor">{{ shortAnchor(f.anchor) }}</span>
+                    <span class="svsum">{{ f.summary }}</span>
+                  </li>
+                </ul>
+                <div v-if="stage.meta.verdict.omitted" class="svmore">
+                  …и ещё {{ stage.meta.verdict.omitted }} — остальные в журнале попытки
+                </div>
+              </div>
+              <div v-if="stage.meta.comment" class="snotices">
+                <div
+                  class="scomment"
+                  :class="{ failed: ['skipbad', 'stall'].includes(stage.status) }"
+                >
+                  <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
+                  {{ stage.meta.comment }}
+                </div>
+              </div>
+            </div>
+
             <!-- Ворота: принять/отклонить. Поле пояснения принадлежит ОТКЛОНЕНИЮ и
                  раскрывается по кнопке: при принятии текст никуда не уходит. -->
             <div v-if="gateDecidable" class="sect gate-sect">
               <div class="secth">Ворота — твоё решение</div>
+              <!-- Что арбитр решил за человека по дороге. Ворота — единственная точка его
+                   контроля, а карточка разбора живёт в плашке ОСТАНОВКИ, которой здесь нет.
+                   Без этой сводки он принимал бы план и результат, не зная, какие развилки
+                   закрыли без него. Первым идёт решение о границе задачи: оно требует
+                   проверки сильнее, чем снятый технический тупик. -->
+              <div v-if="gateArbiterLog.length" class="gwal">
+                <div class="gwalh">Решено арбитром, пока тебя не звали</div>
+                <div v-for="(row, i) in gateArbiterLog" :key="i" class="gwrow" :class="row.verdict">
+                  <span class="gwtag">{{ row.verdict === 'deferred' ? 'за тебя' : 'тупик' }}</span>
+                  <span class="gwwhat">{{ row.card.what }}</span>
+                </div>
+                <p class="gate-hint">Не согласен — отклони ворота либо верни конвейер
+                  на нужный узел: решение арбитра отменяется тем же возвратом.</p>
+              </div>
               <template v-if="gateRejecting">
                 <label class="gate-lbl" for="gate-note">Что доработать</label>
                 <UiTextarea
@@ -464,11 +757,43 @@
             <div v-if="stageHasRewind" class="sect rewind-sect">
               <div class="secth">Вернуть конвейер сюда</div>
               <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
+              <!-- Вопросы узла — своими полями. Агент вернул их СТРУКТУРНО (у каждого свой
+                   id и формулировка), а ответить можно было только сплошным текстом: человек
+                   руками восстанавливал нумерацию, а агент получал сплошняк вместо ответа,
+                   привязанного к его же вопросу. Поля появляются только у блокирующих
+                   находок: отложенные вопросом к человеку не являются. -->
+              <div v-if="rewindQuestions.length" class="rwq">
+                <div class="rwqhead">Ответы на вопросы узла</div>
+                <div v-for="(q, i) in rewindQuestions" :key="q.id" class="rwqitem">
+                  <label class="rwqlbl" :for="`rwq-${i}`">
+                    <span class="rwqnum">{{ i + 1 }}</span>
+                    <span class="rwqsum">
+                      {{ q.summary }}
+                      <!-- Якорь ушёл сюда вместе с самой находкой: без него человек знает,
+                           ЧТО не так, но не знает где, а второго списка находок больше нет. -->
+                      <span v-if="q.anchor" class="svanchor mono" :title="q.anchor">{{ shortAnchor(q.anchor) }}</span>
+                    </span>
+                  </label>
+                  <UiTextarea
+                    :id="`rwq-${i}`"
+                    v-model="rewindAnswers[q.id]"
+                    data-role="pipeline-stage-note"
+                    rows="2"
+                    placeholder="Ответ на этот вопрос"
+                  />
+                </div>
+              </div>
+              <label v-if="rewindQuestions.length" class="rwqlbl rwqfree" for="rewind-free">
+                Что ещё сказать агенту
+              </label>
               <UiTextarea
+                id="rewind-free"
                 v-model="rewindComment"
                 data-role="pipeline-stage-note"
-                rows="6"
-                placeholder="Указание агенту — что сделать иначе (необязательно)"
+                :rows="rewindQuestions.length ? 4 : 8"
+                :placeholder="rewindQuestions.length
+                  ? 'Необязательно: остальное по задаче'
+                  : 'Указание агенту — что сделать иначе (необязательно)'"
               />
               <UiButton
                 class="btn play"
@@ -486,6 +811,31 @@
           </aside>
 
           <main v-if="stageHasMain" class="smain">
+            <!-- Телеметрия захода: время, длительность, расход. Живёт рядом с исполнителем,
+                 которому принадлежит, а не полосой в шапке — вопрос «что от меня хотят»
+                 она не решает, а место занимала всегда, даже когда сообщать было нечего. -->
+            <div v-if="stageHasMeta" class="smeta" aria-label="Показатели этапа">
+              <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
+              <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
+              <!-- Ноль субагентов не сообщает ничего: заход без них — обычное дело, а чип
+                   ради нуля занимал всю полосу метаданных. То же правило, что у отказов прав. -->
+              <span v-if="stage.meta.fanout" class="smchip">{{ stage.meta.fanout }} субаг.</span>
+              <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
+                   одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
+                   обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
+                   запретили нужный запуск, склонен подобрать похожий и выдать его результат за
+                   доказательство. -->
+              <span v-if="stage.meta.denials" class="smchip failed"
+                title="Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.">
+                {{ stage.meta.denials }} отказ. прав</span>
+              <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
+              <span v-if="stage.meta.fails" class="smchip failed">{{ stage.meta.fails }} возвр.</span>
+              <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
+              <span v-if="stage.meta.verdict?.reviewed?.length" class="smchip"
+                :title="stage.meta.verdict.reviewed.join('\n')">
+                просм. файлов: {{ stage.meta.verdict.reviewed.length }}</span>
+            </div>
+
             <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
             <div v-if="stage.meta.runner" class="sect runner-sect">
               <div class="secth">
@@ -666,6 +1016,16 @@
           </div>
         </footer>
     </UiDialog>
+
+    <!-- Разбор арбитра и ответ на него. Отдельная модалка: у неё один вопрос к человеку
+         и вся ширина под текст, тогда как модалка узла отвечает за телеметрию захода. -->
+    <ArbiterDecision
+      :open="Boolean(arbiterDecision)"
+      :decision="arbiterDecision"
+      :busy="arbiterDecisionBusy"
+      @close="arbiterDecision = null"
+      @submit="sendArbiterDecision"
+    />
   </div>
 </template>
 
@@ -687,15 +1047,21 @@ import {
   UiDialog,
   UiDisclosureButton,
   UiIconButton,
+  UiPopover,
   UiSpinner,
   UiTextarea,
-  UiToggleButton,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.js';
-import { agentActivityLabel } from '../shared/agent-activity.js';
+import { agentActivityLabel, silenceReason } from '../shared/agent-activity.js';
+import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiter-run.js';
+import { buildRewindNote, rewindQuestionsOf } from '../shared/rewind-note.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
 import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
+import {
+  pipelineBadgeSummary,
+  pipelineTopbarItems,
+} from '../shared/pipeline-nav-badge.js';
 import {
   attemptCostLabel,
   attemptCostTitle,
@@ -707,6 +1073,7 @@ import {
   runnerNodeLabel,
   runnerReasonLabel,
 } from '../shared/runner-display.js';
+import ArbiterDecision from './pipeline/ArbiterDecision.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -719,6 +1086,7 @@ const tasks = ref([]);
 const error = ref(null);
 const loaded = ref(false);
 const now = ref(Date.now());
+const silenceWindow = ref(0);
 
 // Тикет — обязательный вход route-прогона, поэтому его заголовок доступен и задачам
 // без трекера. Живое название B24 оставляем приоритетным и только его делаем
@@ -798,6 +1166,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
   clearInterval(actPoll);
+  clearTimeout(stateReloadTimer);
 });
 
 // Тумблеры (переживают перезагрузку — как в старом дашборде).
@@ -812,12 +1181,338 @@ function toggleLoops(value) {
   localStorage.setItem('cockpit-loops', value ? '1' : '0');
 }
 
-// Фильтр по проектам (профилям).
-const activeProject = ref(localStorage.getItem('cockpit-project') || 'all');
-function setProject(p) { activeProject.value = p; localStorage.setItem('cockpit-project', p); }
+// Две независимые оси фильтра: проект отвечает «где», состояние — «что требует внимания».
+// Обе настройки локальны устройству, как компактный режим страницы.
+const savedProject = localStorage.getItem('cockpit-pipeline-project')
+  || localStorage.getItem('cockpit-project')
+  || 'all';
+const activeProject = ref(savedProject);
+function setProject(project) {
+  activeProject.value = project;
+  localStorage.setItem('cockpit-pipeline-project', project);
+}
 const projects = computed(() => [...new Set(tasks.value.map((t) => t.profile).filter(Boolean))]);
-const filteredTasks = computed(() => (activeProject.value === 'all'
-  ? tasks.value : tasks.value.filter((t) => t.profile === activeProject.value)));
+const projectCounts = computed(() => {
+  const counts = new Map();
+
+  for (const task of tasks.value) {
+    if (task.profile) {
+      counts.set(task.profile, (counts.get(task.profile) || 0) + 1);
+    }
+  }
+
+  return counts;
+});
+const projectOptions = computed(() => [
+  { id: 'all', label: 'Все', count: tasks.value.length },
+  ...projects.value.map((project) => ({
+    id: project,
+    label: project,
+    count: projectCounts.value.get(project) || 0,
+  })),
+]);
+
+// Тот же приём, что у адаптивных легенд графиков: скрытый ряд даёт натуральную
+// ширину каждой кнопки, а ResizeObserver пересчитывает хвост без breakpoint-магии.
+const projectStrip = ref(null);
+const projectMeasure = ref(null);
+const visibleProjectIds = ref([]);
+let projectResizeObserver = null;
+
+const visibleProjectOptions = computed(() => {
+  if (!visibleProjectIds.value.length) {
+    return projectOptions.value;
+  }
+
+  const visible = new Set(visibleProjectIds.value);
+
+  return projectOptions.value.filter((option) => visible.has(option.id));
+});
+const hiddenProjectOptions = computed(() => {
+  const visible = new Set(visibleProjectOptions.value.map((option) => option.id));
+
+  return projectOptions.value.filter((option) => !visible.has(option.id));
+});
+
+function projectWidth(ids, widths, gap) {
+  let width = 0;
+  let count = 0;
+
+  for (const option of projectOptions.value) {
+    if (!ids.has(option.id)) continue;
+    if (count) width += gap;
+    width += widths.get(option.id) || 0;
+    count += 1;
+  }
+
+  return width;
+}
+
+function measureProjectStrip() {
+  const strip = projectStrip.value;
+  const measure = projectMeasure.value;
+
+  // DOM-less component tests keep the complete row. Real geometry is applied as soon
+  // as the browser reports a positive content width.
+  if (!strip || !measure || strip.clientWidth <= 0) {
+    visibleProjectIds.value = [];
+    return;
+  }
+
+  const widths = new Map();
+  for (const element of measure.querySelectorAll('[data-project-measure]')) {
+    widths.set(
+      element.dataset.projectMeasure,
+      element.getBoundingClientRect().width || element.offsetWidth,
+    );
+  }
+
+  const options = projectOptions.value;
+  if (!options.length || widths.size !== options.length) return;
+
+  const style = getComputedStyle(measure);
+  const gap = Number.parseFloat(style.columnGap || style.gap) || 6;
+  const available = strip.clientWidth;
+  const everyId = new Set(options.map((option) => option.id));
+
+  if (projectWidth(everyId, widths, gap) <= available) {
+    visibleProjectIds.value = options.map((option) => option.id);
+    return;
+  }
+
+  const more = measure.querySelector('[data-project-more-measure]');
+  const moreWidth = more
+    ? (more.getBoundingClientRect().width || more.offsetWidth)
+    : 0;
+  const budget = Math.max(0, available - moreWidth - gap);
+  const selected = everyId.has(activeProject.value) ? activeProject.value : 'all';
+  const chosen = new Set([selected]);
+
+  // «Все» остаётся быстрым возвратом, пока вместе с выбранным проектом помещается.
+  if (selected !== 'all') {
+    const withAll = new Set(chosen).add('all');
+    if (projectWidth(withAll, widths, gap) <= budget) chosen.add('all');
+  }
+
+  // Остаток заполняется в исходном порядке, но место выбранного уже зарезервировано:
+  // проект, взятый из +N, не исчезает сразу после клика.
+  for (const option of options) {
+    if (chosen.has(option.id)) continue;
+    const candidate = new Set(chosen).add(option.id);
+    if (projectWidth(candidate, widths, gap) <= budget) {
+      chosen.add(option.id);
+    }
+  }
+
+  visibleProjectIds.value = options
+    .filter((option) => chosen.has(option.id))
+    .map((option) => option.id);
+}
+
+watch([projectOptions, activeProject], async () => {
+  await nextTick();
+  measureProjectStrip();
+}, { flush: 'post' });
+
+onMounted(async () => {
+  await nextTick();
+  measureProjectStrip();
+
+  if (typeof ResizeObserver === 'function' && projectStrip.value) {
+    projectResizeObserver = new ResizeObserver(measureProjectStrip);
+    projectResizeObserver.observe(projectStrip.value);
+  }
+});
+onUnmounted(() => {
+  projectResizeObserver?.disconnect();
+});
+
+const projectTasks = computed(() => (activeProject.value === 'all'
+  ? tasks.value
+  : tasks.value.filter((task) => task.profile === activeProject.value)));
+
+const STATUS_IDS = new Set(['all', 'running', 'waiting', 'error', 'inactive']);
+const savedStatus = localStorage.getItem('cockpit-pipeline-status') || 'all';
+const activeStatus = ref(STATUS_IDS.has(savedStatus) ? savedStatus : 'all');
+function setStatus(status) {
+  activeStatus.value = STATUS_IDS.has(status) ? status : 'all';
+  localStorage.setItem('cockpit-pipeline-status', activeStatus.value);
+}
+
+// Строим ту же взаимоисключающую сводку, что чип навигации и popover топбара:
+// проблема сильнее штатного ожидания, ожидание сильнее обычной работы.
+const pipelineState = computed(() => {
+  const state = {
+    stalled: [],
+    silent: [],
+    waiting: [],
+    running: [],
+    observedByTask: {},
+  };
+
+  for (const task of projectTasks.value) {
+    const taskId = String(task.task);
+    const taskTitle = title(task) || '';
+    const wait = waitingReason(task.graph);
+    const silence = silenceReason(task, silenceWindow.value);
+    const currentStage = task.graph?.progress?.current || null;
+    const progressDone = Number(task.graph?.progress?.done);
+    const progressTotal = Number(task.graph?.progress?.total);
+
+    state.observedByTask[taskId] = {
+      progress: Number.isSafeInteger(progressDone) && progressDone >= 0
+        && Number.isSafeInteger(progressTotal) && progressTotal >= 0
+        ? { done: progressDone, total: progressTotal }
+        : null,
+      stage: currentStage
+        ? {
+          id: currentStage,
+          label: stripEmoji(task.graph?.nodes?.[currentStage]?.[1]) || currentStage,
+          state: task.graph?.statuses?.[currentStage] || null,
+        }
+        : null,
+    };
+
+    if (!task.readOnly && task.stall) {
+      state.stalled.push({
+        task: taskId,
+        taskTitle,
+        title: task.stall.title || task.stall.hint || 'Конвейер встал',
+      });
+    }
+    if (!task.readOnly && silence) {
+      state.silent.push({
+        task: taskId,
+        taskTitle,
+        text: silence.text,
+      });
+    }
+    if (!task.readOnly && wait) {
+      state.waiting.push({
+        task: taskId,
+        taskTitle,
+        text: wait.text,
+      });
+    }
+    if (!task.readOnly && task.daemonAlive) {
+      state.running.push({
+        task: taskId,
+        taskTitle,
+      });
+    }
+  }
+
+  return state;
+});
+const statusSummary = computed(() => pipelineBadgeSummary(pipelineState.value));
+const statusItems = computed(() => pipelineTopbarItems(pipelineState.value));
+const statusKindByTask = computed(() => {
+  const kinds = new Map(statusItems.value.map((item) => [item.task, item.kind]));
+
+  for (const task of projectTasks.value) {
+    const taskId = String(task.task);
+
+    if (!kinds.has(taskId)) {
+      kinds.set(taskId, 'inactive');
+    }
+  }
+
+  return kinds;
+});
+
+/**
+ * Подсказка раскрывает не только цифру, но и конкретные задачи с причиной.
+ * Для пустой категории честно говорит, что таких задач в выбранном проекте нет.
+ */
+function statusHint(kind, emptyText) {
+  const items = kind === 'inactive'
+    ? projectTasks.value
+      .filter((task) => statusKindByTask.value.get(String(task.task)) === 'inactive')
+      .map((task) => ({
+        task: String(task.task),
+        title: title(task) || '',
+        detail: task.result ? `результат: ${task.result}` : '',
+      }))
+    : statusItems.value.filter((item) => item.kind === kind);
+
+  if (!items.length) {
+    return emptyText;
+  }
+
+  return items.map((item) => {
+    const detail = item.detail || item.stage || item.title;
+    return detail ? `#${item.task}: ${detail}` : `#${item.task}`;
+  }).join('\n');
+}
+
+const statusOptions = computed(() => [
+  {
+    id: 'all',
+    label: 'Все',
+    count: projectTasks.value.length,
+    tone: 'neutral',
+    hint: 'Все задачи выбранного проекта',
+  },
+  {
+    id: 'running',
+    label: 'В работе',
+    count: statusSummary.value.runningCount,
+    tone: 'accent',
+    hint: statusHint('running', 'Сейчас нет задач в обычной работе'),
+  },
+  {
+    id: 'waiting',
+    label: 'Ждут решения',
+    count: statusSummary.value.waitingCount,
+    tone: 'warning',
+    hint: statusHint('waiting', 'Сейчас никто не ждёт твоего решения'),
+  },
+  {
+    id: 'error',
+    label: 'Проблемы',
+    count: statusSummary.value.errorCount,
+    tone: 'danger',
+    hint: statusHint('error', 'Сейчас нет вставших или молчащих прогонов'),
+  },
+  {
+    id: 'inactive',
+    label: 'Неактивные',
+    count: projectTasks.value.length - statusSummary.value.totalCount,
+    tone: 'neutral',
+    hint: statusHint(
+      'inactive',
+      'Нет завершённых, остановленных или доступных только для чтения прогонов',
+    ),
+  },
+]);
+const currentStatusOption = computed(() => (
+  statusOptions.value.find((option) => option.id === activeStatus.value)
+  || statusOptions.value[0]
+));
+
+const filteredTasks = computed(() => {
+  if (activeStatus.value === 'all') {
+    return projectTasks.value;
+  }
+
+  return projectTasks.value.filter((task) => (
+    statusKindByTask.value.get(String(task.task)) === activeStatus.value
+  ));
+});
+function resetStatusFilter() {
+  setStatus('all');
+}
+
+// Исчезнувший профиль не оставляет страницу в невидимом пустом состоянии.
+watch(tasks, (list) => {
+  if (activeProject.value === 'all') {
+    return;
+  }
+
+  if (!list.some((task) => task.profile === activeProject.value)) {
+    setProject('all');
+  }
+});
 
 // По-карточное сворачивание (запоминается). Свёрнута, если глобальный compact ИЛИ отмечена.
 const collapsedSet = ref(new Set(JSON.parse(localStorage.getItem('cockpit-cards-collapsed') || '[]')));
@@ -828,14 +1523,6 @@ function toggleCard(task) {
   localStorage.setItem('cockpit-cards-collapsed', JSON.stringify([...s]));
 }
 function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
-const waitingCount = computed(() => filteredTasks.value
-  .filter((t) => !t.readOnly && waitingReason(t.graph)).length);
-// Встали — это НЕ то же, что «ждут тебя». У ворот конвейер стоит штатно и с кнопкой,
-// а тут движок упёрся и сам позвал человека (или оборвался). Без этого различия REPRO failed
-// выглядит под тем же значком «○ стоит», что и доделанная задача, и ожидание человека незаметно.
-const stalledCount = computed(() => filteredTasks.value.filter((t) => !t.readOnly && t.stall).length);
-const stalledTitles = computed(() => filteredTasks.value
-  .filter((t) => !t.readOnly && t.stall).map((t) => `#${t.task}: ${t.stall.title}`).join('\n'));
 
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref(null);
@@ -847,6 +1534,9 @@ const gateComment = ref('');
 const gateRejecting = ref(false);
 const gateNoteEl = ref(null);
 const rewindComment = ref('');
+// Ответы на вопросы узла: id находки → текст. Отдельно от свободного поля, потому что
+// каждый ответ обязан приехать агенту привязанным к ЕГО вопросу, а не сплошняком.
+const rewindAnswers = ref({});
 const stageActivity = ref(null);
 const stageDoc = ref('');       // документ этапа (план/разведнота/диагноз…) — рендерится в модалке
 const stageDocOpen = ref(true);
@@ -902,6 +1592,15 @@ const STAGE_HINT = {
   skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
   fail: 'провалился — стенд не поднялся',
 };
+// Подпись статуса узла. Обычно берётся из карты, но у остановки есть случай, когда карта
+// врёт: узел со `stall` подписан «завис — агент молчит», а он не молчал — он отработал и
+// САМ вернул решение человеку, объявив это классом провала. Разница для читателя
+// принципиальная: молчание зовут чинить, вынесенное решение — принимать.
+function stageStatusHint(s) {
+  if (s.status === 'stall' && s.meta?.verdict?.stop === 'human') return 'вернул решение человеку';
+  return STAGE_HINT[s.status] || s.status;
+}
+
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
 const RUNNER_SOURCE = {
   'profile-project': 'политика проекта',
@@ -932,6 +1631,7 @@ function openStage(t, node) {
   };
   loadFactoryRunners();
   gateComment.value = ''; gateRejecting.value = false; rewindComment.value = '';
+  rewindAnswers.value = {};
   runnerPending.value = null;
   stageActivity.value = null;
   stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
@@ -1009,16 +1709,73 @@ const gateDecidable = computed(() => Boolean(
 // Только компоновка модалки: на широком экране информационная колонка и управление
 // живут рядом, но пустую колонку не держим ради одной рамки. Условия действий остаются
 // теми же, что и у самих секций ниже.
+// Сводка решений арбитра для ворот. `deferred` — решение о границе задачи, принятое за
+// человека: оно требует проверки сильнее, чем снятый технический тупик, поэтому идёт
+// первым. Отказы арбитра (`human`) сюда не входят: они конвейер останавливали, человек
+// их уже видел в плашке остановки.
+const gateArbiterLog = computed(() => {
+  const graph = tasks.value.find((x) => Number(x.task) === Number(stage.value?.task))?.graph;
+  const log = graph?.arbiterLog;
+  if (!Array.isArray(log)) return [];
+
+  const rows = log.filter((row) => row?.card?.what && row.verdict !== 'human');
+  return [...rows].sort((a, b) => Number(b.verdict === 'deferred') - Number(a.verdict === 'deferred'));
+});
+
 const stageHasRewind = computed(() => Boolean(
   stage.value && !stage.value.readOnly && !stage.value.isGate,
 ));
+// Вопросом к человеку является только БЛОКИРУЮЩАЯ находка: правило общее с отдельной
+// модалкой разбора, поэтому живёт в `shared/rewind-note.js`.
+const rewindQuestions = computed(() => rewindQuestionsOf(stage.value?.meta?.verdict));
+
+/**
+ * Находки для блока «что сказал узел».
+ *
+ * Блокирующие уезжают отсюда, когда рядом стоит форма возврата: там у каждой из них
+ * своё поле ответа с тем же текстом, и список выше показывал человеку один и тот же
+ * вопрос дважды на одном экране. Отложенные остаются: полей под них нет по замыслу —
+ * это замечание на будущее, а не вопрос к человеку.
+ */
+const verdictFindings = computed(() => {
+  const findings = stage.value?.meta?.verdict?.findings;
+  if (!Array.isArray(findings)) return [];
+  if (!stageHasRewind.value || !rewindQuestions.value.length) return findings;
+
+  return findings.filter((f) => f.severity !== 'blocking');
+});
+
+const stageArbiterCard = computed(() => (
+  stage.value ? arbiterCardFor(stageTask.value, stage.value.id) : null
+));
+
+// Блокирующие вопросы ушли в форму ответа — значит список стал списком отложенного.
+const verdictDeferredOnly = computed(() => (
+  verdictFindings.value.length > 0 && verdictFindings.value.every((f) => f.severity === 'deferred')
+));
+
+// Чем закончился заход: разбор арбитра, причина остановки, находки узла и дайджест.
+const stageHasSituation = computed(() => Boolean(
+  stage.value && (stage.value.meta.stall || stage.value.meta.comment
+    || verdictFindings.value.length || stageArbiterCard.value),
+));
+// Телеметрия захода. Нулевой fanout сюда не входит: чип ради нуля держал целую полосу.
+const stageHasMeta = computed(() => Boolean(
+  stage.value && (stage.value.meta.at || stage.value.meta.dur != null || stage.value.meta.fanout
+    || stage.value.meta.denials || stage.value.meta.tokens || stage.value.meta.fails || stage.value.sub
+    || stage.value.meta.verdict?.reviewed?.length),
+));
+
 const stageHasMain = computed(() => Boolean(
   stage.value?.meta?.runner
+  || stageHasMeta.value
   || stageDocLoading.value
   || stageDoc.value
   || (stage.value?.status === 'run' && (stageActivity.value?.live || stageActivity.value?.tail?.length)),
 ));
-const stageHasRail = computed(() => gateDecidable.value || stageHasRewind.value);
+// Колонка решения показывается и без кнопок: у read-only узла причина остановки — всё,
+// что человеку нужно, и прятать её в телеметрию слева значило бы прятать сам ответ.
+const stageHasRail = computed(() => gateDecidable.value || stageHasRewind.value || stageHasSituation.value);
 // Контекст открытого этапа остаётся живым: название задачи может догрузиться из B24 уже
 // после открытия модалки, а стенд — появиться после очередного SSE-обновления графа.
 // Снимок в openStage здесь дал бы устаревшие название и порты до повторного открытия.
@@ -1071,7 +1828,7 @@ async function forceStatus(status) {
   // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
   try {
     const res = await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
-      { comment: rewindComment.value });
+      { comment: buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value) });
     await load(); closeStage();
     await warnIfNotResumed(res);
   }
@@ -1164,6 +1921,28 @@ function stageCommentLabel(s) {
     : 'Отправлено агенту на доработку';
 }
 
+// Заголовок блока находок. Он обязан отвечать на «что мне с этим делать», а не
+// называть структуру данных: остановка на человеке и рядовое замечание перед возвратом
+// требуют от читателя разного. Класс владельца (`owner`) в заголовок не выносим — он
+// служебный и для человека ничего не добавляет к самому факту остановки.
+//
+// Когда блокирующие уехали в форму ответа, в списке остаются только отложенные — и
+// «узел вернул решение человеку» над строчкой «подпись оси не выровнена» приписывало бы
+// остановку косметике: решение вернули из-за вопроса, который теперь стоит ниже полем.
+function verdictLabel(v, deferredOnly = false) {
+  if (deferredOnly) return 'Замечания на будущее';
+  if (v.stop === 'human') return 'Узел вернул решение человеку';
+  if (v.rewind) return `Замечания — маршрут вернулся на ${v.rewind}`;
+  return 'Замечания узла';
+}
+
+// Якорь находки — путь внутри репозитория. Целиком он съедает строку и обрезается
+// с конца, то есть теряет как раз имя файла; полный путь остаётся в подсказке.
+function shortAnchor(anchor) {
+  const parts = String(anchor).split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : anchor;
+}
+
 // Снос идёт до пары минут (docker + схемы БД) — на это время кнопка превращается
 // в индикатор «сношу…», повторный клик заблокирован.
 const sandboxBusy = ref(new Set());
@@ -1248,10 +2027,198 @@ async function sandboxRetry(task) {
 // по разбору заголовка: текст пишется человеку и меняется, а решение «можно ли отдать это
 // арбитру» обязано быть точным. `no-progress` — единственный вид, где решение выводится из
 // вердиктов дуги; `human` (упал стенд, не хватило прав) выводить не из чего.
+// --- Решение человека по остановке ----------------------------------------------------
+//
+// Ответ пишется в модалке узла: там разбор арбитра целиком, причина остановки, вопросы
+// узла своими полями и ручка `stage/<КЛЮЧ>/running` (движок пишет указание причиной
+// human-rewind и сам делает resume). Плашка ленты отвечает на другой вопрос — «где стоит
+// и на ком», — поэтому в ней остаются признак и вход, а не форма и четыре абзаца разбора.
+
+/**
+ * Относится ли сохранённый разбор арбитра к ТОЙ остановке, что видна сейчас.
+ *
+ * Карточка привязана к попытке, но не к узлу: после ответа человека маршрут может встать
+ * дальше, и прежний разбор той же попытки остался бы на экране как свежий.
+ */
+function arbiterAsksHuman(t) {
+  const card = t.stall?.arbiter;
+  if (!card || card.verdict !== 'human') return false;
+  if (!card.node) return true;
+  return t.graph?.keys?.[card.node] === t.stall.stage;
+}
+// Подпись разбора одна на ленту и модалку: две копии разошлись бы на первой же правке.
+function arbiterCardLabel(card) {
+  if (card?.verdict === 'human') return 'Арбитр разобрал: решать тебе';
+  if (card?.verdict === 'deferred') return 'Арбитр решил за тебя — проверишь на воротах';
+  return 'Арбитр снял тупик';
+}
+/**
+ * След арбитра по узлам попытки для схемы: узел → вердикт последнего разбора.
+ *
+ * Идущий разбор виден статусом `arb` и гаснет вместе с ним; без этого следа человек,
+ * открыв схему, не знает, что курсор на узле двигал не он. История принадлежит попытке
+ * и приезжает тем же ответом графа (`arbiterLog`).
+ */
+function arbitratedNodes(graph) {
+  const log = graph?.arbiterLog;
+  if (!Array.isArray(log) || !log.length) return null;
+
+  const nodes = {};
+  for (const row of log) {
+    if (row?.node && row.verdict && !nodes[row.node]) nodes[row.node] = row.verdict;
+  }
+  return Object.keys(nodes).length ? nodes : null;
+}
+function canAnswerStall(t) {
+  if (t.readOnly || t.daemonAlive || t.arbitrating || !t.stall) return false;
+  return Boolean(stallNodeId(t)) && t.stall.stage !== 'SANDBOX' && t.stall.kind !== 'crashed';
+}
+function stallNodeId(t) {
+  const keys = t.graph?.keys || {};
+  return Object.keys(keys).find((id) => keys[id] === t.stall?.stage) || '';
+}
+/**
+ * Разбор арбитра, относящийся к УЗЛУ.
+ *
+ * Источник — история арбитражей попытки (`graph.arbiterLog`), поэтому разбор виден и на
+ * пройденном узле: «кто двигал курсор» остаётся вопросом и после того, как маршрут поехал
+ * дальше. Последняя карточка остановки берётся запасным путём — для записей, сохранённых
+ * до появления истории, — и только если она про этот же узел: карточка привязана к
+ * попытке, и чужой разбор выглядел бы ответом на сегодняшний вопрос.
+ */
+function arbiterCardFor(task, nodeId) {
+  const log = task?.graph?.arbiterLog;
+  const fromLog = Array.isArray(log)
+    ? log.find((row) => row?.node === nodeId && row?.card?.what)
+    : null;
+  if (fromLog) return fromLog;
+
+  const card = task?.stall?.arbiter;
+  if (!card?.card?.what) return null;
+
+  return !card.node || card.node === nodeId ? card : null;
+}
+
+/**
+ * Открывает отдельный разбор арбитра по узлу: его текст целиком и поле решения.
+ *
+ * Вопросы берутся у вердикта того же узла — ответ уедет тем же указанием, что и обычный
+ * возврат, поэтому и склейка текста общая. Разбора нет — открывать нечего: молчаливая
+ * пустая модалка читалась бы как поломка.
+ */
+function openArbiterDecision(task, nodeId) {
+  const key = task?.graph?.keys?.[nodeId];
+  const card = arbiterCardFor(task, nodeId);
+  if (!key || !card) return;
+
+  const definition = task.graph?.nodes?.[nodeId] || [];
+  arbiterDecision.value = {
+    task: task.task,
+    node: nodeId,
+    key,
+    label: stripEmoji(definition[1] || nodeId),
+    card,
+    questions: rewindQuestionsOf(task.graph?.nodeMeta?.[nodeId]?.verdict),
+  };
+}
+
+/** Вход в разбор из модалки узла: одну модалку поверх другой не держим. */
+function openArbiterFromStage() {
+  const task = stageTask.value;
+  const nodeId = stage.value?.id;
+  closeStage();
+  openArbiterDecision(task, nodeId);
+}
+
+/**
+ * Отправляет решение человека и продолжает прогон.
+ *
+ * Тот же эндпоинт, что и обычный возврат курсора: сервер кладёт текст в журнал попытки
+ * причиной human-rewind, движок подмешивает его в промпт захода. Подтверждение остаётся —
+ * возврат сбрасывает не только этот узел, но и весь хвост маршрута за ним.
+ */
+async function sendArbiterDecision(note) {
+  const target = arbiterDecision.value;
+  if (!target || arbiterDecisionBusy.value) return;
+
+  const question = `Вернуть конвейер на «${target.label}»? Результаты этого узла и всех`
+    + ' следующих за ним будут сброшены.';
+  if (!await confirmDialog(question, { okText: 'Вернуть' })) return;
+
+  arbiterDecisionBusy.value = true;
+  try {
+    const res = await api.post(`/api/tasks/${target.task}/stage/${target.key}/running`,
+      { comment: note });
+    arbiterDecision.value = null;
+    await load();
+    await warnIfNotResumed(res);
+  }
+  catch (e) { alertDialog(`Ошибка: ${e.message}`); }
+  finally { arbiterDecisionBusy.value = false; }
+}
+
+/**
+ * Вход из плашки затыка.
+ *
+ * Разбор арбитра ведёт в свою модалку — там его текст и поле решения; обычный затык без
+ * разбора ведёт в узел, где кроме возврата человеку нужны и телеметрия, и вердикт.
+ */
+function openStallAnswer(t) {
+  if (arbiterAsksHuman(t)) {
+    openArbiterDecision(t, stallNodeId(t));
+    return;
+  }
+
+  openStallStage(t);
+}
+
+/** Открывает узел, на котором стоит остановка: решение принимают там. */
+function openStallStage(t) {
+  const nodeId = stallNodeId(t);
+  if (!nodeId) return;
+
+  const definition = t.graph?.nodes?.[nodeId] || [];
+  openStage(t, {
+    id: nodeId,
+    label: definition[1] || nodeId,
+    subtitle: definition[2] || '',
+    status: t.graph?.statuses?.[nodeId] || 'stall',
+  });
+}
+
+// Отдельный разбор арбитра: узел, его карточка и вопросы. Живёт рядом с модалкой узла,
+// а не внутри неё — вопрос у него один, и ширина нужна вся.
+const arbiterDecision = ref(null);
+const arbiterDecisionBusy = ref(false);
+
 const arbiterBusy = ref(new Set());
 function canArbitrate(t) {
-  return !t.readOnly && !t.daemonAlive && t.stall?.stop === 'no-progress';
+  // Признак считает СЕРВЕР одним правилом (`stopIsArbitrable`), общим с гейтом самого
+  // арбитра: раньше здесь стояла своя копия сравнения с `no-progress`, и после
+  // расширения арбитра на вызов человека узлом она бы молча разошлась с ним.
+  return !t.readOnly && !t.daemonAlive && t.stall?.arbitrable === true && !t.arbitrating;
 }
+
+// Идёт ли разбор ПРЯМО СЕЙЧАС — знает сервер, а не окно. Прежний признак жил только в
+// нажавшем окне, поэтому автоматический обход вотчера не показывался нигде: задача
+// выглядела вставшей, и человек шёл делать руками работу, которую в этот момент делал
+// арбитр. Ровно то ложное чувство «конвейер встал, надо быть курьером».
+//
+// Подпись — общая (`shared/arbiter-run.js`): её показывают три поверхности (свёрнутая
+// карточка, узел схемы и модалка узла), и своя копия в каждой разъехалась бы.
+
+/**
+ * Разбирается ли ОТКРЫТЫЙ узел. Плашка на соседнем узле обещала бы работу там, где её
+ * нет: арбитр занимается остановкой, а она принадлежит одному узлу.
+ */
+const stageArbitrating = computed(() => {
+  if (!stage.value) return null;
+
+  const task = tasks.value.find((x) => Number(x.task) === Number(stage.value.task));
+  if (!task?.arbitrating) return null;
+
+  return nodeIsArbitrated(stage.value.status, task.arbitrating) ? task.arbitrating : null;
+});
 async function arbitrate(task) {
   if (arbiterBusy.value.has(task)) return;
   if (!await confirmDialog(
@@ -1342,12 +2309,23 @@ const ROUTE_ICON = {
   feature: '✨', debug: '🔍', trivial: '⚡', hunt: '🕵', perf: '⏱', dev: '🛠', quick: '⚡',
 };
 
-async function load() {
+let loadPromise = null;
+let loadQueued = false;
+let stateReloadTimer = null;
+const STATE_RELOAD_DELAY_MS = 800;
+
+/**
+ * Один снимок страницы читает дешёвые state-файлы и их графы, затем обновляет уже
+ * существующие B24-кеши. Вызов сериализован обёрткой `load`, чтобы старый ответ
+ * никогда не перезаписал более свежий.
+ */
+async function loadSnapshot() {
   try {
-    const { tasks: list } = await api.get('/api/tasks');
+    const { tasks: list, silenceWindow: nextSilenceWindow } = await api.get('/api/tasks');
     const graphs = await Promise.all(
       list.map((t) => api.get(`/api/tasks/${t.task}/graph`).catch(() => null)),
     );
+    silenceWindow.value = Number.isFinite(nextSilenceWindow) ? nextSilenceWindow : 0;
     tasks.value = list.map((t, i) => ({ ...t, graph: graphs[i] })).filter((x) => x.graph);
     // Названия задач из B24 (для заголовка) + доска (для «таймеров вне фабрики»).
     tasks.value.forEach((t) => taskStore.load(t.task).catch(() => {}));
@@ -1359,6 +2337,50 @@ async function load() {
     loaded.value = true;
   }
 }
+
+/**
+ * Single-flight с одним trailing-проходом: частые SSE не создают параллельный веер
+ * `/graph`, но изменение, пришедшее во время чтения, обязательно будет перечитано.
+ */
+function load() {
+  if (loadPromise) {
+    loadQueued = true;
+    return loadPromise;
+  }
+
+  loadPromise = (async () => {
+    do {
+      loadQueued = false;
+      await loadSnapshot();
+    } while (loadQueued);
+  })().finally(() => {
+    loadPromise = null;
+  });
+
+  return loadPromise;
+}
+
+// `state-change` может приходить каждые 300 мс. Небольшой throttle сохраняет живость
+// страницы, но не превращает каждый fs.watch-event в полный перечит всех графов.
+function scheduleStateReload() {
+  if (stateReloadTimer) {
+    return;
+  }
+
+  stateReloadTimer = setTimeout(() => {
+    stateReloadTimer = null;
+    load();
+  }, STATE_RELOAD_DELAY_MS);
+}
+
+useSse((name) => {
+  // Разбор арбитра не меняет файлы состояния, поэтому `state-change` его не приносит:
+  // у начала и конца хода своё событие. Без него окно узнавало бы о работающем арбитре
+  // только на следующем перечитывании — то есть тогда, когда всё уже кончилось.
+  if (name === 'state-change' || name === 'arbiter-live') {
+    scheduleStateReload();
+  }
+});
 load();
 
 // Класс полосы прогресса по текущему статусу.
@@ -1387,17 +2409,295 @@ function cardState(g) {
 </script>
 
 <style scoped>
-.pipeline { display: flex; flex-direction: column; gap: 14px; }
-/* Липкий тулбар: full-bleed по бокам; top:-22px компенсирует padding-top .content,
-   иначе sticky прилипает ниже паддинга и над ним светит прокрученный контент. */
-.toolbar { position: sticky; top: -22px; z-index: 30; background: var(--ground);
-  padding: 14px 22px 12px; margin: 0 -22px 6px; display: flex; flex-direction: column; gap: 8px;
-  border-bottom: 1px solid var(--line); }
-.tbrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.ttl { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-mid); margin: 0; display: flex; align-items: center; gap: 10px; }
-.needme { color: var(--warn); text-transform: none; letter-spacing: 0; font-size: 12px; }
-.stalledme { color: var(--bad); text-transform: none; letter-spacing: 0; font-size: 12px; margin-left: 8px; cursor: help; }
-.projects { display: flex; flex-wrap: wrap; gap: 6px; }
+.pipeline {
+  container-name: pipeline-view;
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Одна строка: проекты получают всё свободное место, состояния и вид прижаты вправо. */
+.toolbar {
+  --pipeline-content-gutter: 22px;
+  position: sticky;
+  top: calc(var(--pipeline-content-gutter) * -1);
+  z-index: 30;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: calc(var(--pipeline-content-gutter) * -1)
+    calc(var(--pipeline-content-gutter) * -1)
+    calc(var(--pipeline-content-gutter) + 6px);
+  padding: 8px var(--pipeline-content-gutter);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--topbar) 88%, var(--ground));
+  box-shadow: 0 8px 18px #00000024;
+}
+
+.status-filter-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-mid);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-mid) 12%, transparent);
+}
+
+/* Цвет точки задаётся её собственным тоном, а не классом кнопки. Селектор вида
+   `.status-filter … .status-dot` означал бы, что раздел перекрашивает общий control,
+   и упирался бы в границу UI-библиотеки; заодно исчезает вторая карта «статус → цвет»
+   рядом с той, что уже уехала в `tone` самой кнопки. */
+.status-dot[data-tone='accent'] {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.status-dot[data-tone='warning'] {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 13%, transparent);
+}
+
+.status-dot[data-tone='danger'] {
+  background: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 13%, transparent);
+}
+
+.status-count {
+  min-width: 1ch;
+  color: currentColor;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  opacity: .75;
+}
+
+.toolbar-icon {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.filter-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 92px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  color: var(--ink-mid);
+  font-size: 12.5px;
+}
+
+.ttl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+@media (min-width: 760px) and (max-width: 1099px) {
+  .toolbar {
+    --pipeline-content-gutter: 18px;
+  }
+}
+
+@media (max-width: 759px) {
+  .toolbar {
+    --pipeline-content-gutter: 16px;
+  }
+}
+
+@container pipeline-view (max-width: 620px) {
+  .filter-empty {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px;
+  }
+}
+
+/* Главный ряд измеряет только реально доступный ему левый участок. */
+.project-strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.project-button-frame {
+  display: inline-flex;
+  flex: none;
+  min-width: 0;
+  max-width: 220px;
+}
+
+.project-option-copy,
+.project-menu-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.project-option-label,
+.project-menu-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-count {
+  flex: none;
+  color: currentColor;
+  font-size: 11px;
+  opacity: .68;
+}
+
+.project-more-icon {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.project-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-menu-copy {
+  max-width: 260px;
+}
+
+.project-menu-copy > span {
+  max-width: 220px;
+}
+
+.project-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+  contain: layout style;
+}
+
+.toolbar-secondary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.status-scroll {
+  flex: none;
+}
+
+.secondary-status-filters {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  opacity: .82;
+}
+
+.secondary-status-filters > .ui-button {
+  flex: none;
+}
+
+.status-menu {
+  display: none;
+  flex: none;
+}
+
+.status-menu-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-menu-option-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-menu-trigger-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.compact-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 4px;
+  border-left: 1px solid var(--line);
+}
+
+/* Состояния вторичны: сначала у них исчезает текст, но точки, числа и доступные
+   названия остаются. Проекты получают освободившуюся ширину автоматически. */
+@container pipeline-view (max-width: 1250px) {
+  .secondary-status-filters .status-filter-label {
+    display: none;
+  }
+}
+
+/* На узком экране пять состояний становятся одним меню справа, а не выталкивают
+   проекты на вторую строку. */
+@container pipeline-view (max-width: 760px) {
+  .status-scroll {
+    display: none;
+  }
+
+  .status-menu {
+    display: block;
+  }
+}
+
+@container pipeline-view (max-width: 620px) {
+  .project-button-frame {
+    max-width: 130px;
+  }
+}
+
+@container pipeline-view (max-width: 420px) {
+  .project-button-frame {
+    max-width: 90px;
+  }
+
+  .project-more .project-more-icon {
+    display: none;
+  }
+}
 
 /* Очередь и слоты не входят в графы: у каждого блока собственные loading/error и
    последний удачный снимок. Поэтому визуально это одна операционная полоса, но не
@@ -1422,9 +2722,18 @@ function cardState(g) {
 .stalled .scomment { margin-top: 2px; opacity: .85; font-style: italic; }
 .stalled .sfix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .stalled .sfixhint { opacity: .75; font-size: 11.5px; }
-.cnt { color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
-.tools { display: flex; gap: 6px; }
-
+/* Признак разбора в ленте: одна строка вместо четырёх абзацев. Полный текст живёт в
+   модалке узла — лента отвечает на «где стоит и на ком», а не заменяет собой карточку. */
+.sarbnote { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; padding: 6px 10px;
+  border-left: 3px solid var(--ink-mid); border-radius: 8px; background: var(--surface-2);
+  color: var(--ink-mid); font-size: 12px; }
+.sarbnote.human { border-left-color: var(--warn); color: var(--ink);
+  background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.sarbicon { flex: none; }
+.sarbnote-text { min-width: 0; font-weight: 600; }
+.sarbnote .samodel { margin-left: auto; }
+.sarbopen { margin-top: 0; align-items: center; }
+.sarbmore { margin-left: auto; flex: none; }
 .err { color: var(--bad); }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
@@ -1491,6 +2800,8 @@ function cardState(g) {
   letter-spacing: .08em; }
 .sh h3 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 17px; font-weight: 650;
   line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.shead-state { min-width: 0; display: flex; align-items: center; justify-content: flex-end;
+  gap: 8px; flex-wrap: wrap; }
 
 /* Контекст открытого решения: название задачи слева, прямой вход на её стенд справа. */
 .stage-context { min-height: 56px; flex: none; display: grid;
@@ -1517,12 +2828,17 @@ function cardState(g) {
 .stage-stand-state.building { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); }
 
 /* Компактная строка метаданных */
-.smeta { min-height: 40px; max-height: 76px; flex: none; display: flex; flex-wrap: wrap; align-items: center;
-  gap: 6px; overflow-y: auto; padding: 7px 18px; border-bottom: 1px solid var(--line); background: var(--ground); }
+.smeta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .sbadge { flex: none; padding: 5px 11px; border-radius: 999px; font-size: 10.5px; font-weight: 650;
   line-height: 1.15; text-transform: uppercase; letter-spacing: .055em; white-space: nowrap; }
 .sbadge.run { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .sbadge.done { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+/* Разбор идёт: цвет тот же, что у узла на схеме, но со своим словом — «done» и
+   «арбитр разбирает» не должны выглядеть одинаково. */
+.sbadge.arb { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good);
+  animation: sarbfade 1.8s ease-in-out infinite; }
+@keyframes sarbfade { 50% { opacity: .62; } }
+@media (prefers-reduced-motion: reduce) { .sbadge.arb { animation: none; } }
 .sbadge.wait, .sbadge.premature { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .sbadge.pending, .sbadge.idle { background: var(--surface-2); color: var(--ink-mid); }
 .sbadge.stall, .sbadge.skipbad, .sbadge.fail { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
@@ -1530,8 +2846,46 @@ function cardState(g) {
 .smchip { flex: none; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); color: var(--ink-mid);
   font-size: 11.5px; line-height: 1.35; white-space: nowrap; }
 .smchip.failed { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.snotices { max-height: 130px; flex: none; display: flex; flex-direction: column; gap: 7px; overflow-y: auto;
-  padding: 9px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+/* Разбор арбитра в плашке остановки. Человеческая формулировка стоит выше сырых находок
+   по значимости, поэтому у неё акцентная рамка, а не приглушённый вид справки. */
+/* Идущий разбор. Акцентная, но НЕ тревожная плашка: работа не стоит, а движется —
+   красный и жёлтый здесь означали бы обратное. Вертится только точка: полоса прогресса
+   обещала бы известную длительность, а ход арбитра длится сколько потребуется. */
+.sarbrun { display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  padding: 8px 11px; border-radius: 8px;
+  border-left: 3px solid var(--good);
+  background: color-mix(in srgb, var(--good) 8%, transparent);
+  color: var(--ink); font-size: 12.5px; }
+/* В модалке плашка стоит первой строкой тела, поэтому верхнего отступа ей не нужно. */
+.sarbrun.sarbnode { margin: 0 0 10px; }
+.sarbspin { width: 9px; height: 9px; flex: none; border-radius: 50%;
+  background: var(--good); animation: sarbpulse 1.1s ease-in-out infinite; }
+.sarbtxt { font-weight: 600; }
+.sarbmeta { margin-left: auto; color: var(--ink-mid); font-size: 10.5px; opacity: .8; }
+@keyframes sarbpulse { 0%, 100% { opacity: .35; transform: scale(.82); }
+  50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .sarbspin { animation: none; opacity: .9; } }
+.samodel { margin-left: auto; color: var(--ink-mid); font-size: 10.5px; opacity: .8; }
+
+/* Находки узла. Свой блок и свой скролл, а не строка внутри `.snotices`: пять
+   замечаний по три строки каждое не помещаются в 130px дайджеста, а обрезать здесь
+   нечего — это и есть то, ради чего человека позвали. */
+.sverdict { min-width: 0; }
+.svhead { display: flex; align-items: baseline; gap: 8px; }
+.svhead .sclbl { margin-bottom: 6px; }
+.svfiles { margin-left: auto; color: var(--ink-mid); font-size: 10.5px; opacity: .75; }
+.svlist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.svlist li { padding: 8px 11px; border-left: 3px solid var(--warn); border-radius: 8px;
+  background: var(--surface-2); color: var(--ink); font-size: 12.5px; line-height: 1.45;
+  overflow-wrap: anywhere; }
+/* Отложенная находка не требует действия сейчас — она обязана визуально уступать
+   блокирующей, иначе список из пяти пунктов читается как пять срочных дел. */
+.svlist li.deferred { border-left-color: var(--line); color: var(--ink-mid); }
+.svanchor { display: block; margin-bottom: 3px; color: var(--ink-mid); font-size: 11px; opacity: .85; }
+.svmore { margin-top: 7px; color: var(--ink-mid); font-size: 11.5px; }
+/* Остановка на человеке — единственный случай, где блок сам является вызовом. */
+.sverdict.human .sclbl { color: var(--warn); opacity: 1; }
+.snotices { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 .scomment { margin: 0; padding: 8px 11px; border-left: 3px solid var(--line); border-radius: 8px;
   background: var(--surface-2); color: var(--ink-mid); font-size: 12.5px; line-height: 1.45;
   white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1546,7 +2900,7 @@ function cardState(g) {
 /* Рабочая область: информация слева, действия справа. Обе колонки скроллятся внутри
    viewport-рамки, поэтому шапка и нижние действия всегда остаются на экране. */
 .sworkspace { min-width: 0; min-height: 0; flex: 1; display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); grid-template-areas: "main rail";
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 470px); grid-template-areas: "main rail";
   overflow: hidden; background: var(--surface); }
 .sworkspace.main-only { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; }
 .sworkspace.rail-only { grid-template-columns: minmax(0, 1fr); grid-template-areas: "rail"; }
@@ -1637,6 +2991,35 @@ function cardState(g) {
 .sdoc :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-x: auto; }
 .sdoc :deep(table) { border-collapse: collapse; }
 .sdoc :deep(td), .sdoc :deep(th) { border: 1px solid var(--line); padding: 4px 8px; font-size: 12px; }
+/* Вопросы узла. Номер и формулировка стоят НАД полем, а не сбоку: вопрос агента бывает
+   в две строки, и боковая колонка сжимала бы поле ответа до нечитаемого. */
+.rwq { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.rwqhead { color: var(--warn); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .055em; }
+.rwqitem { display: flex; flex-direction: column; gap: 4px; }
+.rwqlbl { display: flex; align-items: baseline; gap: 6px;
+  color: var(--ink); font-size: 12px; line-height: 1.4; }
+.rwqnum { flex: none; min-width: 15px; color: var(--warn); font-weight: 600; }
+.rwqsum { flex: 1; min-width: 0; }
+.rwqfree { margin-bottom: 4px; color: var(--ink-mid); font-size: 11.5px; }
+/* Сводка решений арбитра в воротах. Приглушённая: это справка перед решением человека,
+   а не само решение — акцент здесь принадлежит кнопкам «Принять»/«Отклонить». */
+.gwal { margin-bottom: 12px; padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.gwalh { margin-bottom: 6px; color: var(--ink-mid); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: .055em; }
+.gwrow { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px;
+  font-size: 12px; line-height: 1.4; }
+.gwtag { flex: none; padding: 1px 6px; border-radius: 5px; font-size: 10px;
+  background: color-mix(in srgb, var(--ink-mid) 18%, transparent); color: var(--ink-mid); }
+/* Решение о границе задачи проверяют пристальнее снятого технического тупика. */
+.gwrow.deferred .gwtag { background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn); }
+.gwwhat { flex: 1; min-width: 0; color: var(--ink); }
+/* Ситуация — условие решения, поэтому она в той же колонке и в том же ритме, что кнопки,
+   но тише их: рамка нейтральная, тревожность несут сами блоки внутри. */
+.situation-sect { padding: 14px; border: 1px solid var(--line); border-radius: 11px;
+  background: var(--ground); }
 .gate-sect, .rewind-sect { padding: 14px; border-radius: 11px; }
 .gate-sect { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
   background: color-mix(in srgb, var(--warn) 7%, var(--ground)); }
@@ -1667,7 +3050,7 @@ function cardState(g) {
   .sh { min-height: 66px; grid-template-columns: minmax(0, 1fr) 44px; grid-template-rows: auto auto;
     column-gap: 10px; row-gap: 5px; padding: 8px 10px 8px 14px; }
   .shead-copy { grid-column: 1; grid-row: 1; }
-  .sh > .sbadge { grid-column: 1; grid-row: 2; justify-self: start; }
+  .shead-state { grid-column: 1; grid-row: 2; justify-content: flex-start; }
   .sx { grid-column: 2; grid-row: 1 / span 2; }
   .sh h3 { font-size: 15px; }
   .shead-kicker { font-size: 9.5px; }
@@ -1678,13 +3061,10 @@ function cardState(g) {
   .stage-stand-context { justify-content: flex-start; gap: 6px; overflow-x: auto; }
   .stage-stand-link { min-height: 34px; }
   .stage-stand-state { max-width: none; }
-  .smeta { min-height: 38px; max-height: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
-    padding: 6px 12px; }
   .jf { margin-left: 0; }
-  .snotices { max-height: 110px; padding: 8px 12px; }
   .sworkspace, .sworkspace.main-only, .sworkspace.rail-only { gap: 10px; padding: 10px; }
   .smain, .srail { gap: 10px; }
-  .runner-sect, .content-sect, .gate-sect, .rewind-sect { padding: 12px; }
+  .runner-sect, .content-sect, .gate-sect, .rewind-sect, .situation-sect { padding: 12px; }
   .secth { flex-wrap: wrap; }
   .runner-source { width: 100%; margin-left: 0; text-align: left; }
   .runner-attempt { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: auto auto;

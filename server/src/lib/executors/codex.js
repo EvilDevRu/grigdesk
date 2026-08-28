@@ -22,6 +22,37 @@ import {
 } from './_direct-ssh-policy.js';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
+const SCOPED_WORKSPACE_CACHE_MS = 60_000;
+const scopedWorkspaceCache = new Map();
+
+/** Старый app-server принимает workspaceWrite, но читает весь хост — это не triage-safe. */
+export async function codexSupportsRestrictedWorkspace(bin) {
+  const key = String(bin || '');
+  if (!key) return false;
+  const cached = scopedWorkspaceCache.get(key);
+  if (cached && Date.now() - cached.at < SCOPED_WORKSPACE_CACHE_MS) {
+    return cached.value;
+  }
+  const value = (async () => {
+    const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-scope-'));
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(key, ['app-server', 'generate-ts', '--out', schemaDir], {
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        }, (error) => (error ? reject(error) : resolve()));
+      });
+      const schema = await fs.readFile(path.join(schemaDir, 'v2', 'SandboxPolicy.ts'), 'utf8');
+      return /\breadOnlyAccess\b/.test(schema);
+    } catch {
+      return false;
+    } finally {
+      await fs.rm(schemaDir, { recursive: true, force: true }).catch(() => {});
+    }
+  })();
+  scopedWorkspaceCache.set(key, { at: Date.now(), value });
+  return value;
+}
 
 function windowLabel(minutes) {
   if (minutes === 300) return 'Сессия (5ч)';
@@ -797,8 +828,14 @@ function codexRpcError(method, error) {
 export function openCodexSession({
   config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo, workTools,
+  workspaceAccess,
 }) {
-  const roots = codexWorkspaceRoots(cwd, extraDirs);
+  const roots = workspaceAccess
+    ? codexWorkspaceRoots(cwd, workspaceAccess.readableRoots)
+    : codexWorkspaceRoots(cwd, extraDirs);
+  const writableRoots = workspaceAccess
+    ? codexWorkspaceRoots('', workspaceAccess.writableRoots)
+    : roots;
   const pending = new Map();
   let nextRequestId = 0;
   let threadId = sessionId || null;
@@ -1233,10 +1270,15 @@ export function openCodexSession({
           approvalPolicy: 'never',
           sandboxPolicy: {
             type: 'workspaceWrite',
-            writableRoots: roots,
-            networkAccess: true,
-            excludeTmpdirEnvVar: false,
-            excludeSlashTmp: false,
+            writableRoots,
+            readOnlyAccess: workspaceAccess ? {
+              type: 'restricted',
+              includePlatformDefaults: true,
+              readableRoots: roots,
+            } : { type: 'fullAccess' },
+            networkAccess: workspaceAccess?.networkAccess ?? true,
+            excludeTmpdirEnvVar: workspaceAccess?.excludeTmpdirEnvVar ?? false,
+            excludeSlashTmp: workspaceAccess?.excludeSlashTmp ?? false,
           },
           ...(model && { model }),
           ...(effort && { effort }),
@@ -1279,13 +1321,13 @@ export function openCodexSession({
 export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
-  workTools,
+  workTools, workspaceAccess,
 }) {
   if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
   const session = openCodexSession({
     config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, providerSettings,
-    tokenInfoReader, workTools,
+    tokenInfoReader, workTools, workspaceAccess,
   });
   const onAbort = () => { void session.interrupt(); };
   signal?.addEventListener('abort', onAbort, { once: true });
@@ -1368,6 +1410,9 @@ export default {
   vendor: 'OpenAI',
   color: '#10a37f',
   order: 2,
+  scopedWorkspace(config) {
+    return codexSupportsRestrictedWorkspace(config?.codexBin);
+  },
   install: 'npm i -g @openai/codex && codex login',
   // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
   trustedDirectories: true,
@@ -1468,11 +1513,11 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
     providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
-    workTools,
+    workTools, workspaceAccess,
   }) {
     return runCodexAppServer({
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
-      providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools,
+      providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools, workspaceAccess,
     });
   },
 

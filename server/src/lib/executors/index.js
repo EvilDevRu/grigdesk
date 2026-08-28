@@ -105,6 +105,11 @@
 //                              Числа — только известные неотрицательные целые; отсутствие
 //                              поля не приравнивается к нулю.
 //                              opts.extraDirs — единый список доверенных/служебных каталогов
+//                              opts.workspaceAccess — строгие readable/writable roots для
+//                              adapter-ов с capability scopedWorkspace; сеть и temp roots
+//                              задаются там же и не выводятся из cwd
+//                              opts.workTools — server-owned структурные инструменты; adapter
+//                              передаёт только их descriptors/invoke, без внешних MCP
 //                              opts.providerSettings — выбор из настроек этого исполнителя
 //                              opts.chatHistory — server-owned история чата (массив сохранённых
 //                              сообщений; для stateless HTTP-исполнителей, реплеящих разговор
@@ -120,6 +125,9 @@
 //                              MCP, сессии и файловых путей. Изображения приходят как
 //                              [{ mediaType, data: base64 }]. Обычный run() НЕ является
 //                              fallback: permission mode не изолирует prompt injection.
+//   scopedWorkspace?         — boolean либо async (config) => boolean: adapter и текущая
+//                              версия CLI действительно разводят readable/writable roots;
+//                              одного permission mode для этой capability недостаточно.
 // Карточка установки может не иметь run(): такой адаптер виден в настройках, но не
 // попадает в runtime-реестр и потому физически не может получить ход чата. Это нужно
 // для поэтапного подключения нового CLI: сначала обычная установка/авторизация, затем
@@ -237,4 +245,17 @@ export async function getExecutors() {
  */
 export async function getExecutor(id) {
   return (await getExecutors()).get(id) || null;
+}
+
+/** Capability может зависеть от версии установленного CLI и всегда проверяется fail-closed. */
+export async function supportsScopedWorkspace(executor, config) {
+  if (!executor || typeof executor.run !== 'function') return false;
+  try {
+    const declared = typeof executor.scopedWorkspace === 'function'
+      ? await executor.scopedWorkspace(config)
+      : executor.scopedWorkspace;
+    return declared === true;
+  } catch {
+    return false;
+  }
 }

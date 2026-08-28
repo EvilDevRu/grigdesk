@@ -203,3 +203,45 @@ test('AttentionAlerts запускает и скрывает оценки чер
   assert.deepEqual(analyzed, [17, 23]);
   assert.deepEqual(dismissed, [23]);
 });
+
+test('AttentionAlerts не опрашивает и не показывает ошибки выключенного триажа', async (t) => {
+  const browser = await installUiBrowser(t);
+  let pollingStarts = 0;
+
+  globalThis.__attentionAnalysis = {
+    disabled: true,
+    issues: [{
+      task: 23,
+      status: { state: 'failed', error: 'старый таймаут' },
+    }],
+    startPolling() {
+      pollingStarts += 1;
+    },
+    async analyze() {},
+    async dismiss() {},
+  };
+
+  const [{ mount }, AttentionAlerts] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileAttentionAlerts(),
+  ]);
+  const wrapper = mount(AttentionAlerts, {
+    attachTo: browser.document.querySelector('#mount'),
+    global: {
+      stubs: {
+        UiPopover: {
+          template: '<section><slot name="trigger" /><slot /></section>',
+        },
+      },
+    },
+  });
+  t.after(() => wrapper.unmount());
+
+  assert.deepEqual({
+    pollingStarts,
+    staleIssueVisible: wrapper.text().includes('старый таймаут'),
+  }, {
+    pollingStarts: 0,
+    staleIssueVisible: false,
+  });
+});

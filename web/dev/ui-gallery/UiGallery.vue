@@ -107,6 +107,18 @@
           </svg>
         </UiIconButton>
       </div>
+      <div class="ui-gallery__toolbar-select-fixture">
+        <UiSelect
+          v-model="chatToolbarSelect"
+          compact
+          data-context="chat-session-toolbar"
+          data-geometry-chat-toolbar-select
+          aria-label="Модель чата"
+        >
+          <option value="gpt">GPT-5.6 Codex</option>
+          <option value="claude">Claude Opus</option>
+        </UiSelect>
+      </div>
       <div
         class="ui-gallery__dock-actions"
         data-geometry-row="compact"
@@ -359,6 +371,7 @@ const number = ref<number | '' | null>(4);
 const selectValue = ref<string | number | null>('one');
 const longText = ref('Многострочное содержимое остаётся многострочным.');
 const composerText = ref('Внутри составного composer-а нет второй рамки фокуса.');
+const chatToolbarSelect = ref<string | number | null>('gpt');
 const checked = ref(true);
 const switched = ref(true);
 const toggled = ref(false);

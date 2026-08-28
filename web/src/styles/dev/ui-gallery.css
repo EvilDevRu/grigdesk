@@ -44,6 +44,18 @@
   border-color: var(--line-2);
 }
 
+.ui-gallery__toolbar-select-fixture {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ui-gallery__toolbar-select-fixture > * {
+  max-width: min(280px, 100%);
+}
+
 .ui-gallery__dock-actions {
   --tool-dock-action-size: 30px;
   display: flex;

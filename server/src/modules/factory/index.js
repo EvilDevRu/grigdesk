@@ -59,7 +59,16 @@ const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 // Лимит хода арбитра. `executor.run` своего таймаута не имеет by design — в чате его
 // считает watchdog, который знает, что агент ждёт ответа человека. Арбитр человека не
 // ждёт вовсе, поэтому лимит здесь простой и жёсткий.
-const ARBITER_TURN_LIMIT_MS = 10 * 60 * 1000;
+//
+// Десяти минут оказалось мало на реальной остановке (замер 28.08.2026, задача с
+// перф-регрессией в чужой библиотеке): арбитр честно прочитал отчёт, диагностику и
+// исходники — 34 команды, — и был оборван на десятой минуте, не дав ничего. Худший из
+// возможных исходов: время живого агента потрачено, конвейер стоит, задача ушла в
+// часовой cooldown. Двадцать минут против часов человеческого ожидания дёшевы, а
+// главная защита от бесконечного чтения теперь не резак, а объявленный агенту бюджет
+// (`budgetMin` в промпте): знающий свой лимит начинает формулировать заранее.
+const ARBITER_TURN_LIMIT_MIN = 20;
+const ARBITER_TURN_LIMIT_MS = ARBITER_TURN_LIMIT_MIN * 60 * 1000;
 
 const registryIsMissing = (error) => error?.code === 'ENOENT';
 
@@ -102,7 +111,8 @@ function runnerStageIsLive(graph, registry, nodeId, stage) {
 
 async function factoryModule(fastify, opts) {
   const {
-    factoryState, config, prefs, b24, analyzer, internalToken = '',
+    factoryState, config, prefs, b24, analyzer, internalToken = '', arbiterCards = null,
+    arbiterLive = null,
   } = opts;
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
   const runnerControl = new FactoryRunnerControl({
@@ -238,6 +248,9 @@ async function factoryModule(fastify, opts) {
     const titledTasks = await Promise.all(tasks.map(async (task) => ({
       ...task,
       title: await storedTicketTitle(task.task),
+      // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
+      // Без этого признака человек берётся за неё руками параллельно с арбитром.
+      arbitrating: arbiterLive?.read(task.task) || null,
     })));
     // Порог молчания едет вместе со списком: «этот ход завис» обязаны считать одинаково
     // чип в навигации, оповещение и карточка задачи, а хранится он в настройках.
@@ -337,7 +350,7 @@ async function factoryModule(fastify, opts) {
     }
   }
 
-  // Контекст, которого нет в описании задачи: локальные уточнения человека
+  // Контекст, которого нет в описании задачи: локальные уточнения человека и арбитра
   // (в трекер их НЕ публикуем — заказчик видит комментарии) и несистемные комментарии
   // из B24. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
   async function ticketSections(id, { profile = null, title = '', description = '' } = {}) {
@@ -345,7 +358,7 @@ async function factoryModule(fastify, opts) {
     const clarify = await analyzer.readClarifications(id);
     if (clarify) {
       sections.push({
-        title: '[Внутренние уточнения человека — приоритетнее описания; пометки «[приложено фото: /путь]» открывай инструментом Read]',
+        title: '[Внутренние уточнения триажа — учитывай автора каждой записи; пометки «[приложено фото: /путь]» открывай инструментом Read]',
         text: clarify.slice(0, 6000),
       });
     }
@@ -353,7 +366,7 @@ async function factoryModule(fastify, opts) {
     if (open) {
       const lines = [];
       if (open.questions.length) {
-        lines.push('Вопросы к человеку:');
+        lines.push('Открытые вопросы триажа:');
         open.questions.forEach((q, i) => lines.push(`${i + 1}. ${q}`));
       }
       if (open.unknowns.length) {
@@ -362,7 +375,7 @@ async function factoryModule(fastify, opts) {
         open.unknowns.forEach((u, i) => lines.push(`${i + 1}. ${u}`));
       }
       sections.push({
-        title: '[Открытые вопросы триажа — начинай с них: отвечай первой секцией плана «## Открытые решения»; ответы человека в уточнениях выше приоритетнее и снимают вопрос]',
+        title: '[Открытые вопросы триажа — начинай с них: отвечай первой секцией плана «## Открытые решения»; закрытые уточнения выше снимают вопрос]',
         text: lines.join('\n').slice(0, 4000),
       });
     }
@@ -1289,7 +1302,9 @@ async function factoryModule(fastify, opts) {
   // Тело вынесено из роута, потому что зовут его ДВОЕ: кнопка человека и автоматический
   // вотчер. Одно тело — одни границы: у автоматического пути не должно быть ни своей
   // проверки остановки, ни своего потолка арбитражей.
-  const runArbitration = async (id, reply) => {
+  // `actor` не влияет на границы разбора — он только объясняет человеку, ПОЧЕМУ задача
+  // едет сама: нажатую кнопку он и так помнит, а обход вотчера выглядит самодвижением.
+  const runArbitration = async (id, reply, { actor = 'human' } = {}) => {
     const managed = await managedRegistry(id, reply);
     if (!managed) return null;
     const { trusted } = managed;
@@ -1342,6 +1357,13 @@ async function factoryModule(fastify, opts) {
     // без конца. Десять минут — с запасом на чтение артефактов и пару опытов.
     const ac = new AbortController();
     const deadline = setTimeout(() => ac.abort(), ARBITER_TURN_LIMIT_MS);
+    // Отметку ставим здесь, а не в начале: до этой строки идут дешёвые проверки, и
+    // мигать «разбирается» на отказе за миллисекунду нечестно. Снимаем в `finally` —
+    // потерянная отметка держала бы задачу «в разборе» до перезапуска сервера.
+    const doneLive = arbiterLive?.begin(id, {
+      actor,
+      model: `${target.ref.provider}/${target.ref.model}`,
+    }) || (() => {});
     let output;
     try {
       output = await target.executor.run({
@@ -1354,6 +1376,8 @@ async function factoryModule(fastify, opts) {
           reason: context.reason,
           series: context.series,
           stateDir: config.stateDir,
+          stop: context.stop,
+          budgetMin: ARBITER_TURN_LIMIT_MIN,
         }),
         cwd,
         extraDirs,
@@ -1364,65 +1388,107 @@ async function factoryModule(fastify, opts) {
         log: fastify.log,
       });
     } catch (err) {
-      fastify.log.warn({ err, task: id }, 'арбитр: ход не состоялся');
+      if (ac.signal.aborted) {
+        fastify.log.warn(
+          { task: id, limitMin: ARBITER_TURN_LIMIT_MIN, steps: err?.steps?.length ?? null },
+          'арбитр: ход оборван по лимиту времени',
+        );
+      }
+      else fastify.log.warn({ err, task: id }, 'арбитр: ход не состоялся');
       reply.code(409).send({
         error: 'arbiter_run_failed',
         message: ac.signal.aborted ? 'арбитр не уложился в лимит хода' : 'арбитр не отработал',
       });
+      // Эта ветка уходит мимо общего `finally` ниже, поэтому отметку снимаем здесь:
+      // забытая запись держала бы задачу «в разборе» до перезапуска сервера.
+      doneLive();
       return null;
     } finally {
       clearTimeout(deadline);
     }
 
-    const decision = parseArbiterDecision(output?.reply);
-    if (!decision.ok) {
-      reply.code(409).send({ error: decision.error, message: decision.message });
-      return null;
-    }
-    if (decision.verdict === 'human') {
-      // Не отказ и не ошибка: арбитр отработал и вернул то, что обязан вернуть, когда
-      // решение меняет границу задачи. Карточку показываем человеку — она и есть работа.
-      return {
-        ok: true,
-        resolved: false,
-        verdict: 'human',
+    // Разбор ответа и возврат курсора идут ПОСЛЕ хода, но занимают ещё секунды:
+    // `factory goto` — это отдельный процесс движка. Пока он работает, задача обязана
+    // оставаться «в разборе», иначе в это окно вклинится вотчер или второе окно.
+    try {
+      const decision = parseArbiterDecision(output?.reply);
+      if (!decision.ok) {
+        reply.code(409).send({ error: decision.error, message: decision.message });
+        return null;
+      }
+      if (decision.verdict === 'human') {
+        // Не отказ и не ошибка: арбитр отработал и вернул то, что обязан вернуть, когда
+        // решение меняет границу задачи. Карточку СОХРАНЯЕМ, а не только возвращаем в ответ:
+        // у автоматического пути ответа некому показать, и разбор пропадал вместе с
+        // потраченным ходом живого агента.
+        await arbiterCards?.save(id, {
+          attempt: trusted.attempt,
+          verdict: 'human',
+          card: decision.card,
+          scopeChange: decision.scopeChange,
+          model: `${target.ref.provider}/${target.ref.model}`,
+          node: context.node,
+          stop: context.stop,
+        });
+        return {
+          ok: true,
+          resolved: false,
+          verdict: 'human',
+          card: decision.card,
+          scopeChange: decision.scopeChange,
+          model: `${target.ref.provider}/${target.ref.model}`,
+        };
+      }
+
+      const sanitized = humanComment(formatArbiterReason(decision), { fallback: '' });
+      if (!sanitized.ok) {
+        reply.code(409).send({ error: 'comment_too_long', message: sanitized.message });
+        return null;
+      }
+      const rewound = await runRouteEngine(config, routeGotoArgs(config, {
+        task: id,
+        profile: trusted.profile,
+        attempt: trusted.attempt,
+        node: context.target,
+        reason: sanitized.value,
+        actor: ARBITER_ACTOR,
+      }));
+      if (!rewound.ok) {
+        reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
+        return null;
+      }
+      const resumed = await resumeRouteAttempt(id, {
+        profile: trusted.profile, attempt: trusted.attempt, why: 'после арбитража',
+      });
+      // Снятый тупик тоже объясняется человеку: он увидит на схеме возврат курсора и обязан
+      // понимать, кто и почему его сделал, — иначе машинное решение неотличимо от сбоя.
+      // `deferred` — то же самое движение курсора, но решение задело границу задачи, и
+      // арбитр выбрал минимальный вариант вместо остановки. Разница только в пометке:
+      // человек увидит такое решение сводкой в воротах, а не будильником посреди работы.
+      await arbiterCards?.save(id, {
+        attempt: trusted.attempt,
+        verdict: decision.verdict,
         card: decision.card,
         scopeChange: decision.scopeChange,
         model: `${target.ref.provider}/${target.ref.model}`,
+        node: context.target,
+        stop: context.stop,
+      });
+      return {
+        ok: true,
+        resolved: true,
+        verdict: decision.verdict,
+        scopeChange: decision.scopeChange,
+        node: context.target,
+        card: decision.card,
+        model: `${target.ref.provider}/${target.ref.model}`,
+        resumed: resumed.ok,
+        resumeError: resumed.message || null,
+        resumeFailure: resumed.failure || null,
       };
+    } finally {
+      doneLive();
     }
-
-    const sanitized = humanComment(formatArbiterReason(decision), { fallback: '' });
-    if (!sanitized.ok) {
-      reply.code(409).send({ error: 'comment_too_long', message: sanitized.message });
-      return null;
-    }
-    const rewound = await runRouteEngine(config, routeGotoArgs(config, {
-      task: id,
-      profile: trusted.profile,
-      attempt: trusted.attempt,
-      node: context.target,
-      reason: sanitized.value,
-      actor: ARBITER_ACTOR,
-    }));
-    if (!rewound.ok) {
-      reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
-      return null;
-    }
-    const resumed = await resumeRouteAttempt(id, {
-      profile: trusted.profile, attempt: trusted.attempt, why: 'после арбитража',
-    });
-    return {
-      ok: true,
-      resolved: true,
-      verdict: 'resolve',
-      node: context.target,
-      card: decision.card,
-      model: `${target.ref.provider}/${target.ref.model}`,
-      resumed: resumed.ok,
-      resumeError: resumed.message || null,
-      resumeFailure: resumed.failure || null,
-    };
   };
 
   fastify.post('/api/tasks/:id/arbitrate', async (request, reply) => {

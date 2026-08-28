@@ -1,0 +1,162 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import test from 'node:test';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
+import analysisModule from '../../server/src/modules/analysis/index.js';
+
+const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
+const Fastify = requireFromServer('fastify');
+
+test('пакет ответов хранится в единственном markdown с серверной отметкой человека', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-clarifications-'));
+  const analyzer = new Analyzer({
+    config: { analysisDir: dir },
+    claudeAuth: null,
+    b24: null,
+    factoryState: {},
+    log: null,
+  });
+  await analyzer._ready;
+  await writeFile(path.join(dir, 't42.analysis.json'), JSON.stringify({
+    task: 42,
+    questions: [{
+      id: 'q-mode',
+      text: 'Какой режим оставить?',
+      options: [
+        { id: 'o-auto', label: 'Автоматический' },
+        { id: 'o-manual', label: 'Ручной' },
+      ],
+    }],
+  }));
+  const app = Fastify({ logger: false });
+  app.decorate('pluginEnabled', () => true);
+  await app.register(analysisModule, { analyzer });
+  t.after(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/42/clarifications',
+    payload: {
+      actor: 'cockpit-arbiter',
+      answers: [{
+        questionId: 'q-mode',
+        optionIds: ['o-manual'],
+        text: 'Так безопаснее для старых установок',
+        attachments: [],
+      }],
+    },
+  });
+  const markdown = await analyzer.readClarifications('42');
+
+  assert.deepEqual({
+    status: response.statusCode,
+    human: /Ответ человека/.test(markdown),
+    machine: /Разбор арбитра/.test(markdown),
+    marker: /cockpit-clarification:v1/.test(markdown),
+    files: (await readdir(dir)).filter((file) => file.includes('clarif')),
+  }, {
+    status: 200,
+    human: true,
+    machine: false,
+    marker: true,
+    files: ['t42.clarify.md'],
+  });
+});
+
+test('клиентский абсолютный путь вложения не становится полномочием на чтение', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-attachment-escape-'));
+  const analyzer = new Analyzer({
+    config: { analysisDir: dir },
+    claudeAuth: null,
+    b24: null,
+    factoryState: {},
+    log: null,
+  });
+  await analyzer._ready;
+  await writeFile(path.join(dir, 't42.analysis.json'), JSON.stringify({
+    task: 42,
+    questions: [{ id: 'q-proof', text: 'Есть снимок?', options: [] }],
+  }));
+  const app = Fastify({ logger: false });
+  app.decorate('pluginEnabled', () => true);
+  await app.register(analysisModule, { analyzer });
+  t.after(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/42/clarifications',
+    payload: {
+      text: 'Снимок приложен',
+      answers: [{
+        questionId: 'q-proof',
+        optionIds: [],
+        text: 'Снимок приложен',
+        attachments: [{
+          file: 'safe-token.png',
+          name: 'proof.png',
+          path: '/etc/passwd',
+        }],
+      }],
+    },
+  });
+
+  assert.deepEqual({
+    status: response.statusCode,
+    error: response.json().error,
+    clarification: await analyzer.readClarifications('42'),
+  }, {
+    status: 400,
+    error: 'invalid_attachment',
+    clarification: '',
+  });
+});
+
+test('GET уточнений возвращает server-owned actor и status машинного ответа', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-clarification-read-'));
+  const entry = {
+    id: 'answer-code',
+    questionId: 'q-code',
+    actor: 'cockpit-arbiter',
+    status: 'answered',
+    selection: [],
+    text: 'Поле уже есть.',
+    attachments: [],
+    proof: ['web/src/Form.vue:42'],
+  };
+  const marker = Buffer.from(JSON.stringify(entry)).toString('base64url');
+  await writeFile(path.join(dir, 't42.clarify.md'), [
+    '## Разбор арбитра — машинный',
+    'Поле уже есть.',
+    `<!-- cockpit-clarification:v1 ${marker} -->`,
+    '',
+  ].join('\n'));
+  const analyzer = new Analyzer({
+    config: { analysisDir: dir },
+    claudeAuth: null,
+    b24: null,
+    factoryState: {},
+    log: null,
+  });
+  await analyzer._ready;
+  const app = Fastify({ logger: false });
+  app.decorate('pluginEnabled', () => true);
+  await app.register(analysisModule, { analyzer });
+  t.after(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const response = await app.inject({ method: 'GET', url: '/api/tasks/42/clarifications' });
+
+  assert.deepEqual(response.json().entries, [entry]);
+});

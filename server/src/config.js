@@ -154,6 +154,11 @@ export const config = {
   // а не настройки интерфейса.
   taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH
     || path.join(__dirname, '..', '.state', 'task-favorites.json'),
+  // Разбор арбитра последней остановки задачи. Хранится у кокпита, а не в журнале
+  // попытки: журнал immutable и принадлежит движку, а это подсказка человеку, которую
+  // перекрывает следующая остановка той же задачи.
+  arbiterCardsPath: process.env.COCKPIT_ARBITER_CARDS_PATH
+    || path.join(__dirname, '..', '.state', 'arbiter-cards.json'),
   // Личная полка B24-задач с серверными снимками наблюдаемого состояния.
   taskShelfPath: process.env.COCKPIT_TASK_SHELF_PATH
     || path.join(__dirname, '..', '.state', 'task-shelf.json'),
@@ -169,7 +174,6 @@ export const config = {
   // Триаж задач: разведка кода headless-агентом без стенда. Результаты (оценки + разведнота)
   // живут рядом с состоянием фабрики, но в своём каталоге — фабрика про них не знает.
   analysisDir: process.env.COCKPIT_ANALYSIS_DIR || path.join(home, '.factory', 'analysis'),
-  analysisModel: process.env.COCKPIT_ANALYSIS_MODEL || 'sonnet',
   analysisTimeoutMs: Number(process.env.COCKPIT_ANALYSIS_TIMEOUT_MS) || 20 * 60 * 1000,
   // Параллельных оценок триажа: один воркер на большой очереди создаёт часы ожидания.
   analysisConcurrency: Number(process.env.COCKPIT_ANALYSIS_CONCURRENCY) || 2,
