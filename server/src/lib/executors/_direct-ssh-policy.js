@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isIP } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 const DIRECT_CLIENTS = new Set([
@@ -10,7 +11,17 @@ const DIRECT_CLIENTS = new Set([
   'ssh-copy-id',
 ]);
 const SHELLS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh']);
-const SIMPLE_WRAPPERS = new Set(['command', 'exec', 'nohup']);
+const SIMPLE_WRAPPERS = new Set(['command', 'exec', 'nohup', 'setsid', 'time']);
+
+// Обёртки запуска сами ничего не решают, но прячут имя клиента от разбора: без их
+// снятия «timeout 5 mysql -h prod» выглядел бы вызовом timeout и проходил мимо рубежа.
+const WRAPPER_VALUE_OPTIONS = new Map([
+  ['nice', new Set(['-n', '--adjustment'])],
+  ['ionice', new Set(['-c', '--class', '-n', '--classdata'])],
+  ['stdbuf', new Set(['-i', '--input', '-o', '--output', '-e', '--error'])],
+  ['timeout', new Set(['-k', '--kill-after', '-s', '--signal'])],
+]);
+const DURATION_WRAPPERS = new Set(['timeout']);
 
 export const DIRECT_SSH_HOOK_MATCHER = '^Bash$';
 export const DIRECT_SSH_HOOK_PATH = fileURLToPath(
@@ -134,6 +145,14 @@ function commandIndex(tokens) {
       index = skipOptions(tokens, index + 1);
       continue;
     }
+    if (WRAPPER_VALUE_OPTIONS.has(name)) {
+      index = skipOptions(tokens, index + 1, WRAPPER_VALUE_OPTIONS.get(name));
+      // timeout берёт длительность отдельным позиционным аргументом перед командой.
+      if (DURATION_WRAPPERS.has(name) && /^\d+(?:\.\d+)?[smhd]?$/u.test(tokens[index] || '')) {
+        index += 1;
+      }
+      continue;
+    }
     if (name === 'env') {
       index = skipOptions(tokens, index + 1, new Set(['-u', '--unset', '-C', '--chdir']));
       while (isAssignment(tokens[index])) index += 1;
@@ -215,4 +234,130 @@ export function isDirectSshCommand(command, depth = 0) {
   const segments = shellSegments(command);
   if (!segments) return false;
   return segments.some((tokens) => segmentUsesDirectSsh(tokens, depth));
+}
+
+const DB_CLIENTS = new Set([
+  'mysql', 'mariadb', 'clickhouse-client', 'redis-cli', 'valkey-cli',
+]);
+
+// Штатные алиасы клиентов дают ту же сетевую форму под другим именем: mariadb и
+// valkey-cli приходят из пакетов-форков, а единый бинарь clickhouse открывает
+// соединение подкомандой. Без этих имён политика молча пропускала бы прямой доступ.
+const REDIS_FAMILY = new Set(['redis-cli', 'valkey-cli']);
+const DB_SUBCOMMANDS = new Map([
+  ['clickhouse', new Set(['client', 'benchmark', 'local'])],
+]);
+const OFFLINE_SUBCOMMANDS = new Set(['local']);
+
+function localHost(value) {
+  const host = String(value || '').replace(/^\[|\]$/gu, '').toLowerCase();
+  if (host === 'localhost' || host === '::1') return true;
+  return isIP(host) === 4 && host.startsWith('127.');
+}
+
+function dynamicValue(value) {
+  return !value || /[$`{}]/u.test(String(value));
+}
+
+function hostVerdict(value) {
+  if (dynamicValue(value)) return 'unknown';
+  return localHost(value) ? 'allow' : 'deny';
+}
+
+function uriVerdict(value) {
+  if (dynamicValue(value)) return 'unknown';
+  try {
+    return hostVerdict(new URL(String(value)).hostname);
+  } catch {
+    return 'unknown';
+  }
+}
+
+function optionValue(tokens, index, longName, shortName) {
+  const token = String(tokens[index] || '');
+  if (token === longName || token === shortName) {
+    return { found: true, value: tokens[index + 1], consumed: 1 };
+  }
+  if (token.startsWith(`${longName}=`)) {
+    return { found: true, value: token.slice(longName.length + 1), consumed: 0 };
+  }
+  if (shortName && token.startsWith(shortName) && token !== shortName) {
+    return { found: true, value: token.slice(shortName.length), consumed: 0 };
+  }
+  return { found: false, value: '', consumed: 0 };
+}
+
+function dbSegmentVerdict(tokens, depth) {
+  const index = commandIndex(tokens);
+  const name = executableName(tokens[index]);
+  if (SHELLS.has(name) && depth < 4) {
+    const script = shellScriptOf(tokens, index + 1);
+    return script ? dbCommandVerdicts(script, depth + 1) : [];
+  }
+  const subcommands = DB_SUBCOMMANDS.get(name);
+  let rest = null;
+  if (subcommands) {
+    const subcommand = String(tokens[index + 1] || '').toLowerCase();
+    if (!subcommands.has(subcommand)) return [];
+    if (OFFLINE_SUBCOMMANDS.has(subcommand)) return ['allow'];
+    rest = tokens.slice(index + 2);
+  } else if (DB_CLIENTS.has(name)) {
+    rest = tokens.slice(index + 1);
+  } else {
+    return [];
+  }
+
+  for (let at = 0; at < rest.length; at += 1) {
+    const socket = optionValue(rest, at, '--socket', REDIS_FAMILY.has(name) ? '-s' : '');
+    if (socket.found) return dynamicValue(socket.value) ? ['unknown'] : ['allow'];
+    const host = optionValue(rest, at, '--host', '-h');
+    if (host.found) return [hostVerdict(host.value)];
+    if (REDIS_FAMILY.has(name)) {
+      const uri = optionValue(rest, at, '--uri', '-u');
+      if (uri.found) return [uriVerdict(uri.value)];
+    }
+  }
+  return ['allow'];
+}
+
+function dbCommandVerdicts(command, depth = 0) {
+  if (typeof command !== 'string' || !command || command.includes('\0')) return ['unknown'];
+  const segments = shellSegments(command);
+  if (!segments) return ['unknown'];
+  return segments.flatMap((tokens) => dbSegmentVerdict(tokens, depth));
+}
+
+/** Общая command-policy даёт типизированный verdict до permission mode исполнителя. */
+export function evaluateDirectCommand(command, options = {}) {
+  if (options.blockDirectSsh === true && isDirectSshCommand(command)) {
+    return { verdict: 'deny', kind: 'ssh' };
+  }
+  if (options.blockDirectDb === true) {
+    const verdicts = dbCommandVerdicts(command);
+    if (verdicts.includes('deny')) return { verdict: 'deny', kind: 'db' };
+    if (verdicts.includes('unknown')) {
+      return {
+        verdict: options.strictUnknownDbClient === true ? 'deny' : 'unknown',
+        kind: 'db',
+      };
+    }
+    if (verdicts.length) return { verdict: 'allow', kind: 'db' };
+  }
+  return { verdict: 'allow', kind: 'other' };
+}
+
+export const evaluateDirectClientCommand = evaluateDirectCommand;
+
+/** SSH-only сохраняет прежний argv; DB-флаги входят в fingerprint живой сессии. */
+export function directCommandHook(options = {}) {
+  const blockSsh = options.blockDirectSsh === true;
+  const blockDb = options.blockDirectDb === true;
+  if (!blockSsh && !blockDb) return '';
+  if (blockSsh && !blockDb) return DIRECT_SSH_HOOK_COMMAND;
+  return [
+    DIRECT_SSH_HOOK_COMMAND,
+    ...(blockSsh ? ['--ssh'] : ['--no-ssh']),
+    '--db',
+    ...(options.strictUnknownDbClient === true ? ['--strict-db'] : []),
+  ].join(' ');
 }

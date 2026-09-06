@@ -16,6 +16,7 @@ import {
   CLAUDE_DIRECT_SSH_DENY,
   DIRECT_SSH_HOOK_COMMAND,
   DIRECT_SSH_HOOK_MATCHER,
+  directCommandHook,
   directSshSetting,
 } from './_direct-ssh-policy.js';
 import {
@@ -24,6 +25,7 @@ import {
   createClaudeTurnCollector,
   openClaudeStreamSession,
 } from './_claude-stream.js';
+import { defaultWorkToolDescriptors } from './work-tools/index.js';
 
 /**
  * probe/efforts гоняют CLI — короткие таймауты, ошибки не роняют реестр.
@@ -787,13 +789,18 @@ async function configureClaudeExtraUsage(patch = {}, config = {}) {
  */
 export function claudeProviderSettingsArgs(settings = {}, { directSshPolicy = true } = {}) {
   const blockDirectSsh = directSshPolicy && settings.blockDirectSsh !== false;
+  const hookCommand = directCommandHook({
+    blockDirectSsh,
+    blockDirectDb: settings.blockDirectDb === true,
+    strictUnknownDbClient: settings.strictUnknownDbClient === true,
+  });
   const payload = {
     fastMode: settings.fastMode === true,
-    ...(blockDirectSsh && {
+    ...(hookCommand && {
       hooks: {
         PreToolUse: [{
           matcher: DIRECT_SSH_HOOK_MATCHER,
-          hooks: [{ type: 'command', command: DIRECT_SSH_HOOK_COMMAND, timeout: 5 }],
+          hooks: [{ type: 'command', command: hookCommand, timeout: 5 }],
         }],
       },
     }),
@@ -1143,6 +1150,9 @@ export default {
   scopedWorkspace: true,
   workToolsTransport: 'mcp',
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
+  // Официальная страница состояния вендора. Всплывашка ведёт туда, когда лимиты не
+  // пришли не по нашей вине: иначе сбой Anthropic человек разбирает как поломку кокпита.
+  statusPage: 'https://status.claude.com',
   // Каждый путь из opts.extraDirs становится дополнительным workspace через --add-dir.
   trustedDirectories: true,
   directSshPolicy: { enforcement: 'command-hook' },
@@ -1472,7 +1482,7 @@ export default {
     if (mcpConfig?.mcpServers?.['cockpit-work']) {
       const descriptors = Array.isArray(workTools?.descriptors)
         ? workTools.descriptors
-        : [{ name: 'supervised_ssh' }];
+        : defaultWorkToolDescriptors('claude');
       const allowed = scoped
         ? 'mcp__cockpit-work__repo_history'
         : descriptors

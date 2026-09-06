@@ -10,14 +10,14 @@ const SEP = '\x1e'; // record separator — в значениях профиля
 /**
  * @param {{factoryHome:string, profilesDir:string}} config пути движка и профилей
  * @param {string} name имя профиля (profiles/<name>/profile.sh)
- * @returns {Promise<{ctx:string, cwd:string, dirs:string[], repos:Array<{key:string,dir:string}>, markers:string}>}
+ * @returns {Promise<{ctx:string, cwd:string, dirs:string[], repos:Array<{key:string,dir:string}>, markers:string, routeMap:string}>}
  */
 export async function loadTriageProfile({ factoryHome, profilesDir }, name) {
-  const empty = { ctx: '', cwd: '', dirs: [], repos: [], markers: '' };
+  const empty = { ctx: '', cwd: '', dirs: [], repos: [], markers: '', routeMap: '' };
   if (!name || !factoryHome || !profilesDir) return empty;
   const file = path.join(profilesDir, name, 'profile.sh');
   const script = `source "${file}" >/dev/null 2>&1 || exit 1
-printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PROFILE_TRIAGE_REPOS" "$PROFILE_TRIAGE_MARKERS"`;
+printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PROFILE_TRIAGE_REPOS" "$PROFILE_TRIAGE_MARKERS" "$PROFILE_TRIAGE_ROUTES"`;
   const out = await new Promise((resolve) => {
     execFile('bash', ['-c', script], {
       env: { ...process.env, FACTORY_HOME: factoryHome, FACTORY_PROFILES_DIR: profilesDir },
@@ -25,7 +25,7 @@ printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PR
     }, (err, stdout) => resolve(err ? null : stdout));
   });
   if (out === null) return empty;
-  const [ctx = '', cwd = '', dirsRaw = '', reposRaw = '', markers = ''] = out.split(SEP);
+  const [ctx = '', cwd = '', dirsRaw = '', reposRaw = '', markers = '', routeMap = ''] = out.split(SEP);
   return {
     ctx,
     cwd,
@@ -36,5 +36,8 @@ printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PR
       return i > 0 ? { key: pair.slice(0, i), dir: pair.slice(i + 1) } : null;
     }).filter(Boolean),
     markers,
+    // «род:глубина=маршрут» — соответствие оценки триажа маршрутам ЭТОГО проекта.
+    // Профиль без карты работает по-старому: род должен совпасть с именем маршрута.
+    routeMap,
   };
 }

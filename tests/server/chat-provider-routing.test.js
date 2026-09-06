@@ -337,6 +337,62 @@ test('пустой Kimi-ход после принятого prompt не пов�
   assert.equal(binding.sessionId, null);
 });
 
+test('пустой запуск объясняется в ленте отметкой повтора и остаётся в сохранённом ходе', async (t) => {
+  const start = { k: 'start', model: 'claude-test', mode: 'auto' };
+  let runs = 0;
+  const executor = {
+    id: 'claude',
+    async run(options) {
+      runs += 1;
+      options.onStep?.({ ...start });
+      // Первый запуск умер на старте: обращений к модели не было, ход пуст.
+      if (runs === 1) return { reply: '', steps: [{ ...start }], emptyRun: true };
+      options.onStep?.({ k: 'text', text: 'готово' });
+      return { reply: 'готово', steps: [{ ...start }, { k: 'text', text: 'готово' }] };
+    },
+  };
+  const { app, events } = await apiFixture(t, { executor });
+  const saved = await app.inject({
+    method: 'PUT',
+    url: '/api/chat/store/chat',
+    payload: {
+      chat: {
+        id: 'empty-start-chat',
+        modelRef: { provider: 'claude', model: 'claude-test' },
+        messages: [],
+        createdAt: Date.UTC(2026, 7, 1),
+        updatedAt: Date.UTC(2026, 7, 1),
+        revision: 0,
+      },
+    },
+  });
+  assert.equal(saved.statusCode, 200);
+
+  const run = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: 'empty-start-chat',
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      message: 'проверка повтора пустого запуска',
+    },
+  });
+
+  assert.equal(run.statusCode, 200);
+  assert.equal(runs, 2, 'пустой запуск повторяется ровно один раз');
+  // Два «старта» подряд без объяснения читаются как дубль показа, поэтому между ними
+  // обязана стоять отметка повтора — и живьём, и в сохранённой ленте.
+  const steps = run.json().steps || [];
+  assert.deepEqual(steps.map((step) => step.k), ['start', 'note', 'start', 'text']);
+  assert.equal(steps[1].level, 'warn');
+  assert.match(steps[1].text, /повторяю ход/);
+
+  const notes = events
+    .filter((entry) => entry.event === 'chat-step' && entry.data.step?.k === 'note');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0].data.step.text, /повторяю ход/);
+});
+
 test('сбой инвалидации Kimi binding блокирует дальнейший ход вместо опасного resume', async (t) => {
   const executor = {
     id: 'kimi',

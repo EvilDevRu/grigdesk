@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
+import { createKnowledgeTransfer } from '../../server/src/lib/search/transfer.js';
+import { knowledgeFixture, record } from './helpers/knowledge.js';
+
 let knowledgeModule;
 let knowledgeModuleError;
 try {
@@ -228,6 +231,49 @@ test('Правка передаёт expectedRevision и возвращает aut
     calls: [['update', id, payload]],
     revision: 4,
   });
+});
+
+test('API отклоняет неверную тему до записи, сохраняя экспорт и карты рабочими', async (t) => {
+  const { root, storage } = await knowledgeFixture(t);
+  const transfer = createKnowledgeTransfer({ rootDir: root, knowledge: storage });
+  const { app } = await fixture(t, { knowledge: storage, transfer });
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/knowledge',
+    payload: record({ tags: ['knowledge', 'знания'] }),
+  });
+  assert.equal(created.statusCode, 201);
+  const saved = created.json().record;
+  const snapshot = await storage.exportSnapshot();
+
+  for (const tags of [[], [' ', 'knowledge'], ['../outside'], ['знания']]) {
+    const responses = [
+      await app.inject({
+        method: 'POST',
+        url: '/api/knowledge',
+        payload: record({ tags }),
+      }),
+      await app.inject({
+        method: 'PUT',
+        url: `/api/knowledge/${saved.id}`,
+        payload: { tags, body: 'Не сохранять.', expectedRevision: saved.revision },
+      }),
+    ];
+
+    for (const response of responses) {
+      assert.equal(response.statusCode, 400);
+      assert.equal(response.json().error, 'invalid_arguments');
+      assert.match(response.json().message, /Первый тег обязателен/);
+    }
+  }
+
+  assert.deepEqual(await storage.exportSnapshot(), snapshot);
+  const backup = await app.inject({ method: 'POST', url: '/api/knowledge/backup/export' });
+  const maps = await app.inject({ method: 'POST', url: '/api/knowledge/maps/refresh' });
+  assert.equal(backup.statusCode, 200);
+  assert.equal(backup.json().records.length, 1);
+  assert.equal(maps.statusCode, 200);
+  assert.equal(maps.json().mapCount, 1);
 });
 
 test('Удаление требует expectedRevision в теле DELETE', async (t) => {

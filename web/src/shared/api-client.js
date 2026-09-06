@@ -109,11 +109,11 @@ async function download(path) {
 
 // Пароль SSH уходит только как непрозрачные байты: общий JSON-клиент здесь
 // использовать нельзя, иначе секрет окажется в сериализуемом объекте.
-async function postBytes(path, body) {
+async function postBytes(path, body, { headers = {} } = {}) {
   const res = await fetch(url(path), {
     ...FETCH_OPTS,
     method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers: { ...headers, 'Content-Type': 'application/octet-stream' },
     body,
   });
   return handle(res, path);

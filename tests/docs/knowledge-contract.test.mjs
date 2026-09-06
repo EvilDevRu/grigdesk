@@ -3,7 +3,13 @@ import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
+import { measureKnowledgeContext } from '../../server/src/lib/search/context.js';
+
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+
+// Единственная цель @-каскада. Файл держит карты локальной базы и в репозиторий не входит,
+// поэтому сторожа отличают его отсутствие от битой ссылки.
+const LOCAL_CASCADE = 'CLAUDE.local.md';
 
 async function source(relativePath) {
   return readFile(path.join(ROOT, relativePath), 'utf8').catch(() => '');
@@ -13,7 +19,7 @@ test('CLAUDE.md ссылается на канонический контрак�
   const claude = await source('CLAUDE.md');
 
   assert.equal(
-    /\[([^\]]*знан[^\]]*)\]\(docs\/cockpit\/knowledge\.md\)/iu.test(claude),
+    /\[([^\]]*знан[^\]]*)\]\(docs\/cockpit\/guide\/knowledge\.md\)/iu.test(claude),
     true,
   );
 });
@@ -39,22 +45,23 @@ test('AGENTS.md сам объясняет исполнителю полный п
   });
 });
 
-test('Действующий каскад шести @-импортов остаётся неизменным', async () => {
+// Каскад репозитория состоит из ОДНОЙ строки: карты локальны для машины и в git не входят,
+// поэтому прямой @-импорт карты вернул бы в поставку ссылку на файл, которого в клоне нет.
+test('Каскад CLAUDE.md ведёт только в локальное оглавление', async () => {
   const claude = await source('CLAUDE.md');
-  const imports = [...claude.matchAll(/^@docs\/cockpit\/[^\s]+$/gm)].map((match) => match[0]);
+  const imports = [...claude.matchAll(/^@([^\s]+)$/gm)].map((match) => match[1]);
 
-  assert.deepEqual(imports, [
-    '@docs/cockpit/architecture.md',
-    '@docs/cockpit/b24.md',
-    '@docs/cockpit/inbox.md',
-    '@docs/cockpit/factory-graph.md',
-    '@docs/cockpit/chat-agents.md',
-    '@docs/cockpit/gotchas.md',
-  ]);
+  assert.deepEqual({
+    imports,
+    directMaps: imports.filter((target) => target.startsWith('docs/cockpit/')),
+  }, {
+    imports: [LOCAL_CASCADE],
+    directMaps: [],
+  });
 });
 
 test('Контракт описывает приватный путь базы и машинный override', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     defaultPath: contract.includes('~/.config/cockpit/knowledge/knowledge.db'),
@@ -68,7 +75,7 @@ test('Контракт описывает приватный путь базы �
 });
 
 test('Контракт различает CLI search/read/write и коды 0, 1, 2, 64', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     search: /knowledge\s+search/iu.test(contract),
@@ -85,7 +92,7 @@ test('Контракт различает CLI search/read/write и коды 0, 1
 });
 
 test('Контракт фиксирует морфологию, её границы, ранжирование и пустой поиск', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     morphology: /деплой[\s\S]{0,120}деплоя|деплоя[\s\S]{0,120}деплой/iu.test(contract),
@@ -103,7 +110,7 @@ test('Контракт фиксирует морфологию, её грани�
 });
 
 test('Контракт перечисляет HTTP, tool, live gate и CAS-ошибки', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     http: contract.includes('/api/knowledge'),
@@ -121,7 +128,7 @@ test('Контракт перечисляет HTTP, tool, live gate и CAS-ош�
 });
 
 test('Контракт описывает запись, происхождение, карты и запрет удаления исполнителем', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     toolWrite: /knowledge_search[\s\S]{0,300}(?:action[^\n]{0,40}write|write)/iu.test(contract),
@@ -146,7 +153,7 @@ test('Контракт описывает запись, происхождени
 });
 
 test('Замер отделяет текущую карту sample-записей от исторического @-каскада', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     dated: /29\.08\.2026|2026-08-29/.test(contract),
@@ -163,11 +170,15 @@ test('Замер отделяет текущую карту sample-записе�
   });
 });
 
-test('Каждая цель действующего @-каскада существует в репозитории', async () => {
+// Отсутствие локального оглавления — штатное состояние клона, а не поломка каскада.
+test('Каждая цель @-каскада, кроме локального оглавления, существует в репозитории', async () => {
   const claude = await source('CLAUDE.md');
   const imports = [...claude.matchAll(/^@([^\s]+)$/gm)].map((match) => match[1]);
   const missing = [];
   for (const target of imports) {
+    if (target === LOCAL_CASCADE) {
+      continue;
+    }
     const exists = await access(path.join(ROOT, target)).then(() => true).catch(() => false);
     if (!exists) {
       missing.push(target);
@@ -177,28 +188,22 @@ test('Каждая цель действующего @-каскада сущес
   assert.deepEqual(missing, []);
 });
 
-// Замер считает ровно то, что агент носит на себе каждый ход: корневые инструкции и
-// карты из действующего @-каскада CLAUDE.md. Карты вне каскада читаются по требованию
-// и контекста не занимают, поэтому в бюджет не входят.
+// Замер считает ровно то, что агент носит на себе каждый ход: корневые инструкции и весь
+// @-каскад, включая вложенный локальный уровень с картами. Обход именно транзитивный:
+// карты подключены не из CLAUDE.md, и счёт по одному уровню перестал бы их видеть.
+// Карты вне каскада читаются по требованию и контекста не занимают, в бюджет не входят.
 test('AGENTS.md, CLAUDE.md, карты @-каскада и резерв занимают не больше 60000 байт', async () => {
-  const claude = await source('CLAUDE.md');
-  const cascade = [...claude.matchAll(/^@([^\s]+)$/gm)].map((match) => match[1]);
-  const chunks = await Promise.all([
-    source('AGENTS.md'),
-    ...cascade.map((target) => source(target)),
-  ]);
-
+  const measured = await measureKnowledgeContext(ROOT);
   const reserveBytes = 512;
-  const totalBytes = [claude, ...chunks]
-    .reduce((sum, chunk) => sum + Buffer.byteLength(chunk, 'utf8'), 0) + reserveBytes;
+  const totalBytes = measured.totalBytes + reserveBytes;
 
   assert.deepEqual({
-    cascadeEmpty: cascade.length === 0,
-    unreadable: chunks.filter((chunk) => !chunk).length,
+    cascadeEmpty: measured.imports.length === 0,
+    unreadable: measured.missing.filter((target) => target !== LOCAL_CASCADE),
     withinBudget: totalBytes <= 60_000,
   }, {
     cascadeEmpty: false,
-    unreadable: 0,
+    unreadable: [],
     withinBudget: true,
   }, `фактический объём контекста: ${totalBytes} байт`);
 });
@@ -220,6 +225,8 @@ test('Каталог tracked-корпуса физически отсутств�
   assert.equal(exists, false);
 });
 
+// Верхний уровень docs/cockpit принадлежит картам целиком: продуктовые документы лежат в
+// guide/ и reference/ именно поэтому. Пустой список — рабочая копия без записей или клон.
 test('Все docs/cockpit документы являются картами с общей шапкой чтения', async () => {
   const names = (await readdir(path.join(ROOT, 'docs/cockpit')))
     .filter((name) => name.endsWith('.md'))
@@ -232,7 +239,7 @@ test('Все docs/cockpit документы являются картами с 
     }
   }
 
-  assert.deepEqual({ nonempty: names.length > 0, invalid }, { nonempty: true, invalid: [] });
+  assert.deepEqual({ invalid }, { invalid: [] });
 });
 
 test('Карты содержат непустой набор уникальных ссылок на живые записи', async () => {
@@ -242,10 +249,10 @@ test('Карты содержат непустой набор уникальны
   const ids = maps.flatMap(liveMapIds);
 
   assert.deepEqual({
-    nonempty: ids.length > 0,
+    linksPresent: names.length === 0 || ids.length > 0,
     duplicates: ids.length - new Set(ids).size,
   }, {
-    nonempty: true,
+    linksPresent: true,
     duplicates: 0,
   });
 });
@@ -287,7 +294,7 @@ test('Router поддерживает прямой адрес каждой жи�
 });
 
 test('Физический контракт описывает единый самодостаточный backup и все поля записи', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
   const fields = [
     'id', 'title', 'body', 'tags', 'kind', 'project', 'repository', 'sourceDocument',
     'revision', 'updatedAt',
@@ -307,7 +314,7 @@ test('Физический контракт описывает единый са
 });
 
 test('Физический контракт разделяет backup import/export и обновление карт', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.deepEqual({
     previewApply: /preview[\s\S]{0,500}apply|предпросмотр[\s\S]{0,500}примен/iu.test(contract),
@@ -325,7 +332,7 @@ test('Физический контракт разделяет backup import/exp
 });
 
 test('Физический контракт больше не обещает manifest tracked-корпуса', async () => {
-  const contract = await source('docs/cockpit/knowledge.md');
+  const contract = await source('docs/cockpit/guide/knowledge.md');
 
   assert.equal(/создаёт manifest|Manifest публикуется|docs\/knowledge\/manifest\.json/iu.test(contract), false);
 });

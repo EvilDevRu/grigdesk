@@ -63,32 +63,57 @@ function providers() {
   ];
 }
 
-function makeProvidersStore(mcpByProvider = {}) {
+// Стор реактивный и опрос в нём асинхронный — как в настоящем: `loadMcp` сначала
+// ЧИТАЕТ `mcp` (чтобы не потерять прошлый список на время загрузки), потом ждёт сеть
+// и пишет ответ туда же. На плоском объекте без reactive Vue ничего не отслеживает, и
+// зацикливание опроса такой стенд пропускает — проверять было бы нечего.
+async function makeProvidersStore(mcpByProvider = {}, providerPatch = {}) {
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const calls = [];
-  const store = {
-    providers: providers(),
+  const store = reactive({
+    providers: providers().map((p) => ({ ...p, ...(providerPatch[p.id] || {}) })),
     usage: {},
     mcp: {},
     loaded: true,
     showAllModels: false,
+    updating: '',
+    updateResults: {},
     visibleModels: () => [],
     async load() {},
+    // Установку CLI держит стор — плашка настроек только читает его состояние.
+    async updateCli(id) {
+      store.updating = id;
+      await Promise.resolve();
+      store.updateResults = {
+        ...store.updateResults,
+        [id]: { type: 'ok', text: 'Уже последняя версия (1.0.0).', changed: false },
+      };
+      store.updating = '';
+    },
     async loadUsage() {},
     async saveSetting() { return { ok: true }; },
     async loadMcp(id, refresh = false) {
       calls.push({ id, refresh });
+      // Ограничитель стенда: зацикленный опрос иначе съел бы память до самого assert.
+      if (calls.length > MCP_CALLS_LIMIT) return { state: 'ok', servers: [] };
+      store.mcp = { ...store.mcp, [id]: { ...(store.mcp[id] || {}), loading: true } };
+      await Promise.resolve();
       const data = mcpByProvider[id] || { state: 'ok', servers: [] };
       store.mcp = { ...store.mcp, [id]: { ...data, loading: false } };
       return data;
     },
     async runUsageAction() { return { ok: true }; },
-  };
+  });
   return { store, calls };
 }
 
-async function mountSettings(t, { mcpByProvider } = {}) {
+// Потолок вызовов опроса на стенде: троих исполнителей хватает, чтобы отличить
+// один заход от самоперезапуска, а память стенда остаётся целой.
+const MCP_CALLS_LIMIT = 30;
+
+async function mountSettings(t, { mcpByProvider, providerPatch } = {}) {
   const browser = await installBrowser(t, { 'cockpit-settings-tab': 'providers' });
-  const { store: prov, calls } = makeProvidersStore(mcpByProvider);
+  const { store: prov, calls } = await makeProvidersStore(mcpByProvider, providerPatch);
   // Настройки тянут полдюжины разделов сразу — все ответы пустые, кроме нужного нам реестра.
   globalThis.__settingsApi = {
     async get() { return {}; },
@@ -191,6 +216,18 @@ test('опрашиваем всех установленных исполнит�
   ]);
 });
 
+// Опрос пишет ответ в тот же `prov.mcp`, который читает сам. Наблюдатель, собирающий
+// зависимости автоматически, подписался бы на эту запись и перезапускался бы от своего
+// же ответа: вкладка исполнителей молотила бы опрос без конца, живой health-check не
+// успевал бы за 30-секундный таймаут запроса (панель показывала бы отказ), а очередь
+// соединений браузера не пускала бы к серверу даже «Обновить» на карточке.
+test('ответ опроса не перезапускает опрос', async (t) => {
+  const { calls, flushPromises } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
+
+  for (let i = 0; i < 20; i += 1) await flushPromises();
+  assert.deepEqual(calls.map((call) => call.id), ['claude', 'codex', 'kimi']);
+});
+
 test('«Обновить» перечитывает список мимо кэша', async (t) => {
   const { wrapper, calls } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
 
@@ -253,17 +290,70 @@ test('Codex и Kimi показывают configured/disabled без ложног
   assert.equal(kimi.get('.mcpst').text(), 'Настроен');
 });
 
-test('MCP-блок ограничен сверху и прокручивает только внутреннее содержимое', async () => {
+// Число ручек и длина списка MCP у исполнителей разные, а приезжают они в разное время.
+// Потолок высоты этого не держит: одноимённые разделы соседних карточек вставали на
+// разной высоте, а пришедший ответ сдвигал вниз всё, что под ним, — вплоть до кнопки
+// «Обновить». Поэтому у обоих блоков высота ЗАДАНА, а лишнее прокручивается внутри.
+test('блоки настроек и MCP держат заданную высоту и прокручивают содержимое', async () => {
   const source = await readFile(
     new URL('../../web/src/views/SettingsView.vue', import.meta.url),
     'utf8',
   );
 
+  const pvsettings = source.match(/\.pvsettings\s*\{[^}]*\}/s)?.[0] || '';
   const pvmcp = source.match(/\.pvmcp\s*\{[^}]*\}/s)?.[0] || '';
-  assert.match(pvmcp, /max-block-size:\s*220px/);
-  assert.doesNotMatch(pvmcp, /(?<!max-)block-size:\s*220px/, 'высота не фиксируется');
-  assert.match(source, /\.mcpbody\s*\{[^}]*overflow-y:\s*auto/s);
-  assert.match(source, /\.mcpbody\s*\{[^}]*scrollbar-gutter:\s*stable/s);
+  assert.match(pvsettings, /(?<!max-|min-)block-size:\s*220px/, 'высота настроек не задана');
+  assert.match(pvmcp, /(?<!max-|min-)block-size:\s*220px/, 'высота MCP не задана');
+  for (const body of ['pvsetbody', 'mcpbody']) {
+    const rule = new RegExp(`\\.[\\w.,\\s]*\\b${body}\\b[^{]*\\{[^}]*overflow-y:\\s*auto[^}]*\\}`, 's');
+    assert.match(source, rule, `${body} не прокручивается внутри`);
+  }
+  assert.match(source, /\.pvsetbody,\s*\.mcpbody\s*\{[^}]*scrollbar-gutter:\s*stable/s);
+});
+
+// Строка «доступно обновление» была только у отставшего исполнителя и сдвигала вниз
+// содержимое одной карточки ряда. Индикатор — точка у имени, а текст живёт в тултипе.
+test('версия CLI показана точкой у имени, а не строкой в фактах', async (t) => {
+  const { wrapper } = await mountSettings(t, {
+    providerPatch: {
+      claude: { latest: '2.1.9', updateAvailable: true },
+      codex: { latest: '0.152.1', updateAvailable: false },
+    },
+  });
+
+  assert.equal(wrapper.findAll('.pvupd').length, 0, 'строка обновления осталась в фактах');
+
+  const cards = wrapper.findAll('.pvcard');
+  const dots = cards.map((card) => card.find('[data-testid="provider-update-dot"]'));
+  assert.deepEqual(dots.map((dot) => dot.exists()), [true, true, false, false],
+    'точка есть ровно там, где фоновая проверка назвала последнюю версию');
+  assert.ok(dots[0].classes().includes('hot'), 'отставший CLI не выделен');
+  assert.ok(!dots[1].classes().includes('hot'), 'свежий CLI показан тревожным цветом');
+
+  // Текст ушёл в тултип — в самой карточке его быть не должно.
+  assert.doesNotMatch(cards[0].text(), /Доступно обновление/);
+  const tips = cards.map((card) => card.findComponent({ name: 'UiTooltip' }));
+  assert.match(tips[0].props('text'), /Доступно обновление: 2\.1\.9/);
+  assert.match(tips[1].props('text'), /Последняя версия \(0\.152\.1\)/);
+});
+
+// Итог нажатия появляется в одной карточке ряда. Стоя над блоками заданной высоты, он
+// сдвигал бы вниз и настройки, и MCP — и одноимённые секции соседей снова разъезжались бы.
+test('итог обновления стоит у своей кнопки и не двигает секции', async (t) => {
+  const { wrapper, flushPromises } = await mountSettings(t, {
+    providerPatch: { claude: { canUpdate: true } },
+  });
+
+  const card = wrapper.findAll('.pvcard')[0];
+  await card.get('.upd').trigger('click');
+  await flushPromises();
+
+  const result = card.get('[data-testid="provider-update-result"]');
+  assert.ok(card.get('.pvfoot').element.contains(result.element), 'итог не в строке кнопки');
+  assert.ok(
+    card.get('.pvfacts').element.nextElementSibling.matches('[data-testid="provider-settings-slot"]'),
+    'между фактами и настройками вклинился блок, который сдвигает секции вниз',
+  );
 });
 
 test('доверенные каталоги перечисляют исполнителей по capability из реестра', async (t) => {

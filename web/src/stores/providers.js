@@ -10,7 +10,17 @@ export const useProvidersStore = defineStore('providers', {
   // showAllModels — настройка «показывать все модели, включая старые версии» (server prefs).
   // Держим её здесь же: список моделей приходит полным, тумблер только фильтрует показ.
   // mcp: id исполнителя → { state, servers[], error?, checkedAt, loading } — грузится лениво.
-  state: () => ({ providers: [], usage: {}, mcp: {}, loaded: false, showAllModels: false }),
+  // updating — id исполнителя, чей CLI ставится прямо сейчас (ход один на все окна кнопок),
+  // updateResults — итог последней установки по исполнителю: { type, text, changed }.
+  state: () => ({
+    providers: [],
+    usage: {},
+    mcp: {},
+    loaded: false,
+    showAllModels: false,
+    updating: '',
+    updateResults: {},
+  }),
   getters: {
     /**
      * Модель по умолчанию: сильнейшая из видимых в кратком списке (не `extra`) у доступного
@@ -114,6 +124,47 @@ export const useProvidersStore = defineStore('providers', {
         const { usage } = await api.get('/api/providers/usage');
         this.usage = usage || {};
       } catch { /* эндпоинта нет / сервер молчит — баров просто нет */ }
+    },
+    /**
+     * Установка новой версии CLI исполнителя. Живёт в сторе, а не во вьюхе: жмут и в
+     * плашке настроек, и во всплывашке топбара, а ход у операции один — пока npm ставит,
+     * второй кнопке нельзя показывать «можно жать». Версия CLI задаёт набор моделей,
+     * поэтому по итогу реестр перечитывается принудительно.
+     */
+    async updateCli(providerId) {
+      if (this.updating) return { ok: false, error: 'другой CLI уже обновляется' };
+
+      this.updating = providerId;
+      this.updateResults = { ...this.updateResults, [providerId]: null };
+
+      let result;
+
+      try {
+        const r = await api.post(`/api/providers/${encodeURIComponent(providerId)}/update`, {});
+
+        result = r.changed
+          ? {
+            type: 'ok',
+            text: `Обновлён: ${r.before || '?'} → ${r.after}. Список моделей пересобран.`,
+            changed: true,
+          }
+          : {
+            type: r.ok ? 'ok' : 'err',
+            text: r.ok
+              ? `Уже последняя версия (${r.after || r.before}).`
+              : `Не получилось: ${(r.output || '').slice(-300)}`,
+            changed: false,
+          };
+        this.updateResults = { ...this.updateResults, [providerId]: result };
+        await this.load(true);
+      } catch (e) {
+        result = { type: 'err', text: e.message, changed: false };
+        this.updateResults = { ...this.updateResults, [providerId]: result };
+      } finally {
+        this.updating = '';
+      }
+
+      return result;
     },
     /**
      * Своя настройка исполнителя (тумблер в его плашке). Значение применяем сразу,

@@ -199,6 +199,40 @@ export function flattenGitTree(tree, openDirs, group = '') {
   return rows;
 }
 
+// Столько квадратиков в полоске итога, как в сводке GitHub.
+export const GIT_STAT_BLOCKS = 5;
+
+/**
+ * Итог группы, как сводка pull request на GitHub: сумма добавленных и удалённых строк по
+ * всем файлам и раскладка полоски из пяти квадратиков. Пока строк не больше пяти,
+ * квадратик — одна строка; дальше доли округляются вниз, но ненулевая сторона всегда
+ * оставляет себе хотя бы один: две удалённые строки на фоне тысячи добавленных не должны
+ * исчезать с полоски. Остаток — нейтральный.
+ */
+export function gitGroupStat(files) {
+  let add = 0;
+  let del = 0;
+  for (const file of Array.isArray(files) ? files : []) {
+    add += Number(file?.add) || 0;
+    del += Number(file?.del) || 0;
+  }
+
+  const total = add + del;
+  let addBlocks = add;
+  let delBlocks = del;
+  if (total > GIT_STAT_BLOCKS) {
+    addBlocks = Math.max(Math.floor((add / total) * GIT_STAT_BLOCKS), add ? 1 : 0);
+    delBlocks = Math.max(Math.floor((del / total) * GIT_STAT_BLOCKS), del ? 1 : 0);
+  }
+
+  const blocks = [
+    ...Array(addBlocks).fill('add'),
+    ...Array(delBlocks).fill('del'),
+    ...Array(GIT_STAT_BLOCKS - addBlocks - delBlocks).fill('none'),
+  ];
+  return { add, del, total, blocks };
+}
+
 /**
  * Группы изменений панели «Код» — как Source Control в VS Code: сначала индекс,
  * затем рабочее дерево. Пустая группа не рисуется вовсе.
@@ -236,12 +270,13 @@ export function buildGitGroups(payload, openDirs) {
         tree,
         rows: flattenGitTree(tree, openDirs, source.id),
         list: source.files.map((file) => ({ file, ...splitGitPath(file.path) })),
+        stat: gitGroupStat(source.files),
       };
     });
   if (groups.length) return groups;
   // Чистое дерево: одна пустая группа остаётся, чтобы панели было куда поставить
   // заголовок, переключатель вида и честное «изменений нет».
-  return [{ ...sources[1], tree: buildGitTree([]), rows: [], list: [] }];
+  return [{ ...sources[1], tree: buildGitTree([]), rows: [], list: [], stat: gitGroupStat([]) }];
 }
 
 /** Все каталоги обеих групп — ключами «группа:путь», как их видит `gitOpenDirs`. */

@@ -14,12 +14,21 @@ import {
 
 const ATTEMPT = 'a_00112233445566778899aabbccddeeff';
 
-test('живой юнит и совпавшая попытка — прогон подтверждён', async () => {
+test('живой юнит и совпавшая попытка — прогон подтверждён', async (t) => {
   let polls = 0;
+  let clockMs = 1000;
+  // Время окна зависит от ответов юнита: задержка event loop под нагрузкой
+  // не должна завершать окно после первого же таймера и скрывать повторный опрос.
+  t.mock.method(Date, 'now', () => clockMs);
+
   const res = await confirmRouteResume({
     attempt: ATTEMPT,
     identity: async () => ({ attempt: ATTEMPT, alive: true }),
-    unitAlive: async () => { polls += 1; return true; },
+    unitAlive: async () => {
+      polls += 1;
+      clockMs += 4;
+      return true;
+    },
     reason: async () => '',
     settleMs: 12, stepMs: 4,
   });

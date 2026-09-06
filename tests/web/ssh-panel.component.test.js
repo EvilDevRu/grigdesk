@@ -107,6 +107,14 @@ test('две server-owned сессии показаны вкладками пр�
   const { wrapper } = await mountPanel(t);
 
   assert.deepEqual({
+    maturity: {
+      heading: wrapper.get('#ssh-panel-title').text(),
+      text: wrapper.get('[data-product-maturity="beta"]').text(),
+      label: wrapper.get('[data-product-maturity="beta"]').attributes('aria-label'),
+      role: wrapper.get('[data-product-maturity="beta"]').attributes('role'),
+      inTitle: wrapper.get('.ssh-panel__title [data-product-maturity="beta"]').exists(),
+      inSummary: wrapper.find('.ssh-panel__summary [data-product-maturity]').exists(),
+    },
     tabs: wrapper.findAll('[role="tab"]').map((entry) => ({
       project: entry.get('[data-ssh-session-project]').text(),
       target: entry.get('[data-ssh-session-target]').text(),
@@ -114,6 +122,10 @@ test('две server-owned сессии показаны вкладками пр�
     terminals: globalThis.__sshPanelTerminals.length,
     terminalHosts: wrapper.findAll('[data-ssh-terminal-host]').length,
   }, {
+    maturity: {
+      heading: 'SSH', text: 'бета', label: 'Бета-версия', role: undefined,
+      inTitle: true, inSummary: false,
+    },
     tabs: [
       { project: 'cockpit', target: 'Боевой код · code' },
       { project: 'cockpit', target: 'База · db' },
@@ -347,13 +359,16 @@ test('закрытие активной сессии выбирает сосед
   });
 });
 
-test('терминальный host включает внутренние отступы в измеряемую высоту', async () => {
+test('FitAddon видит отступы xterm и не обрезает нижнюю строку', async () => {
   const source = await readFile(PANEL_PATH, 'utf8');
+  const hostRule = source.match(/\.ssh-terminal\s*\{(?<body>[^}]*)\}/su)?.groups?.body || '';
+  const xtermRule = source.match(
+    /\.ssh-terminal :deep\(\.xterm\)\s*\{(?<body>[^}]*)\}/su,
+  )?.groups?.body || '';
 
-  assert.match(
-    source,
-    /\.ssh-terminal\s*\{[^}]*box-sizing:\s*border-box;/su,
-  );
+  assert.doesNotMatch(hostRule, /\bpadding\s*:/u);
+  assert.match(xtermRule, /box-sizing:\s*border-box;/u);
+  assert.match(xtermRule, /padding:\s*9px 10px;/u);
 });
 
 test('мобильная page-панель не резервирует место под кнопки дока', async (t) => {
@@ -373,6 +388,25 @@ test('мобильная page-панель не резервирует мест�
     compact: true,
     dock: false,
     regions: ['ssh-workspace', 'ssh-connections'],
+  });
+});
+
+test('бета-метка SSH остаётся в шапке компактного дока', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    props: {
+      compact: true,
+      presentation: 'dock',
+    },
+  });
+
+  assert.deepEqual({
+    compact: wrapper.classes().includes('is-compact'),
+    dock: wrapper.classes().includes('is-dock'),
+    chips: wrapper.findAll('.ssh-panel__title [data-product-maturity="beta"]').length,
+  }, {
+    compact: true,
+    dock: true,
+    chips: 1,
   });
 });
 

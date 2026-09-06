@@ -17,6 +17,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { factoryUnitArgs } from './factory-launch.js';
+import { cockpitCliPath } from './cli-path.js';
 
 /** Коды выхода route-движка человеческим текстом. */
 export const ROUTE_EXIT_HINTS = {
@@ -179,7 +180,8 @@ export function startRegistryIdentity(registry, {
 export function routeLaunchEnv(config, extra = {}) {
   return {
     ...extra,
-    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+    PATH: cockpitCliPath(config.rootDir),
+    ...(config.knowledgeDbPath ? { COCKPIT_KNOWLEDGE_DB_PATH: config.knowledgeDbPath } : {}),
     HOME: process.env.HOME || '',
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,

@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createStepSink } from '../chat/stream-steps.js';
 import { contextCacheStatus } from '../chat/context-cache.js';
 import { createKimiStepNormalizer } from '../executors/_kimi-steps.js';
+import { defaultWorkToolDescriptors } from '../executors/work-tools/index.js';
 import { createAcpClient, initializeKimiAcp } from './acp-client.js';
 import { stageKimiAttachments } from './attachments.js';
 import {
@@ -266,6 +267,13 @@ export async function runContainedKimi({
     error.code = 'direct_ssh_policy_unavailable';
     throw error;
   }
+  if (launchMode === 'host' && providerSettings?.blockDirectDb === true) {
+    const error = new Error(
+      'Kimi host не умеет обеспечить запрет прямых подключений к БД: включи contained.',
+    );
+    error.code = 'direct_db_policy_unavailable';
+    throw error;
+  }
   const checkVersion = deps.assertVersion || assertPinnedVersion;
   if (launchMode === 'host') {
     // Host CLI обновляется пользователем: жёсткий пин ломал бы чат при любом
@@ -320,10 +328,9 @@ export async function runContainedKimi({
   const stepSink = createStepSink(onStep);
   const normalizeStep = createKimiStepNormalizer({ model, cwd, mode: permissionMode || 'manual' });
   let sessionMcpServers = mcpServers;
-  const defaultWorkNames = ['supervised_ssh', 'knowledge_search'];
   const workNames = new Set((Array.isArray(workTools?.descriptors)
     ? workTools.descriptors
-    : defaultWorkNames.map((name) => ({ name })))
+    : defaultWorkToolDescriptors('kimi'))
     .map((descriptor) => descriptor?.name || descriptor?.function?.name)
     .filter(Boolean));
   let containedWorkMcp = null;

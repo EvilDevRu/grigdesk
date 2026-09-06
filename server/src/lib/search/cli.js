@@ -193,6 +193,7 @@ export async function runKnowledgeCli(args = process.argv.slice(2), options = {}
     try {
       const transfer = createKnowledgeTransfer({
         rootDir,
+        dbPath,
         knowledge: storage,
         mapsRootFor: mapsRootFor || ((project) => projectMapsRoot({
           config,

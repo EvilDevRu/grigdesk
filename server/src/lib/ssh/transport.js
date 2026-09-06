@@ -68,6 +68,12 @@ export function createSshTransport(options = {}) {
       shell: (settings = {}) => callChannel(client, 'shell', settings),
       exec: (command, execOptions = {}) => callChannel(client, 'exec', command, execOptions),
       sftp: () => callChannel(client, 'sftp'),
+      forwardOut: ({ host, port }) => new Promise((resolve, reject) => {
+        client.forwardOut('127.0.0.1', 0, String(host), Number(port), (error, channel) => {
+          if (error) reject(error);
+          else resolve(channel);
+        });
+      }),
       close: () => client.end(),
       end: () => client.end(),
       destroy: () => client.destroy?.(),

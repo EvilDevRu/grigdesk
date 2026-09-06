@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { isDirectSshCommand } from './_direct-ssh-policy.js';
+import { evaluateDirectCommand } from './_direct-ssh-policy.js';
 
 function deny(reason) {
   process.stdout.write(`${JSON.stringify({
@@ -29,8 +29,16 @@ async function main() {
     deny('Проверка прямого SSH получила неподдерживаемый вызов; команда отклонена fail-closed.');
     return;
   }
-  if (isDirectSshCommand(command)) {
-    deny('Прямой SSH запрещён настройкой исполнителя. Используй контролируемый SSH-инструмент Cockpit.');
+  const flags = new Set(process.argv.slice(2));
+  const verdict = evaluateDirectCommand(command, {
+    blockDirectSsh: flags.size ? flags.has('--ssh') : true,
+    blockDirectDb: flags.has('--db'),
+    strictUnknownDbClient: flags.has('--strict-db'),
+  });
+  if (verdict.verdict === 'deny') {
+    deny(verdict.kind === 'db'
+      ? 'Прямое подключение к внешней БД запрещено. Используй надзорный инструмент Cockpit.'
+      : 'Прямой SSH запрещён настройкой исполнителя. Используй контролируемый SSH-инструмент Cockpit.');
   }
 }
 

@@ -18,7 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { cut, cutMiddle, base, lineCount } from '../chat/stream-steps.js';
-import { isDirectSshCommand } from './_direct-ssh-policy.js';
+import { evaluateDirectCommand } from './_direct-ssh-policy.js';
 
 // Сколько текста инструмент возвращает МОДЕЛИ. Жёстче, чем лента для человека:
 // результат уезжает обратно в контекст, а у локальной модели он 32k по умолчанию —
@@ -332,6 +332,7 @@ export function toolModes() {
  */
 export async function createToolbox({
   cwd, roots = [], permissionMode = 'manual', blockDirectSsh = true,
+  blockDirectDb = false, strictUnknownDbClient = false,
   onPermission, sink, signal, workTools,
 } = {}) {
   // Корни резолвим один раз: realpath — дорогой сисколл, а проверять их надо на каждый путь.
@@ -414,9 +415,17 @@ export async function createToolbox({
     const safeArgs = args && typeof args === 'object' ? args : {};
     sink?.emit({ k: 'tool', id, name: tool.ribbon, ...tool.describe(safeArgs) });
 
-    if (blockDirectSsh && tool.name === 'bash'
-        && isDirectSshCommand(String(safeArgs.command || ''))) {
-      const text = 'Прямой SSH запрещён настройкой исполнителя.';
+    const commandPolicy = tool.name === 'bash'
+      ? evaluateDirectCommand(String(safeArgs.command || ''), {
+        blockDirectSsh,
+        blockDirectDb,
+        strictUnknownDbClient,
+      })
+      : { verdict: 'allow', kind: 'other' };
+    if (commandPolicy.verdict === 'deny') {
+      const text = commandPolicy.kind === 'db'
+        ? 'Прямое подключение к внешней БД запрещено настройкой исполнителя.'
+        : 'Прямой SSH запрещён настройкой исполнителя.';
       sink?.emit({ k: 'res', id, ok: false, text });
       return { ok: false, text };
     }

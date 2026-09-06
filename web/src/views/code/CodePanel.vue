@@ -197,6 +197,16 @@
               <div class="subhead" :data-group="group.id">
                 <span class="subtitle" :title="group.hint">{{ group.title }}</span>
                 <span v-if="group.files.length" class="cnt mono">{{ group.files.length }}</span>
+                <!-- Итог группы, как сводка pull request на GitHub: сумма строк по всем файлам
+                     и полоска из пяти квадратиков. Без строк (бинарные файлы, чистое дерево)
+                     итога нет, чтобы не рисовать «+0». -->
+                <span v-if="group.stat.total" class="diffstat mono" :title="gitStatTitle(group.stat)">
+                  <i v-if="group.stat.add" class="a">+{{ group.stat.add }}</i>
+                  <i v-if="group.stat.del" class="d">−{{ group.stat.del }}</i>
+                  <span class="bar" aria-hidden="true">
+                    <i v-for="(block, index) in group.stat.blocks" :key="index" :class="block"></i>
+                  </span>
+                </span>
                 <span class="grow"></span>
                 <UiIconButton
                   v-if="group.files.length"
@@ -570,6 +580,11 @@ const STLABEL = { A: 'A', M: 'M', D: 'D', R: 'R' };
 // Шаг лесенки дерева задаётся в CSS (`--tree-step`), сюда приезжает только глубина:
 // иначе два числа — px в скрипте и отступ шеврона в стилях — разъезжаются при правке.
 function rowDepth(depth) { return { '--depth': depth }; }
+
+/** Подсказка итога группы: в заголовке только числа, слово «строк» живёт здесь. */
+function gitStatTitle(stat) {
+  return `добавлено строк: ${stat.add}, удалено строк: ${stat.del}`;
+}
 
 /** Первый файл первой непустой группы: индекс важнее рабочего дерева. */
 function firstGitRef() {
@@ -1602,6 +1617,20 @@ onBeforeUnmount(() => {
 .st.A { color: var(--good); } .st.M { color: var(--warn); } .st.D { color: var(--bad); } .st.R { color: var(--accent); }
 .cnt { flex: none; font-size: 11px; display: flex; gap: 5px; transition: opacity .1s; }
 .cnt .a { color: var(--good); } .cnt .d { color: var(--bad); }
+/* Итог группы: числа в тех же цветах, что у строк файлов, полоска — пять квадратиков
+   GitHub. Заголовок группы задаёт вес шрифта, итог его наследует. */
+.diffstat { flex: none; display: flex; align-items: center; gap: 5px; font-size: 11px; }
+.diffstat .a { color: var(--good); } .diffstat .d { color: var(--bad); }
+.diffstat .bar { display: inline-flex; gap: 1px; }
+.diffstat .bar i { width: 7px; height: 7px; border-radius: 1px; background: var(--line); }
+.diffstat .bar .add { background: var(--good); } .diffstat .bar .del { background: var(--bad); }
+/* В панели уже 360 px итог с пятизначными числами не умещается в строке заголовка рядом
+   с кнопками: замер при 300 px показал заголовок, ужатый до «В…». Поэтому там итог
+   целиком уходит на свою строку под заголовком — числа и полоска остаются читаемыми. */
+@container code-panel (max-width: 359px) {
+  .subhead { flex-wrap: wrap; }
+  .diffstat { order: 10; flex-basis: 100%; }
+}
 /* В узкой панели имени файла уступают и счётчик строк, и хвост каталога: имя — то,
    ради чего список открывают, числа видны в самом дифе, а целый путь остаётся в
    подсказке строки. Меряем панель, а не окно: ширину ей задаёт разделитель дерева,

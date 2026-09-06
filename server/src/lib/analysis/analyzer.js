@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadTriageProfile } from './profile.js';
 import { buildTriagePrompt } from './prompt.js';
+import { parseRouteMap, resolveRoute } from './route-policy.js';
 import { createRepoHistoryTools } from './repo-history.js';
 import { supportsScopedWorkspace } from '../executors/index.js';
 import { createWorkIpc } from '../executors/work-ipc.js';
@@ -378,9 +379,25 @@ export class Analyzer {
   async profile() {
     if (!this._profile) {
       const name = this.config.factoryProfile || (await this.factoryState.primaryProfile().catch(() => '')) || '';
-      this._profile = await loadTriageProfile(this.config, name);
+      this._profile = { name, ...await loadTriageProfile(this.config, name) };
     }
     return this._profile;
+  }
+
+  /**
+   * Опубликованный каталог маршрутов профиля. Он нужен дважды: промпту — чтобы триаж
+   * не называл род работы, которого у профиля нет, и политике — чтобы не рекомендовать
+   * маршрут, которого движок не примет. Каталога нет — просто работаем без рекомендации.
+   */
+  async _routeCatalog(profileName) {
+    if (!profileName || typeof this.factoryState?.catalog !== 'function') {
+      return null;
+    }
+    try {
+      return await this.factoryState.catalog(profileName);
+    } catch {
+      return null;
+    }
   }
 
   /** Сводка по всем анализам: оценки + статусы (для бейджей доски). */
@@ -562,6 +579,7 @@ export class Analyzer {
       const clarifications = await this._materializeClarifications(id, inputDir);
       const outputJson = path.join(outputDir, `t${id}.analysis.json`);
       const outputNote = path.join(outputDir, `t${id}.md`);
+      const catalog = await this._routeCatalog(profile.name);
       const prompt = buildTriagePrompt({
         task: id,
         title: ticket.title,
@@ -570,6 +588,13 @@ export class Analyzer {
         clarifications,
         discussion: await this._discussion(id, ticket),
         profile,
+        routeChoice: {
+          kinds: parseRouteMap(profile.routeMap).kinds,
+          routes: (catalog?.routes || []).map((routeId) => ({
+            id: routeId,
+            title: catalog.routeOptions?.[routeId]?.title || '',
+          })),
+        },
         jsonPath: outputJson,
         notePath: outputNote,
       });
@@ -620,6 +645,7 @@ export class Analyzer {
       await this._enrich(outputJson, normalized, {
         ticket,
         profile,
+        catalog,
         run,
         startedAt,
         selected,
@@ -808,14 +834,33 @@ export class Analyzer {
     }
   }
 
-  /** Дописывает в analysis.json то, что агенту знать неоткуда: SHA репо, стоимость, время. */
-  async _enrich(jsonPath, analysis, { ticket, profile, run, startedAt, selected }) {
+  /**
+   * Дописывает в analysis.json то, что агенту знать неоткуда: SHA репо, стоимость, время
+   * и рекомендацию маршрута. Маршрут именно здесь, а не в промпте: род работы называет
+   * модель, глубину считает политика по её же оценкам, а имена маршрутов знает профиль.
+   * Профиль и hash каталога уезжают в файл, чтобы устаревшая рекомендация не применялась
+   * к другому каталогу молча.
+   */
+  async _enrich(jsonPath, analysis, { ticket, profile, catalog, run, startedAt, selected }) {
     const repos = {};
     for (const r of profile.repos) {
       repos[r.key] = { dir: r.dir, sha: await gitSha(r.dir) };
     }
+    const decision = resolveRoute(analysis, {
+      routeMap: profile.routeMap,
+      routes: catalog?.routes || [],
+    });
     const enriched = {
       ...analysis,
+      ...(decision.kind ? { route_kind: decision.kind } : {}),
+      // route_guess остаётся именем поля для формы запуска и старых оценок, но теперь
+      // это результат политики, а не свободная догадка модели.
+      ...(decision.route ? { route_guess: decision.route } : {}),
+      route_depth: decision.depth,
+      route_reason: decision.reason,
+      ...(catalog
+        ? { route_profile: profile.name, route_catalog_hash: catalog.catalogHash }
+        : {}),
       title: ticket.title,
       generated_at: new Date().toISOString(),
       repos,

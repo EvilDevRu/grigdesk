@@ -60,12 +60,27 @@ test('экспортированные порты имеют приоритет 
   }), '28140\t28143');
 });
 
-test('штатные launcher-ы добавляют официальный каталог Kimi в PATH один раз', (t) => {
+test('штатные launcher-ы добавляют CLI установки и пользовательские bin в PATH один раз', (t) => {
   const home = mkdtempSync(path.join(os.tmpdir(), 'cockpit-kimi-home-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const value = execFileSync('bash', ['-c', pathProbe, 'runtime-env-test', helper, home], {
     encoding: 'utf8',
   }).trim();
 
-  assert.equal(value, `${home}/.kimi-code/bin:/usr/bin:/bin`);
+  assert.equal(value, `${root}/bin:${home}/.local/bin:${home}/.kimi-code/bin:/usr/bin:/bin`);
+});
+
+test('существующий bin текущей установки сохраняет приоритет над старыми CLI-ссылками', () => {
+  const value = execFileSync('bash', ['-c', String.raw`
+set -euo pipefail
+source "$1"
+PATH="$2/bin:/usr/bin:/bin:$2/bin"
+cockpit_add_cli_paths "$2"
+command -v knowledge
+printf '%s\n' "$PATH"
+`, 'runtime-env-priority-test', helper, root], { encoding: 'utf8' }).trim().split('\n');
+
+  assert.equal(value[0], path.join(root, 'bin/knowledge'));
+  assert.equal(value[1].split(':')[0], path.join(root, 'bin'));
+  assert.equal(value[1].split(':').filter((entry) => entry === path.join(root, 'bin')).length, 1);
 });

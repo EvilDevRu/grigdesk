@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { createStepSink } from '../chat/stream-steps.js';
 import { toClaudeSteps } from './_claude-steps.js';
+import { defaultWorkToolDescriptors } from './work-tools/index.js';
 
 // Служебная модель внутренних вызовов CLI: её usage к контексту разговора не относится.
 export const SYNTHETIC_MODEL = '<synthetic>';
@@ -180,7 +181,7 @@ export function claudeSessionArgs({
   if (mcpConfig?.mcpServers?.['cockpit-work']) {
     const descriptors = Array.isArray(workTools?.descriptors)
       ? workTools.descriptors
-      : [{ name: 'supervised_ssh' }];
+      : defaultWorkToolDescriptors('claude');
     const allowed = descriptors
       .map((descriptor) => descriptor?.name || descriptor?.function?.name)
       .filter(Boolean)

@@ -46,12 +46,12 @@ export function createPermissionQueue(options = {}) {
       ...request,
       pid,
       at,
-      canRemember: request.origin === 'ssh' ? false : request.canRemember,
+      canRemember: ['ssh', 'db'].includes(request.origin) ? false : request.canRemember,
       resolve: resolveResult,
       result,
     };
     entry.timer = setTimer(() => {
-      const value = entry.origin === 'ssh'
+      const value = ['ssh', 'db'].includes(entry.origin)
         ? { allow: false, error: 'approval_expired' }
         : { allow: false, error: 'permission_expired' };
       finish(entry, value, 'expired');
@@ -60,6 +60,20 @@ export function createPermissionQueue(options = {}) {
     entries.set(pid, entry);
     notify({ type: 'waiting', entry: publicEntry(entry) });
     return publicEntry(entry);
+  }
+
+  /** Внутренний fail-closed/auto verdict проходит через очередь, не создавая карточку. */
+  function decide(request = {}, value = { allow: false }, reason = 'internal') {
+    const pid = String(request.pid || `p${randomUUID().replaceAll('-', '')}`);
+    resolved.add(pid);
+    notify({ type: 'done', pid, origin: request.origin, reason });
+    return {
+      ...request,
+      pid,
+      at: request.at ?? Date.now(),
+      canRemember: false,
+      result: Promise.resolve(value),
+    };
   }
 
   async function answer(pidValue, expectedOrigin, decision = {}) {
@@ -108,6 +122,7 @@ export function createPermissionQueue(options = {}) {
 
   return {
     enqueue,
+    decide,
     answer,
     cancel,
     cancelWhere,

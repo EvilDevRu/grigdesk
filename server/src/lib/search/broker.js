@@ -46,12 +46,59 @@ function sourceDocument(record) {
 }
 
 /**
+ * Правка знания подчиняется режиму файловых прав. Общий callback показывает
+ * человеку точное содержимое; отсутствие канала подтверждения закрывает запись.
+ * Пустой режим также требует спроса: sandbox исполнителя не разрешает сам по себе
+ * запись в серверную БД и карты за пределами его рабочего каталога.
+ */
+async function authorizeWrite(scope, context, previous, value) {
+  if (context.signal?.aborted || context.isCurrent?.() === false) {
+    return { ok: false, error: 'permission_denied', reason: 'turn_inactive' };
+  }
+  const mode = scope.permissionMode || 'default';
+  if (mode === 'plan') {
+    return { ok: false, error: 'permission_denied', reason: 'plan_read_only' };
+  }
+  if (['acceptEdits', 'dontAsk', 'bypassPermissions', 'yolo'].includes(mode)) {
+    return { ok: true, prompted: false };
+  }
+  if (typeof context.onPermission !== 'function') {
+    return { ok: false, error: 'permission_denied', reason: 'approval_unavailable' };
+  }
+  const answer = await context.onPermission({
+    tool: previous ? 'изменение знания' : 'создание знания',
+    input: {
+      description: value.title,
+      project: previous?.project || scope.projectId,
+      repository: value.repository,
+      recordKind: value.kind,
+      tags: [...value.tags],
+      ...(previous ? { id: previous.id, revision: previous.revision } : {}),
+      diff: { old: previous?.body || '', new: value.body },
+    },
+    acceptsComment: true,
+    canRemember: false,
+    signal: context.signal,
+    raw: { toolCall: { kind: 'edit', title: value.title } },
+  });
+  if (answer?.allow !== true) {
+    return {
+      ok: false,
+      error: 'permission_denied',
+      reason: 'user_denied',
+      ...(answer?.comment ? { comment: String(answer.comment) } : {}),
+    };
+  }
+  return { ok: true, prompted: true };
+}
+
+/**
  * Broker проверяет живой plugin gate перед каждой операцией и навязывает
  * server-owned project scope. Ошибки SQLite и пути остаются только в журнале.
  */
 export function createKnowledgeBroker({ pluginEnabled, knowledge, transfer, log } = {}) {
   return {
-    async invoke(scope = {}, input = {}) {
+    async invoke(scope = {}, input = {}, context = {}) {
       if (pluginEnabled?.('knowledge') !== true) {
         return { ok: false, error: 'plugin_disabled' };
       }
@@ -97,7 +144,6 @@ export function createKnowledgeBroker({ pluginEnabled, knowledge, transfer, log 
             ref: String(scope.chatKey),
           };
           let previous = null;
-          let record;
           if (hasId) {
             previous = await knowledge.read(id);
             if (!previous || (scope.projectId && previous.project !== String(scope.projectId))) {
@@ -106,23 +152,38 @@ export function createKnowledgeBroker({ pluginEnabled, knowledge, transfer, log 
             if (!sourceDocument(previous)) {
               return { ok: false, error: 'invalid_arguments' };
             }
-            const project = String(previous.project || '');
-            if (!project) {
+            if (!String(previous.project || '')) {
               return { ok: false, error: 'invalid_arguments' };
             }
-            record = await knowledge.update(id, {
-              ...value,
-              project,
-              expectedRevision: revision,
-              provenance,
-            });
-          } else {
-            if (!scope.projectId) {
-              return { ok: false, error: 'project_scope_unavailable' };
+            if (previous.revision !== revision) {
+              return { ok: false, error: 'knowledge_conflict', currentRevision: previous.revision };
             }
-            const project = String(scope.projectId);
-            record = await knowledge.create({ ...value, project, provenance });
+          } else if (!scope.projectId) {
+            return { ok: false, error: 'project_scope_unavailable' };
           }
+          const permission = await authorizeWrite(scope, context, previous, value);
+          if (!permission.ok) {
+            return permission;
+          }
+          if (hasId && permission.prompted) {
+            const current = await knowledge.read(id);
+            if (!current || current.project !== previous.project) {
+              return { ok: false, error: 'not_found' };
+            }
+            if (current.revision !== revision) {
+              return { ok: false, error: 'knowledge_conflict', currentRevision: current.revision };
+            }
+          }
+          if (pluginEnabled?.('knowledge') !== true) {
+            return { ok: false, error: 'plugin_disabled' };
+          }
+          if (context.signal?.aborted || context.isCurrent?.() === false) {
+            return { ok: false, error: 'permission_denied', reason: 'turn_inactive' };
+          }
+          const project = String(previous?.project || scope.projectId);
+          const record = hasId
+            ? await knowledge.update(id, { ...value, project, expectedRevision: revision, provenance })
+            : await knowledge.create({ ...value, project, provenance });
           const sourceDocuments = [...new Set([
             sourceDocument(previous),
             sourceDocument(record),

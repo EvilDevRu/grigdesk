@@ -86,7 +86,7 @@ test('потерянный ответ POST снимается только ав�
 
   assert.deepEqual({ pending: store.pending['ssh-pid-1'], getPaths }, {
     pending: undefined,
-    getPaths: ['/api/chat/waiting?include=ssh'],
+    getPaths: ['/api/chat/waiting?include=ssh,db'],
   });
 });
 
@@ -102,7 +102,7 @@ test('после F5 SSH-подтверждение восстанавливае�
       if (path === '/api/chat/pending') {
         return { pending: [] };
       }
-      if (path === '/api/chat/waiting?include=ssh') {
+      if (path === '/api/chat/waiting?include=ssh,db') {
         return { waiting: [restored] };
       }
       if (path === '/api/chat/active') {
@@ -117,7 +117,7 @@ test('после F5 SSH-подтверждение восстанавливае�
     waitingRequests: gets.filter((path) => path.includes('/api/chat/waiting')),
     pending: store.pending['ssh-restored'],
   }, {
-    waitingRequests: ['/api/chat/waiting?include=ssh'],
+    waitingRequests: ['/api/chat/waiting?include=ssh,db'],
     pending: restored,
   });
 });

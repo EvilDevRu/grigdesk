@@ -16,6 +16,7 @@ const PANELS = {
   shelf: defineAsyncComponent(() => import('../../views/shelf/TaskShelfPanel.vue')),
   terminal: defineAsyncComponent(() => import('../../views/terminal/TerminalPanel.vue')),
   ssh: defineAsyncComponent(() => import('../../views/ssh/SshPanel.vue')),
+  db: defineAsyncComponent(() => import('../../views/db/DbPanel.vue')),
 };
 
 export const TOOL_REGISTRY = TOOL_CATALOG.map((item) => ({ ...item, component: PANELS[item.id] }));

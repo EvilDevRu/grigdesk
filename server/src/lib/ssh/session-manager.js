@@ -94,6 +94,12 @@ export function createSshSessionManager(options = {}) {
     session.alive = false;
     session.generation += 1;
     cancelRuns(session, reason);
+    for (const channel of session.forwardChannels) {
+      channel.close?.();
+      channel.end?.();
+      channel.destroy?.();
+    }
+    session.forwardChannels.clear();
     for (const target of session.attached) {
       target.close?.();
     }
@@ -117,6 +123,7 @@ export function createSshSessionManager(options = {}) {
       shell,
       replay: Buffer.alloc(0),
       attached: new Set(),
+      forwardChannels: new Set(),
       runs: new Set(),
       alive: true,
       agentAllowed: false,
@@ -257,6 +264,34 @@ export function createSshSessionManager(options = {}) {
     return true;
   }
 
+  /** Scoped direct-tcpip канал принадлежит SSH-сессии и не попадает в terminal replay. */
+  async function forwardOut(idValue, options = {}) {
+    const session = sessions.get(String(idValue || ''));
+    if (!session?.alive
+      || session.connection.projectId !== String(options.projectId || '')
+      || session.generation !== Number(options.generation)) {
+      const error = new Error('SSH-сессия для туннеля недоступна');
+      error.code = 'session_lost';
+      throw error;
+    }
+    const channel = await session.transport.forwardOut({
+      host: String(options.host || ''),
+      port: Number(options.port),
+    });
+    if (!session.alive || session.generation !== Number(options.generation)) {
+      channel.close?.();
+      channel.destroy?.();
+      const error = new Error('SSH-сессия потеряна при открытии туннеля');
+      error.code = 'session_lost';
+      throw error;
+    }
+    session.forwardChannels.add(channel);
+    const forget = () => session.forwardChannels.delete(channel);
+    channel.once?.('close', forget);
+    channel.once?.('error', forget);
+    return channel;
+  }
+
   async function closeAll(reason = 'session_lost') {
     await Promise.all([...sessions.keys()].map(async (id) => {
       const session = sessions.get(id);
@@ -337,6 +372,8 @@ export function createSshSessionManager(options = {}) {
     write,
     resize,
     exec,
+    forwardOut,
+    openForward: forwardOut,
     close,
     closeAll,
     setAgentAccess,

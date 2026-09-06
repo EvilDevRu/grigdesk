@@ -1156,6 +1156,47 @@ test('пустой индекс оставляет прежний одиночн
   assert.equal(wrapper.find('.ehead .scope').exists(), false);
 });
 
+test('заголовок группы несёт итог строк, как сводка pull request на GitHub', async (t) => {
+  const git = {
+    branch: 'main',
+    staged: [
+      { path: 'src/a.js', status: 'M', add: 23, del: 6, group: 'staged', oldContent: 'head', newContent: 'index' },
+      { path: 'src/b.js', status: 'A', add: 2, del: 0, group: 'staged', oldContent: '', newContent: 'b' },
+    ],
+    // Бинарный файл строк не несёт: итога у такой группы нет, чтобы не рисовать «+0».
+    files: [{ path: 'logo.png', status: 'A', add: 0, del: 0, binary: true, group: 'work' }],
+    log: [],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) return { entries: [] };
+      if (url.includes('/git?')) return git;
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises } = await mountCodeView(t, { api });
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+
+  const heads = wrapper.findAll('.subhead[data-group]').map((node) => ({
+    group: node.attributes('data-group'),
+    stat: node.find('.diffstat').exists() ? node.get('.diffstat').text().replace(/\s+/g, '') : '',
+    blocks: node.findAll('.diffstat .bar i').map((block) => block.classes()[0]),
+  }));
+  // 25 добавленных строк против 6 удалённых: четыре зелёных квадратика и один красный.
+  assert.deepEqual(heads, [
+    { group: 'staged', stat: '+25−6', blocks: ['add', 'add', 'add', 'add', 'del'] },
+    { group: 'work', stat: '', blocks: [] },
+  ]);
+  assert.equal(wrapper.get('.diffstat').attributes('title'), 'добавлено строк: 25, удалено строк: 6');
+  // Счётчик файлов рядом с заголовком итогом строк не подменяется.
+  assert.deepEqual(groupHeads(wrapper).map((head) => head.count), ['2', '1']);
+});
+
 test('чистое рабочее дерево при непустом индексе показывает диф, а не «изменений нет»', async (t) => {
   // Всё лежит в индексе (обычное состояние перед коммитом): `files` пуст, и оверлей,
   // завязанный на одну эту группу, закрывал бы существующий диф собой.

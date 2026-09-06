@@ -90,9 +90,12 @@ async function mountSettings(t, {
     mcp: {},
     loaded: true,
     showAllModels: false,
+    updating: '',
+    updateResults: {},
     visibleModels: () => [],
     async load() {},
     async loadUsage() {},
+    async updateCli() { return { type: 'ok', text: 'Уже последняя версия (1.0.0).', changed: false }; },
     async loadMcp() { return {}; },
     async runUsageAction() { return { ok: true }; },
     async saveSetting(...args) {

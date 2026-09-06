@@ -154,6 +154,12 @@ export const config = {
     || path.join(__dirname, '..', '.state', 'ssh', 'known-hosts.json'),
   sshAuditDir: process.env.COCKPIT_SSH_AUDIT_DIR
     || path.join(__dirname, '..', '.state', 'ssh', 'audit'),
+  // DB-профили и журнал содержат адреса боевых систем и тексты запросов, поэтому
+  // живут в своём приватном namespace, а не в общих prefs.
+  dbProfilesPath: process.env.COCKPIT_DB_PROFILES_PATH
+    || path.join(__dirname, '..', '.state', 'db', 'profiles.json'),
+  dbAuditDir: process.env.COCKPIT_DB_AUDIT_DIR
+    || path.join(__dirname, '..', '.state', 'db', 'audit'),
   // Личная подборка B24-задач. Отдельно от prefs: это пользовательские данные,
   // а не настройки интерфейса.
   taskFavoritesPath: process.env.COCKPIT_TASK_FAVORITES_PATH

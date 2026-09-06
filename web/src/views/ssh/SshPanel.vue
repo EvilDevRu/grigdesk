@@ -25,7 +25,16 @@
           </svg>
         </span>
         <div>
-          <h2 id="ssh-panel-title">SSH</h2>
+          <div class="ssh-panel__title">
+            <h2 id="ssh-panel-title">SSH</h2>
+            <span
+              class="ui-maturity-chip"
+              data-product-maturity="beta"
+              aria-label="Бета-версия"
+            >
+              бета
+            </span>
+          </div>
           <small>Терминал, файлы и команды агента</small>
         </div>
       </div>
@@ -1105,6 +1114,7 @@ function deny(approval) {
 }
 
 .ssh-panel__brand,
+.ssh-panel__title,
 .ssh-panel__summary,
 .ssh-summary-item,
 .ssh-section-heading,
@@ -1131,6 +1141,11 @@ function deny(approval) {
 
 .ssh-panel__brand {
   gap: 10px;
+  min-width: 0;
+}
+
+.ssh-panel__title {
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1915,13 +1930,14 @@ function deny(approval) {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 9px 10px;
   overflow: hidden;
   background: var(--ground);
 }
 
 .ssh-terminal :deep(.xterm) {
+  box-sizing: border-box;
   height: 100%;
+  padding: 9px 10px;
 }
 
 .ssh-terminal :deep(.xterm-viewport) {

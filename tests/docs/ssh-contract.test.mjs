@@ -1,30 +1,18 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const root = new URL('../../', import.meta.url);
-
-async function physicalDocs(...names) {
-  const values = await Promise.all(names.map((name) => (
-    readFile(new URL(`docs/cockpit/${name}`, root), 'utf8')
-  )));
-  values.push(await readFile(
-    new URL('docs/cockpit/reference/runtime-contracts.md', root),
-    'utf8',
-  ));
-  return values.join('\n');
-}
+import { canonDocs } from './helpers/canon.mjs';
 
 async function sshDocs() {
-  return physicalDocs('ssh.md');
+  return canonDocs();
 }
 
 async function projectMap() {
-  return physicalDocs('ssh.md');
+  return canonDocs();
 }
 
 async function sshGotchas() {
-  return physicalDocs('gotchas.md');
+  return canonDocs();
 }
 
 test('документация закрепляет пароль только в ручном raw connect', async () => {

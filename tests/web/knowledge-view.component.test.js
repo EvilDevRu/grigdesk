@@ -144,6 +144,57 @@ test('Создание отправляет введённую человеко�
   ]);
 });
 
+test('Неверная первая тема оставляет новый черновик до исправления без HTTP-записи', async (t) => {
+  const calls = [];
+  const { wrapper, settle } = await mountKnowledgeView(t, { api: baseApi(calls) });
+  await button(wrapper, 'Новая запись').trigger('click');
+  await wrapper.get('[name="project"]').setValue('alpha');
+  await wrapper.get('[name="repository"]').setValue('backend');
+  await wrapper.get('[name="title"]').setValue('Новая запись');
+  await wrapper.get('[name="body"]').setValue('Черновик должен сохраниться.');
+
+  for (const tags of ['', '../outside', ', queue', 'Тема', 'topic_1']) {
+    await wrapper.get('[name="tags"]').setValue(tags);
+    await button(wrapper, 'Сохранить').trigger('click');
+    await settle();
+
+    assert.match(wrapper.text(), /Первый тег обязателен/);
+    assert.equal(wrapper.get('[name="body"]').element.value, 'Черновик должен сохраниться.');
+    assert.equal(calls.filter((call) => call[0] === 'POST').length, 0);
+  }
+
+  await wrapper.get('[name="tags"]').setValue(' release-2 , сборка');
+  await button(wrapper, 'Сохранить').trigger('click');
+  await settle();
+
+  const mutations = calls.filter((call) => call[0] === 'POST');
+  assert.equal(mutations.length, 1);
+  assert.deepEqual(mutations[0][2].tags, ['release-2', 'сборка']);
+  assert.equal(wrapper.text().includes('Первый тег обязателен'), false);
+});
+
+test('Удаление первой темы из открытой записи не отправляет PUT и сохраняет исправления', async (t) => {
+  const calls = [];
+  const { wrapper, settle } = await mountKnowledgeView(t, { api: baseApi(calls), routeId: ID });
+  await wrapper.get('[name="body"]').setValue('Уточнённый черновик.');
+  await wrapper.get('[name="tags"]').setValue('');
+  await button(wrapper, 'Сохранить').trigger('click');
+  await settle();
+
+  assert.match(wrapper.text(), /Первый тег обязателен/);
+  assert.equal(wrapper.get('[name="body"]').element.value, 'Уточнённый черновик.');
+  assert.equal(calls.filter((call) => call[0] === 'PUT').length, 0);
+
+  await wrapper.get('[name="tags"]').setValue('queue, уточнение');
+  await button(wrapper, 'Сохранить').trigger('click');
+  await settle();
+
+  const updates = calls.filter((call) => call[0] === 'PUT');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0][2].expectedRevision, RECORD.revision);
+  assert.equal(updates[0][2].body, 'Уточнённый черновик.');
+});
+
 test('Правка использует authoritative revision открытой записи', async (t) => {
   const calls = [];
   const { wrapper, settle } = await mountKnowledgeView(t, { api: baseApi(calls) });

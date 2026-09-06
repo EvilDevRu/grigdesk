@@ -13,7 +13,7 @@ import factoryModule from '../../server/src/modules/factory/index.js';
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-async function fixture(t, { analysisRepos = null, twinProfile = false } = {}) {
+async function fixture(t, { analysisRepos = null, twinProfile = false, analysisExtra = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-profiles-'));
   const profilesDir = path.join(root, 'profiles');
   const installed = ['project-alpha', 'project-beta', ...(twinProfile ? ['project-gamma'] : [])];
@@ -113,6 +113,7 @@ exit 99
             files: ['app:src/diagnostics.py'],
             title: 'Повторный запуск создаёт дубликаты',
             ...(analysisRepos ? { repos: analysisRepos } : {}),
+            ...(analysisExtra || {}),
           },
         };
       },
@@ -155,7 +156,11 @@ test('launch-options отдаёт профили и fail-closed каталог �
     kind: 'data', signal: 'Повторный запуск создаёт дубликаты',
   });
   assert.deepEqual(selected.json().routeOptions['consilium-debug'], {
-    deliveryMode: 'publish', instrumentationMode: 'explicit', instrumentationRequired: true,
+    deliveryMode: 'publish',
+    instrumentationMode: 'explicit',
+    instrumentationRequired: true,
+    // Подпись маршрута приходит из бандла профиля; фикстура её не задаёт.
+    title: '',
   });
 });
 
@@ -297,4 +302,36 @@ test('launch не принимает profile в обход опубликова�
     assert.equal(response.json().error, 'bad_profile');
     assert.deepEqual(response.json().profiles, ['project-alpha', 'project-beta']);
   }
+});
+
+// Оценка триажа живёт дольше каталога: маршруты переиздают, и подсказка на снятый или
+// переопубликованный маршрут увела бы запуск в гарантированный отказ движка.
+test('рекомендация маршрута принимается только от текущего каталога', async (t) => {
+  const current = await fixture(t, {
+    analysisExtra: {
+      route_catalog_hash: 'b'.repeat(64),
+      route_depth: 'full',
+      route_reason: 'риск 4 — цена ошибки требует полного маршрута',
+    },
+  });
+  const response = await current.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
+  });
+  assert.equal(response.json().defaultRoute, 'consilium-debug');
+  assert.deepEqual(response.json().routeSuggestion, {
+    route: 'consilium-debug',
+    depth: 'full',
+    reason: 'риск 4 — цена ошибки требует полного маршрута',
+  });
+
+  const stale = await fixture(t, {
+    analysisExtra: { route_catalog_hash: 'c'.repeat(64), route_depth: 'full', route_reason: 'старая' },
+  });
+  const ignored = await stale.inject({
+    method: 'GET',
+    url: '/api/tasks/9123/launch-options?profile=project-beta',
+  });
+  assert.equal(ignored.json().routeSuggestion, null);
+  assert.equal(ignored.json().defaultRoute, 'feature');
 });

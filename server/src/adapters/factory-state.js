@@ -167,6 +167,9 @@ export class FactoryStateAdapter {
           deliveryMode: route.nodes.some((node) => node.id === 'ship') ? 'publish' : 'disabled',
           instrumentationMode,
           instrumentationRequired: instrumentationMode === 'explicit',
+          // Подпись из бандла: её читают человек в форме запуска и триаж в промпте.
+          // Своего словаря названий у кокпита нет — маршруты именует профиль.
+          title: typeof route.title === 'string' ? route.title : '',
         }];
       }));
       return {

@@ -5,6 +5,7 @@
         <span class="p-t">
           <template v-if="isPlan">План готов — утвердить?</template>
           <template v-else-if="isSsh">Выполнить команду на сервере?</template>
+          <template v-else-if="isDb">Выполнить запрос к базе?</template>
           <template v-else-if="isExternalUrl">
             Открыть внешнюю страницу для <span class="p-tool">{{ req.tool }}</span>?
           </template>
@@ -67,6 +68,26 @@
           Пользователь: <strong data-ssh-user>{{ req.user }}</strong>
           <span v-if="req.isRoot" class="p-ssh-badge" data-ssh-privilege>root</span>
           <span v-if="req.usesSudo" class="p-ssh-badge" data-ssh-privilege>sudo</span>
+        </div>
+      </div>
+
+      <div v-if="isDb" class="p-db-meta">
+        <div>
+          <strong data-db-profile>{{ req.profile?.label }} — {{ dbRole }}</strong>
+          <span v-if="req.prod" class="p-db-prod" data-db-prod>прод</span>
+        </div>
+        <div>Движок: <strong data-db-engine>{{ req.engine?.label || req.engine?.id }}</strong></div>
+        <div>Класс: <strong data-db-class>{{ dbQueryClass }}</strong></div>
+        <div>Таблицы: <span data-db-tables>{{ dbTables }}</span></div>
+        <div v-if="req.rowEstimate != null">
+          Оценка строк: <strong data-db-row-estimate>{{ req.rowEstimate }}</strong>
+        </div>
+        <div v-if="dbSpecial" data-db-special>
+          Особые конструкции: <strong>{{ dbSpecial }}</strong>
+        </div>
+        <pre class="p-in cmd" data-db-query>{{ req.query }}</pre>
+        <div v-if="req.autoReadReason?.message" class="p-db-reason" data-db-auto-read-reason>
+          {{ req.autoReadReason.message }}
         </div>
       </div>
 
@@ -148,6 +169,7 @@ watch(
 
 const input = computed(() => props.req?.input || {});
 const isSsh = computed(() => props.req?.origin === 'ssh');
+const isDb = computed(() => props.req?.origin === 'db');
 const isExternalUrl = computed(() => input.value.kind === 'external_url');
 const isPlan = computed(() => (
   Boolean(input.value.plan) || props.req?.tool === 'ExitPlanMode'
@@ -167,9 +189,29 @@ const externalRejectLabel = computed(() => String(input.value.reject_label || '�
 const canRemember = computed(() => (
   !isPlan.value
   && !isSsh.value
+  && !isDb.value
   && !isExternalUrl.value
   && props.req?.canRemember !== false
 ));
+const dbRole = computed(() => ({ read: 'чтение', write: 'запись' }[props.req?.profile?.role]
+  || String(props.req?.profile?.role || '')));
+const dbQueryClass = computed(() => ({
+  read: 'чтение',
+  write: 'запись',
+  ddl: 'DDL',
+  admin: 'администрирование',
+  unknown: 'неизвестный',
+}[props.req?.queryClass] || String(props.req?.queryClass || '')));
+const dbTables = computed(() => Array.isArray(props.req?.tables) && props.req.tables.length
+  ? props.req.tables.join(', ')
+  : 'не определены');
+
+// Табличная функция и запрещённая конструкция — единственное в карточке, что говорит
+// о выходе запроса за саму базу; без строки человек увидел бы обычный SELECT.
+const dbSpecial = computed(() => [
+  ...(Array.isArray(props.req?.tableFunctions) ? props.req.tableFunctions : []),
+  ...(Array.isArray(props.req?.forbidden) ? props.req.forbidden : []),
+].map(String).join(', '));
 
 const diff = computed(() => {
   const source = input.value.diff;
@@ -328,6 +370,9 @@ function chooseById(value) {
 .p-in.cmd { color: var(--ink); font-family: var(--mono, monospace); }
 .p-in.cmd.ssh { max-height: none; min-width: 0; max-width: 100%; word-break: break-word; }
 .p-ssh-meta { display: grid; gap: 4px; margin-top: 6px; min-width: 0; overflow-wrap: anywhere; }
+.p-db-meta { display: grid; gap: 4px; margin-top: 6px; min-width: 0; overflow-wrap: anywhere; }
+.p-db-prod { margin-left: 6px; color: var(--bad); }
+.p-db-reason { color: var(--ink-mid); font-size: 11.5px; }
 .p-ssh-badge { margin-left: 5px; padding: 1px 6px; border-radius: 999px;
   background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 .p-in.big { max-height: 320px; color: var(--ink); font-size: 12px;

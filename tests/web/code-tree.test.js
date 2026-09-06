@@ -8,8 +8,10 @@ import {
   codeContextId,
   encodeStoredCodeContext,
   flattenGitTree,
+  GIT_STAT_BLOCKS,
   gitDirectoryPaths,
   gitGroupDirectoryPaths,
+  gitGroupStat,
   gitRef,
   normalizeGitView,
   pickCodeContext,
@@ -294,4 +296,40 @@ test('группа изменений несёт готовые строки п�
 
   // Чистое дерево тоже отдаёт список: шаблон не должен различать пустую группу.
   assert.deepEqual(buildGitGroups({ staged: [], files: [] }, new Set())[0].list, []);
+});
+
+test('итог группы: сумма строк по файлам и полоска из пяти квадратиков, как на GitHub', () => {
+  assert.equal(GIT_STAT_BLOCKS, 5);
+
+  // Пока строк не больше пяти, квадратик равен строке.
+  assert.deepEqual(gitGroupStat([{ add: 1, del: 0 }, { add: 1, del: 2 }]), {
+    add: 2,
+    del: 2,
+    total: 4,
+    blocks: ['add', 'add', 'del', 'del', 'none'],
+  });
+  // Дальше — доли с округлением вниз, остаток полоски нейтральный.
+  assert.deepEqual(gitGroupStat([{ add: 7, del: 3 }]).blocks, ['add', 'add', 'add', 'del', 'none']);
+  // Ненулевая сторона не исчезает с полоски даже при ничтожной доле.
+  assert.deepEqual(gitGroupStat([{ add: 998, del: 2 }]).blocks, ['add', 'add', 'add', 'add', 'del']);
+  assert.deepEqual(gitGroupStat([{ add: 1, del: 4999 }]).blocks, ['add', 'del', 'del', 'del', 'del']);
+
+  // Бинарные и файлы без счётчиков дают пустой итог — панель его не рисует.
+  assert.deepEqual(gitGroupStat([{ binary: true }, { add: 0, del: 0 }]), {
+    add: 0,
+    del: 0,
+    total: 0,
+    blocks: ['none', 'none', 'none', 'none', 'none'],
+  });
+  assert.equal(gitGroupStat(null).total, 0);
+
+  // Группа несёт готовый итог: шаблон список не пересчитывает.
+  const payload = { staged: [], files: [{ path: 'a.js', status: 'M', add: 4, del: 1 }] };
+  assert.deepEqual(buildGitGroups(payload, new Set())[0].stat, {
+    add: 4,
+    del: 1,
+    total: 5,
+    blocks: ['add', 'add', 'add', 'add', 'del'],
+  });
+  assert.equal(buildGitGroups({ staged: [], files: [] }, new Set())[0].stat.total, 0);
 });

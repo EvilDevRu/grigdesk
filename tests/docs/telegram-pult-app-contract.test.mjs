@@ -1,16 +1,11 @@
 // Проверяет, что документация Telegram-пульта содержит обязательный пользовательский и безопасностный контракт.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const referenceUrl = new URL(
-  '../../docs/cockpit/reference/runtime-contracts.md',
-  import.meta.url,
-);
+import { canonDocs } from './helpers/canon.mjs';
 
 test('PULT-DOC-01: канон описывает клавиатуру и безопасный разговор с ассистентом', async () => {
-  const map = await readFile(new URL('../../docs/cockpit/telegram-pult.md', import.meta.url), 'utf8');
-  const text = `${map}\n${await readFile(referenceUrl, 'utf8')}`;
+  const text = await canonDocs();
   const clauses = [
     ['новый принцип', /смотрит,\s*разблокирует\s+и\s+поручает/iu],
     ['постоянная клавиатура', /ReplyKeyboardMarkup[\s\S]*is_persistent[\s\S]*resize_keyboard/u],

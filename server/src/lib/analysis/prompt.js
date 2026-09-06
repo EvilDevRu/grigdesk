@@ -16,16 +16,31 @@ const MAX_COMMENTS = 15;  // последних комментариев
  * @param {Array<{author:string,time:string,text:string}>} p.comments несистемные комментарии
  * @param {string} [p.discussion] переписка по телеграм-ссылкам из задачи (уже с лимитами)
  * @param {{ctx:string, markers:string, repos:Array<{key:string,dir:string}>}} p.profile
+ * @param {{kinds:string[], routes:Array<{id:string,title:string}>}} [p.routeChoice]
+ *   роды работ профиля и опубликованные маршруты. Пусто — профиль без карты и каталога:
+ *   тогда спрашиваем исторический enum, иначе триаж назовёт то, чего движок не примет.
  * @param {string} p.jsonPath куда писать analysis.json
  * @param {string} p.notePath куда писать разведноту
  */
-export function buildTriagePrompt({ task, title, description, comments, clarifications, discussion, profile, jsonPath, notePath }) {
+export function buildTriagePrompt({
+  task, title, description, comments, clarifications, discussion, profile,
+  routeChoice, jsonPath, notePath,
+}) {
   const comm = (comments || [])
     .slice(-MAX_COMMENTS)
     .map((c) => `- ${c.author}${c.time ? ` (${c.time})` : ''}: ${String(c.text || '').slice(0, CAP_COMMENT)}`)
     .join('\n');
 
   const repoList = (profile.repos || []).map((r) => `${r.key}: ${r.dir}`).join('\n');
+
+  // Род работы модель выбирает из объявленных профилем; глубину она не выбирает вовсе.
+  const kinds = (routeChoice?.kinds || []).filter(Boolean);
+  const routes = (routeChoice?.routes || []).filter((route) => route?.id);
+  const kindList = kinds.length ? kinds.join(' | ') : 'feature | debug | trivial';
+  const routeCatalog = routes.length
+    ? `\nМаршруты этого профиля (их выберет политика, тебе выбирать не нужно):\n${
+      routes.map((route) => `- ${route.id}${route.title ? ` — ${route.title}` : ''}`).join('\n')}\n`
+    : '';
 
   return `Ты — триаж-разведчик задач трекера. Цель: быстро и честно оценить сложность, риски и объём задачи ПО КОДУ. План реализации НЕ составлять — его позже сделает конвейер по свежему коду.
 
@@ -36,7 +51,7 @@ ${profile.ctx || '(профиль проекта недоступен — оце
 
 Репозитории (префиксы для путей в files[]):
 ${repoList || '(не заданы)'}
-
+${routeCatalog}
 [Задача #${task}]
 Название: ${title}
 Описание:
@@ -56,14 +71,15 @@ ${discussion ? `\n${DISCUSSION_SECTION_TITLE}\n${discussion}\nЭто уже ра
 complexity (1–5): 1 = точечная правка одного файла/компонента; 2 = несколько файлов в одном слое; 3 = сквозная фича через слои (API+логика+UI) по готовым паттернам; 4 = новая подсистема, изменение схемы данных или нетривиальный алгоритм; 5 = сквозная фича + изменение схемы/очередей/агрегатов, много точек интеграции.
 risk (1–5): цена ошибки и необратимость последствий, НЕ трудоёмкость. 1 = косметика, откат тривиален; 3 = можно сломать заметный пользователю сценарий; 5 = порча/потеря данных, деньги, безопасность.${profile.markers ? `\nПроектные маркеры риска (каждый найденный поднимает оценку):\n${profile.markers}` : ''}
 diff_size: S (<50 строк), M (50–300), L (300–1000), XL (>1000) — прогноз итогового диффа.
-route_guess: feature (новое поведение) | debug (сломано существующее, надо сначала воспроизвести) | trivial (мелочь без плана).
+route_kind (род работы, НЕ глубина проверки): ${kindList}. feature — нужно новое или изменённое поведение; debug — есть наблюдаемый дефект, причину надо сначала доказать; perf — предмет задачи скорость; hunt — просят найти дефекты в области, а не чинить конкретный.
+ГЛУБИНУ маршрута (полный / средний / лёгкий) выбираешь НЕ ты: её считает политика по твоим complexity, risk, diff_size, confidence и по наличию открытых вопросов. Поэтому оценки должны быть честными в обе стороны: завышенная сложность отправит мелкую правку по полному кругу с планом и воротами, заниженный риск — наоборот. Про сам маршрут в summary писать не нужно.
 confidence: high | medium | low. Если тикет мутный, цель непонятна или есть недоступные ссылки (нераскрытые t.me/…, скрины без текста) — ставь low, заполняй questions[] и needs_clarification=true. НЕ фантазируй охват: честное «нужно уточнение» ценнее выдуманной оценки.
 
 [Схема ${jsonPath}]
 {
   "task": ${task},
   "project": "<префикс из названия задачи до первого |, как есть>",
-  "route_guess": "feature|debug|trivial",
+  "route_kind": "<один род из списка выше>",
   "complexity": 1-5,
   "risk": 1-5,
   "diff_size": "S|M|L|XL",

@@ -52,7 +52,7 @@ export function record(overrides = {}) {
     kind: 'fact',
     title: 'Проверяемая запись',
     body: 'Подробный текст проверяемого факта.',
-    tags: ['тест'],
+    tags: ['knowledge', 'тест'],
     ...overrides,
   };
 }

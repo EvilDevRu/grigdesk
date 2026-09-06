@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
+import { measureKnowledgeContext } from '../../server/src/lib/search/context.js';
 import { knowledgeStorageFactory, record } from './helpers/knowledge.js';
 
 let transferModule;
@@ -281,7 +284,10 @@ test('Обновление карт пишет живую ссылку и тол
     liveLink: map.includes(`](#/knowledge/${FIRST_ID})`),
     canary: await readFile(path.join(rootDir, 'CLAUDE.md'), 'utf8'),
   }, {
-    paths: ['CLAUDE.md', 'docs/', 'docs/cockpit/', 'docs/cockpit/knowledge.md'],
+    paths: [
+      '.state/', '.state/knowledge-maps.lock', 'CLAUDE.md',
+      'docs/', 'docs/cockpit/', 'docs/cockpit/knowledge.md',
+    ],
     liveLink: true,
     canary: 'не менять\n',
   });
@@ -532,4 +538,265 @@ test('Неизвестный корень карт обрывает заход �
     reason: 'maps_root_unknown',
     partialWrite: false,
   });
+});
+
+test('Чужие проекты и соседние темы исключаются до проверки записей снимка', async (t) => {
+  const rootDir = await temporaryRoot(t);
+  const records = [
+    snapshotRecord({ tags: ['alpha'] }),
+    snapshotRecord({ id: SECOND_ID, project: 'foreign', tags: [], body: null }),
+    snapshotRecord({ id: 'invalid-id', tags: ['beta'], body: null }),
+  ];
+  const { transfer } = transferFixture(t, records);
+
+  await transfer.updateMaps({ project: 'cockpit-test', sourceDocuments: ['alpha'] });
+
+  const map = await readFile(path.join(rootDir, 'docs/cockpit/alpha.md'), 'utf8');
+  assert.equal(map.includes(FIRST_ID), true);
+  assert.equal(await exists(path.join(rootDir, 'docs/cockpit/beta.md')), false);
+
+  await assert.rejects(
+    transfer.updateMaps({ project: 'cockpit-test', sourceDocuments: ['beta'] }),
+    (error) => error.code === 'KNOWLEDGE_INVALID_ARGUMENTS',
+  );
+});
+
+test('Полная пересборка проекта не проверяет записи другого проекта', async (t) => {
+  await temporaryRoot(t);
+  const { transfer } = transferFixture(t, [
+    snapshotRecord({ tags: ['alpha'] }),
+    snapshotRecord({ id: SECOND_ID, project: 'foreign', tags: [], title: null }),
+  ]);
+
+  const result = await transfer.updateMaps({ project: 'cockpit-test' });
+
+  assert.equal(result.mapCount, 1);
+  await assert.rejects(
+    transfer.updateMaps(),
+    (error) => error.code === 'KNOWLEDGE_INVALID_ARGUMENTS',
+  );
+});
+
+test('Метрика контекста считает вложенные импорты один раз и исключает карты вне каскада', async (t) => {
+  const rootDir = await temporaryRoot(t);
+  await mkdir(path.join(rootDir, 'docs/cockpit'), { recursive: true });
+  const files = {
+    'AGENTS.md': 'Инструкции агента\n',
+    'CLAUDE.md': '# Правила\n@CLAUDE.local.md\n',
+    'CLAUDE.local.md': '# Локальное оглавление\n@docs/cockpit/alpha.md\n@nested.md\n',
+    'nested.md': '@docs/cockpit/alpha.md\n@CLAUDE.local.md\n',
+  };
+  for (const [name, contents] of Object.entries(files)) {
+    await writeFile(path.join(rootDir, name), contents);
+  }
+  const { transfer } = transferFixture(t, [
+    snapshotRecord({ tags: ['alpha'] }),
+    snapshotRecord({ id: SECOND_ID, tags: ['unused'], title: 'Не импортируется' }),
+  ]);
+
+  const result = await transfer.updateMaps();
+  const map = await readFile(path.join(rootDir, 'docs/cockpit/alpha.md'), 'utf8');
+  const expectedBytes = [...Object.values(files), map]
+    .reduce((sum, contents) => sum + Buffer.byteLength(contents), 0);
+  const measured = await measureKnowledgeContext(rootDir);
+
+  assert.deepEqual({
+    byProject: result.contextBytes['cockpit-test'],
+    total: result.totalContextBytes,
+    sharedAlgorithm: measured.totalBytes,
+    missing: measured.missing,
+  }, {
+    byProject: expectedBytes,
+    total: expectedBytes,
+    sharedAlgorithm: expectedBytes,
+    missing: [],
+  });
+});
+
+test('Метрика контекста поддерживает клон без CLAUDE.local.md и относительный вложенный импорт', async (t) => {
+  const rootDir = await temporaryRoot(t);
+  const claude = '# Правила\n@CLAUDE.local.md\n@docs/entry.md\n';
+  const entry = '@../shared.md\n';
+  const shared = 'Общий контекст\n';
+  await mkdir(path.join(rootDir, 'docs'));
+  await writeFile(path.join(rootDir, 'CLAUDE.md'), claude);
+  await writeFile(path.join(rootDir, 'AGENTS.md'), '');
+  await writeFile(path.join(rootDir, 'docs/entry.md'), entry);
+  await writeFile(path.join(rootDir, 'shared.md'), shared);
+
+  const measured = await measureKnowledgeContext(rootDir);
+
+  assert.equal(measured.totalBytes, Buffer.byteLength(claude + entry + shared));
+  assert.deepEqual(measured.missing, ['CLAUDE.local.md']);
+});
+
+test('Цикл импорта через символический каталог считается один раз и не срывает обновление карт', async (t) => {
+  const rootDir = await temporaryRoot(t);
+  const claude = '# Правила\n@nested/CLAUDE.md\n';
+  await writeFile(path.join(rootDir, 'CLAUDE.md'), claude);
+  await writeFile(path.join(rootDir, 'AGENTS.md'), '');
+  await symlink('.', path.join(rootDir, 'nested'));
+  const { transfer } = transferFixture(t, [snapshotRecord({ tags: ['alpha'] })]);
+
+  const result = await transfer.updateMaps();
+
+  assert.equal(result.totalContextBytes, Buffer.byteLength(claude));
+  assert.equal(result.contextBytes['cockpit-test'], Buffer.byteLength(claude));
+  assert.match(await readFile(path.join(rootDir, 'docs/cockpit/alpha.md'), 'utf8'), /Полная запись/u);
+});
+
+test('Импорт через символический файл разрешает вложенные пути от физического документа', async (t) => {
+  const rootDir = await temporaryRoot(t);
+  const claude = '@entry-link.md\n';
+  const entry = '@sibling.md\n';
+  const sibling = 'Сосед физического документа\n';
+  await mkdir(path.join(rootDir, 'docs'));
+  await writeFile(path.join(rootDir, 'CLAUDE.md'), claude);
+  await writeFile(path.join(rootDir, 'AGENTS.md'), '');
+  await writeFile(path.join(rootDir, 'docs/entry.md'), entry);
+  await writeFile(path.join(rootDir, 'docs/sibling.md'), sibling);
+  await writeFile(path.join(rootDir, 'sibling.md'), 'Ошибочный сосед символической ссылки\n');
+  await symlink('docs/entry.md', path.join(rootDir, 'entry-link.md'));
+
+  const measured = await measureKnowledgeContext(rootDir);
+
+  assert.equal(measured.totalBytes, Buffer.byteLength(claude + entry + sibling));
+  assert.deepEqual(measured.missing, []);
+});
+
+/** Запускает независимый writer; IPC фиксирует момент чтения снимка и разрешает его завершить. */
+async function mapsWorker(t, rootDir, dbPath) {
+  const child = fork(new URL('../fixtures/knowledge-maps-worker.mjs', import.meta.url), [
+    rootDir, dbPath,
+  ], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  const events = new Map();
+  const waiters = new Map();
+  const closed = Promise.withResolvers();
+  let stderr = '';
+
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  child.on('message', (message) => {
+    events.set(message.type, message);
+    waiters.get(message.type)?.resolve(message);
+  });
+  child.on('error', closed.reject);
+  child.on('exit', (code) => {
+    closed.resolve(code);
+    for (const [type, waiter] of waiters) {
+      if (!events.has(type)) {
+        waiter.reject(new Error(`Writer завершился до ${type}: ${code}; ${stderr}`));
+      }
+    }
+  });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+    await closed.promise;
+  });
+
+  function waitFor(type) {
+    if (events.has(type)) {
+      return Promise.resolve(events.get(type));
+    }
+    const waiter = waiters.get(type) || Promise.withResolvers();
+    waiters.set(type, waiter);
+    return waiter.promise;
+  }
+
+  await waitFor('ready');
+  return { send: (type) => child.send({ type }), waitFor, closed: closed.promise };
+}
+
+test('Независимые процессы читают снимок под общей блокировкой и сохраняют последнюю карту', {
+  timeout: 15_000,
+}, async (t) => {
+  const rootDir = await temporaryRoot(t);
+  const dbPath = path.join(rootDir, 'state/knowledge.db');
+  const storage = await knowledgeStorageFactory()({ dbPath, seedSamples: false });
+  t.after(() => storage.close());
+  const firstRecord = await storage.create(record({ tags: ['alpha'], title: 'Первая запись' }));
+  const first = await mapsWorker(t, rootDir, dbPath);
+  const second = await mapsWorker(t, rootDir, dbPath);
+  first.send('start');
+  await first.waitFor('snapshot');
+
+  const secondRecord = await storage.create(record({ tags: ['alpha'], title: 'Вторая запись' }));
+  second.send('start');
+  const earlySnapshot = await Promise.race([
+    second.waitFor('snapshot').then(() => true),
+    delay(300).then(() => false),
+  ]);
+  if (earlySnapshot) {
+    second.send('continue');
+    await second.waitFor('done');
+  }
+  first.send('continue');
+  await first.waitFor('done');
+  if (!earlySnapshot) {
+    await second.waitFor('snapshot');
+    second.send('continue');
+    await second.waitFor('done');
+  }
+
+  assert.deepEqual(await Promise.all([first.closed, second.closed]), [0, 0]);
+  const map = await readFile(path.join(rootDir, 'docs/cockpit/alpha.md'), 'utf8');
+  assert.deepEqual({
+    earlySnapshot,
+    firstPresent: map.includes(firstRecord.id),
+    secondPresent: map.includes(secondRecord.id),
+  }, { earlySnapshot: false, firstPresent: true, secondPresent: true });
+});
+
+test('Откат одной серии не перезаписывает успешную конкурирующую серию карт', {
+  timeout: 10_000,
+}, async (t) => {
+  const rootDir = await temporaryRoot(t);
+  const cockpitDir = path.join(rootDir, 'docs/cockpit');
+  await mkdir(cockpitDir, { recursive: true });
+  await writeFile(path.join(cockpitDir, 'alpha.md'), 'Исходная карта\n');
+  const enteredFailure = Promise.withResolvers();
+  const releaseFailure = Promise.withResolvers();
+  const secondSnapshot = Promise.withResolvers();
+  const first = createTransfer(rootDir, {
+    exportSnapshot: async () => [
+      snapshotRecord({ project: 'alpha', tags: ['alpha'], title: 'Временная карта' }),
+      snapshotRecord({ id: SECOND_ID, project: 'zeta', tags: ['zeta'] }),
+    ],
+  }, {
+    async mapsRootFor(project) {
+      if (project === 'alpha') {
+        return rootDir;
+      }
+      enteredFailure.resolve();
+      await releaseFailure.promise;
+      return null;
+    },
+  });
+  const second = createTransfer(rootDir, {
+    async exportSnapshot() {
+      secondSnapshot.resolve();
+      return [snapshotRecord({ project: 'alpha', tags: ['alpha'], title: 'Последняя карта' })];
+    },
+  });
+
+  const failed = first.updateMaps().catch((error) => error);
+  await enteredFailure.promise;
+  const succeeded = second.updateMaps({ project: 'alpha', sourceDocuments: ['alpha'] });
+  const earlySnapshot = await Promise.race([
+    secondSnapshot.promise.then(() => true),
+    delay(100).then(() => false),
+  ]);
+  if (earlySnapshot) {
+    await succeeded;
+  }
+  releaseFailure.resolve();
+  const failure = await failed;
+  await succeeded;
+
+  assert.equal(failure.reasonCode, 'maps_root_unknown');
+  assert.equal(earlySnapshot, false);
+  assert.match(await readFile(path.join(cockpitDir, 'alpha.md'), 'utf8'), /Последняя карта/u);
 });

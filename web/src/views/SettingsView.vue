@@ -869,7 +869,19 @@
               <ProviderIcon :provider="p" :size="20" />
             </span>
             <div class="pvtitle">
-              <div class="pvname">{{ p.name }}</div>
+              <!-- Состояние версии CLI — точка у имени, а не строка в фактах: строка
+                   появлялась только у отставшего исполнителя и сдвигала вниз всё, что
+                   под ней, в одной карточке ряда. Текст живёт в тултипе. -->
+              <div class="pvname">
+                {{ p.name }}
+                <UiTooltip v-if="updateHint(p)" :text="updateHint(p)" placement="top-start">
+                  <span
+                    class="pvupddot"
+                    :class="{ hot: p.updateAvailable }"
+                    data-testid="provider-update-dot"
+                  ></span>
+                </UiTooltip>
+              </div>
               <div class="pvsub muted">{{ p.vendor }} · {{ p.kind }}</div>
             </div>
             <span class="pvstate" :class="p.available ? 'ok' : 'err'">
@@ -884,11 +896,6 @@
             <div v-if="p.models?.length" class="pvsub muted">
               моделей в каталоге: {{ p.models.length }}<template v-if="hiddenCount(p)"> (в выборе {{ p.models.length - hiddenCount(p) }} — остальные скрыты)</template><template v-if="p.models.some((m) => m.unknown)"> · есть неизвестные CLI (помечены «?»)</template>
             </div>
-            <!-- Индикатор новой версии: кокпит только сообщает, обновление — по кнопке -->
-            <div v-if="p.updateAvailable" class="pvupd">
-              ● Доступно обновление: <b>{{ p.latest }}</b> — нажми «Обновить»
-            </div>
-            <div v-else-if="p.latest" class="pvsub muted">последняя версия ({{ p.latest }})</div>
           </div>
           <div v-if="!p.available && (p.setupCommand || p.install)" class="pvinstall">
             {{ p.installed ? 'Авторизация' : 'Установка' }}:
@@ -900,71 +907,90 @@
               {{ p.setupCommand || p.install }}
             </UiCommandButton>
           </div>
-          <p v-if="updMsg[p.id]" class="msg" :class="updMsg[p.id].type">{{ updMsg[p.id].text }}</p>
           <!-- Свои настройки исполнителя. Список объявляет сам executor (поле settings),
                фронт про вендоров не знает и рисует по kind; выбор сохраняется в prefs. -->
-          <div class="pvset">
+          <div class="pvset pvsettings" data-testid="provider-settings-slot">
             <div class="pvsetttl">Настройки исполнителя</div>
-            <template v-if="p.settings?.length">
-              <div v-for="s in p.settings" :key="s.id" class="pvsetrow">
-                <div class="pvsetline">
-                  <UiSwitch
-                    v-if="s.kind === 'toggle'"
-                    :model-value="!!s.value"
-                    :disabled="s.disabled === true || providerSettingBusy(p, s)"
-                    @update:model-value="(v) => saveProviderSetting(p, s, v)"
-                  >
-                    {{ s.label }}
-                  </UiSwitch>
-                  <!-- Ползунок (num_ctx у Ollama): потолок вычисляет исполнитель.
-                       Без валидного max падаем обратно в числовой инпут ниже. -->
-                  <template v-else-if="s.kind === 'range' && Number(s.max) > Number(s.min)">
-                    <span class="pvsetlbl">{{ s.label }}</span>
-                    <UiRange
-                      class="pvsetrange"
-                      :min="Number(s.min)"
-                      :max="Number(s.max)"
-                      :step="Number(s.step || 1)"
-                      :model-value="Number(s.value)"
+            <!-- Своего tabindex тут нет намеренно: внутри живые ручки, и до нижних
+                 клавиатура доезжает табом по ним, а лишняя остановка на контейнере
+                 только удлиняет путь. У списка MCP фокусировать нечего — там он нужен. -->
+            <div class="pvsetbody">
+              <template v-if="p.settings?.length">
+                <div v-for="s in p.settings" :key="s.id" class="pvsetrow">
+                  <div class="pvsetline">
+                    <UiSwitch
+                      v-if="s.kind === 'toggle'"
+                      :model-value="!!s.value"
                       :disabled="s.disabled === true || providerSettingBusy(p, s)"
-                      @change="(e) => saveProviderSetting(p, s, Number(e.target.value))"
-                    />
-                    <span class="pvrangeval">{{ Number(s.value).toLocaleString('ru') }} / {{ Number(s.max).toLocaleString('ru') }}</span>
-                  </template>
-                  <template v-else-if="s.kind === 'text' || s.kind === 'number' || s.kind === 'range'">
-                    <span class="pvsetlbl">{{ s.label }}</span>
-                    <UiInput
-                      v-if="s.kind === 'text'"
-                      class="pvsetinput"
-                      data-context="settings-field"
-                      :model-value="String(s.value ?? '')"
-                      :disabled="s.disabled === true || providerSettingBusy(p, s)"
-                      @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
-                      @blur="(e) => commitProviderSetting(p, s, e)"
-                    />
-                    <UiNumberInput
-                      v-else
-                      class="pvsetinput"
-                      data-context="settings-field"
-                      :min="Number(s.min) || 512"
-                      :model-value="Number(s.value)"
-                      :disabled="s.disabled === true || providerSettingBusy(p, s)"
-                      @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
-                      @blur="(e) => commitProviderSetting(p, s, e)"
-                    />
-                  </template>
-                  <span v-else class="pvsetlbl">{{ s.label }}</span>
-                  <span v-if="s.note" class="pvsoon">{{ s.note }}</span>
+                      @update:model-value="(v) => saveProviderSetting(p, s, v)"
+                    >
+                      {{ s.label }}
+                    </UiSwitch>
+                    <!-- Ползунок (num_ctx у Ollama): потолок вычисляет исполнитель.
+                         Без валидного max падаем обратно в числовой инпут ниже. -->
+                    <template v-else-if="s.kind === 'range' && Number(s.max) > Number(s.min)">
+                      <span class="pvsetlbl">{{ s.label }}</span>
+                      <UiRange
+                        class="pvsetrange"
+                        :min="Number(s.min)"
+                        :max="Number(s.max)"
+                        :step="Number(s.step || 1)"
+                        :model-value="Number(s.value)"
+                        :disabled="s.disabled === true || providerSettingBusy(p, s)"
+                        @change="(e) => saveProviderSetting(p, s, Number(e.target.value))"
+                      />
+                      <span class="pvrangeval">{{ Number(s.value).toLocaleString('ru') }} / {{ Number(s.max).toLocaleString('ru') }}</span>
+                    </template>
+                    <template v-else-if="s.kind === 'text' || s.kind === 'number' || s.kind === 'range'">
+                      <span class="pvsetlbl">{{ s.label }}</span>
+                      <UiInput
+                        v-if="s.kind === 'text'"
+                        class="pvsetinput"
+                        data-context="settings-field"
+                        :model-value="String(s.value ?? '')"
+                        :disabled="s.disabled === true || providerSettingBusy(p, s)"
+                        @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
+                        @blur="(e) => commitProviderSetting(p, s, e)"
+                      />
+                      <UiNumberInput
+                        v-else
+                        class="pvsetinput"
+                        data-context="settings-field"
+                        :min="Number(s.min) || 512"
+                        :model-value="Number(s.value)"
+                        :disabled="s.disabled === true || providerSettingBusy(p, s)"
+                        @keydown.enter.prevent="(e) => { commitProviderSetting(p, s, e); e.target.blur(); }"
+                        @blur="(e) => commitProviderSetting(p, s, e)"
+                      />
+                    </template>
+                    <span v-else class="pvsetlbl">{{ s.label }}</span>
+                    <span v-if="s.note" class="pvsoon">{{ s.note }}</span>
+                  </div>
+                  <div v-if="s.hint" class="muted small">{{ s.hint }}</div>
+                  <p v-if="setMsg[`${p.id}:${s.id}`]" class="msg err">{{ setMsg[`${p.id}:${s.id}`] }}</p>
                 </div>
-                <div v-if="s.hint" class="muted small">{{ s.hint }}</div>
-                <p v-if="setMsg[`${p.id}:${s.id}`]" class="msg err">{{ setMsg[`${p.id}:${s.id}`] }}</p>
-              </div>
-            </template>
-            <p v-else class="muted small">Своих настроек у этого исполнителя пока нет.</p>
+              </template>
+              <p v-else class="muted small">Своих настроек у этого исполнителя пока нет.</p>
+            </div>
+          </div>
+          <!-- Ресурсы исполнителя (доплата, кредиты, загруженные модели): ЕДИНСТВЕННОЕ
+               место, где их МЕНЯЮТ. Всплывашка топбара те же ресурсы только показывает —
+               там человек смотрит на состояние, а не правит деньги аккаунта между делом. -->
+          <div
+            v-if="usageResourcesOf(p).length"
+            class="pvset pvusage"
+            data-testid="provider-usage-slot"
+            :data-provider-id="p.id"
+          >
+            <div class="pvsetttl">Ресурсы исполнителя</div>
+            <div class="pvsetbody">
+              <ProviderUsageResources :provider-id="p.id" :resources="usageResourcesOf(p)" />
+            </div>
           </div>
           <!-- Блок есть только у того, кто о MCP вообще сообщает: пустая рамка на
                карточке без этого понятия — не «стабильная сетка», а мусор. Высота
-               ограничена сверху, поэтому поздний ответ CLI не растягивает карточку. -->
+               задана, а не ограничена сверху: место под список занято ещё до ответа
+               CLI, поэтому пришедший список не сдвигает ни кнопку, ни соседний блок. -->
           <div
             v-if="p.mcp && p.installed"
             class="pvset pvmcp provider-mcp-slot"
@@ -1021,7 +1047,16 @@
               </template>
             </div>
           </div>
+          <!-- Итог обновления живёт у своей кнопки, в самом низу карточки. Над
+               блоками фиксированной высоты ему места нет: строка появляется по нажатию
+               и сдвинула бы вниз и настройки, и MCP — ровно в той карточке, где жмут. -->
           <div class="pvfoot">
+            <p
+              v-if="updMsg[p.id]"
+              class="msg pvfootmsg"
+              :class="updMsg[p.id].type"
+              data-testid="provider-update-result"
+            >{{ updMsg[p.id].text }}</p>
             <UiButton
               v-if="p.installed && p.canUpdate"
               class="upd"
@@ -2462,6 +2497,7 @@ import { useProvidersStore } from '../stores/providers.js';
 import { useUiContextSource } from '../composables/useUiContextSource.js';
 import { useToolLauncher } from '../shared/tools/launcher.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
+import ProviderUsageResources from '../features/providers/ProviderUsageResources.vue';
 import { NAV_ICONS } from '../shared/nav-icons.js';
 import AccessOverview from './settings/AccessOverview.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
@@ -2491,6 +2527,7 @@ import {
   UiSpinner,
   UiSwitch,
   UiTextarea,
+  UiTooltip,
 } from '../ui';
 import { useSse } from '../composables/useSse.js';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
@@ -3382,26 +3419,11 @@ async function checkUpdates() {
   finally { checking.value = false; }
 }
 
-// Обновление CLI исполнителя. Версия CLI и доступ аккаунта определяют набор моделей:
-// после обновления Кокпит принудительно перечитывает каталог самого исполнителя.
-const updating = ref('');
-const updMsg = ref({});
-async function updateProvider(p) {
-  updating.value = p.id;
-  updMsg.value = { ...updMsg.value, [p.id]: null };
-  try {
-    const r = await api.post(`/api/providers/${p.id}/update`, {});
-    updMsg.value = {
-      ...updMsg.value,
-      [p.id]: r.changed
-        ? { type: 'ok', text: `Обновлён: ${r.before || '?'} → ${r.after}. Список моделей пересобран.` }
-        : { type: r.ok ? 'ok' : 'err', text: r.ok ? `Уже последняя версия (${r.after || r.before}).` : `Не получилось: ${(r.output || '').slice(-300)}` },
-    };
-    await prov.load(true);
-  } catch (e) {
-    updMsg.value = { ...updMsg.value, [p.id]: { type: 'err', text: e.message } };
-  } finally { updating.value = ''; }
-}
+// Обновление CLI исполнителя. Сам ход и его итог живут в сторе: ту же кнопку носит
+// всплывашка топбара, и состояние «ставится прямо сейчас» у них общее.
+const updating = computed(() => prov.updating || '');
+const updMsg = computed(() => prov.updateResults || {});
+const updateProvider = (p) => prov.updateCli(p.id);
 
 // ── MCP-серверы исполнителя ──
 // Адаптер сам решает, отдаёт он live health-check или безопасный inventory конфигов.
@@ -3421,6 +3443,17 @@ const MCP_STATES = {
   unknown: { label: 'Состояние неизвестно', cls: 'warn' },
 };
 function mcpOf(p) { return prov.mcp[p.id] || null; }
+
+/**
+ * Ресурсы аккаунта исполнителя (доплата, кредиты, загруженные модели) — из того же
+ * ответа о лимитах, что кормит всплывашку топбара. Пусто, пока ответ не пришёл или
+ * исполнитель ресурсов не объявляет: пустой рамки на карточке тогда не будет.
+ */
+function usageResourcesOf(p) {
+  const usage = prov.usage[p.id];
+
+  return Array.isArray(usage?.resources) ? usage.resources : [];
+}
 
 /**
  * Базовые scope общие, но адаптер может переименовать секцию и дать пояснение.
@@ -3778,6 +3811,18 @@ async function saveFactoryDebug(level) {
 // по которому строится селект в чате (стор providers), а не своей копией условия.
 function hiddenCount(p) {
   return (p.models || []).length - prov.visibleModels(p).length;
+}
+
+/**
+ * Подпись точки версии рядом с именем исполнителя. Пусто, пока фоновая проверка не
+ * назвала последнюю версию: точки нет вовсе — придумывать «всё в порядке» за
+ * непроведённую проверку нельзя. Обновляет человек кнопкой, кокпит только сообщает.
+ */
+function updateHint(p) {
+  if (!p.latest) return '';
+  return p.updateAvailable
+    ? `Доступно обновление: ${p.latest} — нажми «Обновить»`
+    : `Последняя версия (${p.latest})`;
 }
 
 // Показ старых версий моделей в выборе чата. Сохраняем на сервере (настройка общая для всех
@@ -4455,10 +4500,24 @@ async function rebuildWeb() {
 // Опрос MCP начинаем, только когда человек открыл вкладку исполнителей: он стоит
 // секунд живого health-check, и платить за него при открытии любой другой вкладки
 // (или в топбаре) незачем. Повторные заходы гасит минутный кэш сервера.
-watchEffect(() => {
-  if (tab.value !== 'providers' || !prov.loaded) return;
-  loadAllMcp(false);
-});
+// Источники перечислены ЯВНО, и это не стиль: watchEffect собрал бы в зависимости
+// ещё и `prov.mcp` — его читает сам `loadMcp`, чтобы не терять прошлый список на
+// время загрузки, — а ответ опроса в него же и пишет. Эффект перезапускал бы себя
+// после каждого ответа, и вкладка молотила бы опрос исполнителей без конца.
+watch(
+  () => tab.value === 'providers' && prov.loaded,
+  (active) => {
+    if (!active) {
+      return;
+    }
+
+    loadAllMcp(false);
+    // Ресурсы аккаунта приезжают тем же запросом, что кормит всплывашку топбара:
+    // минутный кэш стора не даст лишнего похода на вкладку.
+    prov.loadUsage();
+  },
+  { immediate: true },
+);
 
 onMounted(() => {
   revealTab(tab.value, false);
@@ -5008,10 +5067,17 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 .pvcard { gap: 10px; }
 .pvhead { display: flex; align-items: center; gap: 10px; }
 .pvtitle { flex: 1; min-width: 0; }
-.pvfacts { display: grid; gap: 2px; }
+/* Две строки фактов о CLI держат место всегда: реестр отвечает не мгновенно, и без
+   этой меры блоки ниже переезжали бы уже после отрисовки карточки. */
+.pvfacts { display: grid; gap: 2px; align-content: start; min-block-size: 40px; }
 .pvicon { flex: none; display: grid; place-items: center; width: 34px; height: 34px;
   border: 1px solid var(--line); border-radius: 9px; background: var(--ground); }
-.pvname { font-size: 14px; font-weight: 600; }
+.pvname { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; }
+/* Точка версии CLI: тихая у свежей, тревожная у отставшей. Текст — в тултипе. */
+.pvupddot { flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ink-mid); cursor: default; }
+.pvupddot.hot { background: var(--warn, #e0a33a);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--warn, #e0a33a) 60%, transparent); }
 .pvsub { font-size: 12.5px; }
 /* Свои настройки исполнителя — отбиты от фактов о CLI, как у карточек плагинов */
 .pvset { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--line); padding-top: 10px; }
@@ -5026,12 +5092,17 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 /* Ручка объявлена исполнителем, но ещё не подключена к ходу */
 .pvsoon { font-size: 11px; border: 1px solid var(--line); border-radius: 999px;
   padding: 1px 8px; color: var(--mut, var(--ink-mid)); }
-/* Потолок высоты, а не фиксация: короткий список не оставляет пустоты, длинный
-   прокручивается внутри и не растягивает карточку поздним ответом CLI. */
+/* Высота ЗАДАНА, а не ограничена сверху. Число ручек и длина списка MCP у исполнителей
+   разные, приезжают они в разное время, и потолок оставлял бы блоки разъезжаться: у
+   соседних карточек одноимённые разделы стояли бы на разной высоте, а поздний ответ
+   двигал бы всё, что под ним. Лишнее прокручивается внутри своего тела. */
 .pvsetttl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pvmcp { flex: none; max-block-size: 220px; }
-.mcpbody { flex: 1; min-block-size: 0; overflow-y: auto; padding-right: 2px;
+.pvsettings { flex: none; block-size: 220px; }
+.pvmcp { flex: none; block-size: 220px; }
+.pvsetbody, .mcpbody { flex: 1; min-block-size: 0; overflow-y: auto; padding-right: 2px;
   scrollbar-gutter: stable; overscroll-behavior: contain; }
+.pvsetbody { display: flex; flex-direction: column; gap: 8px; }
+.pvsetbody:focus-visible,
 .mcpbody:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .mcpnote { margin-top: 0; }
 .mcpgrp { display: grid; gap: 4px; }
@@ -5057,9 +5128,11 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 .mcpdetail { font-size: 11.5px; line-height: 1.45; padding-left: 16px;
   overflow-wrap: anywhere; }
 /* Кнопка футера прижата к низу плашки: при равной высоте ряда кнопки в одну линию */
-.pvfoot { display: flex; justify-content: flex-end; margin-top: auto; }
-.pvupd { margin-top: 3px; font-size: 12.5px; color: var(--warn, #e0a33a); }
-.pvupd b { font-weight: 600; }
+.pvfoot { display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  margin-top: auto; }
+/* Итог обновления занимает оставшуюся ширину строки кнопки: карточка может подрасти
+   вниз, но всё, что выше, остаётся на своих местах — секции соседних карточек сходятся. */
+.pvfootmsg { flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; text-align: start; }
 .pvstate { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; }
 .pvstate .dot { width: 8px; height: 8px; border-radius: 50%; }
 .pvstate.ok { color: var(--good); }

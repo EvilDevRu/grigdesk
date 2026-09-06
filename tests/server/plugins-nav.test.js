@@ -28,6 +28,7 @@ test('системные инструменты имеют явные group/orde
       github: ['tools', 30],
       knowledge: ['tools', 40],
       ssh: ['dock', 40],
+      db: ['dock', 50],
     },
   );
 

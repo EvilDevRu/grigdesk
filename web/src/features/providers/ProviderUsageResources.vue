@@ -22,12 +22,12 @@
         />
       </span>
 
-      <span v-if="resource.note" class="usage-resource-note">
-        {{ resource.note }}
+      <span v-if="noteOf(resource)" class="usage-resource-note">
+        {{ noteOf(resource) }}
       </span>
 
       <span
-        v-for="control in resource.controls || []"
+        v-for="control in controlsOf(resource)"
         :key="control.id"
         class="usage-control"
       >
@@ -129,6 +129,12 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  // Всплывашка топбара показывает ресурсы только на чтение: единственное место
+  // изменения — плашка исполнителя в настройках.
+  readonly: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const providers = useProvidersStore();
@@ -139,6 +145,31 @@ const EMPTY_STATE = Object.freeze({
   ask: null,
   draft: undefined,
 });
+
+/**
+ * Ручки, которые здесь действительно можно тронуть. Ресурсом владеет исполнитель, он же
+ * говорит, где ручка уместна: настройка аккаунта (доплата, потолок) крутится только в
+ * своей плашке настроек, а `scope: 'live'` — операция над рантаймом, и её место там, где
+ * человек видит состояние, то есть и во всплывашке топбара.
+ */
+function controlsOf(resource) {
+  return (resource.controls || [])
+    .filter((control) => !props.readonly || control.scope === 'live');
+}
+
+/**
+ * Заметка ресурса. Во всплывашке она остаётся только у беды: «месячный потолок выбран —
+ * сверх лимитов подписки работа не пойдёт» терять нельзя, а спокойное «причина отказа:
+ * out_of_credits» стоит рядом со сводкой «выключено» и говорит то же самое второй раз.
+ * Состояние самих ручек там не отражается вовсе — на «включено или нет» отвечает сводка.
+ */
+function noteOf(resource) {
+  if (!resource.note) {
+    return '';
+  }
+
+  return !props.readonly || resource.tone === 'bad' ? resource.note : '';
+}
 
 function stateKey(resource, control) {
   return `${resource.key}:${control.id}`;

@@ -87,6 +87,34 @@ function numstatPath(raw) {
   return unquotePath(merged.replace(/\/{2,}/g, '/'));
 }
 
+// Столько первых символов git просматривает в поисках NUL, решая, бинарный ли файл.
+const BINARY_PROBE_CHARS = 8000;
+
+/**
+ * Число строк текста по правилу git: строкой считается каждый перевод строки, а
+ * незавершённый хвост — ещё одна. Нужно только неотслеживаемым файлам: в diff они
+ * не попадают, и без этого счёта новый файл показывался как «+0», а итог группы врал.
+ */
+function countLines(text) {
+  if (!text) {
+    return 0;
+  }
+
+  let lines = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 10) {
+      lines += 1;
+    }
+  }
+
+  return text.endsWith('\n') ? lines : lines + 1;
+}
+
+/** Та же эвристика, что у git: NUL в начале файла — значит бинарный. */
+function looksBinary(text) {
+  return text.slice(0, BINARY_PROBE_CHARS).includes('\0');
+}
+
 /** numstat: "add\tdel\tpath" (бинарные — "-\t-\tpath"). */
 function parseNumstat(text) {
   const counts = {};
@@ -172,6 +200,19 @@ async function collectFiles({ statuses, oldPathOf, counts, group, readOld, readN
     if (c.binary) { files.push(file); continue; }
     const oldContent = await readOld(p, st);
     const newContent = await readNew(p, st);
+
+    // Неотслеживаемого файла нет ни в одном diff, поэтому бинарность и число строк
+    // определяются по содержимому: иначе новый файл показывался как «+0».
+    if (c.untracked) {
+      if (looksBinary(newContent)) {
+        file.binary = true;
+        files.push(file);
+        continue;
+      }
+
+      file.add = countLines(newContent);
+    }
+
     if (oldContent.length > MAX_BYTES || newContent.length > MAX_BYTES) file.tooBig = true;
     else { file.oldContent = oldContent; file.newContent = newContent; }
     files.push(file);
@@ -199,7 +240,10 @@ export async function taskDiff(cwd) {
   const counts = parseNumstat(numstat);
   const { statuses, oldPathOf } = parseNameStatus(nameStatus);
   const untracked = new Set(parseUntracked(porcelain));
-  for (const u of untracked) { statuses[u] = 'A'; if (!counts[u]) counts[u] = { add: 0, del: 0, binary: false }; }
+  for (const u of untracked) {
+    statuses[u] = 'A';
+    if (!counts[u]) counts[u] = { add: 0, del: 0, binary: false, untracked: true };
+  }
 
   const files = await collectFiles({
     statuses,
@@ -260,7 +304,7 @@ export async function worktreeChanges(cwd) {
   }
   const workCounts = parseNumstat(workNumstat);
   for (const u of untracked) {
-    if (!workCounts[u]) workCounts[u] = { add: 0, del: 0, binary: false };
+    if (!workCounts[u]) workCounts[u] = { add: 0, del: 0, binary: false, untracked: true };
   }
   const files = await collectFiles({
     statuses: workStatus.statuses,

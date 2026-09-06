@@ -80,3 +80,12 @@ test('StepList не схлопывает пункты обновлённого �
   assert.match(component, /\.note\s*\{[^}]*white-space:\s*pre-line/s);
   assert.match(component, /\.note\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 });
+
+test('StepList не сдвигает служебную строку вдвое', async () => {
+  const component = await readFile(STEP_LIST_PATH, 'utf8');
+
+  // Внешний .step носит класс вида шага, поэтому общий селектор .note давал служебной
+  // строке padding-left дважды: отметка повтора стояла правее соседних стартов.
+  assert.match(component, /\.step\s*>\s*\.note\s*\{[^}]*padding:\s*2px 4px 2px 26px/s);
+  assert.doesNotMatch(component, /^\.note\s*\{/m);
+});

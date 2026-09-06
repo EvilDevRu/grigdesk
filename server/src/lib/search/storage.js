@@ -76,6 +76,24 @@ function cleanTags(value) {
   return result;
 }
 
+/**
+ * Первый тег адресует карту и потому проверяется до удаления пустых тегов:
+ * очистка не должна незаметно назначать следующую тему владельцем записи.
+ */
+function cleanRecordTags(value) {
+  const sourceDocument = Array.isArray(value) && typeof value[0] === 'string'
+    ? value[0].normalize('NFKC').trim()
+    : '';
+
+  if (!SOURCE_DOCUMENT_RE.test(sourceDocument)) {
+    throw invalidArguments(
+      'Первый тег обязателен: используйте строчные латинские буквы, цифры и дефис между ними.',
+    );
+  }
+
+  return cleanTags(value);
+}
+
 function cleanRecord(input, current = null) {
   const merged = { ...(current || {}), ...(input || {}) };
   const value = {
@@ -84,7 +102,7 @@ function cleanRecord(input, current = null) {
     kind: String(merged.kind || '').trim(),
     title: String(merged.title || '').trim(),
     body: String(merged.body || ''),
-    tags: cleanTags(merged.tags),
+    tags: cleanRecordTags(merged.tags),
     provenance: Object.hasOwn(input || {}, 'provenance')
       ? cleanProvenance(input.provenance)
       : cleanProvenance(current?.provenance),

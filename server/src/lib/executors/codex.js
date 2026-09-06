@@ -22,6 +22,7 @@ import {
 import {
   DIRECT_SSH_HOOK_COMMAND,
   DIRECT_SSH_HOOK_MATCHER,
+  directCommandHook,
   directSshSetting,
 } from './_direct-ssh-policy.js';
 
@@ -281,6 +282,8 @@ export function parseCodexUsageResources(result) {
       controls: [{
         id: 'consume-rate-limit-reset',
         kind: 'button',
+        // Ответ на «всё встало, что делать сейчас» — держим рядом с полосами лимитов.
+        scope: 'live',
         label: 'Использовать сброс лимита',
         action: 'consume-rate-limit-reset',
         ...(first?.id && { payload: { creditId: String(first.id) } }),
@@ -763,9 +766,14 @@ function codexAppServerConfig(compactWindow) {
 }
 
 function codexProcessArgs(providerSettings) {
-  if (providerSettings?.blockDirectSsh === false) return ['app-server'];
+  const hookCommand = directCommandHook({
+    blockDirectSsh: providerSettings?.blockDirectSsh !== false,
+    blockDirectDb: providerSettings?.blockDirectDb === true,
+    strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
+  });
+  if (!hookCommand) return ['app-server'];
   const hook = '[{ matcher = "^Bash$", hooks = [{ type = "command", '
-    + `command = "${DIRECT_SSH_HOOK_COMMAND}", timeout = 5 }] }]`;
+    + `command = "${hookCommand}", timeout = 5 }] }]`;
   return [
     '--dangerously-bypass-hook-trust',
     '-c',
@@ -784,13 +792,13 @@ function directSshPolicyError(message) {
  * Process flags недостаточно принять на веру: app-server мог отбросить их. До
  * thread/start сверяем опубликованный enabled sessionFlags-hook по всем опорным полям.
  */
-function assertDirectSshHook(result) {
+function assertDirectSshHook(result, expectedCommand) {
   const hooks = (Array.isArray(result?.data) ? result.data : [])
     .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []));
   const found = hooks.some((hook) => (
     hook?.eventName === 'preToolUse'
     && hook?.handlerType === 'command'
-    && hook?.command === DIRECT_SSH_HOOK_COMMAND
+    && hook?.command === expectedCommand
     && hook?.matcher === DIRECT_SSH_HOOK_MATCHER
     && hook?.source === 'sessionFlags'
     && hook?.enabled === true
@@ -893,7 +901,11 @@ export function openCodexSession({
     return `${current}${String(chunk || '')}`.slice(-limit);
   }
 
-  const blockDirectSsh = providerSettings?.blockDirectSsh !== false;
+  const commandHook = directCommandHook({
+    blockDirectSsh: providerSettings?.blockDirectSsh !== false,
+    blockDirectDb: providerSettings?.blockDirectDb === true,
+    strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
+  });
   const child = spawn(config.codexBin, codexProcessArgs(providerSettings), {
     cwd,
     env,
@@ -1455,8 +1467,8 @@ export function openCodexSession({
       },
     });
     send({ method: 'initialized' });
-    if (blockDirectSsh) {
-      assertDirectSshHook(await request('hooks/list', {}));
+    if (commandHook) {
+      assertDirectSshHook(await request('hooks/list', {}), commandHook);
     }
 
     const dynamicTools = codexDynamicTools(workTools?.descriptors || []);
@@ -1874,6 +1886,7 @@ export default {
     return codexSupportsRestrictedWorkspace(config?.codexBin);
   },
   install: 'npm i -g @openai/codex && codex login',
+  statusPage: 'https://status.openai.com',
   // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
   trustedDirectories: true,
   directSshPolicy: { enforcement: 'command-hook' },

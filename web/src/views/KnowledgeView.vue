@@ -126,8 +126,12 @@
           <UiField label="Заголовок" required>
             <UiInput v-model="draft.title" name="title" />
           </UiField>
-          <UiField label="Теги" hint="Через запятую; первый тег — имя исходного документа">
-            <UiInput v-model="draft.tagsText" name="tags" />
+          <UiField
+            label="Теги"
+            hint="Через запятую; первый тег — тема латиницей, например release-notes"
+            required
+          >
+            <UiInput v-model="draft.tagsText" name="tags" required />
           </UiField>
           <UiField class="knowledge-view__body" label="Полный текст" required>
             <UiTextarea v-model="draft.body" name="body" rows="14" />
@@ -382,14 +386,26 @@ function startCreate() {
   });
 }
 
+/**
+ * Проверяет владельца темы до удаления пустых тегов, чтобы исправление черновика
+ * не отправило запись без доступной карты и резервной копии.
+ */
 function payload() {
+  const tags = draft.value.tagsText.split(',').map((tag) => tag.normalize('NFKC').trim());
+
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tags[0])) {
+    throw new Error(
+      'Первый тег обязателен: используйте строчные латинские буквы, цифры и дефис между ними.',
+    );
+  }
+
   return {
     project: draft.value.project,
     repository: draft.value.repository,
     kind: draft.value.kind,
     title: draft.value.title,
     body: draft.value.body,
-    tags: draft.value.tagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
+    tags: tags.filter(Boolean),
   };
 }
 

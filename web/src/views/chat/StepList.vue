@@ -310,7 +310,9 @@ function toolLabel(name) {
 .dcell.add::before { content: '+ '; opacity: .7; }
 
 .say { padding: 3px 4px 3px 26px; color: var(--ink); white-space: pre-wrap; }
-.note {
+/* Отступ — только у самой строки: внешний .step тоже носит класс вида шага (note),
+   и общий селектор давал служебной строке двойной сдвиг относительно соседних. */
+.step > .note {
   padding: 2px 4px 2px 26px;
   font-size: 11.5px;
   line-height: 1.45;

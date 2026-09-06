@@ -210,3 +210,23 @@ test('CODE-GIT-07: приёмка задачи по-прежнему одна в
   assert.equal(files.get('src/added.js').status, 'A');
   assert.equal(files.get('untracked.js').status, 'A');
 });
+
+test('CODE-GIT-08: неотслеживаемый файл считает строки сам, а бинарный так и помечен', async (t) => {
+  const { root, write } = await repo(t);
+  // Без завершающего перевода строки: git считает незавершённый хвост отдельной строкой.
+  await write('fresh.txt', 'one\ntwo\nthree');
+  await write('blob.bin', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]));
+
+  const work = byPath((await worktreeChanges(root)).files);
+  // Раньше у неотслеживаемого файла было «+0»: в diff его нет, и numstat о нём молчит.
+  assert.deepEqual([work.get('untracked.js').add, work.get('untracked.js').del], [1, 0]);
+  assert.deepEqual([work.get('fresh.txt').add, work.get('fresh.txt').del], [3, 0]);
+  assert.equal(work.get('blob.bin').binary, true);
+  assert.equal(work.get('blob.bin').add, 0);
+  assert.equal(work.get('blob.bin').newContent, '');
+
+  // Приёмка задачи видит те же числа: новый файл там тоже не «+0».
+  const acceptance = byPath((await taskDiff(root)).files);
+  assert.equal(acceptance.get('fresh.txt').add, 3);
+  assert.equal(acceptance.get('blob.bin').binary, true);
+});

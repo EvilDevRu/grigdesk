@@ -173,10 +173,9 @@
              а здесь он доступен всегда. Свой разделитель рисует сам. -->
         <CompanionTopbarButton />
         <AttentionAlerts />
-        <!-- pointerdown, а не только mouseenter: на тач-экране ховера нет, и без него
-             свежие лимиты приезжали бы уже после раскрытия всплывашки -->
-        <span v-if="runtimeProviders.length" class="provbox"
-              @mouseenter="prov.loadUsage()" @pointerdown="prov.loadUsage()">
+        <!-- Наведения на ряд иконок для чтения лимитов больше нет: раскрытие всплывашки
+             перечитывает их само и тикает, пока она открыта (см. usageWatch). -->
+        <span v-if="runtimeProviders.length" class="provbox">
           <span
             v-for="p in runtimeProviders"
             :key="p.id"
@@ -187,6 +186,8 @@
               focus-policy="none"
               placement="top"
               :style="{ maxWidth: '320px' }"
+              @open="usageWatch.open(p.id)"
+              @close="usageWatch.close(p.id)"
             >
               <!-- Клик раскрывает всплывашку на планшете; обновление CLI остаётся ручным. -->
               <template #trigger>
@@ -205,10 +206,85 @@
               </template>
               <template #default="{ close }">
               <span class="ptip">
-                <span>{{ provTitle(p) }}</span>
-                <!-- Индикатор новой версии. Кокпит НИЧЕГО не обновляет сам — только сообщает. -->
-                <span v-if="p.updateAvailable" class="pupd">
-                  Доступно обновление: <b>{{ p.latest }}</b>
+                <!-- Шапка — только имя исполнителя: вендор, способ авторизации и версия
+                     живут в его плашке настроек, а здесь место нужно лимитам. Обновление
+                     сжато до точки справа; кокпит НИЧЕГО не обновляет сам — только сообщает.
+                     Переход в настройки — шестерёнка в той же строке: полосой во всю ширину
+                     внизу он занимал место, которого во всплывашке и так мало. -->
+                <span class="ptip-head">
+                  <b class="ptip-name">{{ p.name }}</b>
+                  <!-- «доступен» не пишем: это норма. Недоступность — единственный факт
+                       шапки, который нельзя потерять вместе со строкой подробностей. -->
+                  <span v-if="!p.available" class="ptip-off">недоступен</span>
+                  <span class="ptip-actions">
+                    <span
+                      v-if="p.updateAvailable"
+                      class="ptip-upd"
+                      data-testid="provider-popover-update-dot"
+                      :title="`Доступно обновление: ${p.latest}`"
+                    ></span>
+                    <!-- Ставится по нажатию и отсюда: точка сообщала о новой версии, а идти
+                         за ней приходилось в настройки. Ход один на весь кокпит, поэтому
+                         пока ставится один CLI, кнопки соседей заблокированы. -->
+                    <UiIconButton
+                      v-if="canUpdateCli(p)"
+                      data-context="topbar-popover-update"
+                      role="embedded"
+                      :label="`Обновить до ${p.latest}`"
+                      :title="`Обновить CLI до ${p.latest}. Каталог моделей перечитается.`"
+                      :disabled="!!prov.updating"
+                      :loading="prov.updating === p.id"
+                      loading-label="Обновляю"
+                      @click="prov.updateCli(p.id)"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 3v12 M7 10l5 5 5-5 M4 20h16" />
+                      </svg>
+                    </UiIconButton>
+                    <UiIconButton
+                      data-context="topbar-popover-settings"
+                      role="embedded"
+                      label="Настройки исполнителей"
+                      title="Настройки исполнителей"
+                      @click="close('action'); toProviders()"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
+                           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path :d="ICONS.settings" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </UiIconButton>
+                  </span>
+                </span>
+                <!-- Итог установки виден, только когда он что-то значит: успех и так
+                     виден пропавшим предложением обновиться. -->
+                <span
+                  v-if="updateNoteOf(p)"
+                  class="pu-state"
+                  :class="updateNoteOf(p).type === 'err' ? 'is-bad' : 'is-warn'"
+                >{{ updateNoteOf(p).text }}</span>
+                <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
+                     читали уже после того, как начинали гадать о причине сбоя. -->
+                <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
+                  <span>{{ usageOf(p).message }}</span>
+                  <span v-if="statusHintOf(p)" class="pu-status">
+                    {{ statusHintOf(p).text }}
+                    <UiActionLink
+                      data-context="topbar-popover-status-link"
+                      :href="statusHintOf(p).url"
+                      variant="text"
+                      target="_blank"
+                    >{{ statusHintOf(p).host }}</UiActionLink>
+                  </span>
+                  <UiButton
+                    v-if="usageOf(p).action"
+                    data-context="topbar-popover-action"
+                    variant="outline"
+                    @click.stop="close('action'); runUsageAction(usageOf(p).action)"
+                  >
+                    {{ usageOf(p).action.label }}
+                  </UiButton>
                 </span>
                 <!-- Потребление лимитов подписки — как /usage в CLI -->
                 <span class="pu">
@@ -230,29 +306,13 @@
                     <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
                     <span v-if="b.note || resetIn(b.resetsAt)" class="pu-reset">{{ b.note || resetIn(b.resetsAt) }}</span>
                   </span>
-                  <ProviderUsageResources :provider-id="p.id" :resources="usageOf(p).resources" />
-                  <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
-                    <span>{{ usageOf(p).message }}</span>
-                    <span v-if="usageOf(p).note" class="pu-reset">{{ usageOf(p).note }}</span>
-                    <UiButton
-                      v-if="usageOf(p).action"
-                      data-context="topbar-popover-action"
-                      variant="outline"
-                      @click.stop="close('action'); runUsageAction(usageOf(p).action)"
-                    >
-                      {{ usageOf(p).action.label }}
-                    </UiButton>
-                  </span>
-                </span>
-                <span class="ptip-go">
-                  <UiButton
-                    block
-                    data-context="topbar-popover-footer"
-                    variant="outline"
-                    @click="close('action'); toProviders()"
-                  >
-                    Настройки исполнителей
-                  </UiButton>
+                  <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
+                       можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
+                  <ProviderUsageResources
+                    :provider-id="p.id"
+                    :resources="usageOf(p).resources"
+                    readonly
+                  />
                 </span>
               </span>
               </template>
@@ -392,7 +452,9 @@ import { ref, computed, nextTick, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  UiActionLink,
   UiButton,
+  UiIconButton,
   UiPopover,
   UiPressable,
   UiTooltip,
@@ -412,7 +474,11 @@ import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
 import { useInboxStore } from '../../stores/inbox.js';
 import { useDockStore } from '../../stores/dock.js';
-import { providerUsageView } from '../../features/providers/providerUsage.js';
+import {
+  providerStatusHint,
+  providerUsageView,
+  resetIn,
+} from '../../features/providers/providerUsage.js';
 import { aggregateNavBadges, inboxNavBadge } from '../nav-badges.js';
 import CompanionTopbarButton from '../../features/companion/CompanionTopbarButton.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
@@ -420,6 +486,7 @@ import PipelineTopbarPopover from '../../features/pipeline/PipelineTopbarPopover
 import UpdateBanner from '../../features/pwa/UpdateBanner.vue';
 import ProviderIcon from '../ProviderIcon.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
+import { createUsageWatch } from '../../features/providers/usageWatch.js';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
@@ -486,21 +553,31 @@ function toProviders() {
   router.push('/settings');
 }
 const usageOf = (p) => providerUsageView(prov.usage[p.id], p);
+// Открытая всплывашка держит лимиты свежими: force обходит минутный троттл стора, а
+// серверный кэш остаётся — он и стережёт частоту походов в API вендора.
+const usageWatch = createUsageWatch(() => prov.loadUsage(true));
+onUnmounted(() => usageWatch.stop());
+// Кнопка установки во всплывашке: только у отставшего CLI, который кокпит умеет ставить
+// сам. Пока идёт установка, кнопка остаётся на месте — иначе она исчезла бы вместе с
+// ходом, который сама и начала, и человек не понял бы, ставится ли ещё.
+function canUpdateCli(p) {
+  return Boolean(p.installed && p.canUpdate && (p.updateAvailable || prov.updating === p.id));
+}
+// Итог установки во всплывашке: показываем отказ и «ничего не изменилось». Удачную
+// установку объявлять нечем — предложение обновиться просто исчезает, а полный текст
+// («Обновлён: X → Y») живёт в плашке настроек, где у него есть своя строка.
+function updateNoteOf(p) {
+  const result = prov.updateResults[p.id];
+
+  return result && (result.type === 'err' || result.changed === false) ? result : null;
+}
+// Куда смотреть при сбое вендора. Домен объявляет адаптер исполнителя, поэтому
+// всплывашка не знает ни одного вендорского адреса.
+const statusHintOf = (p) => providerStatusHint(p, prov.usage[p.id] || {});
 function runUsageAction(action) {
   if (action?.kind !== 'terminal' || !action.command) return;
   openTerminal({ insert: action.command });
 }
-// «сброс через 2ч» из ISO-даты сброса лимита
-function resetIn(iso) {
-  if (!iso) return '';
-  const ms = new Date(iso).getTime() - Date.now();
-  if (!(ms > 0)) return '';
-  const h = Math.floor(ms / 3600_000);
-  if (h >= 48) return `сброс через ${Math.round(h / 24)}д`;
-  if (h >= 1) return `сброс через ${h}ч`;
-  return `сброс через ${Math.max(1, Math.round(ms / 60_000))}м`;
-}
-
 function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
 // Разбивка памяти для всплывашки: физическая отдельно, подкачка отдельно.
 // `??` — страховка на окно между выкаткой фронта и перезапуском сервера: пока сервер
@@ -908,9 +985,20 @@ const { connected } = useSse((name) => {
 /* Точка «вышла новая версия CLI». Обновление — только руками из настроек. */
 .updot { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%;
   background: var(--warn, #e0a33a); box-shadow: 0 0 0 2px var(--surface); }
-.pupd { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line);
-  color: var(--warn, #e0a33a); line-height: 1.5; }
-.pupd b { font-weight: 600; }
+/* Шапка всплывашки: короткое имя слева, точка обновления — справа. */
+.ptip-head { display: flex; align-items: center; gap: 7px; }
+.ptip-name { color: var(--ink); font-weight: 600; }
+.ptip-off { color: var(--bad); font-size: 11px; }
+/* Точка обновления и переход в настройки живут одной группой у правого края: имя
+   слева тянется, а расстояние между индикатором и шестерёнкой не зависит от длины имени. */
+.ptip-actions { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; }
+/* Та же точка, что и в плашке настроек: обновление ручное, поэтому это индикатор. */
+.ptip-upd { flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn, #e0a33a); }
+/* Ссылка на состояние вендора идёт за текстом одной строкой, а не отдельным блоком.
+   Цвет нейтральный: тревожный тон блока — про НАШУ беду с лимитами, а слова вендора о
+   своём состоянии («о сбое не сообщает») красным читались бы как ещё одна поломка. */
+.pu-status { display: block; color: var(--ink-mid); }
 /* Тултип исполнителя: статус + прогрессбары потребления лимитов (ширина — :tip-style) */
 .ptip { display: flex; flex-direction: column; gap: 10px; min-width: 240px; text-align: left; }
 .pu { display: flex; flex-direction: column; gap: 9px; }
@@ -941,7 +1029,8 @@ const { connected } = useSse((name) => {
 }
 .pu-state.is-bad { color: var(--bad); }
 .pu-state.is-warn { color: var(--warn); }
-/* Переход в настройки исполнителей — теперь кнопкой внутри всплывашки, а не кликом по иконке */
+/* Подвал всплывашки «мозга»: у версии кокпита переход в настройки остаётся полосой —
+   там это единственное действие, и сжимать его в иконку нечего ради. */
 .ptip-go { display: flex; padding-top: 8px; border-top: 1px solid var(--line); }
 
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).

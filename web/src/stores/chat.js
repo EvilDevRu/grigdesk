@@ -915,8 +915,8 @@ export const useChatStore = defineStore('chat', {
             return;
           }
           this._addPending({ ...d, kind: 'perm' });
-        } else if (name === 'ssh-permission') {
-          // SSH всегда решает человек. Событие — лишь сигнал перечитать единую
+        } else if (name === 'ssh-permission' || name === 'db-permission') {
+          // Надзорные запросы всегда решает человек. Событие — лишь сигнал перечитать единую
           // серверную очередь; DTO команды не размножаем по двум источникам.
           this._loadWaiting();
         } else if (name === 'chat-question') {
@@ -1039,7 +1039,7 @@ export const useChatStore = defineStore('chat', {
      */
     async _loadWaiting() {
       let waiting;
-      try { ({ waiting } = await api.get('/api/chat/waiting?include=ssh')); }
+      try { ({ waiting } = await api.get('/api/chat/waiting?include=ssh,db')); }
       catch { return; /* сервер старый/недоступен — обойдёмся SSE */ }
       // Сверяемся ПОЛНОСТЬЮ, а не дозаливаем: после рестарта сервера запросы умирают
       // вместе с процессами агентов, и наши всплывашки стали бы фантомами.
@@ -1235,6 +1235,15 @@ export const useChatStore = defineStore('chat', {
         } catch {
           // Ответ мог принять другое окно. Истина — общая очередь сервера; при
           // сетевой ошибке _loadWaiting оставит карточку на месте.
+          await this._loadWaiting();
+        }
+        return;
+      }
+      if (p.origin === 'db') {
+        try {
+          await api.post(`/api/db/approvals/${p.pid}`, { allow });
+          delete this.pending[pid];
+        } catch {
           await this._loadWaiting();
         }
         return;

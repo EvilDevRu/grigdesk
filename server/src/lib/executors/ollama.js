@@ -310,6 +310,8 @@ export default {
   vendor: 'Ollama',
   color: '#b8c0cc',
   order: 4,
+  // statusPage нет намеренно: демон работает на этой же машине, и внешняя страница
+  // состояния про его сбой ничего не скажет.
   install: 'curl -fsSL https://ollama.com/install.sh | sh',
   // Файловые инструменты Cockpit принимают opts.extraDirs как разрешённые realpath-корни.
   trustedDirectories: true,
@@ -531,6 +533,8 @@ export default {
       roots: extraDirs,
       permissionMode: mode,
       blockDirectSsh: providerSettings?.blockDirectSsh !== false,
+      blockDirectDb: providerSettings?.blockDirectDb === true,
+      strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
       onPermission,
       sink,
       signal,
@@ -738,6 +742,9 @@ export default {
         controls: [{
           id: 'unload',
           kind: 'button',
+          // Операция над рантаймом, а не настройка аккаунта: нужна там, где человек
+          // смотрит на занятую память, — во всплывашке топбара.
+          scope: 'live',
           label: 'Выгрузить из памяти',
           action: 'unload-model',
           payload: { model: m.name },

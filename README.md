@@ -101,10 +101,10 @@ systemctl --user status cockpit-server
 ## Документация
 
 - [Карта документации](docs/README.md)
-- [Чаты, модели и разрешения](docs/cockpit/chat-agents.md)
-- [Конвейер и состояния задач](docs/cockpit/factory-graph.md)
+- [Постановка задачи и триаж](docs/cockpit/guide/tasks.md)
+- [Остановки на человеке](docs/cockpit/guide/gates.md)
 - [Устройство Factory Engine](docs/engine/ENGINE.md)
 - [Подключение нового проекта](docs/engine/NEW-PROJECT.md)
-- [Эксплуатация и диагностика](docs/cockpit/gotchas.md)
+- [База знаний](docs/cockpit/guide/knowledge.md)
 
 Полная проверка проекта: `bash tests/run-all.sh`.

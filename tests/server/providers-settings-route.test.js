@@ -21,6 +21,7 @@ function guardedAdapter() {
     auth: async () => ({ mode: 'cli', label: 'ok', available: true }),
     seedModels: () => [],
     run: async () => ({ reply: 'ok' }),
+    statusPage: 'https://status.example.test',
     settings: [{
       id: 'blockDirectSsh',
       kind: 'toggle',
@@ -31,7 +32,38 @@ function guardedAdapter() {
   };
 }
 
-async function routeFixture(t) {
+// Локальный исполнитель страницы состояния не объявляет: его сбой на чужом сайте
+// не виден, и подставлять туда адрес нельзя.
+function localAdapter() {
+  return {
+    id: 'local-provider',
+    name: 'Local Provider',
+    vendor: 'Test',
+    color: '#654321',
+    bin: () => '/bin/true',
+    probe: async () => ({ ok: true, version: '1.0' }),
+    auth: async () => ({ mode: 'none', label: 'ok', available: true }),
+    seedModels: () => [],
+    run: async () => ({ reply: 'ok' }),
+  };
+}
+
+// Исполнитель, у которого лимиты прямо сейчас не читаются: именно на его беде кокпит
+// идёт на страницу состояния вендора.
+function faultyAdapter() {
+  return {
+    ...localAdapter(),
+    id: 'faulty-provider',
+    name: 'Faulty Provider',
+    statusPage: 'https://status.example.test',
+    usage: async () => ({
+      state: 'unavailable',
+      message: 'Не удалось получить лимиты Faulty Provider. Повторим проверку автоматически.',
+    }),
+  };
+}
+
+async function routeFixture(t, extraAdapters = []) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-settings-route-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   let snapshot = {
@@ -48,14 +80,14 @@ async function routeFixture(t) {
       snapshot = { ...snapshot, ...patch };
     },
   };
-  const adapter = guardedAdapter();
+  const adapters = [guardedAdapter(), ...extraAdapters];
   const app = Fastify({ logger: false });
   app.decorate('sse', { broadcast() {} });
   await app.register(providersModule, {
     config: { modelsPath: path.join(root, 'models.json') },
     claudeAuth: null,
     prefs,
-    getProviderAdapters: async () => new Map([[adapter.id, adapter]]),
+    getProviderAdapters: async () => new Map(adapters.map((item) => [item.id, item])),
   });
   t.after(() => app.close());
   return { app, writes, read: () => snapshot };
@@ -109,4 +141,55 @@ test('подтверждённый POST пишет только namespace выб
       neighbor: { keep: 'me' },
     },
   });
+});
+
+// Сбой вендора выглядел как поломка кокпита. Куда смотреть — знает только адаптер,
+// поэтому адрес страницы состояния едет в реестр как есть, а Vue доменов не хранит.
+test('реестр отдаёт объявленную адаптером страницу состояния и не выдумывает чужую', async (t) => {
+  const fixture = await routeFixture(t, [localAdapter()]);
+  const response = await fixture.app.inject({ method: 'GET', url: '/api/providers' });
+  const byId = Object.fromEntries(response.json().providers
+    .map((provider) => [provider.id, provider.statusPage]));
+
+  assert.deepEqual(byId, {
+    'future-provider': 'https://status.example.test',
+    'local-provider': null,
+  });
+});
+
+// «Не удалось получить лимиты» не отвечало на главный вопрос — это у меня или у них.
+// Ответ приносит сама страница состояния, и спрашивают её ТОЛЬКО у беды на стороне
+// сервиса: у исполнителя без такой беды внешнего запроса быть не должно вовсе.
+test('беда лимитов приносит прочитанное состояние вендора, а тишина — нет', async (t) => {
+  const { app } = await routeFixture(t, [faultyAdapter()]);
+  const requested = [];
+  const realFetch = globalThis.fetch;
+
+  globalThis.fetch = async (url) => {
+    requested.push(String(url));
+
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          status: { indicator: 'major', description: 'Partial System Outage' },
+          components: [{ name: 'API', status: 'partial_outage' }],
+          incidents: [{ name: 'Elevated error rates' }],
+        };
+      },
+    };
+  };
+  t.after(() => { globalThis.fetch = realFetch; });
+
+  const response = await app.inject({ method: 'GET', url: '/api/providers/usage' });
+  const { usage } = response.json();
+
+  assert.equal(usage['faulty-provider'].vendorStatus.state, 'down');
+  assert.equal(usage['faulty-provider'].vendorStatus.summary, 'Partial System Outage');
+  assert.deepEqual(usage['faulty-provider'].vendorStatus.components, ['API']);
+  assert.equal(usage['faulty-provider'].vendorStatus.url, 'https://status.example.test/');
+  assert.equal(usage['future-provider'].vendorStatus, undefined,
+    'исполнителю без беды лимитов страницу состояния не читают');
+  assert.deepEqual(requested, ['https://status.example.test/api/v2/summary.json']);
 });

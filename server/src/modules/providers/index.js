@@ -17,6 +17,7 @@ import {
   normalizeProviderUsage,
   unsupportedProviderUsage,
 } from '../../lib/provider-usage.js';
+import { createProviderStatusProbe, VENDOR_FAULT_USAGE_STATES } from '../../lib/provider-status.js';
 import { ProviderUsageSeenStore, isFreshGroup } from '../../lib/provider-usage-seen.js';
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
@@ -146,6 +147,9 @@ async function providersModule(fastify, opts) {
         directSshPolicy: await directSshPolicyOf(ex),
         installed: ok,
         install: ex.install || null,
+        // Куда смотреть при сбое вендора. Какой домен «свой» — знает только адаптер,
+        // поэтому Vue домены не перечисляет и по вендорам не ветвится.
+        statusPage: ex.statusPage || null,
         // Установка и login могут быть разными сценариями. Старые адаптеры пока
         // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
         setupCommand: ok ? (ex.login || ex.install || null) : (ex.install || null),
@@ -206,8 +210,15 @@ async function providersModule(fastify, opts) {
     };
   }
 
+  // Страницу состояния вендора читаем ТОЛЬКО когда лимиты уже не пришли: в норме это
+  // лишний внешний запрос на каждое наведение мыши, а в беде — единственный ответ на
+  // вопрос «это у меня или у них».
+  const statusProbe = createProviderStatusProbe();
+
   const usageCache = createUsageReadCache(async (previousUsage) => {
-    const executors = await getProviderAdapters();
+    // Тот же источник адаптеров, что и у реестра (`adaptersOf`): иначе стенд подменял
+    // исполнителей, а лимиты всё равно собирались у настоящих.
+    const executors = await adaptersOf();
     const checkedAt = Date.now();
     // Аккаунты независимы: медленная проверка одного исполнителя не должна
     // задерживать запуск остальных. Promise.all сохраняет порядок реестра.
@@ -229,7 +240,15 @@ async function providersModule(fastify, opts) {
           }, { providerName: ex.name, checkedAt });
         }
       }
-      return [ex.id, mergeProviderUsage(previousUsage?.[ex.id], markFreshBuckets(ex.id, current))];
+      const merged = mergeProviderUsage(previousUsage?.[ex.id], markFreshBuckets(ex.id, current));
+
+      if (!VENDOR_FAULT_USAGE_STATES.has(merged.state) || !ex.statusPage) {
+        return [ex.id, merged];
+      }
+
+      const vendorStatus = await statusProbe.read(ex.statusPage);
+
+      return [ex.id, vendorStatus ? { ...merged, vendorStatus } : merged];
     }));
     return Object.fromEntries(entries);
   }, { maxAgeMs: CACHE_MS });

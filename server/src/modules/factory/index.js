@@ -1095,6 +1095,7 @@ async function factoryModule(fastify, opts) {
       readOnly: Boolean(registry && !trusted),
       routes: [],
       defaultRoute: null,
+      routeSuggestion: null,
       catalogHash: null,
       routeOptions: {},
       repositories: [],
@@ -1130,16 +1131,31 @@ async function factoryModule(fastify, opts) {
       name: repo.name,
       targetBranch: repo.targetBranch,
     }));
-    const suggestedRoute = routes.includes(analysis?.route_guess) ? analysis.route_guess : null;
+    // Рекомендацию триажа принимаем только от ЭТОГО каталога: маршруты могли быть
+    // переопубликованы после оценки, и подсказка на снятый маршрут ведёт в отказ движка.
+    const suggestionIsStale = typeof analysis?.route_catalog_hash === 'string'
+      && analysis.route_catalog_hash !== catalog.catalogHash;
+    const suggestedRoute = !suggestionIsStale && routes.includes(analysis?.route_guess)
+      ? analysis.route_guess
+      : null;
     return {
       ...body,
       routes,
       defaultRoute: suggestedRoute || (routes.includes('feature') ? 'feature' : (routes[0] || null)),
+      // Почему предложен именно этот маршрут — человек видит основание, а не вердикт.
+      routeSuggestion: suggestedRoute
+        ? {
+          route: suggestedRoute,
+          depth: analysis?.route_depth || null,
+          reason: analysis?.route_reason || '',
+        }
+        : null,
       catalogHash: catalog.catalogHash,
       routeOptions: Object.fromEntries(routes.map((routeId) => [routeId, {
         deliveryMode: catalog.routeOptions?.[routeId]?.deliveryMode || null,
         instrumentationMode: catalog.routeOptions?.[routeId]?.instrumentationMode || null,
         instrumentationRequired: catalog.routeOptions?.[routeId]?.instrumentationRequired === true,
+        title: catalog.routeOptions?.[routeId]?.title || '',
       }])),
       repositories,
       instrumentationSuggestions: instrumentationSuggestions(

@@ -287,7 +287,10 @@
                   <span class="tchip" :class="triage.analysis.complexity >= 4 ? 'warn' : triage.analysis.complexity === 3 ? 'acc' : ''">сложность {{ triage.analysis.complexity }}/5</span>
                   <span class="tchip" :class="triage.analysis.risk >= 4 ? 'bad' : triage.analysis.risk === 3 ? 'warn' : ''">риск {{ triage.analysis.risk }}/5</span>
                   <span class="tchip">дифф {{ triage.analysis.diff_size }}</span>
-                  <span class="tchip">{{ triage.analysis.route_guess }}</span>
+                  <span class="tchip" :title="triage.analysis.route_reason || ''">
+                    {{ triage.analysis.route_guess
+                    }}<template v-if="triageDepthLabel"> · {{ triageDepthLabel }}</template>
+                  </span>
                   <span v-if="triage.analysis.confidence !== 'high'" class="tchip" :class="triage.analysis.confidence === 'low' ? 'warn' : ''">уверенность: {{ triage.analysis.confidence }}</span>
                 </span>
                 <span v-if="triageBusy" class="tmuted">
@@ -649,7 +652,7 @@
               :loading="busy === 'launch' || launchOptionsBusy"
               :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm"
               loading-label="Читаю параметры запуска"
-              title="Открыть параметры запуска фабрики по задаче"
+              :title="launchOpenHint"
               @click="openLaunch"
             >
               🏭 На конвейер
@@ -703,10 +706,26 @@
                 :disabled="launchOptionsBusy || busy === 'launch'"
                 @change="changeLaunchRoute"
               >
-                <option v-for="r in launchOpts.routes" :key="r" :value="r">{{ r }}</option>
+                <option
+                  v-for="r in launchOpts.routes"
+                  :key="r"
+                  :value="r"
+                  :title="launchOpts.routeOptions?.[r]?.title || ''"
+                >{{ r }}</option>
               </UiSelect>
-              <span v-if="launchRouteIsSuggested" class="lhint suggested">рекомендован триажем</span>
-              <span v-else-if="routeGuess" class="lhint">триаж предлагает: {{ routeGuess }}</span>
+              <span v-if="launchRouteIsSuggested" class="lhint suggested">
+                рекомендован триажем<template v-if="routeDepthLabel"> · {{ routeDepthLabel }}</template>
+              </span>
+              <!-- Человек ушёл с рекомендованного маршрута: основание относится к ней, а не к
+                   выбранному, поэтому текстом его больше не показываем — только подсказкой. -->
+              <span
+                v-else-if="routeSuggestion"
+                class="lhint"
+                :title="routeSuggestionReason"
+              >триаж предлагает: {{ routeSuggestion }}</span>
+              <span v-if="launchRouteIsSuggested && routeSuggestionReason" class="lhint lreason">
+                почему: {{ routeSuggestionReason }}
+              </span>
             </div>
             <div v-if="launchOpts.runners?.length" class="lrow">
               <label class="llbl" for="launch-runner">Исполнитель</label>
@@ -1432,9 +1451,10 @@ const DIAGNOSIS_LABELS = {
   integration: 'интеграция',
 };
 let launchOptionsRequest = 0;
+// Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
+// оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
 function preferredLaunchRoute(opts) {
-  const guess = triage.value?.analysis?.route_guess;
-  return opts.routes?.includes(guess) ? guess : opts.defaultRoute;
+  return opts.routeSuggestion?.route || opts.defaultRoute;
 }
 function makeLaunchForm(opts, criteria = '') {
   const route = preferredLaunchRoute(opts);
@@ -1506,10 +1526,24 @@ async function changeLaunchProfile() {
     if (requestId === launchOptionsRequest) launchOptionsBusy.value = false;
   }
 }
-const routeGuess = computed(() => {
-  const guess = triage.value?.analysis?.route_guess;
-  return guess && guess !== launchForm.value?.route && launchOpts.value?.routes?.includes(guess) ? guess : null;
+// Глубина — вторая половина рекомендации: человек видит не только «какой маршрут»,
+// но и «насколько короткий», а рядом — по каким числам оценки это вышло.
+const DEPTH_LABELS = { light: 'лёгкий', mid: 'средний', full: 'полный' };
+const triageDepthLabel = computed(() => DEPTH_LABELS[triage.value?.analysis?.route_depth] || '');
+// Кнопка называет маршрут, который откроется уже выбранным: путь от оценки триажа до
+// запуска — один клик, и человек заранее знает, с чем согласится.
+const launchOpenHint = computed(() => {
+  const route = triage.value?.analysis?.route_guess;
+  const depth = triageDepthLabel.value;
+  return route
+    ? `Открыть параметры запуска: триаж предлагает «${route}»${depth ? ` (${depth} маршрут)` : ''}`
+    : 'Открыть параметры запуска фабрики по задаче';
 });
+const routeSuggestion = computed(() => launchOpts.value?.routeSuggestion?.route || null);
+const routeSuggestionReason = computed(() => launchOpts.value?.routeSuggestion?.reason || '');
+const routeDepthLabel = computed(() => (
+  DEPTH_LABELS[launchOpts.value?.routeSuggestion?.depth] || ''
+));
 const launchRouteOption = computed(() => (
   launchOpts.value?.routeOptions?.[launchForm.value?.route] || null
 ));
@@ -1518,7 +1552,7 @@ const launchNeedsInstrumentation = computed(() => Boolean(
   launchRouteOption.value?.instrumentationRequired
 ));
 const launchRouteIsSuggested = computed(() => (
-  triage.value?.analysis?.route_guess === launchForm.value?.route
+  Boolean(routeSuggestion.value) && routeSuggestion.value === launchForm.value?.route
 ));
 const launchDeliverySummary = computed(() => (launchOpts.value?.repositories || [])
   .map((repo) => `${repo.name}/${repo.targetBranch || '—'}`)
@@ -1923,6 +1957,8 @@ onUnmounted(() => {
 .lrepo code { color: var(--ink); overflow-wrap: anywhere; }
 .lhint { font-size: 12px; color: var(--ink-mid); }
 .lhint.suggested { color: var(--good); }
+/* Основание рекомендации — отдельной строкой: в ряд с селектом оно не влезает. */
+.lreason { flex-basis: 100%; }
 .lsummary { display: grid; gap: 5px; padding: 8px 10px; border: 1px solid var(--line);
   border-radius: 9px; background: var(--ground); }
 .lsummary-row { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 10px;

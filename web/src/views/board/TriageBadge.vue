@@ -30,7 +30,11 @@
         <span class="trow"><b>Сложность {{ a.complexity }}/5</b> — {{ CX_DESC[a.complexity] || '' }}</span>
         <span class="trow"><b>Риск {{ a.risk }}/5</b> — {{ RISK_DESC[a.risk] || '' }}</span>
         <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[a.diff_size] || '' }}</span>
-        <span class="trow muted">маршрут: {{ a.route_guess }} · уверенность: {{ CONF_RU[a.confidence] || a.confidence }}</span>
+        <span class="trow muted">
+          маршрут: {{ a.route_guess || '—' }}<template v-if="depthLabel"> ({{ depthLabel }})</template>
+          · уверенность: {{ CONF_RU[a.confidence] || a.confidence }}
+        </span>
+        <span v-if="a.route_reason" class="trow muted clamp2">почему: {{ a.route_reason }}</span>
         <span v-if="a.summary" class="trow sum clamp">{{ a.summary }}</span>
         <span v-for="(q, index) in (a.questions || []).slice(0, 2)" :key="q?.id || index" class="trow q clamp2">? {{ questionText(q) }}</span>
         <span v-if="(a.questions || []).length > 2" class="trow muted">…ещё {{ (a.questions || []).length - 2 }} — в карточке задачи</span>
@@ -52,6 +56,9 @@ const props = defineProps({
 
 const a = computed(() => props.row?.analysis || null);
 const state = computed(() => props.row?.status?.state || null);
+// Глубину маршрута считает политика сервера по этой же оценке — показываем её словом.
+const DEPTH_RU = { light: 'лёгкий', mid: 'средний', full: 'полный' };
+const depthLabel = computed(() => DEPTH_RU[a.value?.route_depth] || '');
 const busy = computed(() => state.value === 'queued' || state.value === 'running');
 
 // Расшифровки шкал — те же формулировки, что в рубрике промпта триажа.

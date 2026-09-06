@@ -12,6 +12,7 @@ const EVENT_NAMES = [
   'hello', 'state-change', 'providers-update', 'cockpit-update',
   'chat-permission', 'chat-question', 'chat-permission-done',
   'ssh-permission', 'ssh-sessions', 'ssh-audit',
+  'db-permission', 'db-sessions', 'db-queries', 'db-audit',
   'chat-step', 'chat-progress', 'chat-done', 'chat-orphan', 'chat-turn-start', 'chat-sessions',
   'chat-store', 'chat-store-meta',
   'speech-settings',

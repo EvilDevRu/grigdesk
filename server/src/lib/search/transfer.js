@@ -9,6 +9,8 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 
+import { acquireKernelFileLock } from '../kernel-lock.js';
+import { measureKnowledgeContext } from './context.js';
 import { KnowledgeError, invalidArguments, unavailable } from './errors.js';
 
 const SCHEMA_VERSION = 1;
@@ -267,15 +269,7 @@ async function rollbackReplacements(replacements) {
 }
 
 async function contextBytes(rootDir) {
-  const cockpitDir = path.join(rootDir, 'docs/cockpit');
-  const names = await readdir(cockpitDir).catch(() => []);
-  const chunks = await Promise.all([
-    readFile(path.join(rootDir, 'AGENTS.md')).catch(() => Buffer.alloc(0)),
-    readFile(path.join(rootDir, 'CLAUDE.md')).catch(() => Buffer.alloc(0)),
-    ...names.filter((name) => name.endsWith('.md'))
-      .map((name) => readFile(path.join(cockpitDir, name)).catch(() => Buffer.alloc(0))),
-  ]);
-  return chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  return (await measureKnowledgeContext(rootDir)).totalBytes;
 }
 
 /**
@@ -286,11 +280,15 @@ async function contextBytes(rootDir) {
  */
 export function createKnowledgeTransfer({
   rootDir,
+  dbPath,
   knowledge,
   mapsRootFor,
   listKnownProjects,
 } = {}) {
   const repositoryRoot = path.resolve(String(rootDir || ''));
+  const mapsLockPath = dbPath
+    ? `${path.resolve(dbPath)}.maps.lock`
+    : path.join(repositoryRoot, '.state/knowledge-maps.lock');
   const resolveMapsRoot = typeof mapsRootFor === 'function'
     ? mapsRootFor
     : () => repositoryRoot;
@@ -342,6 +340,7 @@ export function createKnowledgeTransfer({
    */
   async function updateMaps({ project, sourceDocuments } = {}) {
     const replacements = [];
+    let mapLock;
     try {
       const targeted = sourceDocuments !== undefined;
       let targets = null;
@@ -357,16 +356,28 @@ export function createKnowledgeTransfer({
         throw invalidArguments('Проект карты должен быть непустым.');
       }
 
+      // HTTP/MCP и отдельные CLI делят один kernel lock базы. Снимок берётся уже
+      // внутри него: ожидавший writer иначе мог бы вернуть на диск устаревшую карту.
+      // FD остаётся у текущего процесса до завершения всей серии или её отката.
+      mapLock = await acquireKernelFileLock({
+        lockPath: mapsLockPath,
+        timeoutCode: 'maps_lock_timeout',
+        unavailableCode: 'maps_lock_unavailable',
+        lostCode: 'maps_lock_lost',
+        errorFactory: (code, message) => unavailable(code, new Error(message)),
+      });
+      await mapLock.assertPathIdentity();
+
       const records = exactRecords(await knowledge.exportSnapshot());
       const byProject = new Map();
       for (const record of records) {
+        if (scope !== null && record?.project !== scope) {
+          continue;
+        }
+        if (targeted && !targets.includes(record?.tags?.[0])) {
+          continue;
+        }
         const sourceDocument = validateRecord(record);
-        if (targeted && !targets.includes(sourceDocument)) {
-          continue;
-        }
-        if (scope !== null && record.project !== scope) {
-          continue;
-        }
         const topics = byProject.get(record.project) || new Map();
         const sourceRecords = topics.get(sourceDocument) || [];
         sourceRecords.push(record);
@@ -473,6 +484,8 @@ export function createKnowledgeTransfer({
         throw error;
       }
       throw unavailable('maps_refresh_failed', error);
+    } finally {
+      await mapLock?.release();
     }
   }
 

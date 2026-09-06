@@ -148,6 +148,74 @@ test('Созданная запись получает UUID, серверное 
   });
 });
 
+const INVALID_RECORD_TAGS = [
+  undefined,
+  null,
+  'knowledge',
+  [],
+  [''],
+  [' ', 'knowledge'],
+  ['../outside'],
+  ['/outside'],
+  ['topic/child'],
+  ['Тема'],
+  ['Topic'],
+  ['topic_name'],
+  ['-topic'],
+  ['topic-'],
+  [42],
+];
+
+test('Создание без безопасной первой темы отклоняется до изменения базы и индекса', async (t) => {
+  const { storage } = await knowledgeFixture(t);
+  await storage.create(record({ body: 'Сохранённый факт.' }));
+  const before = await storage.exportSnapshot();
+
+  for (const tags of INVALID_RECORD_TAGS) {
+    await assert.rejects(
+      storage.create(record({ tags, body: 'Недопустимыйуникальныймаркер' })),
+      (error) => error?.code === 'KNOWLEDGE_INVALID_ARGUMENTS',
+      `Недопустимые теги: ${JSON.stringify(tags)}`,
+    );
+  }
+
+  assert.deepEqual(await storage.exportSnapshot(), before);
+  assert.deepEqual(await storage.search({ query: 'Недопустимыйуникальныймаркер' }), { items: [] });
+});
+
+test('Недопустимая первая тема не меняет ревизию, тело, теги и индекс при правке', async (t) => {
+  const { storage } = await knowledgeFixture(t);
+  const created = await storage.create(record({ body: 'Сохранённыйуникальныймаркер' }));
+
+  for (const tags of INVALID_RECORD_TAGS) {
+    await assert.rejects(
+      storage.update(created.id, {
+        tags,
+        body: 'Недопустимыйуникальныймаркер',
+        expectedRevision: created.revision,
+      }),
+      (error) => error?.code === 'KNOWLEDGE_INVALID_ARGUMENTS',
+      `Недопустимые теги: ${JSON.stringify(tags)}`,
+    );
+  }
+
+  assert.deepEqual(await storage.read(created.id), created);
+  assert.deepEqual(await storage.search({ query: 'Недопустимыйуникальныймаркер' }), { items: [] });
+  assert.equal((await storage.search({ query: 'Сохранённыйуникальныймаркер' })).items[0]?.id, created.id);
+});
+
+test('Тема нормализуется, а правка без поля tags сохраняет её и русские теги', async (t) => {
+  const { storage } = await knowledgeFixture(t);
+  const created = await storage.create(record({ tags: [' ｒｅｌｅａｓｅ-2 ', 'сборка', 'сборка'] }));
+  const updated = await storage.update(created.id, {
+    body: 'Уточнённый факт.',
+    expectedRevision: created.revision,
+  });
+
+  assert.deepEqual(updated.tags, ['release-2', 'сборка']);
+  assert.equal(updated.revision, 2);
+});
+
 test('Существующая база схемы v1 открывается с записью и мигрирует marker на v2', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-knowledge-v1-'));
   const dbPath = path.join(root, 'knowledge.db');
@@ -303,7 +371,10 @@ test('SQLite использует переносимый DELETE journal и вн�
 
 test('Чтение по id возвращает полный исходный текст и точные теги', async (t) => {
   const { storage } = await knowledgeFixture(t);
-  const input = record({ body: 'Полный текст без сокращения.', tags: ['архитектура', 'API'] });
+  const input = record({
+    body: 'Полный текст без сокращения.',
+    tags: ['architecture', 'архитектура', 'API'],
+  });
   const created = await storage.create(input);
   const found = await storage.read(created.id);
 
@@ -362,16 +433,16 @@ test('Две одновременные правки одной ревизии �
 
 test('Отклонённая CAS-правка атомарно сохраняет прежнее тело и теги', async (t) => {
   const { storage } = await knowledgeFixture(t);
-  const created = await storage.create(record({ body: 'Исходное тело.', tags: ['исходное'] }));
+  const created = await storage.create(record({ body: 'Исходное тело.', tags: ['original', 'исходное'] }));
   await assert.rejects(storage.update(created.id, {
-    ...record({ body: 'Не должно сохраниться.', tags: ['битое'] }),
+    ...record({ body: 'Не должно сохраниться.', tags: ['invalid', 'битое'] }),
     expectedRevision: created.revision + 10,
   }));
   const after = await storage.read(created.id);
 
   assert.deepEqual({ body: after.body, tags: after.tags, revision: after.revision }, {
     body: 'Исходное тело.',
-    tags: ['исходное'],
+    tags: ['original', 'исходное'],
     revision: 1,
   });
 });

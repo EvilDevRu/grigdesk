@@ -44,6 +44,15 @@ export const TOOL_CATALOG = [
     hotkey: 'Ctrl+Shift+Digit4',
     plugin: 'ssh',
   },
+  {
+    id: 'db',
+    route: '/db',
+    label: 'Базы',
+    icon: 'db',
+    order: 50,
+    hotkey: 'Ctrl+Shift+Digit5',
+    plugin: 'db',
+  },
 ];
 
 export const TOOL_META_BY_ID = new Map(TOOL_CATALOG.map((item) => [item.id, item]));

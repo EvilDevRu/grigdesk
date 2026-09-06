@@ -12,7 +12,7 @@ const RESOURCE_TONES = new Set(['ok', 'muted', 'warn', 'bad']);
 const CONTROL_KINDS = new Set(['toggle', 'number', 'button', 'link']);
 const ACTION_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-function safeHttpsUrl(value) {
+export function safeHttpsUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' ? url.href : null;

@@ -1,18 +1,39 @@
 #!/usr/bin/env bash
 
-# Загружает машинные параметры запуска тем же штатным парсером .env, которым сервер
-# читает их через `node --env-file`. Сам `.env` не source-ится и не попадает в eval:
-# строки вроде `VALUE=$(command)` остаются обычным текстом. Уже экспортированное
-# окружение имеет приоритет над значениями файла — это также поведение Node.
+# CLI текущей установки доступны без повторного запуска installer. Абсолютный bin
+# наследуется агентами даже при старте из рабочего дерева другого проекта.
 cockpit_add_cli_paths() {
-  local kimi_bin_dir="${HOME:?домашний каталог обязателен}/.kimi-code/bin"
-  case ":${PATH:-}:" in
-    *":${kimi_bin_dir}:"*) ;;
-    *) PATH="${kimi_bin_dir}${PATH:+:${PATH}}" ;;
-  esac
+  local cockpit_root=${1:-}
+  local cli_bin_dir
+  local cli_path_entry
+  local -a cli_path_entries
+  if [[ -z "$cockpit_root" ]]; then
+    cockpit_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P) || return 1
+  fi
+
+  for cli_bin_dir in \
+    "${HOME:?домашний каталог обязателен}/.kimi-code/bin" \
+    "$HOME/.local/bin"; do
+    case ":${PATH:-}:" in
+      *":${cli_bin_dir}:"*) ;;
+      *) PATH="${cli_bin_dir}${PATH:+:${PATH}}" ;;
+    esac
+  done
+
+  # Текущая установка всегда первая, даже если bin уже был в хвосте PATH:
+  # пользовательский симлинк может всё ещё вести в другой checkout.
+  IFS=: read -r -a cli_path_entries <<<"${PATH:-}"
+  PATH="$cockpit_root/bin"
+  for cli_path_entry in "${cli_path_entries[@]}"; do
+    [[ "$cli_path_entry" == "$cockpit_root/bin" ]] && continue
+    PATH+=":$cli_path_entry"
+  done
+
   export PATH
 }
 
+# Загружает .env штатным парсером Node без source/eval: подстановки shell остаются
+# обычным текстом, а уже экспортированное окружение имеет приоритет над файлом.
 cockpit_load_runtime_env() {
   local cockpit_root=${1:?корень cockpit обязателен}
   local env_file="$cockpit_root/.env"

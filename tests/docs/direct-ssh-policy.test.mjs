@@ -1,15 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const root = new URL('../../', import.meta.url);
+import { canonDocs } from './helpers/canon.mjs';
 
-async function physicalDocs(name) {
-  const [map, reference] = await Promise.all([
-    readFile(new URL(`docs/cockpit/${name}.md`, root), 'utf8'),
-    readFile(new URL('docs/cockpit/reference/runtime-contracts.md', root), 'utf8'),
-  ]);
-  return `${map}\n${reference}`;
+async function physicalDocs() {
+  return canonDocs();
 }
 
 function missingClauses(text, clauses) {
@@ -57,6 +52,8 @@ test('security-канон Kimi различает host fail-closed и contained 
     ['ключ настройки', /blockDirectSsh/u],
     ['host fail-closed', /host[\s\S]{0,300}fail-closed/iu],
     ['typed отказ', /direct_ssh_policy_unavailable/u],
+    ['typed DB-отказ', /direct_db_policy_unavailable/u],
+    ['DB-отказ до spawn', /DB[\s\S]{0,500}(до build\/spawn|до spawn)/iu],
     ['contained при false закрыт сетью', /contained[\s\S]{0,500}(false|выключ)[\s\S]{0,300}(egress|сетев|network)/iu],
   ]);
 

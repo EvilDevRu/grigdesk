@@ -9,6 +9,7 @@ import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 
 import { config } from './config.js';
+import { cockpitCliPath } from './lib/cli-path.js';
 import { AuthStore } from './lib/auth-store.js';
 import { FactoryStateAdapter } from './adapters/factory-state.js';
 import { ArbiterCardsStore } from './lib/arbiter-cards.js';
@@ -62,6 +63,12 @@ import { createSshTransport } from './lib/ssh/transport.js';
 import { createSshSessionManager } from './lib/ssh/session-manager.js';
 import { createSshAudit } from './lib/ssh/audit.js';
 import { createSshBroker } from './lib/ssh/broker.js';
+import { createEngineRegistry } from './lib/db/engine-registry.js';
+import { createDbStore } from './lib/db/store.js';
+import { createDbSessionManager } from './lib/db/session-manager.js';
+import { createDbAudit } from './lib/db/audit.js';
+import { cancelDbQuery, createDbBroker } from './lib/db/broker.js';
+import { normalizeDbResult } from './lib/db/result.js';
 import { createKnowledgeClient } from './lib/search/client.js';
 import { createKnowledgeBroker } from './lib/search/broker.js';
 import { createKnowledgeTransfer } from './lib/search/transfer.js';
@@ -99,10 +106,15 @@ import githubModule from './modules/github/index.js';
 import inboxModule from './modules/inbox/index.js';
 import documentsModule from './modules/documents/index.js';
 import sshModule from './modules/ssh/index.js';
+import dbModule from './modules/db/index.js';
 import knowledgeModule from './modules/knowledge/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 import { AnalysisArbiter } from './lib/analysis/arbiter.js';
 import { DocumentReader } from './lib/documents/reader.js';
+
+// npm start и существующий systemd-юнит тоже дают агентам CLI текущей установки.
+// Дочерние процессы наследуют этот PATH независимо от рабочего каталога задачи.
+process.env.PATH = cockpitCliPath(config.rootDir);
 
 // Настройки нужны ещё до сборки приложения: тумблер режима доступа решает, поднимать ли
 // https-сокет, а сокет создаётся один раз при старте.
@@ -153,6 +165,7 @@ async function build() {
   });
   const knowledgeTransfer = createKnowledgeTransfer({
     rootDir: config.rootDir,
+    dbPath: config.knowledgeDbPath,
     knowledge,
     mapsRootFor: (project) => projectMapsRoot({ config, prefs, id: project }),
     listKnownProjects: () => listProjects(config, prefs),
@@ -307,6 +320,208 @@ async function build() {
       await sshSessions.closeAll('plugin_disabled');
     },
   };
+
+  const dbEngines = await createEngineRegistry();
+  const dbProfiles = await createDbStore({
+    path: config.dbProfilesPath,
+    projects: async () => (await listProjects(config, prefs)).map((id) => ({ id })),
+  });
+  const dbAuditStore = await createDbAudit({ dir: config.dbAuditDir });
+  const dbAudit = {
+    async append(entry) {
+      const result = await dbAuditStore.append(entry);
+      fastify.sse.broadcast('db-audit', { at: result.at });
+      return result;
+    },
+  };
+  const dbSessions = createDbSessionManager({
+    engines: dbEngines,
+    sshSessions,
+    permissionQueue,
+    idleMs: () => (
+      Math.max(1, Number(fastify.pluginSettings?.('db')?.idleCloseMinutes) || 15) * 60_000
+    ),
+  });
+  const dbSettings = () => {
+    const value = fastify.pluginSettings?.('db') || {};
+    return {
+      allowDdlAdmin: value.allowDdlAdmin === true,
+      autoRead: value.autoRead === true,
+      autoReadProd: value.autoReadProd === true,
+      maxRows: Math.max(1, Number(value.maxRows) || 1000),
+      maxBytes: Math.max(4, Number(value.maxBytesKiB) || 256) * 1024,
+      timeoutMs: Math.max(1, Number(value.timeoutSeconds) || 15) * 1000,
+      autoReadPerMinute: Math.max(1, Number(value.autoReadPerMinute) || 10),
+    };
+  };
+  const dbQueries = new Map();
+
+  function publicDbQuery(query) {
+    return query ? {
+      id: query.id,
+      sessionId: query.sessionId,
+      actor: query.actor,
+      text: query.text,
+      queryClass: query.queryClass || null,
+      tables: query.tables || [],
+      state: query.state,
+      error: query.error || null,
+      startedAt: query.startedAt,
+      finishedAt: query.finishedAt || null,
+      result: query.result || null,
+    } : null;
+  }
+
+  function updateDbQuery(event) {
+    const current = dbQueries.get(event.id);
+    if (current?.state === 'cancelled' && event.state !== 'cancelled') return;
+    dbQueries.set(event.id, { ...current, ...event });
+    fastify.sse.broadcast('db-queries', { queryId: event.id });
+  }
+
+  const dbBroker = createDbBroker({
+    pluginEnabled: (id) => fastify.pluginEnabled?.(id) === true,
+    sessions: dbSessions,
+    engines: dbEngines,
+    permissionQueue,
+    audit: dbAudit,
+    settings: dbSettings,
+    onQuery: updateDbQuery,
+  });
+  fastify.decorate('dbBroker', dbBroker);
+
+  dbSessions.subscribe((event) => {
+    fastify.sse.broadcast('db-sessions', { sessionId: event.session.id });
+  });
+
+  const dbService = {
+    listEngines: () => dbEngines.list(),
+    listProfiles: () => dbProfiles.list(),
+    createProfile: (input) => dbProfiles.create(input),
+    updateProfile: (id, input) => dbProfiles.update(id, input),
+    async deleteProfile(id) {
+      await Promise.all(dbSessions.list().filter((session) => session.profileId === id)
+        .map((session) => dbSessions.close(session.id, 'profile_deleted')));
+      return dbProfiles.remove(id);
+    },
+    async openSession(id, password, sshSessionId) {
+      const profile = dbProfiles.get(id);
+      if (!profile) {
+        const error = new Error('Профиль БД не найден');
+        error.code = 'not_found';
+        throw error;
+      }
+      return { session: await dbSessions.open({ profile, password, sshSessionId }) };
+    },
+    listSessions: () => dbSessions.list(),
+    setAgentAccess: (id, allowed) => dbSessions.setAgentAccess(id, allowed),
+    closeSession: (id) => dbSessions.close(id),
+    async schema(id) {
+      const session = dbSessions.find(id);
+      if (!session) {
+        const error = new Error('DB-сессия не найдена');
+        error.code = 'session_not_found';
+        throw error;
+      }
+      const raw = await session.engine.schema(session.handle);
+      const result = await normalizeDbResult(raw, { ...dbSettings(), completed: true });
+      await dbAudit.append({
+        projectId: session.profile.projectId,
+        sessionId: session.id,
+        actor: 'human',
+        query: 'Просмотр схемы',
+        queryClass: 'read',
+        outcome: 'success',
+        rows: result.totalRows,
+        bytes: result.totalBytes,
+        truncated: result.truncated,
+      });
+      return { schema: result };
+    },
+    async query(id, input) {
+      const session = dbSessions.find(id);
+      if (!session) {
+        const error = new Error('DB-сессия не найдена');
+        error.code = 'session_not_found';
+        throw error;
+      }
+      const query = {
+        id: randomUUID(),
+        sessionId: session.id,
+        actor: 'human',
+        text: String(input.text || ''),
+        queryClass: null,
+        tables: [],
+        state: 'running',
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        result: null,
+      };
+      dbQueries.set(query.id, query);
+      const run = { id: query.id, queryId: query.id };
+      const untrack = dbSessions.trackRun(session.id, run);
+      fastify.sse.broadcast('db-queries', { queryId: query.id });
+      Promise.resolve().then(async () => {
+        try {
+          const raw = await session.engine.execute(session.handle, {
+            text: query.text,
+            params: input.params || [],
+            queryId: query.id,
+            limits: dbSettings(),
+          });
+          query.result = await normalizeDbResult(raw, { ...dbSettings(), completed: true });
+          query.state = 'done';
+          await dbAudit.append({
+            projectId: session.profile.projectId,
+            sessionId: session.id,
+            actor: 'human',
+            query: query.text,
+            outcome: 'success',
+            rows: query.result.totalRows,
+            bytes: query.result.totalBytes,
+            truncated: query.result.truncated,
+          });
+        } catch {
+          query.state = 'error';
+          query.result = { ok: false, error: 'query_failed' };
+          await dbAudit.append({
+            projectId: session.profile.projectId,
+            sessionId: session.id,
+            actor: 'human',
+            query: query.text,
+            outcome: 'query_failed',
+          });
+        } finally {
+          query.finishedAt = new Date().toISOString();
+          untrack?.();
+          fastify.sse.broadcast('db-queries', { queryId: query.id });
+        }
+      });
+      return { queryId: query.id };
+    },
+    listQueries: () => [...dbQueries.values()].map(publicDbQuery),
+    getQuery: (id) => publicDbQuery(dbQueries.get(id)),
+    async cancelQuery(id) {
+      const query = dbQueries.get(id);
+      const session = query ? dbSessions.find(query.sessionId) : null;
+      const outcome = await cancelDbQuery({ query, session, sessions: dbSessions });
+      if (!outcome.ok) return outcome;
+      query.state = 'cancelled';
+      query.finishedAt = new Date().toISOString();
+      fastify.sse.broadcast('db-queries', { queryId: query.id });
+      return { ok: true, method: outcome.method };
+    },
+    listAudit: (query) => dbAuditStore.list(query),
+    answerApproval: (pid, body) => permissionQueue.answer(pid, 'db', body),
+    async disable() {
+      permissionQueue.cancelWhere(
+        (entry) => entry.origin === 'db',
+        { allow: false, error: 'plugin_disabled' },
+      );
+      await dbSessions.closeAll('plugin_disabled');
+    },
+  };
+  fastify.addHook('onClose', async () => dbSessions.dispose('server_shutdown'));
   fastify.addHook('onClose', async () => {
     await sshSessions.closeAll('server_shutdown');
   });
@@ -554,6 +769,9 @@ async function build() {
       if (id === 'ssh' && !enabled) {
         await sshService.disable();
       }
+      if (id === 'db' && !enabled) {
+        await dbService.disable();
+      }
       if (id === 'analysis') {
         analyzer.pluginToggled(enabled);
       }
@@ -590,11 +808,13 @@ async function build() {
   await fastify.register(documentsModule, { reader: documentReader });
   await fastify.register(projectsModule, { config, prefs });
   await fastify.register(sshModule, { service: sshService });
+  await fastify.register(dbModule, { service: dbService });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
     taskExists: companionTaskExists,
     permissionQueue,
     sshBroker,
+    dbBroker,
     knowledgeBroker,
   });
   await fastify.register(settingsModule, {

@@ -463,6 +463,47 @@ test('host runtime при default-on запрете отказывает до с
   ]);
 });
 
+test('host runtime при DB-политике отказывает до запуска во всех режимах прав', async (t) => {
+  const snapshots = [];
+  for (const permissionMode of ['default', 'auto', 'plan', 'bypassPermissions']) {
+    const f = await fixture(t);
+    const calls = { buildHost: 0, spawn: 0 };
+    let error;
+    try {
+      await runContainedKimi({
+        config: { ...f.config, kimiLaunchMode: 'host' },
+        chatKey: `chat-host-db-${permissionMode}`,
+        cwd: f.cwd,
+        message: 'offline fake prompt',
+        model: 'kimi-code/k3',
+        permissionMode,
+        providerSettings: { blockDirectSsh: false, blockDirectDb: true },
+        deps: {
+          assertVersion: async () => {},
+          buildHostLaunch: async () => {
+            calls.buildHost += 1;
+            throw new Error('host launch не должен собираться');
+          },
+          spawn: () => {
+            calls.spawn += 1;
+            throw new Error('process не должен запускаться');
+          },
+        },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    snapshots.push({ permissionMode, code: error?.code, calls });
+  }
+
+  assert.deepEqual(snapshots, ['default', 'auto', 'plan', 'bypassPermissions']
+    .map((permissionMode) => ({
+      permissionMode,
+      code: 'direct_db_policy_unavailable',
+      calls: { buildHost: 0, spawn: 0 },
+    })));
+});
+
 test('host runtime: вложения идут по исходным путям, чужой корень отклоняется', async (t) => {
   const f = await fixture(t);
   const attachments = [path.join(f.config.chatsDir, 'attachments', 'note.txt')];

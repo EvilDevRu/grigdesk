@@ -6,9 +6,13 @@ import { knowledgeFixture, record } from './helpers/knowledge.js';
 async function indexedFixture(t) {
   const fixture = await knowledgeFixture(t);
   const rows = [
-    record({ title: 'Деплой сервиса', body: 'Справочная запись.', tags: ['операции'] }),
-    record({ title: 'Справочная запись', body: 'Тег описывает выпуск.', tags: ['деплой'] }),
-    record({ title: 'Справочная запись', body: 'Подробно описан деплой приложения.', tags: ['прочее'] }),
+    record({ title: 'Деплой сервиса', body: 'Справочная запись.', tags: ['knowledge', 'операции'] }),
+    record({ title: 'Справочная запись', body: 'Тег описывает выпуск.', tags: ['knowledge', 'деплой'] }),
+    record({
+      title: 'Справочная запись',
+      body: 'Подробно описан деплой приложения.',
+      tags: ['knowledge', 'прочее'],
+    }),
   ];
   const created = [];
   for (const row of rows) created.push(await fixture.storage.create(row));
@@ -107,10 +111,10 @@ test('Русский запрос находит отличающуюся сло
 test('Фильтры проекта, репозитория и тегов применяются одновременно', async (t) => {
   const { storage } = await knowledgeFixture(t);
   const wanted = await storage.create(record({
-    project: 'alpha', repository: 'backend', title: 'Очередь заданий', tags: ['важное', 'queue'],
+    project: 'alpha', repository: 'backend', title: 'Очередь заданий', tags: ['queue', 'важное'],
   }));
   await storage.create(record({
-    project: 'beta', repository: 'backend', title: 'Очередь заданий', tags: ['важное', 'queue'],
+    project: 'beta', repository: 'backend', title: 'Очередь заданий', tags: ['queue', 'важное'],
   }));
   const result = await storage.search({
     query: 'очередь', project: 'alpha', repository: 'backend', tags: ['важное'],

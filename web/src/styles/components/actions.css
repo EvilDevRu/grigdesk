@@ -735,9 +735,27 @@
   color: var(--accent);
 }
 
-/* Внешний ресурс — ссылка, а не кнопка формы. Обычный action skin добавляет ей
-   36 px высоты и nowrap; длинная подпись Claude из-за этого раздвигала popover. */
-.ui-action-link[data-context='topbar-popover-resource-link'] {
+/* Иконки в шапке всплывашки исполнителя. Там строка имени, а не панель инструментов:
+   кнопка ростом с ручку панели перевешивала само имя, ради которого шапку и сократили. */
+.ui-icon-button[data-context='topbar-popover-settings'],
+.ui-icon-button[data-context='topbar-popover-update'] {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border-radius: 6px;
+}
+
+.ui-icon-button[data-context='topbar-popover-settings'] svg,
+.ui-icon-button[data-context='topbar-popover-update'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Внешний ресурс и страница состояния вендора — ссылки, а не кнопки формы. Обычный
+   action skin добавляет им 36 px высоты и nowrap; длинная подпись Claude из-за этого
+   раздвигала popover. Скин один: обе ссылки живут строкой в тексте всплывашки. */
+.ui-action-link[data-context='topbar-popover-resource-link'],
+.ui-action-link[data-context='topbar-popover-status-link'] {
   justify-content: flex-start;
   width: fit-content;
   max-width: 100%;
@@ -755,7 +773,8 @@
   overflow-wrap: anywhere;
 }
 
-.ui-action-link[data-context='topbar-popover-resource-link']:hover:not([aria-disabled='true']) {
+.ui-action-link[data-context='topbar-popover-resource-link']:hover:not([aria-disabled='true']),
+.ui-action-link[data-context='topbar-popover-status-link']:hover:not([aria-disabled='true']) {
   border-color: transparent;
   background: transparent;
   color: var(--accent);

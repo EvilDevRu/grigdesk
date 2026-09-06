@@ -68,6 +68,15 @@
   font-size: 13px;
 }
 
+/* SQL остаётся обычным общим textarea, но код требует моноширинного ритма и
+   устойчивой рабочей высоты в полноразмерной панели и узком доке. */
+.ui-textarea[data-role='db-query'] {
+  min-height: 104px;
+  max-height: 220px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 .ui-input::placeholder,
 .ui-number-input::placeholder,
 .ui-textarea::placeholder {

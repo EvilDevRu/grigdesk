@@ -241,6 +241,8 @@ export default {
   // зависимости от системного Node.js.
   install: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
   login: 'kimi login',
+  // У kimi.com своей страницы состояния нет — сбои публикует Moonshot AI.
+  statusPage: 'https://status.moonshot.cn',
   securityProfile: KIMI_SECURITY_PROFILE,
   retryContract: KIMI_RETRY_CONTRACT,
   compaction: { kind: 'native', message: '/compact' },

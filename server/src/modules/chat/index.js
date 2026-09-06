@@ -162,6 +162,7 @@ async function chatModule(fastify, opts) {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
   } = opts;
   const sshBroker = opts.sshBroker || fastify.sshBroker || null;
+  const dbBroker = opts.dbBroker || fastify.dbBroker || null;
   const knowledgeBroker = opts.knowledgeBroker || fastify.knowledgeBroker || null;
   const permissionQueue = opts.permissionQueue || createPermissionQueue();
   const workIpcs = new Map();
@@ -679,14 +680,15 @@ async function chatModule(fastify, opts) {
   const PERM_WAIT_MS = 24 * 60 * 60 * 1000;
 
   permissionQueue.subscribe?.((event) => {
-    if (event.origin !== 'ssh' && event.entry?.origin !== 'ssh') {
+    const origin = event.origin || event.entry?.origin;
+    if (!['ssh', 'db'].includes(origin)) {
       return;
     }
     if (event.type === 'waiting') {
-      fastify.sse.broadcast('ssh-permission', { pid: event.entry.pid });
+      fastify.sse.broadcast(`${origin}-permission`, { pid: event.entry.pid });
     } else {
       fastify.sse.broadcast('chat-permission-done', { pid: event.pid });
-      fastify.sse.broadcast('ssh-permission', { pid: event.pid });
+      fastify.sse.broadcast(`${origin}-permission`, { pid: event.pid });
     }
   });
 
@@ -694,7 +696,7 @@ async function chatModule(fastify, opts) {
   function dropPending(chatKey, message) {
     for (const [pid, p] of pendingPerms) {
       if (p.chatKey !== chatKey) continue;
-      if (p.origin === 'ssh') {
+      if (['ssh', 'db'].includes(p.origin)) {
         permissionQueue.cancel(pid, { allow: false, error: 'session_lost' });
         continue;
       }
@@ -820,17 +822,19 @@ async function chatModule(fastify, opts) {
   // Что сейчас ждёт человека — чтобы окно после F5 (и второе окно) подняло всплывашки:
   // SSE доставляет событие один раз, а запрос висит, пока на него не ответят.
   fastify.get('/api/chat/waiting', async (request) => {
-    const includeSsh = request.query?.include === 'ssh' && request.authKind === 'session';
+    const included = new Set(String(request.query?.include || '').split(',').filter(Boolean));
+    const includeSupervised = request.authKind === 'session';
     const entries = [...pendingPerms.entries()].filter(([, pending]) => (
-      pending.origin !== 'ssh' || includeSsh
+      !['ssh', 'db'].includes(pending.origin)
+      || (includeSupervised && included.has(pending.origin))
     ));
     return {
       waiting: await Promise.all(entries.map(async ([pid, p]) => {
       const head = await chatHeadOf(p.chatKey);
-      if (p.origin === 'ssh') {
+      if (['ssh', 'db'].includes(p.origin)) {
         return {
           pid,
-          origin: 'ssh',
+          origin: p.origin,
           chatKey: p.chatKey,
           at: p.at,
           chatTitle: head.title,
@@ -932,7 +936,7 @@ async function chatModule(fastify, opts) {
     const pid = String(request.params.pid);
     const p = pendingPerms.get(pid);
     if (!p) return reply.code(404).send({ error: 'not_found' });
-    if (p.origin === 'ssh') {
+    if (['ssh', 'db'].includes(p.origin)) {
       return reply.code(409).send({ error: 'origin_mismatch' });
     }
     const body = request.body || {};
@@ -1432,9 +1436,29 @@ async function chatModule(fastify, opts) {
       invoke: (scope, input) => (sshBroker
         ? sshBroker.invoke(scope, input)
         : Promise.resolve({ ok: false, error: 'not_available' })),
-      knowledgeInvoke: (scope, input) => (knowledgeBroker
-        ? knowledgeBroker.invoke(scope, input)
-        : Promise.resolve({ ok: false, error: 'knowledge_unavailable' })),
+      knowledgeInvoke: (scope, input) => {
+        if (!knowledgeBroker) {
+          return Promise.resolve({ ok: false, error: 'knowledge_unavailable' });
+        }
+        if (input.action !== 'write') {
+          return knowledgeBroker.invoke(scope, input);
+        }
+        // MCP и dynamic tools живут дольше хода: подтверждение всегда принадлежит
+        // текущему запуску с тем же scope, а не замыканию первого сообщения.
+        const run = activeRuns.get(chatKey);
+        if (!run || run.workToolScopeKey !== workToolScopeKey) {
+          return Promise.resolve({ ok: false, error: 'permission_denied', reason: 'turn_inactive' });
+        }
+        return knowledgeBroker.invoke(scope, input, {
+          onPermission: run.onPermission,
+          signal: run.ac.signal,
+          isCurrent: () => activeRuns.get(chatKey) === run,
+        });
+      },
+      pluginEnabled: (pluginId) => fastify.pluginEnabled?.(pluginId) === true,
+      dbInvoke: (scope, input) => (dbBroker
+        ? dbBroker.invoke(scope, input)
+        : Promise.resolve({ ok: false, error: 'not_available' })),
     });
     const workIpc = executor.workToolsTransport === 'mcp'
       ? await ensureWorkIpc(workToolScopeKey, workToolsValue)
@@ -1546,6 +1570,7 @@ async function chatModule(fastify, opts) {
       compact: !!plan,
       speechSafe: companionTurn === true,
       speechTraceSeen: false,
+      workToolScopeKey,
     };
     if (chatKey) {
       activeRuns.set(chatKey, runRec);
@@ -1583,6 +1608,24 @@ async function chatModule(fastify, opts) {
     }
 
     try {
+      // Живой показ шага: служебный маркер заголовка не виден ни в ленте, ни после F5,
+      // копия в activeRuns нужна окну, открытому ПОСРЕДИ хода. Окно скользящее, как у
+      // sink: раньше здесь копились первые 400 шагов, и после F5 длинный ход показывал
+      // начало часовой давности вместо того, что идёт прямо сейчас.
+      // Вынесено из onStep, потому что этим же путём идёт служебная отметка повтора: она
+      // приходит не от исполнителя, и аттестацию озвучки трогать не должна.
+      const publishStep = (step) => {
+        if (!chatKey) return;
+        const visibleStep = visibleChatTitleStep(step, wantsTitle);
+        if (!visibleStep) return;
+        const a = activeRuns.get(chatKey);
+        if (a) {
+          a.steps.push(visibleStep);
+          if (a.steps.length > MAX_CHAT_STEPS) a.steps.splice(0, a.steps.length - MAX_CHAT_STEPS);
+        }
+        fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
+      };
+
       const runArgs = {
         config,
         chatKey,
@@ -1601,7 +1644,11 @@ async function chatModule(fastify, opts) {
         permissionPromptTool: 'mcp__cockpit-perm__approve',
         workTools: workToolsValue,
         workToolScopeKey,
-        providerSettings: currentPrefs.providerSettings?.[executor.id] || {},
+        providerSettings: {
+          ...(currentPrefs.providerSettings?.[executor.id] || {}),
+          blockDirectDb: fastify.pluginEnabled?.('db') === true,
+          strictUnknownDbClient: fastify.pluginSettings?.('db')?.strictClientPolicy === true,
+        },
         // Server-owned снапшот истории чата: stateless HTTP-исполнители (Ollama)
         // реплеят из него разговор; CLI-исполнители поле игнорируют. Содержит и
         // текущее сообщение (клиент сохранил его до POST) — дубликат срезает executor.
@@ -1665,20 +1712,10 @@ async function chatModule(fastify, opts) {
             : null;
           if (speechKind) runRec.speechTraceSeen = true;
           if (!speechKind || !SPEECH_SAFE_STEP_KINDS.has(speechKind)) runRec.speechSafe = false;
-          // Служебный маркер заголовка не показываем ни в живой ленте, ни после F5.
-          const visibleStep = visibleChatTitleStep(step, wantsTitle);
-          if (!visibleStep) return;
-          const a = activeRuns.get(chatKey);
-          // Тем же скользящим окном, что и sink: копия нужна окну, открытому ПОСРЕДИ
-          // хода, а ему важно свежее. Раньше здесь копились первые 400 шагов, и после
-          // F5 длинный ход показывал начало часовой давности вместо того, что идёт.
-          if (a) {
-            a.steps.push(visibleStep);
-            if (a.steps.length > MAX_CHAT_STEPS) a.steps.splice(0, a.steps.length - MAX_CHAT_STEPS);
-          }
-          fastify.sse.broadcast('chat-step', { chatKey, step: visibleStep });
+          publishStep(step);
         } : undefined,
       };
+      runRec.onPermission = runArgs.onPermission;
       // Один вход для обоих путей: живая сессия отдаёт то же, что разовый запуск,
       // поэтому остальной код хода про смену модели работы ничего не знает.
       const runTurn = () => (liveTurn
@@ -1700,7 +1737,22 @@ async function chatModule(fastify, opts) {
       // небезопасен (например claude /clear начал бы ещё одну сессию).
       if (!slash && mayRetryEmptyRun(executor, out, { compact: !!plan })) {
         fastify.log.warn({ chatKey, subtype: out.subtype }, 'чат: ход пустой (ноль шагов) — повторяю один раз');
+        // Повтор человек видит вторым «стартом» в ленте, и без объяснения это читается
+        // как дубль показа. Отметку ставит кокпит: у исполнителя события на это нет, а
+        // лента обязана объяснять собственные строки.
+        const retryNote = {
+          k: 'note',
+          level: 'warn',
+          at: Date.now(),
+          text: 'Пустой запуск: агент не сделал ни шага — повторяю ход',
+        };
+        publishStep(retryNote);
+        // Ленту пустого запуска не выбрасываем: сохранённый ход обязан совпасть с тем,
+        // что человек видел живьём, — старт, отметка, второй старт.
+        const emptySteps = Array.isArray(out.steps) ? out.steps : [];
         out = await runTurn();
+        const retrySteps = Array.isArray(out.steps) ? out.steps : [];
+        out = { ...out, steps: [...emptySteps, retryNote, ...retrySteps] };
       }
       out = normalizeExecutorContextCache(out);
       // ACP может вернуть end_turn без единого chunk/шага. После принятого prompt

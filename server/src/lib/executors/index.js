@@ -23,7 +23,19 @@
 //   familyClass?(family)     — класс семейства (reasoning|balanced|cheap) для сверки
 //                              рекомендаций шаблонов агентов с политикой профиля.
 //                              Не объявлен → сверка для этого ИИ не проводится
-//   usage?()                 — состояние лимитов + provider-neutral account resources
+//   statusPage?              — URL официальной страницы состояния вендора. Когда лимиты
+//                              не пришли по причине на его стороне, кокпит читает её сам
+//                              (`lib/provider-status.js`, формат Atlassian Statuspage) и
+//                              кладёт разобранное состояние в `usage.vendorStatus`;
+//                              незнакомый движок страницы даёт `unknown`, и остаётся
+//                              одна ссылка. Локальный исполнитель поля не объявляет: его
+//                              сбой на внешней странице не виден
+//   usage?()                 — состояние лимитов + provider-neutral account resources.
+//                              У ручки ресурса (`controls[]`) есть `scope`: по умолчанию
+//                              её меняют ТОЛЬКО в плашке настроек, а всплывашка топбара
+//                              показывает значение текстом. `scope: 'live'` — операция
+//                              над рантаймом (выгрузить модель, использовать сброс
+//                              лимита): такую ручку видно и во всплывашке
 //   usageActions?            — явная Map-подобная таблица разрешённых действий ресурсов
 //   mcpStatus?(config)       — состояние MCP-серверов этого CLI для его плашки:
 //                              { state: 'ok'|'error', error?, note?, groups?, servers:
@@ -138,216 +150,9 @@ import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { createWorkToolRegistry } from './work-tools/index.js';
+
 const DIR = path.dirname(fileURLToPath(import.meta.url));
-
-const SUPERVISED_SSH = {
-  name: 'supervised_ssh',
-  description: 'Показать разрешённые живые сессии или запросить выполнение команды под надзором.',
-  inputSchema: {
-    type: 'object',
-    required: ['action'],
-    properties: {
-      action: { type: 'string', enum: ['list', 'exec'] },
-      label: { type: 'string', description: 'Метка нужной сессии' },
-      role: { type: 'string', description: 'Роль нужной сессии' },
-      command: { type: 'string', description: 'Команда целиком; человек подтвердит её отдельно' },
-    },
-  },
-};
-
-const KNOWLEDGE_SEARCH = {
-  name: 'knowledge_search',
-  description: 'Искать, читать и править проверенные знания.',
-  inputSchema: {
-    type: 'object',
-    oneOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        required: ['action', 'query'],
-        properties: {
-          action: { const: 'search' },
-          query: { type: 'string', description: 'Текст поиска' },
-          repository: { type: 'string', description: 'Фильтр логического репозитория' },
-          tags: { type: 'array', items: { type: 'string' }, description: 'Точные теги' },
-          limit: { type: 'integer', minimum: 1, maximum: 100 },
-        },
-      },
-      {
-        type: 'object',
-        additionalProperties: false,
-        required: ['action', 'id'],
-        properties: {
-          action: { const: 'read' },
-          id: { type: 'string', description: 'UUID записи для чтения' },
-        },
-      },
-      {
-        type: 'object',
-        additionalProperties: false,
-        required: ['action', 'record'],
-        properties: {
-          action: { const: 'write' },
-          record: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['repository', 'kind', 'title', 'body', 'tags'],
-            properties: {
-              repository: { type: 'string' },
-              kind: { type: 'string' },
-              title: { type: 'string' },
-              body: { type: 'string' },
-              tags: { type: 'array', minItems: 1, items: { type: 'string' } },
-            },
-          },
-        },
-      },
-      {
-        type: 'object',
-        additionalProperties: false,
-        required: ['action', 'id', 'revision', 'record'],
-        properties: {
-          action: { const: 'write' },
-          id: { type: 'string', minLength: 1, description: 'UUID изменяемой записи' },
-          revision: { type: 'integer', minimum: 1 },
-          record: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['repository', 'kind', 'title', 'body', 'tags'],
-            properties: {
-              repository: { type: 'string' },
-              kind: { type: 'string' },
-              title: { type: 'string' },
-              body: { type: 'string' },
-              tags: { type: 'array', minItems: 1, items: { type: 'string' } },
-            },
-          },
-        },
-      },
-    ],
-  },
-};
-
-function safeWorkResult(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => ({
-      label: String(item?.label || ''),
-      role: String(item?.role || ''),
-    }));
-  }
-  const keys = [
-    'ok', 'error', 'comment', 'output', 'shownBytes', 'totalBytes', 'truncated',
-    'notice', 'exitCode', 'signal',
-  ];
-  const result = {};
-  for (const key of keys) {
-    if (value?.[key] !== undefined) {
-      result[key] = value[key];
-    }
-  }
-  return result;
-}
-
-function safeKnowledgeResult(value, action) {
-  if (value?.ok !== true) {
-    const result = { ok: false, error: String(value?.error || 'knowledge_unavailable') };
-    if (value?.reason !== undefined) {
-      result.reason = String(value.reason);
-    }
-    if (value?.currentRevision !== undefined) {
-      result.currentRevision = Number(value.currentRevision);
-    }
-    if (value?.committed !== undefined) {
-      result.committed = Boolean(value.committed);
-    }
-    if (value?.id !== undefined) {
-      result.id = String(value.id);
-    }
-    if (value?.revision !== undefined) {
-      result.revision = Number(value.revision);
-    }
-    return result;
-  }
-  if (action === 'search') {
-    return {
-      ok: true,
-      items: (Array.isArray(value.items) ? value.items : []).map((item) => ({
-        id: String(item?.id || ''),
-        title: String(item?.title || ''),
-        tags: Array.isArray(item?.tags) ? item.tags.map(String) : [],
-        fragment: String(item?.fragment || ''),
-      })),
-    };
-  }
-  const record = value.record || {};
-  const safeRecord = {
-    id: String(record.id || ''),
-    project: String(record.project || ''),
-    repository: String(record.repository || ''),
-    kind: String(record.kind || ''),
-    title: String(record.title || ''),
-    body: String(record.body || ''),
-    tags: Array.isArray(record.tags) ? record.tags.map(String) : [],
-    updatedAt: String(record.updatedAt || ''),
-    revision: Number(record.revision) || 0,
-  };
-  if (record.provenance === null) {
-    safeRecord.provenance = null;
-  } else if (record.provenance && typeof record.provenance === 'object') {
-    safeRecord.provenance = {
-      actor: String(record.provenance.actor || ''),
-      channel: String(record.provenance.channel || ''),
-      ref: String(record.provenance.ref || ''),
-    };
-  }
-  return {
-    ok: true,
-    record: safeRecord,
-  };
-}
-
-function knowledgeInput(input = {}) {
-  const action = ['search', 'read', 'write'].includes(input.action) ? input.action : '';
-  if (!action) {
-    return null;
-  }
-  if (action === 'read') {
-    return input.id ? { action, id: String(input.id) } : null;
-  }
-  if (action === 'write') {
-    const source = input.record;
-    if (!source || typeof source !== 'object' || Array.isArray(source)
-      || typeof source.repository !== 'string' || !source.repository.trim()
-      || typeof source.kind !== 'string' || !source.kind.trim()
-      || typeof source.title !== 'string' || !source.title.trim()
-      || typeof source.body !== 'string' || !Array.isArray(source.tags) || !source.tags.length) {
-      return null;
-    }
-    const record = {
-      repository: source.repository,
-      kind: source.kind,
-      title: source.title,
-      body: source.body,
-      tags: source.tags.map(String),
-    };
-    const hasId = Object.hasOwn(input, 'id');
-    if (hasId) {
-      const id = typeof input.id === 'string' ? input.id.trim() : '';
-      const revision = Number(input.revision);
-      return id && Number.isInteger(revision) && revision > 0
-        ? { action, id, revision, record }
-        : null;
-    }
-    return input.revision === undefined ? { action, record } : null;
-  }
-  return {
-    action,
-    query: String(input.query || ''),
-    ...(input.repository ? { repository: String(input.repository) } : {}),
-    ...(Array.isArray(input.tags) ? { tags: input.tags.map(String) } : {}),
-    ...(input.limit !== undefined ? { limit: Number(input.limit) } : {}),
-  };
-}
 
 /**
  * Provider-neutral рабочие инструменты замкнуты на server-owned scope. Никакое
@@ -360,47 +165,19 @@ export function createWorkTools({
   permissionMode = '',
   invoke,
   knowledgeInvoke,
+  pluginEnabled,
+  dbInvoke,
 } = {}) {
-  const descriptors = [structuredClone(SUPERVISED_SSH), structuredClone(KNOWLEDGE_SEARCH)];
-
-  async function call(name, input = {}) {
-    if (name === KNOWLEDGE_SEARCH.name) {
-      const safeInput = knowledgeInput(input);
-      if (!safeInput || typeof knowledgeInvoke !== 'function') {
-        return safeInput
-          ? { ok: false, error: 'knowledge_unavailable' }
-          : { ok: false, error: 'invalid_arguments' };
-      }
-      const scopedKnowledgeProject = knowledgeProjectId === undefined
-        ? projectId
-        : knowledgeProjectId;
-      const scope = {
-        projectId: scopedKnowledgeProject ? String(scopedKnowledgeProject) : null,
-        ...(chatKey ? { chatKey: String(chatKey) } : {}),
-        ...(permissionMode ? { permissionMode: String(permissionMode) } : {}),
-      };
-      const result = await knowledgeInvoke(scope, safeInput);
-      return safeKnowledgeResult(result, safeInput.action);
-    }
-    if (name !== SUPERVISED_SSH.name) {
-      return { ok: false, error: 'tool_not_found' };
-    }
-    if (!projectId) {
-      return input.action === 'list'
-        ? []
-        : { ok: false, error: 'project_scope_unavailable' };
-    }
-    const scope = {
-      projectId: String(projectId),
-      ...(chatKey ? { chatKey: String(chatKey) } : {}),
-    };
-    const result = typeof invoke === 'function'
-      ? await invoke(scope, input)
-      : { ok: false, error: 'not_available' };
-    return safeWorkResult(result);
-  }
-
-  return { descriptors, invoke: call };
+  return createWorkToolRegistry({
+    projectId,
+    knowledgeProjectId,
+    chatKey,
+    permissionMode,
+    invoke,
+    knowledgeInvoke,
+    pluginEnabled,
+    dbInvoke,
+  });
 }
 
 export const workTools = createWorkTools;
