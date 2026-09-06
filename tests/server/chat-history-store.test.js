@@ -105,3 +105,63 @@ test('peek читает один чат по id, не поднимая всю и
   assert.equal(await store.peek('../../../etc/passwd'), null);
   assert.equal(await store.peek('chat/../../secret'), null);
 });
+
+test('точечные операции после миграции не читают файлы остальных чатов', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-targeted-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
+  const saved = await store.saveOne({
+    id: 'target',
+    messages: [{ role: 'user', text: 'Сохрани этот разговор' }],
+    createdAt: Date.UTC(2026, 5, 1),
+  });
+  await store.saveOne({
+    id: 'unrelated',
+    messages: [{ role: 'assistant', text: 'Другая история'.repeat(1000) }],
+    createdAt: Date.UTC(2026, 7, 1),
+  });
+
+  const readFile = t.mock.method(fs, 'readFile');
+  const current = await store.readOne('target');
+  assert.deepEqual(current.messages, saved.chat.messages);
+  const archived = await store.saveOne({ ...current, draft: 'Новый черновик' }, true);
+  assert.equal(archived.chat.archived, true);
+  assert.equal((await store.readOne('target')).draft, 'Новый черновик');
+  assert.equal(await store.remove('target'), true);
+  assert.equal(await store.peek('target'), null);
+
+  const readNames = readFile.mock.calls.map((call) => path.basename(String(call.arguments[0])));
+  assert.ok(readNames.length > 0);
+  assert.deepEqual([...new Set(readNames)], ['target.json']);
+});
+
+test('точечная запись перечитывает свежую серверную копию в старом месяце', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-fresh-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new ChatHistoryStore({ chatsDir: path.join(root, 'chats') });
+  const first = await store.saveOne({
+    id: 'target',
+    messages: [{ role: 'user', text: 'Вопрос' }],
+    createdAt: Date.UTC(2026, 5, 1),
+    updatedAt: Date.UTC(2026, 5, 1),
+  });
+  const fresh = {
+    ...first.chat,
+    revision: first.chat.revision + 1,
+    messages: [...first.chat.messages, { role: 'assistant', text: 'Ответ из другого окна' }],
+    updatedAt: Date.UTC(2026, 5, 2),
+  };
+  await fs.writeFile(store.fileOf(fresh), JSON.stringify(fresh));
+  const newerMonth = path.join(store.dir, '2026-08');
+  await fs.mkdir(newerMonth);
+  await fs.writeFile(path.join(newerMonth, 'target.json'), JSON.stringify({ id: 'different' }));
+
+  const merged = await store.saveOne({ ...first.chat, draft: 'Черновик' });
+  assert.equal(merged.stale, true);
+  assert.equal(merged.restored, 1);
+  assert.deepEqual((await store.readOne('target')).messages, fresh.messages);
+
+  await fs.writeFile(path.join(newerMonth, 'target.json'), '{');
+  assert.deepEqual((await store.readOne('target')).messages, fresh.messages);
+  assert.equal(await store.readOne('../../outside'), null);
+});

@@ -147,26 +147,46 @@ export class ChatHistoryStore {
   }
 
   /**
-   * Точечное чтение одного чата по id, без полного `scan()`.
+   * Точечное чтение файла по id, без полного `scan()`.
    *
    * Месяц в пути — свойство `createdAt`, поэтому каталог заранее неизвестен: перебираем
-   * месяцы от свежих к старым и пробуем ровно один файл в каждом. Нужно тем, кому хватает
-   * шапки чата (название, задача) и кому дорого читать всю историю: `readOne` тянет с
-   * диска ВСЕ чат-файлы, а карточка вопроса в телеграм-пульте спрашивает про один.
+   * месяцы от свежих к старым и пробуем ровно один файл в каждом. Исходные байты и путь
+   * нужны сохранению для сравнения и переноса файла. Содержимое перечитывается при каждом
+   * обращении, чтобы запись под блокировкой сливалась со свежей серверной копией.
    */
-  async peek(id) {
-    if (!id) return null;
+  async readEntry(id) {
+    if (!id) {
+      return null;
+    }
     const chatId = String(id);
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(chatId)) return null; // id из чужого ввода в путь не клеим
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(chatId)) {
+      return null;
+    }
+
     let months = [];
-    try { months = await fs.readdir(this.dir); } catch { return null; }
+    try {
+      months = await fs.readdir(this.dir);
+    } catch {
+      return null;
+    }
     for (const month of months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse()) {
+      const file = path.join(this.dir, month, `${chatId}.json`);
       try {
-        const chat = JSON.parse(await fs.readFile(path.join(this.dir, month, `${chatId}.json`), 'utf8'));
-        if (chat?.id === chatId) return chat;
-      } catch { /* нет в этом месяце или файл битый — ищем дальше */ }
+        const json = await fs.readFile(file, 'utf8');
+        const chat = JSON.parse(json);
+        if (chat?.id === chatId) {
+          return { path: file, chat, json };
+        }
+      } catch {
+        // Нет в этом месяце или файл битый — ищем дальше.
+      }
     }
     return null;
+  }
+
+  /** Читает один чат без запуска миграции для служебных подписчиков. */
+  async peek(id) {
+    return (await this.readEntry(id))?.chat ?? null;
   }
 
   /**
@@ -385,7 +405,7 @@ export class ChatHistoryStore {
     return this.withChatLock(chat.id, async () => {
       await this.ensureDir();
       // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
-      const prev = (await this.scan()).get(chat.id);
+      const prev = await this.readEntry(chat.id);
       const registry = await this.registry();
       const incomingRevision = Number.isSafeInteger(chat.revision) ? chat.revision : null;
       const currentRevision = Number.isSafeInteger(prev?.chat?.revision) ? prev.chat.revision : 0;
@@ -564,7 +584,7 @@ export class ChatHistoryStore {
   async readOne(id) {
     if (!id) return null;
     await this.ensureMigrated();
-    const found = (await this.scan()).get(String(id));
+    const found = await this.readEntry(id);
     return found ? found.chat : null;
   }
 
@@ -575,13 +595,13 @@ export class ChatHistoryStore {
     const chatId = String(id);
     // Companion ensure держит logical lock, а внутри него берёт per-id lock. DELETE
     // соблюдает тот же порядок, чтобы конкурентный ensure был линейным и без deadlock.
-    const initial = (await this.scan()).get(chatId);
+    const initial = await this.readEntry(chatId);
     const identity = companionIdentity(initial?.chat);
     const removeUnderChatLock = () => this.withChatLock(chatId, async () => {
       // Перечитываем файл уже под тем же per-id lock, что использует saveOne. DELETE,
       // начавшийся во время atomic PUT, удалит его результат, а не позволит позднему
       // rename воскресить durable companion identity.
-      const prev = (await this.scan()).get(chatId);
+      const prev = await this.readEntry(chatId);
       if (!prev) return false;
       await fs.rm(prev.path, { force: true });
       return true;
