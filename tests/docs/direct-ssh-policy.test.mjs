@@ -2,16 +2,22 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const chatAgentsUrl = new URL('../../docs/cockpit/chat-agents.md', import.meta.url);
-const gotchasUrl = new URL('../../docs/cockpit/gotchas.md', import.meta.url);
-const kimiSecurityUrl = new URL('../../docs/cockpit/kimi-runtime-security.md', import.meta.url);
+const root = new URL('../../', import.meta.url);
+
+async function physicalDocs(name) {
+  const [map, reference] = await Promise.all([
+    readFile(new URL(`docs/cockpit/${name}.md`, root), 'utf8'),
+    readFile(new URL('docs/cockpit/reference/runtime-contracts.md', root), 'utf8'),
+  ]);
+  return `${map}\n${reference}`;
+}
 
 function missingClauses(text, clauses) {
   return clauses.filter(([, pattern]) => !pattern.test(text)).map(([name]) => name);
 }
 
 test('канон chat-agents описывает настройку, POST и четыре способа запрета SSH', async () => {
-  const text = await readFile(chatAgentsUrl, 'utf8');
+  const text = await physicalDocs('chat-agents');
   const missing = missingClauses(text, [
     ['ключ настройки', /blockDirectSsh/u],
     ['хранение по исполнителю', /providerSettings\.<id>\.blockDirectSsh/u],
@@ -29,7 +35,7 @@ test('канон chat-agents описывает настройку, POST и че
 });
 
 test('грабли честно ограничивают гарантию и фиксируют конфликт с user deny', async () => {
-  const text = await readFile(gotchasUrl, 'utf8');
+  const text = await physicalDocs('gotchas');
   const missing = missingClauses(text, [
     ['кооперативный агент', /кооперативн[^\n]*агент/iu],
     ['намеренный обход', /(намеренн[^\n]*обход|base64[^\n]*sh|собственн[^\n]*SSH-клиент)/iu],
@@ -46,7 +52,7 @@ test('грабли честно ограничивают гарантию и ф�
 });
 
 test('security-канон Kimi различает host fail-closed и contained network invariant', async () => {
-  const text = await readFile(kimiSecurityUrl, 'utf8');
+  const text = await physicalDocs('kimi-runtime-security');
   const missing = missingClauses(text, [
     ['ключ настройки', /blockDirectSsh/u],
     ['host fail-closed', /host[\s\S]{0,300}fail-closed/iu],

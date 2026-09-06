@@ -389,7 +389,12 @@ export async function createToolbox({
     ));
     if (shared) {
       const id = `t${(calls += 1)}`;
-      sink?.emit({ k: 'tool', id, name: String(name), title: 'Надзорный SSH' });
+      sink?.emit({
+        k: 'tool',
+        id,
+        name: String(name),
+        title: String(shared.description || shared.function?.description || name),
+      });
       const result = await workTools.invoke(String(name), args && typeof args === 'object' ? args : {});
       sink?.emit({
         k: 'res',

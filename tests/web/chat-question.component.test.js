@@ -18,7 +18,7 @@ function compileQuestion() {
   return componentPromise;
 }
 
-async function mountQuestion(t, questions) {
+async function mountQuestion(t, questions, req = {}) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/chats');
   const [{ mount }, ChatQuestion] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -31,6 +31,7 @@ async function mountQuestion(t, questions) {
         pid: `question-${Date.now()}`,
         chatKey: 'c1',
         questions,
+        ...req,
       },
     },
   });
@@ -141,4 +142,124 @@ test('канал без free text показывает hint и не обещае
   assert.match(wrapper.text(), /Можно выбрать ровно один вариант/);
   assert.equal(Boolean(button(wrapper, 'свой ответ…')), false);
   assert.equal(wrapper.find('input').exists(), false);
+});
+
+test('structured-форма сохраняет типы и raw values отдельно от подписей', async (t) => {
+  const wrapper = await mountQuestion(t, [
+    {
+      key: 'name',
+      header: 'Имя',
+      question: 'Имя окружения',
+      inputType: 'text',
+      required: true,
+      minLength: 2,
+    },
+    {
+      key: 'replicas',
+      header: 'Реплики',
+      question: 'Количество реплик',
+      inputType: 'integer',
+      required: true,
+      minimum: 1,
+    },
+    {
+      key: 'starts_at',
+      header: 'Старт',
+      question: 'Когда запустить?',
+      inputType: 'text',
+      format: 'date-time',
+      required: true,
+    },
+    {
+      key: 'enabled',
+      header: 'Запуск',
+      question: 'Запустить сразу?',
+      inputType: 'boolean',
+      required: true,
+    },
+    {
+      key: 'mode',
+      header: 'Режим',
+      question: 'Какой режим?',
+      inputType: 'choice',
+      required: true,
+      options: [{ value: 'safe_mode', label: 'Безопасный' }],
+    },
+    {
+      key: 'checks',
+      header: 'Проверки',
+      question: 'Что проверить?',
+      inputType: 'multi-choice',
+      multiSelect: true,
+      required: true,
+      minItems: 1,
+      options: [
+        { value: 'unit_tests', label: 'Тесты' },
+        { value: 'build', label: 'Сборка' },
+      ],
+    },
+  ], {
+    structured: true,
+    source: 'MCP · deploy',
+    prompt: 'Настрой окружение',
+    actions: ['accept', 'cancel'],
+  });
+
+  assert.match(wrapper.text(), /MCP · deploy/u);
+  assert.match(wrapper.text(), /Настрой окружение/u);
+  assert.equal(button(wrapper, 'Отправить').attributes('disabled'), '');
+
+  const inputs = wrapper.findAll('input');
+  await inputs[0].setValue('stage');
+  await inputs[1].setValue('3');
+  await inputs[2].setValue('2026-08-31T12:30');
+  const lists = wrapper.findAll('.ui-choice-list');
+  await lists[0].findAll('.ui-choice-list__option')[1].trigger('click');
+  await lists[1].find('.ui-choice-list__option').trigger('click');
+  await lists[2].findAll('.ui-choice-list__option')[0].trigger('click');
+
+  assert.equal(button(wrapper, 'Отправить').attributes('disabled'), undefined);
+  await button(wrapper, 'Отправить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[{
+    action: 'accept',
+    answers: [
+      { key: 'name', value: 'stage' },
+      { key: 'replicas', value: 3 },
+      { key: 'starts_at', value: new Date('2026-08-31T12:30').toISOString() },
+      { key: 'enabled', value: false },
+      { key: 'mode', value: 'safe_mode' },
+      { key: 'checks', value: ['unit_tests'] },
+    ],
+  }]]);
+});
+
+test('пустая structured-форма отправляет явный исход и отдельные allow-варианты', async (t) => {
+  const wrapper = await mountQuestion(t, [], {
+    structured: true,
+    prompt: 'Разрешить вызов MCP?',
+    actions: ['accept_session', 'accept_always', 'cancel'],
+  });
+
+  assert.equal(button(wrapper, 'Разрешить на сессию').attributes('disabled'), undefined);
+  await button(wrapper, 'Разрешить на сессию').trigger('click');
+  await button(wrapper, 'Разрешать всегда').trigger('click');
+  await button(wrapper, 'Отменить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [
+    [{ action: 'accept_session', answers: [] }],
+    [{ action: 'accept_always', answers: [] }],
+    [{ action: 'cancel', answers: [] }],
+  ]);
+});
+
+test('structured decline не маскируется пустым массивом ответов', async (t) => {
+  const wrapper = await mountQuestion(t, [], {
+    structured: true,
+    actions: ['accept', 'decline', 'cancel'],
+  });
+
+  await button(wrapper, 'Отклонить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[{ action: 'decline', answers: [] }]]);
 });

@@ -22,6 +22,7 @@ import { PrefsStore } from './lib/prefs-store.js';
 import { SpeechRuntime } from './lib/speech/index.js';
 import { ModelJobManager } from './lib/speech/model-jobs.js';
 import { listProjects } from './lib/profiles.js';
+import { projectMapsRoot } from './lib/projects.js';
 import * as telegramBotApi from './lib/telegram/api.js';
 import { TelegramAccountBindings } from './lib/telegram/account-bindings.js';
 import { createTelegramAccountContextFactory } from './lib/telegram/account-context.js';
@@ -61,6 +62,9 @@ import { createSshTransport } from './lib/ssh/transport.js';
 import { createSshSessionManager } from './lib/ssh/session-manager.js';
 import { createSshAudit } from './lib/ssh/audit.js';
 import { createSshBroker } from './lib/ssh/broker.js';
+import { createKnowledgeClient } from './lib/search/client.js';
+import { createKnowledgeBroker } from './lib/search/broker.js';
+import { createKnowledgeTransfer } from './lib/search/transfer.js';
 
 import authPlugin from './plugins/auth.js';
 import httpScopePlugin from './plugins/http-scope.js';
@@ -95,6 +99,7 @@ import githubModule from './modules/github/index.js';
 import inboxModule from './modules/inbox/index.js';
 import documentsModule from './modules/documents/index.js';
 import sshModule from './modules/ssh/index.js';
+import knowledgeModule from './modules/knowledge/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 import { AnalysisArbiter } from './lib/analysis/arbiter.js';
 import { DocumentReader } from './lib/documents/reader.js';
@@ -142,6 +147,24 @@ async function build() {
     // (`INBOX_REF_LIMITS.encodedChars`), чтобы предела правды не было два.
     maxParamLength: INBOX_REF_LIMITS.encodedChars,
   });
+  const knowledge = createKnowledgeClient({
+    dbPath: config.knowledgeDbPath,
+    seedSamples: false,
+  });
+  const knowledgeTransfer = createKnowledgeTransfer({
+    rootDir: config.rootDir,
+    knowledge,
+    mapsRootFor: (project) => projectMapsRoot({ config, prefs, id: project }),
+    listKnownProjects: () => listProjects(config, prefs),
+  });
+  const knowledgeBroker = createKnowledgeBroker({
+    pluginEnabled: (id) => fastify.pluginEnabled?.(id) === true,
+    knowledge,
+    transfer: knowledgeTransfer,
+    log: fastify.log,
+  });
+  fastify.decorate('knowledgeBroker', knowledgeBroker);
+  fastify.addHook('onClose', async () => knowledge.close());
 
   // CORS нужен только в dev (vite на другом порту). В проде фронт — тот же origin.
   if (config.isDev) {
@@ -180,7 +203,12 @@ async function build() {
   });
   const sshHostKeys = await createHostKeyStore({ file: config.sshKnownHostsPath });
   const sshTransport = createSshTransport();
-  const sshSessions = createSshSessionManager({ transport: sshTransport });
+  const sshSessions = createSshSessionManager({
+    transport: sshTransport,
+    // Эхо агентских команд в терминал человека — видимость происходящего, а не канал
+    // исполнения; выключается настройкой плагина без перезапуска сервера.
+    echoEnabled: () => fastify.pluginSettings?.('ssh')?.echoToTerminal !== false,
+  });
   const sshAuditStore = await createSshAudit({ dir: config.sshAuditDir });
   const sshAudit = {
     async append(entry) {
@@ -531,6 +559,7 @@ async function build() {
       }
     },
   });
+  await fastify.register(knowledgeModule, { knowledge, transfer: knowledgeTransfer });
   await fastify.register(taskShelfModule, { shelf: taskShelf });
   await fastify.register(mediaModule, {
     media,
@@ -566,6 +595,7 @@ async function build() {
     taskExists: companionTaskExists,
     permissionQueue,
     sshBroker,
+    knowledgeBroker,
   });
   await fastify.register(settingsModule, {
     credsStore, b24, claudeAuth, config, prefs, factoryDebug, localTls, tlsRuntime,

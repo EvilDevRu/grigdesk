@@ -3,6 +3,7 @@
 // видимости, состояние и текст ошибки обязаны доезжать до экрана. Плюс блок ленивый: его
 // нельзя дёргать для исполнителя, который про MCP вообще не сообщает.
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { compileSettingsView } from './helpers/settings-view.js';
 
@@ -38,7 +39,7 @@ async function installBrowser(t, storage = {}) {
   return browser;
 }
 
-// Реестр с разными возможностями: только один исполнитель сообщает о MCP.
+// Реестр с разными возможностями: три CLI сообщают о MCP, будущий адаптер — нет.
 function providers() {
   return [
     {
@@ -47,10 +48,10 @@ function providers() {
     },
     {
       id: 'codex', name: 'GPT (Codex)', vendor: 'OpenAI', available: true, installed: true,
-      chatEnabled: true, trustedDirectories: true, models: [], settings: [],
+      chatEnabled: true, trustedDirectories: true, mcp: true, models: [], settings: [],
     },
     {
-      id: 'kimi', name: 'Kimi', vendor: 'Moonshot', available: false, installed: false,
+      id: 'kimi', name: 'Kimi', vendor: 'Moonshot', available: false, installed: true,
       chatEnabled: true, trustedDirectories: false, mcp: true, models: [], settings: [],
     },
     // Произвольный будущий адаптер доказывает, что строка собирается из реестра,
@@ -123,6 +124,11 @@ async function mountSettings(t, { mcpByProvider } = {}) {
 const REAL_MCP = {
   state: 'ok',
   checkedAt: Date.parse('2026-08-07T10:20:30Z'),
+  groups: [{
+    id: 'account',
+    label: 'claude.ai',
+    hint: 'Коннекторы аккаунта: локально их живость не проверяется.',
+  }],
   servers: [
     { name: 'playwright', target: 'node /home/u/cli.js', scope: 'user', state: 'ok', detail: 'Connected' },
     {
@@ -138,6 +144,7 @@ const REAL_MCP = {
       scope: 'account',
       state: 'needs-auth',
       detail: 'Needs authentication',
+      hint: 'Авторизуется в настройках коннекторов на claude.ai, не из Cockpit.',
     },
     // Коннектор аккаунта, про который локально известно только имя.
     { name: 'claude.ai Canva', target: '', scope: 'account', state: 'remote', detail: '' },
@@ -148,7 +155,9 @@ test('серверы сгруппированы по области видимо
   const { wrapper } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
 
   const groups = wrapper.findAll('.mcpgrp');
-  assert.deepEqual(groups.map((g) => g.find('.mcpgrpttl').text()), ['Свои (2)', 'claude.ai (2)']);
+  assert.deepEqual(groups.map((g) => g.find('.mcpgrpttl').text()), [
+    'Пользователь (2)', 'claude.ai (2)',
+  ]);
 
   const lines = wrapper.findAll('.mcpline');
   assert.deepEqual(lines.map((l) => l.find('.mcpname').text()),
@@ -172,14 +181,17 @@ test('серверы сгруппированы по области видимо
   assert.equal(wrapper.findAll('.mcpname')[1].attributes('title'), 'docker run -i --rm bitrix-mcp');
 });
 
-test('опрашиваем только тех, кто про MCP сообщает и доступен', async (t) => {
+test('опрашиваем всех установленных исполнителей с MCP capability', async (t) => {
   const { calls } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
 
-  // codex не объявил mcpStatus, kimi не установлен — лишний health-check стоит секунд.
-  assert.deepEqual(calls, [{ id: 'claude', refresh: false }]);
+  assert.deepEqual(calls, [
+    { id: 'claude', refresh: false },
+    { id: 'codex', refresh: false },
+    { id: 'kimi', refresh: false },
+  ]);
 });
 
-test('«Перепроверить» перечитывает мимо кэша', async (t) => {
+test('«Обновить» перечитывает список мимо кэша', async (t) => {
   const { wrapper, calls } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
 
   await wrapper.find('.mcpbtn').trigger('click');
@@ -196,11 +208,62 @@ test('сбой опроса показывается человеку, а не �
   assert.equal(wrapper.findAll('.mcpgrp').length, 0);
 });
 
-test('исполнителя без MCP блок не показывает вовсе', async (t) => {
+test('блок MCP есть только у того, кто о MCP сообщает', async (t) => {
   const { wrapper } = await mountSettings(t, { mcpByProvider: { claude: REAL_MCP } });
 
-  const titles = wrapper.findAll('.pvsetttl').map((n) => n.text());
-  assert.equal(titles.filter((t2) => t2.includes('MCP-серверы')).length, 1);
+  const slots = wrapper.findAll('.provider-mcp-slot');
+  assert.deepEqual(
+    slots.map((slot) => slot.attributes('data-provider-id')),
+    ['claude', 'codex', 'kimi'],
+    'у адаптера без mcpStatus пустой рамки на карточке не остаётся',
+  );
+  assert.ok(slots.every((slot) => slot.find('.mcpbtn').exists()));
+  assert.equal(wrapper.findAll('.pvcard').length, 4);
+});
+
+test('Codex и Kimi показывают configured/disabled без ложного зелёного статуса', async (t) => {
+  const { wrapper } = await mountSettings(t, {
+    mcpByProvider: {
+      codex: {
+        state: 'ok',
+        note: 'Живая проверка недоступна; показана конфигурация.',
+        groups: [{ id: 'user', label: 'Codex' }],
+        servers: [
+          { name: 'figma', scope: 'user', state: 'configured', detail: '' },
+          { name: 'old-server', scope: 'user', state: 'disabled', detail: 'Выключен.' },
+        ],
+      },
+      kimi: {
+        state: 'ok',
+        note: 'Показана конфигурация mcp.json.',
+        servers: [
+          { name: 'docs', scope: 'project', state: 'configured', detail: '' },
+        ],
+      },
+    },
+  });
+
+  const codex = wrapper.get('.provider-mcp-slot[data-provider-id="codex"]');
+  assert.deepEqual(codex.findAll('.mcpst').map((node) => node.text()), ['Настроен', 'Выключен']);
+  assert.ok(codex.findAll('.mcpdot').every((node) => node.classes().includes('idle')));
+  assert.match(codex.text(), /Живая проверка недоступна/);
+
+  const kimi = wrapper.get('.provider-mcp-slot[data-provider-id="kimi"]');
+  assert.equal(kimi.get('.mcpgrpttl').text(), 'Проект (1)');
+  assert.equal(kimi.get('.mcpst').text(), 'Настроен');
+});
+
+test('MCP-блок ограничен сверху и прокручивает только внутреннее содержимое', async () => {
+  const source = await readFile(
+    new URL('../../web/src/views/SettingsView.vue', import.meta.url),
+    'utf8',
+  );
+
+  const pvmcp = source.match(/\.pvmcp\s*\{[^}]*\}/s)?.[0] || '';
+  assert.match(pvmcp, /max-block-size:\s*220px/);
+  assert.doesNotMatch(pvmcp, /(?<!max-)block-size:\s*220px/, 'высота не фиксируется');
+  assert.match(source, /\.mcpbody\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(source, /\.mcpbody\s*\{[^}]*scrollbar-gutter:\s*stable/s);
 });
 
 test('доверенные каталоги перечисляют исполнителей по capability из реестра', async (t) => {

@@ -5,12 +5,38 @@
         <span class="p-t">
           <template v-if="isPlan">План готов — утвердить?</template>
           <template v-else-if="isSsh">Выполнить команду на сервере?</template>
+          <template v-else-if="isExternalUrl">
+            Открыть внешнюю страницу для <span class="p-tool">{{ req.tool }}</span>?
+          </template>
           <template v-else>
             Разрешить <span class="p-tool">{{ req.tool }}</span>?
           </template>
         </span>
 
-        <UiFormActions v-if="!choices.length" class="p-act">
+        <UiFormActions v-if="isExternalUrl" class="p-act">
+          <UiActionLink
+            v-if="externalUrl"
+            :href="externalUrl"
+            target="_blank"
+            variant="solid"
+            tone="accent"
+          >
+            {{ externalLinkLabel }}
+          </UiActionLink>
+          <UiButton
+            variant="solid"
+            tone="success"
+            :disabled="!externalUrl"
+            @click="emit('answer', true, false)"
+          >
+            {{ externalApproveLabel }}
+          </UiButton>
+          <UiButton tone="danger" @click="reject()">
+            {{ externalRejectLabel }}
+          </UiButton>
+        </UiFormActions>
+
+        <UiFormActions v-else-if="!choices.length" class="p-act">
           <UiButton
             variant="solid"
             tone="success"
@@ -45,6 +71,12 @@
       </div>
 
       <div v-if="description" class="p-desc">{{ description }}</div>
+      <div v-if="isExternalUrl && externalUrl" class="p-url-host">
+        Внешний сайт: {{ externalHost }}. После завершения вернись и нажми «{{ externalApproveLabel }}».
+      </div>
+      <div v-else-if="isExternalUrl" class="p-url-bad">
+        Ссылка отклонена как небезопасная. Продолжить через неё нельзя.
+      </div>
       <div v-if="filePath" class="p-path">{{ filePath }}</div>
       <pre
         v-if="command"
@@ -72,7 +104,7 @@
       <pre v-if="details" class="p-in">{{ details }}</pre>
       <pre v-if="rest" class="p-in">{{ rest }}</pre>
 
-      <div v-if="!isPlan && !isSsh" class="p-rem">
+      <div v-if="canRemember" class="p-rem">
         <UiCheckbox v-model="remember">
           не спрашивать про «{{ req.tool }}» до конца сессии
         </UiCheckbox>
@@ -86,6 +118,7 @@ import { computed, ref, watch } from 'vue';
 import { lineDiff, splitRows } from '../../shared/diff.js';
 import {
   promptDialog,
+  UiActionLink,
   UiButton,
   UiCheckbox,
   UiChoiceList,
@@ -115,6 +148,7 @@ watch(
 
 const input = computed(() => props.req?.input || {});
 const isSsh = computed(() => props.req?.origin === 'ssh');
+const isExternalUrl = computed(() => input.value.kind === 'external_url');
 const isPlan = computed(() => (
   Boolean(input.value.plan) || props.req?.tool === 'ExitPlanMode'
 ));
@@ -123,6 +157,19 @@ const command = computed(() => String(isSsh.value ? props.req?.command || '' : i
 const filePath = computed(() => String(input.value.file_path || ''));
 const details = computed(() => String(input.value.details || ''));
 const description = computed(() => String(input.value.description || ''));
+const externalUrl = computed(() => safeExternalUrl(input.value.url));
+const externalHost = computed(() => {
+  try { return new URL(externalUrl.value).host; } catch { return ''; }
+});
+const externalLinkLabel = computed(() => String(input.value.link_label || 'Открыть страницу'));
+const externalApproveLabel = computed(() => String(input.value.approve_label || 'Готово'));
+const externalRejectLabel = computed(() => String(input.value.reject_label || 'Не открывать'));
+const canRemember = computed(() => (
+  !isPlan.value
+  && !isSsh.value
+  && !isExternalUrl.value
+  && props.req?.canRemember !== false
+));
 
 const diff = computed(() => {
   const source = input.value.diff;
@@ -164,6 +211,10 @@ const KNOWN_FIELDS = new Set([
   'file_path',
   'diff',
   'choices',
+  'url',
+  'link_label',
+  'approve_label',
+  'reject_label',
 ]);
 
 const rest = computed(() => {
@@ -198,6 +249,12 @@ const rest = computed(() => {
  * висеть, а введённый текст уезжает третьим аргументом прежнего контракта.
  */
 async function reject(choice = '') {
+  if (isExternalUrl.value) {
+    emit('answer', false, false, '', choice);
+
+    return;
+  }
+
   const text = await promptDialog({
     title: isPlan.value ? 'Что доработать в плане?' : 'Почему отклоняете?',
     placeholder: isSsh.value ? 'Пояснение обязательно' : 'можно оставить пустым',
@@ -212,6 +269,21 @@ async function reject(choice = '') {
   if (isSsh.value && !text.trim()) return;
 
   emit('answer', false, false, text.trim(), choice);
+}
+
+/** Повторяет server policy: внешние credentials и активные/локальные схемы запрещены. */
+function safeExternalUrl(value) {
+  if (typeof value !== 'string' || value.length > 4_000) return '';
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password) return '';
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && loopback)
+      ? parsed.href
+      : '';
+  } catch {
+    return '';
+  }
 }
 
 function choose(choice) {
@@ -246,6 +318,8 @@ function chooseById(value) {
 .p-act { margin-left: auto; }
 .p-choices { margin-top: 7px; }
 .p-desc { margin-top: 5px; color: var(--ink); font-size: 12.5px; overflow-wrap: anywhere; }
+.p-url-host { margin-top: 5px; color: var(--ink-mid); font-size: 11.5px; overflow-wrap: anywhere; }
+.p-url-bad { margin-top: 5px; color: var(--bad); font-size: 11.5px; }
 .p-path { margin-top: 4px; color: var(--ink-mid); font-family: var(--mono, monospace);
   font-size: 11.5px; overflow-wrap: anywhere; }
 .p-in { margin: 6px 0 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line);

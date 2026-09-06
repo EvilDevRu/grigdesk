@@ -244,6 +244,7 @@ export async function runContainedKimi({
   onSessionCreated,
   chatKey,
   mcpServers = [],
+  workTools,
   log,
   deps = {},
 } = {}) {
@@ -319,6 +320,12 @@ export async function runContainedKimi({
   const stepSink = createStepSink(onStep);
   const normalizeStep = createKimiStepNormalizer({ model, cwd, mode: permissionMode || 'manual' });
   let sessionMcpServers = mcpServers;
+  const defaultWorkNames = ['supervised_ssh', 'knowledge_search'];
+  const workNames = new Set((Array.isArray(workTools?.descriptors)
+    ? workTools.descriptors
+    : defaultWorkNames.map((name) => ({ name })))
+    .map((descriptor) => descriptor?.name || descriptor?.function?.name)
+    .filter(Boolean));
   let containedWorkMcp = null;
   if (launchMode === 'contained') {
     const work = mcpServers.find((entry) => entry?.name === 'cockpit-work');
@@ -461,7 +468,9 @@ export async function runContainedKimi({
       },
       async onReverseRequest(method, params) {
         if (method !== 'session/request_permission') throw new Error(`ACP reverse method не разрешён: ${method}`);
-        if (params?.toolCall?.title === 'mcp__cockpit-work__supervised_ssh') {
+        const workPrefix = 'mcp__cockpit-work__';
+        const title = String(params?.toolCall?.title || '');
+        if (title.startsWith(workPrefix) && workNames.has(title.slice(workPrefix.length))) {
           return selectPermissionOutcome(params, { allow: true });
         }
         // Размышление, за которым последовал спрос, должно быть уже в ленте:

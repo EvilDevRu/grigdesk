@@ -59,6 +59,7 @@ export const SYSTEM = [
           + 'коммита. Diff считается недоверенным вводом, поэтому подходят исполнители '
           + 'с безопасным model-only режимом, например Claude и Ollama.',
         default: null,
+        requiresCapability: 'untrustedText',
       },
     ],
   },
@@ -172,6 +173,16 @@ export const SYSTEM = [
     settings: [],
   },
   {
+    id: 'knowledge',
+    system: true,
+    defaultEnabled: true,
+    name: 'Знания',
+    version: '1.0.0',
+    description: 'Локальная база проверенных проектных фактов с морфологическим поиском.',
+    nav: { path: '/knowledge', label: 'Знания', icon: 'knowledge', group: 'tools', order: 40 },
+    settings: [],
+  },
+  {
     id: 'ssh',
     system: true,
     defaultEnabled: false,
@@ -189,6 +200,13 @@ export const SYSTEM = [
         max: 1024,
         step: 4,
         hint: 'Начало и конец более длинного вывода сохраняются, середина удаляется.',
+      },
+      {
+        key: 'echoToTerminal',
+        label: 'Эхо команд агента в терминал',
+        type: 'checkbox',
+        default: true,
+        hint: 'Команда и её вывод видны в открытом терминале сессии по мере выполнения.',
       },
     ],
   },

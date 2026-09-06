@@ -426,9 +426,9 @@ export function normalizeRules(list, { projects = null } = {}) {
       // Ответ в исходный чат — явный opt-in каждого правила. Старые правила
       // остаются молчащими, а настройка темы не расползается на соседние темы.
       notifyTaskCreated: src.notifyTaskCreated === true,
-      // Human allowlist задаёт само наличие правила. Доступ model-operated
-      // knowledge_search шире не выводим из него: агент получает внешний текст
-      // только после отдельного явного opt-in.
+      // Human allowlist задаёт само наличие правила. Будущий внешний корпус
+      // переписки шире не выводим из него: локальная SQLite-база знаний этим
+      // флагом не управляется, а внешний текст требует отдельного opt-in.
       agentSearch: src.agentSearch === true,
       autoTask: normalizeAutoTask(src.autoTask),
       autoLaunch: normalizeAutoLaunch(src.autoLaunch, where),

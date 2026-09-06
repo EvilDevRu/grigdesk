@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 
+import { createExecEcho } from './echo.js';
+
 function sendTo(target, data) {
   if (typeof target?.send === 'function') {
     target.send(data);
@@ -32,6 +34,8 @@ function publicSession(session) {
 export function createSshSessionManager(options = {}) {
   const transportFactory = options.transport || options;
   const replayBytes = Math.max(1_024, Number(options.replayBytes) || 256 * 1_024);
+  const echoEnabled = options.echoEnabled || (() => true);
+  const echoLimitBytes = Math.max(0, Number(options.echoLimitBytes) || 64 * 1_024);
   const sessions = new Map();
   const events = new EventEmitter();
 
@@ -50,12 +54,27 @@ export function createSshSessionManager(options = {}) {
     }
   }
 
+  /**
+   * Эхо агентской команды идёт ВНИЗ, в fan-out окон терминала, и не касается shell-канала:
+   * человек видит происходящее, но текст не может стать вводом его оболочки. Мёртвую
+   * сессию не трогаем — её окна уже закрыты.
+   */
+  function echoToTerminal(session, text) {
+    if (!text || !session.alive) {
+      return;
+    }
+    appendReplay(session, text);
+  }
+
   function settleRun(run, result) {
     if (run.settled) {
       return;
     }
     run.settled = true;
     run.session.runs.delete(run);
+    if (run.echo) {
+      echoToTerminal(run.session, run.echo.finish(result));
+    }
     run.resolve(result);
   }
 
@@ -182,12 +201,23 @@ export function createSshSessionManager(options = {}) {
       channel.close?.();
       return { ok: false, error: session.alive ? 'access_revoked' : 'session_lost' };
     }
+    const echo = echoEnabled() ? createExecEcho({ limitBytes: echoLimitBytes }) : null;
+    if (echo) {
+      echoToTerminal(session, echo.start(String(command)));
+    }
+
     return new Promise((resolve) => {
       const chunks = [];
-      const run = { session, channel, resolve, settled: false };
+      const run = { session, channel, resolve, settled: false, echo };
       session.runs.add(run);
-      channel.on?.('data', (chunk) => chunks.push(Buffer.from(chunk)));
-      channel.stderr?.on?.('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      const collect = (chunk) => {
+        chunks.push(Buffer.from(chunk));
+        if (echo) {
+          echoToTerminal(session, echo.data(chunk));
+        }
+      };
+      channel.on?.('data', collect);
+      channel.stderr?.on?.('data', collect);
       channel.once?.('error', () => {
         settleRun(run, session.alive
           ? { ok: false, error: 'command_failed' }

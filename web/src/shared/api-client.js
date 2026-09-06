@@ -93,6 +93,20 @@ async function upload(path, formData, { timeoutMs = 0, signal = null } = {}) {
   return handle(res, path);
 }
 
+/** Получает бинарный ответ и сохраняет общую обработку JSON-ошибок и 401. */
+async function download(path) {
+  const res = await fetch(url(path), {
+    ...FETCH_OPTS,
+    method: 'POST',
+  });
+  if (!res.ok) {
+    await handle(res, path);
+  }
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const filename = disposition.match(/filename="([^"]+)"/iu)?.[1];
+  return { blob: await res.blob(), ...(filename ? { filename } : {}) };
+}
+
 // Пароль SSH уходит только как непрозрачные байты: общий JSON-клиент здесь
 // использовать нельзя, иначе секрет окажется в сериализуемом объекте.
 async function postBytes(path, body) {
@@ -114,7 +128,8 @@ export const api = {
   get: (path) => request('GET', path),
   post: (path, body) => request('POST', path, body),
   put: (path, body) => request('PUT', path, body),
-  del: (path) => request('DELETE', path),
+  del: (path, body) => request('DELETE', path, body),
   postBytes,
+  download,
   upload,
 };

@@ -26,7 +26,12 @@ async function waitFor(predicate, message, timeoutMs = 5_000) {
   assert.fail(message);
 }
 
-async function apiFixture(t, { ticket = null, telegramDiscussion = null } = {}) {
+async function apiFixture(t, {
+  ticket = null,
+  telegramDiscussion = null,
+  knowledgeBroker = null,
+  workProject = null,
+} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-companion-mode-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const worktree = path.join(root, 'task-worktree');
@@ -74,6 +79,7 @@ async function apiFixture(t, { ticket = null, telegramDiscussion = null } = {}) 
       async readTrustedAttempt(id) {
         if (!sandboxTasks.has(String(id))) throw new Error('trusted attempt missing');
         return {
+          ...(workProject ? { profile: workProject } : {}),
           workspaceMode: 'isolated',
           repositories: [{ name: 'main', workspace: worktree, branch: `factory/t${id}` }],
         };
@@ -98,7 +104,13 @@ async function apiFixture(t, { ticket = null, telegramDiscussion = null } = {}) 
     },
     prefs: {
       read() {
-        return { speech: {}, trustedDirectories: [], providerSettings: {}, chatAutoCompactWindow: 0 };
+        return {
+          speech: {},
+          trustedDirectories: [],
+          providerSettings: {},
+          chatAutoCompactWindow: 0,
+          projects: workProject ? { [workProject]: {} } : {},
+        };
       },
     },
     modelsRegistry: async () => ({
@@ -114,6 +126,7 @@ async function apiFixture(t, { ticket = null, telegramDiscussion = null } = {}) 
       taskChecks.push(String(taskId));
       return knownTasks.has(String(taskId));
     },
+    knowledgeBroker,
   });
   await app.ready();
   t.after(() => app.close());
@@ -242,6 +255,90 @@ test('COMP-MODE-01: exact companion global/task проходят только в
   assert.equal(fixture.runs[1].options.permissionMode, 'plan');
   assert.equal(fixture.runs[0].options.cwd, fixture.root);
   assert.equal(fixture.runs[1].options.cwd, fixture.worktree);
+});
+
+test('COMP-MODE-01: смена режима прав создаёт отдельный scope рабочих инструментов', async (t) => {
+  const fixture = await apiFixture(t);
+  const executor = fixture.setExecutor('claude', {
+    modesImpl: async () => [{ id: 'plan' }, { id: 'acceptEdits' }],
+  });
+  executor.workToolsTransport = 'mcp';
+  const chat = await saveCompanion(fixture.app, { taskId: '44' });
+
+  const planned = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/tasks/44/chat',
+    payload: turnPayload(chat),
+  });
+  const writable = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/tasks/44/chat',
+    payload: turnPayload(chat, { companionTurn: false, mode: 'acceptEdits' }),
+  });
+  const keys = fixture.runs.map((run) => run.options.workToolScopeKey);
+
+  assert.deepEqual({
+    statuses: [planned.statusCode, writable.statusCode],
+    distinct: new Set(keys).size,
+    carriesModes: keys.map((key) => key.includes('plan') || key.includes('acceptEdits')),
+  }, {
+    statuses: [200, 200],
+    distinct: 2,
+    carriesModes: [true, true],
+  });
+});
+
+test('COMP-MODE-01: knowledge write получает server-owned plan и chat scope', async (t) => {
+  const calls = [];
+  const fixture = await apiFixture(t, {
+    workProject: 'cockpit',
+    knowledgeBroker: {
+      async invoke(scope, input) {
+        calls.push({ scope, input });
+        return { ok: false, error: 'permission_denied' };
+      },
+    },
+  });
+  fixture.setExecutor('claude', {
+    modesImpl: async () => [{ id: 'plan' }],
+    async runImpl(options) {
+      await options.workTools.invoke('knowledge_search', {
+        action: 'write',
+        record: {
+          repository: 'main',
+          kind: 'fact',
+          title: 'Проверка режима',
+          body: 'Не записывать в plan.',
+          tags: ['knowledge'],
+        },
+      });
+      return { reply: 'ok', steps: [], sessionId: 'plan-scope', cost: 0 };
+    },
+  });
+  const chat = await saveCompanion(fixture.app, { taskId: '44' });
+
+  const response = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/tasks/44/chat',
+    payload: turnPayload(chat),
+  });
+
+  assert.deepEqual({ status: response.statusCode, calls }, {
+    status: 200,
+    calls: [{
+      scope: { projectId: 'cockpit', chatKey: chat.id, permissionMode: 'plan' },
+      input: {
+        action: 'write',
+        record: {
+          repository: 'main',
+          kind: 'fact',
+          title: 'Проверка режима',
+          body: 'Не записывать в plan.',
+          tags: ['knowledge'],
+        },
+      },
+    }],
+  });
 });
 
 test('COMP-MODE-01/03: marker не превращает normal chat и не меняет task scope/mode', async (t) => {

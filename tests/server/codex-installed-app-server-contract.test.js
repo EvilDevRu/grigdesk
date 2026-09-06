@@ -76,7 +76,9 @@ test('установленный Codex сохраняет необходимый
   t.after(() => fs.rm(schemaDir, { recursive: true, force: true }));
 
   try {
-    await execFileAsync(CODEX_BIN, ['app-server', 'generate-ts', '--out', schemaDir], {
+    await execFileAsync(CODEX_BIN, [
+      'app-server', 'generate-ts', '--experimental', '--out', schemaDir,
+    ], {
       encoding: 'utf8',
       timeout: 20_000,
       maxBuffer: 1024 * 1024,
@@ -95,9 +97,12 @@ test('установленный Codex сохраняет необходимый
     }
   }
 
-  const [clientRequest, clientNotification, serverNotification, initializeParams] = await Promise.all([
+  const [
+    clientRequest, clientNotification, serverRequest, serverNotification, initializeParams,
+  ] = await Promise.all([
     schema('ClientRequest.ts'),
     schema('ClientNotification.ts'),
+    schema('ServerRequest.ts'),
     schema('ServerNotification.ts'),
     schema('InitializeParams.ts'),
   ]);
@@ -114,6 +119,7 @@ test('установленный Codex сохраняет необходимый
   ]) {
     assertMethod(clientRequest, method, version, 'ClientRequest');
   }
+  assertMethod(serverRequest, 'item/tool/call', version, 'ServerRequest');
 
   for (const method of [
     'item/started',
@@ -144,6 +150,9 @@ test('установленный Codex сохраняет необходимый
     threadItem,
     threadStartParams,
     threadResumeParams,
+    dynamicToolResponse,
+    dynamicToolOutput,
+    dynamicToolSpec,
     turnStartParams,
     userInput,
     sandboxMode,
@@ -162,6 +171,9 @@ test('установленный Codex сохраняет необходимый
     schema('v2/ThreadItem.ts'),
     schema('v2/ThreadStartParams.ts'),
     schema('v2/ThreadResumeParams.ts'),
+    schema('v2/DynamicToolCallResponse.ts'),
+    schema('v2/DynamicToolCallOutputContentItem.ts'),
+    schema('v2/DynamicToolSpec.ts'),
     schema('v2/TurnStartParams.ts'),
     schema('v2/UserInput.ts'),
     schema('v2/SandboxMode.ts'),
@@ -184,6 +196,27 @@ test('установленный Codex сохраняет необходимый
     }
   }
   assertField(threadResumeParams, 'threadId', 'string', version, 'ThreadResumeParams');
+  assertSchemaPattern(
+    threadStartParams,
+    /\bdynamicTools\?\s*:\s*Array<DynamicToolSpec>\s*\|\s*null/,
+    'dynamicTools?: Array<DynamicToolSpec> | null',
+    version,
+    'ThreadStartParams',
+  );
+  assert.doesNotMatch(
+    threadResumeParams,
+    /\bdynamicTools\b/,
+    `Codex ${version}: dynamicTools неожиданно появился в ThreadResumeParams`,
+  );
+  assertField(dynamicToolResponse, 'contentItems', 'Array<DynamicToolCallOutputContentItem>',
+    version, 'DynamicToolCallResponse');
+  assertField(dynamicToolResponse, 'success', 'boolean', version, 'DynamicToolCallResponse');
+  assertSchemaPattern(dynamicToolOutput, /"type"\s*:\s*"inputText"/,
+    'inputText content item', version, 'DynamicToolCallOutputContentItem');
+  assertField(dynamicToolOutput, 'text', 'string', version,
+    'DynamicToolCallOutputContentItem');
+  assertSchemaPattern(dynamicToolSpec, /"type"\s*:\s*"function"/,
+    'function discriminant', version, 'DynamicToolSpec');
 
   assertField(turnStartParams, 'threadId', 'string', version, 'TurnStartParams');
   assertField(turnStartParams, 'input', 'Array<UserInput>', version, 'TurnStartParams');
@@ -229,7 +262,9 @@ test('установленный Codex сохраняет необходимый
   assertField(fileUpdateChange, 'kind', 'PatchChangeKind', version, 'FileUpdateChange');
   assertField(fileUpdateChange, 'diff', 'string', version, 'FileUpdateChange');
 
-  for (const itemType of ['agentMessage', 'reasoning', 'commandExecution', 'fileChange']) {
+  for (const itemType of [
+    'agentMessage', 'reasoning', 'commandExecution', 'fileChange', 'dynamicToolCall',
+  ]) {
     assert.match(
       threadItem,
       new RegExp(`"type"\\s*:\\s*"${itemType}"`),

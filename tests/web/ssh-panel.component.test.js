@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
@@ -8,16 +9,29 @@ const PANEL_PATH = webFile('src/views/ssh/SshPanel.vue');
 
 async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props = {} } = {}) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/ssh');
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const savedConnections = [];
-  const store = {
+  const store = reactive({
     connections: [],
     projects: [
       { id: 'cockpit', factory: false },
       { id: 'factory-project', factory: true },
     ],
     sessions: [
-      { id: 'session-a', label: 'Боевой код', role: 'code', agentAllowed: true },
-      { id: 'session-b', label: 'База', role: 'db', agentAllowed: false },
+      {
+        id: 'session-a',
+        projectId: 'cockpit',
+        label: 'Боевой код',
+        role: 'code',
+        agentAllowed: true,
+      },
+      {
+        id: 'session-b',
+        projectId: 'cockpit',
+        label: 'База',
+        role: 'db',
+        agentAllowed: false,
+      },
     ],
     activeId: 'session-a',
     approvals: [],
@@ -27,7 +41,7 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
     activate(id) { this.activeId = id; },
     detach() {},
     ...storeOverrides,
-  };
+  });
   const answers = [];
   const chatStore = {
     pending,
@@ -93,14 +107,100 @@ test('две server-owned сессии показаны вкладками пр�
   const { wrapper } = await mountPanel(t);
 
   assert.deepEqual({
-    tabs: wrapper.findAll('[role="tab"]').map((entry) => entry.text()),
+    tabs: wrapper.findAll('[role="tab"]').map((entry) => ({
+      project: entry.get('[data-ssh-session-project]').text(),
+      target: entry.get('[data-ssh-session-target]').text(),
+    })),
     terminals: globalThis.__sshPanelTerminals.length,
     terminalHosts: wrapper.findAll('[data-ssh-terminal-host]').length,
   }, {
-    tabs: ['Боевой код', 'База'],
+    tabs: [
+      { project: 'cockpit', target: 'Боевой код · code' },
+      { project: 'cockpit', target: 'База · db' },
+    ],
     terminals: 1,
     terminalHosts: 1,
   });
+});
+
+test('одноимённые сессии показывают проект и различаются ролью во вкладках', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    store: {
+      sessions: [
+        {
+          id: 'session-backend',
+          connectionId: 'connection-backend',
+          projectId: 'arsenkin',
+          label: 'production',
+          role: 'backend',
+          host: 'backend.internal',
+          port: 22,
+          user: 'root',
+        },
+        {
+          id: 'session-db',
+          connectionId: 'connection-db',
+          projectId: 'arsenkin',
+          label: 'production',
+          role: 'db',
+          host: 'db.internal',
+          port: 22,
+          user: 'root',
+        },
+      ],
+      activeId: 'session-backend',
+    },
+  });
+
+  assert.deepEqual(
+    wrapper.findAll('[role="tab"]').map((tab) => ({
+      project: tab.get('[data-ssh-session-project]').text(),
+      target: tab.get('[data-ssh-session-target]').text(),
+      ariaLabel: tab.attributes('aria-label'),
+      title: tab.attributes('title'),
+    })),
+    [
+      {
+        project: 'arsenkin',
+        target: 'production · backend',
+        ariaLabel: 'Проект arsenkin, сессия production · backend, root@backend.internal:22',
+        title: 'Проект arsenkin — production · backend — root@backend.internal:22',
+      },
+      {
+        project: 'arsenkin',
+        target: 'production · db',
+        ariaLabel: 'Проект arsenkin, сессия production · db, root@db.internal:22',
+        title: 'Проект arsenkin — production · db — root@db.internal:22',
+      },
+    ],
+  );
+});
+
+test('повторные сессии одного сервера получают видимый порядковый номер', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    store: {
+      sessions: [
+        {
+          id: 'session-first',
+          projectId: 'cockpit',
+          label: 'production',
+          role: 'backend',
+        },
+        {
+          id: 'session-second',
+          projectId: 'cockpit',
+          label: 'production',
+          role: 'backend',
+        },
+      ],
+      activeId: 'session-first',
+    },
+  });
+
+  assert.deepEqual(
+    wrapper.findAll('[data-ssh-session-target]').map((target) => target.text()),
+    ['production · backend · 1', 'production · backend · 2'],
+  );
 });
 
 test('переключение внутренней вкладки переиспользует тот же xterm', async (t) => {
@@ -110,6 +210,72 @@ test('переключение внутренней вкладки переис�
 
   assert.deepEqual({ activeId: store.activeId, terminals: globalThis.__sshPanelTerminals.length }, {
     activeId: 'session-b',
+    terminals: 1,
+  });
+});
+
+test('подключённый сервер открывает живую сессию без нового probe', async (t) => {
+  let probes = 0;
+  const connection = {
+    id: 'connection-a',
+    projectId: 'cockpit',
+    label: 'Production',
+    role: 'backend',
+    host: 'server.internal',
+    port: 22,
+    user: 'deploy',
+  };
+  const { wrapper, store, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: [connection],
+      sessions: [
+        {
+          id: 'session-a',
+          connectionId: 'connection-a',
+          label: 'Production',
+          role: 'backend',
+          host: 'server.internal',
+          port: 22,
+          user: 'deploy',
+        },
+        {
+          id: 'session-b',
+          connectionId: 'connection-b',
+          label: 'Database',
+          role: 'db',
+        },
+      ],
+      activeId: 'session-b',
+      async probeHostKey() {
+        probes += 1;
+      },
+    },
+  });
+  const card = wrapper.get('.ssh-connection');
+  const loginPanel = card.get('.ssh-connection__login-panel');
+
+  assert.deepEqual({
+    button: card.get('[aria-label="Открыть терминал Production"]').text(),
+    loginOpen: loginPanel.attributes('open'),
+  }, {
+    button: 'Открыть терминал',
+    loginOpen: undefined,
+  });
+
+  await card.get('[aria-label="Открыть терминал Production"]').trigger('click');
+  await flushPromises();
+
+  assert.deepEqual({
+    activeId: store.activeId,
+    current: card.classes().includes('is-current'),
+    button: card.get('[aria-label="Открыть терминал Production"]').text(),
+    probes,
+    terminals: globalThis.__sshPanelTerminals.length,
+  }, {
+    activeId: 'session-a',
+    current: true,
+    button: 'К терминалу',
+    probes: 0,
     terminals: 1,
   });
 });
@@ -124,12 +290,70 @@ test('без активной сессии панель показывает п�
 
   assert.deepEqual({
     terminals: globalThis.__sshPanelTerminals.length,
-    message: wrapper.find('.ssh-console__empty').text(),
+    message: wrapper.find('.ssh-console__empty strong').text(),
+    hint: wrapper.find('.ssh-console__empty > span:last-child').text(),
   }, {
     terminals: 0,
-    message: 'Нет активной SSH-сессииВыберите сохранённое соединение ниже — '
-      + 'терминал появится после входа.',
+    message: 'Нет активной SSH-сессии',
+    hint: 'Выберите сохранённый сервер — терминал появится после входа.',
   });
+});
+
+test('стрелки переключают сессии и фокус без второго xterm', async (t) => {
+  const { wrapper, store, flushPromises } = await mountPanel(t);
+  const tabs = wrapper.findAll('[role="tab"]');
+
+  await tabs[0].trigger('keydown', { key: 'ArrowRight' });
+  await flushPromises();
+
+  assert.deepEqual({
+    activeId: store.activeId,
+    focused: wrapper.element.ownerDocument.activeElement?.getAttribute('aria-label'),
+    terminals: globalThis.__sshPanelTerminals.length,
+  }, {
+    activeId: 'session-b',
+    focused: 'Проект cockpit, сессия База · db',
+    terminals: 1,
+  });
+});
+
+test('закрытие активной сессии выбирает соседнюю вкладку и возвращает фокус', async (t) => {
+  const { wrapper, store, flushPromises } = await mountPanel(t, {
+    store: {
+      async closeSession(id) {
+        this.activeId = '';
+        this.sessions = this.sessions.filter((session) => session.id !== id);
+      },
+    },
+  });
+  const close = wrapper.find('[aria-label="Закрыть активную сессию Боевой код"]');
+  close.element.focus();
+  await close.trigger('click');
+  await flushPromises();
+
+  const tabs = wrapper.findAll('[role="tab"]');
+  assert.deepEqual({
+    activeId: store.activeId,
+    labels: tabs.map((tab) => tab.text()),
+    selected: tabs[0]?.attributes('aria-selected'),
+    tabindex: tabs[0]?.attributes('tabindex'),
+    focused: wrapper.element.ownerDocument.activeElement?.getAttribute('aria-label'),
+  }, {
+    activeId: 'session-b',
+    labels: ['ПроектcockpitБаза · db'],
+    selected: 'true',
+    tabindex: '0',
+    focused: 'Проект cockpit, сессия База · db',
+  });
+});
+
+test('терминальный host включает внутренние отступы в измеряемую высоту', async () => {
+  const source = await readFile(PANEL_PATH, 'utf8');
+
+  assert.match(
+    source,
+    /\.ssh-terminal\s*\{[^}]*box-sizing:\s*border-box;/su,
+  );
 });
 
 test('мобильная page-панель не резервирует место под кнопки дока', async (t) => {
@@ -143,9 +367,12 @@ test('мобильная page-панель не резервирует мест�
   assert.deepEqual({
     compact: wrapper.classes().includes('is-compact'),
     dock: wrapper.classes().includes('is-dock'),
+    regions: [...wrapper.get('.ssh-layout').element.children]
+      .map((element) => element.className),
   }, {
     compact: true,
     dock: false,
+    regions: ['ssh-workspace', 'ssh-connections'],
   });
 });
 
@@ -196,6 +423,56 @@ test('новое соединение выбирает проект из рее�
   await flushPromises();
 
   assert.equal(savedConnections[0]?.projectId, 'cockpit');
+});
+
+test('повторный вход не дублирует probe, а пароль очищается после подключения', async (t) => {
+  let finishProbe;
+  let probes = 0;
+  const connected = [];
+  const probe = new Promise((resolve) => {
+    finishProbe = resolve;
+  });
+  const connection = {
+    id: 'connection-a',
+    projectId: 'cockpit',
+    label: 'Production',
+    role: 'backend',
+    host: 'server.internal',
+    port: 22,
+    user: 'deploy',
+  };
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: [connection],
+      async probeHostKey() {
+        probes += 1;
+
+        return probe;
+      },
+      async connect(id, password) {
+        connected.push([id, password]);
+      },
+    },
+  });
+  const form = wrapper.find('.ssh-connection__login');
+  const password = form.find('input[type="password"]');
+
+  await password.setValue('секрет');
+  await form.trigger('submit');
+  await form.trigger('submit');
+
+  assert.equal(probes, 1);
+
+  finishProbe({ status: 'trusted' });
+  await flushPromises();
+
+  assert.deepEqual({
+    connected,
+    password: password.element.value,
+  }, {
+    connected: [['connection-a', 'секрет']],
+    password: '',
+  });
 });
 
 test('SSH-панель показывает карточку из общего chat.pending', async (t) => {

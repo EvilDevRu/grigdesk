@@ -547,8 +547,24 @@ export class TelegramPultActions {
     )) || null;
   }
 
+  /** Старую/подделанную кнопку MCP не превращаем в обход browser-only формы. */
+  async _cockpitOnly({ lease, callback, chatId }, item) {
+    const subject = chatSubject(item);
+    await this._answer(lease, callback, 'Заверши это действие в Cockpit.');
+    await this._edit(
+      lease,
+      chatId,
+      callback.messageId,
+      `🔔 ${subject} — требуется действие\nЗаверши в Cockpit.`,
+    );
+  }
+
   async _question({ lease, callback, chatId }, { pid, index }) {
     const item = await this._waitingItem(pid);
+    if (item?.structured === true) {
+      await this._cockpitOnly({ lease, callback, chatId }, item);
+      return;
+    }
     const first = item?.questions?.[0];
     const option = first?.options?.[index];
     if (!item || !first || !option) {
@@ -574,6 +590,10 @@ export class TelegramPultActions {
     const item = await this._waitingItem(pid);
     if (!item) {
       await this._answer(lease, callback, 'Этот вопрос уже закрыт.');
+      return;
+    }
+    if (item.structured === true) {
+      await this._cockpitOnly({ lease, callback, chatId }, item);
       return;
     }
     const subject = chatSubject(item);
@@ -602,6 +622,10 @@ export class TelegramPultActions {
       await this._answer(lease, callback, 'Этот запрос уже закрыт.');
       await this._delete(lease, chatId, callback.messageId);
       this.forget(`perm:${pid}`);
+      return;
+    }
+    if (pending.input?.kind === 'external_url') {
+      await this._cockpitOnly({ lease, callback, chatId }, pending);
       return;
     }
     if (action === 'deny-comment') {

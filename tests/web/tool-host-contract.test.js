@@ -52,15 +52,15 @@ test('Code, Shelf, Terminal и SSH лениво загружаются неза�
 });
 
 test('Узкий route полки объявлен как tool и не создаёт отдельный dock state', async () => {
-  const [router, registry, dock] = await Promise.all([
+  const [router, catalog, dock] = await Promise.all([
     source('web/src/router.js'),
-    source('web/src/shared/tools/registry.js'),
+    source('web/src/shared/tools/catalog.js'),
     source('web/src/stores/dock.js'),
   ]);
 
   assert.deepEqual({
     route: /path:\s*['"]\/shelf['"][\s\S]*meta:\s*\{[^}]*tool:\s*['"]shelf['"]/.test(router),
-    registry: /id:\s*['"]shelf['"][\s\S]*route:\s*['"]\/shelf['"]/.test(registry),
+    registry: /id:\s*['"]shelf['"][\s\S]*route:\s*['"]\/shelf['"]/.test(catalog),
     separateShelfState: /shelf(?:Dock|Open|Mounted)\s*:/i.test(dock),
   }, {
     route: true,

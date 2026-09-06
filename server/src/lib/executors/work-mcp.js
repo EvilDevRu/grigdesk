@@ -52,13 +52,13 @@ export function createWorkMcpHandler({ workTools }) {
   return { request, handle: request };
 }
 
-async function ipcRequest(socketPath, nonce, name, input) {
+async function ipcRequest(socketPath, nonce, request) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     let buffer = '';
     socket.setEncoding('utf8');
     socket.once('connect', () => {
-      socket.end(`${JSON.stringify({ nonce, name, input })}\n`);
+      socket.end(`${JSON.stringify({ nonce, ...request })}\n`);
     });
     socket.on('data', (chunk) => {
       buffer += chunk;
@@ -84,18 +84,11 @@ async function runCli() {
   const nonceIndex = process.argv.indexOf('--nonce');
   const socketPath = socketIndex >= 0 ? process.argv[socketIndex + 1] : '';
   const nonce = nonceIndex >= 0 ? process.argv[nonceIndex + 1] : '';
+  const descriptors = await ipcRequest(socketPath, nonce, { type: 'descriptors' });
   const handler = createWorkMcpHandler({
     workTools: {
-      descriptors: [{
-        name: 'supervised_ssh',
-        description: 'Надзорное выполнение команды',
-        inputSchema: {
-          type: 'object',
-          required: ['action'],
-          properties: { action: { enum: ['list', 'exec'] } },
-        },
-      }],
-      invoke: (name, input) => ipcRequest(socketPath, nonce, name, input),
+      descriptors: Array.isArray(descriptors) ? descriptors : [],
+      invoke: (name, input) => ipcRequest(socketPath, nonce, { name, input }),
     },
   });
   const lines = createInterface({ input: process.stdin });

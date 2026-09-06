@@ -154,6 +154,7 @@ test('Codex run использует app-server и не теряет rich events
     assert.deepEqual(init.params.capabilities, {
       experimentalApi: true,
       requestAttestation: false,
+      mcpServerOpenaiFormElicitation: true,
     });
   }
 
@@ -343,6 +344,110 @@ test('ход без final_answer отдаёт последний commentary, а 
     steps.some((step) => step.k === 'text' && step.text === result.reply),
     'сам commentary остаётся в ленте: ответ его дублирует, но не подменяет',
   );
+});
+
+for (const status of ['completed', 'interrupted']) {
+  test(`Codex игнорирует ${status} чужого хода субагента`, async (t) => {
+    const f = await fixture(t, `foreign-${status}`);
+    const live = [];
+    const result = await codex.run(runOptions(f, {
+      onStep: (step) => live.push(step),
+    }));
+
+    assert.equal(result.reply, 'Готово: изменения сохранены.');
+    assert.equal(result.sessionId, '00000000-0000-7000-8000-000000000049');
+    assert.equal(result.totalInputTokens, 0, 'чужой token usage не относится к родителю');
+    assert.deepEqual(result.steps, live);
+    assert.doesNotMatch(
+      JSON.stringify(result.steps),
+      /Чужой субагент/u,
+      'чужие сообщения не попадают в ленту родителя',
+    );
+  });
+}
+
+test('Codex показывает MCP Figma form и возвращает typed elicitation response', async (t) => {
+  const f = await fixture(t, 'mcp-elicitation');
+  const presentations = [];
+  const result = await codex.run(runOptions(f, {
+    onPermission: async (presentation) => {
+      presentations.push(presentation);
+      return {
+        action: 'accept',
+        answers: [
+          { key: 'file_key', value: 'file-42' },
+          { key: 'include_hidden', value: false },
+        ],
+      };
+    },
+  }));
+
+  assert.equal(result.reply, 'Готово: изменения сохранены.');
+  assert.equal(presentations.length, 1);
+  assert.equal(presentations[0].source, 'MCP · figma');
+  assert.equal(presentations[0].prompt, 'Какие данные макета использовать?');
+  assert.deepEqual(presentations[0].actions, ['accept', 'decline', 'cancel']);
+  assert.deepEqual(
+    presentations[0].questions.map(({ key, inputType, required, default: value }) => ({
+      key, inputType, required, defaultValue: value,
+    })),
+    [
+      { key: 'file_key', inputType: 'text', required: true, defaultValue: undefined },
+      { key: 'include_hidden', inputType: 'boolean', required: true, defaultValue: false },
+    ],
+  );
+  assert.equal(presentations[0].signal instanceof AbortSignal, true);
+});
+
+test('serverRequest/resolved отменяет Figma URL без позднего JSON-RPC ответа', async (t) => {
+  const f = await fixture(t, 'mcp-resolved');
+  let aborted = false;
+  const result = await codex.run(runOptions(f, {
+    onPermission: (presentation) => new Promise((resolve) => {
+      assert.equal(presentation.input.url, 'https://www.figma.com/oauth?state=opaque');
+      presentation.signal.addEventListener('abort', () => {
+        aborted = true;
+        resolve({ action: 'cancel' });
+      }, { once: true });
+    }),
+  }));
+
+  assert.equal(result.reply, 'Готово: изменения сохранены.');
+  assert.equal(aborted, true);
+  const trace = await readTrace(f.trace);
+  assert.equal(trace.some((entry) => (
+    entry.direction === 'client' && entry.message?.id === 91013
+  )), false, 'resolved request уже не ждёт и не принимает JSON-RPC response');
+});
+
+test('Codex не роняет ход на дубле и чужом item/tool/call', async (t) => {
+  const f = await fixture(t, 'work-routing');
+  const calls = [];
+  const descriptor = {
+    name: 'knowledge_search',
+    description: 'Поиск в базе знаний',
+    inputSchema: { type: 'object' },
+  };
+  const result = await codex.run(runOptions(f, {
+    workTools: {
+      descriptors: [descriptor],
+      async invoke(name, input) {
+        calls.push({ name, input });
+        return { ok: true, items: [{ title: 'Figma MCP' }] };
+      },
+    },
+  }));
+
+  assert.equal(result.reply, 'Готово: изменения сохранены.');
+  assert.deepEqual(calls, [{
+    name: 'knowledge_search',
+    input: { action: 'search', query: 'figma', limit: 3 },
+  }]);
+  const trace = await readTrace(f.trace);
+  const foreignResponse = trace.find((entry) => (
+    entry.direction === 'client' && entry.message?.id === 91012
+  ));
+  assert.equal(foreignResponse?.message?.error?.code, -32602);
 });
 
 test('AbortSignal прерывает app-server ход через turn/interrupt и сохраняет sessionId со steps', async (t) => {

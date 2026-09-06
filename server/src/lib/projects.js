@@ -5,14 +5,14 @@
 // у которых bash-профиля нет. Сам список проектов — как и раньше, lib/profiles.js.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { listFactoryProfiles, listProjects } from './profiles.js';
+import { PROFILE_RE, listFactoryProfiles, listProjects } from './profiles.js';
 import { loadTriageProfile } from './analysis/profile.js';
 import { RoutesStore } from '../modules/routes/store.js';
 
 // Чтение профиля — это source bash-файла (см. analysis/profile.js), не дёшево.
 // Короткого кэша хватает: профили правятся руками и редко.
 const TTL = 15_000;
-const cache = new Map(); // имя → { at, repos }
+const cache = new Map(); // имя → { at, profile }
 
 // Один монорепозиторий иногда объявляют несколькими техническими алиасами (например,
 // BE/FE для совместимости профиля фабрики). Для раздела «Проекты» и плагина «Код» это
@@ -33,12 +33,16 @@ function normalizeProjectRepos(repos, id, from) {
   return unique;
 }
 
-async function factoryRepos(config, name) {
+async function factoryProfile(config, name) {
   const hit = cache.get(name);
-  if (hit && Date.now() - hit.at < TTL) return hit.repos;
-  const { repos } = await loadTriageProfile(config, name);
-  cache.set(name, { at: Date.now(), repos });
-  return repos;
+  if (hit && Date.now() - hit.at < TTL) return hit.profile;
+  const profile = await loadTriageProfile(config, name);
+  cache.set(name, { at: Date.now(), profile });
+  return profile;
+}
+
+async function factoryRepos(config, name) {
+  return (await factoryProfile(config, name)).repos;
 }
 
 /**
@@ -55,6 +59,34 @@ export async function projectRepos({ config, prefs, id, isFactory = null }) {
   }
   const saved = (prefs.read().projects || {})[id]?.repos || [];
   return normalizeProjectRepos(saved, id, 'cockpit');
+}
+
+/**
+ * Корень, в котором лежат карты знаний проекта. Источник — рабочий каталог агента из
+ * профиля фабрики: агент проекта стартует именно там, поэтому до карт дотягивается его
+ * собственный @-каскад, а не каскад кокпита. Кокпитный проект без bash-профиля отдаёт
+ * единственный репозиторий реестра. Несколько корней без явного выбора и полное
+ * отсутствие путей дают null: карта, положенная наугад, хуже внятного отказа.
+ * @param {{config: object, prefs: object, id: string, isFactory?: boolean|null}} p
+ * @returns {Promise<string|null>} абсолютный путь или null
+ */
+export async function projectMapsRoot({ config, prefs, id, isFactory = null }) {
+  if (!PROFILE_RE.test(String(id || ''))) {
+    return null;
+  }
+  const factory = isFactory ?? (await listFactoryProfiles(config.profilesDir)).includes(id);
+  if (factory) {
+    const { cwd } = await factoryProfile(config, id);
+    if (cwd && path.isAbsolute(cwd)) {
+      return path.resolve(cwd);
+    }
+  }
+  const repos = normalizeProjectRepos(
+    (prefs.read().projects || {})[id]?.repos || [],
+    id,
+    'cockpit',
+  );
+  return repos.length === 1 ? path.resolve(repos[0].dir) : null;
 }
 
 /**

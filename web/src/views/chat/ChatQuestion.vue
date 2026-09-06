@@ -1,19 +1,68 @@
 <template>
   <div class="q">
     <div class="col">
+      <div v-if="structured && (source || prompt)" class="q-intro">
+        <span v-if="source" class="q-source">{{ source }}</span>
+        <div v-if="prompt" class="q-prompt">{{ prompt }}</div>
+      </div>
+
       <div
         v-for="(question, questionIndex) in questions"
-        :key="questionIndex"
+        :key="question.key || questionIndex"
         class="q-item"
       >
         <div class="q-text">
           <span class="q-ico">?</span>
           {{ question.question }}
+          <span v-if="structured && question.required" class="q-required">обязательно</span>
           <span v-if="question.multiSelect" class="q-multi">можно несколько</span>
         </div>
 
         <div v-if="question.hint" class="q-hint">{{ question.hint }}</div>
 
+        <template v-if="structured">
+          <UiInput
+            v-if="question.inputType === 'text'"
+            v-model="state[questionIndex].value"
+            class="q-own"
+            :type="textInputType(question)"
+            :required="question.required"
+            :minlength="question.minLength"
+            :maxlength="question.maxLength ?? 4000"
+            :placeholder="question.placeholder || ''"
+            :aria-label="question.header || question.question"
+            @keydown.enter.prevent="ready && submitStructured('accept')"
+          />
+
+          <UiNumberInput
+            v-else-if="question.inputType === 'number' || question.inputType === 'integer'"
+            v-model="state[questionIndex].value"
+            class="q-own"
+            :required="question.required"
+            :min="question.minimum"
+            :max="question.maximum"
+            :step="question.inputType === 'integer' ? 1 : 'any'"
+            :aria-label="question.header || question.question"
+            @keydown.enter.prevent="ready && submitStructured('accept')"
+          />
+
+          <UiChoiceList
+            v-else-if="structuredChoices(question)"
+            class="q-opts"
+            :label="question.header || question.question"
+            :mode="question.inputType === 'multi-choice' ? 'multiple' : 'single'"
+            :model-value="structuredValue(questionIndex)"
+            :options="structuredOptions(question)"
+            selection-indicator
+            @update:model-value="setStructuredValue(questionIndex, $event)"
+          />
+
+          <div v-if="constraintText(question)" class="q-rule">
+            {{ constraintText(question) }}
+          </div>
+        </template>
+
+        <template v-else>
         <UiChoiceList
           class="q-opts"
           :label="question.header || question.question"
@@ -43,18 +92,43 @@
           placeholder="напиши своими словами"
           @keydown.enter.prevent="ready && submit()"
         />
+        </template>
       </div>
 
       <UiFormActions class="q-act" align="start">
-        <UiButton
-          variant="solid"
-          tone="accent"
-          :disabled="!ready"
-          @click="submit"
-        >
-          Ответить
-        </UiButton>
-        <UiButton @click="emit('skip')">Пропустить</UiButton>
+        <template v-if="structured">
+          <UiButton
+            v-for="entry in acceptingActions"
+            :key="entry.action"
+            :variant="entry.action === 'accept' ? 'solid' : 'outline'"
+            tone="accent"
+            :disabled="!ready"
+            @click="submitStructured(entry.action)"
+          >
+            {{ entry.label || actionLabel(entry.action) }}
+          </UiButton>
+          <UiButton
+            v-if="hasAction('decline')"
+            tone="danger"
+            @click="submitStructured('decline')"
+          >
+            {{ actionLabel('decline') }}
+          </UiButton>
+          <UiButton v-if="hasAction('cancel')" @click="submitStructured('cancel')">
+            {{ actionLabel('cancel') }}
+          </UiButton>
+        </template>
+        <template v-else>
+          <UiButton
+            variant="solid"
+            tone="accent"
+            :disabled="!ready"
+            @click="submit"
+          >
+            Ответить
+          </UiButton>
+          <UiButton @click="emit('skip')">Пропустить</UiButton>
+        </template>
       </UiFormActions>
     </div>
   </div>
@@ -67,6 +141,7 @@ import {
   UiChoiceList,
   UiFormActions,
   UiInput,
+  UiNumberInput,
 } from '../../ui';
 
 // Диалог агента: он спросил по существу, а не запросил разрешение на действие.
@@ -83,19 +158,57 @@ const state = ref([]);
 watch(
   () => props.req?.pid,
   () => {
-    state.value = (props.req?.questions || []).map(() => ({
+    state.value = (props.req?.questions || []).map((question) => ({
       picked: [],
       text: '',
       own: false,
+      value: initialValue(question),
     }));
   },
   { immediate: true },
 );
 
 const questions = computed(() => props.req?.questions || []);
-const ready = computed(() => (
-  state.value.some((item) => item.picked.length || item.text.trim())
+const structured = computed(() => props.req?.structured === true);
+const source = computed(() => String(props.req?.source || ''));
+const prompt = computed(() => String(props.req?.prompt || ''));
+const ready = computed(() => (structured.value
+  ? questions.value.every((question, index) => validStructured(question, state.value[index]?.value))
+  : state.value.some((item) => item.picked.length || item.text.trim())));
+
+const DEFAULT_ACTIONS = Object.freeze(['accept', 'cancel']);
+const ACTION_LABELS = Object.freeze({
+  accept: 'Отправить',
+  accept_session: 'Разрешить на сессию',
+  accept_always: 'Разрешать всегда',
+  decline: 'Отклонить',
+  cancel: 'Отменить',
+});
+const actions = computed(() => {
+  const given = Array.isArray(props.req?.actions) ? props.req.actions : DEFAULT_ACTIONS;
+  const normalized = given.map((entry) => (
+    typeof entry === 'string'
+      ? { action: entry, label: '' }
+      : { action: entry?.action, label: String(entry?.label || '') }
+  )).filter((entry) => Object.hasOwn(ACTION_LABELS, entry.action));
+
+  return normalized.length ? normalized : DEFAULT_ACTIONS.map((action) => ({ action, label: '' }));
+});
+const acceptingActions = computed(() => (
+  actions.value.filter((entry) => entry.action.startsWith('accept'))
 ));
+
+function initialValue(question) {
+  if (Object.hasOwn(question || {}, 'default')) {
+    if (question?.format === 'date-time' && typeof question.default === 'string') {
+      return dateTimeInputValue(question.default);
+    }
+    return Array.isArray(question.default) ? [...question.default] : question.default;
+  }
+  if (question?.inputType === 'multi-choice') return [];
+  if (question?.inputType === 'choice' || question?.inputType === 'boolean') return null;
+  return '';
+}
 
 function freeText(question) {
   return question?.allowFreeText !== false;
@@ -107,6 +220,138 @@ function optionsOf(question) {
     label: String(option.label || ''),
     description: option.description ? String(option.description) : undefined,
   }));
+}
+
+function structuredChoices(question) {
+  return ['choice', 'multi-choice', 'boolean'].includes(question?.inputType);
+}
+
+function structuredOptions(question) {
+  if (question?.inputType === 'boolean') {
+    return [
+      { value: true, label: 'Да' },
+      { value: false, label: 'Нет' },
+    ];
+  }
+
+  return (question?.options || []).map((option) => ({
+    value: Object.hasOwn(option || {}, 'value') ? option.value : String(option?.label || ''),
+    label: String(option?.label ?? option?.value ?? ''),
+    description: option?.description ? String(option.description) : undefined,
+  }));
+}
+
+function structuredValue(questionIndex) {
+  return state.value[questionIndex]?.value ?? null;
+}
+
+function setStructuredValue(questionIndex, value) {
+  const item = state.value[questionIndex];
+  if (item) item.value = value;
+}
+
+function hasStructuredValue(question, value) {
+  if (question?.inputType === 'text') return typeof value === 'string';
+  if (question?.inputType === 'multi-choice') return Array.isArray(value);
+  if (question?.inputType === 'number' || question?.inputType === 'integer') {
+    return typeof value === 'number';
+  }
+  if (question?.inputType === 'boolean') return typeof value === 'boolean';
+  return value !== '' && value !== null && value !== undefined;
+}
+
+function validStructured(question, value) {
+  const present = hasStructuredValue(question, value);
+  if (!present) return !question?.required;
+  if (!question?.required && (value === '' || (Array.isArray(value) && !value.length))) {
+    return true;
+  }
+
+  if (question?.inputType === 'text') {
+    if (typeof value !== 'string' || value.length > 4_000) return false;
+    if (question.minLength !== undefined && value.length < question.minLength) return false;
+    if (question.maxLength !== undefined && value.length > question.maxLength) return false;
+    return validTextFormat(question.format, value);
+  }
+  if (question?.inputType === 'number' || question?.inputType === 'integer') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+    if (question.inputType === 'integer' && !Number.isInteger(value)) return false;
+    if (question.minimum !== undefined && value < question.minimum) return false;
+    if (question.maximum !== undefined && value > question.maximum) return false;
+    return true;
+  }
+  if (question?.inputType === 'boolean') return typeof value === 'boolean';
+
+  const allowed = new Set(structuredOptions(question).map((option) => option.value));
+  if (question?.inputType === 'choice') return allowed.has(value);
+  if (question?.inputType === 'multi-choice') {
+    if (!Array.isArray(value) || !value.every((entry) => allowed.has(entry))) return false;
+    if (question.minItems !== undefined && value.length < question.minItems) return false;
+    if (question.maxItems !== undefined && value.length > question.maxItems) return false;
+    return true;
+  }
+  return false;
+}
+
+function textInputType(question) {
+  return {
+    email: 'email',
+    uri: 'url',
+    date: 'date',
+    'date-time': 'datetime-local',
+  }[question?.format] || 'text';
+}
+
+function validTextFormat(format, value) {
+  if (!format) return true;
+  if (format === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (format === 'uri') {
+    try { return !!new URL(value).protocol; } catch { return false; }
+  }
+  if (format === 'date') {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.valueOf())
+      && date.getUTCFullYear() === Number(match[1])
+      && date.getUTCMonth() + 1 === Number(match[2])
+      && date.getUTCDate() === Number(match[3]);
+  }
+  if (format === 'date-time') return !Number.isNaN(new Date(value).valueOf());
+  return false;
+}
+
+function dateTimeInputValue(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  const local = new Date(date.valueOf() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function answerValue(question, value) {
+  if (question?.format !== 'date-time' || typeof value !== 'string') return value;
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : date.toISOString();
+}
+
+function constraintText(question) {
+  const parts = [];
+  if (question?.minLength !== undefined) parts.push(`минимум ${question.minLength} симв.`);
+  if (question?.maxLength !== undefined) parts.push(`максимум ${question.maxLength} симв.`);
+  if (question?.minimum !== undefined) parts.push(`не меньше ${question.minimum}`);
+  if (question?.maximum !== undefined) parts.push(`не больше ${question.maximum}`);
+  if (question?.minItems !== undefined) parts.push(`выбрать минимум ${question.minItems}`);
+  if (question?.maxItems !== undefined) parts.push(`выбрать максимум ${question.maxItems}`);
+  return parts.join(' · ');
+}
+
+function hasAction(action) {
+  return actions.value.some((entry) => entry.action === action);
+}
+
+function actionLabel(action) {
+  if (action === 'accept' && !questions.value.length) return 'Разрешить';
+  return actions.value.find((entry) => entry.action === action)?.label || ACTION_LABELS[action];
 }
 
 function pickedValue(questionIndex) {
@@ -157,6 +402,23 @@ function submit() {
     })),
   );
 }
+
+/** Structured-форма сохраняет raw primitive values и явный исход MCP отдельно. */
+function submitStructured(action) {
+  const accepts = action.startsWith('accept');
+  if (accepts && !ready.value) return;
+  const answers = accepts
+    ? questions.value.flatMap((question, index) => {
+      const value = state.value[index]?.value;
+      const emptyOptional = !question.required
+        && (value === '' || (Array.isArray(value) && !value.length));
+      return hasStructuredValue(question, value) && !emptyOptional
+        ? [{ key: question.key, value: answerValue(question, value) }]
+        : [];
+    })
+    : [];
+  emit('answer', { action, answers });
+}
 </script>
 
 <style scoped>
@@ -167,9 +429,15 @@ function submit() {
 .q-item + .q-item { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
 .q-text { display: flex; align-items: baseline; gap: 6px; margin-bottom: 7px; font-size: 13px; }
 .q-ico { flex: none; color: var(--accent); font-weight: 700; }
+.q-intro { margin-bottom: 10px; }
+.q-source { color: var(--accent); font-size: 11px; font-weight: 650; }
+.q-prompt { margin-top: 3px; color: var(--ink); font-size: 13px; line-height: 1.45;
+  overflow-wrap: anywhere; }
+.q-required { color: var(--bad); font-size: 10.5px; }
 .q-multi { padding: 0 5px; border: 1px solid var(--line); border-radius: 5px;
   color: var(--ink-mid); font-size: 10.5px; }
 .q-hint { margin: -3px 0 7px 18px; color: var(--ink-mid); font-size: 11px; line-height: 1.45; }
+.q-rule { margin: 5px 0 0 18px; color: var(--ink-mid); font-size: 10.5px; }
 .q-own-toggle { margin-top: 3px; }
 .q-own { margin-top: 5px; }
 .q-act { margin-top: 9px; }

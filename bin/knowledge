@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Офлайн-поиск по локальной базе знаний: без сети и без запущенного Cockpit.
+set -uo pipefail
+
+_self="$(readlink -f "$0")"
+_root="$(cd "$(dirname "$_self")/.." && pwd)"
+source "$_root/bin/lib/runtime-env.sh"
+cockpit_load_runtime_env "$_root" || exit 2
+exec node "${COCKPIT_NODE_ENV_ARGS[@]}" --disable-warning=ExperimentalWarning \
+  "$_root/server/src/lib/search/cli.js" "$@"

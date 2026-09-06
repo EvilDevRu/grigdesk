@@ -1,0 +1,28 @@
+// Продуктовый канон — то, что реально уезжает в поставку: документы docs/cockpit/guide/
+// и дополнительные runtime-контракты. Карты базы знаний сюда НЕ входят: они локальны для
+// машины и закрыты .gitignore, поэтому сторож, читающий карту, зеленел бы у владельца базы
+// и падал в свежем клоне — то есть проверял бы не поставку, а рабочую копию автора.
+import { readFile, readdir } from 'node:fs/promises';
+
+const ROOT = new URL('../../../', import.meta.url);
+
+const CANON_DIRS = ['docs/cockpit/reference/', 'docs/cockpit/guide/'];
+
+async function readMarkdown(relativeDir) {
+  const dir = new URL(relativeDir, ROOT);
+  const names = (await readdir(dir)).filter((name) => name.endsWith('.md')).sort();
+
+  return Promise.all(names.map((name) => readFile(new URL(name, dir), 'utf8')));
+}
+
+/** Весь продуктовый канон одним текстом — им проверяются сквозные контракты. */
+export async function canonDocs() {
+  const parts = await Promise.all(CANON_DIRS.map((dir) => readMarkdown(dir)));
+
+  return parts.flat().join('\n');
+}
+
+/** Корневые инструкции проекта, которые тоже входят в поставку. */
+export async function rootDoc(name) {
+  return readFile(new URL(name, ROOT), 'utf8');
+}

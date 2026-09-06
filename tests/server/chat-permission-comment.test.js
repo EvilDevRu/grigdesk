@@ -231,6 +231,170 @@ test('вопрос по прямому каналу с текстовым ход
   assert.deepEqual(ack, { ok: true });
 });
 
+test('структурированный прямой вопрос сохраняет typed value и явное действие', async (t) => {
+  const questions = [
+    {
+      key: 'count', question: 'Сколько блоков?', header: 'Блоки', inputType: 'integer',
+      required: true, minimum: 1, maximum: 12,
+    },
+    {
+      key: 'theme', question: 'Какая тема?', header: 'Тема', inputType: 'choice',
+      required: true, options: [{ value: 'dark', label: 'Тёмная' }],
+    },
+  ];
+  const { outcome, event } = await askDirectly(t, {
+    presentation: {
+      isQuestion: true,
+      structured: true,
+      structuredAnswers: true,
+      prompt: 'Параметры лендинга',
+      source: 'MCP · Figma',
+      actions: ['accept', 'cancel'],
+      questions,
+    },
+    answer: {
+      action: 'accept',
+      answers: [{ key: 'count', value: 4 }, { key: 'theme', value: 'dark' }],
+    },
+  });
+  assert.equal(event.structured, true);
+  assert.equal(event.prompt, 'Параметры лендинга');
+  assert.equal(event.source, 'MCP · Figma');
+  assert.deepEqual(event.actions, ['accept', 'cancel']);
+  assert.deepEqual(outcome, {
+    action: 'accept',
+    answers: [{ key: 'count', value: 4 }, { key: 'theme', value: 'dark' }],
+  });
+});
+
+test('невалидный typed-ответ не снимает pending, после него можно ответить правильно', async (t) => {
+  let deliver = null;
+  const asked = new Promise((resolve) => { deliver = resolve; });
+  const executor = {
+    id: 'fake',
+    async run(args) {
+      deliver(await args.onPermission({
+        isQuestion: true,
+        structured: true,
+        structuredAnswers: true,
+        actions: ['accept', 'cancel'],
+        questions: [{
+          key: 'approved', question: 'Подтвердить?', header: 'Подтверждение',
+          inputType: 'boolean', required: true,
+        }],
+      }));
+      return { reply: 'готово', sessionId: 'sess-typed' };
+    },
+  };
+  const { app, events } = await apiFixture(t, executor);
+  const turn = app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: { message: 'спроси', modelRef: { provider: 'fake', model: 'fake-1' } },
+  });
+  let event;
+  for (let i = 0; i < 50 && !event; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    event = events.find((entry) => entry.name === 'chat-question');
+  }
+  assert.ok(event);
+
+  const invalid = await app.inject({
+    method: 'POST',
+    url: `/api/chat/permission/${event.payload.pid}`,
+    payload: { action: 'accept', answers: [{ key: 'approved', value: 'да' }] },
+  });
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().error, 'invalid_answer_value');
+  const waiting = (await app.inject({ method: 'GET', url: '/api/chat/waiting' })).json().waiting;
+  assert.ok(waiting.some((entry) => entry.pid === event.payload.pid));
+
+  const valid = await app.inject({
+    method: 'POST',
+    url: `/api/chat/permission/${event.payload.pid}`,
+    payload: { action: 'accept', answers: [{ key: 'approved', value: true }] },
+  });
+  assert.equal(valid.statusCode, 200);
+  assert.deepEqual(await asked, {
+    action: 'accept',
+    answers: [{ key: 'approved', value: true }],
+  });
+  assert.equal((await turn).statusCode, 200);
+});
+
+test('внешнее MCP-действие нельзя запомнить, ссылка остаётся отдельной от ответа', async (t) => {
+  const { outcome, event } = await askDirectly(t, {
+    presentation: {
+      tool: 'Figma',
+      canRemember: false,
+      input: {
+        kind: 'external_url',
+        description: 'Установи приложение и вернись.',
+        url: 'https://chatgpt.com/apps/figma',
+        link_label: 'Открыть установку',
+        approve_label: 'Готово',
+        reject_label: 'Отклонить',
+      },
+    },
+    answer: { allow: true, remember: true },
+  });
+  assert.equal(event.input.kind, 'external_url');
+  assert.equal(event.canRemember, false);
+  assert.deepEqual(outcome, { allow: true, comment: '', remember: false, choice: '' });
+});
+
+test('serverRequest/resolved снимает прямой MCP-спрос и запрещает поздний ответ', async (t) => {
+  const controller = new AbortController();
+  let deliver = null;
+  const asked = new Promise((resolve) => { deliver = resolve; });
+  const executor = {
+    id: 'fake',
+    async run(args) {
+      deliver(await args.onPermission({
+        signal: controller.signal,
+        isQuestion: true,
+        structured: true,
+        structuredAnswers: true,
+        actions: ['accept', 'cancel'],
+        questions: [{
+          key: 'node_id', question: 'Какой узел?', inputType: 'text', required: true,
+        }],
+      }));
+      return { reply: 'запрос уже снят', sessionId: 'sess-resolved' };
+    },
+  };
+  const { app, events } = await apiFixture(t, executor);
+  const turn = app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: { message: 'открой макет', modelRef: { provider: 'fake', model: 'fake-1' } },
+  });
+  let event;
+  for (let i = 0; i < 50 && !event; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    event = events.find((entry) => entry.name === 'chat-question');
+  }
+  assert.ok(event);
+
+  controller.abort();
+  assert.deepEqual(await asked, {
+    action: 'cancel', outcome: { outcome: 'cancelled' }, allow: false,
+  });
+  assert.equal((await turn).statusCode, 200);
+  const waiting = (await app.inject({ method: 'GET', url: '/api/chat/waiting' })).json().waiting;
+  assert.equal(waiting.some((entry) => entry.pid === event.payload.pid), false);
+  assert.ok(events.some((entry) => (
+    entry.name === 'chat-permission-done' && entry.payload.pid === event.payload.pid
+  )));
+
+  const late = await app.inject({
+    method: 'POST',
+    url: `/api/chat/permission/${event.payload.pid}`,
+    payload: { action: 'accept', answers: [{ key: 'node_id', value: '1:2' }] },
+  });
+  assert.equal(late.statusCode, 404);
+});
+
 test('висящий спрос называет чат: waiting отдаёт название и задачу из истории', async (t) => {
   const { app, events } = await apiFixture(t);
   // Клиент сохраняет чат до model POST, поэтому к моменту спроса шапка уже на диске.

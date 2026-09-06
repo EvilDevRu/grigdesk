@@ -53,7 +53,7 @@ class FakeTransport extends EventEmitter {
   destroy() { this.close(); }
 }
 
-async function manager(t) {
+async function manager(t, extra = {}) {
   let module;
   try {
     module = await import('../../server/src/lib/ssh/session-manager.js');
@@ -70,13 +70,14 @@ async function manager(t) {
       return transport;
     },
     replayBytes: 4096,
+    ...extra,
   });
   t.after(() => value.closeAll?.());
   return { value, transports };
 }
 
-async function openSession(t) {
-  const { value, transports } = await manager(t);
+async function openSession(t, extra = {}) {
+  const { value, transports } = await manager(t, extra);
   const session = await value.open({
     connection: {
       id: 'connection-a', projectId: 'project-a', label: 'Боевой код', role: 'code',
@@ -192,5 +193,68 @@ test('явное закрытие сессии глобально закрыва
   assert.deepEqual({ sessions: value.list(), transportClosed: transport.closed }, {
     sessions: [],
     transportClosed: true,
+  });
+});
+
+test('эхо агентской команды приходит в окно терминала, но не в shell-канал', async (t) => {
+  const { manager: value, session, transport } = await openSession(t);
+  await value.setAgentAccess(session.id, true);
+  const received = [];
+  value.attach(session.id, { send: (data) => received.push(String(data)) });
+  const command = value.exec(session.id, 'whoami');
+  await new Promise((resolve) => setImmediate(resolve));
+  transport.execChannels[0].emit('data', Buffer.from('root\n'));
+  transport.execChannels[0].emit('close', 0);
+  await command;
+  const shown = received.join('');
+
+  assert.deepEqual({
+    command: shown.includes('агент ▸ whoami'),
+    output: shown.includes('root\r\n'),
+    outcome: shown.includes('код 0'),
+    shellWrites: transport.shellChannel.writes,
+  }, {
+    command: true,
+    output: true,
+    outcome: true,
+    shellWrites: [],
+  });
+});
+
+test('эхо в терминал выключается настройкой плагина', async (t) => {
+  const { manager: value, session, transport } = await openSession(t, { echoEnabled: () => false });
+  await value.setAgentAccess(session.id, true);
+  const received = [];
+  value.attach(session.id, { send: (data) => received.push(String(data)) });
+  const command = value.exec(session.id, 'whoami');
+  await new Promise((resolve) => setImmediate(resolve));
+  transport.execChannels[0].emit('data', Buffer.from('root\n'));
+  transport.execChannels[0].emit('close', 0);
+
+  assert.deepEqual({
+    received: received.join(''),
+    output: (await command).output,
+  }, {
+    received: '',
+    output: 'root\n',
+  });
+});
+
+test('снятие доступа во время команды пишет причину обрыва в терминал', async (t) => {
+  const { manager: value, session, transport } = await openSession(t);
+  await value.setAgentAccess(session.id, true);
+  const received = [];
+  value.attach(session.id, { send: (data) => received.push(String(data)) });
+  const command = value.exec(session.id, 'tail -f app.log');
+  await new Promise((resolve) => setImmediate(resolve));
+  transport.execChannels[0].emit('data', Buffer.from('строка\n'));
+  await value.setAgentAccess(session.id, false);
+
+  assert.deepEqual({
+    result: (await command).error,
+    terminal: received.join('').includes('прервано: access_revoked'),
+  }, {
+    result: 'access_revoked',
+    terminal: true,
   });
 });

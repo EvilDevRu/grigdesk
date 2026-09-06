@@ -2,7 +2,7 @@
 
 // Версионированный fake app-server по TypeScript-схеме `codex-cli 0.149.0`.
 // Он закрепляет wire-форму JSON-RPC v2 без настоящего model call и аккаунта OpenAI.
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, createReadStream, writeSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
@@ -16,12 +16,18 @@ export const CODEX_APP_SERVER_COMPATIBILITY = Object.freeze({
 
 const THREAD_ID = '00000000-0000-7000-8000-000000000049';
 const TURN_ID = '00000000-0000-7000-8000-00000000004a';
+const FOREIGN_THREAD_ID = '00000000-0000-7000-8000-00000000004b';
+const FOREIGN_TURN_ID = '00000000-0000-7000-8000-00000000004c';
+const STALE_TURN_ID = '00000000-0000-7000-8000-00000000004d';
 const UPDATE_DIFF = '@@ -1 +1 @@\n-export const answer = 41;\n+export const answer = 42;\n';
 const ADD_DIFF = '@@ -0,0 +1,2 @@\n+export function ready() {\n+  return true;\n+}\n';
 
 function runFixture() {
   const traceFile = process.env.COCKPIT_CODEX_FIXTURE_TRACE || '';
   const scenario = process.env.COCKPIT_CODEX_FIXTURE_SCENARIO || 'rich';
+  // Базовая fixture остаётся снимком 0.149, а dynamic tool сценарии могут
+  // проверить актуальный wire-контракт без дублирования всего app-server.
+  const cliVersion = process.env.COCKPIT_CODEX_FIXTURE_CLI_VERSION || '0.149.0';
   const expectHook = process.env.COCKPIT_CODEX_FIXTURE_EXPECT_HOOK !== '0';
   const hookState = process.env.COCKPIT_CODEX_FIXTURE_HOOK_STATE || 'enabled';
   const argv = process.argv.slice(2);
@@ -33,6 +39,7 @@ function runFixture() {
   const hookMatcher = hookConfig.match(/matcher\s*=\s*"([^"]+)"/)?.[1] || '';
   let phase = 'initialize';
   let resumed = false;
+  let fixtureInput = null;
 
   function trace(entry) {
     if (!traceFile) return;
@@ -41,13 +48,19 @@ function runFixture() {
 
   function send(message) {
     trace({ direction: 'server', message });
-    process.stdout.write(`${JSON.stringify(message)}\n`);
+    writeSync(1, `${JSON.stringify(message)}\n`);
+  }
+
+  function sendBatch(messages) {
+    for (const message of messages) trace({ direction: 'server', message });
+    writeSync(1, messages.map((message) => `${JSON.stringify(message)}\n`).join(''));
   }
 
   function fail(message) {
     trace({ direction: 'fixture-error', message });
-    process.stderr.write(`${message}\n`);
+    writeSync(2, `${message}\n`);
     process.exitCode = 64;
+    fixtureInput?.destroy();
     process.stdin.destroy();
   }
 
@@ -89,7 +102,7 @@ function runFixture() {
     status: { type: 'idle' },
     path: null,
     cwd: process.cwd(),
-    cliVersion: '0.149.0',
+    cliVersion,
     source: 'appServer',
     canAcceptDirectInput: true,
     threadSource: null,
@@ -265,7 +278,137 @@ function runFixture() {
     } });
   }
 
-  const lines = createInterface({ input: process.stdin });
+  /**
+   * app-server публикует события субагентов в том же JSONL-потоке. Они обязаны
+   * остаться видимыми самому Codex, но не могут завершить или загрязнить ход Cockpit.
+   */
+  function emitForeignTurn(status) {
+    const text = `Чужой субагент: ${status}.`;
+    const foreignThread = {
+      ...thread,
+      id: FOREIGN_THREAD_ID,
+      sessionId: FOREIGN_THREAD_ID,
+      parentThreadId: THREAD_ID,
+    };
+    const foreignTurn = {
+      ...runningTurn,
+      id: FOREIGN_TURN_ID,
+    };
+
+    send({ method: 'thread/started', params: { thread: foreignThread } });
+    send({
+      method: 'turn/started',
+      params: { threadId: FOREIGN_THREAD_ID, turn: foreignTurn },
+    });
+    send({ method: 'item/agentMessage/delta', params: {
+      threadId: FOREIGN_THREAD_ID,
+      turnId: FOREIGN_TURN_ID,
+      itemId: 'foreign-answer-1',
+      delta: text,
+    } });
+    send({ method: 'item/completed', params: {
+      threadId: FOREIGN_THREAD_ID,
+      turnId: FOREIGN_TURN_ID,
+      completedAtMs: 1_700_000_001_900,
+      item: {
+        type: 'agentMessage', id: 'foreign-answer-1', text, phase: 'final_answer',
+        memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'thread/tokenUsage/updated', params: {
+      threadId: FOREIGN_THREAD_ID,
+      tokenUsage: {
+        total: {
+          inputTokens: 900_000,
+          cachedInputTokens: 800_000,
+          outputTokens: 2_000,
+          reasoningOutputTokens: 1_000,
+        },
+        last: {
+          inputTokens: 900_000,
+          cachedInputTokens: 800_000,
+          outputTokens: 2_000,
+          reasoningOutputTokens: 1_000,
+        },
+        modelContextWindow: 1_000_000,
+      },
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId: FOREIGN_THREAD_ID,
+      turn: {
+        ...foreignTurn,
+        status,
+        completedAt: 1_700_000_002,
+        durationMs: 1_000,
+      },
+    } });
+
+    // Позднее событие прежнего хода может назвать правильный thread, поэтому
+    // одного threadId для маршрутизации недостаточно: обязан совпасть и turnId.
+    const staleText = `Чужой субагент в текущем thread: ${status}.`;
+    const staleTurn = { ...runningTurn, id: STALE_TURN_ID };
+    send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: staleTurn } });
+    send({ method: 'item/agentMessage/delta', params: {
+      threadId: THREAD_ID,
+      turnId: STALE_TURN_ID,
+      itemId: 'stale-answer-1',
+      delta: staleText,
+    } });
+    send({ method: 'item/completed', params: {
+      threadId: THREAD_ID,
+      turnId: STALE_TURN_ID,
+      completedAtMs: 1_700_000_001_950,
+      item: {
+        type: 'agentMessage', id: 'stale-answer-1', text: staleText, phase: 'final_answer',
+        memoryCitation: null, delivery: null,
+      },
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId: THREAD_ID,
+      turn: {
+        ...staleTurn,
+        status,
+        completedAt: 1_700_000_002,
+        durationMs: 1_000,
+      },
+    } });
+    emitRichTurn();
+  }
+
+  function dynamicToolPayload(message, expectedSuccess) {
+    const result = message?.result;
+    const contentItems = result?.contentItems;
+    if (message?.error || result?.success !== expectedSuccess
+      || !Array.isArray(contentItems) || contentItems.length !== 1
+      || contentItems[0]?.type !== 'inputText'
+      || typeof contentItems[0]?.text !== 'string') {
+      fail('item/tool/call получил невалидный DynamicToolCallResponse');
+      return null;
+    }
+    try {
+      return JSON.parse(contentItems[0].text);
+    } catch {
+      fail('DynamicToolCallResponse обязан содержать JSON broker-result');
+      return null;
+    }
+  }
+
+  function validElicitationResponse(message) {
+    const result = message?.result;
+    const content = result?.content;
+    if (message?.id !== 91009 || message?.method || result?.action !== 'accept'
+      || result?._meta !== null || content?.file_key !== 'file-42'
+      || content?.include_hidden !== false || Object.keys(content || {}).length !== 2) {
+      fail('MCP elicitation получил неточный JSON-RPC ответ');
+      return false;
+    }
+    return true;
+  }
+
+  // В Node 22 fd 0 дочернего процесса с socketpair превращается в уже завершённый
+  // `process.stdin`. Отдельный fs-stream сохраняет настоящий pipe до первой записи.
+  fixtureInput = createReadStream(null, { fd: 0, autoClose: false });
+  const lines = createInterface({ input: fixtureInput });
   lines.on('line', (line) => {
     let message;
     try {
@@ -282,7 +425,7 @@ function runFixture() {
         return;
       }
       send({ id: message.id, result: {
-        userAgent: 'codex-cli/0.149.0', codexHome: '/tmp/codex-home',
+        userAgent: `codex-cli/${cliVersion}`, codexHome: '/tmp/codex-home',
         platformFamily: 'unix', platformOs: 'linux',
       } });
       phase = 'initialized';
@@ -377,12 +520,45 @@ function runFixture() {
         fail('turn/start получил неверный threadId');
         return;
       }
+      if (scenario === 'work-routing') {
+        sendBatch([
+          { id: message.id, result: { turn: runningTurn } },
+          {
+            id: 91010,
+            method: 'item/tool/call',
+            params: {
+              threadId: THREAD_ID,
+              turnId: TURN_ID,
+              callId: 'reused-work-call',
+              tool: 'knowledge_search',
+              arguments: { action: 'search', query: 'figma', limit: 3 },
+            },
+          },
+        ]);
+        phase = 'work-routing';
+        return;
+      }
       send({ id: message.id, result: { turn: runningTurn } });
       send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
-      phase = scenario === 'interrupt' ? 'interrupt' : scenario === 'ssh-tool' ? 'ssh-tool' : 'complete';
+      phase = scenario === 'interrupt'
+        ? 'interrupt'
+        : ['ssh-tool', 'knowledge-tool', 'mcp-elicitation', 'mcp-resolved'].includes(scenario)
+          ? scenario
+          : 'complete';
       if (scenario === 'interrupt') emitInterruptibleTurn();
       else if (scenario === 'commentary-only') emitCommentaryOnlyTurn();
+      else if (scenario === 'foreign-completed') emitForeignTurn('completed');
+      else if (scenario === 'foreign-interrupted') emitForeignTurn('interrupted');
       else if (scenario === 'ssh-tool') {
+        send({ method: 'item/started', params: {
+          threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_050,
+          item: {
+            type: 'dynamicToolCall', id: 'ssh-call-1', namespace: null,
+            tool: 'supervised_ssh',
+            arguments: { action: 'exec', label: 'Боевой код', role: 'code', command: 'id' },
+            status: 'inProgress', contentItems: null, success: null, durationMs: null,
+          },
+        } });
         send({
           id: 91006,
           method: 'item/tool/call',
@@ -397,7 +573,135 @@ function runFixture() {
           },
         });
       }
+      else if (scenario === 'knowledge-tool') {
+        send({ method: 'item/started', params: {
+          threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_050,
+          item: {
+            type: 'dynamicToolCall', id: 'knowledge-call-1', namespace: null,
+            tool: 'knowledge_search',
+            arguments: { action: 'search', query: 'деплой', limit: 3 },
+            status: 'inProgress', contentItems: null, success: null, durationMs: null,
+          },
+        } });
+        send({
+          id: 91008,
+          method: 'item/tool/call',
+          params: {
+            threadId: THREAD_ID,
+            turnId: TURN_ID,
+            callId: 'knowledge-call-1',
+            tool: 'knowledge_search',
+            arguments: { action: 'search', query: 'деплой', limit: 3 },
+          },
+        });
+      }
+      else if (scenario === 'mcp-elicitation') {
+        send({
+          id: 91009,
+          method: 'mcpServer/elicitation/request',
+          params: {
+            threadId: THREAD_ID,
+            turnId: TURN_ID,
+            serverName: 'figma',
+            mode: 'form',
+            _meta: null,
+            message: 'Какие данные макета использовать?',
+            requestedSchema: {
+              type: 'object',
+              required: ['file_key', 'include_hidden'],
+              properties: {
+                file_key: {
+                  type: 'string',
+                  title: 'Ключ файла Figma',
+                  minLength: 2,
+                },
+                include_hidden: {
+                  type: 'boolean',
+                  title: 'Включить скрытые слои',
+                  default: false,
+                },
+              },
+            },
+          },
+        });
+      }
+      else if (scenario === 'mcp-resolved') {
+        send({
+          id: 91013,
+          method: 'mcpServer/elicitation/request',
+          params: {
+            threadId: THREAD_ID,
+            turnId: TURN_ID,
+            serverName: 'figma',
+            mode: 'url',
+            _meta: null,
+            message: 'Подключи Figma в браузере.',
+            url: 'https://www.figma.com/oauth?state=opaque',
+            elicitationId: 'figma-connect',
+          },
+        });
+        send({
+          method: 'serverRequest/resolved',
+          params: { threadId: THREAD_ID, requestId: 91013 },
+        });
+        phase = 'complete';
+        setTimeout(() => emitRichTurn(), 10);
+      }
       else emitRichTurn();
+      return;
+    }
+
+    if (phase === 'mcp-elicitation') {
+      if (!validElicitationResponse(message)) return;
+      phase = 'complete';
+      emitRichTurn();
+      return;
+    }
+
+    if (phase === 'work-routing') {
+      const payload = dynamicToolPayload(message, true);
+      if (!payload || payload.items?.[0]?.title !== 'Figma MCP') return;
+      send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: runningTurn } });
+      send({
+        id: 91011,
+        method: 'item/tool/call',
+        params: {
+          threadId: THREAD_ID,
+          turnId: TURN_ID,
+          callId: 'reused-work-call',
+          tool: 'knowledge_search',
+          arguments: { action: 'search', query: 'figma', limit: 3 },
+        },
+      });
+      phase = 'work-duplicate';
+      return;
+    }
+
+    if (phase === 'work-duplicate') {
+      const payload = dynamicToolPayload(message, true);
+      if (!payload || payload.items?.[0]?.title !== 'Figma MCP') return;
+      send({
+        id: 91012,
+        method: 'item/tool/call',
+        params: {
+          threadId: FOREIGN_THREAD_ID,
+          turnId: FOREIGN_TURN_ID,
+          callId: 'foreign-work-call',
+          tool: 'knowledge_search',
+          arguments: { action: 'search', query: 'чужой ход', limit: 3 },
+        },
+      });
+      phase = 'work-foreign';
+      return;
+    }
+
+    if (phase === 'work-foreign') {
+      if (message.id !== 91012 || message.error?.code !== -32602) {
+        fail('чужой item/tool/call обязан получить -32602 без падения родительского хода');
+        return;
+      }
+      phase = 'complete';
+      emitRichTurn();
       return;
     }
 
@@ -406,10 +710,48 @@ function runFixture() {
         fail('item/tool/call ожидает ровно один JSON-RPC ответ');
         return;
       }
-      if (message.error || message.result?.error !== 'denied') {
+      const payload = dynamicToolPayload(message, false);
+      if (!payload) return;
+      if (payload.error !== 'denied') {
         fail('supervised_ssh обязан вернуть типизированный broker-result');
         return;
       }
+      send({ method: 'item/completed', params: {
+        threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_075,
+        item: {
+          type: 'dynamicToolCall', id: 'ssh-call-1', namespace: null,
+          tool: 'supervised_ssh',
+          arguments: { action: 'exec', label: 'Боевой код', role: 'code', command: 'id' },
+          status: 'failed', contentItems: message.result.contentItems,
+          success: false, durationMs: 25,
+        },
+      } });
+      phase = 'complete';
+      emitRichTurn();
+      return;
+    }
+
+    if (phase === 'knowledge-tool') {
+      if (message.id !== 91008 || message.method) {
+        fail('item/tool/call знаний ожидает ровно один JSON-RPC ответ');
+        return;
+      }
+      const payload = dynamicToolPayload(message, true);
+      if (!payload) return;
+      if (payload.items?.[0]?.title !== 'Очередь деплоя') {
+        fail('knowledge_search обязан вернуть очищенный ранжированный результат');
+        return;
+      }
+      send({ method: 'item/completed', params: {
+        threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_075,
+        item: {
+          type: 'dynamicToolCall', id: 'knowledge-call-1', namespace: null,
+          tool: 'knowledge_search',
+          arguments: { action: 'search', query: 'деплой', limit: 3 },
+          status: 'completed', contentItems: message.result.contentItems,
+          success: true, durationMs: 25,
+        },
+      } });
       phase = 'complete';
       emitRichTurn();
       return;

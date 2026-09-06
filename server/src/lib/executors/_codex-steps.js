@@ -44,7 +44,7 @@ function itemOk(item) {
 
 function resultOf(item) {
   return textOf(item?.aggregatedOutput ?? item?.aggregated_output
-    ?? item?.output ?? item?.result ?? item?.error ?? '');
+    ?? item?.output ?? item?.result ?? item?.error ?? item?.contentItems ?? '');
 }
 
 function toolCallInputOf(item) {

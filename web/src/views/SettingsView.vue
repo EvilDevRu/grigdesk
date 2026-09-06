@@ -129,6 +129,12 @@
 
       </div>
 
+      <!-- Горячие клавиши инструментов — тоже настройка устройства: клавиатуры планшета
+           и рабочего компьютера разные, а состав панелей берётся из общего реестра. -->
+      <div class="card">
+        <ToolHotkeys />
+      </div>
+
       <!-- Компаньон — своя карточка, а не строка в «Экране устройства»: у него три разных
            решения (показывать ли, чем отвечает, озвучивать ли), и два из них device-local,
            а одно общее для всех окон. Область каждого блока названа пилюлей: без этого
@@ -956,10 +962,14 @@
             </template>
             <p v-else class="muted small">Своих настроек у этого исполнителя пока нет.</p>
           </div>
-          <!-- MCP-серверы: чем агент этого CLI дополнен сверх своих инструментов.
-               Список и живость знает только сам CLI, поэтому блок грузится отдельным
-               запросом (см. loadMcpFor) и есть лишь у тех, кто объявил mcpStatus. -->
-          <div v-if="p.mcp && p.available" class="pvset">
+          <!-- Блок есть только у того, кто о MCP вообще сообщает: пустая рамка на
+               карточке без этого понятия — не «стабильная сетка», а мусор. Высота
+               ограничена сверху, поэтому поздний ответ CLI не растягивает карточку. -->
+          <div
+            v-if="p.mcp && p.installed"
+            class="pvset pvmcp provider-mcp-slot"
+            :data-provider-id="p.id"
+          >
             <div class="pvsetttl">
               MCP-серверы
               <UiButton
@@ -968,39 +978,48 @@
                 :disabled="mcpOf(p)?.loading"
                 @click="loadMcpFor(p, true)"
               >
-                {{ mcpOf(p)?.loading ? 'Проверка…' : 'Перепроверить' }}
+                {{ mcpOf(p)?.loading ? 'Обновляем…' : 'Обновить' }}
               </UiButton>
             </div>
-            <p v-if="!mcpOf(p) || (mcpOf(p).loading && !mcpOf(p).servers)" class="muted small">
-              Опрашиваем CLI — это несколько секунд…
-            </p>
-            <p v-else-if="mcpOf(p).state === 'error'" class="msg err">
-              Не удалось опросить: {{ mcpOf(p).error }}
-            </p>
-            <template v-else>
-              <div v-for="g in mcpGroups(p)" :key="g.id" class="mcpgrp">
-                <div class="mcpgrpttl muted">{{ g.label }} ({{ g.servers.length }})</div>
-                <div v-if="g.hint" class="mcpgrphint muted">{{ g.hint }}</div>
-                <div v-for="s in g.servers" :key="s.name" class="mcprow">
-                  <div class="mcpline">
-                    <span class="mcpdot" :class="mcpState(s).cls"></span>
-                    <span class="mcpname" :title="s.target || undefined">{{ s.name }}</span>
-                    <span class="mcpst" :class="mcpState(s).cls">{{ mcpState(s).label }}</span>
-                  </div>
-                  <!-- Причина отказа — то единственное, по чему сервер чинят -->
-                  <div v-if="s.state !== 'ok' && s.detail" class="mcpdetail muted">{{ s.detail }}</div>
-                  <div v-if="s.state === 'needs-auth'" class="mcpdetail muted">
-                    {{ s.scope === 'account'
-                      ? 'Авторизуется в настройках коннекторов на claude.ai — из кокпита ход этого не умеет.'
-                      : 'Нужен вход: `claude mcp login ' + s.name + '` в терминале.' }}
+            <div
+              class="mcpbody"
+              tabindex="0"
+              :aria-label="`MCP-серверы ${p.name}`"
+              aria-live="polite"
+            >
+              <p
+                v-if="!mcpOf(p) || (mcpOf(p).loading && !mcpOf(p).servers)"
+                class="muted small"
+              >
+                Получаем список от исполнителя…
+              </p>
+              <p v-else-if="mcpOf(p).state === 'error'" class="msg err">
+                Не удалось получить список: {{ mcpOf(p).error }}
+              </p>
+              <template v-else>
+                <p v-if="mcpOf(p).note" class="mcpnote muted small">{{ mcpOf(p).note }}</p>
+                <div v-for="g in mcpGroups(p)" :key="g.id" class="mcpgrp">
+                  <div class="mcpgrpttl muted">{{ g.label }} ({{ g.servers.length }})</div>
+                  <div v-if="g.hint" class="mcpgrphint muted">{{ g.hint }}</div>
+                  <div v-for="s in g.servers" :key="s.name" class="mcprow">
+                    <div class="mcpline">
+                      <span class="mcpdot" :class="mcpState(s).cls"></span>
+                      <span class="mcpname" :title="s.target || undefined">{{ s.name }}</span>
+                      <span class="mcpst" :class="mcpState(s).cls">{{ mcpState(s).label }}</span>
+                    </div>
+                    <!-- Причина/подсказка принадлежит адаптеру, поэтому Vue не знает CLI. -->
+                    <div v-if="s.state !== 'ok' && s.detail" class="mcpdetail muted">
+                      {{ s.detail }}
+                    </div>
+                    <div v-if="s.hint" class="mcpdetail muted">{{ s.hint }}</div>
                   </div>
                 </div>
-              </div>
-              <p v-if="!mcpGroups(p).length" class="muted small">Серверов не подключено.</p>
-              <p v-if="mcpOf(p).checkedAt" class="muted small">
-                проверено {{ new Date(mcpOf(p).checkedAt).toLocaleTimeString('ru') }}
-              </p>
-            </template>
+                <p v-if="!mcpGroups(p).length" class="muted small">Серверов не настроено.</p>
+                <p v-if="mcpOf(p).checkedAt" class="muted small">
+                  обновлено {{ new Date(mcpOf(p).checkedAt).toLocaleTimeString('ru') }}
+                </p>
+              </template>
+            </div>
           </div>
           <div class="pvfoot">
             <UiButton
@@ -1591,11 +1610,15 @@
                       @change="setPluginModel(p, s.key, $event.target.value)"
                     >
                       <option value="">— не выбрана —</option>
-                      <!-- Выбор мог пропасть из каталога (сменили CLI, демон молчит).
+                      <!-- Выбор мог пропасть из каталога или перестать подходить задаче.
                            Молча показать «не выбрана» нельзя: в настройках он остался,
-                           и сервер всё ещё ходит именно этой моделью. -->
-                      <option v-if="pluginModelLost(p, s.key)" :value="pluginModelValue(p, s.key)">
-                        {{ pluginModelLost(p, s.key) }} — нет в реестре
+                           и сервер всё ещё пытается ходить именно этой моделью. -->
+                      <option
+                        v-if="pluginModelUnavailable(p, s)"
+                        :value="pluginModelValue(p, s.key)"
+                        disabled
+                      >
+                        {{ pluginModelUnavailable(p, s) }}
                       </option>
                       <optgroup v-for="g in pluginModelGroups(s)" :key="g.id"
                                 :label="g.name + (g.available ? '' : ' — недоступен')">
@@ -2441,6 +2464,7 @@ import { useToolLauncher } from '../shared/tools/launcher.js';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import { NAV_ICONS } from '../shared/nav-icons.js';
 import AccessOverview from './settings/AccessOverview.vue';
+import ToolHotkeys from './settings/ToolHotkeys.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useChatStore } from '../stores/chat.js';
@@ -3380,35 +3404,45 @@ async function updateProvider(p) {
 }
 
 // ── MCP-серверы исполнителя ──
-// Что за серверы подключены и живы ли они, знает только сам CLI, и опрос его стоит
-// секунд — поэтому блок грузится лениво (открыли вкладку) и обновляется кнопкой.
-// Секции — как в расширении: свои (файлы конфигов) отдельно от аккаунтных коннекторов,
-// у них разные места починки: первые правятся локально, вторые — на claude.ai.
+// Адаптер сам решает, отдаёт он live health-check или безопасный inventory конфигов.
+// UI знает только нейтральные scope/state и опрашивает capability лениво.
 const MCP_SCOPES = [
-  { id: 'user', label: 'Свои' },
+  { id: 'user', label: 'Пользователь' },
   { id: 'project', label: 'Проект' },
-  {
-    id: 'account',
-    label: 'claude.ai',
-    hint: 'Коннекторы аккаунта: подключаются и авторизуются на claude.ai, локально их живость '
-      + 'не проверяется — CLI о них не отчитывается.',
-  },
+  { id: 'account', label: 'Аккаунт' },
 ];
-// `remote` — аккаунтный коннектор, который локально не проверить ничем: его состояние
-// знает claude.ai. Жёлтый «состояние неизвестно» тут был бы ложной тревогой над рабочим
-// коннектором, поэтому у него своя нейтральная подпись и серая точка.
 const MCP_STATES = {
   ok: { label: 'Подключён', cls: 'ok' },
   failed: { label: 'Не подключился', cls: 'err' },
   'needs-auth': { label: 'Нужна авторизация', cls: 'warn' },
+  configured: { label: 'Настроен', cls: 'idle' },
+  disabled: { label: 'Выключен', cls: 'idle' },
   remote: { label: 'Включён на claude.ai', cls: 'idle' },
   unknown: { label: 'Состояние неизвестно', cls: 'warn' },
 };
 function mcpOf(p) { return prov.mcp[p.id] || null; }
+
+/**
+ * Базовые scope общие, но адаптер может переименовать секцию и дать пояснение.
+ * Незнакомый будущий scope не теряем: он появится с собственным id как подписью.
+ */
 function mcpGroups(p) {
   const servers = mcpOf(p)?.servers || [];
-  return MCP_SCOPES
-    .map((s) => ({ ...s, servers: servers.filter((x) => (x.scope || 'user') === s.id) }))
+  const overrides = new Map((Array.isArray(mcpOf(p)?.groups) ? mcpOf(p).groups : [])
+    .filter((group) => typeof group?.id === 'string' && group.id)
+    .map((group) => [group.id, group]));
+  const scopes = MCP_SCOPES.map((scope) => ({ ...scope, ...(overrides.get(scope.id) || {}) }));
+  const known = new Set(scopes.map((scope) => scope.id));
+  for (const group of overrides.values()) if (!known.has(group.id)) scopes.push(group);
+  for (const server of servers) {
+    const id = server.scope || 'user';
+    if (!scopes.some((scope) => scope.id === id)) scopes.push({ id, label: id });
+  }
+  return scopes
+    .map((scope) => ({
+      ...scope,
+      servers: servers.filter((server) => (server.scope || 'user') === scope.id),
+    }))
     .filter((g) => g.servers.length);
 }
 function mcpState(server) { return MCP_STATES[server.state] || MCP_STATES.unknown; }
@@ -3416,9 +3450,10 @@ function loadMcpFor(p, refresh = false) {
   if (typeof p?.id !== 'string') return;
   prov.loadMcp(p.id, refresh);
 }
-// Опрашиваем только тех, кто про MCP вообще сообщает (`mcp: true` в реестре).
+// Слот есть у всех карточек, запрос — у установленной MCP-capability: модельный
+// login не нужен для чтения конфигурации и может как раз быть причиной MCP auth.
 function loadAllMcp(refresh = false) {
-  for (const p of prov.providers) if (p.mcp && p.available) loadMcpFor(p, refresh);
+  for (const p of prov.providers) if (p.mcp && p.installed) loadMcpFor(p, refresh);
 }
 
 // ── Запуски (правила перед стартом триажа/конвейера) ──
@@ -4243,12 +4278,22 @@ function pluginModelValue(p, key) {
   return provider && model ? `${provider}:${model}` : '';
 }
 
-/** Выбор есть, а такой модели в реестре нет — вернём его подписью, иначе `null`. */
-function pluginModelLost(p, key) {
-  const value = pluginModelValue(p, key);
+/**
+ * Сохранённый, но недоступный для настройки выбор остаётся видимым: иначе пустой
+ * select соврёт, будто сервер не продолжает запускать прежнюю модель.
+ */
+function pluginModelUnavailable(p, setting) {
+  const value = pluginModelValue(p, setting?.key);
   if (!value) return null;
-  const { provider, model } = prov.modelOf(p.values[key]);
-  return provider && model ? null : value;
+  const { provider, model } = prov.modelOf(p.values[setting.key]);
+  if (!provider || !model) return `${value} — нет в реестре`;
+
+  const capability = String(setting?.requiresCapability || '');
+  if (capability && provider.capabilities?.[capability] !== true) {
+    return `${provider.name}: ${model.name} — не подходит для этой настройки`;
+  }
+
+  return null;
 }
 
 function setPluginModel(p, key, value) {
@@ -4981,8 +5026,14 @@ label:not([class^='ui-']):not([class*=' ui-']) {
 /* Ручка объявлена исполнителем, но ещё не подключена к ходу */
 .pvsoon { font-size: 11px; border: 1px solid var(--line); border-radius: 999px;
   padding: 1px 8px; color: var(--mut, var(--ink-mid)); }
-/* MCP-серверы исполнителя: заголовок с кнопкой проверки, затем секции по scope */
+/* Потолок высоты, а не фиксация: короткий список не оставляет пустоты, длинный
+   прокручивается внутри и не растягивает карточку поздним ответом CLI. */
 .pvsetttl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pvmcp { flex: none; max-block-size: 220px; }
+.mcpbody { flex: 1; min-block-size: 0; overflow-y: auto; padding-right: 2px;
+  scrollbar-gutter: stable; overscroll-behavior: contain; }
+.mcpbody:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.mcpnote { margin-top: 0; }
 .mcpgrp { display: grid; gap: 4px; }
 .mcpgrpttl { font-size: 11.5px; }
 .mcpgrphint { font-size: 11px; line-height: 1.4; opacity: .8; }

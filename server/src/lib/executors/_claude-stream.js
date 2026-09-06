@@ -166,7 +166,7 @@ export function buildClaudeTurnResult(collector, { fallbackSessionId = null, std
  */
 export function claudeSessionArgs({
   model, effort, permissionMode, sessionId, extraDirs = [],
-  mcpConfig, permissionPromptTool, providerSettingsArgs = [],
+  mcpConfig, permissionPromptTool, providerSettingsArgs = [], workTools,
 }) {
   const args = [
     '-p',
@@ -178,7 +178,17 @@ export function claudeSessionArgs({
   args.push(...providerSettingsArgs);
   if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
   if (mcpConfig?.mcpServers?.['cockpit-work']) {
-    args.push('--allowedTools', 'mcp__cockpit-work__supervised_ssh');
+    const descriptors = Array.isArray(workTools?.descriptors)
+      ? workTools.descriptors
+      : [{ name: 'supervised_ssh' }];
+    const allowed = descriptors
+      .map((descriptor) => descriptor?.name || descriptor?.function?.name)
+      .filter(Boolean)
+      .map((name) => `mcp__cockpit-work__${name}`)
+      .join(',');
+    if (allowed) {
+      args.push('--allowedTools', allowed);
+    }
   }
   if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
   if (model) args.push('--model', model);

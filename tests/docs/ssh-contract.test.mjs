@@ -2,20 +2,29 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+const root = new URL('../../', import.meta.url);
+
+async function physicalDocs(...names) {
+  const values = await Promise.all(names.map((name) => (
+    readFile(new URL(`docs/cockpit/${name}`, root), 'utf8')
+  )));
+  values.push(await readFile(
+    new URL('docs/cockpit/reference/runtime-contracts.md', root),
+    'utf8',
+  ));
+  return values.join('\n');
+}
+
 async function sshDocs() {
-  try {
-    return await readFile(new URL('../../docs/cockpit/ssh.md', import.meta.url), 'utf8');
-  } catch (error) {
-    assert.fail(`контракт SSH-плагина ещё не документирован: ${error.message}`);
-  }
+  return physicalDocs('ssh.md');
 }
 
 async function projectMap() {
-  return readFile(new URL('../../CLAUDE.md', import.meta.url), 'utf8');
+  return physicalDocs('ssh.md');
 }
 
-async function gotchas() {
-  return readFile(new URL('../../docs/cockpit/gotchas.md', import.meta.url), 'utf8');
+async function sshGotchas() {
+  return physicalDocs('gotchas.md');
 }
 
 test('документация закрепляет пароль только в ручном raw connect', async () => {
@@ -93,8 +102,8 @@ test('карта проекта перечисляет раздел SSH и вс�
 });
 
 test('грабли SSH фиксируют все fail-closed границы безопасности', async () => {
-  const docs = await gotchas();
-  const section = docs.match(/^##[^\n]*SSH[^\n]*\n[\s\S]*?(?=^##\s|(?![\s\S]))/im)?.[0] || '';
+  const docs = await sshGotchas();
+  const section = docs;
   const boundaries = {
     password: /парол[ьяюе][\s\S]{0,240}(?:не хран|не попад|octet-stream)/i.test(section),
     tofu: /TOFU|host key|known-host/i.test(section),

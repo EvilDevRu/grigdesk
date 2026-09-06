@@ -24,6 +24,7 @@ import {
 import { ChatSessionBindingStore } from '../../lib/chat/session-binding-store.js';
 import { ChatTurnLocks } from '../../lib/chat/turn-locks.js';
 import { ChatLiveSessions } from '../../lib/chat/live-sessions.js';
+import { validateStructuredAnswers } from '../../lib/chat/structured-answers.js';
 import { createPermissionQueue } from '../../lib/chat/permission-queue.js';
 import { mayRetryEmptyRun } from '../../lib/chat/retry-contract.js';
 import { resolveChatAttachment } from '../../lib/chat/attachments.js';
@@ -161,6 +162,7 @@ async function chatModule(fastify, opts) {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
   } = opts;
   const sshBroker = opts.sshBroker || fastify.sshBroker || null;
+  const knowledgeBroker = opts.knowledgeBroker || fastify.knowledgeBroker || null;
   const permissionQueue = opts.permissionQueue || createPermissionQueue();
   const workIpcs = new Map();
   const speechStreamStartTimeoutMs = Number.isInteger(opts.speechStreamStartTimeoutMs)
@@ -697,6 +699,7 @@ async function chatModule(fastify, opts) {
         continue;
       }
       pendingPerms.delete(pid);
+      p.cleanup?.();
       p.resolve(p.direct
         ? { outcome: { outcome: 'cancelled' }, allow: false, message }
         : { behavior: 'deny', message });
@@ -711,12 +714,22 @@ async function chatModule(fastify, opts) {
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     const at = Date.now();
     const isQuestion = !!presentation?.isQuestion;
+    const presentationActions = Array.isArray(presentation?.actions)
+      && presentation.actions.length
+      ? presentation.actions
+      : (presentation?.structured === true ? ['accept', 'cancel'] : []);
     const input = isQuestion
-      ? { questions: presentation.questions || [] }
+      ? {
+        questions: presentation.questions || [],
+        prompt: String(presentation?.prompt || ''),
+        source: String(presentation?.source || ''),
+        structured: presentation?.structured === true,
+        actions: presentationActions,
+      }
       : (presentation?.input || {});
     const tool = presentation?.tool || 'Действие агента';
     return new Promise((resolve) => {
-      pendingPerms.set(pid, {
+      const entry = {
         resolve,
         direct: true,
         acceptsComment: !!presentation?.acceptsComment,
@@ -724,19 +737,46 @@ async function chatModule(fastify, opts) {
         // возвращает только выбранный optionId, поэтому текст туда не влезает.
         // Умолчание «влезает» оставляет прежнее поведение остальным исполнителям.
         acceptsText: presentation?.acceptsText !== false,
+        structuredAnswers: presentation?.structuredAnswers === true,
+        canRemember: presentation?.canRemember !== false,
         isQuestion,
         tool,
         input,
         chatKey: chatKey || '',
         at,
-      });
+        cleanup: null,
+      };
+      const signal = presentation?.signal;
+      if (signal?.aborted) {
+        resolve({ action: 'cancel', outcome: { outcome: 'cancelled' }, allow: false });
+        return;
+      }
+      if (signal?.addEventListener) {
+        const onAbort = () => {
+          if (pendingPerms.get(pid) !== entry) return;
+          pendingPerms.delete(pid);
+          entry.cleanup?.();
+          resolve({ action: 'cancel', outcome: { outcome: 'cancelled' }, allow: false });
+          fastify.sse.broadcast('chat-permission-done', { pid });
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        entry.cleanup = () => signal.removeEventListener('abort', onAbort);
+      }
+      pendingPerms.set(pid, entry);
       if (isQuestion) {
         fastify.sse.broadcast('chat-question', {
-          pid, chatKey: chatKey || '', questions: input.questions, at,
+          pid,
+          chatKey: chatKey || '',
+          questions: input.questions,
+          prompt: input.prompt,
+          source: input.source,
+          structured: input.structured,
+          actions: input.actions,
+          at,
         });
       } else {
         fastify.sse.broadcast('chat-permission', {
-          pid, tool, input, chatKey: chatKey || '', at,
+          pid, tool, input, canRemember: entry.canRemember, chatKey: chatKey || '', at,
         });
       }
     });
@@ -803,7 +843,17 @@ async function chatModule(fastify, opts) {
         pid, chatKey: p.chatKey, at: p.at,
         chatTitle: head.title,
         taskId: head.taskId,
-        ...(p.isQuestion ? { questions: p.input?.questions || [] } : { tool: p.tool, input: p.input }),
+        ...(p.isQuestion ? {
+          questions: p.input?.questions || [],
+          prompt: p.input?.prompt || '',
+          source: p.input?.source || '',
+          structured: p.input?.structured === true,
+          actions: p.input?.actions || [],
+        } : {
+          tool: p.tool,
+          input: p.input,
+          canRemember: p.canRemember !== false,
+        }),
       };
       })),
     };
@@ -885,14 +935,37 @@ async function chatModule(fastify, opts) {
     if (p.origin === 'ssh') {
       return reply.code(409).send({ error: 'origin_mismatch' });
     }
-    pendingPerms.delete(pid);
-    fastify.sse.broadcast('chat-permission-done', { pid });
     const body = request.body || {};
+    let structuredDecision = null;
+    if (p.direct && p.isQuestion && p.structuredAnswers) {
+      const action = typeof body.action === 'string' ? body.action : '';
+      const actions = Array.isArray(p.input?.actions) ? p.input.actions : [];
+      if (!actions.includes(action)) {
+        return reply.code(400).send({ error: 'invalid_action' });
+      }
+      if (action === 'accept') {
+        const validated = validateStructuredAnswers(
+          p.input?.questions || [],
+          Array.isArray(body.answers) ? body.answers : [],
+        );
+        if (!validated.ok) return reply.code(400).send({ error: validated.error });
+        structuredDecision = { action, answers: validated.answers };
+      } else {
+        structuredDecision = { action, answers: [] };
+      }
+    }
+    pendingPerms.delete(pid);
+    p.cleanup?.();
+    fastify.sse.broadcast('chat-permission-done', { pid });
     // Пояснение к отказу из модалки. У claude едет агенту в deny-message (канал ответов
     // на вопросы), у прямых исполнителей отдельного текстового канала нет — фронт по
     // флагу commentDelivered отправит его отдельным сообщением в очередь чата.
     const comment = String(body.comment || '').trim().slice(0, 4000);
     if (p.direct && p.isQuestion) {
+      if (p.structuredAnswers) {
+        p.resolve(structuredDecision);
+        return { ok: true };
+      }
       const answers = Array.isArray(body.answers) ? body.answers : [];
       const text = answers.map((answer) => answer?.text || '').find(Boolean) || '';
       p.resolve({
@@ -911,7 +984,7 @@ async function chatModule(fastify, opts) {
       p.resolve({
         allow: body.allow === true,
         comment,
-        remember: body.remember === true,
+        remember: p.canRemember !== false && body.remember === true,
         choice: typeof body.choice === 'string' ? body.choice.slice(0, 100) : '',
       });
       // Дойдёт ли пояснение до агента — свойство КАНАЛА, а не вендора: ACP-outcome Kimi
@@ -1346,13 +1419,22 @@ async function chatModule(fastify, opts) {
     if (!executor) return reply.code(400).send({ error: 'unknown_provider', message: `нет исполнителя для модели ${model}` });
 
     const workProjectId = await trustedWorkProject(id);
-    const workToolScopeKey = `${workProjectId || 'none'}:${chatKey || id || 'free'}`;
+    const workToolScopeKey = [
+      workProjectId || 'none',
+      chatKey || id || 'free',
+      permissionMode,
+    ].join(':');
     const workToolsValue = createWorkTools({
       projectId: workProjectId,
+      knowledgeProjectId: workProjectId,
       chatKey,
+      permissionMode,
       invoke: (scope, input) => (sshBroker
         ? sshBroker.invoke(scope, input)
         : Promise.resolve({ ok: false, error: 'not_available' })),
+      knowledgeInvoke: (scope, input) => (knowledgeBroker
+        ? knowledgeBroker.invoke(scope, input)
+        : Promise.resolve({ ok: false, error: 'knowledge_unavailable' })),
     });
     const workIpc = executor.workToolsTransport === 'mcp'
       ? await ensureWorkIpc(workToolScopeKey, workToolsValue)
@@ -1547,7 +1629,7 @@ async function chatModule(fastify, opts) {
           // Кокпит-режим «auto»: исполнитель продолжает спрашивать (у Kimi ACP остаётся
           // в default), а на безопасные запросы отвечает общий классификатор.
           // Деструктивные и неизвестные формы по-прежнему уходят человеку во всплывашку.
-          if (permissionMode === 'auto') {
+          if (permissionMode === 'auto' && presentation?.requiresExplicitUser !== true) {
             const decision = autoDecision(presentation);
             if (decision.verdict === 'allow') return { allow: true };
             fastify.log.info({ chatKey, tool: presentation?.tool, reason: decision.reason }, 'Авто-режим: действие — на подтверждение человеку');
@@ -1604,6 +1686,7 @@ async function chatModule(fastify, opts) {
           message: runArgs.message,
           onStep: runArgs.onStep,
           onProgress: runArgs.onProgress,
+          onPermission: runArgs.onPermission,
         })
         : executor.run(runArgs));
 

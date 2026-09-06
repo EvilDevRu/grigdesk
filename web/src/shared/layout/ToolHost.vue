@@ -4,7 +4,7 @@
                   :ref="(value) => setRailButton(item.id, value)" role="rail"
                   data-context="tool-rail-item"
                   class="tool-rail-item" :class="{ active: presentedTool === item.id }"
-                  :title="item.label" :label="item.label"
+                  :title="railTitle(item)" :label="item.label"
                   :pressed="presentation === 'dock' && presentedTool === item.id"
                   @click="clickRail(item)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -54,6 +54,8 @@ import { useUiContextSource } from '../../composables/useUiContextSource.js';
 import { NAV_ICONS } from '../nav-icons.js';
 import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';
 import { useDockViewport } from '../tools/viewport.js';
+import { comboFromEvent, formatCombo } from '../hotkeys/combo.js';
+import { useHotkeysStore } from '../../stores/hotkeys.js';
 import ToolDock from './ToolDock.vue';
 import { UiIconButton, useUiLayer } from '../../ui';
 
@@ -62,6 +64,7 @@ const router = useRouter();
 const dock = useDockStore();
 const plugins = usePluginsStore();
 const shelf = useTaskShelfStore();
+const hotkeys = useHotkeysStore();
 const toolContext = useUiContextSource('tool', { layer: 'dock', active: false });
 const { dockCapable } = useDockViewport();
 
@@ -87,6 +90,12 @@ const railItems = computed(() => TOOL_REGISTRY.filter((item) => {
   if (!item.plugin) return true;
   return plugins.dockNav.some((nav) => nav.id === item.id);
 }));
+
+function railTitle(item) {
+  const combo = formatCombo(hotkeys.comboOf(item.id));
+  return combo ? `${item.label} · ${combo}` : item.label;
+}
+
 const toolBadges = computed(() => ({
   shelf: shelf.totalCount > 0
     ? { count: shelf.litCount || shelf.totalCount, wait: shelf.litCount > 0 }
@@ -181,6 +190,32 @@ async function clickRail(item) {
   }
   dock.open(item.id);
   focusPresented({ dockHeader: true });
+}
+
+/**
+ * Одна и та же команда «показать инструмент» для рейки и для клавиши. На узком
+ * экране дока нет вовсе, поэтому там открывается страница инструмента.
+ */
+function activateTool(item) {
+  if (routeTool.value || dockCapable.value) return clickRail(item);
+  return router.push(item.route);
+}
+
+/**
+ * Глобальные сочетания слушаются в capture: Monaco и терминал забирают клавиши себе,
+ * а панель обязана открываться и поверх них. Сочетание без Ctrl/Alt настройка не
+ * принимает, поэтому обычный набор текста сюда не доходит.
+ */
+function onHotkey(event) {
+  if (hotkeys.recording || event.defaultPrevented || event.repeat || event.isComposing) return;
+
+  const id = hotkeys.toolByCombo[comboFromEvent(event)];
+  const item = id && railItems.value.some((entry) => entry.id === id) ? TOOL_BY_ID.get(id) : null;
+  if (!item) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  activateTool(item);
 }
 
 function hideDock(id = dock.activeTool) {
@@ -278,11 +313,13 @@ onMounted(() => {
     contentObserver.observe(content);
   }
   window.addEventListener('resize', measureContent, { passive: true });
+  document.addEventListener('keydown', onHotkey, true);
   measureContent();
 });
 onBeforeUnmount(() => {
   contentObserver?.disconnect?.();
   window.removeEventListener('resize', measureContent);
+  document.removeEventListener('keydown', onHotkey, true);
   dock.resetAllRuntime();
 });
 </script>

@@ -220,6 +220,55 @@ test('незнакомая форма запроса не превращаетс
   assert.match(wrapper.find('.p-in').text(), /whatever/);
 });
 
+test('external URL не открывается сам и подтверждается отдельной кнопкой', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'p-url',
+    chatKey: 'c1',
+    tool: 'MCP · installer',
+    canRemember: false,
+    input: {
+      kind: 'external_url',
+      description: 'Заверши установку на сайте сервиса.',
+      url: 'https://example.test/install?token=private-value',
+      link_label: 'Открыть установку',
+      approve_label: 'Готово',
+      reject_label: 'Не открывать',
+    },
+  });
+  const link = wrapper.get('a.ui-action-link');
+
+  assert.equal(link.attributes('href'), 'https://example.test/install?token=private-value');
+  assert.equal(link.attributes('target'), '_blank');
+  assert.equal(link.attributes('rel'), 'noopener noreferrer');
+  assert.equal(wrapper.find('input[type="checkbox"]').exists(), false);
+  assert.equal(wrapper.text().includes('private-value'), false);
+  assert.equal(wrapper.emitted('answer'), undefined, 'показ карточки не подтверждает действие');
+
+  await button(wrapper, 'Готово').trigger('click');
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
+});
+
+test('небезопасный external URL нельзя открыть или подтвердить', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'p-url-bad',
+    chatKey: 'c1',
+    tool: 'MCP · installer',
+    canRemember: false,
+    input: {
+      kind: 'external_url',
+      description: 'Открой ссылку.',
+      url: 'javascript:alert(1)',
+    },
+  });
+
+  assert.equal(wrapper.find('a').exists(), false);
+  assert.equal(button(wrapper, 'Готово').attributes('disabled'), '');
+  assert.match(wrapper.text(), /отклонена как небезопасная/iu);
+
+  await button(wrapper, 'Не открывать').trigger('click');
+  assert.deepEqual(wrapper.emitted('answer'), [[false, false, '', '']]);
+});
+
 test('SSH-карточка показывает сервер пользователя root sudo и полную команду', async (t) => {
   const command = `sudo printf '${'x'.repeat(10_000)}'`;
   const { wrapper } = await mountPermission(t, {

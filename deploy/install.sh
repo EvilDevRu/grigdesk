@@ -38,9 +38,10 @@ mkdir -p "$UNIT_DIR"
 sed -e "s|__NODE__|$NODE_BIN|g" -e "s|__NODE_DIR__|$NODE_DIR|g" -e "s|__COCKPIT_DIR__|$COCKPIT_DIR|g" \
   "$COCKPIT_DIR/deploy/$UNIT" > "$UNIT_DIR/$UNIT"
 
-echo "→ CLI b24 в PATH…"
+echo "→ CLI b24 и knowledge в PATH…"
 mkdir -p "$HOME/.local/bin"
 ln -sf "$COCKPIT_DIR/bin/b24" "$HOME/.local/bin/b24"
+ln -sf "$COCKPIT_DIR/bin/knowledge" "$HOME/.local/bin/knowledge"
 case ":$PATH:" in *":$HOME/.local/bin:"*) : ;; *) echo "  ⚠ добавь ~/.local/bin в PATH" ;; esac
 
 systemctl --user daemon-reload

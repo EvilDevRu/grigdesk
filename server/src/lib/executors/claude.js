@@ -1000,6 +1000,17 @@ async function scanClaudeUserCommands() {
 // хватает (`docker run -i --rm …`), а текст ошибки содержит что угодно.
 const MCP_STATUS_AT = /\s+-\s+(?=[✓✔✗✘⚠]|Connected\b|Failed\b|Disconnected\b|Needs\b|Authenticat)/u;
 const MCP_ICONS = /^[✓✔✗✘⚠\s]+/u;
+const CLAUDE_MCP_GROUPS = [{
+  id: 'account',
+  label: 'claude.ai',
+  hint: 'Коннекторы аккаунта настраиваются на claude.ai; CLI не сообщает их живой статус.',
+}];
+
+function claudeMcpAuthHint(name, scope) {
+  return scope === 'account'
+    ? 'Авторизуется в настройках коннекторов на claude.ai, не из Cockpit.'
+    : `Нужен вход: \`claude mcp login ${name}\` в терминале.`;
+}
 
 /**
  * Разбор `claude mcp list` в записи { name, target, state, detail }.
@@ -1074,6 +1085,7 @@ export function claudeAiConnectors(userConfig, needsAuthNames = []) {
       scope: 'account',
       state: needsAuth ? 'needs-auth' : 'remote',
       detail: needsAuth ? 'Needs authentication' : '',
+      ...(needsAuth ? { hint: claudeMcpAuthHint(name, 'account') } : {}),
     });
   }
   return out;
@@ -1090,14 +1102,16 @@ export function composeMcpServers({
   const listed = servers.map((s) => {
     // Провал важнее: сервер, который не поднялся, авторизацией не лечится.
     const needsAuth = s.state !== 'failed' && needsAuthNames.includes(s.name);
+    const scope = classifyMcpScope(s.name, { userServers, projectServers });
     return {
       ...s,
-      scope: classifyMcpScope(s.name, { userServers, projectServers }),
+      scope,
       state: needsAuth ? 'needs-auth' : s.state,
       // Такой коннектор список печатает как Connected — соединение и правда есть,
       // инструментов у агента всё равно нет. Оставь текст CLI, и панель скажет
       // «Нужна авторизация», а строкой ниже — «Connected».
       detail: needsAuth ? 'Needs authentication' : s.detail,
+      ...(needsAuth ? { hint: claudeMcpAuthHint(s.name, scope) } : {}),
     };
   });
   const known = new Set(listed.map((s) => s.name));
@@ -1207,6 +1221,7 @@ export default {
 
     return {
       state: 'ok',
+      groups: CLAUDE_MCP_GROUPS,
       servers: composeMcpServers({
         servers, userServers, projectServers, needsAuthNames, userConfig,
       }),
@@ -1405,7 +1420,7 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, permissionMode,
     mcpConfig, permissionPromptTool, providerSettings, log, onProgress, onStep, signal,
-    workspaceAccess,
+    workspaceAccess, workTools,
   }) {
     const args = ['-p', message, '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
     const scoped = workspaceAccess && typeof workspaceAccess === 'object';
@@ -1455,9 +1470,19 @@ export default {
     args.push(...providerArgs);
     if (mcpConfig) args.push('--mcp-config', JSON.stringify(mcpConfig));
     if (mcpConfig?.mcpServers?.['cockpit-work']) {
-      args.push('--allowedTools', scoped
+      const descriptors = Array.isArray(workTools?.descriptors)
+        ? workTools.descriptors
+        : [{ name: 'supervised_ssh' }];
+      const allowed = scoped
         ? 'mcp__cockpit-work__repo_history'
-        : 'mcp__cockpit-work__supervised_ssh');
+        : descriptors
+          .map((descriptor) => descriptor?.name || descriptor?.function?.name)
+          .filter(Boolean)
+          .map((name) => `mcp__cockpit-work__${name}`)
+          .join(',');
+      if (allowed) {
+        args.push('--allowedTools', allowed);
+      }
     }
     if (permissionPromptTool) args.push('--permission-prompt-tool', permissionPromptTool);
     if (model) args.push('--model', model);
@@ -1548,7 +1573,7 @@ export default {
 
     open({
       config, env, cwd, extraDirs = [], model, effort, permissionMode, sessionId,
-      mcpConfig, permissionPromptTool, providerSettings, log, hooks,
+      mcpConfig, permissionPromptTool, providerSettings, log, hooks, workTools,
     }) {
       return openClaudeStreamSession({
         bin: config.claudeBin,
@@ -1561,6 +1586,7 @@ export default {
           mcpConfig,
           permissionPromptTool,
           providerSettingsArgs: claudeProviderSettingsArgs(providerSettings),
+          workTools,
         }),
         cwd,
         env,

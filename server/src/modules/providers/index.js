@@ -136,6 +136,9 @@ async function providersModule(fastify, opts) {
         chatEnabled: typeof ex.run === 'function',
         capabilities: {
           scopedWorkspace: await supportsScopedWorkspace(ex, config),
+          untrustedText: typeof ex.run === 'function'
+            && typeof ex.runUntrusted === 'function'
+            && ex.untrustedInput?.text === true,
         },
         // Какие исполнители реально применяют prefs.trustedDirectories, UI узнаёт
         // из контракта адаптера — без хардкода id/названий.
@@ -148,7 +151,7 @@ async function providersModule(fastify, opts) {
         setupCommand: ok ? (ex.login || ex.install || null) : (ex.install || null),
         canUpdate: !!ex.updateCmd,
         // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
-        // его опрос — живой health-check, за ним UI ходит отдельным маршрутом.
+        // адаптер может делать health-check или читать конфиг, UI ходит отдельным маршрутом.
         mcp: typeof ex.mcpStatus === 'function',
         // Индикатор «вышла новая версия» — из фоновой проверки (updates), не из этого запроса:
         // ходить в сеть на каждый рендер топбара незачем.
@@ -275,10 +278,9 @@ async function providersModule(fastify, opts) {
 
   /**
    * Состояние MCP-серверов исполнителя — блок в его плашке «Настройки → Исполнители».
-   * Отдельный ленивый маршрут, а НЕ поле общего `/api/providers`: опрос делает живой
-   * health-check каждого сервера (замер на claude: 3–4 с, на зависшем — дольше), и
-   * реестр ждал бы эти секунды на каждый свой ответ. Кэш короткий, кнопка
-   * «Перепроверить» обходит его через `?refresh=1`.
+   * Отдельный ленивый маршрут, а НЕ поле общего `/api/providers`: Claude/Codex могут
+   * делать живой health-check, Kimi читает несколько конфигов, и общий реестр не должен
+   * ждать ни один из этих источников. Кэш короткий, ручное обновление обходит его.
    */
   const mcpCache = new Map(); // id исполнителя → { at, data }
   const MCP_CACHE_MS = 60_000;

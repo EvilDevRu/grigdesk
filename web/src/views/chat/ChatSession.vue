@@ -323,8 +323,12 @@
     </div>
 
     <!-- Диалог: агент задал вопрос и ждёт ответа (не разрешение — выбор по существу) -->
-    <ChatQuestion v-if="question" :req="question"
-                  @answer="chat.answerQuestion(question.pid, $event)" @skip="chat.answerQuestion(question.pid, [])" />
+    <ChatQuestion
+      v-if="question"
+      :req="question"
+      @answer="answerQuestion"
+      @skip="skipQuestion"
+    />
 
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
     <ChatPermission v-if="perm" :req="perm"
@@ -1552,6 +1556,12 @@ function messageTimeIso(value) {
 // берём адресованные этому чату. Висят, пока не ответишь: агент их ждёт. ──
 const perm = computed(() => chat.permFor(props.sid));
 const question = computed(() => chat.questionFor(props.sid));
+function answerQuestion(payload) {
+  if (question.value) void chat.answerQuestion(question.value.pid, payload);
+}
+function skipQuestion() {
+  if (question.value) void chat.answerQuestion(question.value.pid, []);
+}
 
 // ── Действие «На конвейер» с защитой ──
 const onConveyor = computed(() => chat.isOnConveyor(sess.value?.taskId));

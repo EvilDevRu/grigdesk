@@ -305,7 +305,27 @@ test('CODE-ACTION-07: без модели генератор объясняет,
   assert.match(response.json().message, /Настройки.*Плагины.*Код/);
 });
 
-test('CODE-ACTION-08: `−` работает и до первого коммита', async (t) => {
+test('CODE-ACTION-08: несовместимая модель направляет в настройку плагина', async (t) => {
+  const root = await repository(t);
+  await writeFile(path.join(root, 'app.js'), 'base\nstaged\n');
+  await git(root, ['add', 'app.js']);
+  const app = await codeApp(t, root, {
+    commitMessageModel: { provider: 'codex', model: 'gpt-test' },
+    resolveCommitTarget: async () => ({ ok: false, error: 'unsafe_model_provider' }),
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: actionUrl('commit-message'),
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'unsafe_model_provider');
+  assert.match(response.json().message, /Настройки.*Плагины.*Код/);
+});
+
+test('CODE-ACTION-09: `−` работает и до первого коммита', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-code-unborn-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 

@@ -263,6 +263,45 @@ test('вопрос агента: вариант i уезжает в {answers} с
   assert.deepEqual(f.forgotten, ['q:p1abc']);
 });
 
+test('старые кнопки structured form и external URL требуют завершения в Cockpit', async (t) => {
+  const f = await fixture(t);
+  f.cockpit.set('GET', '/api/chat/waiting', {
+    statusCode: 200,
+    body: {
+      waiting: [{
+        pid: 'p1abc',
+        chatKey: 'c1',
+        structured: true,
+        questions: [{ question: 'Секрет?', options: [{ label: 'Да' }] }],
+      }],
+    },
+  });
+
+  await f.tap('q:p1abc:0');
+  await f.tap('q:p1abc:txt', { messageId: 43 });
+
+  f.cockpit.set('GET', '/api/chat/waiting', {
+    statusCode: 200,
+    body: {
+      waiting: [{
+        pid: 'p2xyz',
+        chatKey: 'c1',
+        tool: 'MCP · installer',
+        input: { kind: 'external_url', url: 'https://example.test/install' },
+      }],
+    },
+  });
+  await f.tap('p:p2xyz:a', { messageId: 44 });
+
+  assert.equal(f.cockpit.calls.filter((call) => call.method === 'POST').length, 0);
+  assert.equal(f.answers().length, 3);
+  assert.ok(f.answers().every((call) => /Cockpit/u.test(call.body.text)));
+  assert.ok(f.edits().every((call) => (
+    call.body.reply_markup.inline_keyboard.length === 0
+    && /Заверши в Cockpit/u.test(call.body.text)
+  )));
+});
+
 test('протухший pid — «вопрос уже закрыт», без inject ответа', async (t) => {
   const f = await fixture(t);
   f.cockpit.set('GET', '/api/chat/waiting', { statusCode: 200, body: { waiting: [] } });

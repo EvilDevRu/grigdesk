@@ -352,6 +352,54 @@ test('/api/providers берёт поддержку доверенных ката
   assert.equal(byId.get('setup')?.trustedDirectories, false, 'setup-only не получает ход');
 });
 
+test('/api/providers объявляет безопасный недоверенный текст только по полному контракту', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'providers-untrusted-text-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const runtimeAdapter = (id, extra = {}) => ({
+    ...stubAdapter(id, null),
+    run: async () => ({ reply: 'ok' }),
+    ...extra,
+  });
+  const adapters = new Map([
+    ['safe', runtimeAdapter('safe', {
+      untrustedInput: { text: true },
+      runUntrusted: async () => ({ reply: 'ok' }),
+    })],
+    ['no-method', runtimeAdapter('no-method', { untrustedInput: { text: true } })],
+    ['no-capability', runtimeAdapter('no-capability', {
+      runUntrusted: async () => ({ reply: 'ok' }),
+    })],
+    ['setup-only', {
+      ...stubAdapter('setup-only', null),
+      untrustedInput: { text: true },
+      runUntrusted: async () => ({ reply: 'ok' }),
+    }],
+  ]);
+  const app = Fastify({ logger: false });
+  app.decorate('sse', { broadcast() {} });
+  await app.register(providersModule, {
+    config: { modelsPath: path.join(root, 'models.json') },
+    claudeAuth: null,
+    prefs: { read: () => ({}) },
+    getProviderAdapters: async () => adapters,
+  });
+  t.after(() => app.close());
+
+  const response = await app.inject({ method: 'GET', url: '/api/providers' });
+  const capabilities = Object.fromEntries(response.json().providers.map((provider) => [
+    provider.id,
+    provider.capabilities?.untrustedText,
+  ]));
+
+  assert.deepEqual(capabilities, {
+    safe: true,
+    'no-method': false,
+    'no-capability': false,
+    'setup-only': false,
+  });
+});
+
 test('/api/providers нормализует способ запрета SSH без списка известных исполнителей', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'providers-direct-ssh-policy-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -16,7 +16,7 @@ export async function createWorkIpc({ workTools, root = os.tmpdir() }) {
   await fs.chmod(dir, 0o700);
   const socketPath = path.join(dir, 'work.sock');
   const nonce = randomUUID();
-  const server = createServer((socket) => {
+  const server = createServer({ allowHalfOpen: true }, (socket) => {
     let input = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk) => {
@@ -28,7 +28,9 @@ export async function createWorkIpc({ workTools, root = os.tmpdir() }) {
         if (request.nonce !== nonce) {
           throw new Error('work IPC nonce не совпал');
         }
-        const result = await workTools.invoke(request.name, request.input || {});
+        const result = request.type === 'descriptors'
+          ? workTools.descriptors
+          : await workTools.invoke(request.name, request.input || {});
         socket.end(`${JSON.stringify({ result })}\n`);
       } catch (error) {
         socket.end(`${JSON.stringify({ error: String(error?.message || error) })}\n`);

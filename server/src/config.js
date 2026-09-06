@@ -13,6 +13,8 @@ const telegramDir = process.env.COCKPIT_TELEGRAM_DIR || path.join(rootDir, 'tele
 const githubDir = process.env.COCKPIT_GITHUB_DIR || path.join(rootDir, 'github');
 const factoryStateDir = process.env.FACTORY_STATE_DIR || path.join(home, '.factory', 'state');
 const publicDomain = process.env.COCKPIT_PUBLIC_DOMAIN || '';
+const knowledgeDbPath = process.env.COCKPIT_KNOWLEDGE_DB_PATH
+  || path.join(home, '.config', 'cockpit', 'knowledge', 'knowledge.db');
 
 // Запуск kimi-чатов: host — прямой дочерний процесс сервера (parity с claude: host
 // fs/config/credentials, без namespace/cgroup/egress allowlist), contained — прежний
@@ -31,6 +33,8 @@ export const config = {
   // Корень репозитория кокпита — от него считаются bin/restart, plugins/ и базы в корне.
   rootDir,
   stateDir: factoryStateDir,
+  // Общая база знаний живёт вне checkout и создаётся только при первом обращении.
+  knowledgeDbPath,
   // Доверенный control-каталог протокола маршрутов (движок пишет туда то, что провайдеру
   // менять нельзя). Задаём явно, а не полагаемся на дефолт по $HOME: прогон уезжает
   // в transient-юнит systemd, окружение вызывающего он не наследует.

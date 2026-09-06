@@ -41,7 +41,7 @@ import { encodePultOwnerKey, pultOwnerKeyMatches } from './state-store.js';
 const CALL_TIMEOUT_MS = 15_000;
 // Меняем при несовместимой разметке карточек: существующее сообщение best-effort
 // обновится после рестарта, не дожидаясь, пока повод исчезнет и возникнет снова.
-export const CARD_UI_VERSION = 4;
+export const CARD_UI_VERSION = 5;
 
 /**
  * Исходы, о которых будить не надо. `human-rewind` человек сделал сам, `recovered`
@@ -66,6 +66,16 @@ export function permissionPreview(input) {
     if (typeof input[field] === 'string' && input[field].trim()) return input[field];
   }
   try { return JSON.stringify(input); } catch { return ''; }
+}
+
+/** Structured MCP-ввод доступен только в browser-session: пульт лишь будит человека. */
+function cockpitOnlyCard(subject, detail) {
+  const body = collapseLine(detail || 'Сервис ждёт продолжения в кокпите.');
+  return clipText([
+    `🔔 ${subject} — требуется действие`,
+    body,
+    'Заверши в Cockpit.',
+  ].join('\n'), 1_000);
 }
 
 export class TelegramPultWatch {
@@ -548,7 +558,24 @@ export class TelegramPultWatch {
         // Кто спрашивает: имя разговора приходит вместе с ожиданием. Без него карточка
         // сообщает вопрос, на который нечем ответить, — чатов у человека несколько.
         const subject = chatSubject(item);
-        if (Array.isArray(item.questions)) {
+        if (item.structured === true) {
+          const detail = [item.source, item.prompt].filter(Boolean).join(': ');
+          summary.chat.push({ pid, text: item.prompt || 'структурированная форма' });
+          desired.set(`q:${pid}`, {
+            kind: 'question',
+            subject,
+            text: cockpitOnlyCard(subject, detail),
+            keyboard: null,
+          });
+        } else if (item.input?.kind === 'external_url') {
+          summary.chat.push({ pid, text: item.input?.description || 'внешнее действие' });
+          desired.set(`perm:${pid}`, {
+            kind: 'perm',
+            subject,
+            text: cockpitOnlyCard(subject, item.input?.description),
+            keyboard: null,
+          });
+        } else if (Array.isArray(item.questions)) {
           const first = item.questions[0] || {};
           const note = [
             item.questions.length > 1

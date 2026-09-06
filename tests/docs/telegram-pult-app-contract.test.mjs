@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const contractUrl = new URL('../../docs/cockpit/telegram-pult.md', import.meta.url);
+const referenceUrl = new URL(
+  '../../docs/cockpit/reference/runtime-contracts.md',
+  import.meta.url,
+);
 
 test('PULT-DOC-01: канон описывает клавиатуру и безопасный разговор с ассистентом', async () => {
-  const text = await readFile(contractUrl, 'utf8');
+  const map = await readFile(new URL('../../docs/cockpit/telegram-pult.md', import.meta.url), 'utf8');
+  const text = `${map}\n${await readFile(referenceUrl, 'utf8')}`;
   const clauses = [
     ['новый принцип', /смотрит,\s*разблокирует\s+и\s+поручает/iu],
     ['постоянная клавиатура', /ReplyKeyboardMarkup[\s\S]*is_persistent[\s\S]*resize_keyboard/u],

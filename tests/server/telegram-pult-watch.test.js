@@ -329,6 +329,55 @@ test('чат: запрос разрешения показывает инстр�
   });
 });
 
+test('чат: structured form и external URL в Telegram только зовут в Cockpit', async (t) => {
+  const { world, watch, store, messages } = await fixture(t);
+  await watch.check();
+  world.waiting = [
+    {
+      pid: 'form-private',
+      chatKey: 'c1',
+      chatTitle: 'Настройка деплоя',
+      at: T0,
+      structured: true,
+      source: 'MCP · deploy',
+      prompt: 'Заполни параметры окружения',
+      questions: [{
+        key: 'secret_mode',
+        question: 'Скрытый параметр',
+        options: [{ value: 'private-value', label: 'Секретный вариант' }],
+      }],
+    },
+    {
+      pid: 'url-private',
+      chatKey: 'c1',
+      chatTitle: 'Установка инструмента',
+      at: T0,
+      tool: 'MCP · installer',
+      canRemember: false,
+      input: {
+        kind: 'external_url',
+        description: 'Заверши установку во внешнем сервисе.',
+        url: 'https://example.test/install?token=private-token',
+      },
+    },
+  ];
+
+  await watch.check();
+
+  assert.equal(messages().length, 2);
+  for (const message of messages()) {
+    assert.match(message.body.text, /Заверши в Cockpit\./u);
+    assert.equal('reply_markup' in message.body, false);
+  }
+  const allText = messages().map((message) => message.body.text).join('\n');
+  assert.equal(allText.includes('Секретный вариант'), false);
+  assert.equal(allText.includes('private-token'), false);
+
+  const cards = (await store.read()).cards;
+  assert.equal(cards['q:form-private'].replyAction, undefined);
+  assert.equal(cards['perm:url-private'].replyAction, undefined);
+});
+
 test('Telegram-вотчер fail-closed не показывает SSH-подтверждение даже из грязного snapshot', async (t) => {
   const { world, watch, store, messages } = await fixture(t);
   await watch.check();

@@ -26,6 +26,7 @@ test('системные инструменты имеют явные group/orde
       inbox: ['rail', 30],
       telegram: ['tools', 20],
       github: ['tools', 30],
+      knowledge: ['tools', 40],
       ssh: ['dock', 40],
     },
   );
@@ -40,8 +41,13 @@ test('системные инструменты имеют явные group/orde
     ['triageModel', 'attachPhotos', 'attachVideos'],
   );
   assert.deepEqual(
-    code.settings.map((setting) => [setting.key, setting.type, setting.default]),
-    [['commitMessageModel', 'model', null]],
+    code.settings.map((setting) => [
+      setting.key,
+      setting.type,
+      setting.default,
+      setting.requiresCapability || null,
+    ]),
+    [['commitMessageModel', 'model', null, 'untrustedText']],
   );
   // Умолчания загрузки — часть контракта: фотографии в задаче полезны, видео
   // раздувает портал и уже пересказано транскриптом.
@@ -64,6 +70,28 @@ test('системные инструменты имеют явные group/orde
     normalizePluginNav({ path: '/no-order', order: null }, 'Без порядка'),
     { path: '/no-order', label: 'Без порядка', icon: 'plugin', group: 'rail' },
   );
+});
+
+test('Знания объявлены включённым системным плагином без собственных настроек', () => {
+  const knowledge = SYSTEM.find((plugin) => plugin.id === 'knowledge');
+
+  assert.deepEqual(knowledge && {
+    system: knowledge.system,
+    defaultEnabled: knowledge.defaultEnabled,
+    nav: knowledge.nav,
+    settings: knowledge.settings,
+  }, {
+    system: true,
+    defaultEnabled: true,
+    nav: {
+      path: '/knowledge',
+      label: 'Знания',
+      icon: 'knowledge',
+      group: 'tools',
+      order: 40,
+    },
+    settings: [],
+  });
 });
 
 test('Триаж объявлен включённым системным плагином с моделью и выключенным авторазбором', () => {

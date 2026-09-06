@@ -16,6 +16,10 @@ import { createStepSink } from '../chat/stream-steps.js';
 import { contextCacheStatus, reportedContextCache } from '../chat/context-cache.js';
 import { createCodexStepNormalizer } from './_codex-steps.js';
 import {
+  codexElicitationPresentation,
+  codexElicitationResponse,
+} from './_codex-elicitation.js';
+import {
   DIRECT_SSH_HOOK_COMMAND,
   DIRECT_SSH_HOOK_MATCHER,
   directSshSetting,
@@ -817,6 +821,44 @@ function codexRpcError(method, error) {
 }
 
 /**
+ * Provider-neutral descriptor не должен знать wire-форму конкретного исполнителя.
+ * App-server v2 требует явный discriminant `type: function`, поэтому добавляем его
+ * только на границе Codex, не ломая MCP/Ollama-представления тех же инструментов.
+ */
+function codexDynamicTools(descriptors = []) {
+  return descriptors.map((descriptor) => (
+    descriptor?.type
+      ? descriptor
+      : { type: 'function', ...descriptor }
+  ));
+}
+
+/**
+ * App-server принимает результат dynamic tool не как произвольный JSON, а как
+ * типизированный список content items. Сам безопасный broker-result оставляем JSON:
+ * модель получает прежний контракт, а transport — обязательную wire-обёртку.
+ */
+function codexDynamicToolResponse(value) {
+  let success = value?.ok !== false;
+  let text;
+
+  try {
+    text = JSON.stringify(value ?? null);
+    if (typeof text !== 'string') {
+      throw new TypeError('результат рабочего инструмента не сериализуется в JSON');
+    }
+  } catch {
+    success = false;
+    text = JSON.stringify({ ok: false, error: 'tool_response_invalid' });
+  }
+
+  return {
+    contentItems: [{ type: 'inputText', text }],
+    success,
+  };
+}
+
+/**
  * Живая сессия Codex: один процесс `codex app-server` держит thread и обслуживает все
  * ходы чата. Раньше он поднимался на КАЖДЫЙ ход и убивался сразу после `turn/completed`,
  * поэтому всё, что агент оставил после себя, умирало вместе с ответом.
@@ -845,7 +887,7 @@ export function openCodexSession({
   let exited = false;
   let exitReason = '';
   let turn = null;
-  const handledWorkCalls = new Set();
+  const elicitationControllers = new Map();
 
   function rememberTail(current, chunk, limit = 4_000) {
     return `${current}${String(chunk || '')}`.slice(-limit);
@@ -864,10 +906,15 @@ export function openCodexSession({
     child.stdin.write(`${JSON.stringify(payload)}\n`);
   }
 
-  function request(method, params) {
+  function request(method, params, owner = null) {
     return new Promise((requestResolve, requestReject) => {
       const id = ++nextRequestId;
-      pending.set(id, { method, resolve: requestResolve, reject: requestReject });
+      pending.set(id, {
+        method,
+        owner,
+        resolve: requestResolve,
+        reject: requestReject,
+      });
       try {
         send({ method, id, ...(params !== undefined && { params }) });
       } catch (error) {
@@ -884,13 +931,14 @@ export function openCodexSession({
   }
 
   /** Состояние ОДНОГО хода: лента, счётчики и итог принадлежат ходу, не сессии. */
-  function createTurn({ message, onStep, onProgress }) {
+  function createTurn({ message, onStep, onProgress, onPermission }) {
     const stepSink = createStepSink(onStep);
     return {
       message,
       stepSink,
       normalizeStep: createCodexStepNormalizer({ model, cwd }),
       onProgress,
+      onPermission,
       messageDeltas: new Map(),
       reply: '',
       lastCommentary: '',
@@ -899,6 +947,7 @@ export function openCodexSession({
       totalInputTokens: 0,
       cachedInputTokens: 0,
       turnId: null,
+      workCalls: new Map(),
       settled: false,
       abortRequested: false,
       interruptSent: false,
@@ -910,6 +959,11 @@ export function openCodexSession({
 
   function closeTurn(current) {
     clearTimeout(current.interruptTimer);
+    for (const [requestId, pendingElicitation] of elicitationControllers) {
+      if (pendingElicitation.current !== current) continue;
+      elicitationControllers.delete(requestId);
+      pendingElicitation.controller.abort();
+    }
     if (turn === current) turn = null;
   }
 
@@ -1007,15 +1061,64 @@ export function openCodexSession({
       .catch(() => finishTurnStopped(current));
   }
 
+  function appNotificationThreadId(params) {
+    return String(params.threadId || params.thread_id || params.thread?.id || '');
+  }
+
+  function appNotificationTurnId(params) {
+    return String(params.turnId || params.turn_id || params.turn?.id || '');
+  }
+
+  function rpcRequestKey(value) {
+    if (typeof value !== 'string' && typeof value !== 'number') return '';
+    const text = String(value);
+
+    return text ? `${typeof value}:${text}` : '';
+  }
+
+  /**
+   * Один app-server мультиплексирует уведомления родителя и его субагентов. Чужой
+   * `turn/completed` нельзя принимать за завершение текущего хода, а чужие items —
+   * добавлять в его ленту. Пустые id оставляем совместимыми со старыми уведомлениями:
+   * отбрасываем событие только когда сервер явно назвал другой thread или turn.
+   */
+  function ownsAppNotification(params, current) {
+    const eventThreadId = appNotificationThreadId(params);
+    if (eventThreadId && threadId && eventThreadId !== threadId) return false;
+
+    const eventTurnId = appNotificationTurnId(params);
+    // До ответа `turn/start` у хода ещё нет авторитетного id. Уведомление в этот
+    // момент не может доказать владение: app-server тем же потоком шлёт субагентов.
+    if (eventTurnId && current && !current.turnId) return false;
+    if (eventTurnId && current?.turnId && eventTurnId !== current.turnId) return false;
+    return true;
+  }
+
   function consumeAppNotification(event) {
     const method = String(event.method || '');
     const params = event.params && typeof event.params === 'object' ? event.params : {};
+    const current = turn;
+
+    if (method === 'serverRequest/resolved') {
+      const requestKey = rpcRequestKey(params.requestId);
+      const pendingElicitation = elicitationControllers.get(requestKey);
+      const resolvedThreadId = typeof params.threadId === 'string' ? params.threadId : '';
+      if (pendingElicitation
+        && resolvedThreadId
+        && resolvedThreadId === threadId
+        && resolvedThreadId === pendingElicitation.threadId) {
+        elicitationControllers.delete(requestKey);
+        pendingElicitation.controller.abort();
+      }
+      return;
+    }
+
+    if (!ownsAppNotification(params, current)) return;
 
     if (method === 'thread/started') {
       threadId = params.thread?.id || threadId;
     }
 
-    const current = turn;
     if (!current) {
       // Событие вне хода: у Codex это служебные уведомления открытой сессии.
       // Ходов «сам заговорил» он не выдаёт (session.unsolicited = false).
@@ -1083,6 +1186,173 @@ export function openCodexSession({
     }
   }
 
+  /**
+   * MCP elicitation — не permission Codex и не dynamic tool: downstream-сервер
+   * просит хост показать человеку форму или внешнюю страницу. Любой сбой UI
+   * превращаем в cancel, чтобы не ронять весь ход неизвестным server request.
+   */
+  function consumeElicitationRequest(messageObject) {
+    const current = turn;
+    const params = messageObject.params;
+    const requestKey = rpcRequestKey(messageObject.id);
+    const validParams = params !== null
+      && typeof params === 'object'
+      && !Array.isArray(params)
+      && typeof params.threadId === 'string'
+      && !!params.threadId
+      && Object.hasOwn(params, 'turnId')
+      && (params.turnId === null || (typeof params.turnId === 'string' && !!params.turnId));
+    const validTurnId = params?.turnId === null
+      || (typeof params?.turnId === 'string' && params.turnId === current?.turnId);
+    const owned = !!current
+      && !current.settled
+      && !!threadId
+      && validParams
+      && params.threadId === threadId
+      && validTurnId
+      && requestKey
+      && !elicitationControllers.has(requestKey);
+    if (!owned) {
+      const duplicate = requestKey && elicitationControllers.has(requestKey);
+      if (requestKey && validParams && !duplicate) {
+        send({
+          id: messageObject.id,
+          result: { action: 'cancel', content: null, _meta: null },
+        });
+      } else {
+        send({
+          id: messageObject.id,
+          error: { code: -32602, message: 'Некорректный запрос MCP elicitation' },
+        });
+      }
+      return;
+    }
+
+    const presentation = codexElicitationPresentation(params);
+    if (!presentation || typeof current?.onPermission !== 'function') {
+      send({
+        id: messageObject.id,
+        result: { action: 'cancel', content: null, _meta: null },
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    const pendingElicitation = { controller, current, threadId };
+    elicitationControllers.set(requestKey, pendingElicitation);
+    Promise.resolve(current.onPermission({
+      ...presentation,
+      signal: controller.signal,
+    })).then(
+      (decision) => {
+        if (controller.signal.aborted || exited) return;
+        send({
+          id: messageObject.id,
+          result: codexElicitationResponse(presentation, decision),
+        });
+      },
+      (error) => {
+        if (controller.signal.aborted || exited) return;
+        log?.warn?.(
+          { err: String(error?.message || error), server: messageObject.params?.serverName },
+          'Codex: диалог MCP завершился ошибкой',
+        );
+        send({
+          id: messageObject.id,
+          result: { action: 'cancel', content: null, _meta: null },
+        });
+      },
+    ).catch(() => {
+      // Ошибка записи в уже закрытый app-server не должна стать unhandled rejection.
+    }).finally(() => {
+      if (elicitationControllers.get(requestKey) === pendingElicitation) {
+        elicitationControllers.delete(requestKey);
+      }
+    });
+  }
+
+  /**
+   * Ответ `turn/start` и следующий server request могут лежать в одном stdout chunk.
+   * Promise continuation выполнится позднее, поэтому фиксируем id синхронно прямо в
+   * JSONL-dispatcher: рабочий вызов уже сможет доказать принадлежность текущему ходу.
+   */
+  function rememberRpcOwnership(call, result) {
+    if (call.method === 'thread/start' || call.method === 'thread/resume') {
+      const openedThreadId = result?.thread?.id || result?.thread?.sessionId;
+      if (typeof openedThreadId === 'string' && openedThreadId) threadId = openedThreadId;
+    }
+    if (call.method !== 'turn/start' || call.owner !== turn || call.owner?.settled) return;
+    const openedTurnId = result?.turn?.id;
+    if (typeof openedTurnId !== 'string' || !openedTurnId) return;
+    call.owner.turnId = openedTurnId;
+    maybeInterrupt(call.owner);
+  }
+
+  function invalidWorkCall(messageObject, reason) {
+    send({
+      id: messageObject.id,
+      error: { code: -32602, message: 'Некорректный вызов рабочего инструмента' },
+    });
+    log?.warn?.({ reason }, 'Codex: отклонён некорректный рабочий вызов');
+  }
+
+  /** Dynamic tool выполняется максимум один раз на callId внутри одного хода. */
+  function consumeWorkToolRequest(messageObject) {
+    const params = messageObject.params;
+    const current = turn;
+    if (!params || typeof params !== 'object' || Array.isArray(params)) {
+      invalidWorkCall(messageObject, 'invalid_params');
+      return;
+    }
+    const descriptor = (workTools?.descriptors || []).find((item) => item.name === params.tool);
+    const callId = typeof params.callId === 'string' ? params.callId : '';
+    let reason = '';
+    if (!descriptor) reason = 'unknown_tool';
+    else if (!current || current.settled) reason = 'no_active_turn';
+    else if (params.threadId !== threadId) reason = 'foreign_thread';
+    else if (!current.turnId || params.turnId !== current.turnId) reason = 'foreign_turn';
+    else if (!callId) reason = 'invalid_call_id';
+    if (reason) {
+      invalidWorkCall(messageObject, reason);
+      return;
+    }
+
+    let input = params.arguments;
+    if (typeof input === 'string') {
+      try {
+        input = JSON.parse(input);
+      } catch {
+        invalidWorkCall(messageObject, 'invalid_arguments');
+        return;
+      }
+    }
+    const signature = JSON.stringify([params.tool, input ?? null]);
+    const remembered = current.workCalls.get(callId);
+    if (remembered) {
+      if (remembered.signature !== signature) {
+        invalidWorkCall(messageObject, 'call_id_conflict');
+        return;
+      }
+      remembered.outcome.then((outcome) => {
+        try { send({ id: messageObject.id, ...outcome }); } catch { /* процесс уже закрыт */ }
+      });
+      return;
+    }
+
+    const outcome = Promise.resolve().then(
+      () => workTools.invoke(params.tool, input ?? {}),
+    ).then(
+      (result) => ({ result: codexDynamicToolResponse(result) }),
+      (error) => ({
+        error: { code: -32603, message: String(error?.message || error) },
+      }),
+    );
+    current.workCalls.set(callId, { signature, outcome });
+    outcome.then((response) => {
+      try { send({ id: messageObject.id, ...response }); } catch { /* процесс уже закрыт */ }
+    });
+  }
+
   function consumeMessage(messageObject) {
     if (messageObject?.id !== undefined && !messageObject?.method
       && (Object.hasOwn(messageObject, 'result') || Object.hasOwn(messageObject, 'error'))) {
@@ -1091,46 +1361,22 @@ export function openCodexSession({
       if (!call) return;
       pending.delete(messageObject.id);
       if (messageObject.error) call.reject(codexRpcError(call.method, messageObject.error));
-      else call.resolve(messageObject.result);
+      else {
+        rememberRpcOwnership(call, messageObject.result);
+        call.resolve(messageObject.result);
+      }
       return;
     }
 
     if (messageObject?.method) {
       protocol = 'app-server';
+      if (messageObject.id !== undefined
+        && messageObject.method === 'mcpServer/elicitation/request') {
+        consumeElicitationRequest(messageObject);
+        return;
+      }
       if (messageObject.id !== undefined && messageObject.method === 'item/tool/call') {
-        const params = messageObject.params || {};
-        const descriptor = (workTools?.descriptors || []).find((item) => (
-          item.name === params.tool
-        ));
-        const valid = descriptor
-          && turn
-          && params.threadId === threadId
-          && params.turnId === turn.turnId
-          && !handledWorkCalls.has(String(params.callId || messageObject.id));
-        if (!valid) {
-          send({
-            id: messageObject.id,
-            error: { code: -32602, message: 'Некорректный вызов рабочего инструмента' },
-          });
-          finishTurnError(turn, new Error('Codex прислал некорректный вызов рабочего инструмента'));
-          return;
-        }
-        handledWorkCalls.add(String(params.callId || messageObject.id));
-        let input = params.arguments;
-        if (typeof input === 'string') {
-          try {
-            input = JSON.parse(input);
-          } catch {
-            input = null;
-          }
-        }
-        Promise.resolve(workTools.invoke(params.tool, input || {})).then(
-          (result) => send({ id: messageObject.id, result }),
-          (error) => send({
-            id: messageObject.id,
-            error: { code: -32603, message: String(error?.message || error) },
-          }),
-        );
+        consumeWorkToolRequest(messageObject);
         return;
       }
       // При policy=never запросов разрешения быть не должно. Не оставляем
@@ -1200,15 +1446,20 @@ export function openCodexSession({
       // `experimentalApi` открывает `runtimeWorkspaceRoots`: без него app-server
       // отвечает «requires experimentalApi capability», и рабочим корнем остаётся
       // один cwd (в схеме: «Omitted defaults to cwd»). `requestAttestation` —
-      // строго false: он включает server request `attestation/generate`, а любой
-      // server request кокпит завершает fail-closed, то есть уронил бы ход.
-      capabilities: { experimentalApi: true, requestAttestation: false },
+      // строго false: он включает server request `attestation/generate`. Расширенную
+      // MCP-форму объявляем только потому, что typed UI и fail-closed ответ реализованы.
+      capabilities: {
+        experimentalApi: true,
+        requestAttestation: false,
+        mcpServerOpenaiFormElicitation: true,
+      },
     });
     send({ method: 'initialized' });
     if (blockDirectSsh) {
       assertDirectSshHook(await request('hooks/list', {}));
     }
 
+    const dynamicTools = codexDynamicTools(workTools?.descriptors || []);
     const common = {
       ...(model && { model }),
       cwd,
@@ -1219,13 +1470,14 @@ export function openCodexSession({
       // рабочую область, и после переезда на app-server она сузилась до cwd.
       runtimeWorkspaceRoots: roots,
       config: codexAppServerConfig(compactWindow),
-      ...((workTools?.descriptors || []).length
-        ? { dynamicTools: workTools.descriptors }
-        : {}),
     };
     const opened = threadId
       ? await request('thread/resume', { threadId, ...common })
-      : await request('thread/start', { ...common, serviceName: 'cockpit' });
+      : await request('thread/start', {
+        ...common,
+        serviceName: 'cockpit',
+        ...(dynamicTools.length ? { dynamicTools } : {}),
+      });
     threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
     actualModel = String(opened?.model || model || '');
     return threadId;
@@ -1240,13 +1492,13 @@ export function openCodexSession({
     get alive() { return !exited; },
     get busy() { return !!turn; },
 
-    async send({ message, onStep, onProgress }) {
+    async send({ message, onStep, onProgress, onPermission }) {
       if (exited) throw new Error(exitReason || 'Сессия Codex закрыта.');
       if (turn) throw new Error('В этой сессии уже идёт ход.');
 
       // Ход объявляется ДО ожидания handshake: «стоп» может прийти, пока app-server
       // ещё поднимается, и прерывать тогда будет нечего — запрос повис бы до таймаута.
-      const current = createTurn({ message, onStep, onProgress });
+      const current = createTurn({ message, onStep, onProgress, onPermission });
       turn = current;
       const result = new Promise((resolve, reject) => {
         current.resolve = resolve;
@@ -1283,7 +1535,7 @@ export function openCodexSession({
           ...(model && { model }),
           ...(effort && { effort }),
           summary: 'detailed',
-        });
+        }, current);
         current.turnId = started?.turn?.id || current.turnId;
         maybeInterrupt(current);
       } catch (error) {
@@ -1321,18 +1573,18 @@ export function openCodexSession({
 export async function runCodexAppServer({
   config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
-  workTools, workspaceAccess,
+  workTools, workspaceAccess, onPermission, log,
 }) {
   if (signal?.aborted) throw codexStoppedError({ sessionId, steps: [] });
 
   const session = openCodexSession({
     config, env, cwd, extraDirs, model, effort, sessionId, compactWindow, providerSettings,
-    tokenInfoReader, workTools, workspaceAccess,
+    tokenInfoReader, workTools, workspaceAccess, log,
   });
   const onAbort = () => { void session.interrupt(); };
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
-    return await session.send({ message, onStep, onProgress });
+    return await session.send({ message, onStep, onProgress, onPermission });
   } finally {
     signal?.removeEventListener('abort', onAbort);
     await session.close();
@@ -1404,6 +1656,214 @@ export async function readCodexSkillCommands(bin, cwd, {
   return parseCodexSkillCommands(response?.result);
 }
 
+const CODEX_MCP_RUNTIME = {
+  connected: { state: 'ok', detail: '' },
+  authenticationRequired: {
+    state: 'needs-auth',
+    detail: 'Codex ожидает авторизацию этого MCP-сервера.',
+  },
+  failed: { state: 'failed', detail: 'Codex не смог подключиться к MCP-серверу.' },
+  cancelled: { state: 'failed', detail: 'Подключение MCP-сервера отменено.' },
+  disabled: { state: 'disabled', detail: 'Сервер выключен в конфигурации Codex.' },
+  starting: { state: 'unknown', detail: 'Codex ещё подключает этот сервер.' },
+  notStarted: { state: 'configured', detail: '' },
+};
+const CODEX_MCP_GROUPS = [{
+  id: 'user',
+  label: 'Codex',
+  hint: '«Подключён» — живой статус app-server; «Настроен» — только запись конфигурации.',
+}];
+
+function codexMcpAuthHint(name) {
+  return `Нужен вход: \`codex mcp login ${name}\` в терминале.`;
+}
+
+/** URL в карточке не должен раскрывать credential из query, fragment или userinfo. */
+function safeMcpUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return text.replace(/[?#].*$/, '').slice(0, 240);
+  }
+}
+
+/**
+ * Args полезны для различения двух stdio-серверов, но в них часто кладут ключи.
+ * Скрываем значение после credential-подобного флага и ограничиваем длину строки;
+ * env и headers из JSON CLI сюда вообще не попадают.
+ */
+function safeMcpCommand(command, args) {
+  const parts = [String(command || '').trim()].filter(Boolean);
+  const secretFlag = /(?:api[-_]?key|token|secret|password|authorization|header|env)/i;
+  let hideNext = false;
+
+  for (const raw of Array.isArray(args) ? args.slice(0, 12) : []) {
+    const arg = String(raw);
+    if (hideNext) {
+      parts.push('•••');
+      hideNext = false;
+      continue;
+    }
+    const equal = arg.indexOf('=');
+    const key = equal >= 0 ? arg.slice(0, equal) : arg;
+    if (secretFlag.test(key)) {
+      parts.push(equal >= 0 ? `${key}=•••` : arg);
+      hideNext = equal < 0;
+      continue;
+    }
+    parts.push(arg);
+  }
+
+  const target = parts.join(' ');
+  return `${target.slice(0, 240)}${target.length > 240 ? '…' : ''}`;
+}
+
+function codexMcpTarget(transport) {
+  if (!transport || typeof transport !== 'object') return '';
+  if (transport.type === 'stdio') return safeMcpCommand(transport.command, transport.args);
+  return safeMcpUrl(transport.url);
+}
+
+/**
+ * `codex mcp list --json` — inventory, а не health-check. Поэтому включённая
+ * запись получает `configured`, а не зелёный `ok`; живость ниже добавляет app-server.
+ */
+export function parseCodexMcpInventory(value) {
+  let rows = value;
+  if (typeof rows === 'string') {
+    try { rows = JSON.parse(rows); } catch { return []; }
+  }
+  if (!Array.isArray(rows)) return [];
+
+  return rows.flatMap((row) => {
+    const name = typeof row?.name === 'string' ? row.name.trim() : '';
+    if (!name) return [];
+    const auth = String(row.auth_status || '');
+    const disabled = row.enabled === false;
+    const needsAuth = !disabled && /not.?logged.?in|needs?.?auth|unauthor/i.test(auth);
+    const state = disabled ? 'disabled' : (needsAuth ? 'needs-auth' : 'configured');
+    const disabledReason = typeof row.disabled_reason === 'string'
+      ? row.disabled_reason.trim().slice(0, 300)
+      : '';
+    return [{
+      name,
+      target: codexMcpTarget(row.transport),
+      scope: 'user',
+      state,
+      detail: disabled ? (disabledReason || 'Сервер выключен в конфигурации Codex.') : '',
+      ...(needsAuth ? { hint: codexMcpAuthHint(name) } : {}),
+    }];
+  });
+}
+
+/**
+ * `codex_apps` в live-ответе — собственный runtime плагинов Codex, а не сервер,
+ * который человек прописал в конфиге. В панели он стоял бы наравне с настроенными
+ * и вводил в заблуждение: чинить и настраивать в нём нечего.
+ */
+function isCodexInternalRuntime(live) {
+  return live?.serverInfo?.name === 'plugin-runtime';
+}
+
+/**
+ * `runtimeStatus` заполнен только у app-server, который уже вёл этот сервер в текущем
+ * процессе; у разового опроса он всегда null, и судить по нему нельзя — иначе живой
+ * ответ вырождается в пересказ конфига. Рукопожатие видно в самих данных: имя сервера
+ * и таблицу инструментов присылает сам сервер, а у не поднявшегося они пустые.
+ */
+function codexMcpHandshake(live, base) {
+  if (live?.serverInfo?.name) {
+    return { state: 'ok', detail: '' };
+  }
+
+  // Выключенный в конфиге сервер не поднимается намеренно — это не отказ.
+  if (base.state === 'disabled') {
+    return { state: base.state, detail: base.detail };
+  }
+
+  return {
+    state: 'failed',
+    detail: 'Codex не получил от сервера ни имени, ни инструментов — агенту он ничего не даёт.',
+  };
+}
+
+/**
+ * Живой app-server-статус обогащает безопасный inventory и не протаскивает в API
+ * таблицы tools/resources. Плагины могут быть только в live-ответе — их тоже оставляем.
+ */
+export function composeCodexMcpServers(result, inventory = []) {
+  const liveRows = Array.isArray(result?.data) ? result.data : [];
+  const liveByName = new Map();
+  for (const row of liveRows) {
+    const name = typeof row?.name === 'string' ? row.name.trim() : '';
+    if (name && !liveByName.has(name)) liveByName.set(name, row);
+  }
+
+  const configured = Array.isArray(inventory) ? inventory : [];
+  const configuredByName = new Map(configured.map((server) => [server.name, server]));
+  const names = [...configuredByName.keys()];
+  for (const [name, live] of liveByName) {
+    if (configuredByName.has(name) || isCodexInternalRuntime(live)) continue;
+    names.push(name);
+  }
+
+  return names.map((name) => {
+    const base = configuredByName.get(name) || {
+      name, target: '', scope: 'user', state: 'configured', detail: '',
+    };
+    const live = liveByName.get(name);
+    if (!live) return base;
+
+    const runtime = CODEX_MCP_RUNTIME[live.runtimeStatus]
+      || (live.runtimeStatus == null
+        ? codexMcpHandshake(live, base)
+        : { state: 'unknown', detail: `Неизвестное состояние Codex: ${live.runtimeStatus}` });
+    const needsAuth = live.authStatus === 'notLoggedIn'
+      || runtime.state === 'needs-auth';
+    const publicBase = { ...base };
+    delete publicBase.hint;
+    return {
+      ...publicBase,
+      state: needsAuth ? 'needs-auth' : runtime.state,
+      detail: needsAuth ? 'Codex ожидает авторизацию этого MCP-сервера.' : runtime.detail,
+      ...(needsAuth ? { hint: codexMcpAuthHint(name) } : {}),
+    };
+  });
+}
+
+function readCodexMcpInventory(bin, cwd, { execFileImpl = execFile } = {}) {
+  return new Promise((resolve) => {
+    execFileImpl(bin, ['mcp', 'list', '--json'], {
+      cwd,
+      timeout: 20_000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        resolve({
+          ok: false,
+          error: String(stderr || error.message || 'Codex MCP inventory недоступен')
+            .trim().slice(-300),
+          servers: [],
+        });
+        return;
+      }
+      let rows;
+      try { rows = JSON.parse(String(stdout || '')); } catch {
+        resolve({ ok: false, error: 'Codex вернул некорректный JSON списка MCP', servers: [] });
+        return;
+      }
+      resolve({ ok: true, servers: parseCodexMcpInventory(rows) });
+    });
+  });
+}
+
 export default {
   id: 'codex',
   name: 'GPT (Codex)',
@@ -1428,6 +1888,46 @@ export default {
   async commands(config) {
     const skills = await readCodexSkillCommands(config?.codexBin, config?.rootDir);
     return [...CODEX_TUI_COMMANDS, ...skills];
+  },
+
+  /**
+   * App-server отдаёт живое состояние effective MCP, а CLI JSON — транспорт и
+   * совместимый fallback. Никакие env/headers из конфигурации наружу не выходят.
+   */
+  async mcpStatus(config, deps = {}) {
+    const request = deps.request || codexAppServerRequest;
+    const inventoryReader = deps.inventory || readCodexMcpInventory;
+    const [live, inventory] = await Promise.all([
+      request(config.codexBin, {
+        method: 'mcpServerStatus/list',
+        params: { detail: 'toolsAndAuthOnly', limit: 100 },
+      }, { timeoutMs: 60_000 }),
+      inventoryReader(config.codexBin, config.rootDir),
+    ]);
+
+    if (!live?.error) {
+      return {
+        state: 'ok',
+        groups: CODEX_MCP_GROUPS,
+        servers: composeCodexMcpServers(live?.result, inventory?.servers),
+        ...(live?.result?.nextCursor
+          ? { note: 'Показаны первые 100 MCP-серверов Codex.' }
+          : {}),
+      };
+    }
+    if (inventory?.ok) {
+      return {
+        state: 'ok',
+        note: 'Живая проверка Codex недоступна; показана сохранённая конфигурация.',
+        groups: CODEX_MCP_GROUPS,
+        servers: inventory.servers,
+      };
+    }
+    return {
+      state: 'error',
+      error: String(live?.error?.message || inventory?.error || 'Codex MCP недоступен').slice(0, 300),
+      servers: [],
+    };
   },
 
   probe(config) {
@@ -1513,11 +2013,12 @@ export default {
   run({
     config, env, message, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
     providerSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
-    workTools, workspaceAccess,
+    workTools, workspaceAccess, onPermission, log,
   }) {
     return runCodexAppServer({
       config, env, message, cwd, extraDirs, model, effort, sessionId, compactWindow,
       providerSettings, signal, onProgress, onStep, tokenInfoReader, workTools, workspaceAccess,
+      onPermission, log,
     });
   },
 
@@ -1540,15 +2041,16 @@ export default {
       'compactWindow',
       'providerSettings',
       'workToolScopeKey',
+      'workspaceAccess',
     ],
 
     open({
       config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
-      providerSettings, log, hooks, workTools,
+      providerSettings, log, hooks, workTools, workspaceAccess,
     }) {
       return openCodexSession({
         config, env, cwd, extraDirs, model, effort, sessionId, compactWindow,
-        providerSettings, log, hooks, workTools,
+        providerSettings, log, hooks, workTools, workspaceAccess,
       });
     },
   },

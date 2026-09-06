@@ -88,6 +88,148 @@ async function scanKimiUserSkills(config) {
   return skills;
 }
 
+/** URL показываем без query/fragment/userinfo: там часто лежит credential. */
+function safeKimiMcpUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return text.replace(/[?#].*$/, '').slice(0, 240);
+  }
+}
+
+/** Аргументы оставляем различимыми, но скрываем значения credential-подобных флагов. */
+function safeKimiMcpCommand(command, args) {
+  const parts = [String(command || '').trim()].filter(Boolean);
+  const secretFlag = /(?:api[-_]?key|token|secret|password|authorization|header|env)/i;
+  let hideNext = false;
+
+  for (const raw of Array.isArray(args) ? args.slice(0, 12) : []) {
+    const arg = String(raw);
+    if (hideNext) {
+      parts.push('•••');
+      hideNext = false;
+      continue;
+    }
+    const equal = arg.indexOf('=');
+    const key = equal >= 0 ? arg.slice(0, equal) : arg;
+    if (secretFlag.test(key)) {
+      parts.push(equal >= 0 ? `${key}=•••` : arg);
+      hideNext = equal < 0;
+      continue;
+    }
+    parts.push(arg);
+  }
+
+  const target = parts.join(' ');
+  return `${target.slice(0, 240)}${target.length > 240 ? '…' : ''}`;
+}
+
+function kimiMcpServer(name, entry, scope) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return {
+      name,
+      target: '',
+      scope,
+      state: 'unknown',
+      detail: 'Некорректная запись в mcp.json.',
+    };
+  }
+
+  const command = typeof entry.command === 'string' ? entry.command.trim() : '';
+  const url = typeof entry.url === 'string' ? entry.url.trim() : '';
+  const target = command
+    ? safeKimiMcpCommand(command, entry.args)
+    : safeKimiMcpUrl(url);
+  if (!target) {
+    return {
+      name,
+      target: '',
+      scope,
+      state: 'unknown',
+      detail: 'В записи mcp.json нет команды или URL.',
+    };
+  }
+
+  const disabled = entry.enabled === false;
+  return {
+    name,
+    target,
+    scope,
+    state: disabled ? 'disabled' : 'configured',
+    detail: disabled ? 'Сервер выключен в mcp.json.' : '',
+  };
+}
+
+/**
+ * Kimi объединяет user/project mcp.json, причём более близкий проектный слой
+ * перекрывает одноимённую запись. Здесь та же effective-семантика, без запуска MCP.
+ */
+export function composeKimiMcpServers({
+  userConfig = null,
+  projectConfigs = [],
+} = {}) {
+  const layers = [
+    { scope: 'user', config: userConfig },
+    ...(Array.isArray(projectConfigs)
+      ? projectConfigs.map((config) => ({ scope: 'project', config }))
+      : []),
+  ];
+  const merged = new Map();
+
+  for (const layer of layers) {
+    const entries = layer.config?.mcpServers;
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries)) continue;
+    for (const [rawName, entry] of Object.entries(entries)) {
+      const name = String(rawName || '').trim();
+      if (!name || name === 'cockpit-work') continue;
+      merged.set(name, kimiMcpServer(name, entry, layer.scope));
+    }
+  }
+
+  const scopeOrder = { user: 0, project: 1 };
+  return [...merged.values()].sort((left, right) => (
+    scopeOrder[left.scope] - scopeOrder[right.scope]
+    || left.name.localeCompare(right.name, 'ru')
+  ));
+}
+
+async function readKimiMcpFile(file) {
+  let value;
+  try {
+    value = JSON.parse(await fs.readFile(file, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { ok: true, value: null };
+    return { ok: false };
+  }
+
+  const object = value && typeof value === 'object' && !Array.isArray(value);
+  const entries = value?.mcpServers;
+  const validEntries = entries === undefined
+    || (entries && typeof entries === 'object' && !Array.isArray(entries));
+  return object && validEntries ? { ok: true, value } : { ok: false };
+}
+
+/** Kimi 0.31.x ищет legacy `.mcp.json` у ближайшего корня репозитория. */
+async function nearestKimiProjectRoot(cwd) {
+  let current = path.resolve(cwd || process.cwd());
+  while (true) {
+    try {
+      await fs.access(path.join(current, '.git'));
+      return current;
+    } catch { /* поднимаемся к родителю */ }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 export default {
   id: 'kimi',
   name: 'Kimi Code',
@@ -140,6 +282,47 @@ export default {
     } catch {
       return { mode: 'none', label: 'не авторизован (kimi login)', available: false };
     }
+  },
+
+  /**
+   * Публичный ACP Kimi не умеет перечислить MCP без создания сессии. Сессия же
+   * запустит все stdio-серверы, поэтому Settings безопасно читает effective mcp.json
+   * и честно помечает записи как «Настроен», а не «Подключён».
+   */
+  async mcpStatus(config, deps = {}) {
+    if (config?.kimiLaunchMode === 'contained') {
+      return {
+        state: 'ok',
+        note: 'Contained-режим изолирует пользовательские и проектные MCP-серверы.',
+        servers: [],
+      };
+    }
+
+    const cwd = config?.rootDir || process.cwd();
+    const projectRoot = await (deps.projectRoot || nearestKimiProjectRoot)(cwd);
+    const files = [
+      path.join(config.kimiHome, 'mcp.json'),
+      ...(projectRoot ? [path.join(projectRoot, '.mcp.json')] : []),
+      path.join(cwd, '.kimi-code', 'mcp.json'),
+    ];
+    const readFile = deps.readFile || readKimiMcpFile;
+    const layers = await Promise.all(files.map((file) => readFile(file)));
+    if (layers.some((layer) => !layer?.ok)) {
+      return {
+        state: 'error',
+        error: 'Один из файлов Kimi mcp.json содержит некорректный JSON или схему.',
+        servers: [],
+      };
+    }
+
+    return {
+      state: 'ok',
+      note: 'Показана конфигурация mcp.json; живость Kimi проверяет в новой сессии.',
+      servers: composeKimiMcpServers({
+        userConfig: layers[0]?.value,
+        projectConfigs: layers.slice(1).map((layer) => layer.value),
+      }),
+    };
   },
 
   async modes() {

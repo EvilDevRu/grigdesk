@@ -11,12 +11,13 @@ async function source(relative, contract) {
 }
 
 test('SSH зарегистрирован одной встроенной панелью ToolHost', async () => {
-  const [registry, shell, view] = await Promise.all([
+  const [catalog, registry, shell, view] = await Promise.all([
+    source('web/src/shared/tools/catalog.js', 'SSH отсутствует в паспорте инструментов'),
     source('web/src/shared/tools/registry.js', 'SSH отсутствует в реестре ToolHost'),
     source('web/src/shared/layout/AppShell.vue', 'единый AppShell недоступен'),
     source('web/src/views/SshView.vue', 'route-adapter SSH ещё не реализован'),
   ]);
-  const registrations = [...registry.matchAll(/id:\s*['"]ssh['"]/g)].length;
+  const registrations = [...catalog.matchAll(/id:\s*['"]ssh['"]/g)].length;
   const hosts = [...shell.matchAll(/<ToolHost\b/g)].length + [...view.matchAll(/<ToolHost\b/g)].length;
 
   assert.deepEqual({

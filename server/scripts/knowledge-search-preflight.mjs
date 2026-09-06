@@ -5,20 +5,21 @@
 import { runKnowledgeSearchRuntimePreflight } from '../src/lib/search/runtime-preflight.js';
 import { KNOWLEDGE_SEARCH_PREFLIGHT_PROTOCOL } from '../src/lib/search/runtime-preflight-client.js';
 
-const report = await runKnowledgeSearchRuntimePreflight();
 const args = process.argv.slice(2);
 const jsonMode = args.length === 1 && args[0] === '--json';
+const usageValid = args.length === 0 || jsonMode;
 
-if (jsonMode) {
+if (!usageValid) {
+  process.stderr.write('Usage: knowledge-search-preflight.mjs [--json]\n');
+  process.exitCode = 64;
+} else {
+  const report = await runKnowledgeSearchRuntimePreflight();
+  if (jsonMode) {
   process.stdout.write(`${JSON.stringify({
     protocol: KNOWLEDGE_SEARCH_PREFLIGHT_PROTOCOL.name,
     protocolVersion: KNOWLEDGE_SEARCH_PREFLIGHT_PROTOCOL.version,
     report,
   })}\n`);
-} else {
-  if (args.length !== 0) {
-    process.stderr.write('Usage: knowledge-search-preflight.mjs [--json]\n');
-    process.exitCode = 64;
   } else {
     const sqlite = report.checks.find((check) => check.id === 'sqlite_runtime');
     if (report.ok) {
@@ -31,5 +32,7 @@ if (jsonMode) {
       );
     }
   }
+  if (!report.ok) {
+    process.exitCode = 2;
+  }
 }
-if (args.length <= 1 && !report.ok) process.exitCode = 2;

@@ -62,6 +62,9 @@ export function compileSettingsView({
         export default { props: ['id'], template: '<i class="picon"></i>' };
       `,
       './settings/AccessOverview.vue': overview,
+      './settings/ToolHotkeys.vue': `
+        export default { template: '<div class="tool-hotkeys-stub"></div>' };
+      `,
       '../stores/cockpit-update.js': `
         export const blockReasonLabel = (value) => String(value || '');
         export const UPDATE_STAGE_LABELS = {};

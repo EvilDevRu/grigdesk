@@ -281,6 +281,10 @@ async function mountToolHost(t, { totalCount, litCount }) {
         '../../stores/plugins.js': [
           'export const usePluginsStore = () => globalThis.__taskShelfHost.plugins;',
         ].join('\n'),
+        '../../stores/hotkeys.js': [
+          'export const useHotkeysStore = () =>',
+          '  ({ recording: null, toolByCombo: {}, comboOf: () => "" });',
+        ].join('\n'),
         '../../stores/task-shelf.js': [
           'export const useTaskShelfStore = () => globalThis.__taskShelfHost.shelf;',
         ].join('\n'),

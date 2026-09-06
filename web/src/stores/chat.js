@@ -460,6 +460,11 @@ let permOff = null; // отписка от общего SSE (подписка о
 // умирает с перезагрузкой страницы, в allowlist навсегда ничего не попадает.
 const permAutoAllow = {};
 
+/** Внешняя страница всегда требует отдельного ручного завершения и не запоминается. */
+function canRememberPermission(req) {
+  return req?.canRemember !== false && req?.input?.kind !== 'external_url';
+}
+
 export const useChatStore = defineStore('chat', {
   // pending — ВСЕ висящие спросы агентов, pid → запрос: `kind: 'perm'` (разрешение на
   // действие) либо `kind: 'question'` (вопрос по существу, AskUserQuestion). Карта, а не
@@ -905,7 +910,7 @@ export const useChatStore = defineStore('chat', {
         if (!d && name !== 'chat-orphan') return;
         if (name === 'chat-permission') {
           // «Разрешать до конца сессии»: инструмент уже одобрен — отвечаем сами, без всплывашки.
-          if (d.chatKey && permAutoAllow[d.chatKey]?.has(d.tool)) {
+          if (canRememberPermission(d) && d.chatKey && permAutoAllow[d.chatKey]?.has(d.tool)) {
             api.post(`/api/chat/permission/${d.pid}`, { allow: true }).catch(() => {});
             return;
           }
@@ -1021,8 +1026,10 @@ export const useChatStore = defineStore('chat', {
       const s = this._find(req.chatKey);
       const who = s ? this.tabLabel(s) : 'чат';
       const what = req.kind === 'question'
-        ? (req.questions?.[0]?.question || 'Агент задал вопрос')
-        : `Агент просит разрешение: ${req.tool || 'действие'}`;
+        ? (req.prompt || req.questions?.[0]?.question || 'Агент задал вопрос')
+        : (req.input?.kind === 'external_url'
+          ? (req.input?.description || 'Сервис просит завершить действие на внешней странице')
+          : `Агент просит разрешение: ${req.tool || 'действие'}`);
       notify(`Нужен твой ответ — ${who}`, what.slice(0, 120), `chat-ask-${req.chatKey || req.pid}`);
     },
     /**
@@ -1233,7 +1240,8 @@ export const useChatStore = defineStore('chat', {
         return;
       }
       delete this.pending[pid];
-      if (allow && remember && p.chatKey && p.tool) {
+      const mayRemember = canRememberPermission(p);
+      if (allow && remember && mayRemember && p.chatKey && p.tool) {
         (permAutoAllow[p.chatKey] ||= new Set()).add(p.tool);
       }
       // План оставляем в переписке: всплывашка закроется, а решение принималось по нему —
@@ -1258,7 +1266,7 @@ export const useChatStore = defineStore('chat', {
           allow,
           // «до конца сессии» — не только политика вкладки: у ACP это отдельный
           // вариант ответа (allow_always), и без передачи Kimi спрашивал снова.
-          ...(remember ? { remember: true } : {}),
+          ...(remember && mayRemember ? { remember: true } : {}),
           // Кнопка плана: у Kimi вариантов ответа больше двух (доработать, выйти).
           ...(choice ? { choice } : {}),
           ...(comment ? { comment } : {}),
@@ -1268,20 +1276,39 @@ export const useChatStore = defineStore('chat', {
       // и пояснение едет обычным сообщением — встанет в очередь чата.
       if (!allow && comment && res?.commentDelivered === false) await this.send(p.chatKey, comment);
     },
-    // Ответ на вопрос агента: answers = [{ header, question, selected: [метки], text }].
-    // Сервер превращает их в текст, который агент читает как результат своего вопроса.
-    async answerQuestion(pid, answers) {
+    // Legacy-вопрос получает массив, structured-форма — `{ action, answers }` с raw values.
+    async answerQuestion(pid, payload) {
       const p = this.pending[pid];
       if (!p) return;
-      delete this.pending[pid];
+      const structured = p.structured === true;
+      const answers = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload?.answers) ? payload.answers : []);
+      const action = typeof payload?.action === 'string' ? payload.action : '';
+      const body = {
+        answers,
+        ...(structured && action ? { action } : {}),
+      };
       let res = null;
-      try { res = await api.post(`/api/chat/permission/${pid}`, { answers }); }
-      catch { /* запрос уже снят (стоп/конец хода/другое окно) */ }
+      if (structured) {
+        // Невалидную форму сервер не снимает. При сетевой неоднозначности перечитываем
+        // общую очередь, чтобы не потерять карточку принятого или непринятого ответа.
+        try {
+          res = await api.post(`/api/chat/permission/${pid}`, body);
+          delete this.pending[pid];
+        } catch {
+          await this._loadWaiting();
+        }
+      } else {
+        delete this.pending[pid];
+        try { res = await api.post(`/api/chat/permission/${pid}`, body); }
+        catch { /* запрос уже снят (стоп/конец хода/другое окно) */ }
+      }
       // Свой текст доезжает не по всякому каналу (ACP-мост Kimi несёт только выбранный
       // вариант). Сервер честно говорит textDelivered:false — досылаем обычным
       // сообщением, как и пояснение к отказу.
       const text = (answers || []).map((a) => a?.text || '').find(Boolean) || '';
-      if (text && res?.textDelivered === false) await this.send(p.chatKey, text);
+      if (!structured && text && res?.textDelivered === false) await this.send(p.chatKey, text);
     },
 
     async ensure() {

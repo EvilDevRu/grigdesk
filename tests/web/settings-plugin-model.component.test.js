@@ -51,7 +51,7 @@ function providers() {
       id: 'claude',
       name: 'Claude',
       available: true,
-      capabilities: { scopedWorkspace: true },
+      capabilities: { scopedWorkspace: true, untrustedText: true },
       // Лестницы эффорта у моделей РАЗНЫЕ — на этом и держится проверка переноса.
       models: [
         { id: 'claude-opus-5', name: 'Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -62,7 +62,7 @@ function providers() {
       id: 'ollama',
       name: 'Ollama',
       available: true,
-      capabilities: { scopedWorkspace: false },
+      capabilities: { scopedWorkspace: false, untrustedText: true },
       // У локального эффорт бинарный: `xhigh` ему передать нельзя.
       models: [{ id: 'hf.co/unsloth/qwen3.6:latest', name: 'qwen3.6 (hf)', efforts: ['low', 'high'] }],
     },
@@ -70,7 +70,7 @@ function providers() {
       id: 'codex',
       name: 'GPT (Codex)',
       available: false,
-      capabilities: { scopedWorkspace: true },
+      capabilities: { scopedWorkspace: true, untrustedText: false },
       models: [{ id: 'gpt-5.6', name: 'GPT-5.6' }],
     },
   ];
@@ -267,6 +267,21 @@ test('пропавшая из реестра модель не выдаётся 
     'выбор должен остаться в списке с пометкой');
 });
 
+test('сохранённая несовместимая модель остаётся видимой до явной замены', async (t) => {
+  const value = { provider: 'codex', model: 'gpt-5.6' };
+  const { wrapper, select } = await mountSettings(t, { value, plugin: CODE_PLUGIN });
+
+  assert.equal(select.element.value, 'codex:gpt-5.6');
+  assert.match(
+    wrapper.get('.plugrow select.inp > option[disabled]').text(),
+    /GPT \(Codex\): GPT-5\.6.*не подходит для этой настройки/u,
+  );
+  assert.deepEqual(
+    wrapper.findAll('.plugrow optgroup').map((group) => group.attributes('label')),
+    ['Claude', 'Ollama'],
+  );
+});
+
 // ── Усилие ──────────────────────────────────────────────────────────────────
 // Усилие — свойство ЗАПУСКА, а не модели: одна и та же модель разбирает встречу и
 // быстро, и вдумчиво, а до правки выбора не было вовсе и ход всегда шёл на умолчании
@@ -283,6 +298,11 @@ test('карточка «Код» показывает модель сообще
   const { wrapper, select } = await mountSettings(t, { value, plugin: CODE_PLUGIN });
 
   assert.equal(select.element.value, 'claude:claude-opus-5');
+  assert.deepEqual(
+    wrapper.findAll('.plugrow optgroup').map((group) => group.attributes('label')),
+    ['Claude', 'Ollama'],
+    'небезопасный model transport нельзя предложить для чтения staged diff',
+  );
   assert.deepEqual(
     wrapper.findAll('.plugset label').map((label) => label.text()),
     ['Модель для сообщения коммита', 'Усилие'],
