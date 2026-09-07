@@ -53,6 +53,15 @@ export const TOOL_CATALOG = [
     hotkey: 'Ctrl+Shift+Digit5',
     plugin: 'db',
   },
+  {
+    id: 'docker',
+    route: '/docker',
+    label: 'Докер',
+    icon: 'docker',
+    order: 60,
+    hotkey: 'Ctrl+Shift+Digit6',
+    plugin: 'docker',
+  },
 ];
 
 export const TOOL_META_BY_ID = new Map(TOOL_CATALOG.map((item) => [item.id, item]));

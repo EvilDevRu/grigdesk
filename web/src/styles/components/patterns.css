@@ -74,6 +74,58 @@
   min-width: 0;
 }
 
+/* Навигация панели Docker: разделы отделены от строки фильтров и не слипаются со счётчиками. */
+.ui-tabs[data-ui-docker-tabs] {
+  flex: none;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  gap: 8px;
+}
+
+.ui-tabs[data-ui-docker-tabs] > .ui-tab {
+  display: inline-flex;
+  height: 42px;
+  min-height: 42px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  gap: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.ui-tabs[data-ui-docker-tabs] > .ui-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.ui-tabs[data-ui-docker-tabs] > .ui-tab:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+@container docker-panel (max-width: 560px) {
+  .ui-tabs[data-ui-docker-tabs] {
+    gap: 0;
+  }
+
+  .ui-tabs[data-ui-docker-tabs] > .ui-tab {
+    flex: 1 0 auto;
+    padding-inline: 9px;
+    gap: 5px;
+    font-size: 12px;
+  }
+}
+
 .ui-choice-list__option {
   width: 100%;
   min-width: 0;

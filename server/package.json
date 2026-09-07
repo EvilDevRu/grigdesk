@@ -6,9 +6,10 @@
   "description": "Кокпит: API-сервер (Fastify). Host-native, читает состояние фабрики и командует ей.",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "node --watch src/app.js",
-    "test": "node --test ../tests/server/*.test.js"
+    "start": "node --experimental-strip-types src/app.js",
+    "dev": "node --experimental-strip-types --watch src/app.js",
+    "test": "npm run typecheck:docker && node --experimental-strip-types --test ../tests/server/*.test.js",
+    "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -26,5 +27,10 @@
     "mysql2": "^3.24.3",
     "qrcode-generator": "^2.0.4",
     "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/ws": "8.18.1",
+    "typescript": "5.9.3"
   }
 }

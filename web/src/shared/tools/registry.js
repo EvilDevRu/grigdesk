@@ -17,6 +17,7 @@ const PANELS = {
   terminal: defineAsyncComponent(() => import('../../views/terminal/TerminalPanel.vue')),
   ssh: defineAsyncComponent(() => import('../../views/ssh/SshPanel.vue')),
   db: defineAsyncComponent(() => import('../../views/db/DbPanel.vue')),
+  docker: defineAsyncComponent(() => import('../../views/docker/DockerPanel.vue')),
 };
 
 export const TOOL_REGISTRY = TOOL_CATALOG.map((item) => ({ ...item, component: PANELS[item.id] }));

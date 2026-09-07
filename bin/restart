@@ -52,7 +52,7 @@ fi
 
 mkdir -p "$(dirname "$LOG")"
 cd "$ROOT"
-setsid nohup node "${ENV_ARG[@]}" server/src/app.js </dev/null >>"$LOG" 2>&1 &
+setsid nohup node "${ENV_ARG[@]}" --experimental-strip-types server/src/app.js </dev/null >>"$LOG" 2>&1 &
 disown
 
 # Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health

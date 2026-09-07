@@ -14,8 +14,9 @@
     "check:ui": "node scripts/check-ui-suite.mjs",
     "check:ui-styles": "node scripts/check-ui-control-styles.mjs",
     "test:ui-browser": "node scripts/check-ui-geometry.mjs",
-    "test:components": "node --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
-    "test": "npm run typecheck:ui && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components"
+    "test:components": "node --experimental-strip-types --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
+    "test": "npm run typecheck:ui && npm run typecheck:docker && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components",
+    "typecheck:docker": "vue-tsc -p tsconfig.docker.json --noEmit && npm --prefix ../server run typecheck:docker"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

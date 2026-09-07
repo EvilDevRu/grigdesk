@@ -13,6 +13,7 @@ const routes = [
   { path: '/terminal', name: 'terminal', component: () => import('./views/TerminalView.vue'), meta: { title: 'Терминал', tool: 'terminal' } },
   { path: '/ssh', name: 'ssh', component: () => import('./views/SshView.vue'), meta: { title: 'SSH', tool: 'ssh' } },
   { path: '/db', name: 'db', component: () => import('./views/DbView.vue'), meta: { title: 'Базы', tool: 'db' } },
+  { path: '/docker', name: 'docker', component: () => import('./views/DockerView.vue'), meta: { title: 'Докер', tool: 'docker' } },
   { path: '/routes', name: 'routes', component: () => import('./views/RoutesView.vue'), meta: { title: 'Маршруты' } },
   { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Проекты' } },
   { path: '/code', name: 'code', component: () => import('./views/CodeView.vue'), meta: { title: 'Код', tool: 'code' } },

@@ -17,7 +17,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 # NODE и рабочая директория подставит install.sh (шаблонные плейсхолдеры).
-ExecStart=__NODE__ __COCKPIT_DIR__/server/src/app.js
+ExecStart=__NODE__ --experimental-strip-types __COCKPIT_DIR__/server/src/app.js
 WorkingDirectory=__COCKPIT_DIR__/server
 # PATH задаём явно: у systemd user-сервиса он берётся из окружения сессии, зафиксированного
 # при логине, и НЕ содержит ~/.local/bin, ~/.kimi-code/bin и каталога node. Без этого кокпит не находит CLI

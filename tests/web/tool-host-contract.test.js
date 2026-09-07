@@ -32,18 +32,19 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
   assert.match(terminalRoute, /data-tool-route="terminal"/);
 });
 
-test('Code, Shelf, Terminal, SSH и DB лениво загружаются независимо', async () => {
+test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаются независимо', async () => {
   const [registry, codeLoading] = await Promise.all([
     source('web/src/shared/tools/registry.js'),
     source('web/src/views/code/CodePanelLoading.js'),
   ]);
 
-  assert.equal(count(registry, /defineAsyncComponent\(/g), 5);
+  assert.equal(count(registry, /defineAsyncComponent\(/g), 6);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/terminal\/TerminalPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ssh\/SshPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/db\/DbPanel\.vue'\)/);
+  assert.match(registry, /import\('\.\.\/\.\.\/views\/docker\/DockerPanel\.vue'\)/);
   assert.match(registry, /loadingComponent: CodePanelLoading/);
   assert.match(registry, /delay: 0/);
   assert.match(codeLoading, /'aria-busy': 'true'/);

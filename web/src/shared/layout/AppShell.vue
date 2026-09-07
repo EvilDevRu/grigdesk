@@ -1108,7 +1108,11 @@ const { connected } = useSse((name) => {
 
 /* ── Мобайл: сайдбар → нижняя навигация ── */
 @media (max-width: 759px) {
-  .shell, .shell.collapsed { grid-template-columns: 1fr; grid-template-rows: 52px 1fr auto; }
+  /* Содержимое верхней панели не должно расширять мобильную колонку за край экрана. */
+  .shell, .shell.collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px 1fr auto;
+  }
   .sidebar { grid-row: 3; grid-column: 1; flex-direction: row; overflow-x: auto; padding: 0; border-right: none; border-top: 1px solid var(--line);
     padding-bottom: env(safe-area-inset-bottom, 0); scrollbar-width: none; }
   .sidebar::-webkit-scrollbar { display: none; }

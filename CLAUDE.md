@@ -69,7 +69,8 @@
 `CLAUDE.local.md` — он тоже вне git, и в свежем клоне его нет: там каскад состоит только из
 этого файла. Продуктовые контракты, которые нужны всем, живут в
 [docs/cockpit/guide/](docs/cockpit/guide/): [постановка и триаж](docs/cockpit/guide/tasks.md),
-[остановки на человеке](docs/cockpit/guide/gates.md). Выясненное про продукт кладут туда, а не
+[остановки на человеке](docs/cockpit/guide/gates.md),
+[плагин докера](docs/cockpit/guide/docker.md). Выясненное про продукт кладут туда, а не
 в базу; в базу — опыт этой установки.
 
 @CLAUDE.local.md

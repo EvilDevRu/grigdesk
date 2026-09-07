@@ -1,5 +1,5 @@
 <template>
-  <div class="settings">
+  <div class="settings" :class="{ 'settings-plugins': tab === 'plugins' }">
     <header class="settings-hero">
       <div>
         <p class="eyebrow">Центр управления</p>
@@ -1560,175 +1560,428 @@
     <!-- Плагины: отключаемые блоки кокпита. Системные — из коробки; пользовательские —
          папки plugins/<id>/ (plugin.json + server.js), подхватываются на старте сервера. -->
     <section v-else-if="tab === 'plugins'">
-      <div class="plugin-overview">
-        <p class="section-note">
-          Здесь включаются самостоятельные возможности Cockpit. Пользовательский модуль —
-          папка <code>plugins/&lt;id&gt;/</code> с <code>plugin.json</code>; серверная часть
-          подключается после рестарта.
-        </p>
-        <div v-if="pluginsStore.loaded" class="plugin-stats" aria-label="Сводка по плагинам">
-          <span><b>{{ pluginStats.enabled }}</b><small>включено</small></span>
-          <span><b>{{ pluginStats.configurable }}</b><small>с настройками</small></span>
-          <span><b>{{ pluginStats.custom }}</b><small>пользовательских</small></span>
-        </div>
-      </div>
       <div v-if="!pluginsStore.loaded" class="plugin-loading muted">
         <UiSpinner decorative /> Загружаю плагины…
       </div>
-      <div v-else class="plugcards">
-        <!-- Плашка с раскрытыми настройками идёт во всю ширину: условие то же, что
-             у блока .plugset ниже, иначе класс и содержимое разъедутся. -->
-        <div v-for="p in pluginsStore.list" :key="p.id" class="card plugcard"
-             :class="{ wide: p.enabled && p.settings.length, off: !p.enabled }">
-          <div class="plughead">
-            <div class="plugidentity">
-              <span class="plugicon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                  <path :d="pluginIconPath(p)" />
-                </svg>
-              </span>
-              <div class="plugtitle">
-                <div class="plugname">
-                  <b>{{ p.name }}</b>
-                  <span class="plugver">v{{ p.version }}</span>
-                </div>
-                <div class="plugmeta">
-                  <span class="plugtag" :class="{ user: !p.system }">{{ p.system ? 'системный' : 'пользовательский' }}</span>
-                  <span v-if="p.nav?.label" class="plugplace">раздел «{{ p.nav.label }}»</span>
-                </div>
-              </div>
-            </div>
-            <div class="plug-switch" :class="{ on: p.enabled }">
-              <span>{{ p.enabled ? 'Включён' : 'Выключен' }}</span>
-              <UiSwitch
-                :model-value="p.enabled"
-                @update:model-value="(v) => pluginsStore.toggle(p.id, v)"
-              />
-            </div>
-          </div>
-          <p class="plugdesc">{{ p.description }}</p>
-          <p v-if="p.needsRestart" class="plugrestart">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" />
-            </svg>
-            Изменение серверной части применится после рестарта Cockpit.
-          </p>
-          <div v-if="p.enabled && p.settings.length" class="plugset">
-            <div class="plugset-head">
-              <div>
-                <span>Параметры</span>
-                <b>Настройки плагина</b>
-              </div>
-            </div>
-            <template v-for="s in p.settings" :key="s.key">
-              <div v-if="s.type === 'checkbox'" class="plugrow plugcheck">
-                <UiCheckbox v-model="p.values[s.key]">
-                  <span class="plugcheck-copy">
-                    <b>{{ s.label }}</b>
-                    <small v-if="s.hint">{{ s.hint }}</small>
-                  </span>
-                </UiCheckbox>
-              </div>
-              <template v-else>
-                <div v-if="s.type === 'model'" class="plug-model-grid"
-                     :class="{ solo: !(pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)) }">
-                  <!-- Модель берётся из общего реестра исполнителей — того же, что рисует
-                       селект в чате. Значение хранится парой «исполнитель + модель»:
-                       склеенной строкой её не разобрать, у локальных исполнителей id
-                       модели сам бывает со слэшами и двоеточиями (`hf.co/user/repo:tag`). -->
-                  <div class="plugrow wide">
-                    <label>{{ s.label }}</label>
-                    <UiSelect
-                      class="inp"
-                      data-context="settings-field"
-                      :model-value="pluginModelValue(p, s.key)"
-                      @change="setPluginModel(p, s.key, $event.target.value)"
-                    >
-                      <option value="">— не выбрана —</option>
-                      <!-- Выбор мог пропасть из каталога или перестать подходить задаче.
-                           Молча показать «не выбрана» нельзя: в настройках он остался,
-                           и сервер всё ещё пытается ходить именно этой моделью. -->
-                      <option
-                        v-if="pluginModelUnavailable(p, s)"
-                        :value="pluginModelValue(p, s.key)"
-                        disabled
-                      >
-                        {{ pluginModelUnavailable(p, s) }}
-                      </option>
-                      <optgroup v-for="g in pluginModelGroups(s)" :key="g.id"
-                                :label="g.name + (g.available ? '' : ' — недоступен')">
-                        <option v-for="m in g.models" :key="m.id" :value="`${g.id}:${m.id}`" :disabled="!g.available">
-                          {{ m.name }}
-                        </option>
-                      </optgroup>
-                    </UiSelect>
-                  </div>
-                  <!-- Усилие — свойство ЗАПУСКА, а не модели. Поэтому контрол остаётся
-                       отдельным, но визуально стоит с моделью в одной строке: это одна
-                       настройка запуска. На узком экране сетка складывается в колонку. -->
-                  <div v-if="pluginEffortLevels(p.values[s.key]).length || pluginEffortLost(p, s.key)"
-                       class="plugrow effort-row">
-                    <label>Усилие</label>
-                    <UiSelect
-                      class="inp"
-                      data-context="settings-field"
-                      :model-value="p.values[s.key]?.effort || ''"
-                      @change="setPluginEffort(p, s.key, $event.target.value)"
-                    >
-                      <option value="">по умолчанию исполнителя</option>
-                      <!-- Уровень мог исчезнуть у модели после обновления CLI. Показываем
-                           его прямо: сервер такой уровень снимет и пойдёт на умолчании,
-                           и человек должен видеть, что выбор больше не действует. -->
-                      <option v-if="pluginEffortLost(p, s.key)" :value="pluginEffortLost(p, s.key)">
-                        {{ pluginEffortLost(p, s.key) }} — нет у этой модели
-                      </option>
-                      <option v-for="e in pluginEffortLevels(p.values[s.key])" :key="e" :value="e">{{ e }}</option>
-                    </UiSelect>
-                  </div>
-                </div>
-                <div v-else class="plugrow">
-                  <label>{{ s.label }}</label>
-                  <UiNumberInput
-                    v-if="s.type === 'number'"
-                    v-model="p.values[s.key]"
-                    class="inp"
-                    data-context="settings-field"
-                    :min="s.min"
-                    :max="s.max"
-                    :step="s.step"
-                  />
-                  <UiSelect
-                    v-else-if="s.type === 'select'"
-                    v-model="p.values[s.key]"
-                    class="inp"
-                    data-context="settings-field"
-                  >
-                    <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
-                  </UiSelect>
-                  <UiInput
-                    v-else
-                    v-model="p.values[s.key]"
-                    class="inp"
-                    data-context="settings-field"
-                  />
-                </div>
-                <p v-if="s.hint" class="muted small plughint">{{ s.hint }}</p>
-              </template>
-            </template>
-            <UiButton
-              class="btn plugin-save"
-              :class="{ saved: plugMsg === p.id }"
-              data-role="settings-action"
-              @click="savePlugin(p)"
+      <template v-else>
+        <div
+          class="plugin-toolbar"
+          :class="{ 'mobile-detail-hidden': pluginMobileDetailOpen }"
+        >
+          <UiSearchInput
+            v-model="pluginQuery"
+            class="plugin-search"
+            aria-label="Поиск плагинов"
+            placeholder="Найти плагин"
+          />
+          <div class="plugin-filter-group">
+            <UiSegmentedControl
+              v-model="pluginFilter"
+              class="plugin-filter"
+              :options="pluginFilterOptions"
+              label="Состояние плагинов"
+            />
+            <UiToggleButton v-model="pluginConfigurableOnly">
+              С параметрами {{ pluginStats.configurable }}
+            </UiToggleButton>
+            <UiToggleButton
+              v-if="pluginStats.custom"
+              v-model="pluginCustomOnly"
+              aria-label="Только пользовательские плагины"
+              title="Пользовательские плагины"
             >
-              <svg v-if="plugMsg === p.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M5 12l4 4L19 6" />
-              </svg>
-              {{ plugMsg === p.id ? 'Сохранено' : 'Сохранить' }}
-            </UiButton>
+              Свои {{ pluginStats.custom }}
+            </UiToggleButton>
           </div>
         </div>
-      </div>
+
+        <div
+          v-if="visiblePlugins.length"
+          class="plugin-browser"
+          :class="{ 'mobile-detail-open': pluginMobileDetailOpen }"
+        >
+          <aside
+            ref="pluginCatalog"
+            class="card plugin-catalog"
+            aria-label="Каталог плагинов"
+          >
+            <div class="plugin-catalog-head">
+              <div>
+                <span>Каталог</span>
+                <b>{{ pluginCountLabel(visiblePlugins.length) }}</b>
+              </div>
+              <small v-if="pluginQuery">по запросу</small>
+            </div>
+            <div class="plugin-catalog-list">
+              <UiSelectableRow
+                v-for="p in visiblePlugins"
+                :key="p.id"
+                class="plugin-catalog-item"
+                :data-plugin-id="p.id"
+                :selected="selectedPluginId === p.id"
+                @select="selectPlugin(p.id)"
+              >
+                <span class="plugin-catalog-content">
+                  <span
+                    class="plugicon plugin-catalog-icon"
+                    :class="{ muted: !p.enabled }"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path :d="pluginIconPath(p)" />
+                    </svg>
+                  </span>
+                  <span class="plugin-catalog-copy">
+                    <span class="plugin-catalog-name">{{ p.name }}</span>
+                    <span class="plugin-catalog-meta">
+                      {{ p.settings.length ? settingCountLabel(p.settings.length) : 'без параметров' }}
+                    </span>
+                  </span>
+                  <span class="plugin-catalog-state" :class="{ on: p.enabled }">
+                    <i></i>{{ p.enabled ? 'вкл' : 'выкл' }}
+                  </span>
+                </span>
+              </UiSelectableRow>
+            </div>
+          </aside>
+
+          <div
+            v-if="selectedPlugin"
+            :key="selectedPlugin.id"
+            ref="pluginDetail"
+            class="card plugin-detail"
+            :class="{ off: !selectedPlugin.enabled }"
+            role="region"
+            :aria-label="`Плагин ${selectedPlugin.name}`"
+            tabindex="-1"
+          >
+            <UiButton
+              class="plugin-mobile-back"
+              variant="ghost"
+              @click="closeMobilePlugin"
+            >
+              ← Все плагины
+            </UiButton>
+            <div class="plughead">
+              <div class="plugidentity">
+                <span class="plugicon" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path :d="pluginIconPath(selectedPlugin)" />
+                  </svg>
+                </span>
+                <div class="plugtitle">
+                  <div class="plugname">
+                    <b>{{ selectedPlugin.name }}</b>
+                    <span class="plugver">v{{ selectedPlugin.version }}</span>
+                  </div>
+                  <div class="plugmeta">
+                    <span class="plugtag" :class="{ user: !selectedPlugin.system }">
+                      {{ selectedPlugin.system ? 'системный' : 'пользовательский' }}
+                    </span>
+                    <span v-if="selectedPlugin.nav?.label" class="plugplace">
+                      раздел «{{ selectedPlugin.nav.label }}»
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="plug-switch" :class="{ on: selectedPlugin.enabled }">
+                <span>{{ selectedPlugin.enabled ? 'Включён' : 'Выключен' }}</span>
+                <UiSwitch
+                  :model-value="selectedPlugin.enabled"
+                  :disabled="plugToggleId === selectedPlugin.id"
+                  :aria-label="`${selectedPlugin.enabled ? 'Выключить' : 'Включить'} ${selectedPlugin.name}`"
+                  @update:model-value="(v) => togglePlugin(selectedPlugin, v)"
+                />
+              </div>
+            </div>
+            <p class="plugdesc">{{ selectedPlugin.description }}</p>
+            <p v-if="selectedPlugin.needsRestart" class="plugrestart">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" />
+              </svg>
+              Изменение состояния серверной части применится после рестарта Cockpit.
+            </p>
+            <div v-if="!selectedPlugin.enabled" class="plugin-detail-state">
+              <span class="plugin-detail-state-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M8 11V8a4 4 0 0 1 8 0v3 M6 11h12v10H6z" />
+                </svg>
+              </span>
+              <span>
+                <b>Плагин выключен</b>
+                <small>
+                  {{ selectedPlugin.settings.length
+                    ? 'Функции неактивны, но параметры можно подготовить заранее.'
+                    : 'Включите его, чтобы использовать.' }}
+                </small>
+              </span>
+            </div>
+            <div
+              v-if="selectedPlugin.enabled && !selectedPlugin.settings.length"
+              class="plugin-detail-state ready"
+            >
+              <span class="plugin-detail-state-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M5 12l4 4L19 6" />
+                </svg>
+              </span>
+              <span>
+                <b>Готов к работе</b>
+                <small>У этого плагина нет отдельных параметров.</small>
+              </span>
+            </div>
+            <div v-if="selectedPlugin.settings.length" class="plugset">
+              <div class="plugset-head">
+                <div>
+                  <span>Параметры</span>
+                  <b>Настройки плагина</b>
+                </div>
+                <small>{{ settingCountLabel(selectedPlugin.settings.length) }}</small>
+              </div>
+              <template v-for="s in selectedPlugin.settings" :key="s.key">
+                <div v-if="s.type === 'checkbox'" class="plugrow plugcheck">
+                  <UiCheckbox v-model="selectedPlugin.values[s.key]">
+                    <span class="plugcheck-copy">
+                      <b>{{ s.label }}</b>
+                      <small v-if="s.hint">{{ s.hint }}</small>
+                    </span>
+                  </UiCheckbox>
+                </div>
+                <template v-else>
+                  <div
+                    v-if="s.type === 'model'"
+                    class="plug-model-grid"
+                    :class="{
+                      solo: !(pluginEffortLevels(selectedPlugin.values[s.key]).length
+                        || pluginEffortLost(selectedPlugin, s.key)),
+                    }"
+                  >
+                    <!-- Модель берётся из общего реестра исполнителей — того же, что
+                         рисует селект в чате. Значение хранится парой «исполнитель +
+                         модель»: у локальных исполнителей id сам бывает со слэшами и
+                         двоеточиями (`hf.co/user/repo:tag`). -->
+                    <div class="plugrow wide">
+                      <label :for="pluginSettingId(selectedPlugin, s)">{{ s.label }}</label>
+                      <UiSelect
+                        :id="pluginSettingId(selectedPlugin, s)"
+                        class="inp"
+                        data-context="settings-field"
+                        :aria-describedby="s.hint
+                          ? pluginSettingId(selectedPlugin, s, 'hint') : undefined"
+                        :model-value="pluginModelValue(selectedPlugin, s.key)"
+                        @change="setPluginModel(selectedPlugin, s.key, $event.target.value)"
+                      >
+                        <option value="">— не выбрана —</option>
+                        <!-- Выбор мог пропасть из каталога или перестать подходить задаче.
+                             Молча показать «не выбрана» нельзя: сервер всё ещё пытается
+                             ходить именно этой моделью. -->
+                        <option
+                          v-if="pluginModelUnavailable(selectedPlugin, s)"
+                          :value="pluginModelValue(selectedPlugin, s.key)"
+                          disabled
+                        >
+                          {{ pluginModelUnavailable(selectedPlugin, s) }}
+                        </option>
+                        <optgroup
+                          v-for="g in pluginModelGroups(s)"
+                          :key="g.id"
+                          :label="g.name + (g.available ? '' : ' — недоступен')"
+                        >
+                          <option
+                            v-for="m in g.models"
+                            :key="m.id"
+                            :value="`${g.id}:${m.id}`"
+                            :disabled="!g.available"
+                          >
+                            {{ m.name }}
+                          </option>
+                        </optgroup>
+                      </UiSelect>
+                    </div>
+                    <!-- Усилие — свойство запуска, а не модели. Поэтому контрол остаётся
+                         отдельным, но визуально стоит с моделью в одной строке. -->
+                    <div
+                      v-if="pluginEffortLevels(selectedPlugin.values[s.key]).length
+                        || pluginEffortLost(selectedPlugin, s.key)"
+                      class="plugrow effort-row"
+                    >
+                      <label :for="pluginSettingId(selectedPlugin, s, 'effort')">
+                        Усилие
+                      </label>
+                      <UiSelect
+                        :id="pluginSettingId(selectedPlugin, s, 'effort')"
+                        class="inp"
+                        data-context="settings-field"
+                        :model-value="selectedPlugin.values[s.key]?.effort || ''"
+                        @change="setPluginEffort(selectedPlugin, s.key, $event.target.value)"
+                      >
+                        <option value="">по умолчанию исполнителя</option>
+                        <!-- Устаревший уровень остаётся видимым: сервер снимет его и
+                             пойдёт с умолчанием, что нельзя скрывать от человека. -->
+                        <option
+                          v-if="pluginEffortLost(selectedPlugin, s.key)"
+                          :value="pluginEffortLost(selectedPlugin, s.key)"
+                        >
+                          {{ pluginEffortLost(selectedPlugin, s.key) }} — нет у этой модели
+                        </option>
+                        <option
+                          v-for="e in pluginEffortLevels(selectedPlugin.values[s.key])"
+                          :key="e"
+                          :value="e"
+                        >
+                          {{ e }}
+                        </option>
+                      </UiSelect>
+                    </div>
+                  </div>
+                  <div v-else class="plugrow">
+                    <label :for="pluginSettingId(selectedPlugin, s)">{{ s.label }}</label>
+                    <UiNumberInput
+                      v-if="s.type === 'number'"
+                      :id="pluginSettingId(selectedPlugin, s)"
+                      v-model="selectedPlugin.values[s.key]"
+                      class="inp"
+                      data-context="settings-field"
+                      :aria-describedby="s.hint
+                        ? pluginSettingId(selectedPlugin, s, 'hint') : undefined"
+                      :min="s.min"
+                      :max="s.max"
+                      :step="s.step"
+                    />
+                    <UiSelect
+                      v-else-if="s.type === 'select'"
+                      :id="pluginSettingId(selectedPlugin, s)"
+                      v-model="selectedPlugin.values[s.key]"
+                      class="inp"
+                      data-context="settings-field"
+                      :aria-describedby="s.hint
+                        ? pluginSettingId(selectedPlugin, s, 'hint') : undefined"
+                    >
+                      <option v-for="o in s.options" :key="o" :value="o">{{ o }}</option>
+                    </UiSelect>
+                    <UiInput
+                      v-else
+                      :id="pluginSettingId(selectedPlugin, s)"
+                      v-model="selectedPlugin.values[s.key]"
+                      class="inp"
+                      data-context="settings-field"
+                      :aria-describedby="s.hint
+                        ? pluginSettingId(selectedPlugin, s, 'hint') : undefined"
+                    />
+                  </div>
+                  <p
+                    v-if="s.hint"
+                    :id="pluginSettingId(selectedPlugin, s, 'hint')"
+                    class="muted small plughint"
+                  >
+                    {{ s.hint }}
+                  </p>
+                </template>
+              </template>
+              <UiButton
+                class="btn plugin-save"
+                :class="{ saved: plugMsg === selectedPlugin.id }"
+                data-role="settings-action"
+                :loading="plugSavingId === selectedPlugin.id"
+                loading-label="Сохраняю настройки"
+                @click="savePlugin(selectedPlugin)"
+              >
+                <svg
+                  v-if="plugMsg === selectedPlugin.id"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12l4 4L19 6" />
+                </svg>
+                {{ plugMsg === selectedPlugin.id ? 'Сохранено' : 'Сохранить' }}
+              </UiButton>
+              <span class="ui-visually-hidden" aria-live="polite">
+                {{ plugMsg === selectedPlugin.id ? 'Настройки плагина сохранены.' : '' }}
+              </span>
+              <p
+                v-if="plugError?.id === selectedPlugin.id"
+                class="msg err"
+                role="alert"
+              >
+                {{ plugError.text }}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div v-else class="card plugin-empty">
+          <span class="plugin-empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-4-4 M8.5 11h5" />
+            </svg>
+          </span>
+          <div>
+            <b>Плагины не найдены</b>
+            <p class="muted small">Измените запрос или сбросьте выбранный фильтр.</p>
+          </div>
+          <UiButton variant="ghost" data-role="settings-action" @click="clearPluginFilters">
+            Сбросить фильтры
+          </UiButton>
+        </div>
+
+        <div
+          class="plugin-guide"
+          :class="{ 'mobile-detail-hidden': pluginMobileDetailOpen }"
+        >
+          <UiDisclosureButton
+            v-model:open="pluginGuideOpen"
+            controls="plugin-user-guide"
+            density="compact"
+          >
+            Как добавить пользовательский плагин
+          </UiDisclosureButton>
+          <p v-if="pluginGuideOpen" id="plugin-user-guide" class="section-note">
+            Пользовательский модуль — папка <code>plugins/&lt;id&gt;/</code> с
+            <code>plugin.json</code>. Серверная часть подключается после рестарта Cockpit.
+          </p>
+        </div>
+      </template>
     </section>
 
     <!-- Сервер: демон systemd, перезапуск для применения нового кода (плагины, правки сервера) -->
@@ -2523,10 +2776,14 @@ import {
   UiNumberInput,
   UiRadio,
   UiRange,
+  UiSearchInput,
   UiSelect,
+  UiSegmentedControl,
+  UiSelectableRow,
   UiSpinner,
   UiSwitch,
   UiTextarea,
+  UiToggleButton,
   UiTooltip,
 } from '../ui';
 import { useSse } from '../composables/useSse.js';
@@ -4279,6 +4536,18 @@ function gwManualToTerminal(entry) {
 // ── Плагины ──
 const pluginsStore = usePluginsStore();
 const plugMsg = ref(null);
+const plugSavingId = ref(null);
+const plugToggleId = ref(null);
+const plugError = ref(null);
+const pluginQuery = ref('');
+const pluginFilter = ref('all');
+const pluginConfigurableOnly = ref(false);
+const pluginCustomOnly = ref(false);
+const selectedPluginId = ref('');
+const pluginDetail = ref(null);
+const pluginCatalog = ref(null);
+const pluginMobileDetailOpen = ref(false);
+const pluginGuideOpen = ref(false);
 const pluginStats = computed(() => {
   const list = Array.isArray(pluginsStore.list) ? pluginsStore.list : [];
   return {
@@ -4287,6 +4556,143 @@ const pluginStats = computed(() => {
     custom: list.filter((plugin) => !plugin.system).length,
   };
 });
+const pluginFilterOptions = computed(() => {
+  const total = Array.isArray(pluginsStore.list) ? pluginsStore.list.length : 0;
+
+  return [
+    { value: 'all', label: `Все ${total}` },
+    { value: 'enabled', label: `Включены ${pluginStats.value.enabled}` },
+    { value: 'disabled', label: `Выключены ${total - pluginStats.value.enabled}` },
+  ];
+});
+
+/** Поиск охватывает то, по чему человек узнаёт модуль, включая id из манифеста. */
+function pluginMatchesQuery(plugin, query) {
+  if (!query) return true;
+
+  const haystack = [
+    plugin.id,
+    plugin.name,
+    plugin.description,
+    plugin.nav?.label,
+    plugin.system ? 'системный' : 'пользовательский',
+  ].filter(Boolean).join(' ').toLocaleLowerCase('ru');
+
+  return haystack.includes(query);
+}
+
+/** Фильтр состояния применяется до выбора: правая панель никогда не спорит с каталогом. */
+function pluginMatchesFilter(plugin) {
+  const stateMatches = pluginFilter.value === 'enabled'
+    ? plugin.enabled === true
+    : pluginFilter.value === 'disabled'
+      ? plugin.enabled !== true
+      : true;
+
+  return stateMatches
+    && (!pluginConfigurableOnly.value || plugin.settings?.length > 0)
+    && (!pluginCustomOnly.value || !plugin.system);
+}
+
+const visiblePlugins = computed(() => {
+  const query = pluginQuery.value.trim().toLocaleLowerCase('ru');
+  const list = Array.isArray(pluginsStore.list) ? pluginsStore.list : [];
+
+  return list.filter((plugin) => pluginMatchesFilter(plugin)
+    && pluginMatchesQuery(plugin, query));
+});
+const selectedPlugin = computed(() => visiblePlugins.value
+  .find((plugin) => plugin.id === selectedPluginId.value) || null);
+
+// Первый подходящий модуль выбирается только когда прежний действительно исчез из выдачи.
+// Поэтому ввод поиска не сбрасывает осмысленный выбор, пока он всё ещё подходит запросу.
+watch(
+  visiblePlugins,
+  (plugins) => {
+    if (!plugins.some((plugin) => plugin.id === selectedPluginId.value)) {
+      selectedPluginId.value = plugins[0]?.id || '';
+      pluginMobileDetailOpen.value = false;
+    }
+  },
+  { immediate: true },
+);
+
+/** Русские формы счётчика нужны и каталогу, и заголовку панели параметров. */
+function countedLabel(value, one, few, many) {
+  const normalized = Math.abs(Number(value)) % 100;
+  const digit = normalized % 10;
+  let word = many;
+
+  if (normalized < 11 || normalized > 19) {
+    if (digit === 1) word = one;
+    else if (digit >= 2 && digit <= 4) word = few;
+  }
+
+  return `${value} ${word}`;
+}
+
+function pluginCountLabel(value) {
+  return countedLabel(value, 'плагин', 'плагина', 'плагинов');
+}
+
+function settingCountLabel(value) {
+  return countedLabel(value, 'параметр', 'параметра', 'параметров');
+}
+
+function clearPluginFilters() {
+  pluginQuery.value = '';
+  pluginFilter.value = 'all';
+  pluginConfigurableOnly.value = false;
+  pluginCustomOnly.value = false;
+}
+
+/**
+ * В узкой раскладке каталог и подробности стоят друг под другом. После явного выбора
+ * переносим человека к панели, но на широком экране оставляем фокус в каталоге.
+ */
+async function selectPlugin(id) {
+  selectedPluginId.value = id;
+  pluginMobileDetailOpen.value = true;
+  await nextTick();
+
+  if (typeof window.matchMedia !== 'function'
+      || !window.matchMedia('(max-width: 959px)').matches) return;
+
+  pluginDetail.value?.focus({ preventScroll: true });
+  pluginDetail.value?.scrollIntoView?.({ block: 'start' });
+}
+
+/** Возврат из мобильной detail-панели восстанавливает фокус на выбранной строке. */
+async function closeMobilePlugin() {
+  pluginMobileDetailOpen.value = false;
+  await nextTick();
+
+  const row = pluginCatalog.value
+    ?.querySelector(`[data-plugin-id="${selectedPluginId.value}"] button`);
+  row?.focus();
+}
+
+/** Смена состояния не должна размонтировать detail из-под сфокусированного тумблера. */
+async function togglePlugin(plugin, enabled) {
+  if (plugToggleId.value) return;
+
+  if ((pluginFilter.value === 'enabled' && !enabled)
+      || (pluginFilter.value === 'disabled' && enabled)) {
+    pluginFilter.value = 'all';
+  }
+
+  plugToggleId.value = plugin.id;
+
+  try {
+    await pluginsStore.toggle(plugin.id, enabled);
+  } finally {
+    plugToggleId.value = null;
+  }
+}
+
+function pluginSettingId(plugin, setting, suffix = 'value') {
+  return `plugin-${plugin.id}-${setting.key}-${suffix}`;
+}
 
 // Иконка относится к назначению плагина, а не к его происхождению. Встроенные
 // повторяют навигацию Cockpit; неизвестному пользовательскому модулю достаётся
@@ -4296,9 +4702,25 @@ function pluginIconPath(plugin) {
 }
 
 async function savePlugin(p) {
-  await pluginsStore.saveSettings(p.id, p.values);
-  plugMsg.value = p.id;
-  setTimeout(() => { if (plugMsg.value === p.id) plugMsg.value = null; }, 2000);
+  if (plugSavingId.value) return;
+
+  plugSavingId.value = p.id;
+  plugError.value = null;
+
+  try {
+    await pluginsStore.saveSettings(p.id, p.values);
+    plugMsg.value = p.id;
+    setTimeout(() => {
+      if (plugMsg.value === p.id) plugMsg.value = null;
+    }, 2000);
+  } catch (error) {
+    plugError.value = {
+      id: p.id,
+      text: error?.data?.message || error?.message || 'Не удалось сохранить настройки.',
+    };
+  } finally {
+    plugSavingId.value = null;
+  }
 }
 
 // Настройка типа `model` — тот же выбор, что в чате: исполнители группами, внутри их
@@ -4754,66 +5176,380 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
 .speech-benchmark { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding-top: 12px; border-top: 1px solid var(--line); }
 .speech-benchmark p { margin: 3px 0 0; }
-/* Плагины читаются в три слоя: краткая сводка, идентичность модуля и отдельная
-   внутренняя панель его параметров. Так длинная подсказка модели не смешивается
-   с описанием самого плагина и тумблером его жизненного цикла. */
-.plugin-overview { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 14px; }
-.plugin-overview .section-note { max-width: none; }
-.plugin-stats { display: flex; align-items: stretch; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
-.plugin-stats > span { min-width: 88px; display: grid; place-content: center; gap: 1px; padding: 9px 13px; border-left: 1px solid var(--line); text-align: center; }
-.plugin-stats > span:first-child { border-left: 0; }
-.plugin-stats b { font-size: 14px; font-weight: 670; }
-.plugin-stats small { color: var(--ink-mid); font-size: 9.5px; white-space: nowrap; }
-.plugin-loading { display: flex; align-items: center; gap: 9px; min-height: 88px; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
-
-/* dense обязателен вместе с широкими плашками: без него обычная плашка, попавшая
-   между двумя широкими, остаётся одна в ряду. Замер на 1620 px: ряд с «Кодом» был
-   занят на 24%, три четверти пустовали. */
-.plugcards {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  grid-auto-flow: dense; align-items: start; gap: 14px;
+/* Каталог держит десятки модулей в одной короткой колонке, а форма существует только
+   для выбранного. Порядок DOM совпадает с визуальным — клавиатура не скачет по dense-grid. */
+.plugin-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 88px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
 }
-.plugcard {
+.plugin-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.plugin-search {
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+.plugin-filter-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+}
+.plugin-filter {
+  flex: none;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.plugin-browser {
+  display: grid;
+  grid-template-columns: minmax(270px, .72fr) minmax(0, 1.55fr);
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+.plugin-catalog {
+  position: sticky;
+  top: 12px;
+  gap: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--ground));
+}
+.plugin-catalog-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 3px 3px;
+}
+.plugin-catalog-head > div {
+  display: grid;
+  gap: 2px;
+}
+.plugin-catalog-head span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 740;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.plugin-catalog-head b {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.plugin-catalog-head small {
+  color: var(--ink-mid);
+  font-size: 10px;
+}
+.plugin-catalog-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(66vh, 680px);
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
+}
+.plugin-catalog-content {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+}
+.plugin-catalog-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+.plugin-catalog-icon svg {
+  width: 17px;
+  height: 17px;
+}
+.plugin-catalog-icon.muted {
+  border-color: var(--line);
+  background: var(--ground);
+  color: var(--ink-mid);
+}
+.plugin-catalog-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.plugin-catalog-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 630;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-catalog-meta {
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-catalog-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.plugin-catalog-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-mid);
+}
+.plugin-catalog-state.on {
+  color: var(--good);
+}
+.plugin-catalog-state.on i {
+  background: var(--good);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--good) 45%, transparent);
+}
+.plugin-detail {
   position: relative;
   overflow: hidden;
   gap: 0;
   padding: 0;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--surface) 96%, var(--accent)) 0%, var(--surface) 42%);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--surface) 96%, var(--accent)) 0%,
+    var(--surface) 42%
+  );
+  scroll-margin-top: 12px;
 }
-.plugcard::before { content: ''; position: absolute; inset: 0 0 auto; height: 2px; background: linear-gradient(90deg, var(--accent), transparent 70%); opacity: .72; }
-.plugcard.off::before { background: var(--line-2); opacity: .45; }
-/* Плагин с раскрытыми настройками занимает ДВЕ колонки, а не весь ряд: он выше соседа
-   в разы, и выравнивание ряда по нему превращало бы соседнюю плашку в полупустую,
-   но на широком экране целый ряд под одну плашку — это та же пустота с другой стороны.
-   Текст и поля при этом держим в читаемой колонке, а не тянем на всю ширину. */
-.plugcard.wide { grid-column: span 2; }
-.plugcard.wide > p, .plugcard.wide .plugset > * { max-width: 760px; }
-.plugcard.wide .plugrow.wide .inp { max-width: 600px; }
-.plughead { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 19px 19px 0; }
-.plugidentity { min-width: 0; display: flex; align-items: center; gap: 12px; }
-.plugicon { flex: none; display: grid; place-items: center; width: 43px; height: 43px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 9%, var(--ground)); color: var(--accent); box-shadow: inset 0 1px 0 #ffffff08; }
+.plugin-detail:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 3px;
+}
+.plugin-detail::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent 70%);
+  opacity: .72;
+}
+.plugin-detail.off::before {
+  background: var(--line-2);
+  opacity: .45;
+}
+.plugin-mobile-back {
+  display: none;
+  align-self: flex-start;
+  margin: 12px 12px 0;
+}
+.plughead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 19px 19px 0;
+}
+.plugidentity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.plugicon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--ground));
+  color: var(--accent);
+  box-shadow: inset 0 1px 0 #ffffff08;
+}
 .plugicon svg { width: 21px; height: 21px; }
-.plugcard.off .plugicon { border-color: var(--line); background: var(--ground); color: var(--ink-mid); }
+.plugin-detail.off .plugicon {
+  border-color: var(--line);
+  background: var(--ground);
+  color: var(--ink-mid);
+}
 .plugtitle { min-width: 0; display: grid; gap: 5px; }
 .plugname { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
-.plugname b { overflow: hidden; font-size: 14px; font-weight: 670; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.plugname b {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 670;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .plugver { flex: none; color: var(--ink-mid); font-family: var(--mono); font-size: 10.5px; }
 .plugmeta { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.plugtag { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-mid); font-size: 9.5px; line-height: 1.3; }
-.plugtag.user { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--accent); }
-.plugplace { overflow: hidden; color: var(--ink-mid); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.plug-switch { flex: none; display: flex; align-items: center; gap: 7px; padding-top: 5px; color: var(--ink-mid); font-size: 10.5px; }
+.plugtag {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+.plugtag.user {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--accent);
+}
+.plugplace {
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plug-switch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 5px;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
 .plug-switch.on { color: var(--accent); }
 .plug-switch :deep(.tsw) { padding: 0; }
-.plugdesc { min-height: 42px; margin: 14px 19px 17px; color: var(--ink-mid); font-size: 12px; line-height: 1.5; }
-.plugcard.off .plugdesc { color: color-mix(in srgb, var(--ink-mid) 72%, transparent); }
-.plugrestart { display: flex; align-items: flex-start; gap: 7px; margin: -5px 19px 17px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--warn) 6%, var(--ground)); color: var(--ink-mid); font-size: 11px; line-height: 1.45; }
+.plugdesc {
+  margin: 14px 19px 17px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.plugin-detail-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 19px 18px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--ground);
+  color: var(--ink-mid);
+}
+.plugin-detail-state.ready {
+  border-color: color-mix(in srgb, var(--good) 30%, var(--line));
+}
+.plugin-detail-state-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.plugin-detail-state.ready .plugin-detail-state-icon {
+  background: color-mix(in srgb, var(--good) 10%, var(--surface));
+  color: var(--good);
+}
+.plugin-detail-state-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.plugin-detail-state > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+.plugin-detail-state b {
+  color: var(--ink);
+  font-size: 12px;
+}
+.plugin-detail-state small {
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.plugin-empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.plugin-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+}
+.plugin-empty-icon svg {
+  width: 19px;
+  height: 19px;
+}
+.plugin-empty p {
+  margin: 3px 0 0;
+}
+.plugin-guide {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding-top: 2px;
+}
+.plugin-guide .section-note {
+  max-width: 680px;
+  margin: 0;
+}
+.plugrestart {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: -5px 19px 17px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 6%, var(--ground));
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .plugrestart svg { flex: none; width: 14px; height: 14px; margin-top: 1px; color: var(--warn); }
 
-.plugset { display: flex; flex-direction: column; gap: 10px; padding: 15px 19px 19px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--ground) 74%, transparent); }
-.plugset-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 2px; }
+.plugset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 15px 19px 19px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ground) 74%, transparent);
+}
+.plugset-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 2px;
+}
 .plugset-head > div { display: grid; gap: 1px; }
-.plugset-head span { color: var(--accent); font-size: 9px; font-weight: 740; letter-spacing: .09em; text-transform: uppercase; }
+.plugset-head span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 740;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
 .plugset-head b { font-size: 12.5px; font-weight: 650; }
 .plugset-head small { color: var(--ink-mid); font-size: 9.5px; }
 .plugrow { min-width: 0; display: grid; gap: 6px; }
@@ -4823,7 +5559,12 @@ section { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
    с именем исполнителя в узкой колонке не помещаются. */
 .plugrow.wide { align-items: stretch; }
 .plugrow.wide label, .plugrow.wide .inp { min-width: 0; max-width: none; }
-.plug-model-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(220px, .85fr); align-items: end; gap: 12px; }
+.plug-model-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(220px, .85fr);
+  align-items: end;
+  gap: 12px;
+}
 .plug-model-grid.solo { grid-template-columns: minmax(0, 1fr); }
 .plug-model-grid .plugrow .inp { width: 100%; max-width: none; }
 .plughint { max-width: 720px; margin: -2px 0 1px; color: var(--ink-mid); font-size: 11px; line-height: 1.5; }
@@ -5276,17 +6017,31 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .settings-workspace, .settings-workspace.wide { max-width: 920px; margin: 16px auto 0; }
 }
 
+/* На средней ширине detail уже важнее одновременного показа двух тесных колонок. */
+@media (max-width: 959px) {
+  .plugin-toolbar { align-items: stretch; flex-direction: column; }
+  .plugin-search { max-width: none; }
+  .plugin-filter-group { justify-content: flex-start; flex-wrap: wrap; }
+  .plugin-browser { grid-template-columns: minmax(0, 1fr); }
+  .plugin-catalog { position: static; }
+  .plugin-catalog-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+  .plugin-mobile-back { display: inline-flex; }
+}
+
 @media (max-width: 760px) {
-  .plugin-overview { grid-template-columns: minmax(0, 1fr); }
-  .plugin-stats { width: 100%; }
-  .plugin-stats > span { flex: 1; min-width: 0; }
-  .plugcard.wide { grid-column: auto; }
   .plug-model-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Мобильный: одна колонка без горизонтального переполнения и с крупными действиями. */
 @media (max-width: 639px) {
   .settings { gap: 12px; }
+  .settings.settings-plugins .settings-hero { display: none; }
+  .settings.settings-plugins .section-intro p:last-child { display: none; }
   .settings-hero { min-height: 0; padding: 19px; border-radius: 14px; }
   .settings-hero h2 { font-size: 21px; }
   .settings-hero p:last-child { display: none; }
@@ -5308,11 +6063,21 @@ label:not([class^='ui-']):not([class*=' ui-']) {
   .speech-model-row { grid-template-columns: minmax(0, 1fr); }
   .speech-model-actions { justify-content: flex-start; }
   .speech-benchmark { align-items: stretch; flex-direction: column; }
-  .pvcards, .plugcards { grid-template-columns: minmax(0, 1fr); }
-  /* В одну колонку `span 2` СОЗДАЁТ вторую, неявную: замер на 600 px давал
-     плашку в 30 px рядом с растянутой соседкой и ряд на 105% ширины. */
-  .plugcard.wide { grid-column: auto; }
-  .plugcard { padding: 0; }
+  .pvcards { grid-template-columns: minmax(0, 1fr); }
+  .plugin-toolbar.mobile-detail-hidden,
+  .plugin-guide.mobile-detail-hidden { display: none; }
+  .plugin-filter-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+  .plugin-filter { grid-column: 1 / -1; overflow: visible; }
+  .plugin-catalog-list { grid-template-columns: minmax(0, 1fr); }
+  .plugin-browser.mobile-detail-open .plugin-catalog { display: none; }
+  .plugin-browser:not(.mobile-detail-open) .plugin-detail { display: none; }
+  .plugin-detail { padding: 0; scroll-margin-top: 84px; }
+  .plugin-empty { grid-template-columns: auto minmax(0, 1fr); }
+  .plugin-empty .ui-button { grid-column: 1 / -1; width: 100%; }
   .plughead { flex-wrap: wrap; gap: 12px; padding: 16px 16px 0; }
   .plugidentity { width: 100%; }
   .plug-switch { width: 100%; justify-content: space-between; padding-top: 0; }

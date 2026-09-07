@@ -1,0 +1,820 @@
+<template>
+  <div class="docker-containers">
+    <div class="docker-containers__filters">
+      <div class="docker-containers__search">
+        <UiSearchInput
+          v-model="query"
+          placeholder="Имя, образ, порт или проект"
+          aria-label="Поиск контейнера"
+        />
+      </div>
+      <UiCheckbox v-model="showStopped">Показывать незапущенные</UiCheckbox>
+    </div>
+
+    <div class="docker-containers__caption" aria-live="polite">
+      <span>Контейнеры: {{ visible.length }} из {{ store.containers.length }}</span>
+      <span>Сгруппированы по проектам</span>
+    </div>
+
+    <UiInlineMessage v-if="message" :tone="message.tone" class="docker-containers__message">
+      {{ message.text }}
+    </UiInlineMessage>
+
+    <div v-if="store.loading && !store.containers.length" class="docker-containers__empty">
+      <strong>Получаем контейнеры…</strong>
+      <p>Здесь появятся проекты и состояние их сервисов.</p>
+    </div>
+    <div v-else-if="!groups.length" class="docker-containers__empty">
+      <strong>{{ store.containers.length ? 'Контейнеры не найдены' : 'Контейнеров пока нет' }}</strong>
+      <p v-if="store.containers.length">Измените запрос или включите показ незапущенных контейнеров.</p>
+      <p v-else>Созданные на этом хосте контейнеры появятся здесь после обновления.</p>
+    </div>
+
+    <article v-for="group in groups" :key="group.key" class="docker-group">
+      <header class="docker-group__head">
+        <UiIconButton
+          role="embedded"
+          :label="`${collapsed.has(group.key) ? 'Развернуть' : 'Свернуть'} проект ${group.title}`"
+          :title="collapsed.has(group.key) ? 'Развернуть проект' : 'Свернуть проект'"
+          :aria-expanded="!collapsed.has(group.key)"
+          :aria-controls="groupId(group)"
+          @click="toggleGroup(group.key)"
+        >
+          <svg v-bind="ICON" aria-hidden="true">
+            <path :d="collapsed.has(group.key) ? 'M9 5l7 7-7 7' : 'M5 9l7 7 7-7'" />
+          </svg>
+        </UiIconButton>
+        <div class="docker-group__title">
+          <strong :title="group.title">{{ group.title }}</strong>
+          <small v-if="group.workingDir" :title="group.workingDir">{{ group.workingDir }}</small>
+          <small v-else>Отдельные контейнеры</small>
+        </div>
+        <span class="docker-group__count" :class="{ 'is-running': group.running > 0 }">
+          <i aria-hidden="true"></i>{{ group.running }} / {{ group.total }} работают
+        </span>
+        <div v-if="group.project" class="docker-group__actions">
+          <UiButton
+            :disabled="projectBusy(group)"
+            @click="runProject(group, group.running ? 'restart' : 'start')"
+          >
+            {{ group.running ? 'Перезапустить' : 'Поднять' }}
+          </UiButton>
+          <UiIconButton
+            v-if="group.running"
+            role="embedded"
+            :label="`Остановить проект ${group.title}`"
+            title="Остановить весь проект"
+            :disabled="projectBusy(group)"
+            @click="runProject(group, 'stop')"
+          >
+            <svg v-bind="ICON" aria-hidden="true"><path d="M6 6h12v12H6z" /></svg>
+          </UiIconButton>
+        </div>
+      </header>
+
+      <div v-show="!collapsed.has(group.key)" :id="groupId(group)">
+        <div class="docker-group__columns" aria-hidden="true">
+          <span>Контейнер / образ</span>
+          <span>Порты</span>
+          <span>CPU</span>
+          <span>Память</span>
+          <span>Действия</span>
+        </div>
+        <ul class="docker-list">
+          <li
+            v-for="container in group.items"
+            :key="container.id"
+            class="docker-row"
+            :class="`tone-${stateTone(container)}`"
+          >
+            <div class="docker-row__main">
+              <div class="docker-row__name">
+                <span class="docker-row__dot" aria-hidden="true"></span>
+                <strong :title="container.name">{{ container.compose?.service || container.name }}</strong>
+              </div>
+              <small class="docker-row__image" :title="container.image">{{ container.image }}</small>
+              <div class="docker-row__state">
+                <span :title="container.status">{{ stateLabel(container.state) }}</span>
+                <span v-if="container.health" class="docker-row__health" :data-health="container.health">
+                  {{ healthLabel(container.health) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="docker-row__ports">
+              <template
+                v-for="port in container.ports"
+                :key="`${port.published}-${port.target}-${port.protocol}`"
+              >
+                <a
+                  v-if="port.published"
+                  class="docker-port"
+                  :href="sandboxUrl(port.published) || undefined"
+                  target="_blank"
+                  rel="noopener"
+                  :title="`Открыть ${formatPort(port)}`"
+                >{{ formatPort(port) }}<span aria-hidden="true"> ↗</span></a>
+                <span v-else class="docker-port is-internal">{{ formatPort(port) }}</span>
+              </template>
+              <span v-if="!container.ports.length" class="docker-row__placeholder">Нет портов</span>
+            </div>
+
+            <div class="docker-row__cpu">
+              <span class="docker-row__metric-label">CPU</span>
+              {{ formatCpu(container) }}
+            </div>
+            <div class="docker-row__memory">
+              <span class="docker-row__metric-label">Память</span>
+              {{ formatMemory(container) }}
+            </div>
+
+            <div class="docker-row__actions">
+              <UiIconButton
+                role="embedded"
+                :label="`Логи ${container.name}`"
+                title="Логи"
+                @click="emit('logs', container)"
+              >
+                <svg v-bind="ICON" aria-hidden="true">
+                  <path d="M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5" />
+                </svg>
+              </UiIconButton>
+              <UiIconButton
+                role="embedded"
+                :label="`Терминал в контейнере ${container.name}`"
+                :title="allowExec ? 'Терминал' : 'Терминал выключен в настройках плагина'"
+                :disabled="container.state !== 'running' || !allowExec"
+                @click="emit('exec', container)"
+              >
+                <svg v-bind="ICON" aria-hidden="true">
+                  <path d="M4 5h16v14H4z M7 9l3 3-3 3 M13 15h4" />
+                </svg>
+              </UiIconButton>
+              <UiIconButton
+                role="embedded"
+                :label="`${container.state === 'running' ? 'Перезапустить' : 'Запустить'} ${container.name}`"
+                :title="container.state === 'running' ? 'Перезапустить' : 'Запустить'"
+                :disabled="store.isBusy(group.project)"
+                :loading="store.isBusy(container.id)"
+                @click="run(container, container.state === 'running' ? 'restart' : 'start')"
+              >
+                <svg v-bind="ICON" aria-hidden="true">
+                  <path
+                    :d="container.state === 'running'
+                      ? 'M21 12a9 9 0 1 1-2.6-6.4 M21 4v5h-5'
+                      : 'M8 5l11 7-11 7z'"
+                  />
+                </svg>
+              </UiIconButton>
+              <UiIconButton
+                v-if="container.state === 'running'"
+                role="embedded"
+                :label="`Остановить ${container.name}`"
+                title="Остановить"
+                :disabled="store.isBusy(group.project)"
+                :loading="store.isBusy(container.id)"
+                @click="run(container, 'stop')"
+              >
+                <svg v-bind="ICON" aria-hidden="true"><path d="M7 7h10v10H7z" /></svg>
+              </UiIconButton>
+              <UiIconButton
+                role="embedded"
+                :label="`Удалить контейнер ${container.name}`"
+                title="Удалить контейнер"
+                tone="danger"
+                :disabled="store.isBusy(group.project)"
+                :loading="store.isBusy(container.id)"
+                @click="removeOne(container)"
+              >
+                <svg v-bind="ICON" aria-hidden="true">
+                  <path d="M5 7h14 M9 7V5h6v2 M7 7l1 13h8l1-13 M10 11v6 M14 11v6" />
+                </svg>
+              </UiIconButton>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </article>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref } from 'vue';
+import type { SVGAttributes } from 'vue';
+
+import type {
+  DockerActionResult,
+  DockerContainer,
+  DockerContainerAction,
+  DockerProjectAction,
+  DockerProjectActionResponse,
+  DockerStatsMap,
+} from '../../../../shared/dockerContracts';
+
+import { sandboxUrl } from '../../shared/sandbox.js';
+import { useDockerStore } from '../../stores/docker';
+import { usePluginsStore } from '../../stores/plugins.js';
+import { UiButton, UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog } from '../../ui';
+import { formatPort, formatSize, stateLabel, stateTone } from './format';
+import { dockerSettings } from './settings';
+
+interface DockerFeedback {
+  tone: 'success' | 'danger';
+  text: string;
+}
+
+interface ContainerGroup {
+  key: string;
+  project: string;
+  title: string;
+  workingDir: string;
+  items: DockerContainer[];
+  total: number;
+  running: number;
+}
+
+const props = withDefaults(defineProps<{ stats?: DockerStatsMap }>(), {
+  stats: () => ({}),
+});
+const emit = defineEmits<{
+  logs: [container: DockerContainer];
+  exec: [container: DockerContainer];
+}>();
+
+const ICON: SVGAttributes = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  'stroke-width': '1.8',
+  'stroke-linecap': 'round',
+  'stroke-linejoin': 'round',
+};
+const HEALTH_LABELS: Record<string, string> = {
+  healthy: 'исправен',
+  unhealthy: 'ошибка проверки',
+  starting: 'проверяется',
+};
+
+const store = useDockerStore();
+const plugins = usePluginsStore();
+const query = ref('');
+const showStopped = ref(false);
+const collapsed = ref(new Set<string>());
+const message = ref<DockerFeedback | null>(null);
+let messageTimer: ReturnType<typeof setTimeout> | undefined;
+
+const allowExec = computed(() => dockerSettings(plugins.byId('docker')).allowExec !== false);
+const statsOf = (container: DockerContainer) => container.state === 'running'
+  ? props.stats[container.id] || null
+  : null;
+const healthLabel = (health: DockerContainer['health']) => HEALTH_LABELS[health] || health;
+const groupId = (group: ContainerGroup) => `docker-project-${encodeURIComponent(group.key)}`;
+
+function formatCpu(container: DockerContainer): string {
+  const stats = statsOf(container);
+
+  return stats ? `${Math.round(stats.cpuPercent)}%` : '—';
+}
+
+function formatMemory(container: DockerContainer): string {
+  const stats = statsOf(container);
+
+  return stats ? formatSize(stats.memoryUsed) : '—';
+}
+
+/**
+ * Поиск учитывает опубликованный и внутренний порт, сервис и compose-проект:
+ * человек может помнить адрес стенда, не зная имени контейнера.
+ */
+function matches(container: DockerContainer): boolean {
+  const needle = query.value.trim().toLowerCase();
+
+  if (!needle) {
+    return true;
+  }
+
+  const haystack = [
+    container.name,
+    container.image,
+    container.compose?.project,
+    container.compose?.service,
+    ...container.ports.map((port) => `${port.published} ${port.target}`),
+  ].join(' ').toLowerCase();
+
+  return haystack.includes(needle);
+}
+
+const visible = computed(() => store.containers.filter((container) => {
+  if (!showStopped.value && container.state !== 'running') {
+    return false;
+  }
+
+  return matches(container);
+}));
+
+// Счётчики и действия относятся ко всему проекту, даже если поиск скрыл его часть.
+const groups = computed(() => {
+  const byProject = new Map<string, ContainerGroup>();
+  const visibleIds = new Set(visible.value.map((container) => container.id));
+
+  for (const container of store.containers) {
+    const project = container.compose?.project || '';
+    const key = project ? `project:${project}` : 'loose';
+    const group = byProject.get(key) || {
+      key,
+      project,
+      title: project || 'Без проекта',
+      workingDir: container.compose?.workingDir || '',
+      items: [],
+      total: 0,
+      running: 0,
+    };
+
+    group.total += 1;
+
+    if (container.state === 'running') {
+      group.running += 1;
+    }
+
+    if (visibleIds.has(container.id)) {
+      group.items.push(container);
+    }
+
+    byProject.set(key, group);
+  }
+
+  return [...byProject.values()]
+    .filter((group) => group.items.length)
+    .sort((left, right) => Number(Boolean(right.project)) - Number(Boolean(left.project))
+      || right.running - left.running
+      || left.title.localeCompare(right.title, 'ru'));
+});
+
+function toggleGroup(key: string): void {
+  if (collapsed.value.has(key)) {
+    collapsed.value.delete(key);
+  } else {
+    collapsed.value.add(key);
+  }
+}
+
+/**
+ * Новое сообщение заменяет предыдущее вместе с таймером, чтобы старый ответ
+ * не скрыл результат следующего действия.
+ */
+function report(result: DockerActionResult | DockerProjectActionResponse, okText: string): void {
+  clearTimeout(messageTimer);
+
+  const failure = 'message' in result ? result.message : '';
+
+  message.value = result.ok
+    ? { tone: 'success', text: okText }
+    : { tone: 'danger', text: failure || 'Демон отклонил действие' };
+  messageTimer = setTimeout(() => {
+    message.value = null;
+  }, 6000);
+}
+
+async function run(container: DockerContainer, action: DockerContainerAction): Promise<void> {
+  const result = await store.containerAction(container.id, action);
+
+  report(result, `${container.name}: готово`);
+}
+
+/**
+ * Действие над проектом не пересекается с уже запущенной мутацией его контейнера,
+ * даже когда этот контейнер скрыт поиском или фильтром состояния.
+ */
+function projectBusy(group: ContainerGroup): boolean {
+  return store.isBusy(group.project) || store.containers.some((container) =>
+    container.compose?.project === group.project && store.isBusy(container.id));
+}
+
+/**
+ * Остановка затрагивает весь compose-проект. В диалоге показываем полное число
+ * контейнеров независимо от поискового запроса и фильтра состояния.
+ */
+async function runProject(group: ContainerGroup, action: DockerProjectAction): Promise<void> {
+  const labels = {
+    start: 'поднят',
+    stop: 'остановлен',
+    restart: 'перезапущен',
+  };
+
+  if (projectBusy(group)) {
+    return;
+  }
+
+  if (action === 'stop' && !await confirmDialog(
+    `Остановить весь проект «${group.project}» — ${group.total} контейнер(ов)?`,
+    {
+      title: 'Остановка проекта',
+      okText: 'Остановить',
+      danger: true,
+    },
+  )) {
+    return;
+  }
+
+  if (projectBusy(group)) {
+    return;
+  }
+
+  const result = await store.projectAction(group.project, action);
+
+  report(result, `${group.project} ${labels[action]}`);
+}
+
+/**
+ * Удаление работающего контейнера требует принудительной остановки;
+ * предупреждаем об этом до отправки запроса демону.
+ */
+async function removeOne(container: DockerContainer): Promise<void> {
+  const running = container.state === 'running';
+  const accepted = await confirmDialog(
+    `Удалить контейнер «${container.name}»?`
+      + (running ? '\n\nОн сейчас работает и будет остановлен принудительно.' : ''),
+    {
+      title: 'Удаление контейнера',
+      okText: 'Удалить',
+      danger: true,
+    },
+  );
+
+  if (!accepted) {
+    return;
+  }
+
+  const result = await store.removeContainer(container.id, { force: running });
+
+  report(result, `${container.name} удалён`);
+}
+
+onBeforeUnmount(() => {
+  clearTimeout(messageTimer);
+});
+</script>
+
+<style scoped>
+.docker-containers {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.docker-containers__filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.docker-containers__search {
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.docker-containers__caption {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.docker-containers__empty {
+  padding: 40px 20px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.docker-containers__empty strong {
+  font-size: 14px;
+}
+
+.docker-containers__empty p {
+  margin: 8px 0 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+
+.docker-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.docker-group__head {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  gap: 10px;
+  background: var(--surface-2);
+}
+
+.docker-group__title {
+  min-width: 0;
+  flex: 1;
+}
+
+.docker-group__title strong {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-group__title small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-group__count {
+  display: flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  gap: 6px;
+}
+
+.docker-group__count i,
+.docker-row__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--idle);
+}
+
+.docker-group__count.is-running i,
+.tone-good .docker-row__dot {
+  background: var(--good);
+}
+
+.docker-group__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 10px;
+}
+
+.docker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.docker-group__columns,
+.docker-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(170px, 0.8fr) 54px 84px 158px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.docker-group__columns {
+  padding-block: 8px;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.docker-group__columns > :nth-child(3),
+.docker-group__columns > :nth-child(4) {
+  text-align: right;
+}
+
+.docker-group__columns > :last-child {
+  text-align: center;
+}
+
+.docker-row:hover {
+  background: color-mix(in srgb, var(--surface-2) 40%, transparent);
+}
+
+.tone-warn .docker-row__dot {
+  background: var(--warn);
+}
+
+.tone-bad .docker-row__dot {
+  background: var(--bad);
+}
+
+.docker-row__main {
+  min-width: 0;
+}
+
+.docker-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.docker-row__name strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-row__image {
+  display: block;
+  overflow: hidden;
+  margin: 4px 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-row__state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.docker-row__health {
+  color: var(--warn);
+}
+
+.docker-row__health[data-health='healthy'] {
+  color: var(--good);
+}
+
+.docker-row__health[data-health='unhealthy'] {
+  color: var(--bad);
+}
+
+.docker-row__ports {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  gap: 6px;
+}
+
+.docker-port {
+  padding: 3px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.docker-port:hover {
+  border-color: var(--accent);
+}
+
+.docker-port.is-internal {
+  border-color: var(--line);
+  color: var(--ink-mid);
+}
+
+.docker-row__placeholder {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.docker-row__cpu,
+.docker-row__memory {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.docker-row__metric-label {
+  display: none;
+  color: var(--ink-mid);
+  font-family: var(--sans);
+  font-size: 11px;
+}
+
+.docker-row__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.docker-containers__message {
+  margin: 0;
+}
+
+@container docker-panel (max-width: 960px) {
+  .docker-group__columns {
+    display: none;
+  }
+
+  .docker-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px 16px;
+  }
+
+  .docker-row__main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .docker-row__ports {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .docker-row__cpu {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .docker-row__memory {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .docker-row__actions {
+    grid-column: 2 / 4;
+    grid-row: 2;
+  }
+
+  .docker-row__metric-label {
+    display: block;
+    margin-bottom: 4px;
+  }
+}
+
+@container docker-panel (max-width: 600px) {
+  .docker-group__head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .docker-group__title {
+    flex-basis: calc(100% - 44px);
+  }
+
+  .docker-group__count {
+    flex: 1;
+  }
+
+  .docker-group__actions {
+    margin-left: 0;
+  }
+
+  .docker-row {
+    grid-template-columns: 1fr 1fr;
+    padding: 14px 12px;
+    gap: 12px;
+  }
+
+  .docker-row__main {
+    grid-column: 1 / -1;
+  }
+
+  .docker-row__ports {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .docker-row__cpu,
+  .docker-row__memory {
+    grid-row: 3;
+    text-align: left;
+  }
+
+  .docker-row__cpu {
+    grid-column: 1;
+  }
+
+  .docker-row__memory {
+    grid-column: 2;
+  }
+
+  .docker-row__actions {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+}
+</style>

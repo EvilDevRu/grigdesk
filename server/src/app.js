@@ -69,6 +69,7 @@ import { createDbSessionManager } from './lib/db/session-manager.js';
 import { createDbAudit } from './lib/db/audit.js';
 import { cancelDbQuery, createDbBroker } from './lib/db/broker.js';
 import { normalizeDbResult } from './lib/db/result.js';
+import { createDockerService } from './lib/docker/service.ts';
 import { createKnowledgeClient } from './lib/search/client.js';
 import { createKnowledgeBroker } from './lib/search/broker.js';
 import { createKnowledgeTransfer } from './lib/search/transfer.js';
@@ -107,6 +108,7 @@ import inboxModule from './modules/inbox/index.js';
 import documentsModule from './modules/documents/index.js';
 import sshModule from './modules/ssh/index.js';
 import dbModule from './modules/db/index.js';
+import dockerModule from './modules/docker/index.ts';
 import knowledgeModule from './modules/knowledge/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 import { AnalysisArbiter } from './lib/analysis/arbiter.js';
@@ -354,6 +356,20 @@ async function build() {
       autoReadPerMinute: Math.max(1, Number(value.autoReadPerMinute) || 10),
     };
   };
+  // Докер читает свои настройки при каждом обращении: предохранители (тома, массовая
+  // очистка образов) должны действовать сразу после переключения галки, без рестарта.
+  const dockerService = createDockerService({
+    settings: () => {
+      const value = fastify.pluginSettings?.('docker') || {};
+      return {
+        allowVolumeRemoval: value.allowVolumeRemoval === true,
+        allowImagePruneAll: value.allowImagePruneAll === true,
+        allowExec: value.allowExec !== false,
+        logTailLines: Math.max(50, Number(value.logTailLines) || 500),
+      };
+    },
+  });
+
   const dbQueries = new Map();
 
   function publicDbQuery(query) {
@@ -772,6 +788,9 @@ async function build() {
       if (id === 'db' && !enabled) {
         await dbService.disable();
       }
+      if (id === 'docker' && !enabled) {
+        await dockerService.disable();
+      }
       if (id === 'analysis') {
         analyzer.pluginToggled(enabled);
       }
@@ -809,6 +828,7 @@ async function build() {
   await fastify.register(projectsModule, { config, prefs });
   await fastify.register(sshModule, { service: sshService });
   await fastify.register(dbModule, { service: dbService });
+  await fastify.register(dockerModule, { service: dockerService });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
     taskExists: companionTaskExists,

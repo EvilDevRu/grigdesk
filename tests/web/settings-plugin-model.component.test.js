@@ -390,19 +390,32 @@ test('уровень, пропавший у модели, показан пом�
     'исчезнувший уровень обязан остаться в списке с оговоркой');
 });
 
-test('широкая плашка занимает две колонки, а в одну колонку — ни одной лишней', async () => {
-  // happy-dom раскладку не считает вовсе, поэтому правило стережём чтением стиля;
-  // сама геометрия замерена в headless Chrome на 1620/1200/860/600 px.
+test('каталог и detail складываются в одну колонку без dense-переупорядочивания', async () => {
+  // happy-dom раскладку не считает вовсе, поэтому адаптивный контракт стережём
+  // чтением стиля, а поведение выбора — отдельным компонентным тестом.
   const source = await readFile(VIEW_PATH, 'utf8');
   const style = source.slice(source.indexOf('<style'));
 
-  assert.match(style, /\.plugcards \{[^}]*grid-auto-flow: dense/s,
-    'без dense обычная плашка между двумя широкими остаётся одна в ряду (замер: 24% ряда)');
-  assert.match(style, /\.plugcard\.wide \{ grid-column: span 2; \}/,
-    'целый ряд под одну плашку — та же пустота, что и полупустой сосед');
-  const narrow = style.slice(style.indexOf('@media (max-width: 639px)'));
-  assert.match(narrow, /\.plugcard\.wide \{ grid-column: auto; \}/,
-    'в одну колонку `span 2` создаёт вторую, неявную: замер на 600 px давал плашку в 30 px');
+  assert.match(style, /\.plugin-browser \{[^}]*grid-template-columns:[^;}]*270px[^;}]*1\.55fr/s,
+    'на широком экране каталог и detail должны занимать самостоятельные колонки');
+  assert.doesNotMatch(style, /grid-auto-flow:\s*dense/,
+    'dense меняет визуальный порядок относительно DOM и клавиатурного фокуса');
+  assert.match(style, /\.plugin-catalog-list \{[^}]*max-height:[^;}]*66vh[^}]*overflow-y:\s*auto/s,
+    'длинный desktop-каталог должен прокручиваться независимо от формы');
+
+  const tablet = style.slice(style.indexOf('@media (max-width: 959px)'));
+  assert.match(tablet, /\.plugin-browser \{ grid-template-columns: minmax\(0, 1fr\); \}/,
+    'на планшете detail не должен сжиматься рядом с каталогом');
+  assert.match(tablet, /\.plugin-catalog-list \{[^}]*max-height:\s*none[^}]*overflow-y:\s*visible/s,
+    'в одноколоночной раскладке не нужен вложенный вертикальный скролл');
+  assert.match(tablet, /\.plugin-mobile-back \{ display: inline-flex; \}/,
+    'после перехода к detail на планшете нужен короткий путь обратно к каталогу');
+
+  const mobile = style.slice(style.indexOf('@media (max-width: 639px)'));
+  assert.match(mobile, /\.plugin-browser\.mobile-detail-open \.plugin-catalog \{ display: none; \}/,
+    'на телефоне выбранный detail заменяет длинный каталог');
+  assert.match(mobile, /\.plugin-browser:not\(\.mobile-detail-open\) \.plugin-detail \{ display: none; \}/,
+    'до выбора телефон должен показывать каталог, а не случайный первый detail');
   assert.match(style, /\.plugset > \.btn \{ align-self: flex-start; \}/,
-    'кнопка обязана быть по содержимому: общий max-width растягивал её на 760 px');
+    'кнопка сохранения обязана оставаться по содержимому');
 });

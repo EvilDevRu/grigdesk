@@ -86,8 +86,10 @@ function onKeydown(event: KeyboardEvent): void {
   event.preventDefault();
   tabs[index]?.element?.focus();
 
-  if (props.activation === 'automatic' && tabs[index]) {
-    model.value = tabs[index].value;
+  const next = tabs[index];
+
+  if (props.activation === 'automatic' && next) {
+    model.value = next.value;
   }
 }
 </script>
