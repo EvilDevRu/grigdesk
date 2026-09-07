@@ -8,8 +8,9 @@
   "scripts": {
     "start": "node --experimental-strip-types src/app.js",
     "dev": "node --experimental-strip-types --watch src/app.js",
-    "test": "npm run typecheck:docker && node --experimental-strip-types --test ../tests/server/*.test.js",
-    "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit"
+    "test": "npm run typecheck:docker && npm run typecheck:code && node --experimental-strip-types --test ../tests/server/*.test.js",
+    "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
+    "typecheck:code": "tsc -p tsconfig.code.json --noEmit"
   },
   "engines": {
     "node": ">=22.13.0"

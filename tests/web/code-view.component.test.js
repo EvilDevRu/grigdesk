@@ -24,6 +24,17 @@ function worktree(path, name, branch, task = '') {
   return { path, main: false, name, task, branch };
 }
 
+/**
+ * Сводка проектов передаёт описания репозиториев, как настоящий /api/projects.
+ * Короткие пути фикстуры преобразуются до сетевого вызова, без обхода декодера.
+ */
+function projectFixture(id, directories) {
+  return {
+    id,
+    repos: directories.map((dir) => ({ key: dir.split('/').pop(), dir })),
+  };
+}
+
 function query(url) {
   return new URL(url, 'http://cockpit.test').searchParams;
 }
@@ -31,8 +42,8 @@ function query(url) {
 async function compileCodeView() {
   return compileVue(VIEW_PATH, {
     stubs: {
-      '../../shared/api-client.js': 'export const api = globalThis.__codeViewApi;',
-      '../../shared/monaco.js': `
+      './api-client.js': 'export const api = globalThis.__codeViewApi;',
+      '../../shared/monaco': `
         export const monaco = globalThis.__codeViewMonaco;
         export const langOf = (path) => path.split('.').pop() || 'plaintext';
         export const READONLY_OPTS = {};
@@ -185,7 +196,7 @@ test('холодный запуск Code сразу занимает финал�
   assert.equal(loading.find('.editorwrap').exists(), true);
   assert.equal(wrapper.find('.empty').exists(), false);
 
-  projectsRequest.resolve({ projects: [{ id: 'demo', repos: ['/demo'] }] });
+  projectsRequest.resolve({ projects: [projectFixture('demo', ['/demo'])] });
   await settle(flushPromises);
   assert.equal(wrapper.find('.code-loading').exists(), false);
   assert.equal(wrapper.get('.lay').classes().includes('compact'), true);
@@ -194,8 +205,8 @@ test('холодный запуск Code сразу занимает финал�
 test('CodeView показывает два подписанных уровня, хранит контекст по проекту и сообщает о недоступном repo', async (t) => {
   const calls = [];
   const projects = [
-    { id: 'cockpit', repos: ['/engine', '/web', '/broken'] },
-    { id: 'solo', repos: ['/solo'] },
+    projectFixture('cockpit', ['/engine', '/web', '/broken']),
+    projectFixture('solo', ['/solo']),
   ];
   const repos = {
     cockpit: [
@@ -292,19 +303,67 @@ test('CodeView показывает два подписанных уровня, 
 
 test('Git по умолчанию показан деревом, доступно переключается в список и сохраняет выбранный diff', async (t) => {
   const git = {
+    stat: '',
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
     branch: 'main',
     files: [
-      { path: 'src/deep/b.js', status: 'M', add: 2, del: 1, oldContent: 'old b', newContent: 'new b' },
-      { path: 'src/a.js', status: 'A', add: 4, del: 0, oldContent: '', newContent: 'a' },
-      { path: 'root.md', status: 'D', add: 0, del: 3, oldContent: 'root', newContent: '' },
-      { path: 'foo', status: 'D', add: 0, del: 1, oldContent: 'file', newContent: '' },
-      { path: 'foo/bar.js', status: 'A', add: 1, del: 0, oldContent: '', newContent: 'bar' },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'src/deep/b.js',
+        status: 'M',
+        add: 2,
+        del: 1,
+        oldContent: 'old b',
+        newContent: 'new b'
+      },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'src/a.js',
+        status: 'A',
+        add: 4,
+        del: 0,
+        oldContent: '',
+        newContent: 'a'
+      },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'root.md',
+        status: 'D',
+        add: 0,
+        del: 3,
+        oldContent: 'root',
+        newContent: ''
+      },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'foo',
+        status: 'D',
+        add: 0,
+        del: 1,
+        oldContent: 'file',
+        newContent: ''
+      },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'foo/bar.js',
+        status: 'A',
+        add: 1,
+        del: 0,
+        oldContent: '',
+        newContent: 'bar'
+      },
     ],
     log: [],
   };
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -381,7 +440,7 @@ test('поздние ls/file не перезаписывают новый выб
   let bRootCalls = 0;
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'race', repos: ['/race'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('race', ['/race'])] };
       if (url === '/api/code/race/repos') {
         return {
           repos: [{
@@ -459,14 +518,26 @@ test('поздние repos и git не возвращают интерфейс �
     trees: [mainTree('/a/main'), worktree('/a/task', 'task', 'task-7', 't7')],
   }];
   const gitPayload = (path) => ({
+    stat: '',
+    staged: [],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
     branch: 'main',
-    files: [{ path, status: 'M', add: 1, del: 0, oldContent: '', newContent: path }],
+    files: [{
+      binary: false,
+      tooBig: false,
+      path,
+      status: 'M',
+      add: 1,
+      del: 0,
+      oldContent: '',
+      newContent: path
+    }],
     log: [],
   });
   const api = {
     async get(url) {
       if (url === '/api/projects') {
-        return { projects: [{ id: 'a', repos: ['/a'] }, { id: 'b', repos: ['/b'] }] };
+        return { projects: [projectFixture('a', ['/a']), projectFixture('b', ['/b'])] };
       }
       if (url === '/api/code/a/repos') {
         aRepoCalls += 1;
@@ -529,7 +600,7 @@ test('повторное открытие обновляет Code без пус�
   let reposCalls = 0;
   let rootCalls = 0;
   let fileCalls = 0;
-  const projectPayload = { projects: [{ id: 'demo', repos: ['/demo'] }] };
+  const projectPayload = { projects: [projectFixture('demo', ['/demo'])] };
   const reposPayload = {
     repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }],
   };
@@ -615,7 +686,7 @@ test('интерактивное чтение того же файла побе�
   let fileCalls = 0;
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -663,7 +734,7 @@ test('временная ошибка фонового чтения сохран
   let fileCalls = 0;
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -704,8 +775,8 @@ test('ответ revalidation не откатывает проект, выбра
   const nextProjects = deferred();
   let projectCalls = 0;
   const projects = [
-    { id: 'a', repos: ['/a'] },
-    { id: 'b', repos: ['/b'] },
+    projectFixture('a', ['/a']),
+    projectFixture('b', ['/b']),
   ];
   const api = {
     async get(url) {
@@ -746,7 +817,7 @@ test('фоновое обновление дерева не отменяет с�
   let nestedCalls = 0;
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -787,7 +858,7 @@ test('фоновое обновление дерева не отменяет с�
 test('compact Code оставляет дерево слева и хранит ширину вертикального разделителя', async (t) => {
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -826,7 +897,7 @@ test('картинка показывается предпросмотром, а
   const api = {
     url: (path) => `http://brain${path}`,
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -868,7 +939,7 @@ test('intent open-file открывает точную рабочую копию
   const api = {
     url: (path) => path,
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return {
           repos: [{
@@ -916,19 +987,51 @@ test('intent open-file открывает точную рабочую копию
 
 test('Git показывает индекс и рабочее дерево разными группами с независимыми дифами', async (t) => {
   const git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
     branch: 'main',
     staged: [
-      { path: 'src/a.js', status: 'M', add: 1, del: 0, group: 'staged', oldContent: 'head a', newContent: 'index a' },
-      { path: 'only-staged.js', status: 'M', add: 2, del: 2, group: 'staged', oldContent: 'head', newContent: 'index' },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'src/a.js',
+        status: 'M',
+        add: 1,
+        del: 0,
+        group: 'staged',
+        oldContent: 'head a',
+        newContent: 'index a'
+      },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'only-staged.js',
+        status: 'M',
+        add: 2,
+        del: 2,
+        group: 'staged',
+        oldContent: 'head',
+        newContent: 'index'
+      },
     ],
     files: [
-      { path: 'src/a.js', status: 'M', add: 3, del: 0, group: 'work', oldContent: 'index a', newContent: 'work a' },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'src/a.js',
+        status: 'M',
+        add: 3,
+        del: 0,
+        group: 'work',
+        oldContent: 'index a',
+        newContent: 'work a'
+      },
     ],
     log: [],
   };
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -982,6 +1085,8 @@ test('Git показывает индекс и рабочее дерево ра�
 
 test('Git-кнопки индексируют, генерируют сообщение, коммитят и пушат точный контекст', async (t) => {
   const file = {
+    binary: false,
+    tooBig: false,
     path: 'src/a.js',
     status: 'M',
     add: 1,
@@ -990,6 +1095,7 @@ test('Git-кнопки индексируют, генерируют сообще
     newContent: 'new',
   };
   let git = {
+    stat: '',
     branch: 'main',
     tracking: {
       detached: false,
@@ -1005,7 +1111,7 @@ test('Git-кнопки индексируют, генерируют сообще
   const api = {
     async get(url) {
       if (url === '/api/projects') {
-        return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+        return { projects: [projectFixture('demo', ['/demo'])] };
       }
       if (url === '/api/code/demo/repos') {
         return {
@@ -1029,7 +1135,7 @@ test('Git-кнопки индексируют, генерируют сообще
           staged: [],
           files: [{ ...file, group: 'work' }],
         };
-        return { ok: true };
+        return { ok: true, changed: 1 };
       }
       if (url.includes('/stage?')) {
         git = {
@@ -1037,13 +1143,15 @@ test('Git-кнопки индексируют, генерируют сообще
           staged: [{ ...file, group: 'staged' }],
           files: [],
         };
-        return { ok: true };
+        return { ok: true, changed: 1 };
       }
       if (url.includes('/commit-message?')) {
         return {
           ok: true,
           title: 'Кокпит: добавить Git-действия',
           model: 'claude/claude-test',
+          effort: null,
+          truncated: false,
         };
       }
       if (url.includes('/commit?')) {
@@ -1077,6 +1185,8 @@ test('Git-кнопки индексируют, генерируют сообще
           ok: true,
           branch: 'main',
           published: true,
+          remote: 'origin',
+          tracking: git.tracking,
         };
       }
 
@@ -1131,16 +1241,27 @@ test('Git-кнопки индексируют, генерируют сообще
 test('пустой индекс оставляет прежний одиночный список «Не в коммите»', async (t) => {
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
       if (url.includes('/ls?')) return { entries: [] };
       if (url.includes('/git?')) {
         return {
+          stat: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
           branch: 'main',
           staged: [],
-          files: [{ path: 'a.js', status: 'M', add: 1, del: 1, oldContent: 'x', newContent: 'y' }],
+          files: [{
+            binary: false,
+            tooBig: false,
+            path: 'a.js',
+            status: 'M',
+            add: 1,
+            del: 1,
+            oldContent: 'x',
+            newContent: 'y'
+          }],
           log: [],
         };
       }
@@ -1158,18 +1279,50 @@ test('пустой индекс оставляет прежний одиночн
 
 test('заголовок группы несёт итог строк, как сводка pull request на GitHub', async (t) => {
   const git = {
+    stat: '',
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
     branch: 'main',
     staged: [
-      { path: 'src/a.js', status: 'M', add: 23, del: 6, group: 'staged', oldContent: 'head', newContent: 'index' },
-      { path: 'src/b.js', status: 'A', add: 2, del: 0, group: 'staged', oldContent: '', newContent: 'b' },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'src/a.js',
+        status: 'M',
+        add: 23,
+        del: 6,
+        group: 'staged',
+        oldContent: 'head',
+        newContent: 'index'
+      },
+      {
+        binary: false,
+        tooBig: false,
+        path: 'src/b.js',
+        status: 'A',
+        add: 2,
+        del: 0,
+        group: 'staged',
+        oldContent: '',
+        newContent: 'b'
+      },
     ],
     // Бинарный файл строк не несёт: итога у такой группы нет, чтобы не рисовать «+0».
-    files: [{ path: 'logo.png', status: 'A', add: 0, del: 0, binary: true, group: 'work' }],
+    files: [{
+      oldContent: '',
+      newContent: '',
+      tooBig: false,
+      path: 'logo.png',
+      status: 'A',
+      add: 0,
+      del: 0,
+      binary: true,
+      group: 'work'
+    }],
     log: [],
   };
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -1202,15 +1355,26 @@ test('чистое рабочее дерево при непустом инде�
   // завязанный на одну эту группу, закрывал бы существующий диф собой.
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
       if (url.includes('/ls?')) return { entries: [] };
       if (url.includes('/git?')) {
         return {
+          stat: '',
+          tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
           branch: 'master',
-          staged: [{ path: 'src/jobResult.ts', status: 'M', add: 23, del: 6, oldContent: 'head', newContent: 'index' }],
+          staged: [{
+            binary: false,
+            tooBig: false,
+            path: 'src/jobResult.ts',
+            status: 'M',
+            add: 23,
+            del: 6,
+            oldContent: 'head',
+            newContent: 'index'
+          }],
           files: [],
           log: [],
         };
@@ -1236,7 +1400,7 @@ test('лесенка дерева: у файла зарезервировано 
   };
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -1273,12 +1437,20 @@ async function mountGitPanel(t, gitPayload, { branch = 'main', post = null } = {
   const api = {
     post,
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo', branch)] }] };
       }
       if (url.includes('/ls?')) return { entries: [] };
-      if (url.includes('/git?')) return { staged: [], files: [], log: [], ...gitPayload };
+      if (url.includes('/git?')) return {
+        stat: '',
+        branch: 'main',
+        tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+        staged: [],
+        files: [],
+        log: [],
+        ...gitPayload
+      };
       throw new Error(`unexpected GET ${url}`);
     },
   };
@@ -1293,7 +1465,7 @@ async function mountGitPanel(t, gitPayload, { branch = 'main', post = null } = {
 test('оба переключателя живут в шапке и не дублируются внутри панели', async (t) => {
   const api = {
     async get(url) {
-      if (url === '/api/projects') return { projects: [{ id: 'demo', repos: ['/demo'] }] };
+      if (url === '/api/projects') return { projects: [projectFixture('demo', ['/demo'])] };
       if (url === '/api/code/demo/repos') {
         return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
       }
@@ -1332,7 +1504,16 @@ test('композер отдаёт поле ввода целой строке,
 
 test('Enter набирает тело сообщения, а коммит уходит по Ctrl+Enter', async (t) => {
   const posts = [];
-  const staged = { path: 'src/a.js', status: 'M', add: 1, del: 0 };
+  const staged = {
+    oldContent: '',
+    newContent: '',
+    binary: false,
+    tooBig: false,
+    path: 'src/a.js',
+    status: 'M',
+    add: 1,
+    del: 0
+  };
   const { wrapper, flushPromises } = await mountGitPanel(
     t,
     { staged: [{ ...staged, group: 'staged' }], files: [] },
@@ -1440,3 +1621,207 @@ test('фон строки дерева задаёт общий скин и то�
     /\.ui-pressable\[data-context='code-tree-row'\]\[aria-pressed='true'\]\s*\{\s*background-color:/,
   );
 });
+
+test('повреждённый ответ файла сохраняет модель и не раскрывает отклонённое значение', async (t) => {
+  let reads = 0;
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [{ name: 'keep.js', dir: false }] };
+      }
+      if (url.includes('/file?')) {
+        reads += 1;
+        return reads === 1
+          ? { content: 'valid snapshot', size: 14, binary: false, tooBig: false }
+          : { content: { privateValue: 'НЕ_ПОКАЗЫВАТЬ' }, size: 14, binary: false, tooBig: false };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+  await wrapper.get('[data-file-path="keep.js"]').trigger('click');
+  await settle(flushPromises);
+  const model = monacoState.fileEditors[0].model;
+
+  await wrapper.get('button[title="Обновить"]').trigger('click');
+  await settle(flushPromises);
+
+  assert.equal(monacoState.fileEditors[0].model, model);
+  assert.equal(model.disposed, false);
+  assert.equal(model.content, 'valid snapshot');
+  assert.match(wrapper.get('.perr').text(), /file\.content/);
+  assert.doesNotMatch(wrapper.text(), /НЕ_ПОКАЗЫВАТЬ/);
+  assert.equal(wrapper.findAll('.note').some((note) => note.text() === 'читаю…'), false);
+});
+
+test('повреждённые Git и ответ генератора не заменяют диф и текст сообщения', async (t) => {
+  let reads = 0;
+  const snapshot = {
+    branch: 'main',
+    stat: '',
+    files: [],
+    staged: [{
+      path: 'keep.js',
+      status: 'M',
+      add: 1,
+      del: 1,
+      binary: false,
+      tooBig: false,
+      oldContent: 'before',
+      newContent: 'after',
+    }],
+    tracking: { detached: false, upstream: '', ahead: 0, behind: 0 },
+    log: [],
+  };
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [] };
+      }
+      if (url.includes('/git?')) {
+        reads += 1;
+        return reads === 1 ? snapshot : { ...snapshot, staged: [null] };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+    async post(url) {
+      assert.match(url, /\/commit-message\?/);
+      return { ok: true, title: { invalid: true }, model: 'test', effort: null, truncated: false };
+    },
+  };
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+  await wrapper.get('button[title^="Гит:"]').trigger('click');
+  await settle(flushPromises);
+  const models = monacoState.diffEditors[0].model;
+  await wrapper.get('textarea').setValue('Моё сообщение');
+
+  await wrapper.get('button[title="Обновить"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(monacoState.diffEditors[0].model, models);
+  assert.equal(models.original.disposed, false);
+  assert.equal(models.modified.disposed, false);
+  assert.match(wrapper.get('.perr').text(), /git\.staged\[0\]/);
+
+  await wrapper.get('button[title="Составить сообщение по staged diff"]').trigger('click');
+  await settle(flushPromises);
+  assert.equal(wrapper.get('textarea').element.value, 'Моё сообщение');
+  assert.match(wrapper.get('.git-notice.err').text(), /commitTitle\.title/);
+  assert.equal(wrapper.get('button[title="Составить сообщение по staged diff"]').element.disabled, false);
+  assert.equal(reads, 2);
+});
+
+test('неизвестные intents не читают файлы и не блокируют следующую корректную команду', async (t) => {
+  const files = [];
+  const api = {
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo'])] };
+      }
+      if (url === '/api/code/demo/repos') {
+        return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+      }
+      if (url.includes('/ls?')) {
+        return { entries: [{ name: 'keep.js', dir: false }] };
+      }
+      if (url.includes('/file?')) {
+        files.push(query(url).get('path'));
+        return { content: 'keep', size: 4, binary: false, tooBig: false };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const target = { type: 'open-file', project: 'demo', repo: 'demo', root: '/demo', path: 'keep.js' };
+  const intents = [
+    null,
+    { id: 1, ...target, repo: { invalid: true } },
+    { id: 2, ...target, line: '3' },
+    { id: 3, type: 'unsupported' },
+    { id: 4, ...target, line: 0 },
+  ];
+  const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api, props: { intents } });
+  await settle(flushPromises);
+
+  assert.deepEqual(files, ['keep.js']);
+  assert.deepEqual(wrapper.emitted('consume-intent'), [[1], [2], [3], [4]]);
+  assert.deepEqual(monacoState.fileEditors[0].revealed, []);
+
+  await wrapper.setProps({ intents: [...intents, { id: 5, ...target, line: 8 }] });
+  await settle(flushPromises);
+  assert.deepEqual(files, ['keep.js', 'keep.js']);
+  assert.deepEqual(wrapper.emitted('consume-intent'), [[1], [2], [3], [4], [5]]);
+  assert.deepEqual(monacoState.fileEditors[0].revealed, [8]);
+
+  // Launcher передаёт optional-поля явно: undefined означает отсутствие.
+  // null и поля другого типа по-прежнему не становятся командами чтения.
+  await wrapper.setProps({
+    intents: [
+      { id: 6, ...target, project: null },
+      { id: 7, ...target, line: null },
+      { id: 8, ...target, project: undefined, line: undefined },
+    ],
+  });
+  await settle(flushPromises);
+  assert.deepEqual(files, ['keep.js', 'keep.js', 'keep.js']);
+  assert.deepEqual(wrapper.emitted('consume-intent'), [[1], [2], [3], [4], [5], [6], [7], [8]]);
+  assert.deepEqual(monacoState.fileEditors[0].revealed, [8]);
+});
+
+for (const failure of ['malformed', 'network']) {
+  test(`смена файла снимает прежнюю модель до ответа ${failure}`, async (t) => {
+    const nextFile = deferred();
+    const api = {
+      async get(url) {
+        if (url === '/api/projects') {
+          return { projects: [projectFixture('demo', ['/demo'])] };
+        }
+        if (url === '/api/code/demo/repos') {
+          return { repos: [{ key: 'demo', dir: '/demo', trees: [mainTree('/demo')] }] };
+        }
+        if (url.includes('/ls?')) {
+          return { entries: [{ name: 'a.js', dir: false }, { name: 'b.js', dir: false }] };
+        }
+        if (url.includes('/file?')) {
+          return query(url).get('path') === 'a.js'
+            ? { content: 'file A', size: 6, binary: false, tooBig: false }
+            : nextFile.promise;
+        }
+        throw new Error(`unexpected GET ${url}`);
+      },
+    };
+    const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
+    await wrapper.get('[data-file-path="a.js"]').trigger('click');
+    await settle(flushPromises);
+    const editor = monacoState.fileEditors[0];
+    const model = editor.model;
+    assert.equal(model.content, 'file A');
+
+    await wrapper.get('[data-file-path="b.js"]').trigger('click');
+    assert.equal(wrapper.get('.ehead .epath').text(), 'b.js');
+    assert.equal(editor.model, null);
+    assert.equal(model.disposed, true);
+
+    if (failure === 'malformed') {
+      nextFile.resolve({ content: null, size: 6, binary: false, tooBig: false });
+    } else {
+      nextFile.reject(new Error('Сеть недоступна'));
+    }
+    await settle(flushPromises);
+
+    assert.equal(wrapper.get('.ehead .epath').text(), 'b.js');
+    assert.equal(editor.model, null);
+    assert.match(wrapper.get('.perr').text(), failure === 'malformed' ? /file\.content/ : /Сеть недоступна/);
+    assert.equal(wrapper.findAll('.note').some((note) => note.text() === 'читаю…'), false);
+  });
+}

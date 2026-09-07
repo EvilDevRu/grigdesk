@@ -8,14 +8,14 @@
         <div v-if="showsProjectPicker" class="head-pick project" title="Проект">
           <label for="code-project">проект</label>
           <UiSelect id="code-project" compact data-context="code-head-select"
-                    :model-value="project" @change="setProject($event.target.value)">
+                    :model-value="project" @change="selectProject">
             <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.id }}</option>
           </UiSelect>
         </div>
         <div v-if="showsContextPicker" class="head-pick tree" :title="context?.treePath || 'Рабочая копия'">
           <label for="code-context">рабочая копия</label>
           <UiSelect id="code-context" compact data-context="code-head-select"
-                    :model-value="contextId" @change="setContext($event.target.value)">
+                    :model-value="contextId" @change="selectContext">
             <template v-if="contextGroups.length > 1">
               <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
                 <option v-for="item in group.items" :key="item.id" :value="item.id" :title="item.treePath">
@@ -361,7 +361,7 @@
             {{ oneSidedDiff ? '≡ одна колонка' : (renderSideBySide ? '⇆ рядом' : '≡ в строку') }}
           </UiButton>
           <UiIconButton role="embedded" label="Обновить" title="Обновить"
-                        :loading="gitLoading || fileLoading" @click="refresh">↻</UiIconButton>
+                        :loading="gitLoading || fileLoading" @click="refresh()">↻</UiIconButton>
         </div>
         <div class="ebody" data-escape-owner="monaco">
           <div v-show="tab === 'files' && !imageSrc" ref="fileHost" class="editor"></div>
@@ -384,15 +384,24 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Плагин «Код» — просмотр кода и управление Git проектов, как в VS Code:
 // слева рейка режимов (код | гит), дальше панель (дерево файлов или изменения),
 // справа Monaco. Смотреть можно ЛЮБОЕ дерево репозитория — основное или worktree
 // (их создаёт фабрика): репозиторий и worktree выбираются одним полем «Рабочая копия».
 // Пути репозиториев проекта задаются в разделе «Проекты».
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue';
-import { api } from '../../shared/api-client.js';
-import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';
+import { codeApi, codeErrorMessage } from '../../shared/codeApi';
+import type {
+  CodeDirectoryEntry,
+  CodeFileResponse,
+  CodeGitFile,
+  CodeGitResponse,
+  CodeProject,
+  CodeRepo,
+  CodeRequestContext,
+} from '../../../../shared/codeContracts';
+import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco';
 import {
   buildCodeContexts,
   buildGitGroups,
@@ -402,7 +411,8 @@ import {
   normalizeGitView,
   pickCodeContext,
   reconcileGitOpenDirs,
-} from '../../shared/code-tree.js';
+} from '../../shared/codeTree';
+import type { CodeContext, GitGroup, GitGroupId, GitGroupStat } from '../../shared/codeTree';
 import {
   UiButton,
   UiIconButton,
@@ -411,24 +421,76 @@ import {
   UiTextarea,
 } from '../../ui';
 
-const props = defineProps({
-  active: { type: Boolean, default: true },
-  compact: { type: Boolean, default: false },
-  presentation: { type: String, default: 'page' },
-  intents: { type: Array, default: () => [] },
+type CodeTab = 'files' | 'git';
+type ContextSnapshot = CodeRequestContext & { generation: number };
+type ActivationOptions = { activation?: number | null };
+type RefreshOptions = ActivationOptions & { silent?: boolean };
+type PreviousContext = {
+  generation: number;
+  project: string;
+  contextId: string;
+  tab: CodeTab;
+  file: string;
+  gitFile: string;
+};
+type CodePanelContext = {
+  id: 'code';
+  presentation: string;
+  project?: string;
+  context?: string;
+  tab: CodeTab;
+  file?: string;
+};
+type OpenFileIntent = {
+  type: 'open-file';
+  project?: string;
+  repo: string;
+  root: string;
+  path: string;
+  line?: number;
+};
+type CodeIntent = OpenFileIntent | { type: 'project'; project: string };
+type IntentEnvelope = { id: number; payload: CodeIntent | null };
+type FileTreeRow = CodeDirectoryEntry & { rel: string; depth: number };
+type GitNotice = { type: 'ok' | 'err'; text: string };
+type TrackingNote = {
+  type: 'err' | 'mid';
+  text: string;
+  hint?: string
+};
+type GitActionOptions<Result> = {
+  execute: (snapshot: ContextSnapshot) => Promise<Result>;
+  key: string;
+  refreshGit?: boolean;
+  onSuccess?: (result: Result) => void;
+};
+
+const props = withDefaults(defineProps<{
+  active?: boolean;
+  compact?: boolean;
+  presentation?: string;
+  intents?: unknown[];
+}>(), {
+  active: true,
+  compact: false,
+  presentation: 'page',
+  intents: () => [],
 });
-const emit = defineEmits(['consume-intent', 'context']);
+const emit = defineEmits<{
+  'consume-intent': [id: number];
+  context: [value: CodePanelContext | null];
+}>();
 
 const loading = ref(true);
 const contextLoading = ref(false);
 const error = ref('');
-const projects = ref([]);   // сводка /api/projects: [{id, repos, …}]
+const projects = ref<CodeProject[]>([]);   // сводка /api/projects: [{id, repos, …}]
 const project = ref('');
-const repos = ref([]);      // /api/code/:project/repos: [{key, dir, trees}]
+const repos = ref<CodeRepo[]>([]);      // /api/code/:project/repos: [{key, dir, trees}]
 const repoKey = ref('');
 const treePath = ref('');
 const contextId = ref('');
-const tab = ref('files');   // 'files' | 'git'
+const tab = ref<CodeTab>('files');   // 'files' | 'git'
 
 const contextModel = computed(() => buildCodeContexts(repos.value));
 const contexts = computed(() => contextModel.value.contexts);
@@ -436,20 +498,26 @@ const unavailableRepos = computed(() => contextModel.value.unavailable);
 const contextById = computed(() => new Map(contexts.value.map((item) => [item.id, item])));
 const context = computed(() => contextById.value.get(contextId.value) || null);
 const contextGroups = computed(() => {
-  const groups = [];
-  const byRepo = new Map();
+  const groups: { repoKey: string; items: CodeContext[] }[] = [];
+  const byRepo = new Map<string, { repoKey: string; items: CodeContext[] }>();
+
   for (const item of contexts.value) {
     let group = byRepo.get(item.repoKey);
+
     if (!group) {
       group = { repoKey: item.repoKey, items: [] };
       byRepo.set(item.repoKey, group);
       groups.push(group);
     }
+
     group.items.push(item);
   }
+
   return groups;
 });
-const projectHasRepos = computed(() => (projects.value.find((p) => p.id === project.value)?.repos || []).length > 0);
+const projectHasRepos = computed(() => (
+  (projects.value.find((item) => item.id === project.value)?.repos || []).length > 0
+));
 // Оба переключателя видны всегда, как только есть что показать: даже единственный
 // вариант обязан выглядеть переключателем — иначе непонятно, где вообще менять проект
 // и рабочую копию. Скрывается только пустой селект, которому нечего предложить.
@@ -477,18 +545,18 @@ const headContext = computed(() => {
 });
 
 // ── Дерево файлов (ленивое: каталог читается при раскрытии) ──
-const dirs = ref(new Map());     // rel ('' = корень) → entries [{name, dir}]
-const openDirs = ref(new Set());
+const dirs = ref(new Map<string, CodeDirectoryEntry[]>());     // rel ('' = корень) → entries [{name, dir}]
+const openDirs = ref(new Set<string>());
 const fileSel = ref('');
-const fileData = ref(null);      // { content, binary, tooBig, size }
+const fileData = ref<CodeFileResponse | null>(null);      // { content, binary, tooBig, size }
 const fileLoading = ref(false);
 
 // ── Гит ──
-const git = ref(null);           // { branch, files, staged, log }
+const git = ref<CodeGitResponse | null>(null);           // { branch, files, staged, log }
 const gitLoading = ref(false);
 const commitMessage = ref('');
 const gitBusy = ref('');
-const gitNotice = ref(null);     // { type: 'ok' | 'err', text }
+const gitNotice = ref<GitNotice | null>(null);     // { type: 'ok' | 'err', text }
 const gitActionBusy = computed(() => !!gitBusy.value);
 const pushLabel = computed(() => {
   if (!git.value?.tracking?.upstream) {
@@ -496,6 +564,7 @@ const pushLabel = computed(() => {
   }
 
   const ahead = Number(git.value.tracking.ahead) || 0;
+
   return ahead > 0 ? `Пуш ↑${ahead}` : 'Пуш';
 });
 const pushTitle = computed(() => (git.value?.tracking?.upstream
@@ -511,15 +580,21 @@ const pushTitle = computed(() => (git.value?.tracking?.upstream
  * `refresh` перечитывает гит, но не `/repos`, поэтому после переключения ветки мимо
  * кокпита шапка остаётся устаревшей, и промолчать здесь значило бы соврать.
  */
-const trackingNote = computed(() => {
+const trackingNote = computed<TrackingNote | null>(() => {
   const tracking = git.value?.tracking || null;
+
   if (tracking?.detached) {
     return { type: 'err', text: 'detached HEAD — коммит уйдёт в никуда, пуш недоступен' };
   }
 
   const live = String(git.value?.branch || '');
+
   if (live && context.value?.branch && live !== context.value.branch) {
-    return { type: 'err', text: `ветка сменилась на ${live}`, hint: 'откройте рабочую копию заново' };
+    return {
+      type: 'err',
+      text: `ветка сменилась на ${live}`,
+      hint: 'откройте рабочую копию заново'
+    };
   }
 
   if (!tracking?.upstream) {
@@ -528,6 +603,7 @@ const trackingNote = computed(() => {
 
   const ahead = Number(tracking.ahead) || 0;
   const behind = Number(tracking.behind) || 0;
+
   if (!ahead && !behind) {
     return null;
   }
@@ -544,7 +620,7 @@ const gitSel = ref('');
 // Для добавленного/удалённого файла одна сторона дифа заведомо пуста. В режиме
 // «рядом» она съедала половину редактора (особенно заметно в развёрнутом доке),
 // поэтому такие изменения всегда показываем одной колонкой.
-const oneSidedDiff = computed(() => ['A', 'D'].includes(gitFile.value?.status));
+const oneSidedDiff = computed(() => ['A', 'D'].includes(gitFile.value?.status || ''));
 const fullSide = ref(localStorage.getItem('cockpit-diff-side') !== '0');
 const compactSide = ref(localStorage.getItem('cockpit-dock-diff-side') === '1');
 const side = computed({
@@ -561,60 +637,82 @@ const side = computed({
 });
 const renderSideBySide = computed(() => side.value && !oneSidedDiff.value);
 const gitView = ref(normalizeGitView(localStorage.getItem('cockpit-code-git-view')));
-const gitOpenDirs = ref(new Set());
-const gitKnownDirs = ref(new Set());
+const gitOpenDirs = ref(new Set<string>());
+const gitKnownDirs = ref(new Set<string>());
 const gitDirsReady = ref(false);
 // Группы изменений, как Source Control в VS Code: индекс и рабочее дерево. Пустая
 // группа не рисуется, поэтому при чистом индексе панель выглядит ровно как раньше.
 const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value));
 const gitEntries = computed(() => {
-  const map = new Map();
+  const map = new Map<string, { file: CodeGitFile; group: GitGroup }>();
+
   for (const group of gitGroups.value) {
-    for (const file of group.files) map.set(gitRef(group.id, file.path), { file, group });
+    for (const file of group.files) {
+      map.set(gitRef(group.id, file.path), { file, group });
+    }
   }
+
   return map;
 });
 const gitEntry = computed(() => gitEntries.value.get(gitSel.value) || null);
 const gitFile = computed(() => gitEntry.value?.file || null);
-const STLABEL = { A: 'A', M: 'M', D: 'D', R: 'R' };
+const STLABEL: Record<string, string> = {
+  A: 'A',
+  M: 'M',
+  D: 'D',
+  R: 'R'
+};
 // Шаг лесенки дерева задаётся в CSS (`--tree-step`), сюда приезжает только глубина:
 // иначе два числа — px в скрипте и отступ шеврона в стилях — разъезжаются при правке.
-function rowDepth(depth) { return { '--depth': depth }; }
+function rowDepth(depth: number) {
+  return { '--depth': depth };
+}
 
 /** Подсказка итога группы: в заголовке только числа, слово «строк» живёт здесь. */
-function gitStatTitle(stat) {
+function gitStatTitle(stat: GitGroupStat) {
   return `добавлено строк: ${stat.add}, удалено строк: ${stat.del}`;
 }
 
-/** Первый файл первой непустой группы: индекс важнее рабочего дерева. */
+/**
+ * Выбирает первый файл первой непустой группы.
+ * Индекс имеет приоритет перед рабочим деревом, как и порядок групп в панели.
+ */
 function firstGitRef() {
   for (const group of gitGroups.value) {
-    if (group.files.length) return gitRef(group.id, group.files[0].path);
+    const first = group.files[0];
+
+    if (first) {
+      return gitRef(group.id, first.path);
+    }
   }
+
   return '';
 }
 
 // Чей это диф, показываем только когда групп больше одной: при пустом индексе
 // вариант ровно один, и подпись была бы шумом.
 const gitScopeBadge = computed(() => {
-  if (gitGroups.value.length < 2 || !gitEntry.value) return null;
+  if (gitGroups.value.length < 2 || !gitEntry.value) {
+    return null;
+  }
+
   return gitEntry.value.group.id === 'staged'
     ? { label: 'в индексе', hint: 'слева HEAD, справа индекс — это уедет в коммит' }
     : { label: 'в рабочем дереве', hint: 'слева индекс, справа рабочее дерево — в коммит пока не попадёт' };
 });
 
 // ── Monaco: оба редактора живут под v-show, но модели очищаются при смене контекста. ──
-const fileHost = ref(null);
-const diffHost = ref(null);
-const panelHeader = ref(null);
-const layHost = ref(null);
-let fileEditor = null;
-let diffEditor = null;
-let fileModel = null;
-let diffModels = [];
+const fileHost = ref<HTMLElement | null>(null);
+const diffHost = ref<HTMLElement | null>(null);
+const panelHeader = ref<HTMLElement | null>(null);
+const layHost = ref<HTMLElement | null>(null);
+let fileEditor: monaco.editor.IStandaloneCodeEditor | null = null;
+let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
+let fileModel: monaco.editor.ITextModel | null = null;
+let diffModels: monaco.editor.ITextModel[] = [];
 // Строка, на которую надо встать, когда модель уже создана: intent приходит раньше
 // ответа сервера, а Monaco умеет прокручивать только существующую модель.
-let pendingReveal = null;
+let pendingReveal: { path: string; line: number } | null = null;
 
 // Generation защищает весь контекст, request ID — конкурирующие запросы внутри него.
 let contextGeneration = 0;
@@ -624,43 +722,49 @@ let gitRequestId = 0;
 let gitActionId = 0;
 let fileLoadingRequestId = 0;
 let gitLoadingRequestId = 0;
-const dirRequestIds = new Map();
+const dirRequestIds = new Map<string, number>();
 
 // Растровые картинки показываются предпросмотром вместо пустого Monaco: сырые байты
 // отдаёт `/api/code/:project/raw`. Набор обязан совпадать с RAW_IMAGE_TYPES сервера
 // (сторож — tests/server/code-raw.test.js); SVG исключён намеренно, как у документов.
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|bmp|ico)$/i;
-const isImagePath = (rel) => IMAGE_EXT.test(String(rel || ''));
+const isImagePath = (rel: string) => IMAGE_EXT.test(String(rel || ''));
 const imageSrc = computed(() => (fileSel.value && isImagePath(fileSel.value) && context.value
-  ? api.url(`/api/code/${encodeURIComponent(project.value)}/raw?${q(captureContext())}&path=${encodeURIComponent(fileSel.value)}`)
+  ? codeApi.rawUrl(captureContext(), fileSel.value)
   : ''));
 const imageError = ref('');
 // Бинарность у картинки — норма, а не диагноз: пометку «бинарный» показываем только
 // тем файлам, которые действительно нечем показать.
 const showsImage = computed(() => !!imageSrc.value && !imageError.value);
 
-const contextStorageKey = (id) => `cockpit-code-context:${id}`;
-const captureContext = () => ({
+const contextStorageKey = (id: string) => `cockpit-code-context:${id}`;
+const captureContext = (): ContextSnapshot => ({
   generation: contextGeneration,
   project: project.value,
   repoKey: repoKey.value,
   treePath: treePath.value,
 });
-const contextIsCurrent = (snapshot) => snapshot.generation === contextGeneration
+const contextIsCurrent = (snapshot: ContextSnapshot) => snapshot.generation === contextGeneration
   && snapshot.project === project.value
   && snapshot.repoKey === repoKey.value
   && snapshot.treePath === treePath.value;
-const projectIsCurrent = (generation, id, requestId) => generation === contextGeneration
+const projectIsCurrent = (generation: number, id: string, requestId: number) => (
+  generation === contextGeneration
   && id === project.value
-  && requestId === reposRequestId;
-const activationIsCurrent = (id) => id == null || id === activationId;
-const q = (snapshot) => `repo=${encodeURIComponent(snapshot.repoKey)}&root=${encodeURIComponent(snapshot.treePath)}`;
+  && requestId === reposRequestId
+);
+const activationIsCurrent = (id: number | null) => id == null || id === activationId;
 
 const NAVIGATOR_MIN_WIDTH = 140;
 const NAVIGATOR_MAX_WIDTH = 420;
 const navigatorMaxWidth = ref(NAVIGATOR_MAX_WIDTH);
-const clampNavigatorWidth = (value, max = navigatorMaxWidth.value) => {
+/**
+ * Ограничивает сохранённую ширину текущим размером панели.
+ * Повреждённое значение storage возвращает стандартные 260 пикселей.
+ */
+const clampNavigatorWidth = (value: string | number | null, max = navigatorMaxWidth.value) => {
   const parsed = value === null || value === '' ? NaN : Number(value);
+
   return Math.min(
     Math.max(NAVIGATOR_MIN_WIDTH, max),
     Math.max(NAVIGATOR_MIN_WIDTH, Number.isFinite(parsed) ? parsed : 260),
@@ -676,50 +780,115 @@ const navigatorPreferredWidth = ref(clampNavigatorWidth(
 const navigatorWidth = computed(() => clampNavigatorWidth(navigatorPreferredWidth.value));
 const navigatorCollapsed = ref(false);
 const compactStyle = computed(() => ({ '--code-nav-width': `${navigatorWidth.value}px` }));
-let navigatorPointer = null;
-let navigatorObserver = null;
+let navigatorPointer: number | null = null;
+let navigatorObserver: ResizeObserver | null = null;
 
+/**
+ * Пересчитывает допустимую ширину дерева после изменения размера панели.
+ * Редактор сохраняет большую часть пространства, а желаемая ширина не теряется.
+ */
 function measureNavigatorWidth() {
   const width = layHost.value?.getBoundingClientRect?.().width;
-  if (!(width > 0)) return;
+
+  if (width === undefined || width <= 0) {
+    return;
+  }
+
   const nextMax = Math.min(
     NAVIGATOR_MAX_WIDTH,
     Math.max(NAVIGATOR_MIN_WIDTH, Math.floor(width * 0.42)),
   );
-  if (nextMax === navigatorMaxWidth.value) return;
+
+  if (nextMax === navigatorMaxWidth.value) {
+    return;
+  }
+
   navigatorMaxWidth.value = nextMax;
   layoutEditors();
 }
 
-function updateNavigatorWidth(clientX) {
+/**
+ * Переводит координату указателя в ширину дерева относительно панели.
+ * Ширина рейки вычитается до ограничения размера и перераскладки редакторов.
+ */
+function updateNavigatorWidth(clientX: number) {
   const rect = layHost.value?.getBoundingClientRect?.();
-  if (!rect?.width) return;
+
+  if (!rect?.width) {
+    return;
+  }
+
   navigatorPreferredWidth.value = clampNavigatorWidth(clientX - rect.left - 44);
   layoutEditors();
 }
-function startNavigatorResize(event) {
-  if (event.button !== undefined && event.button !== 0) return;
+
+/**
+ * Захватывает основной указатель на время перетаскивания разделителя.
+ * Соседние указатели не должны завершать или менять активное движение.
+ */
+function startNavigatorResize(event: PointerEvent) {
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
   navigatorPointer = event.pointerId;
-  event.currentTarget?.setPointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof Element) {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
   updateNavigatorWidth(event.clientX);
 }
-function moveNavigatorResize(event) {
-  if (navigatorPointer !== event.pointerId) return;
+
+function moveNavigatorResize(event: PointerEvent) {
+  if (navigatorPointer !== event.pointerId) {
+    return;
+  }
+
   updateNavigatorWidth(event.clientX);
 }
-function finishNavigatorResize(event) {
-  if (navigatorPointer !== event.pointerId) return;
+
+/**
+ * Завершает только активное перетаскивание и освобождает захват.
+ * Предпочтение сохраняется после окончания движения, без записи на каждом кадре.
+ */
+function finishNavigatorResize(event: PointerEvent) {
+  if (navigatorPointer !== event.pointerId) {
+    return;
+  }
+
   navigatorPointer = null;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof Element) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
   localStorage.setItem('cockpit-code-dock-nav-width', String(Math.round(navigatorWidth.value)));
 }
-function navigatorResizeKey(event) {
+
+/**
+ * Даёт разделителю те же ограничения ширины при управлении с клавиатуры.
+ * Shift увеличивает шаг, а Home и End выбирают края допустимого диапазона.
+ */
+function navigatorResizeKey(event: KeyboardEvent) {
   const step = event.shiftKey ? 64 : 16;
-  if (event.key === 'ArrowLeft') navigatorPreferredWidth.value = clampNavigatorWidth(navigatorWidth.value - step);
-  else if (event.key === 'ArrowRight') navigatorPreferredWidth.value = clampNavigatorWidth(navigatorWidth.value + step);
-  else if (event.key === 'Home') navigatorPreferredWidth.value = NAVIGATOR_MIN_WIDTH;
-  else if (event.key === 'End') navigatorPreferredWidth.value = navigatorMaxWidth.value;
-  else return;
+
+  if (event.key === 'ArrowLeft') {
+    navigatorPreferredWidth.value = clampNavigatorWidth(navigatorWidth.value - step);
+  }
+  else if (event.key === 'ArrowRight') {
+    navigatorPreferredWidth.value = clampNavigatorWidth(navigatorWidth.value + step);
+  }
+  else if (event.key === 'Home') {
+    navigatorPreferredWidth.value = NAVIGATOR_MIN_WIDTH;
+  }
+  else if (event.key === 'End') {
+    navigatorPreferredWidth.value = navigatorMaxWidth.value;
+  }
+  else {
+    return;
+  }
+
   event.preventDefault();
   localStorage.setItem('cockpit-code-dock-nav-width', String(navigatorWidth.value));
   nextTick(layoutEditors);
@@ -733,159 +902,245 @@ function layoutEditors() {
 watch(layHost, (host) => {
   navigatorObserver?.disconnect?.();
   navigatorObserver = null;
-  if (!host) return;
+
+  if (!host) {
+    return;
+  }
   if (typeof ResizeObserver !== 'undefined') {
     navigatorObserver = new ResizeObserver(measureNavigatorWidth);
     navigatorObserver.observe(host);
   }
+
   nextTick(measureNavigatorWidth);
 }, { flush: 'post' });
 
-function focusPanel() { panelHeader.value?.focus?.(); }
+function focusPanel() {
+  panelHeader.value?.focus?.();
+}
+
 defineExpose({ focus: focusPanel });
 
+function selectProject(event: Event) {
+  if (event.target instanceof HTMLSelectElement) {
+    return setProject(event.target.value);
+  }
+}
+
+function selectContext(event: Event) {
+  if (event.target instanceof HTMLSelectElement) {
+    return setContext(event.target.value);
+  }
+}
+
 // Переходы — явными обработчиками, без каскадов watch: порядок загрузки детерминирован.
-async function setProject(id, { activation = null } = {}) {
-  if (!activationIsCurrent(activation)) return;
+/**
+ * Смена проекта начинает новое поколение запросов и сохраняет выбор человека.
+ * Ответы предыдущего проекта не могут вернуть его рабочую копию или состояние.
+ */
+async function setProject(id: string, { activation = null }: ActivationOptions = {}) {
+  if (!activationIsCurrent(activation)) {
+    return;
+  }
+
   const generation = ++contextGeneration;
   const requestId = ++reposRequestId;
+
   project.value = id;
   localStorage.setItem('cockpit-project', id); // общий выбор проекта с «Маршрутами» и «Проектами»
-  repos.value = []; repoKey.value = ''; treePath.value = ''; contextId.value = '';
+  repos.value = [];
+  repoKey.value = '';
+  treePath.value = '';
+  contextId.value = '';
   resetState();
   contextLoading.value = true;
+
   if (!projectHasRepos.value) {
-    if (projectIsCurrent(generation, id, requestId)) contextLoading.value = false;
-    return;
-  }
-  let loadedRepos;
-  try {
-    loadedRepos = (await api.get(`/api/code/${encodeURIComponent(id)}/repos`)).repos || [];
-  } catch (e) {
-    if (activationIsCurrent(activation) && projectIsCurrent(generation, id, requestId)) {
-      error.value = e.message;
+    if (projectIsCurrent(generation, id, requestId)) {
       contextLoading.value = false;
     }
+
     return;
   }
-  if (!activationIsCurrent(activation) || !projectIsCurrent(generation, id, requestId)) return;
+
+  let loadedRepos;
+
+  try {
+    loadedRepos = await codeApi.repos(id);
+  } catch (e) {
+    if (activationIsCurrent(activation) && projectIsCurrent(generation, id, requestId)) {
+      error.value = codeErrorMessage(e);
+      contextLoading.value = false;
+    }
+
+    return;
+  }
+
+  if (!activationIsCurrent(activation) || !projectIsCurrent(generation, id, requestId)) {
+    return;
+  }
+
   repos.value = loadedRepos;
+
   const picked = pickCodeContext(contexts.value, localStorage.getItem(contextStorageKey(id)));
+
   if (!picked) {
     contextLoading.value = false;
+
     return;
   }
+
   await setContext(picked.id, { activation });
 }
 
-async function setContext(id, { activation = null } = {}) {
-  if (!activationIsCurrent(activation)) return;
+/**
+ * Открывает рабочую копию по точному id и сбрасывает принадлежащие прежней модели.
+ * Корень и Git загружаются последовательно с проверкой поколения после ожиданий.
+ */
+async function setContext(id: string, { activation = null }: ActivationOptions = {}) {
+  if (!activationIsCurrent(activation)) {
+    return;
+  }
+
   const selected = contextById.value.get(id);
-  if (!selected) return;
+
+  if (!selected) {
+    return;
+  }
+
   const generation = ++contextGeneration;
+
   contextId.value = selected.id;
   repoKey.value = selected.repoKey;
   treePath.value = selected.treePath;
   resetState();
   contextLoading.value = true;
   localStorage.setItem(contextStorageKey(project.value), encodeStoredCodeContext(selected));
+
   const snapshot = captureContext();
   const rootLoaded = await loadDir('', snapshot, { activation });
+
   if (rootLoaded && activationIsCurrent(activation)
-      && contextIsCurrent(snapshot) && tab.value === 'git') {
+    && contextIsCurrent(snapshot) && tab.value === 'git') {
     await loadGit(snapshot, { activation });
   }
   if (activationIsCurrent(activation)
-      && generation === contextGeneration && contextIsCurrent(snapshot)) {
+    && generation === contextGeneration && contextIsCurrent(snapshot)) {
     contextLoading.value = false;
   }
 }
 
+/**
+ * Очищает данные и модели прежней рабочей копии вместе с индикаторами загрузки.
+ * Смена идентификаторов запросов лишает поздние ответы права менять новую панель.
+ */
 function resetState() {
-  dirs.value = new Map(); openDirs.value = new Set();
-  fileSel.value = ''; fileData.value = null; imageError.value = '';
-  git.value = null; gitSel.value = '';
-  commitMessage.value = ''; gitBusy.value = ''; gitNotice.value = null;
-  gitOpenDirs.value = new Set(); gitKnownDirs.value = new Set(); gitDirsReady.value = false;
-  fileLoading.value = false; gitLoading.value = false;
-  fileLoadingRequestId = 0; gitLoadingRequestId = 0;
-  fileRequestId += 1; gitRequestId += 1; gitActionId += 1; dirRequestIds.clear();
-  clearFileModel(); clearDiffModels();
+  dirs.value = new Map();
+  openDirs.value = new Set();
+  fileSel.value = '';
+  fileData.value = null;
+  imageError.value = '';
+  git.value = null;
+  gitSel.value = '';
+  commitMessage.value = '';
+  gitBusy.value = '';
+  gitNotice.value = null;
+  gitOpenDirs.value = new Set();
+  gitKnownDirs.value = new Set();
+  gitDirsReady.value = false;
+  fileLoading.value = false;
+  gitLoading.value = false;
+  fileLoadingRequestId = 0;
+  gitLoadingRequestId = 0;
+  fileRequestId += 1;
+  gitRequestId += 1;
+  gitActionId += 1;
+  dirRequestIds.clear();
+  clearFileModel();
+  clearDiffModels();
   error.value = '';
 }
 
-async function setTab(t) {
+async function setTab(t: CodeTab) {
   tab.value = t;
-  if (t === 'git' && !git.value && treePath.value) await loadGit(captureContext());
+
+  if (t === 'git' && !git.value && treePath.value) {
+    await loadGit(captureContext());
+  }
 }
 
-function setGitView(view) {
+function setGitView(view: 'list' | 'tree') {
   gitView.value = normalizeGitView(view);
   localStorage.setItem('cockpit-code-git-view', gitView.value);
 }
 
 function toggleDiffLayout() {
-  if (!oneSidedDiff.value) side.value = !side.value;
+  if (!oneSidedDiff.value) {
+    side.value = !side.value;
+  }
 }
 
-function toggleGitDir(ref) {
+function toggleGitDir(ref: string) {
   const open = new Set(gitOpenDirs.value);
-  if (open.has(ref)) open.delete(ref);
-  else open.add(ref);
+
+  if (open.has(ref)) {
+    open.delete(ref);
+  }
+  else {
+    open.add(ref);
+  }
+
   gitOpenDirs.value = open;
 }
 
-function gitGroupActionKey(group) {
+function gitGroupActionKey(group: GitGroupId) {
   return `${group === 'staged' ? 'unstage' : 'stage'}:all`;
 }
 
-function gitFileActionKey(group, path) {
+function gitFileActionKey(group: GitGroupId, path: string) {
   return `${group === 'staged' ? 'unstage' : 'stage'}:${path}`;
 }
 
-function gitGroupActionLabel(group) {
+function gitGroupActionLabel(group: GitGroupId) {
   return group === 'staged'
     ? 'Вернуть все изменения из индекса'
     : 'Добавить все изменения в индекс';
 }
 
-function gitFileActionLabel(group, path) {
+function gitFileActionLabel(group: GitGroupId, path: string) {
   return group === 'staged'
     ? `Вернуть ${path} из индекса`
     : `Добавить ${path} в индекс`;
-}
-
-function gitActionUrl(snapshot, action) {
-  return `/api/code/${encodeURIComponent(snapshot.project)}/${action}?${q(snapshot)}`;
 }
 
 /**
  * Выполняет одну Git-команду для точного снимка рабочей копии и при необходимости
  * перечитывает обе группы. Поздний ответ старого worktree не меняет новый выбор.
  */
-async function performGitAction({
-  action,
-  body = {},
+async function performGitAction<Result>({
+  execute,
   key,
   refreshGit = true,
-  onSuccess = null,
-}) {
+  onSuccess,
+}: GitActionOptions<Result>): Promise<Result | null> {
   if (gitActionBusy.value || !treePath.value) {
     return null;
   }
 
   const snapshot = captureContext();
   const own = ++gitActionId;
+
   gitBusy.value = key;
   gitNotice.value = null;
 
   try {
-    const result = await api.post(gitActionUrl(snapshot, action), body);
+    const result = await execute(snapshot);
+
     if (!contextIsCurrent(snapshot) || own !== gitActionId) {
       return null;
     }
 
     onSuccess?.(result);
+
     if (refreshGit) {
       await loadGit(snapshot, { silent: true });
     }
@@ -895,9 +1150,10 @@ async function performGitAction({
     if (contextIsCurrent(snapshot) && own === gitActionId) {
       gitNotice.value = {
         type: 'err',
-        text: actionError.data?.message || actionError.message,
+        text: codeErrorMessage(actionError),
       };
     }
+
     return null;
   } finally {
     if (contextIsCurrent(snapshot) && own === gitActionId) {
@@ -906,20 +1162,20 @@ async function performGitAction({
   }
 }
 
-function changeGitGroup(group) {
+function changeGitGroup(group: GitGroup) {
   const action = group.id === 'staged' ? 'unstage' : 'stage';
+
   return performGitAction({
-    action,
-    body: { all: true },
+    execute: (snapshot) => codeApi[action](snapshot, { all: true }),
     key: gitGroupActionKey(group.id),
   });
 }
 
-function changeGitFile(group, file) {
+function changeGitFile(group: GitGroup, file: CodeGitFile) {
   const action = group.id === 'staged' ? 'unstage' : 'stage';
+
   return performGitAction({
-    action,
-    body: { paths: [file.path] },
+    execute: (snapshot) => codeApi[action](snapshot, { paths: [file.path] }),
     key: gitFileActionKey(group.id, file.path),
   });
 }
@@ -930,7 +1186,7 @@ function generateCommitMessage() {
   }
 
   return performGitAction({
-    action: 'commit-message',
+    execute: (snapshot) => codeApi.commitMessage(snapshot),
     key: 'generate',
     refreshGit: false,
     onSuccess: (result) => {
@@ -948,7 +1204,7 @@ function generateCommitMessage() {
  * Коммит вешается на Ctrl/Cmd+Enter — та же пара, что в Source Control VS Code;
  * пока поле было однострочным, ту же работу делал голый Enter.
  */
-function commitOnShortcut(event) {
+function commitOnShortcut(event: KeyboardEvent) {
   if (!event.ctrlKey && !event.metaKey) {
     return;
   }
@@ -959,13 +1215,13 @@ function commitOnShortcut(event) {
 
 function commitGitChanges() {
   const message = commitMessage.value.trim();
+
   if (!git.value?.staged?.length || !message) {
     return null;
   }
 
   return performGitAction({
-    action: 'commit',
-    body: { message },
+    execute: (snapshot) => codeApi.commit(snapshot, message),
     key: 'commit',
     onSuccess: (result) => {
       commitMessage.value = '';
@@ -983,7 +1239,7 @@ function pushGitChanges() {
   }
 
   return performGitAction({
-    action: 'push',
+    execute: (snapshot) => codeApi.push(snapshot),
     key: 'push',
     onSuccess: (result) => {
       gitNotice.value = {
@@ -996,80 +1252,147 @@ function pushGitChanges() {
   });
 }
 
-async function loadDir(rel, snapshot = captureContext(), { activation = null } = {}) {
+/**
+ * Записывает каталог только для актуальной рабочей копии и последнего запроса.
+ * Отказ сохраняет прежнее дерево, чтобы тихое обновление не очищало навигацию.
+ */
+async function loadDir(
+  rel: string,
+  snapshot = captureContext(),
+  { activation = null }: ActivationOptions = {},
+) {
   const requestId = (dirRequestIds.get(rel) || 0) + 1;
+
   dirRequestIds.set(rel, requestId);
+
   try {
-    const { entries } = await api.get(
-      `/api/code/${encodeURIComponent(snapshot.project)}/ls?${q(snapshot)}${rel ? `&dir=${encodeURIComponent(rel)}` : ''}`,
-    );
+    const entries = await codeApi.list(snapshot, rel);
+
     if (!activationIsCurrent(activation)
-        || !contextIsCurrent(snapshot) || dirRequestIds.get(rel) !== requestId) return false;
+      || !contextIsCurrent(snapshot) || dirRequestIds.get(rel) !== requestId) {
+      return false;
+    }
+
     const next = new Map(dirs.value);
+
     next.set(rel, entries || []);
     dirs.value = next;
+
     return true;
   } catch (e) {
     if (activationIsCurrent(activation)
-        && contextIsCurrent(snapshot) && dirRequestIds.get(rel) === requestId) {
-      error.value = e.message;
+      && contextIsCurrent(snapshot) && dirRequestIds.get(rel) === requestId) {
+      error.value = codeErrorMessage(e);
     }
+
     return false;
   }
 }
 
-async function toggleDir(rel) {
+/**
+ * Раскрывает ленивый каталог только после успешного чтения его содержимого.
+ * Сворачивание уже открытого каталога обходится без сетевого запроса.
+ */
+async function toggleDir(rel: string) {
   const open = new Set(openDirs.value);
-  if (open.has(rel)) { open.delete(rel); openDirs.value = open; return; }
-  if (!dirs.value.has(rel) && !(await loadDir(rel))) return;
-  open.add(rel); openDirs.value = open;
+
+  if (open.has(rel)) {
+    open.delete(rel);
+    openDirs.value = open;
+
+    return;
+  }
+  if (!dirs.value.has(rel) && !(await loadDir(rel))) {
+    return;
+  }
+
+  open.add(rel);
+  openDirs.value = open;
 }
 
 // Плоские строки видимой части дерева — из раскрытых каталогов.
 const rows = computed(() => {
-  const out = [];
-  const walk = (rel, depth) => {
+  const out: FileTreeRow[] = [];
+  /**
+   * Строит строки только для раскрытой части ленивого дерева.
+   * Глубина передаётся стилям, чтобы шаг отступов оставался единым.
+   */
+  const walk = (rel: string, depth: number) => {
     for (const e of dirs.value.get(rel) || []) {
       const p = rel ? `${rel}/${e.name}` : e.name;
-      out.push({ name: e.name, dir: e.dir, rel: p, depth });
-      if (e.dir && openDirs.value.has(p)) walk(p, depth + 1);
+
+      out.push({
+        name: e.name,
+        dir: e.dir,
+        rel: p,
+        depth
+      });
+
+      if (e.dir && openDirs.value.has(p)) {
+        walk(p, depth + 1);
+      }
     }
   };
+
   walk('', 0);
+
   return out;
 });
 
-async function openFile(rel, { silent = false, activation = null } = {}) {
-  if (!activationIsCurrent(activation)) return;
+/**
+ * Другой файл сначала снимает прежнюю модель, чтобы заголовок совпадал с содержимым.
+ * Обновление того же пути сохраняет валидный снимок до проверенного ответа.
+ */
+async function openFile(rel: string, { silent = false, activation = null }: RefreshOptions = {}) {
+  if (!activationIsCurrent(activation)) {
+    return;
+  }
+
   const snapshot = captureContext();
   const requestId = ++fileRequestId;
+
+  if (fileSel.value !== rel) {
+    fileData.value = null;
+    clearFileModel();
+  }
+
   fileSel.value = rel;
   imageError.value = '';
+
   if (!silent) {
     fileLoadingRequestId = requestId;
     fileLoading.value = true;
   }
+
   try {
-    const data = await api.get(
-      `/api/code/${encodeURIComponent(snapshot.project)}/file?${q(snapshot)}&path=${encodeURIComponent(rel)}`,
-    );
+    const data = await codeApi.file(snapshot, rel);
+
     if (!activationIsCurrent(activation)
-        || !contextIsCurrent(snapshot) || fileRequestId !== requestId || fileSel.value !== rel) return;
+      || !contextIsCurrent(snapshot) || fileRequestId !== requestId || fileSel.value !== rel) {
+      return;
+    }
+
     fileData.value = data;
     await nextTick();
+
     if (activationIsCurrent(activation)
-        && contextIsCurrent(snapshot) && fileRequestId === requestId && fileSel.value === rel) {
+      && contextIsCurrent(snapshot) && fileRequestId === requestId && fileSel.value === rel) {
       showFile(rel, data);
     }
+
     return true;
   } catch (e) {
     const current = activationIsCurrent(activation)
       && contextIsCurrent(snapshot) && fileRequestId === requestId && fileSel.value === rel;
-    if (!current) return;
-    error.value = e.message;
+
+    if (!current) {
+      return;
+    }
+
+    error.value = codeErrorMessage(e);
     // Только 404 подтверждает, что прежний файл больше нельзя показывать. При
     // сетевой/серверной ошибке последний валидный снимок остаётся на месте.
-    return e?.status === 404 ? false : null;
+    return e !== null && typeof e === 'object' && 'status' in e && e.status === 404 ? false : null;
   } finally {
     // Владелец индикатора отделён от latest request: тихая revalidation может
     // вытеснить запрос по id, но не должна навсегда оставить «читаю…».
@@ -1080,42 +1403,68 @@ async function openFile(rel, { silent = false, activation = null } = {}) {
   }
 }
 
-async function loadGit(snapshot = captureContext(), { silent = false, activation = null } = {}) {
-  if (!activationIsCurrent(activation)) return;
+/**
+ * Принимает проверенный снимок Git целиком, сохраняя раскрытие и выбор файла.
+ * Поздние ответы другой рабочей копии не создают модели в текущем редакторе.
+ */
+async function loadGit(
+  snapshot = captureContext(),
+  { silent = false, activation = null }: RefreshOptions = {},
+) {
+  if (!activationIsCurrent(activation)) {
+    return;
+  }
+
   const requestId = ++gitRequestId;
+
   if (!silent) {
     gitLoadingRequestId = requestId;
     gitLoading.value = true;
   }
+
   try {
-    const data = await api.get(`/api/code/${encodeURIComponent(snapshot.project)}/git?${q(snapshot)}`);
+    const nextGit = await codeApi.git(snapshot);
+
     if (!activationIsCurrent(activation)
-        || !contextIsCurrent(snapshot) || gitRequestId !== requestId) return;
-    const nextGit = {
-      ...data,
-      files: Array.isArray(data?.files) ? data.files : [],
-      staged: Array.isArray(data?.staged) ? data.staged : [],
-      log: Array.isArray(data?.log) ? data.log : [],
-    };
+      || !contextIsCurrent(snapshot) || gitRequestId !== requestId) {
+      return;
+    }
+
     const nextDirs = gitGroupDirectoryPaths(nextGit);
+
     gitOpenDirs.value = reconcileGitOpenDirs(
       nextDirs,
-      gitDirsReady.value ? gitOpenDirs.value : null,
-      gitDirsReady.value ? gitKnownDirs.value : null,
+      gitDirsReady.value ? gitOpenDirs.value : undefined,
+      gitDirsReady.value ? gitKnownDirs.value : undefined,
     );
     gitKnownDirs.value = nextDirs;
     gitDirsReady.value = true;
     git.value = nextGit;
-    if (gitSel.value && !gitEntries.value.has(gitSel.value)) gitSel.value = '';
-    if (!gitSel.value) gitSel.value = firstGitRef();
+
+    if (gitSel.value && !gitEntries.value.has(gitSel.value)) {
+      gitSel.value = '';
+    }
+    if (!gitSel.value) {
+      gitSel.value = firstGitRef();
+    }
+
     await nextTick();
+
     if (!activationIsCurrent(activation)
-        || !contextIsCurrent(snapshot) || gitRequestId !== requestId) return;
-    if (gitFile.value) showDiff(gitFile.value);
-    else clearDiffModels();
+      || !contextIsCurrent(snapshot) || gitRequestId !== requestId) {
+      return;
+    }
+    if (gitFile.value) {
+      showDiff(gitFile.value);
+    }
+    else {
+      clearDiffModels();
+    }
   } catch (e) {
     if (activationIsCurrent(activation)
-        && contextIsCurrent(snapshot) && gitRequestId === requestId) error.value = e.message;
+      && contextIsCurrent(snapshot) && gitRequestId === requestId) {
+      error.value = codeErrorMessage(e);
+    }
   } finally {
     if (!silent && gitLoadingRequestId === requestId) {
       gitLoadingRequestId = 0;
@@ -1124,36 +1473,67 @@ async function loadGit(snapshot = captureContext(), { silent = false, activation
   }
 }
 
-async function selectGit(ref) {
+/**
+ * Меняет выбранный диф после обновления DOM.
+ * Проверка контекста и ключа не даёт ожиданию восстановить уже покинутый выбор.
+ */
+async function selectGit(ref: string) {
   const snapshot = captureContext();
+
   gitSel.value = ref;
   await nextTick();
-  if (contextIsCurrent(snapshot) && gitSel.value === ref) showDiff(gitFile.value);
+
+  if (contextIsCurrent(snapshot) && gitSel.value === ref) {
+    showDiff(gitFile.value);
+  }
 }
 
-async function refresh({ silent = false, activation = null } = {}) {
-  if (!treePath.value) return;
+/**
+ * Перечитывает активный режим поверх последнего корректного снимка.
+ * Удаление выбранного файла подтверждает только 404, а не временная ошибка сети.
+ */
+async function refresh({ silent = false, activation = null }: RefreshOptions = {}) {
+  if (!treePath.value) {
+    return;
+  }
+
   const snapshot = captureContext();
+
   if (tab.value === 'git') {
-    if (!silent || !gitLoading.value) await loadGit(snapshot, { silent, activation });
+    if (!silent || !gitLoading.value) {
+      await loadGit(snapshot, { silent, activation });
+    }
+
     return;
   }
   // Файлы перечитываем поверх последнего валидного снимка. Очищение до ответа
   // давало заметный белый кадр при повторном открытии панели.
   const open = [...openDirs.value];
   const selected = fileSel.value;
+
   if (!(await loadDir('', snapshot, { activation }))
-      || !activationIsCurrent(activation) || !contextIsCurrent(snapshot)) return;
+    || !activationIsCurrent(activation) || !contextIsCurrent(snapshot)) {
+    return;
+  }
+
   for (const rel of open) {
     await loadDir(rel, snapshot, { activation });
-    if (!activationIsCurrent(activation) || !contextIsCurrent(snapshot)) return;
+
+    if (!activationIsCurrent(activation) || !contextIsCurrent(snapshot)) {
+      return;
+    }
   }
-  if (silent && fileLoading.value) return;
+
+  if (silent && fileLoading.value) {
+    return;
+  }
+
   const fileResult = selected && fileSel.value === selected
     ? await openFile(selected, { silent, activation })
     : undefined;
+
   if (fileResult === false && activationIsCurrent(activation)
-      && contextIsCurrent(snapshot) && fileSel.value === selected) {
+    && contextIsCurrent(snapshot) && fileSel.value === selected) {
     fileSel.value = '';
     fileData.value = null;
     clearFileModel();
@@ -1172,16 +1552,31 @@ function clearDiffModels() {
   diffModels = [];
 }
 
-function showFile(rel, data) {
+/**
+ * Подключает новую read-only модель до освобождения прежней.
+ * Для растровых изображений модель не создаётся: предпросмотром владеет img.
+ */
+function showFile(rel: string, data: CodeFileResponse) {
   // Картинку показывает <img>, а не редактор: пустая модель Monaco под ней только
   // мигала бы курсором и держала ресурсы.
-  if (isImagePath(rel)) { clearFileModel(); return; }
-  if (!fileHost.value || !data) return;
-  if (!fileEditor) fileEditor = monaco.editor.create(fileHost.value, { ...READONLY_OPTS, renderLineHighlight: 'none' });
+  if (isImagePath(rel)) {
+    clearFileModel();
+
+    return;
+  }
+  if (!fileHost.value || !data) {
+    return;
+  }
+  if (!fileEditor) {
+    fileEditor = monaco.editor.create(fileHost.value, { ...READONLY_OPTS, renderLineHighlight: 'none' });
+  }
+
   const model = monaco.editor.createModel(data.binary || data.tooBig ? '' : data.content, langOf(rel));
+
   fileEditor.setModel(model);
   fileModel?.dispose(); // старую модель снимаем ПОСЛЕ переустановки (иначе варнинг Monaco)
   fileModel = model;
+
   if (pendingReveal && pendingReveal.path === rel) {
     revealLine(pendingReveal.line);
     pendingReveal = null;
@@ -1189,26 +1584,42 @@ function showFile(rel, data) {
 }
 
 /** Ссылка вида `file.js:120` открывает файл на нужной строке и подсвечивает её. */
-function revealLine(line) {
-  if (!fileEditor || !(line > 0)) return;
+function revealLine(line: number) {
+  if (!fileEditor || !(line > 0)) {
+    return;
+  }
+
   fileEditor.revealLineInCenter(line);
   fileEditor.setPosition({ lineNumber: line, column: 1 });
 }
 
-function showDiff(f) {
-  if (!f || !diffHost.value) return;
+/**
+ * Создаёт обе стороны read-only дифа и затем освобождает прежние модели.
+ * Редактор переиспользуется между файлами и получает актуальный режим колонок.
+ */
+function showDiff(f: CodeGitFile | null) {
+  if (!f || !diffHost.value) {
+    return;
+  }
   if (!diffEditor) {
     diffEditor = monaco.editor.createDiffEditor(diffHost.value, {
       ...READONLY_OPTS,
       renderSideBySide: renderSideBySide.value,
-      renderOverviewRuler: true, ignoreTrimWhitespace: false,
-      hideUnchangedRegions: { enabled: true, minimumLineCount: 3, contextLineCount: 3 },
+      renderOverviewRuler: true,
+      ignoreTrimWhitespace: false,
+      hideUnchangedRegions: {
+        enabled: true,
+        minimumLineCount: 3,
+        contextLineCount: 3
+      },
     });
   }
+
   const lang = langOf(f.path);
   const orig = monaco.editor.createModel(f.tooBig ? '' : (f.oldContent || ''), lang);
   const mod = monaco.editor.createModel(f.tooBig ? '' : (f.newContent || ''), lang);
   const old = diffModels;
+
   diffModels = [orig, mod];
   diffEditor.setModel({ original: orig, modified: mod });
   old.forEach((m) => m.dispose());
@@ -1228,20 +1639,79 @@ watch(() => props.compact, async () => {
 let initialized = false;
 let activationId = 0;
 let processingIntents = false;
-const handledIntentIds = new Set();
+const handledIntentIds = new Set<number>();
 
-function unhandledIntents() {
-  const current = new Set(props.intents.map((intent) => intent.id));
-  for (const id of handledIntentIds) {
-    if (!current.has(id)) handledIntentIds.delete(id);
+/**
+ * Legacy-очередь дока передаёт неизвестный payload. Исполняются только точные
+ * команды «Кода»; повреждённая команда с корректным id потребляется один раз.
+ */
+function decodeIntent(value: unknown): IntentEnvelope | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || !('id' in value)
+    || typeof value.id !== 'number' || !Number.isSafeInteger(value.id) || value.id <= 0) {
+    return null;
   }
-  return props.intents.filter((intent) => !handledIntentIds.has(intent.id));
+
+  const id = value.id;
+
+  if (!('type' in value)) {
+    return { id, payload: null };
+  }
+  if (value.type === 'project' && 'project' in value && typeof value.project === 'string') {
+    return { id, payload: { type: 'project', project: value.project } };
+  }
+  if (value.type !== 'open-file'
+    || !('repo' in value) || typeof value.repo !== 'string' || !value.repo
+    || !('root' in value) || typeof value.root !== 'string' || !value.root
+    || !('path' in value) || typeof value.path !== 'string' || !value.path
+    || ('project' in value && value.project !== undefined && typeof value.project !== 'string')
+    || ('line' in value && value.line !== undefined && (typeof value.line !== 'number'
+      || !Number.isSafeInteger(value.line) || value.line < 0))) {
+    return { id, payload: null };
+  }
+
+  return {
+    id,
+    payload: {
+      type: 'open-file',
+      repo: value.repo,
+      root: value.root,
+      path: value.path,
+      ...('project' in value && typeof value.project === 'string' ? { project: value.project } : {}),
+      ...('line' in value && typeof value.line === 'number' ? { line: value.line } : {}),
+    },
+  };
 }
 
-async function revalidateProject(previous, own) {
+/**
+ * Проверяет неизвестные команды и исключает уже потреблённые идентификаторы.
+ * Идентификаторы удалённых из очереди команд освобождаются вместе с их памятью.
+ */
+function unhandledIntents(): IntentEnvelope[] {
+  const decoded = props.intents.flatMap((value) => {
+    const intent = decodeIntent(value);
+
+    return intent ? [intent] : [];
+  });
+  const current = new Set(decoded.map((intent) => intent.id));
+
+  for (const id of handledIntentIds) {
+    if (!current.has(id)) {
+      handledIntentIds.delete(id);
+    }
+  }
+
+  return decoded.filter((intent) => !handledIntentIds.has(intent.id));
+}
+
+/**
+ * Проверяет существование прежней рабочей копии при повторном открытии панели.
+ * Если она сохранилась, обновляет содержимое без сброса Monaco и пустого кадра.
+ */
+async function revalidateProject(previous: PreviousContext, own: number) {
   const generation = contextGeneration;
   const id = project.value;
   const requestId = ++reposRequestId;
+
   error.value = '';
 
   // Список проектов уже перечитан и подтвердил, что у текущего проекта больше
@@ -1256,24 +1726,31 @@ async function revalidateProject(previous, own) {
       resetState();
       contextLoading.value = false;
     }
+
     return;
   }
 
   let loadedRepos;
+
   try {
-    loadedRepos = (await api.get(`/api/code/${encodeURIComponent(id)}/repos`)).repos || [];
+    loadedRepos = await codeApi.repos(id);
   } catch (e) {
     if (own === activationId && projectIsCurrent(generation, id, requestId)) {
-      error.value = e.message;
+      error.value = codeErrorMessage(e);
       contextLoading.value = false;
     }
+
     return;
   }
-  if (own !== activationId || !projectIsCurrent(generation, id, requestId)) return;
+
+  if (own !== activationId || !projectIsCurrent(generation, id, requestId)) {
+    return;
+  }
 
   const nextContexts = buildCodeContexts(loadedRepos).contexts;
   const picked = nextContexts.find((item) => item.id === previous.contextId)
     || pickCodeContext(nextContexts, localStorage.getItem(contextStorageKey(id)));
+
   repos.value = loadedRepos;
 
   if (!picked) {
@@ -1283,21 +1760,28 @@ async function revalidateProject(previous, own) {
     contextId.value = '';
     resetState();
     contextLoading.value = false;
+
     return;
   }
   if (picked.id !== previous.contextId || contextId.value !== previous.contextId) {
     await setContext(picked.id, { activation: own });
+
     return;
   }
 
   // Тот же контекст обновляется без resetState(): дерево, выбранный файл и
   // Monaco остаются на экране до атомарной подмены свежими ответами.
   await refresh({ silent: true, activation: own });
+
   if (own === activationId && projectIsCurrent(generation, id, requestId)) {
     contextLoading.value = false;
   }
 }
 
+/**
+ * Загружает проекты при открытии и по возможности сохраняет точный контекст.
+ * Новая активация или выбор человека отменяют право старого ответа менять панель.
+ */
 async function activate({ preserve = false } = {}) {
   const own = ++activationId;
   const previous = preserve ? {
@@ -1308,19 +1792,31 @@ async function activate({ preserve = false } = {}) {
     file: fileSel.value,
     gitFile: gitSel.value,
   } : null;
-  if (!initialized) loading.value = true;
+
+  if (!initialized) {
+    loading.value = true;
+  }
+
   try {
-    const loaded = (await api.get('/api/projects')).projects || [];
-    if (own !== activationId) return;
+    const loaded = await codeApi.projects();
+
+    if (own !== activationId) {
+      return;
+    }
     // Пока фоновый запрос летел, человек мог выбрать другой проект/worktree.
     // Такой ответ больше не имеет права возвращать интерфейс к старому снимку.
     if (previous && (previous.generation !== contextGeneration
-        || previous.project !== project.value || previous.contextId !== contextId.value)) return;
+      || previous.project !== project.value || previous.contextId !== contextId.value)) {
+      return;
+    }
+
     projects.value = loaded;
+
     const withRepos = projects.value.filter((item) => (item.repos || []).length);
     const wanted = previous?.project || localStorage.getItem('cockpit-project') || '';
     const pick = withRepos.find((item) => item.id === wanted) || withRepos[0] || projects.value[0];
     let revalidatedInPlace = false;
+
     if (pick && preserve && previous?.project === pick.id && project.value === pick.id) {
       revalidatedInPlace = true;
       await revalidateProject(previous, own);
@@ -1335,13 +1831,17 @@ async function activate({ preserve = false } = {}) {
       contextId.value = '';
       resetState();
     }
-    if (own !== activationId) return;
+    if (own !== activationId) {
+      return;
+    }
     // Файл/диф относится к точной рабочей копии. Если project или context исчез,
     // не переносим старый путь в случайный fallback-репозиторий.
     const sameContext = !revalidatedInPlace && previous?.project === project.value
       && previous?.contextId === contextId.value;
+
     if (sameContext && previous.tab === 'git') {
       await setTab('git');
+
       if (previous.gitFile && gitEntries.value.has(previous.gitFile)) {
         await selectGit(previous.gitFile);
       }
@@ -1354,12 +1854,18 @@ async function activate({ preserve = false } = {}) {
         clearFileModel();
       }
     }
+
     initialized = true;
   } catch (e) {
-    if (own === activationId) error.value = e.message;
+    if (own === activationId) {
+      error.value = codeErrorMessage(e);
+    }
   } finally {
-    if (own === activationId) loading.value = false;
+    if (own === activationId) {
+      loading.value = false;
+    }
   }
+
   await processIntents();
   await nextTick();
   layoutEditors();
@@ -1371,30 +1877,46 @@ async function activate({ preserve = false } = {}) {
  * а не «текущим выбором»: ссылка на worktree задачи не должна открыть одноимённый
  * файл основного дерева.
  */
-async function openIntentFile(intent) {
+async function openIntentFile(intent: OpenFileIntent) {
   const wantRepo = String(intent.repo || '');
   const wantRoot = String(intent.root || '');
   const rel = String(intent.path || '');
-  if (!wantRepo || !wantRoot || !rel) return;
+
+  if (!wantRepo || !wantRoot || !rel) {
+    return;
+  }
 
   if (intent.project && project.value !== intent.project) {
     if (!projects.value.some((item) => item.id === intent.project)) {
       error.value = `Проект «${intent.project}» недоступен в разделе «Код»`;
+
       return;
     }
+
     await setProject(intent.project);
-    if (project.value !== intent.project) return;
+
+    if (project.value !== intent.project) {
+      return;
+    }
   }
+
   const target = contexts.value.find((item) => item.repoKey === wantRepo && item.treePath === wantRoot);
+
   if (!target) {
     error.value = `Рабочая копия ${wantRoot} недоступна — проверь пути в разделе «Проекты»`;
+
     return;
   }
   if (contextId.value !== target.id) {
     await setContext(target.id);
-    if (contextId.value !== target.id) return;
+
+    if (contextId.value !== target.id) {
+      return;
+    }
   }
-  if (tab.value !== 'files') tab.value = 'files';
+  if (tab.value !== 'files') {
+    tab.value = 'files';
+  }
 
   // Каталоги раскрываем по одному сверху вниз: дерево ленивое, и без этого файл
   // открылся бы в редакторе, но не подсветился бы в навигаторе.
@@ -1402,45 +1924,71 @@ async function openIntentFile(intent) {
   const segments = rel.split('/').slice(0, -1);
   let prefix = '';
   const open = new Set(openDirs.value);
+
   for (const segment of segments) {
     prefix = prefix ? `${prefix}/${segment}` : segment;
-    if (!dirs.value.has(prefix) && !(await loadDir(prefix, snapshot))) break;
-    if (!contextIsCurrent(snapshot)) return;
+
+    if (!dirs.value.has(prefix) && !(await loadDir(prefix, snapshot))) {
+      break;
+    }
+    if (!contextIsCurrent(snapshot)) {
+      return;
+    }
+
     open.add(prefix);
   }
+
   openDirs.value = open;
-  pendingReveal = intent.line > 0 ? { path: rel, line: Number(intent.line) } : null;
+  pendingReveal = intent.line ? { path: rel, line: intent.line } : null;
+
   if ((await openFile(rel)) === false) {
     pendingReveal = null;
     error.value = `${rel}: файл не найден в этой рабочей копии`;
   }
 }
 
+/**
+ * Последовательно исполняет и потребляет проверенные команды одной очереди.
+ * Команды, пришедшие во время ожидания, запускаются после текущей обработки.
+ */
 async function processIntents() {
   const pending = unhandledIntents();
-  if (!props.active || !initialized || loading.value || processingIntents || !pending.length) return;
+
+  if (!props.active || !initialized || loading.value || processingIntents || !pending.length) {
+    return;
+  }
+
   processingIntents = true;
+
   try {
-    for (const intent of pending) {
-      if (intent.type === 'project' && intent.project && project.value !== intent.project) {
+    for (const { id, payload: intent } of pending) {
+      if (intent?.type === 'project' && intent.project && project.value !== intent.project) {
         const target = projects.value.find((item) => item.id === intent.project);
-        if (target) await setProject(target.id);
-      } else if (intent.type === 'open-file') {
+
+        if (target) {
+          await setProject(target.id);
+        }
+      } else if (intent?.type === 'open-file') {
         await openIntentFile(intent);
       }
-      handledIntentIds.add(intent.id);
-      emit('consume-intent', intent.id);
+
+      handledIntentIds.add(id);
+      emit('consume-intent', id);
     }
   } finally {
     processingIntents = false;
     // Intent мог приехать, пока выполнялся предыдущий setProject. Его watcher уже
     // сработал и увидел processing=true, поэтому явно продолжаем очередь.
-    if (props.active && unhandledIntents().length) queueMicrotask(processIntents);
+    if (props.active && unhandledIntents().length) {
+      queueMicrotask(processIntents);
+    }
   }
 }
 
 watch(() => props.active, (active, wasActive) => {
-  if (active) activate({ preserve: initialized && wasActive === false });
+  if (active) {
+    activate({ preserve: initialized && wasActive === false });
+  }
   else {
     activationId += 1;
     gitActionId += 1;
@@ -1465,8 +2013,10 @@ onBeforeUnmount(() => {
   gitActionId += 1;
   navigatorObserver?.disconnect?.();
   emit('context', null);
-  clearFileModel(); clearDiffModels();
-  fileEditor?.dispose(); diffEditor?.dispose();
+  clearFileModel();
+  clearDiffModels();
+  fileEditor?.dispose();
+  diffEditor?.dispose();
 });
 </script>
 

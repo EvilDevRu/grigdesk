@@ -3,16 +3,32 @@
 import { defineComponent, h } from 'vue';
 
 const navigatorIcon = () => h('svg', {
-  viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
-  'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true',
+  viewBox: '0 0 20 20',
+  fill: 'none',
+  stroke: 'currentColor',
+  'stroke-width': '1.5',
+  'stroke-linecap': 'round',
+  'stroke-linejoin': 'round',
+  'aria-hidden': 'true',
 }, [
-  h('rect', { x: '2.5', y: '3', width: '15', height: '14', rx: '2' }),
+  h('rect', {
+    x: '2.5',
+    y: '3',
+    width: '15',
+    height: '14',
+    rx: '2'
+  }),
   h('path', { d: 'M7 3v14' }),
 ]);
 
+/**
+ * Каркас сразу использует сохранённую ширину дерева будущей панели.
+ * Отказ storage и повреждённое значение возвращают стандартную ширину.
+ */
 function storedNavigatorWidth() {
   try {
     const value = Number(localStorage.getItem('cockpit-code-dock-nav-width'));
+
     return Number.isFinite(value) && value > 0 ? Math.min(420, Math.max(140, value)) : 260;
   } catch {
     return 260;
@@ -27,6 +43,7 @@ export default defineComponent({
   },
   setup(props) {
     const navigatorWidth = storedNavigatorWidth();
+
     return () => h('div', {
       class: ['code-panel-loading', { compact: props.compact }],
       role: 'status',

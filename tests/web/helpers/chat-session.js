@@ -106,7 +106,7 @@ export function compileChatSession(prefix) {
       '../../ui': uiFacadeStub(prefix),
       '../../shared/md.js': 'export const mdToHtml = (text) => String(text || "");',
       '../../features/documents/links.js': 'export const documentLinkFromClick = () => "";',
-      '../../features/code/links.js': [
+      '../../features/code/links.ts': [
         'export const chatFileLinkHref = () => "";',
         'export const codeLinkFromClick = () => null;',
         'export const loadCodeRoots = () => Promise.resolve([]);',

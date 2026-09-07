@@ -17,7 +17,7 @@ import {
   pickCodeContext,
   reconcileGitOpenDirs,
   splitGitPath,
-} from '../../web/src/shared/code-tree.js';
+} from '../../web/src/shared/codeTree.ts';
 
 function tree(path, overrides = {}) {
   return {

@@ -15,7 +15,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import codeModule, { isHiddenPath } from '../../server/src/modules/code/index.js';
+import codeModule, { isHiddenPath } from '../../server/src/modules/code/index.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

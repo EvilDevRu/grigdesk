@@ -17,8 +17,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import codeModule from '../../server/src/modules/code/index.js';
-import { taskDiff, unquotePath, worktreeChanges } from '../../server/src/lib/git.js';
+import codeModule from '../../server/src/modules/code/index.ts';
+import { taskDiff, unquotePath, worktreeChanges } from '../../server/src/lib/git.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

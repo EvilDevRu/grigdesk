@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.docker.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/modules/code/**/*.ts",
+    "src/lib/codeCommitMessage.ts",
+    "src/lib/git.ts",
+    "../shared/codeContracts.ts",
+    "../tests/types/code-server-contract.test.mts"
+  ]
+}

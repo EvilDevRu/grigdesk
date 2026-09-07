@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.ui.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "allowImportingTsExtensions": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "include": [
+    "../shared/codeContracts.ts",
+    "src/views/code/**/*.ts",
+    "src/views/code/**/*.vue",
+    "src/views/CodeView.vue",
+    "src/shared/codeApi.ts",
+    "src/shared/codeTree.ts",
+    "src/shared/monaco.ts",
+    "src/features/code/**/*.ts",
+    "../tests/types/code-contract.test.ts"
+  ]
+}

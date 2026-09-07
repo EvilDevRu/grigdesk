@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { STAGES, StageKind } from '../../lib/stages.js';
 import { readInstruction, readActivity, readAgentLive } from '../../lib/factory-cli.js';
-import { taskDiff } from '../../lib/git.js';
+import { taskDiff } from '../../lib/git.ts';
 import { refreshRepos } from '../../lib/git-refresh.js';
 import { loadTriageProfile } from '../../lib/analysis/profile.js';
 import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.js';

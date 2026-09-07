@@ -7,11 +7,17 @@ import 'monaco-editor/basic-languages/monaco.contribution';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 
 // Воркер один: editor.worker (в нём же считается сравнение для дифа).
+declare global {
+  var MonacoEnvironment: monaco.Environment | undefined;
+}
+
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
 // Тема под палитру кокпита (определяется один раз на модуль).
 monaco.editor.defineTheme('cockpit-dark', {
-  base: 'vs-dark', inherit: true, rules: [],
+  base: 'vs-dark',
+  inherit: true,
+  rules: [],
   colors: {
     'editor.background': '#0a0c10',
     'editorGutter.background': '#0a0c10',
@@ -30,21 +36,56 @@ monaco.editor.defineTheme('cockpit-dark', {
 });
 
 // Язык по расширению файла (подсветка).
-const LANG = {
-  php: 'php', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
-  ts: 'typescript', tsx: 'typescript', vue: 'html', json: 'json', css: 'css', scss: 'scss',
-  html: 'html', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'shell', bash: 'shell',
-  py: 'python', sql: 'sql', xml: 'xml', env: 'ini', ini: 'ini', blade: 'html',
+const LANG: Record<string, string> = {
+  php: 'php',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  vue: 'html',
+  json: 'json',
+  css: 'css',
+  scss: 'scss',
+  html: 'html',
+  md: 'markdown',
+  yml: 'yaml',
+  yaml: 'yaml',
+  sh: 'shell',
+  bash: 'shell',
+  py: 'python',
+  sql: 'sql',
+  xml: 'xml',
+  env: 'ini',
+  ini: 'ini',
+  blade: 'html',
 };
-export function langOf(p) { const ext = (p.split('.').pop() || '').toLowerCase(); return LANG[ext] || 'plaintext'; }
+
+/**
+ * Выбирает только встроенную подсветку по расширению файла.
+ * Неизвестный формат открывается обычным текстом, без языкового сервиса.
+ */
+export function langOf(path: string): string {
+  const ext = (path.split('.').pop() || '').toLowerCase();
+
+  return LANG[ext] || 'plaintext';
+}
 
 // Общие опции read-only редакторов. Фичи, которым нужен языковой воркер
 // (у нас только editor.worker), выключены — чтобы не сыпать в консоль.
-export const READONLY_OPTS = {
-  theme: 'cockpit-dark', readOnly: true, automaticLayout: true,
-  fontSize: 12.5, lineHeight: 18,
-  minimap: { enabled: false }, scrollBeyondLastLine: false,
-  links: false, occurrencesHighlight: 'off', stickyScroll: { enabled: false }, codeLens: false,
+export const READONLY_OPTS: monaco.editor.IStandaloneEditorConstructionOptions = {
+  theme: 'cockpit-dark',
+  readOnly: true,
+  automaticLayout: true,
+  fontSize: 12.5,
+  lineHeight: 18,
+  minimap: { enabled: false },
+  scrollBeyondLastLine: false,
+  links: false,
+  occurrencesHighlight: 'off',
+  stickyScroll: { enabled: false },
+  codeLens: false,
 };
 
 export { monaco };

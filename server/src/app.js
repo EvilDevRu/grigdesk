@@ -101,7 +101,7 @@ import authModule from './modules/auth/index.js';
 import gatewayModule from './modules/gateway/index.js';
 import pluginsModule from './modules/plugins/index.js';
 import projectsModule from './modules/projects/index.js';
-import codeModule from './modules/code/index.js';
+import codeModule from './modules/code/index.ts';
 import telegramModule from './modules/telegram/index.js';
 import githubModule from './modules/github/index.js';
 import inboxModule from './modules/inbox/index.js';

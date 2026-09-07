@@ -590,7 +590,7 @@ import {
 } from '../../ui';
 import { mdToHtml } from '../../shared/md.js';
 import { documentLinkFromClick } from '../../features/documents/links.js';
-import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.js';
+import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.ts';
 import { useToolLauncher } from '../../shared/tools/launcher.js';
 import { useDocumentPreviewStore } from '../../stores/document-preview.js';
 import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';

@@ -2,7 +2,7 @@
   <div class="tool-route-adapter" data-tool-route="code" aria-hidden="true"></div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Route-adapter намеренно не импортирует CodePanel: единственный экземпляр панели
 // принадлежит постоянному ToolHost в AppShell. Здесь только перевод deep-link
 // (`#/code?project=…&repo=…&root=…&path=…`) в обычный intent панели — тем же путём,
@@ -11,7 +11,7 @@
 import { watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDockStore } from '../stores/dock.js';
-import { parseCodeRouteHref } from '../features/code/links.js';
+import { parseCodeRouteHref } from '../features/code/links';
 
 const route = useRoute();
 const router = useRouter();
@@ -22,11 +22,14 @@ watch(() => route.fullPath, () => {
     return;
   }
 
-  const query = new URLSearchParams(
-    Object.entries(route.query)
-      .filter(([, value]) => typeof value === 'string')
-      .map(([key, value]) => [key, value]),
-  );
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(route.query)) {
+    if (typeof value === 'string') {
+      query.set(key, value);
+    }
+  }
+
   const target = parseCodeRouteHref(`#/code?${query}`);
 
   if (!target) {

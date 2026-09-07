@@ -15,7 +15,7 @@ import {
   looksLikeLocalPath,
   parseCodeRouteHref,
   parseCodeTarget,
-} from '../../web/src/features/code/links.js';
+} from '../../web/src/features/code/links.ts';
 import { mdToHtml } from '../../web/src/shared/md.js';
 
 const ROOTS = [

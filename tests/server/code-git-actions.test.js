@@ -14,8 +14,8 @@ import { promisify } from 'node:util';
 import {
   buildCommitTitlePrompt,
   parseCommitTitle,
-} from '../../server/src/lib/code-commit-message.js';
-import codeModule from '../../server/src/modules/code/index.js';
+} from '../../server/src/lib/codeCommitMessage.ts';
+import codeModule from '../../server/src/modules/code/index.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

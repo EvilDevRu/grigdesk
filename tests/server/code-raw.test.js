@@ -16,7 +16,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import codeModule, { RAW_IMAGE_TYPES, RAW_MAX_BYTES } from '../../server/src/modules/code/index.js';
+import codeModule, { RAW_IMAGE_TYPES, RAW_MAX_BYTES } from '../../server/src/modules/code/index.ts';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

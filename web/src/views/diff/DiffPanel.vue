@@ -59,14 +59,14 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.js';
+import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.ts';
 import { api } from '../../shared/api-client.js';
 import {
   UiButton, UiIconButton, UiPressable, UiSpinner, UiToggleButton,
 } from '../../ui';
 
 // Ядро дифа задачи (дерево файлов + Monaco). Переиспользуется на роуте /diff и в модале.
-// Обвязка Monaco (воркер, тема, языки) — общая с плагином «Код»: shared/monaco.js.
+// Обвязка Monaco (воркер, тема, языки) — общая с плагином «Код»: shared/monaco.ts.
 const props = defineProps({ taskId: { type: [String, Number], default: '' } });
 const tid = computed(() => String(props.taskId || '').replace(/[^0-9]/g, ''));
 

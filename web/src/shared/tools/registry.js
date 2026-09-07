@@ -3,7 +3,7 @@
 // Состав и подписи живут в catalog.js; здесь к каждому инструменту добавляется его
 // панель, поэтому импорт этого модуля означает готовность грузить Monaco и терминал.
 import { defineAsyncComponent } from 'vue';
-import CodePanelLoading from '../../views/code/CodePanelLoading.js';
+import CodePanelLoading from '../../views/code/codePanelLoading.ts';
 import { TOOL_CATALOG } from './catalog.js';
 
 const PANELS = {

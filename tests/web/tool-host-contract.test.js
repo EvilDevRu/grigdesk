@@ -35,7 +35,7 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
 test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаются независимо', async () => {
   const [registry, codeLoading] = await Promise.all([
     source('web/src/shared/tools/registry.js'),
-    source('web/src/views/code/CodePanelLoading.js'),
+    source('web/src/views/code/codePanelLoading.ts'),
   ]);
 
   assert.equal(count(registry, /defineAsyncComponent\(/g), 6);
