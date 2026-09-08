@@ -13,6 +13,7 @@
     "types": ["node"]
   },
   "include": [
+    "../shared/contractDecoders.ts",
     "src/lib/docker/**/*.ts",
     "src/modules/docker/**/*.ts",
     "../shared/dockerContracts.ts",

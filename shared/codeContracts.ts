@@ -1,10 +1,6 @@
 // Контракт плагина «Код». Сетевой JSON получает тип только после проверки полей.
 
-type Decoder<Value> = (value: unknown, path: string) => Value;
-type Fields = Record<string, Decoder<unknown>>;
-type Decoded<Shape extends Fields> = {
-  [Key in keyof Shape]: ReturnType<Shape[Key]>;
-};
+import { contractDecoders } from './contractDecoders.ts';
 
 export class CodeContractError extends Error {
   constructor(path: string) {
@@ -13,75 +9,21 @@ export class CodeContractError extends Error {
   }
 }
 
-function record(value: unknown, path: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new CodeContractError(path);
-  }
+const {
+  boolean,
+  listOf,
+  nullable,
+  objectOf,
+  oneOf,
+  record,
+  text,
+  wholeNumber: numeric,
+} = contractDecoders((path) => {
+  throw new CodeContractError(path);
+});
 
-  return value as Record<string, unknown>;
-}
-
-/**
- * Динамический обход схемы собирает объект только из проверенных полей. Приведение
- * связывает ключи результата с mapped type и не объявляет входящий JSON доверенным.
- */
-function objectOf<Shape extends Fields>(fields: Shape): Decoder<Decoded<Shape>> {
-  return (value, path) => {
-    const source = record(value, path);
-    const entries = Object.entries(fields).map(([key, decode]) => [
-      key,
-      decode(source[key], `${path}.${key}`),
-    ]);
-
-    return Object.fromEntries(entries) as Decoded<Shape>;
-  };
-}
-
-function text(value: unknown, path: string): string {
-  if (typeof value !== 'string') {
-    throw new CodeContractError(path);
-  }
-
-  return value;
-}
-
-function numeric(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new CodeContractError(path);
-  }
-
-  return value;
-}
-
-function boolean(value: unknown, path: string): boolean {
-  if (typeof value !== 'boolean') {
-    throw new CodeContractError(path);
-  }
-
-  return value;
-}
-
-function success(value: unknown, path: string): true {
-  if (value !== true) {
-    throw new CodeContractError(path);
-  }
-
-  return value;
-}
-
-function listOf<Value>(decode: Decoder<Value>): Decoder<Value[]> {
-  return (value, path) => {
-    if (!Array.isArray(value)) {
-      throw new CodeContractError(path);
-    }
-
-    return value.map((item: unknown, index) => decode(item, `${path}[${index}]`));
-  };
-}
-
-function nullable<Value>(decode: Decoder<Value>): Decoder<Value | null> {
-  return (value, path) => value === null ? null : decode(value, path);
-}
+// Ответ-подтверждение: сервер обязан прислать именно true, а не что-нибудь истинное.
+const success = oneOf(true);
 
 const root = objectOf({
   project: text,

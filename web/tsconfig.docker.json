@@ -3,9 +3,11 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": false,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
+    "../shared/contractDecoders.ts",
     "../shared/dockerContracts.ts",
     "src/stores/docker.ts",
     "src/shared/dockerApi.ts",

@@ -3,11 +3,7 @@
 // JSON имеют один источник. Тем же декодером сервер читает собственный журнал
 // подъёмов: повреждённая запись обязана отбрасываться, а не становиться состоянием.
 
-type Decoder<Value> = (value: unknown, path: string) => Value;
-type Fields = Record<string, Decoder<unknown>>;
-type Decoded<Shape extends Fields> = {
-  [Key in keyof Shape]: ReturnType<Shape[Key]>;
-};
+import { contractDecoders } from './contractDecoders.ts';
 
 /**
  * Форма номера стенда. Общая для обеих сторон: HTTP не доверяет телу запроса,
@@ -23,84 +19,17 @@ export class SandboxContractError extends Error {
   }
 }
 
-function record(value: unknown, path: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new SandboxContractError(path);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-/**
- * Объект собирается только из объявленных и проверенных полей: динамический обход
- * ключей связан с mapped type приведением результата, а входящий JSON доверенным
- * не объявляется.
- */
-function objectOf<Shape extends Fields>(fields: Shape): Decoder<Decoded<Shape>> {
-  return (value, path) => {
-    const source = record(value, path);
-    const entries = Object.entries(fields).map(([key, decode]) => [
-      key,
-      decode(source[key], `${path}.${key}`),
-    ]);
-
-    return Object.fromEntries(entries) as Decoded<Shape>;
-  };
-}
-
-function text(value: unknown, path: string): string {
-  if (typeof value !== 'string') {
-    throw new SandboxContractError(path);
-  }
-
-  return value;
-}
-
-function numeric(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new SandboxContractError(path);
-  }
-
-  return value;
-}
-
-function boolean(value: unknown, path: string): boolean {
-  if (typeof value !== 'boolean') {
-    throw new SandboxContractError(path);
-  }
-
-  return value;
-}
-
-/**
- * Перечислением закрыты значения, которые управляют кнопками и ветками показа:
- * незнакомое состояние задания не должно тихо включать запасную ветку.
- */
-function oneOf<const Values extends readonly string[]>(...values: Values): Decoder<Values[number]> {
-  return (value, path) => {
-    for (const expected of values) {
-      if (value === expected) {
-        return expected;
-      }
-    }
-
-    throw new SandboxContractError(path);
-  };
-}
-
-function nullable<Value>(decode: Decoder<Value>): Decoder<Value | null> {
-  return (value, path) => (value === null ? null : decode(value, path));
-}
-
-function listOf<Value>(decode: Decoder<Value>): Decoder<Value[]> {
-  return (value, path) => {
-    if (!Array.isArray(value)) {
-      throw new SandboxContractError(path);
-    }
-
-    return value.map((item, index) => decode(item, `${path}[${index}]`));
-  };
-}
+const {
+  boolean,
+  listOf,
+  nullable,
+  numeric,
+  objectOf,
+  oneOf,
+  text,
+} = contractDecoders((path) => {
+  throw new SandboxContractError(path);
+});
 
 const sandboxRepo = objectOf({
   name: text,

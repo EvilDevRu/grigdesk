@@ -3,9 +3,11 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": false,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
+    "../shared/contractDecoders.ts",
     "../shared/sandboxContracts.ts",
     "src/actions/sandboxes/**/*.ts",
     "src/stores/sandboxes.ts",

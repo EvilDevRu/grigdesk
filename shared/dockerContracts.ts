@@ -1,11 +1,7 @@
 // Контракт панели Docker общий для нормализаторов сервера и клиента.
 // Типы выводятся из декодеров: форма JSON и проверка данных не расходятся.
 
-type Decoder<Value> = (value: unknown, path: string) => Value;
-type Fields = Record<string, Decoder<unknown>>;
-type Decoded<Shape extends Fields> = {
-  [Key in keyof Shape]: ReturnType<Shape[Key]>;
-};
+import { contractDecoders } from './contractDecoders.ts';
 
 export class DockerContractError extends Error {
   constructor(path: string) {
@@ -14,92 +10,19 @@ export class DockerContractError extends Error {
   }
 }
 
-/**
- * На входе сети допускается только обычный JSON-объект. После проверки его поля
- * остаются unknown, пока соответствующий декодер не подтвердит их форму.
- */
-function record(value: unknown, path: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new DockerContractError(path);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-/**
- * Объект собирается только из объявленных и проверенных полей. Приведение здесь
- * связывает динамический обход ключей с mapped type, а не доверяет входящему JSON.
- */
-function objectOf<Shape extends Fields>(fields: Shape): Decoder<Decoded<Shape>> {
-  return (value, path) => {
-    const source = record(value, path);
-    const entries = Object.entries(fields).map(([key, decode]) => [
-      key,
-      decode(source[key], `${path}.${key}`),
-    ]);
-
-    return Object.fromEntries(entries) as Decoded<Shape>;
-  };
-}
-
-function text(value: unknown, path: string): string {
-  if (typeof value !== 'string') {
-    throw new DockerContractError(path);
-  }
-
-  return value;
-}
-
-function numeric(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new DockerContractError(path);
-  }
-
-  return value;
-}
-
-function boolean(value: unknown, path: string): boolean {
-  if (typeof value !== 'boolean') {
-    throw new DockerContractError(path);
-  }
-
-  return value;
-}
-
-/**
- * Только перечисленные значения управляют действиями и вариантами сообщений;
- * незнакомое значение не должно незаметно включать запасную ветку обработки.
- */
-function oneOf<const Values extends readonly (string | boolean)[]>(...values: Values): Decoder<Values[number]> {
-  return (value, path) => {
-    for (const expected of values) {
-      if (value === expected) {
-        return expected;
-      }
-    }
-
-    throw new DockerContractError(path);
-  };
-}
-
-function nullable<Value>(decode: Decoder<Value>): Decoder<Value | null> {
-  return (value, path) => value === null ? null : decode(value, path);
-}
-
-function listOf<Value>(decode: Decoder<Value>): Decoder<Value[]> {
-  return (value, path) => {
-    if (!Array.isArray(value)) {
-      throw new DockerContractError(path);
-    }
-
-    return value.map((item: unknown, index: number) => decode(item, `${path}[${index}]`));
-  };
-}
-
-function mapOf<Value>(decode: Decoder<Value>): Decoder<Record<string, Value>> {
-  return (value, path) => Object.fromEntries(Object.entries(record(value, path))
-    .map(([key, item]) => [key, decode(item, `${path}.${key}`)]));
-}
+const {
+  boolean,
+  listOf,
+  mapOf,
+  nullable,
+  numeric,
+  objectOf,
+  oneOf,
+  record,
+  text,
+} = contractDecoders((path) => {
+  throw new DockerContractError(path);
+});
 
 const strings = listOf(text);
 const port = objectOf({

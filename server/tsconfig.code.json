@@ -5,6 +5,7 @@
     "checkJs": false
   },
   "include": [
+    "../shared/contractDecoders.ts",
     "src/modules/code/**/*.ts",
     "src/lib/codeCommitMessage.ts",
     "src/lib/git.ts",

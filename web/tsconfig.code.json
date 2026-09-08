@@ -7,6 +7,7 @@
     "noUncheckedIndexedAccess": true
   },
   "include": [
+    "../shared/contractDecoders.ts",
     "../shared/codeContracts.ts",
     "src/views/code/**/*.ts",
     "src/views/code/**/*.vue",
