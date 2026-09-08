@@ -24,6 +24,19 @@ if (!['host', 'contained'].includes(kimiLaunchMode)) {
   throw new Error(`COCKPIT_KIMI_LAUNCH_MODE: допустимо host|contained, получено "${kimiLaunchMode}"`);
 }
 
+// Служебный диапазон номеров ручных песочниц разбирается ЗДЕСЬ: кривое значение
+// обязано ронять старт, а не всплывать пятисотым ответом при первом заходе человека
+// в раздел. Тот же приём, что у COCKPIT_KIMI_LAUNCH_MODE выше.
+const manualRangeRaw = process.env.COCKPIT_SANDBOX_MANUAL_RANGE || '990000-999999';
+const manualRangeParts = /^([1-9][0-9]*)-([1-9][0-9]*)$/.exec(manualRangeRaw.trim());
+if (!manualRangeParts || Number(manualRangeParts[1]) > Number(manualRangeParts[2])) {
+  throw new Error(`COCKPIT_SANDBOX_MANUAL_RANGE: нужен диапазон «от-до», получено "${manualRangeRaw}"`);
+}
+const sandboxManualRange = {
+  from: Number(manualRangeParts[1]),
+  to: Number(manualRangeParts[2]),
+};
+
 export const config = {
   // Сеть. HOST=0.0.0.0 — чтобы окно (планшет) достучалось по локальной сети и через шлюз.
   port: Number(process.env.COCKPIT_PORT) || 8140,
@@ -143,6 +156,13 @@ export const config = {
   // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент
   // может переписать. Движок делает себе доверенную копию сам.
   ticketsDir: process.env.COCKPIT_TICKETS_DIR || path.join(__dirname, '..', '.state', 'tickets'),
+
+  // Ручные песочницы: журнал подъёмов кокпита и служебный диапазон номеров стендов,
+  // которые поднимают без задачи B24. Диапазон отделён от номеров задач намеренно:
+  // стенд «поиграться» не должен занять номер, который завтра придёт из портала.
+  sandboxJournalDir: process.env.COCKPIT_SANDBOX_JOURNAL_DIR
+    || path.join(__dirname, '..', '.state', 'sandboxes'),
+  sandboxManualRange,
 
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),

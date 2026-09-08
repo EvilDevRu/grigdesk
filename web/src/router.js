@@ -6,6 +6,7 @@ const routes = [
   { path: '/', redirect: '/board' },
   { path: '/board', name: 'board', component: () => import('./views/BoardView.vue'), meta: { title: 'Доска' } },
   { path: '/pipeline', name: 'pipeline', component: () => import('./views/PipelineView.vue'), meta: { title: 'Конвейер' } },
+  { path: '/sandboxes', name: 'sandboxes', component: () => import('./views/SandboxesView.vue'), meta: { title: 'Песочницы' } },
   { path: '/chats', name: 'chats', component: () => import('./views/ChatsView.vue'), meta: { title: 'Чаты' } },
   { path: '/agents', name: 'agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Агенты' } },
   { path: '/diff', name: 'diff', component: () => import('./views/DiffView.vue'), meta: { title: 'Диф' } },

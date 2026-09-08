@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.docker.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/sandboxes/**/*.ts",
+    "src/modules/sandboxes/**/*.ts",
+    "../shared/sandboxContracts.ts",
+    "../tests/types/sandbox-server-contract.test.mts"
+  ]
+}

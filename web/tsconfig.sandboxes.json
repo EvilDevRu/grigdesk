@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.ui.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noUncheckedIndexedAccess": true
+  },
+  "include": [
+    "../shared/sandboxContracts.ts",
+    "src/actions/sandboxes/**/*.ts",
+    "src/stores/sandboxes.ts",
+    "src/shared/sandboxApi.ts",
+    "src/views/sandboxes/**/*.vue",
+    "src/views/SandboxesView.vue",
+    "../tests/types/sandbox-contract.test.ts"
+  ]
+}

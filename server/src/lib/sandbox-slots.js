@@ -107,6 +107,15 @@ export async function listSlots({
   return slotsSnapshot({ factoryBin, stateDir, profilesDir, profile });
 }
 
+/**
+ * Номера задач с ЖИВОЙ резервацией. Правило протухания живёт здесь же, поэтому
+ * читатель занятости (например, выбор служебного номера песочницы) не заводит
+ * своей копии раскладки каталога и своего понимания TTL.
+ */
+export function reservedTasks({ stateDir, ttlMs = RESERVATION_TTL_MS }) {
+  return [...readReservations(slotsDir(stateDir), ttlMs).keys()];
+}
+
 /** Живые резервации: {task → {task, k, at}}. Протухшие подчищаются на месте. */
 function readReservations(dir, ttlMs = RESERVATION_TTL_MS) {
   const live = new Map();

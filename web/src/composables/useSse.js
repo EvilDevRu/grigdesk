@@ -17,6 +17,7 @@ const EVENT_NAMES = [
   'chat-store', 'chat-store-meta',
   'speech-settings',
   'inbox-changed', 'telegram-status', 'task-shelf-changed', 'arbiter-live',
+  'sandboxes-changed', 'sandbox-progress',
   'gateway-setup',
 ];
 

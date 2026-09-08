@@ -70,6 +70,7 @@ import { createDbAudit } from './lib/db/audit.js';
 import { cancelDbQuery, createDbBroker } from './lib/db/broker.js';
 import { normalizeDbResult } from './lib/db/result.js';
 import { createDockerService } from './lib/docker/service.ts';
+import { createSandboxService } from './lib/sandboxes/service.ts';
 import { createKnowledgeClient } from './lib/search/client.js';
 import { createKnowledgeBroker } from './lib/search/broker.js';
 import { createKnowledgeTransfer } from './lib/search/transfer.js';
@@ -109,6 +110,7 @@ import documentsModule from './modules/documents/index.js';
 import sshModule from './modules/ssh/index.js';
 import dbModule from './modules/db/index.js';
 import dockerModule from './modules/docker/index.ts';
+import sandboxesModule from './modules/sandboxes/index.ts';
 import knowledgeModule from './modules/knowledge/index.js';
 import { Analyzer } from './lib/analysis/analyzer.js';
 import { AnalysisArbiter } from './lib/analysis/arbiter.js';
@@ -368,6 +370,20 @@ async function build() {
         logTailLines: Math.max(50, Number(value.logTailLines) || 500),
       };
     },
+  });
+
+  // Песочницы: подъём и снос идут отдельными процессами и переживают перезапуск
+  // сервера, поэтому служба живёт весь его срок и сама доводит журнал до правды.
+  const sandboxService = createSandboxService({
+    stateDir: config.stateDir,
+    journalDir: config.sandboxJournalDir,
+    profilesDir: config.profilesDir,
+    factoryBin: config.factoryBin,
+    manualRange: config.sandboxManualRange,
+    downCmd: config.sandboxDownCmd,
+    broadcast: (event, data) => fastify.sse?.broadcast(event, data),
+    // Шаги подъёма ловит общий вотчер каталога состояния, а не второй наблюдатель.
+    subscribe: (listener) => fastify.sse.subscribe(listener),
   });
 
   const dbQueries = new Map();
@@ -829,6 +845,7 @@ async function build() {
   await fastify.register(sshModule, { service: sshService });
   await fastify.register(dbModule, { service: dbService });
   await fastify.register(dockerModule, { service: dockerService });
+  await fastify.register(sandboxesModule, { service: sandboxService });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
     taskExists: companionTaskExists,
@@ -974,8 +991,15 @@ async function build() {
       fastify.log.warn({ err: error }, 'telegram-pult: восстановление после старта сорвалось');
     });
     arbiterWatch.start();
+    // Подъём песочницы переживает перезапуск сервера, поэтому журнал заданий сверяется
+    // с реальностью на старте: живой процесс снова под наблюдением, исчезнувший
+    // перестаёт вечно «идти».
+    void sandboxService.resume().catch((error) => {
+      fastify.log.warn({ err: error }, 'песочницы: сверка журнала после старта не удалась');
+    });
   });
   fastify.addHook('onClose', async () => {
+    sandboxService.stop();
     githubConnection.stop();
     telegramPult.actions.stop();
     await telegramPoller.stop();
