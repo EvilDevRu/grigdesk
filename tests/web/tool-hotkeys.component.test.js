@@ -183,7 +183,7 @@ async function mountHost(t) {
       '../../stores/plugins.js': [
         'export const usePluginsStore = () => globalThis.__hotkeyHost.plugins;',
       ].join('\n'),
-      '../../stores/task-shelf.js': [
+      '../../stores/taskShelf.ts': [
         'export const useTaskShelfStore = () => ({ totalCount: 0, litCount: 0 });',
       ].join('\n'),
       '../../composables/useUiContextSource.js': [

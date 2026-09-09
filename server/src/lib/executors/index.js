@@ -154,6 +154,11 @@ import { createWorkToolRegistry } from './work-tools/index.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 
+// Один файл = один ИИ, и язык файла на это не влияет: сервер исполняет TypeScript
+// снятием типов. Пока список знал только .js, перевод исполнителя молча убирал бы
+// его из реестра — с зелёными типами и пустым выбором модели в чате.
+const ADAPTER_EXTENSIONS = ['.js', '.ts'];
+
 /**
  * Provider-neutral рабочие инструменты замкнуты на server-owned scope. Никакое
  * поле аргументов модели не способно назначить проект, чат или живую сессию.
@@ -192,9 +197,18 @@ let loadedExecutors = null; // Map id → adapter с run()
 export async function getProviderAdapters() {
   if (loadedAdapters) return loadedAdapters;
   const map = new Map();
+  const seenNames = new Set();
   for (const f of readdirSync(DIR).sort()) {
     // Файлы на `_` — вспомогательные модули исполнителей (каталоги моделей и т.п.), не ИИ.
-    if (!f.endsWith('.js') || f === 'index.js' || f.startsWith('_')) continue;
+    const extension = ADAPTER_EXTENSIONS.find((suffix) => f.endsWith(suffix));
+    if (!extension || f === 'index.js' || f.startsWith('_')) continue;
+    // Один ИИ — один файл. Переименование в TypeScript оставляет прежний .js на
+    // диске незамеченным, и тогда карточка подключилась бы дважды, из разных версий.
+    const name = f.slice(0, -extension.length);
+    if (seenNames.has(name)) {
+      throw new Error(`Исполнитель ${name} объявлен дважды: убери лишний файл в ${DIR}`);
+    }
+    seenNames.add(name);
     const mod = await import(pathToFileURL(path.join(DIR, f)).href);
     const adapter = mod.default;
     if (adapter?.id && typeof adapter.probe === 'function' && typeof adapter.auth === 'function') {

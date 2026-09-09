@@ -20,9 +20,9 @@ import {
   locatePart,
   meetingFramePath,
   sweepMeetingFrames,
-} from '../../server/src/lib/media/meeting-frames.js';
+} from '../../server/src/lib/media/meetingFrames.ts';
 import b24Module from '../../server/src/modules/b24/index.js';
-import mediaModule from '../../server/src/modules/media/index.js';
+import mediaModule from '../../server/src/modules/media/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

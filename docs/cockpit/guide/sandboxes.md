@@ -118,8 +118,9 @@ db»). Шаги ловит общий вотчер каталога состоя
 
 ## Проверка
 
-`npm --prefix server run typecheck:sandboxes` и `npm --prefix web run typecheck:sandboxes`
-входят в общий `npm test` обеих частей. Поведение закрыто тестами
+Типы проверяют общие команды среды `npm --prefix server run typecheck` и
+`npm --prefix web run typecheck`, входящие в `npm test` обеих частей;
+`typecheck:sandboxes` остаётся быстрой проверкой одной области. Поведение закрыто тестами
 `tests/server/sandbox-registry.test.js`, `tests/server/sandbox-lifecycle.test.js`,
 `tests/server/sandbox-http-gate.test.js`, `tests/web/sandboxes-store.test.js` и
 `tests/web/sandboxes-view.component.test.js`; отрицательные примеры контракта —

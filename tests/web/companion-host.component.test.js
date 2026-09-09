@@ -36,7 +36,7 @@ async function compileHost(deps, t) {
       '../../stores/providers.js': `
         export const useProvidersStore = (...args) => ${fromDeps}.useProvidersStore(...args);
       `,
-      '../../shared/chat-context.js': `
+      '../../../../shared/chatContext.ts': `
         export const contextFill = (...args) => ${fromDeps}.contextFill(...args);
       `,
       '../../stores/notify-watch.js': `

@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { InboxCoordinator } from '../../server/src/lib/inbox/coordinator.js';
-import { InboxRefCodec } from '../../server/src/lib/inbox/identity.js';
-import { normalizeRules } from '../../server/src/lib/telegram/rules-store.js';
-import { normalizeUpdate } from '../../server/src/lib/telegram/updates.js';
+import { InboxCoordinator } from '../../server/src/lib/inbox/coordinator.ts';
+import { InboxRefCodec } from '../../server/src/lib/inbox/identity.ts';
+import { normalizeRules } from '../../server/src/lib/telegram/rulesStore.ts';
+import { normalizeUpdate } from '../../server/src/lib/telegram/updates.ts';
 import {
   createTelegramInboxChannel,
   TelegramInboxChannelError,
   toInboxMessage,
-} from '../../server/src/lib/telegram/inbox-channel.js';
-import { telegramActivationMarker } from '../../server/src/lib/telegram/activation.js';
+} from '../../server/src/lib/telegram/inboxChannel.ts';
+import { telegramActivationMarker } from '../../server/src/lib/telegram/activation.ts';
 
 const ACCOUNT_REF = 'acc_telegram_inbox_0001';
 const BOT_ID = '8123456789';

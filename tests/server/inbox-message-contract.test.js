@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   InboxMessageValidationError,
   validateInboxMessage,
-} from '../../server/src/lib/inbox/message.js';
+} from '../../server/src/lib/inbox/message.ts';
 
 const CHANNEL = 'telegram';
 const ACCOUNT = 'acc_message_contract_01';

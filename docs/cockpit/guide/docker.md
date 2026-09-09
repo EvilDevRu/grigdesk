@@ -35,9 +35,10 @@ JavaScript. Общие контракты объявлены ESM-пакетом 
 шаблона перед перезапуском. Сам перезапуск выполняет человек после завершения агентского
 хода. Для прямого запуска: `node --experimental-strip-types server/src/app.js`.
 
-`npm --prefix server run typecheck:docker` проверяет весь серверный Docker в строгом
-режиме и входит в серверный `npm test`. `npm --prefix web run typecheck:docker` проверяет
-браузерную и серверную части; команда входит в общий `npm --prefix web test`.
+Типы проверяет общая команда среды: `npm --prefix server run typecheck` и
+`npm --prefix web run typecheck`; они входят в `npm test` своих пакетов и накрывают весь
+собственный TypeScript. `typecheck:docker` в обеих частях остаётся быстрой проверкой
+одной области при работе над ней.
 Для разработки и проверок нужны devDependencies: `npm --prefix server install --include=dev`.
 Само удаление типов при запуске не заменяет эту проверку компилятором.
 

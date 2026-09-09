@@ -56,7 +56,7 @@ export function compilePipelineView(prefix) {
       '../shared/sandbox.js': (
         'export const sandboxUrl = (port) => `http://sandbox.test:${port}`;'
       ),
-      '../shared/agent-activity.js': [
+      '../../../shared/agentActivity.ts': [
         'export const agentActivityLabel = () => "";',
         'export function silenceReason(task, window) {',
         '  const silence = task?.silence;',

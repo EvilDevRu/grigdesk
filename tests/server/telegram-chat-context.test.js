@@ -23,10 +23,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import chatModule from '../../server/src/modules/chat/index.js';
-import telegramModule from '../../server/src/modules/telegram/index.js';
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
-import { TelegramRulesStore } from '../../server/src/lib/telegram/rules-store.js';
-import { DISCUSSION_SECTION_TITLE } from '../../server/src/lib/telegram/discussion.js';
+import telegramModule from '../../server/src/modules/telegram/index.ts';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
+import { TelegramRulesStore } from '../../server/src/lib/telegram/rulesStore.ts';
+import { DISCUSSION_SECTION_TITLE } from '../../server/src/lib/telegram/discussion.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

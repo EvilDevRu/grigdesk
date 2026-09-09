@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/githubContracts.ts",
+    "src/lib/github/**/*.ts",
+    "src/modules/github/**/*.ts",
+    "../tests/types/github-server-contract.test.mts"
+  ]
+}

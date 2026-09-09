@@ -24,7 +24,7 @@ import {
   DIRECT_SSH_HOOK_MATCHER,
   directCommandHook,
   directSshSetting,
-} from './_direct-ssh-policy.js';
+} from './_directSshPolicy.ts';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 const SCOPED_WORKSPACE_CACHE_MS = 60_000;

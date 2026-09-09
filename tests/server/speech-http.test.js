@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { SpeechRuntime } from '../../server/src/lib/speech/index.js';
 import chatModule from '../../server/src/modules/chat/index.js';
-import mediaModule from '../../server/src/modules/media/index.js';
+import mediaModule from '../../server/src/modules/media/index.ts';
 import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

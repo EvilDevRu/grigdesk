@@ -42,7 +42,7 @@ import {
   scanHostKeys,
   uploadFile,
   writeKnownHosts,
-} from './ssh.js';
+} from './ssh.ts';
 
 const execFileAsync = promisify(execFile);
 

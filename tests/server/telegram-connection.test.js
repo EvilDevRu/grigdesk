@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { TelegramConnection } from '../../server/src/lib/telegram/connection.js';
+import { TelegramConnection } from '../../server/src/lib/telegram/connection.ts';
 
 const tokenA = '8123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghi';
 const tokenB = '9123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghi';

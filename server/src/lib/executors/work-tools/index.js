@@ -1,6 +1,6 @@
-import knowledgeSearch from './knowledge-search.js';
-import supervisedDb from './supervised-db.js';
-import supervisedSsh from './supervised-ssh.js';
+import knowledgeSearch from './knowledgeSearch.ts';
+import supervisedDb from './supervisedDb.ts';
+import supervisedSsh from './supervisedSsh.ts';
 
 const REGISTRATIONS = Object.freeze([supervisedSsh, knowledgeSearch, supervisedDb]);
 

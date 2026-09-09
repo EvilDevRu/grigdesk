@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { TelegramAccountPoller } from '../../server/src/lib/telegram/account-poller.js';
-import { normalizeUpdate } from '../../server/src/lib/telegram/updates.js';
+import { TelegramAccountPoller } from '../../server/src/lib/telegram/accountPoller.ts';
+import { normalizeUpdate } from '../../server/src/lib/telegram/updates.ts';
 
 const token = '8123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghi';
 

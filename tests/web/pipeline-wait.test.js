@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { waitingReason } from '../../web/src/shared/pipeline-wait.js';
+import { waitingReason } from '../../shared/pipelineWait.ts';
 
 test('waiting reason prefers a route-specific gate meaning', () => {
   const base = {

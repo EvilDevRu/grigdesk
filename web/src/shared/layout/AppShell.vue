@@ -472,7 +472,7 @@ import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
-import { useInboxStore } from '../../stores/inbox.js';
+import { startInboxSummary, stopInboxSummary, useInboxStore } from '../../actions/inbox';
 import { useDockStore } from '../../stores/dock.js';
 import {
   providerStatusHint,
@@ -529,10 +529,10 @@ const plugins = usePluginsStore();
 plugins.load();
 const inboxStore = useInboxStore();
 watch(() => (plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
-  if (enabled) inboxStore.start();
-  else inboxStore.stop();
+  if (enabled) startInboxSummary();
+  else stopInboxSummary();
 }, { immediate: true });
-onUnmounted(() => inboxStore.stop());
+onUnmounted(() => stopInboxSummary());
 prov.load();
 prov.loadUsage();
 // Каталог Codex зависит не только от версии CLI, но и от rollout/доступа аккаунта.

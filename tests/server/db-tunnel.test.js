@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { createSshSessionManager } from '../../server/src/lib/ssh/session-manager.js';
-import { createSshTransport } from '../../server/src/lib/ssh/transport.js';
+import { createSshSessionManager } from '../../server/src/lib/ssh/sessionManager.ts';
+import { createSshTransport } from '../../server/src/lib/ssh/transport.ts';
 
 class FakeClient extends EventEmitter {
   connect() {

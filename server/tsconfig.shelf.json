@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/shelfContracts.ts",
+    "src/lib/taskShelfStore.ts",
+    "src/lib/taskShelfService.ts",
+    "src/modules/task-shelf/**/*.ts",
+    "../tests/types/shelf-server-contract.test.mts"
+  ]
+}

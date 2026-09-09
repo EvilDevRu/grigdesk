@@ -84,7 +84,7 @@ export function compileChatSession(prefix) {
         `export const CONTEXT_WINDOW = globalThis.${prefix}ContextWindow || 200000;`,
         `export const useChatStore = globalThis.${prefix}ChatStore;`,
       ].join('\n'),
-      '../../shared/chat-context.js': [
+      '../../../../shared/chatContext.ts': [
         'export const contextFill = (...args) =>',
         '  globalThis.__sharedChatContextFill(...args);',
       ].join('\n'),

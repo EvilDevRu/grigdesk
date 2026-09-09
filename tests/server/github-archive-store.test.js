@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   GitHubArchiveStore,
   githubIssueSemanticKey,
-} from '../../server/src/lib/github/archive-store.js';
+} from '../../server/src/lib/github/archiveStore.ts';
 
 const ACCOUNT = 'acc_EEEEEEEEEEEEEEEEEEEEEE';
 const REPOSITORY = '1001';

@@ -1,5 +1,5 @@
-import { openKnowledgeStorage } from '../../server/src/lib/search/storage.js';
-import { createKnowledgeTransfer } from '../../server/src/lib/search/transfer.js';
+import { openKnowledgeStorage } from '../../server/src/lib/search/storage.ts';
+import { createKnowledgeTransfer } from '../../server/src/lib/search/transfer.ts';
 
 const [rootDir, dbPath] = process.argv.slice(2);
 const storage = await openKnowledgeStorage({ dbPath, seedSamples: false, readOnly: true });

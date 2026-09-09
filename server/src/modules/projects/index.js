@@ -22,7 +22,7 @@ async function projectsModule(fastify, opts) {
     if (!PROFILE_RE.test(id)) return reply.code(400).send({ error: 'bad_id' });
     if (!(await listProjects(config, prefs)).includes(id)) return reply.code(404).send({ error: 'not_found' });
     if ((await listFactoryProfiles(config.profilesDir)).includes(id)) {
-      const { loadTriageProfile } = await import('../../lib/analysis/profile.js');
+      const { loadTriageProfile } = await import('../../lib/analysis/profile.ts');
       const { repos } = await loadTriageProfile(config, id);
       if (repos.length) {
         return reply.code(409).send({

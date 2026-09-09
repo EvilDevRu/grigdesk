@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/analysisContracts.ts",
+    "src/lib/analysis/**/*.ts",
+    "src/modules/analysis/**/*.ts",
+    "../tests/types/triage-server-contract.test.mts"
+  ]
+}

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { INBOX_AUTO_TICK, InboxAutoTasks } from '../../server/src/lib/inbox/auto-tasks.js';
-import { InboxRefCodec } from '../../server/src/lib/inbox/identity.js';
+import { INBOX_AUTO_TICK, InboxAutoTasks } from '../../server/src/lib/inbox/autoTasks.ts';
+import { InboxRefCodec } from '../../server/src/lib/inbox/identity.ts';
 
 const NOW = Date.UTC(2026, 7, 9, 12, 0, 0);
 const DAY_MS = 86_400_000;

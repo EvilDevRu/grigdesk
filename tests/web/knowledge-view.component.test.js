@@ -21,6 +21,7 @@ const RECORD = {
   tags: ['queue'],
   updatedAt: '2026-08-29T00:00:00.000Z',
   revision: 3,
+  provenance: null,
 };
 
 function listResponse() {

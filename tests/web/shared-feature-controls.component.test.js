@@ -27,6 +27,9 @@ const API_STUB = `
 `;
 const ANALYSIS_STUB = `
   export const useAnalysisStore = () => globalThis.__attentionAnalysis;
+  export const analyzeTask = (...args) => globalThis.__attentionAnalysis.analyze(...args);
+  export const dismissAnalysis = (...args) => globalThis.__attentionAnalysis.dismiss(...args);
+  export const startAnalysisPolling = () => globalThis.__attentionAnalysis.startPolling?.();
 `;
 
 let projectSwitcherPromise;
@@ -46,7 +49,7 @@ function compileProjectSwitcher() {
 function compileAttentionAlerts() {
   attentionAlertsPromise ||= compileVue(ATTENTION_ALERTS_PATH, {
     stubs: {
-      '../../stores/analysis.js': ANALYSIS_STUB,
+      '../../actions/analysis': ANALYSIS_STUB,
     },
   });
 

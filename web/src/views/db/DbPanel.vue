@@ -354,19 +354,19 @@
                     <header class="db-result-stage__header">
                       <div>
                         <h3>Результат</h3>
-                        <span v-if="displayedResult?.untrusted" class="db-untrusted-badge">
+                        <span v-if="limitedResult" class="db-untrusted-badge">
                           Недоверенные данные
                         </span>
                       </div>
-                      <span v-if="displayedResult?.shownRows != null" class="db-result-count">
-                        Показано {{ displayedResult.shownRows }}
-                        из {{ displayedResult.totalRows ?? '?' }}
+                      <span v-if="limitedResult" class="db-result-count">
+                        Показано {{ limitedResult.shownRows }}
+                        из {{ limitedResult.totalRows ?? '?' }}
                       </span>
                     </header>
 
                     <div v-if="queryInFlight" class="db-result-state is-running">
                       <span class="db-result-state__pulse" aria-hidden="true"></span>
-                      <strong>{{ queryStateLabel(activeResultQuery?.state) }}</strong>
+                      <strong>{{ queryStateLabel(activeResultQuery?.state || '') }}</strong>
                       <small>Лента обновится после ответа базы.</small>
                     </div>
 
@@ -460,7 +460,7 @@
               </summary>
 
               <div v-if="store.audit?.length" class="db-audit__list">
-                <article v-for="item in store.audit" :key="item.id || item.at">
+                <article v-for="item in store.audit" :key="item.at">
                   <header>
                     <span>{{ queryActorLabel(item.actor) }}</span>
                     <strong :class="outcomeTone(item.outcome)">
@@ -721,7 +721,7 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import {
   UiButton,
@@ -740,26 +740,55 @@ import {
   UiTextarea,
   alertDialog,
 } from '../../ui';
-import { useDbStore } from '../../stores/db.js';
+import type {
+  DbEngine,
+  DbQuery,
+  DbResult,
+  DbSession,
+} from '../../../../shared/dbContracts.ts';
+import {
+  cancelDbQuery,
+  closeDbSession,
+  loadDb,
+  loadDbProjects,
+  loadDbSchema,
+  loadDbSshSessions,
+  openDbSession,
+  runDbQuery,
+  saveDbProfile,
+  setDbAgentAccess,
+  useDbStore,
+  watchDb,
+} from '../../actions/db';
 
-const props = defineProps({
-  active: { type: Boolean, default: true },
-  compact: { type: Boolean, default: false },
-  presentation: { type: String, default: 'page' },
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    compact?: boolean;
+    presentation?: string;
+  }>(),
+  {
+    active: true,
+    compact: false,
+    presentation: 'page',
+  },
+);
 
 const store = useDbStore();
+
+watchDb();
+
 const selectedProfileId = ref('');
 const selectedSessionId = ref('');
 const sshSessionId = ref('');
 const password = ref('');
 const query = ref('');
-const resultQueryIds = reactive({});
-const fallbackResults = reactive({});
+const resultQueryIds = reactive<Record<string, string>>({});
+const fallbackResults = reactive<Record<string, DbResult | null>>({});
 const localError = ref('');
 const openingProfileId = ref('');
 const closingSessionId = ref('');
-const schemaLoadingIds = reactive(new Set());
+const schemaLoadingIds = reactive(new Set<string>());
 const submittingQuery = ref(false);
 const savingProfile = ref(false);
 
@@ -769,7 +798,8 @@ const draft = reactive({
   engine: '',
   role: 'read',
   host: '',
-  port: '',
+  // Пустое поле порта — это «не задан», а не ноль: ноль был бы настоящим портом.
+  port: '' as number | '',
   user: '',
   database: '',
   via: 'direct',
@@ -777,6 +807,17 @@ const draft = reactive({
 });
 
 const visibleError = computed(() => localError.value || store.error || '');
+
+// Отказ приходит из сети и своего типа не обещает: человеку показывается сообщение
+// ошибки, а при его отсутствии — понятный текст самой операции.
+function errorText(error: unknown, fallback: string): string {
+  const message = error !== null && typeof error === 'object'
+    ? (error as { message?: unknown }).message
+    : undefined;
+
+  return typeof message === 'string' && message ? message : fallback;
+}
+
 const refreshLoading = computed(() => store.loading || store.projectsLoading);
 const selectedProfile = computed(() => (
   (store.profiles || []).find((profile) => profile.id === selectedProfileId.value) || null
@@ -817,7 +858,7 @@ const profileDraftValid = computed(() => Boolean(
 ));
 
 const currentSchema = computed(() => store.schemas?.[selectedSessionId.value] || null);
-const schemaRows = computed(() => rowsOf(currentSchema.value?.schema ?? currentSchema.value));
+const schemaRows = computed(() => rowsOf(currentSchema.value));
 const schemaItems = computed(() => schemaRows.value
   .map((row, index) => schemaItemLabel(row, index))
   .filter(Boolean));
@@ -835,17 +876,26 @@ const displayedResult = computed(() => (
   || fallbackResults[selectedSessionId.value]
   || null
 ));
+// Счётчик строк относится только к настоящему ответу базы. У отказа его нет, и
+// показать «0 из 0» вместо ошибки значило бы выдать неудачу за пустой результат.
+const limitedResult = computed<DbResult | null>(() => {
+  const value = displayedResult.value;
+
+  return value && (value as DbResult).untrusted === true ? value as DbResult : null;
+});
 const queryInFlight = computed(() => Boolean(activeResultId.value) && (
   !activeResultQuery.value
   || ['checking', 'waiting', 'running'].includes(activeResultQuery.value.state)
 ));
 const resultRows = computed(() => rowsOf(displayedResult.value));
 const resultColumns = computed(() => {
-  const columns = [];
+  const columns: string[] = [];
+
   for (const row of resultRows.value) {
     const names = row && typeof row === 'object' && !Array.isArray(row)
       ? Object.keys(row)
       : ['значение'];
+
     for (const name of names) {
       if (!columns.includes(name)) {
         columns.push(name);
@@ -857,33 +907,40 @@ const resultColumns = computed(() => {
 });
 const formattedResult = computed(() => JSON.stringify(displayedResult.value, null, 2));
 
-function rowsOf(value) {
-  if (Array.isArray(value?.rows)) {
-    return value.rows;
+// Ответ базы приходит либо ограниченным результатом, либо отказом без строк.
+// Обе формы законны, и отсутствие строк не должно ронять показ.
+function rowsOf(value: unknown): unknown[] {
+  const source = (value ?? {}) as { rows?: unknown };
+
+  if (Array.isArray(source.rows)) {
+    return source.rows;
   }
 
   return Array.isArray(value) ? value : [];
 }
 
-function engineLabel(engine) {
+// Название движка берётся из живого реестра: адаптеры объявляют себя сами, и
+// зашитый здесь список разошёлся бы с ними при первом же новом движке.
+function engineLabel(engine: string | DbEngine | null | undefined): string {
   const id = typeof engine === 'string' ? engine : engine?.id;
+  const known = (store.engines || []).find((item) => item.id === id);
 
-  return (store.engines || []).find((item) => item.id === id)?.label
-    || engine?.label
+  return known?.label
+    || (typeof engine === 'string' ? '' : engine?.label)
     || id
     || 'движок';
 }
 
-function roleLabel(role) {
+function roleLabel(role: string): string {
   return role === 'write' ? 'запись' : 'чтение';
 }
 
-function queryActorLabel(actor) {
+function queryActorLabel(actor: string | null | undefined): string {
   return actor === 'agent' ? 'агент' : 'человек';
 }
 
-function queryStateLabel(state) {
-  return {
+function queryStateLabel(state: string): string {
+  return ({
     checking: 'проверяется',
     waiting: 'ждёт подтверждения',
     running: 'выполняется',
@@ -891,11 +948,11 @@ function queryStateLabel(state) {
     denied: 'отклонён',
     error: 'ошибка',
     cancelled: 'прерван',
-  }[state] || 'ожидание';
+  } as Record<string, string>)[state] || 'ожидание';
 }
 
-function queryTone(state) {
-  return {
+function queryTone(state: string): string {
+  return ({
     checking: 'is-waiting',
     waiting: 'is-waiting',
     running: 'is-running',
@@ -903,24 +960,25 @@ function queryTone(state) {
     denied: 'is-danger',
     error: 'is-danger',
     cancelled: 'is-muted',
-  }[state] || 'is-muted';
+  } as Record<string, string>)[state] || 'is-muted';
 }
 
-function outcomeLabel(outcome) {
-  return {
+function outcomeLabel(outcome: string | null | undefined): string {
+  return ({
     success: 'успешно',
     query_failed: 'ошибка запроса',
     cancelled: 'прерван',
     session_lost: 'сессия потеряна',
-  }[outcome] || 'отклонён';
+  } as Record<string, string>)[String(outcome)] || 'отклонён';
 }
 
-function outcomeTone(outcome) {
+function outcomeTone(outcome: string | null | undefined): string {
   return outcome === 'success' ? 'is-good' : 'is-bad';
 }
 
-function formatDate(value) {
+function formatDate(value: string): string {
   const date = new Date(value);
+
   if (!Number.isFinite(date.getTime())) {
     return value || '';
   }
@@ -933,8 +991,11 @@ function formatDate(value) {
   }).format(date);
 }
 
-function formatBytes(value) {
+// Объём ответа человеку. Неизвестный размер называется словами: ноль байт и
+// «не посчитали» — разные вещи, и путать их на экране нельзя.
+function formatBytes(value: unknown): string {
   const bytes = Number(value);
+
   if (!Number.isFinite(bytes) || bytes < 0) {
     return 'объём неизвестен';
   }
@@ -945,11 +1006,11 @@ function formatBytes(value) {
   return `${(bytes / 1_024).toFixed(bytes < 10_240 ? 1 : 0)} КиБ`;
 }
 
-function sessionTabId(sessionId) {
+function sessionTabId(sessionId: string): string {
   return `db-session-tab-${String(sessionId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
 
-function sessionTabTitle(session) {
+function sessionTabTitle(session: DbSession): string {
   return [
     session.label,
     session.projectId,
@@ -958,23 +1019,25 @@ function sessionTabTitle(session) {
   ].filter(Boolean).join(' — ');
 }
 
-function profileSessions(profileId) {
+function profileSessions(profileId: string): DbSession[] {
   return (store.sessions || []).filter((session) => session.profileId === profileId);
 }
 
-function profileSessionCount(profileId) {
+function profileSessionCount(profileId: string): number {
   return profileSessions(profileId).length;
 }
 
-function profileIsCurrent(profileId) {
+function profileIsCurrent(profileId: string): boolean {
   return activeSession.value?.profileId === profileId;
 }
 
-function querySessionOpen(item) {
+function querySessionOpen(item: DbQuery | null | undefined): boolean {
   return (store.sessions || []).some((session) => session.id === item?.sessionId);
 }
 
-function schemaItemLabel(row, index) {
+// Строка схемы приходит из чужой базы и формы не обещает: у одного движка это
+// объект с именем таблицы, у другого — просто строка.
+function schemaItemLabel(row: unknown, index: number): string {
   if (row === null || row === undefined) {
     return `Элемент ${index + 1}`;
   }
@@ -982,21 +1045,25 @@ function schemaItemLabel(row, index) {
     return String(row);
   }
   if (Array.isArray(row)) {
-    return row.map((item) => String(item)).join(', ');
+    return (row as unknown[]).map((item) => String(item)).join(', ');
   }
 
+  const named = row as Record<string, unknown>;
   const preferred = ['name', 'table', 'TABLE_NAME']
-    .map((key) => row[key])
+    .map((key) => named[key])
     .find((value) => value !== undefined);
-  const value = preferred ?? Object.values(row)[0];
+  const value = preferred ?? Object.values(named)[0];
 
   return value === undefined ? `Элемент ${index + 1}` : String(value);
 }
 
-function resultCell(row, column) {
+// Ячейка ответа базы: null показывается как есть, отсутствующая колонка — пустым
+// местом, а вложенный объект сериализуется, а не даёт «[object Object]».
+function resultCell(row: unknown, column: string): string {
   const value = row && typeof row === 'object' && !Array.isArray(row)
-    ? row[column]
+    ? (row as Record<string, unknown>)[column]
     : row;
+
   if (value === null) {
     return 'null';
   }
@@ -1007,119 +1074,151 @@ function resultCell(row, column) {
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
-/** После общей загрузки выбор остаётся на живых сущностях и не указывает в пустоту. */
-function reconcileSelections() {
+/**
+ * После общей загрузки выбор остаётся на живых сущностях и не указывает в пустоту:
+ * профиль мог удалить другой человек, а сессию — закрыть таймаут простоя.
+ */
+function reconcileSelections(): void {
   const profiles = store.profiles || [];
   const sessions = store.sessions || [];
+
   if (!profiles.some((profile) => profile.id === selectedProfileId.value)) {
     selectedProfileId.value = profiles[0]?.id || '';
   }
   if (!sessions.some((session) => session.id === selectedSessionId.value)) {
     selectedSessionId.value = sessions[0]?.id || '';
   }
-  if (!draft.engine && store.engines?.length) {
-    draft.engine = store.engines[0].id;
+
+  const firstEngine = store.engines?.[0];
+
+  if (!draft.engine && firstEngine) {
+    draft.engine = firstEngine.id;
   }
 }
 
 /** Обновляются обе независимые части панели, а текущий выбор сверяется после ответов. */
-async function refresh() {
+async function refresh(): Promise<void> {
   localError.value = '';
-  await Promise.all([
-    store.load(),
-    Promise.resolve(store.loadProjects?.()),
-  ]);
+  await Promise.all([loadDb(), loadDbProjects()]);
   reconcileSelections();
 }
 
-/** Пароль очищается независимо от исхода; новая сессия сразу становится рабочей. */
-async function openSession() {
+/**
+ * Вход в базу. Пароль очищается независимо от исхода — он одноразовый и в
+ * состоянии не хранится, — а новая сессия сразу становится рабочей вкладкой.
+ */
+async function openSession(): Promise<void> {
   const profile = selectedProfile.value;
   const sshSessionSelected = profile?.via !== 'ssh' || availableSshSessions.value
     .some((session) => session.id === sshSessionId.value);
+
   if (!profile || !password.value || !sshSessionSelected || openingProfileId.value) {
     return;
   }
 
   openingProfileId.value = profile.id;
   localError.value = '';
+
   try {
-    const result = await store.openSession(profile.id, password.value, {
-      sshSessionId: profile.via === 'ssh' ? sshSessionId.value : '',
-    });
-    const session = result?.session;
-    if (session?.id) {
+    const session = await openDbSession(
+      profile.id,
+      password.value,
+      profile.via === 'ssh' ? sshSessionId.value : '',
+    );
+
+    if (session.id) {
       selectedSessionId.value = session.id;
     }
   } catch (error) {
-    localError.value = error?.message || 'Не удалось открыть сессию базы';
+    localError.value = errorText(error, 'Не удалось открыть сессию базы');
   } finally {
     password.value = '';
     openingProfileId.value = '';
   }
 }
 
-/** Схема привязана к id сессии, чтобы поздний ответ не сменил состояние другой вкладки. */
-async function loadSchema() {
+/**
+ * Схема привязана к идентификатору сессии, чтобы поздний ответ не сменил состояние
+ * другой вкладки: человек к этому моменту мог уйти на соседнюю базу.
+ */
+async function loadSchema(): Promise<void> {
   const sessionId = selectedSessionId.value;
+
   if (!sessionId || schemaLoadingIds.has(sessionId)) {
     return;
   }
 
   schemaLoadingIds.add(sessionId);
   localError.value = '';
+
   try {
-    await store.loadSchema(sessionId);
+    await loadDbSchema(sessionId);
   } catch (error) {
-    localError.value = error?.message || 'Не удалось загрузить схему';
+    localError.value = errorText(error, 'Не удалось загрузить схему');
   } finally {
     schemaLoadingIds.delete(sessionId);
   }
 }
 
-/** Запуск запоминает query id, а результат подхватывается из общей живой ленты. */
-async function runQuery() {
+/**
+ * Запуск запоминает идентификатор запроса, а результат подхватывается из общей
+ * живой ленты: ответ базы приходит позже и может идти минутами.
+ */
+async function runQuery(): Promise<void> {
   if (!selectedSessionId.value || !query.value.trim() || submittingQuery.value) {
     return;
   }
 
   const sessionId = selectedSessionId.value;
+
   submittingQuery.value = true;
   localError.value = '';
+
   try {
-    const result = await store.runQuery(sessionId, query.value);
-    resultQueryIds[sessionId] = result?.queryId || result?.id || '';
-    fallbackResults[sessionId] = Array.isArray(result?.rows) ? result : null;
+    resultQueryIds[sessionId] = await runDbQuery(sessionId, query.value);
+    fallbackResults[sessionId] = null;
   } catch (error) {
-    localError.value = error?.message || 'Не удалось запустить запрос';
+    localError.value = errorText(error, 'Не удалось запустить запрос');
   } finally {
     submittingQuery.value = false;
   }
 }
 
-function inspectQuery(item) {
+// Переход к чужому запросу открывает его сессию и показывает сохранённый ответ:
+// живая лента могла уже уйти вперёд, а человек смотрит именно на этот запрос.
+function inspectQuery(item: DbQuery): void {
   const matchingSession = (store.sessions || []).find((session) => session.id === item.sessionId);
+
   if (!matchingSession) {
     return;
   }
 
   selectedSessionId.value = matchingSession.id;
   resultQueryIds[matchingSession.id] = item.id || '';
-  fallbackResults[matchingSession.id] = item.result || null;
+  fallbackResults[matchingSession.id] = rowsOf(item.result).length
+    ? item.result as DbResult
+    : null;
 }
 
-/** Отмена сохраняет серверное объяснение и не маскирует невозможность прервать запрос. */
-async function cancelQuery(queryId) {
+/**
+ * Отмена сохраняет серверное объяснение и не маскирует невозможность прервать
+ * запрос: часть команд снять нечем, и человек должен знать об этом, а не ждать.
+ */
+async function cancelQuery(queryId: string): Promise<void> {
   try {
-    await store.cancelQuery(queryId);
+    await cancelDbQuery(queryId);
   } catch (error) {
-    localError.value = error?.message || 'Не удалось прервать запрос';
+    localError.value = errorText(error, 'Не удалось прервать запрос');
   }
 }
 
-/** После закрытия вкладки выбирается соседняя живая сессия, как в SSH-панели. */
-async function closeActiveSession() {
+/**
+ * После закрытия вкладки выбирается соседняя живая сессия, как в SSH-панели:
+ * иначе рабочее место человека остаётся пустым посреди открытых подключений.
+ */
+async function closeActiveSession(): Promise<void> {
   const sessionId = selectedSessionId.value;
+
   if (!sessionId || closingSessionId.value) {
     return;
   }
@@ -1127,40 +1226,52 @@ async function closeActiveSession() {
   const sessions = store.sessions || [];
   const index = sessions.findIndex((session) => session.id === sessionId);
   const replacementId = sessions[index + 1]?.id || sessions[index - 1]?.id || '';
+
   closingSessionId.value = sessionId;
+
   try {
-    await store.closeSession(sessionId);
+    await closeDbSession(sessionId);
     delete resultQueryIds[sessionId];
     delete fallbackResults[sessionId];
     selectedSessionId.value = (store.sessions || [])
       .some((session) => session.id === replacementId) ? replacementId : '';
   } catch (error) {
-    await alertDialog(error?.message || 'Не удалось закрыть сессию базы', { title: 'Базы' });
+    await alertDialog(errorText(error, 'Не удалось закрыть сессию базы'), { title: 'Базы' });
   } finally {
     closingSessionId.value = '';
   }
 }
 
-async function setAgentAccess(sessionId, allowed) {
+// Доступ агента к живой сессии. Это решение человека, и отказ по нему должен быть
+// виден сразу: молчаливо оставленный тумблер обещал бы доступ, которого нет.
+async function setAgentAccess(sessionId: string, allowed: boolean): Promise<void> {
   try {
-    await store.setAgentAccess(sessionId, allowed);
+    await setDbAgentAccess(sessionId, allowed);
   } catch (error) {
-    await alertDialog(error?.message || 'Не удалось изменить доступ агента', { title: 'Базы' });
+    await alertDialog(
+      errorText(error, 'Не удалось изменить доступ агента'),
+      { title: 'Базы' },
+    );
   }
 }
 
-/** Новый профиль сохраняет только описание подключения; пароль в draft не существует. */
-async function saveProfile() {
+/**
+ * Новый профиль сохраняет только описание подключения. Пароля в форме нет вовсе:
+ * он спрашивается отдельно при входе и не переживает его.
+ */
+async function saveProfile(): Promise<void> {
   if (!profileDraftValid.value || savingProfile.value) {
     return;
   }
 
   savingProfile.value = true;
+
   try {
-    const saved = await store.saveProfile({
+    const saved = await saveDbProfile({
       ...draft,
       port: Number(draft.port),
     });
+
     Object.assign(draft, {
       projectId: '',
       label: '',
@@ -1173,11 +1284,12 @@ async function saveProfile() {
       via: 'direct',
       prod: false,
     });
+
     if (saved?.id) {
       selectedProfileId.value = saved.id;
     }
   } catch (error) {
-    await alertDialog(error?.message || 'Не удалось сохранить профиль', { title: 'Базы' });
+    await alertDialog(errorText(error, 'Не удалось сохранить профиль'), { title: 'Базы' });
   } finally {
     savingProfile.value = false;
   }
@@ -1186,18 +1298,19 @@ async function saveProfile() {
 watch(selectedProfileId, async () => {
   password.value = '';
   sshSessionId.value = '';
+
   if (selectedProfile.value?.via === 'ssh') {
     try {
-      await store.loadSshSessions?.();
+      await loadDbSshSessions();
     } catch (error) {
-      localError.value = error?.message || 'Не удалось загрузить SSH-сессии';
+      localError.value = errorText(error, 'Не удалось загрузить SSH-сессии');
     }
   }
 });
 
 watch(selectedSessionId, (sessionId, previousId) => {
   if (sessionId && sessionId !== previousId) {
-    loadSchema();
+    void loadSchema();
   }
 });
 

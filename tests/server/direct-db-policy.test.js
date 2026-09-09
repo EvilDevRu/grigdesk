@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createToolbox } from '../../server/src/lib/executors/_ollama-tools.js';
-import * as policy from '../../server/src/lib/executors/_direct-ssh-policy.js';
+import * as policy from '../../server/src/lib/executors/_directSshPolicy.ts';
 import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
 import codex from '../../server/src/lib/executors/codex.js';
 

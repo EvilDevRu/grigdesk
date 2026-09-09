@@ -27,12 +27,12 @@
     <template #tip>
       <span class="tipbody">
         <span class="trow"><b>Итог {{ total }}/5</b> — максимум из сложности и риска</span>
-        <span class="trow"><b>Сложность {{ a.complexity }}/5</b> — {{ CX_DESC[a.complexity] || '' }}</span>
-        <span class="trow"><b>Риск {{ a.risk }}/5</b> — {{ RISK_DESC[a.risk] || '' }}</span>
-        <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[a.diff_size] || '' }}</span>
+        <span class="trow"><b>Сложность {{ a.complexity }}/5</b> — {{ CX_DESC[String(a.complexity)] || '' }}</span>
+        <span class="trow"><b>Риск {{ a.risk }}/5</b> — {{ RISK_DESC[String(a.risk)] || '' }}</span>
+        <span class="trow"><b>Дифф {{ a.diff_size }}</b> — {{ SIZE_DESC[String(a.diff_size)] || '' }}</span>
         <span class="trow muted">
           маршрут: {{ a.route_guess || '—' }}<template v-if="depthLabel"> ({{ depthLabel }})</template>
-          · уверенность: {{ CONF_RU[a.confidence] || a.confidence }}
+          · уверенность: {{ CONF_RU[String(a.confidence)] || a.confidence }}
         </span>
         <span v-if="a.route_reason" class="trow muted clamp2">почему: {{ a.route_reason }}</span>
         <span v-if="a.summary" class="trow sum clamp">{{ a.summary }}</span>
@@ -43,50 +43,79 @@
   </UiTooltip>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Бейджи триажа в строке задачи: сложность / риск / размер диффа словами.
 // Подробности (расшифровка шкал, резюме, вопросы) — в общем тултипе по ховеру.
 // Пока анализ в очереди/идёт — пульсирующая точка; упал — красный «!».
 import { computed } from 'vue';
 import { UiTooltip } from '../../ui';
+import type { AnalysisQuestion, AnalysisRow } from '../../../../shared/analysisContracts.ts';
 
-const props = defineProps({
-  row: { type: Object, default: null }, // { analysis?, status? } из стора analysis
+const props = withDefaults(defineProps<{
+  row?: AnalysisRow | null;
+}>(), {
+  row: null,
 });
 
 const a = computed(() => props.row?.analysis || null);
 const state = computed(() => props.row?.status?.state || null);
 // Глубину маршрута считает политика сервера по этой же оценке — показываем её словом.
-const DEPTH_RU = { light: 'лёгкий', mid: 'средний', full: 'полный' };
-const depthLabel = computed(() => DEPTH_RU[a.value?.route_depth] || '');
+const DEPTH_RU: Record<string, string> = {
+  light: 'лёгкий',
+  mid: 'средний',
+  full: 'полный',
+};
+const depthLabel = computed(() => DEPTH_RU[String(a.value?.route_depth)] || '');
 const busy = computed(() => state.value === 'queued' || state.value === 'running');
 
 // Расшифровки шкал — те же формулировки, что в рубрике промпта триажа.
-const CX_DESC = {
+const CX_DESC: Record<string, string> = {
   1: 'точечная правка одного файла',
   2: 'несколько файлов в одном слое',
   3: 'сквозная фича по готовым паттернам',
   4: 'новая подсистема или схема данных',
   5: 'много точек интеграции, схема/очереди',
 };
-const RISK_DESC = {
+const RISK_DESC: Record<string, string> = {
   1: 'косметика, откат тривиален',
   2: 'ограниченный охват',
   3: 'можно сломать заметный сценарий',
   4: 'массовые данные / деньги',
   5: 'порча данных, необратимо',
 };
-const SIZE_DESC = { S: 'до 50 строк', M: '50–300 строк', L: '300–1000 строк', XL: 'больше 1000 строк' };
-const CONF_RU = { high: 'высокая', medium: 'средняя', low: 'низкая' };
+const SIZE_DESC: Record<string, string> = {
+  S: 'до 50 строк',
+  M: '50–300 строк',
+  L: '300–1000 строк',
+  XL: 'больше 1000 строк',
+};
+const CONF_RU: Record<string, string> = {
+  high: 'высокая',
+  medium: 'средняя',
+  low: 'низкая',
+};
 
-function tone(kind, v) {
-  if (kind === 'risk') return v >= 4 ? 'bad' : v === 3 ? 'warn' : 'dim';
-  return v >= 4 ? 'warn' : v === 3 ? 'acc' : 'dim';
+/**
+ * Цвет чипа. У риска и сложности одна шкала, но разная цена: четвёрка риска — это
+ * уже «плохо», а четвёрка сложности — только «внимательно».
+ */
+function tone(kind: string, v: number | null): string {
+  const value = Number(v) || 0;
+
+  if (kind === 'risk') {
+    return value >= 4 ? 'bad' : value === 3 ? 'warn' : 'dim';
+  }
+
+  return value >= 4 ? 'warn' : value === 3 ? 'acc' : 'dim';
 }
-function questionText(question) {
+
+function questionText(question: AnalysisQuestion | string | null | undefined): string {
   return typeof question === 'string' ? question : String(question?.text || '');
 }
-const needsInfo = computed(() => a.value && (a.value.needs_clarification || a.value.confidence === 'low'));
+
+const needsInfo = computed(() => Boolean(
+  a.value && (a.value.needs_clarification || a.value.confidence === 'low'),
+));
 // Итог тяжести задачи — осторожная свёртка: максимум из сложности и риска.
 const total = computed(() => (a.value ? Math.max(a.value.complexity || 0, a.value.risk || 0) : 0));
 // Кольцо-прогресс: дуга = итог/5 от окружности (r=8 во viewBox 20×20).

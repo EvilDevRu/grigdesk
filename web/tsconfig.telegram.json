@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/telegramContracts.ts",
+    "src/shared/telegramApi.ts",
+    "src/views/TelegramView.vue",
+    "../tests/types/telegram-contract.test.ts"
+  ]
+}

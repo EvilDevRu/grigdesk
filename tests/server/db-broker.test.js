@@ -6,7 +6,7 @@ import { createPermissionQueue } from '../../server/src/lib/chat/permission-queu
 async function brokerFactory() {
   let module;
   try {
-    module = await import('../../server/src/lib/db/broker.js');
+    module = await import('../../server/src/lib/db/broker.ts');
   } catch (error) {
     assert.fail(`единый broker надзорных DB-запросов ещё не реализован: ${error.message}`);
   }
@@ -327,7 +327,7 @@ test('агентский запрос публикуется в живую ле�
 });
 
 test('отмена через разрыв соединения закрывает сессию, а не оставляет её мнимо живой', async () => {
-  const { cancelDbQuery } = await import('../../server/src/lib/db/broker.js');
+  const { cancelDbQuery } = await import('../../server/src/lib/db/broker.ts');
   assert.equal(typeof cancelDbQuery, 'function', 'политика отмены запроса не вынесена в broker');
   const closed = [];
   const outcome = await cancelDbQuery({
@@ -355,7 +355,7 @@ test('отмена через разрыв соединения закрывае
 });
 
 test('неотменяемая команда остаётся выполняющейся и не выдаётся за отменённую', async () => {
-  const { cancelDbQuery } = await import('../../server/src/lib/db/broker.js');
+  const { cancelDbQuery } = await import('../../server/src/lib/db/broker.ts');
   const closed = [];
   const outcome = await cancelDbQuery({
     query: { id: 'query-b', state: 'running', text: 'GET order:1' },
@@ -382,7 +382,7 @@ test('неотменяемая команда остаётся выполняю�
 });
 
 test('движку отмены достаётся текст запроса: без него Redis не отличит скрипт от команды', async () => {
-  const { cancelDbQuery } = await import('../../server/src/lib/db/broker.js');
+  const { cancelDbQuery } = await import('../../server/src/lib/db/broker.ts');
   const seen = [];
   await cancelDbQuery({
     query: { id: 'query-c', state: 'running', text: 'EVAL "return 1" 0' },

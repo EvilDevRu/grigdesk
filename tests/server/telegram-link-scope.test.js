@@ -9,11 +9,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseTelegramLinks } from '../../server/src/lib/telegram/links.js';
-import { normalizeRules } from '../../server/src/lib/telegram/rules-store.js';
+import { parseTelegramLinks } from '../../server/src/lib/telegram/links.ts';
+import { normalizeRules } from '../../server/src/lib/telegram/rulesStore.ts';
 import {
   checkScope, scopeLinks, targetOfLink, targetOfMessage,
-} from '../../server/src/lib/telegram/link-scope.js';
+} from '../../server/src/lib/telegram/linkScope.ts';
 
 const BUGS = -1001234567890; // приватная группа «баги», привязана к проекту
 const OTHER = -1009876543210; // чат, про который правил нет вовсе

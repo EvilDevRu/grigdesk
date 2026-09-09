@@ -8,11 +8,11 @@ import test from 'node:test';
 import {
   GitHubArchiveStore,
   githubIssueSemanticKey,
-} from '../../server/src/lib/github/archive-store.js';
+} from '../../server/src/lib/github/archiveStore.ts';
 import {
   GitHubReconcileError,
   run,
-} from '../../server/src/lib/github/reconciler.js';
+} from '../../server/src/lib/github/reconciler.ts';
 
 const TOKEN = 'github_pat_test_reconcile_9876';
 const OWNER = 'acme';

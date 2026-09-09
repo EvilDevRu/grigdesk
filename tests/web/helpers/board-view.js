@@ -28,14 +28,18 @@ export async function compileBoardView() {
       '../stores/ui.js': `
         export const useUiStore = (...args) => globalThis.__boardViewStores.ui(...args);
       `,
-      '../stores/analysis.js': `
+      '../actions/analysis': `
         export const useAnalysisStore = (...args) => globalThis.__boardViewStores.analysis(...args);
+        export const analyzeTask = (...args) =>
+          globalThis.__boardViewStores.analysis().analyze(...args);
+        export const startAnalysisPolling = () =>
+          globalThis.__boardViewStores.analysis().startPolling?.();
       `,
       '../stores/task-favorites.js': `
         export const useTaskFavoritesStore = (...args) =>
           globalThis.__boardViewStores.favorites(...args);
       `,
-      '../stores/task-shelf.js': `
+      '../stores/taskShelf.ts': `
         export const useTaskShelfStore = (...args) =>
           globalThis.__boardViewStores.shelf(...args);
       `,

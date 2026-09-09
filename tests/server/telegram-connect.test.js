@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import telegramModule from '../../server/src/modules/telegram/index.js';
+import telegramModule from '../../server/src/modules/telegram/index.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

@@ -2,7 +2,7 @@
 // Node-обвязка + Python whisper (venv через COCKPIT_MEDIA_PYTHON). Async job-модель:
 // ingest сразу возвращает jobId, статус читается поллингом (файлы в mediaDir/jobs).
 import path from 'node:path';
-import { cutClipAt, extractFramesAt } from '../lib/media/ingest.js';
+import { cutClipAt, extractFramesAt } from '../lib/media/ingest.ts';
 import { SpeechRuntime } from '../lib/speech/runtime.js';
 
 export class MediaAdapter {

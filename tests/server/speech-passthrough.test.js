@@ -9,9 +9,11 @@ import test from 'node:test';
 import {
   extractSceneFrames,
   ingestRecording,
+  readIngestJob,
   startIngestJob,
-} from '../../server/src/lib/media/ingest.js';
-import { runIngestWorker } from '../../server/src/lib/media/ingest-worker.js';
+  writeIngestJobFile,
+} from '../../server/src/lib/media/ingest.ts';
+import { runIngestWorker } from '../../server/src/lib/media/ingestWorker.ts';
 import {
   buildTranscribeArgv,
   decodeIngestJob,
@@ -375,6 +377,7 @@ test('detached video job сохраняет speech целиком и перед�
   writeFileSync(filePath, 'video');
   let spawned;
   let unrefCalled = false;
+  const spawnHandlers = {};
   const result = startIngestJob({
     filePath,
     workDir: path.join(root, 'work'),
@@ -394,8 +397,13 @@ test('detached video job сохраняет speech целиком и перед�
     now: () => 123,
     spawn(cmd, args, options) {
       spawned = { cmd, args, options };
-      return { unref: () => { unrefCalled = true; } };
+      return {
+        pid: 4242,
+        once: (event, handler) => { spawnHandlers[event] = handler; },
+        unref: () => { unrefCalled = true; },
+      };
     },
+    readProcessIdentity: (pid) => ({ pid, starttime: '777' }),
   });
 
   assert.equal(result.jobId, 'job-fixed');
@@ -410,6 +418,75 @@ test('detached video job сохраняет speech целиком и перед�
   assert.equal('HF_HUB_CACHE' in spawned.options.env, false);
   assert.equal('HUGGINGFACE_HUB_CACHE' in spawned.options.env, false);
   assert.equal(unrefCalled, true);
+  // Воркер — TypeScript, а флаги родителя дочернему процессу не достаются.
+  assert.deepEqual(spawned.args.slice(0, 2), [
+    '--disable-warning=ExperimentalWarning',
+    '--experimental-strip-types',
+  ]);
+  assert.equal(spawned.args.at(-1), result.statusPath);
+  assert.match(spawned.args.at(-2), /ingestWorker\.ts$/);
+  // Метка запущенного воркера лежит отдельно от состояния: сам воркер читает
+  // состояние сразу после старта и своей записью затёр бы её.
+  const workerPath = path.join(jobsDir, 'job-fixed.worker.json');
+  assert.deepEqual(JSON.parse(readFileSync(workerPath, 'utf8')), { pid: 4242, starttime: '777' });
+
+  // Провал запуска приходит событием уже после возврата spawn.
+  spawnHandlers.error(new Error('spawn ENOENT'));
+  const failed = JSON.parse(readFileSync(result.statusPath, 'utf8'));
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /Не удалось запустить разбор/);
+});
+
+test('брошенная задача распознавания закрывается отказом, а готовая — нет', (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cockpit-speech-abandoned-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const jobsDir = path.join(root, 'jobs');
+  const filePath = path.join(root, 'video.mp4');
+  writeFileSync(filePath, 'video');
+
+  const started = () => startIngestJob({
+    filePath,
+    workDir: path.join(root, 'work'),
+    jobsDir,
+    speech: SENTINEL_SPEECH,
+    mediaHfDir: path.join(root, 'hf'),
+    baseEnv: { PATH: '/bin' },
+  }, {
+    createJobId: () => 'job-lost',
+    now: () => 5,
+    spawn: () => ({ pid: 7, once: () => {}, unref: () => {} }),
+    readProcessIdentity: () => ({ pid: 7, starttime: '100' }),
+  });
+
+  const lost = started();
+
+  // Тот же PID достался другому процессу: момент старта отличается.
+  const recovered = readIngestJob('job-lost', jobsDir, {
+    now: () => 42,
+    readProcessIdentity: () => ({ starttime: '200' }),
+  });
+
+  assert.equal(recovered.status, 'failed');
+  assert.equal(recovered.finishedAt, 42);
+  assert.match(recovered.error, /не записав результат/);
+
+  // Живой воркер задачу не теряет.
+  rmSync(lost.statusPath, { force: true });
+  started();
+  const running = readIngestJob('job-lost', jobsDir, {
+    readProcessIdentity: () => ({ starttime: '100' }),
+  });
+
+  assert.equal(running.status, 'running');
+
+  // Воркер успел записать итог: отказом его не переписывают.
+  writeIngestJobFile(lost.statusPath, { ...running, status: 'done', finishedAt: 9 });
+  const done = readIngestJob('job-lost', jobsDir, {
+    readProcessIdentity: () => null,
+  });
+
+  assert.equal(done.status, 'done');
+  assert.equal(done.finishedAt, 9);
 });
 
 test('тонкий worker декодирует nested speech и пишет финальный v2 status', async (t) => {

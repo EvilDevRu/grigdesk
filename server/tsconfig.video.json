@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/mediaContracts.ts",
+    "src/modules/media/**/*.ts",
+    "../tests/types/video-server-contract.test.mts"
+  ]
+}

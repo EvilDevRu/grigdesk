@@ -2,7 +2,7 @@
 // Cockpit меняет попытку только через exact route commands единственного движка.
 import fs from 'node:fs';
 import path from 'node:path';
-import { JOURNAL_FRESH_SEC } from '../../../web/src/shared/agent-activity.js';
+import { JOURNAL_FRESH_SEC } from '../../../shared/agentActivity.ts';
 import { parseStagesLog } from './stages-parse.js';
 
 export function readInstruction({ stateDir, task }) {

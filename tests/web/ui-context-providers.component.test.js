@@ -56,7 +56,7 @@ async function compileToolHostPublisher() {
       '../../stores/plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__uiContextPluginsStore(...args);
       `,
-      '../../stores/task-shelf.js': `
+      '../../stores/taskShelf.ts': `
         export const useTaskShelfStore = () => globalThis.__uiContextTaskShelf;
       `,
       '../../composables/useUiContextSource.js': `
@@ -294,7 +294,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     async upload() { return {}; },
   };
   globalThis.__uiContextApi = globalThis.__uiContextTaskApi;
-  globalThis.__uiContextPipelineWait = await import('../../web/src/shared/pipeline-wait.js');
+  globalThis.__uiContextPipelineWait = await import('../../shared/pipelineWait.ts');
   globalThis.__uiContextRunnerDisplay = await import('../../web/src/shared/runner-display.js');
   globalThis.__uiContextFactoryGraph = {
     name: 'FactoryGraph',

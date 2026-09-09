@@ -78,7 +78,7 @@ test('Ленивый клиент не создаёт файл до первог
   t.after(() => rm(root, { recursive: true, force: true }));
   let clientModule;
   try {
-    clientModule = await import('../../server/src/lib/search/client.js');
+    clientModule = await import('../../server/src/lib/search/client.ts');
   } catch (error) {
     assert.fail(`Ленивый клиент знаний ещё не реализован: ${error.message}`);
   }

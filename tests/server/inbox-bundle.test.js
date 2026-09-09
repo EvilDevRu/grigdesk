@@ -5,7 +5,7 @@ import {
   bundleInboxMessages,
   InboxBundleError,
   validateInboxGrouping,
-} from '../../server/src/lib/inbox/bundle.js';
+} from '../../server/src/lib/inbox/bundle.ts';
 
 const ACCOUNT = 'acc_bundle_000000001';
 const message = (over = {}) => ({

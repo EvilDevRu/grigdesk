@@ -9,8 +9,8 @@ import { STAGES, StageKind } from '../../lib/stages.js';
 import { readInstruction, readActivity, readAgentLive } from '../../lib/factory-cli.js';
 import { taskDiff } from '../../lib/git.ts';
 import { refreshRepos } from '../../lib/git-refresh.js';
-import { loadTriageProfile } from '../../lib/analysis/profile.js';
-import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.js';
+import { loadTriageProfile } from '../../lib/analysis/profile.ts';
+import { DISCUSSION_SECTION_TITLE } from '../../lib/telegram/discussion.ts';
 import {
   hasSlotReservation, reserveSlot, releaseSlot, slotsOverview, SlotsFullError,
 } from '../../lib/sandbox-slots.js';

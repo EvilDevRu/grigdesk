@@ -81,7 +81,7 @@ import { UiFloatingDialog } from '../../ui';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { useCompanionStore } from '../../stores/companion.js';
 import { useProvidersStore } from '../../stores/providers.js';
-import { contextFill } from '../../shared/chat-context.js';
+import { contextFill } from '../../../../shared/chatContext.ts';
 import { useNotifyWatchStore } from '../../stores/notify-watch.js';
 import { useUiContextStore } from '../../stores/ui-context.js';
 import { useDictationController } from '../speech/provider.js';

@@ -4,8 +4,8 @@ import test from 'node:test';
 
 import { readFile } from 'node:fs/promises';
 
-import inboxModule from '../../server/src/modules/inbox/index.js';
-import { encodeInboxRef, INBOX_REF_LIMITS } from '../../server/src/lib/inbox/identity.js';
+import inboxModule from '../../server/src/modules/inbox/index.ts';
+import { encodeInboxRef, INBOX_REF_LIMITS } from '../../server/src/lib/inbox/identity.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

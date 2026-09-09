@@ -6,7 +6,7 @@ import {
   githubActivationEpochFor,
   githubActivationMarker,
   githubIssueBundleKey,
-} from '../../server/src/lib/github/activation.js';
+} from '../../server/src/lib/github/activation.ts';
 
 const marker = (afterSeq, afterOccurredAt) => ({ schema: 1, afterSeq, afterOccurredAt });
 

@@ -97,7 +97,7 @@ test('SSH-подтверждение живёт до общего техниче
 test('chat/index в auto-режиме не применяет autoDecision и remember к SSH', async (t) => {
   let brokerModule;
   try {
-    brokerModule = await import('../../server/src/lib/ssh/broker.js');
+    brokerModule = await import('../../server/src/lib/ssh/broker.ts');
   } catch (error) {
     assert.fail(`SSH broker ещё не реализован: ${error.message}`);
   }

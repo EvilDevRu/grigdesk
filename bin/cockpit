@@ -40,7 +40,7 @@ build_web() { echo "→ Сборка web…"; ( cd "$DIR/web" && npm run build )
 # Probe живёт в отдельном Node-процессе: DatabaseSync не блокирует
 # Fastify. Неготовый runtime отключает только будущий search, а не Cockpit.
 search_preflight() {
-  node --disable-warning=ExperimentalWarning "$DIR/server/scripts/knowledge-search-preflight.mjs" || true
+  node "${COCKPIT_NODE_TS_ARGS[@]}" "$DIR/server/scripts/knowledge-search-preflight.mjs" || true
 }
 
 case "$CMD" in

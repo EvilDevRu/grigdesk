@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { autoDecision } from '../../server/src/lib/chat/auto-approve.js';
-import { createKnowledgeBroker } from '../../server/src/lib/search/broker.js';
+import { createKnowledgeBroker } from '../../server/src/lib/search/broker.ts';
 import chatModule from '../../server/src/modules/chat/index.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

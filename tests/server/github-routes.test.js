@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import githubModule from '../../server/src/modules/github/index.js';
-import { GITHUB_WEBHOOK_BODY_LIMIT } from '../../server/src/lib/github/webhook.js';
+import githubModule from '../../server/src/modules/github/index.ts';
+import { GITHUB_WEBHOOK_BODY_LIMIT } from '../../server/src/lib/github/webhook.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

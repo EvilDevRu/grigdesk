@@ -18,7 +18,7 @@ import {
   DIRECT_SSH_HOOK_MATCHER,
   directCommandHook,
   directSshSetting,
-} from './_direct-ssh-policy.js';
+} from './_directSshPolicy.ts';
 import {
   buildClaudeTurnResult,
   claudeSessionArgs,

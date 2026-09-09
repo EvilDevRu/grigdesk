@@ -6,10 +6,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { PROFILE_RE, listFactoryProfiles, listProjects } from './profiles.js';
-import { loadTriageProfile } from './analysis/profile.js';
+import { loadTriageProfile } from './analysis/profile.ts';
 import { RoutesStore } from '../modules/routes/store.js';
 
-// Чтение профиля — это source bash-файла (см. analysis/profile.js), не дёшево.
+// Чтение профиля — это source bash-файла (см. analysis/profile.ts), не дёшево.
 // Короткого кэша хватает: профили правятся руками и редко.
 const TTL = 15_000;
 const cache = new Map(); // имя → { at, profile }

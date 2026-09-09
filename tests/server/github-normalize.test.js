@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   GitHubNormalizeError,
   normalizeOpenedIssue,
-} from '../../server/src/lib/github/normalize.js';
+} from '../../server/src/lib/github/normalize.ts';
 
 const ACCOUNT_REF = 'acc_github_7f3a';
 const REPOSITORY_ID = '123456';

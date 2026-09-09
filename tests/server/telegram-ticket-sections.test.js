@@ -26,13 +26,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import factoryModule from '../../server/src/modules/factory/index.js';
-import telegramModule from '../../server/src/modules/telegram/index.js';
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
+import telegramModule from '../../server/src/modules/telegram/index.ts';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,
 } from './helpers/telegram-account-module.js';
-import { TelegramRulesStore } from '../../server/src/lib/telegram/rules-store.js';
+import { TelegramRulesStore } from '../../server/src/lib/telegram/rulesStore.ts';
 import { parsePipeline } from '../../server/src/lib/pipeline-parse.js';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));

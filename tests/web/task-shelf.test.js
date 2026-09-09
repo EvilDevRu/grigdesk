@@ -7,7 +7,7 @@ import { compileModule, webFile } from './helpers/compile-vue.js';
 let sharedModule;
 let sharedModuleError;
 try {
-  sharedModule = await import('../../web/src/shared/task-shelf.js');
+  sharedModule = await import('../../web/src/shared/taskShelfDecision.ts');
 } catch (error) {
   sharedModuleError = error;
 }
@@ -15,7 +15,7 @@ try {
 let storeModule;
 let storeModuleError;
 try {
-  storeModule = await import('../../web/src/stores/task-shelf.js');
+  storeModule = await import('../../web/src/stores/taskShelf.ts');
 } catch (error) {
   storeModuleError = error;
 }
@@ -90,6 +90,36 @@ test('Провал оценки зажигает полку и назван сл
     state: 'lit',
     source: 'analysis',
     message: 'Оценка завершилась с ошибкой',
+  });
+});
+
+test('Вторая неудачная оценка отличается от первой числовыми временами', () => {
+  // Сервер присылает времена триажа числом. Пока снимок читал их строкой, оба
+  // провала выглядели одинаково — и на второй карточка уже не загоралась.
+  const failed = (finishedAt) => baseSnapshot({
+    analysis: {
+      state: 'failed',
+      queuedAt: finishedAt - 60_000,
+      startedAt: finishedAt - 30_000,
+      finishedAt,
+      generatedAt: null,
+    },
+  });
+  const first = decision(baseSnapshot({
+    analysis: { ...baseSnapshot().analysis, queuedAt: 1_756_195_200_000 },
+  }), failed(1_756_195_800_000));
+  const second = decision(first.snapshot, failed(1_756_199_400_000));
+
+  assert.deepEqual({
+    first: [first.state, first.source],
+    second: [second.state, second.source],
+    kept: second.snapshot.analysis.finishedAt,
+    distinct: first.fingerprint !== second.fingerprint,
+  }, {
+    first: ['lit', 'analysis'],
+    second: ['lit', 'analysis'],
+    kept: 1_756_199_400_000,
+    distinct: true,
   });
 });
 
@@ -219,7 +249,8 @@ test('Первое появление источника создаёт базу
 
   assert.deepEqual({ state: result.state, snapshot: result.snapshot.analysis }, {
     state: 'neutral',
-    snapshot: current.analysis,
+    // Снимок вкладки прошлого формата читается, но наружу время уходит числом.
+    snapshot: { ...current.analysis, queuedAt: 1_787_731_200_000 },
   });
 });
 
@@ -330,7 +361,8 @@ async function analysisFixture({ enabled = true, autoAdd = true, shelfError = nu
   let autoAddEnabled = autoAdd;
   globalThis.__shelfAnalysisHarness = {
     api: {
-      async post() { return { accepted: true }; },
+      // Сервер отвечает на постановку в очередь своим контрактом, а не «ок».
+      async post() { return { outcome: 'queued', position: 1 }; },
       async get() { return []; },
     },
     shelf: {
@@ -345,11 +377,14 @@ async function analysisFixture({ enabled = true, autoAdd = true, shelfError = nu
       byId: () => ({ values: { autoAddOnAnalysis: autoAddEnabled } }),
     },
   };
-  const module = await compileModule(webFile('src/stores/analysis.js'), {
+  const module = await compileModule(webFile('src/actions/analysis/index.ts'), {
     stubs: {
-      '../shared/api-client.js': 'export const api = globalThis.__shelfAnalysisHarness.api;',
-      './task-shelf.js': [
+      './api-client.js': 'export const api = globalThis.__shelfAnalysisHarness.api;',
+      '../../stores/taskShelf.ts': [
         'export const useTaskShelfStore = () => globalThis.__shelfAnalysisHarness.shelf;',
+      ].join('\n'),
+      '../../stores/plugins.js': [
+        'export const usePluginsStore = () => globalThis.__shelfAnalysisHarness.plugins;',
       ].join('\n'),
       './plugins.js': [
         'export const usePluginsStore = () => globalThis.__shelfAnalysisHarness.plugins;',
@@ -361,47 +396,48 @@ async function analysisFixture({ enabled = true, autoAdd = true, shelfError = nu
   );
   setActivePinia(createPinia());
   return {
-    store: module.useAnalysisStore(),
+    analyze: module.analyzeTask,
+    stopPolling: module.stopAnalysisPolling,
     calls,
     setAutoAdd(value) { autoAddEnabled = value; },
   };
 }
 
 test('Оба входа триажа автоматически ставят задачи на полку через общий analyze', async (t) => {
-  const { store, calls } = await analysisFixture();
+  const { analyze, stopPolling, calls } = await analysisFixture();
   t.after(() => {
-    clearTimeout(store._timer);
+    stopPolling();
     delete globalThis.__shelfAnalysisHarness;
   });
-  await store.analyze(42);
-  await store.analyze(77);
+  await analyze(42);
+  await analyze(77);
 
   assert.deepEqual(calls, ['42', '77']);
 });
 
 test('Живая настройка разрешает и запрещает авто-постановку', async (t) => {
-  const { store, calls, setAutoAdd } = await analysisFixture();
+  const { analyze, stopPolling, calls, setAutoAdd } = await analysisFixture();
   t.after(() => {
-    clearTimeout(store._timer);
+    stopPolling();
     delete globalThis.__shelfAnalysisHarness;
   });
-  await store.analyze(42);
+  await analyze(42);
   setAutoAdd(false);
-  await store.analyze(77);
+  await analyze(77);
 
   assert.deepEqual(calls, ['42']);
 });
 
 test('Ошибка авто-постановки не маскирует успешный запуск триажа', async (t) => {
-  const { store, calls } = await analysisFixture({ shelfError: new Error('полка недоступна') });
+  const fixture = await analysisFixture({ shelfError: new Error('полка недоступна') });
   t.after(() => {
-    clearTimeout(store._timer);
+    fixture.stopPolling();
     delete globalThis.__shelfAnalysisHarness;
   });
-  const result = await store.analyze(42);
+  const result = await fixture.analyze(42);
 
-  assert.deepEqual({ result, calls }, {
-    result: { accepted: true },
+  assert.deepEqual({ result, calls: fixture.calls }, {
+    result: { outcome: 'queued', position: 1 },
     calls: ['42'],
   });
 });
@@ -464,9 +500,10 @@ async function reactiveStoreFixture({
     sseHandler: null,
   };
   globalThis.__taskShelfStoreHarness = harness;
-  const module = await compileModule(webFile('src/stores/task-shelf.js'), {
+  const module = await compileModule(webFile('src/stores/taskShelf.ts'), {
     stubs: {
       '../shared/api-client.js': 'export const api = globalThis.__taskShelfStoreHarness.api;',
+      './api-client.js': 'export const api = globalThis.__taskShelfStoreHarness.api;',
       '../shared/notify.js': [
         'export const notify = (...args) => {',
         '  globalThis.__taskShelfStoreHarness.notifications.push(args);',
@@ -479,7 +516,7 @@ async function reactiveStoreFixture({
         '  return () => { globalThis.__taskShelfStoreHarness.sseHandler = null; };',
         '};',
       ].join('\n'),
-      './analysis.js': [
+      './analysis.ts': [
         'export const useAnalysisStore = () => globalThis.__taskShelfStoreHarness.analysis;',
       ].join('\n'),
       './notify-watch.js': [
@@ -508,9 +545,9 @@ async function reactiveStoreFixture({
         status: {
           task: 42,
           state: currentState,
-          queuedAt: '2026-08-26T08:00:00.000Z',
+          queuedAt: 1_787_731_200_000,
           startedAt: null,
-          finishedAt: currentState === 'done' ? '2026-08-26T08:10:00.000Z' : null,
+          finishedAt: currentState === 'done' ? 1_787_731_800_000 : null,
         },
         analysis: currentState === 'done'
           ? { generated_at: '2026-08-26T08:10:01.000Z' }
@@ -594,7 +631,7 @@ test('Новый переход в огонь отправляет ровно о
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
     state: 'done',
-    finishedAt: '2026-08-26T08:10:00.000Z',
+    finishedAt: 1_787_731_800_000,
   };
   harness.analysis.byTask[42].analysis = {
     generated_at: '2026-08-26T08:10:01.000Z',
@@ -647,7 +684,7 @@ test('Первое появление источника становится б
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
     state: 'done',
-    finishedAt: '2026-08-26T08:10:00.000Z',
+    finishedAt: 1_787_731_800_000,
   };
   harness.analysis.byTask[42].analysis = {
     generated_at: '2026-08-26T08:10:01.000Z',
@@ -671,7 +708,7 @@ test('Зажжённая строка переживает отказ источ
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
     state: 'done',
-    finishedAt: '2026-08-26T08:10:00.000Z',
+    finishedAt: 1_787_731_800_000,
   };
   harness.analysis.byTask[42].analysis = {
     generated_at: '2026-08-26T08:10:01.000Z',
@@ -699,7 +736,7 @@ test('Выключенные браузерные оповещения не оз
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
     state: 'done',
-    finishedAt: '2026-08-26T08:10:00.000Z',
+    finishedAt: 1_787_731_800_000,
   };
   harness.analysis.byTask[42].analysis = {
     generated_at: '2026-08-26T08:10:01.000Z',
@@ -907,9 +944,9 @@ test('Ручная кнопка отправляет фактическое done
     createIfMissing: true,
     analysis: {
       state: 'done',
-      queuedAt: '2026-08-26T08:00:00.000Z',
+      queuedAt: 1_787_731_200_000,
       startedAt: null,
-      finishedAt: '2026-08-26T08:10:00.000Z',
+      finishedAt: 1_787_731_800_000,
       generatedAt: '2026-08-26T08:10:01.000Z',
     },
     error: null,
@@ -977,7 +1014,7 @@ test('Наступление события зажигает строку, но 
   harness.analysis.byTask[42].status = {
     ...harness.analysis.byTask[42].status,
     state: 'done',
-    finishedAt: '2026-08-26T08:10:00.000Z',
+    finishedAt: 1_787_731_800_000,
   };
   harness.analysis.byTask[42].analysis = {
     generated_at: '2026-08-26T08:10:01.000Z',
@@ -1034,8 +1071,8 @@ test('Панель, чип и оповещение не содержат вто�
   let sources;
   try {
     sources = await Promise.all([
-      readFile(webFile('src/shared/task-shelf.js'), 'utf8'),
-      readFile(webFile('src/stores/task-shelf.js'), 'utf8'),
+      readFile(webFile('src/shared/taskShelfDecision.ts'), 'utf8'),
+      readFile(webFile('src/stores/taskShelf.ts'), 'utf8'),
       readFile(webFile('src/views/shelf/TaskShelfPanel.vue'), 'utf8'),
       readFile(webFile('src/shared/layout/ToolHost.vue'), 'utf8'),
     ]);
@@ -1048,7 +1085,7 @@ test('Панель, чип и оповещение не содержат вто�
 
   assert.deepEqual({
     sharedExportsDecision: /export\s+(?:default\s+)?(?:function|const)\b/.test(shared),
-    storeImportsDecision: /from\s+['"]\.\.\/shared\/task-shelf\.js['"]/.test(store),
+    storeImportsDecision: /from\s+['"]\.\.\/shared\/taskShelfDecision\.ts['"]/.test(store),
     duplicateRules,
   }, {
     sharedExportsDecision: true,

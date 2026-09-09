@@ -6,7 +6,7 @@ import test from 'node:test';
 
 async function registryModule() {
   try {
-    return await import('../../server/src/lib/db/engine-registry.js');
+    return await import('../../server/src/lib/db/engineRegistry.ts');
   } catch (error) {
     assert.fail(`сканируемый реестр движков БД ещё не реализован: ${error.message}`);
   }

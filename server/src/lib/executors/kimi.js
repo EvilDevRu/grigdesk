@@ -17,7 +17,7 @@ import {
   requestKimiManagedUsage,
 } from '../kimi/usage.js';
 import { withRetry } from '../retry.js';
-import { directSshSetting } from './_direct-ssh-policy.js';
+import { directSshSetting } from './_directSshPolicy.ts';
 
 function probe(bin) {
   return new Promise((resolve) => {

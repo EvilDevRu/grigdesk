@@ -32,7 +32,14 @@ const SEGMENTS = [
   { start: 275.4, end: 279, text: 'И вторым номером приоритет.' },
 ];
 
-const DONE_JOB = { status: 'done', result: { transcript: { segments: SEGMENTS } } };
+// Длительность нулевая: сервер всегда её присылает, но у части без явной длительности
+// она честно равна нулю — и раздел тогда не выдумывает строку про запись.
+const DONE_JOB = {
+  status: 'done',
+  progress: null,
+  error: null,
+  result: { duration: 0, transcript: { segments: SEGMENTS } },
+};
 
 const PLAN_TASKS = [
   {
@@ -40,12 +47,16 @@ const PLAN_TASKS = [
     description: 'Добавить в комментарий.\n\nНа записи: 04:31',
     confidence: 0.9,
     reason: 'прямая просьба',
+    at: null,
+    frame: null,
   },
   {
     title: 'Приоритет вторым номером',
     description: 'Указывать приоритет.',
     confidence: 0.4,
     reason: 'сказано вскользь',
+    at: null,
+    frame: null,
   },
 ];
 
@@ -109,6 +120,13 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
   const VideoView = await compileVue(VIEW_PATH, {
     stubs: {
       '../shared/api-client.js': 'export const api = globalThis.__vidApi;',
+      // Транспорт раздела зовёт общий клиент своим путём: заглушка сопоставляется по
+      // точной строке импорта, и у shared/mediaApi.ts она отдельная.
+      './api-client.js': `export const api = {
+        url: (path) => path,
+        get: (...args) => globalThis.__vidApi.get(...args),
+        post: (...args) => globalThis.__vidApi.post(...args),
+      };`,
       '../shared/clipboard.js': 'export const writeClipboardText = async () => true;',
       '../stores/plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
@@ -357,7 +375,12 @@ test('разобранный файл назван поимённо — с ра�
   // «Я выбирал другой файл» и «раздел обрезал» иначе неотличимы: записи называются
   // почти одинаково и лежат рядом. Живой случай — встреча в двух файлах, 17:04 и 1:18.
   const api = fakeApi({
-    job: { status: 'done', result: { duration: 78.89, transcript: { segments: SEGMENTS } } },
+    job: {
+      status: 'done',
+      progress: null,
+      error: null,
+      result: { duration: 78.89, transcript: { segments: SEGMENTS } },
+    },
   });
   const view = await mountVideoView(t, { api });
   await view.upload({ step: 'review' });
@@ -547,7 +570,12 @@ test('шапка называет длительность ЗАПИСИ, а не
   // Живой случай: вместо 17-минутной встречи уехал соседний ролик на 1:19, и короткий
   // разбор прочитался как «кокпит обрезал». Длительность отвечает на это сама.
   const api = fakeApi({
-    job: { status: 'done', result: { duration: 78.89, transcript: { segments: SEGMENTS } } },
+    job: {
+      status: 'done',
+      progress: null,
+      error: null,
+      result: { duration: 78.89, transcript: { segments: SEGMENTS } },
+    },
   });
   const view = await mountVideoView(t, { api });
   await view.upload({ step: 'review' });
@@ -558,7 +586,12 @@ test('шапка называет длительность ЗАПИСИ, а не
 test('длинный хвост тишины назван словами, но ошибкой не считается', async (t) => {
   const api = fakeApi({
     // Речь до 4:39, а запись на 20 минут: молчали в конце — законно, но объяснить надо.
-    job: { status: 'done', result: { duration: 1200, transcript: { segments: SEGMENTS } } },
+    job: {
+      status: 'done',
+      progress: null,
+      error: null,
+      result: { duration: 1200, transcript: { segments: SEGMENTS } },
+    },
   });
   const view = await mountVideoView(t, { api });
   await view.upload({ step: 'review' });
@@ -582,13 +615,23 @@ test('несколько выбранных файлов разбираются 
   // Инструменты записи режут длинный созвон на части; разбирать их порознь значит
   // терять поводы, начатые в одной части и договорённые в другой.
   const jobs = {
-    'job-1': { status: 'done', result: { duration: 300, transcript: { segments: [{ start: 10, end: 12, text: 'Часть один.' }] } } },
-    'job-2': { status: 'done', result: { duration: 80, transcript: { segments: [{ start: 5, end: 7, text: 'Часть два.' }] } } },
+    'job-1': {
+      status: 'done',
+      progress: null,
+      error: null,
+      result: { duration: 300, transcript: { segments: [{ start: 10, end: 12, text: 'Часть один.' }] } },
+    },
+    'job-2': {
+      status: 'done',
+      progress: null,
+      error: null,
+      result: { duration: 80, transcript: { segments: [{ start: 5, end: 7, text: 'Часть два.' }] } },
+    },
   };
   const api = fakeApi({ post: async () => ({ ok: true, model: 'm', count: 2, truncated: false, tasks: [] }) });
   api.get = async (url) => {
     if (url.startsWith('/api/media/ingest/')) return jobs[url.split('/').pop()];
-    if (url.endsWith('/api/media/doctor')) return { ok: true };
+    if (url.endsWith('/api/media/doctor')) return { ok: true, storage: null };
     return { users: [], groups: [] };
   };
 
@@ -637,6 +680,7 @@ const FRAMED_TASKS = [{
   description: 'Добавить в комментарий.\n\nНа записи: 04:31',
   confidence: 0.9,
   reason: 'прямая просьба',
+  at: null,
   frame: { name: '0123456789abcdef/p0-00272s.jpg', at: 272 },
 }];
 
@@ -916,9 +960,11 @@ test('пока сервер не ответил, видно, что разбор
   const api = fakeApi();
   // Ответ статуса подвешен: между открытием страницы и первым ответом раздел не имеет
   // права выглядеть пустой формой — разбор в это время идёт на сервере.
-  api.get = async (url) => (url.startsWith('/api/media/ingest/')
-    ? new Promise(() => {})
-    : {});
+  api.get = async (url) => {
+    if (url.startsWith('/api/media/ingest/')) return new Promise(() => {});
+    if (url.endsWith('/api/media/doctor')) return { ok: true, storage: null };
+    return {};
+  };
   const view = await mountVideoView(t, { api, restore: savedSession() });
 
   assert.match(view.wrapper.find('.progress').text(), /Возвращаюсь к разбору/u);

@@ -15,11 +15,18 @@ import { compileModule, webFile } from './helpers/compile-vue.js';
 
 const STORAGE_KEY = 'cockpit-video-session';
 
-const module = await compileModule(webFile('src/stores/video-session.js'), {
+const module = await compileModule(webFile('src/stores/videoSession.ts'), {
   stubs: {
     // Ленивый прокси, а не значение: стаб выполняется на импорте модуля, то есть до
     // того, как тест подставит свой api, и снимок `globalThis` остался бы пустым.
     '../shared/api-client.js': `export const api = {
+      get: (...args) => globalThis.__videoSessionApi.get(...args),
+      post: (...args) => globalThis.__videoSessionApi.post(...args),
+    };`,
+    // Транспорт раздела ходит в общий клиент своим путём — заглушка сопоставляется
+    // по точной строке импорта, поэтому у shared/mediaApi.ts она отдельная.
+    './api-client.js': `export const api = {
+      url: (path) => path,
       get: (...args) => globalThis.__videoSessionApi.get(...args),
       post: (...args) => globalThis.__videoSessionApi.post(...args),
     };`,
@@ -69,7 +76,12 @@ test('сеанс переживает перезагрузку страницы,
     jobId: 'job-1',
     // Расшифровка приезжает с сервера и в снимке не нужна: 17 минут разговора — это
     // сотни килобайт текста, а ключ к ним — один jobId.
-    job: { status: 'done', result: { duration: 90, transcript: { segments: [{ start: 0, text: 'привет' }] } } },
+    job: {
+      status: 'done',
+      progress: null,
+      error: null,
+      result: { duration: 90, transcript: { segments: [{ start: 0, end: 1, text: 'привет' }] } },
+    },
     gone: false,
   }];
   first.uploaded = { name: 'встреча.mp4', size: 1024 };
@@ -90,6 +102,58 @@ test('сеанс переживает перезагрузку страницы,
   assert.equal(second.drafts[0].title, 'Своя задача');
   assert.equal(second.drafts[0].creating, false);
   assert.equal(second.uploaded.name, 'встреча.mp4');
+});
+
+test('повреждённый снимок не становится черновиком с битым вложением', async (t) => {
+  installStorage(t, JSON.stringify({
+    v: 1,
+    savedAt: Date.now(),
+    parts: [{ name: 'встреча.mp4', size: 1024, jobId: 'job-1' }],
+    uploaded: { name: 42, size: 'много' },
+    created: ['t-1', 7, { chuzhoe: true }],
+    defPriority: 'высокий',
+    drafts: [{
+      title: { скрипт: '<img onerror>' },
+      priority: 'срочно',
+      // Кадр уезжает на портал по имени, а секунда его потеряна: вложения нет.
+      frame: { name: 'frame-000010s.jpg' },
+      clip: { name: 'clip.mp4', at: 10, from: 0, to: 20 },
+      at: 'десятая',
+      creating: true,
+      clipBusy: true,
+      error: 'прошлая ошибка',
+    }],
+  }));
+  const session = newSession(t);
+  session.hydrate();
+
+  const draft = session.drafts[0];
+
+  assert.deepEqual({
+    title: draft.title,
+    priority: draft.priority,
+    frame: draft.frame,
+    clip: draft.clip,
+    at: draft.at,
+    creating: draft.creating,
+    clipBusy: draft.clipBusy,
+    error: draft.error,
+    uploaded: session.uploaded,
+    created: session.created,
+    defPriority: session.defPriority,
+  }, {
+    title: '',
+    priority: 1,
+    frame: null,
+    clip: null,
+    at: null,
+    creating: false,
+    clipBusy: false,
+    error: null,
+    uploaded: null,
+    created: ['t-1', 7],
+    defPriority: 1,
+  });
 });
 
 test('снимок старше недели не поднимается: кадров и фрагментов к нему уже нет', async (t) => {
@@ -120,7 +184,7 @@ test('возврат в раздел дочитывает статусы час�
   const session = newSession(t, {
     get: async (url) => {
       asked.push(url);
-      return { status: 'running', progress: { done: 1, total: 4 } };
+      return { status: 'running', progress: { done: 1, total: 4 }, result: null, error: null };
     },
   });
   session.hydrate();

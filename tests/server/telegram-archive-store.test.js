@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramArchiveStore, archiveMonth } from '../../server/src/lib/telegram/archive-store.js';
+import { TelegramArchiveStore, archiveMonth } from '../../server/src/lib/telegram/archiveStore.ts';
 
 const CHAT = -1001000000042;
 const AUG = Date.UTC(2026, 7, 7, 10, 0, 0) / 1000; // секунды, как date у Bot API

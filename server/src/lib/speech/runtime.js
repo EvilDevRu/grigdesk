@@ -7,8 +7,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { ingestRecording, readIngestJob, startIngestJob } from '../media/ingest.js';
-import { preflightAsync } from '../media/preflight.js';
+import { ingestRecording, readIngestJob, startIngestJob } from '../media/ingest.ts';
+import { preflightAsync } from '../media/preflight.ts';
 import {
   CUDA_STATES,
   SPEECH_LANGUAGES,

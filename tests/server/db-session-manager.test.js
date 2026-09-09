@@ -6,7 +6,7 @@ import { createPermissionQueue } from '../../server/src/lib/chat/permission-queu
 
 async function managerFactory() {
   try {
-    const module = await import('../../server/src/lib/db/session-manager.js');
+    const module = await import('../../server/src/lib/db/sessionManager.ts');
     return module.createDbSessionManager || module.default;
   } catch (error) {
     assert.fail(`server-owned DB lifecycle ещё не реализован: ${error.message}`);

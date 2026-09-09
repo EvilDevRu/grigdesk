@@ -10,7 +10,7 @@ const Fastify = requireFromServer('fastify');
 
 async function dbModule() {
   try {
-    return await import('../../server/src/modules/db/index.js');
+    return await import('../../server/src/modules/db/index.ts');
   } catch (error) {
     assert.fail(`live-gated API плагина «Базы» ещё не реализован: ${error.message}`);
   }

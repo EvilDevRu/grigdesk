@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "src/lib/telegram/**/*.ts",
+    "src/modules/telegram/**/*.ts",
+    "../tests/types/telegram-server-contract.test.mts"
+  ]
+}

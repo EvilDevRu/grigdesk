@@ -878,9 +878,10 @@ import {
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
-import { useAnalysisStore } from '../stores/analysis.js';
+import { analyzeTask, readAnalysisDetail, useAnalysisStore } from '../actions/analysis';
+import { analysisApi } from '../shared/analysisApi.ts';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
-import { useTaskShelfStore } from '../stores/task-shelf.js';
+import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import { useDictationController } from '../features/speech/provider.js';
@@ -1237,7 +1238,7 @@ function setComposerOpen(questionId, open) {
 async function loadTriage() {
   if (!taskId.value || !analysisEnabled.value) return;
   try {
-    triage.value = await analysisStore.detail(taskId.value);
+    triage.value = await readAnalysisDetail(taskId.value);
     syncClarifyDrafts();
   } catch { /* блок триажа не ломает модалку */ }
   // Пока идёт — подтягиваем статус; закончилось — останавливаемся.
@@ -1249,7 +1250,7 @@ async function loadTriage() {
 }
 const analyzeNow = () => act('analyze', async () => {
   if (!analysisEnabled.value) return;
-  await analysisStore.analyze(taskId.value);
+  await analyzeTask(taskId.value);
   await loadTriage();
 });
 
@@ -1285,7 +1286,7 @@ function onClarifyPaste(questionId, e) {
 const clarifySaved = ref('');
 async function loadClarifications() {
   try {
-    const response = await api.get(`/api/tasks/${taskId.value}/clarifications`);
+    const response = await analysisApi.clarifications(taskId.value);
     clarifySaved.value = response.text || '';
     clarifyEntries.value = response.entries || [];
   } catch {
@@ -1326,20 +1327,17 @@ const sendClarify = () => act('clarify', async () => {
         .filter(Boolean),
     ].filter(Boolean).join('\n');
   }).filter(Boolean).join('\n\n');
-  const r = await api.post(`/api/tasks/${taskId.value}/clarifications`, {
-    answers,
-    text: legacyText,
-  });
+  const r = await analysisApi.answer(taskId.value, answers, legacyText);
   clarifySaved.value = r.text || '';
   clarifyEntries.value = r.entries || clarifyEntries.value;
   clarifyDrafts.value = {};
   syncClarifyDrafts();
-  await analysisStore.analyze(taskId.value);
+  await analyzeTask(taskId.value);
   await loadTriage();
 });
 
 const arbitrateQuestions = () => act('arbitrate', async () => {
-  await api.post(`/api/tasks/${taskId.value}/analysis/arbitrate`, {});
+  await analysisApi.arbitrate(taskId.value);
   await Promise.all([loadClarifications(), loadTriage()]);
 });
 

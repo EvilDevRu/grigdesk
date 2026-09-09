@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/inboxContracts.ts",
+    "src/lib/inbox/**/*.ts",
+    "src/modules/inbox/**/*.ts",
+    "../tests/types/inbox-server-contract.test.mts"
+  ]
+}

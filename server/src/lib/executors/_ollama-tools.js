@@ -18,7 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { cut, cutMiddle, base, lineCount } from '../chat/stream-steps.js';
-import { evaluateDirectCommand } from './_direct-ssh-policy.js';
+import { evaluateDirectCommand } from './_directSshPolicy.ts';
 
 // Сколько текста инструмент возвращает МОДЕЛИ. Жёстче, чем лента для человека:
 // результат уезжает обратно в контекст, а у локальной модели он 32k по умолчанию —

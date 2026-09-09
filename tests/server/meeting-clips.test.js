@@ -23,9 +23,9 @@ import {
   meetingClipPath,
   meetingClipRun,
   sweepMeetingClips,
-} from '../../server/src/lib/media/meeting-clips.js';
+} from '../../server/src/lib/media/meetingClips.ts';
 import b24Module from '../../server/src/modules/b24/index.js';
-import mediaModule, { parseByteRange } from '../../server/src/modules/media/index.js';
+import mediaModule, { parseByteRange } from '../../server/src/modules/media/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

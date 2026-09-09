@@ -7,7 +7,7 @@ const {
   buildInboxDraft,
   inboxTranscript,
   safeInboxSourceUrl,
-} = await import('../../server/src/lib/inbox/draft.js');
+} = await import('../../server/src/lib/inbox/draft.ts');
 
 const T0 = Date.UTC(2026, 7, 7, 10, 0, 0) / 1000;
 const message = (over = {}) => ({

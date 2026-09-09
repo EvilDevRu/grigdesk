@@ -7,8 +7,8 @@
 import { defineStore } from 'pinia';
 import { api } from '../shared/api-client.js';
 import { notify } from '../shared/notify.js';
-import { stripEmoji, waitingReason } from '../shared/pipeline-wait.js';
-import { silenceReason } from '../shared/agent-activity.js';
+import { stripEmoji, waitingReason } from '../../../shared/pipelineWait.ts';
+import { silenceReason } from '../../../shared/agentActivity.ts';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,

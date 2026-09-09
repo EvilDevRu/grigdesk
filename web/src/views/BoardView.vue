@@ -369,9 +369,9 @@ import { storeToRefs } from 'pinia';
 import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.js';
 import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
-import { useAnalysisStore } from '../stores/analysis.js';
+import { analyzeTask, startAnalysisPolling, useAnalysisStore } from '../actions/analysis';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
-import { useTaskShelfStore } from '../stores/task-shelf.js';
+import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import MiniChart from './board/MiniChart.vue';
@@ -539,7 +539,7 @@ async function analyzeAllUnrated() {
     { title: 'Оценить все задачи без оценки', okText: 'Поставить в очередь' },
   ))) return;
   for (const t of list) {
-    try { await analysis.analyze(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
+    try { await analyzeTask(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
   }
 }
 
@@ -617,7 +617,7 @@ onMounted(() => {
   board.load();
   favorites.load(true);
   seen.load(true);
-  if (analysisEnabled.value) analysis.startPolling();
+  if (analysisEnabled.value) startAnalysisPolling();
   loadConveyor();
   ticker = setInterval(() => { now.value = Date.now(); }, 1000);
 });

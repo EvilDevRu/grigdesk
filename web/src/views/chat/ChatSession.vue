@@ -568,7 +568,7 @@ import { useRouter } from 'vue-router';
 import { api } from '../../shared/api-client.js';
 import { useDictationController } from '../../features/speech/provider.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
-import { contextFill } from '../../shared/chat-context.js';
+import { contextFill } from '../../../../shared/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.js';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
@@ -852,7 +852,7 @@ const ctxTokens = computed(() => (sess.value?.sending && sess.value?.liveContext
 // он не меняет ни шкалу, ни цвет кольца.
 // Абсолютное число без потолка врало бы в другую сторону: у модели с окном 200k порог
 // 200k недостижим, кольцо осталось бы зелёным до самого конца разговора.
-// Сама арифметика — в `shared/chat-context.js`: тот же порог показывает компактный
+// Сама арифметика — в `shared/chatContext.ts`: тот же порог показывает компактный
 // компаньон, и две копии этой шкалы разъехались бы на первой же правке.
 const ctxFill = computed(() => contextFill({
   tokens: ctxTokens.value,

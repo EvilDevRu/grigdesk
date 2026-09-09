@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { skipReasonCode, skipReasonText } from '../../server/src/lib/inbox/skip-reason.js';
+import { skipReasonCode, skipReasonText } from '../../server/src/lib/inbox/skipReason.ts';
 
 test('код причины принимается только машинный', () => {
   assert.equal(skipReasonCode('file_too_large'), 'file_too_large');

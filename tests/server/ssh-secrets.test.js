@@ -35,7 +35,7 @@ test('пароль не появляется в сохранённых SSH-пр�
   t.after(() => rm(root, { recursive: true, force: true }));
   let module;
   try {
-    module = await import('../../server/src/lib/ssh/store.js');
+    module = await import('../../server/src/lib/ssh/store.ts');
   } catch (error) {
     assert.fail(`приватное хранилище SSH-профилей ещё не реализовано: ${error.message}`);
   }
@@ -68,7 +68,7 @@ test('пара метка и роль уникальна только внутр
   t.after(() => rm(root, { recursive: true, force: true }));
   let module;
   try {
-    module = await import('../../server/src/lib/ssh/store.js');
+    module = await import('../../server/src/lib/ssh/store.ts');
   } catch (error) {
     assert.fail(`валидация SSH-профилей ещё не реализована: ${error.message}`);
   }
@@ -96,7 +96,7 @@ test('SSH transport использует ssh2 и не запускает пар�
   ));
   let module;
   try {
-    module = await import('../../server/src/lib/ssh/transport.js');
+    module = await import('../../server/src/lib/ssh/transport.ts');
   } catch (error) {
     assert.fail(`управляемый SSH transport ещё не реализован: ${error.message}`);
   }
@@ -161,7 +161,7 @@ test('пароль из connect не попадает в prefs и их клие�
   });
   let module;
   try {
-    module = await import('../../server/src/modules/ssh/index.js');
+    module = await import('../../server/src/modules/ssh/index.ts');
   } catch (error) {
     assert.fail(`SSH connect API ещё не реализован: ${error.message}`);
   }

@@ -130,7 +130,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { api } from '../shared/api-client.js';
+
+import { githubApi, githubErrorMessage, githubPluginDisabled } from '../shared/githubApi.ts';
+import type {
+  GitHubPolicy,
+  GitHubRule,
+  GitHubRuleAutoTask,
+  GitHubRuleInput,
+  GitHubStatus,
+} from '../../../shared/githubContracts.ts';
 import {
   UiButton,
   UiCheckbox,
@@ -142,7 +150,7 @@ import {
   confirmDialog,
 } from '../ui';
 
-const emptyStatus = Object.freeze({
+const emptyStatus: GitHubStatus = Object.freeze({
   configured: false,
   state: null,
   repositoryId: null,
@@ -158,8 +166,8 @@ const unavailable = ref(false);
 const error = ref('');
 const notice = ref('');
 const busy = ref('');
-const status = ref({ ...emptyStatus });
-const rules = ref([]);
+const status = ref<GitHubStatus>({ ...emptyStatus });
+const rules = ref<GitHubRule[]>([]);
 const rulesLoaded = ref(false);
 const policyFingerprint = ref('');
 const agentSearch = ref(false);
@@ -167,11 +175,19 @@ const agentSearch = ref(false);
 // фактом. Отдельный флаг не даёт false визуально превратиться в «точно закрыто».
 const agentSearchKnown = ref(false);
 const editingRule = ref(false);
-const connectForm = reactive({ owner: '', repo: '', token: '' });
-const ruleForm = reactive({
-  project: '', kind: 'bug', responsibleId: '', groupId: '', priority: 1,
+const connectForm = reactive({
+  owner: '',
+  repo: '',
+  token: '',
 });
-let preservedAutoTask = null;
+const ruleForm = reactive({
+  project: '',
+  kind: 'bug' as 'bug' | 'wish',
+  responsibleId: '',
+  groupId: '',
+  priority: 1,
+});
+let preservedAutoTask: GitHubRuleAutoTask | null = null;
 
 const verified = computed(() => Boolean(status.value.repositoryId && status.value.fullName));
 const providerWritable = computed(() => status.value.connection === 'connected'
@@ -181,32 +197,12 @@ const canConnect = computed(() => connectForm.owner.trim() && connectForm.repo.t
 const validRule = computed(() => ruleForm.project.trim()
   && validOptionalId(ruleForm.responsibleId) && validOptionalId(ruleForm.groupId));
 
-function isPlainObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value);
-}
-
-// Статус копируется по allowlist полей. Даже если version-skew server случайно
-// добавит credential internals, шаблон не сможет отобразить token/secret/ingressRef.
-function publicStatus(payload) {
-  const raw = isPlainObject(payload?.status) ? payload.status : (isPlainObject(payload) ? payload : {});
-  return {
-    configured: raw.configured === true,
-    state: typeof raw.state === 'string' ? raw.state : null,
-    repositoryId: typeof raw.repositoryId === 'string' ? raw.repositoryId : null,
-    fullName: typeof raw.fullName === 'string' ? raw.fullName : null,
-    connectedAt: Number.isFinite(raw.connectedAt) ? raw.connectedAt : null,
-    connection: typeof raw.connection === 'string' ? raw.connection : 'disconnected',
-    reason: typeof raw.reason === 'string' ? raw.reason : null,
-    cleanupPending: raw.cleanupPending === true || raw.state === 'cleanup_pending',
-  };
-}
-
-function isPluginDisabled(err) {
-  return err?.status === 404 && err?.data?.error === 'plugin_disabled';
-}
-
-function applyRule(rule) {
-  if (!isPlainObject(rule)) {
+/**
+ * Правило в форму. Отсутствующее правило чистит форму целиком: показать поля прошлого
+ * репозитория рядом с пустым allowlist значило бы предложить сохранить чужие данные.
+ */
+function applyRule(rule: GitHubRule | undefined): void {
+  if (!rule) {
     ruleForm.project = '';
     ruleForm.kind = 'bug';
     ruleForm.responsibleId = '';
@@ -214,242 +210,358 @@ function applyRule(rule) {
     ruleForm.priority = 1;
     preservedAutoTask = null;
     agentSearch.value = false;
+
     return;
   }
-  ruleForm.project = typeof rule.project === 'string' ? rule.project : '';
-  ruleForm.kind = rule.kind === 'wish' ? 'wish' : 'bug';
+
+  ruleForm.project = rule.project;
+  ruleForm.kind = rule.kind;
   ruleForm.responsibleId = rule.b24?.responsibleId == null ? '' : String(rule.b24.responsibleId);
   ruleForm.groupId = rule.b24?.groupId == null ? '' : String(rule.b24.groupId);
-  ruleForm.priority = [0, 1, 2].includes(rule.b24?.priority) ? rule.b24.priority : 1;
-  preservedAutoTask = isPlainObject(rule.autoTask) ? { ...rule.autoTask } : null;
+  ruleForm.priority = rule.b24?.priority ?? 1;
+  preservedAutoTask = rule.autoTask ? { ...rule.autoTask } : null;
   agentSearch.value = rule.agentSearch === true;
 }
 
-const policyFingerprintPattern = /^ghpol1:[0-9a-f]{64}$/u;
-
-function applyRulesSnapshot(data) {
-  rules.value = Array.isArray(data?.rules) ? data.rules.slice(0, 1) : [];
-  policyFingerprint.value = typeof data?.policyFingerprint === 'string'
-    && policyFingerprintPattern.test(data.policyFingerprint)
-    ? data.policyFingerprint
-    : '';
+/**
+ * Снимок политики на экран. Отпечаток бывает пустым у ещё не подключённого канала —
+ * тогда галочка доступа агентам показывается как «неизвестно», а не как «закрыто»:
+ * без отпечатка CAS невозможен, и обещать точное состояние нельзя.
+ */
+function applyPolicy(policy: GitHubPolicy): void {
+  rules.value = policy.rules.slice(0, 1);
+  policyFingerprint.value = policy.policyFingerprint || '';
   agentSearchKnown.value = Boolean(policyFingerprint.value);
   applyRule(rules.value[0]);
   editingRule.value = false;
 }
 
-async function readRulesSnapshot() {
-  const data = await api.get('/api/github/rules');
-  applyRulesSnapshot(data);
-  return data;
+async function readRulesSnapshot(): Promise<GitHubPolicy> {
+  const policy = await githubApi.rules();
+
+  applyPolicy(policy);
+
+  return policy;
 }
 
-async function loadRules() {
+/**
+ * Правила читаются только у проверенного репозитория: до этого читать нечего, а
+ * пустой ответ на экране выглядел бы как подтверждённый пустой allowlist.
+ */
+async function loadRules(): Promise<void> {
   rulesLoaded.value = false;
+
   if (!verified.value) {
     rules.value = [];
     policyFingerprint.value = '';
     agentSearchKnown.value = false;
-    applyRule(null);
+    applyRule(undefined);
     rulesLoaded.value = true;
+
     return;
   }
+
   await readRulesSnapshot();
   rulesLoaded.value = true;
 }
 
-async function load() {
+/**
+ * Состояние раздела целиком. Выключенный плагин — не ошибка: раздел показывает,
+ * что его выключил человек, а не красную полосу поверх пустого экрана.
+ */
+async function load(): Promise<void> {
   loading.value = true;
   error.value = '';
+
   try {
-    const data = await api.get('/api/github/status');
-    status.value = publicStatus(data);
+    status.value = await githubApi.status();
     unavailable.value = false;
     await loadRules();
   } catch (err) {
-    if (isPluginDisabled(err)) {
+    if (githubPluginDisabled(err)) {
       unavailable.value = true;
       status.value = { ...emptyStatus };
       rules.value = [];
       error.value = '';
     } else {
-      error.value = err?.message || 'Не удалось прочитать состояние GitHub.';
+      error.value = githubErrorMessage(err, 'Не удалось прочитать состояние GitHub.');
     }
   } finally {
     loading.value = false;
   }
 }
 
-async function connect() {
-  if (!canConnect.value) return;
+/**
+ * Подключение репозитория. Токен стирается из формы сразу после отправки: он ушёл на
+ * сервер и обратно не возвращается, а оставшийся в поле переживёт уход со страницы.
+ */
+async function connect(): Promise<void> {
+  if (!canConnect.value) {
+    return;
+  }
+
   busy.value = 'connect';
   error.value = '';
+
   try {
-    await api.post('/api/github/connect', {
-      owner: connectForm.owner.trim(),
-      repo: connectForm.repo.trim(),
-      token: connectForm.token.trim(),
-    });
+    await githubApi.connect(
+      connectForm.owner.trim(),
+      connectForm.repo.trim(),
+      connectForm.token.trim(),
+    );
     connectForm.token = '';
     notice.value = 'Репозиторий проверен; ожидаю signed ping от webhook.';
     await load();
   } catch (err) {
-    error.value = err?.message || 'GitHub не принял подключение.';
+    error.value = githubErrorMessage(err, 'GitHub не принял подключение.');
   } finally {
     busy.value = '';
   }
 }
 
-async function recheck() {
-  if (busy.value) return;
+/**
+ * Перепроверка живого канала. Отдельная кнопка нужна потому, что канал может
+ * протухнуть без единого события: hook удалили на стороне GitHub, и узнать об
+ * этом иначе можно только по молчанию очереди.
+ */
+async function recheck(): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   busy.value = 'recheck';
   error.value = '';
+
   try {
-    await api.post('/api/github/recheck', {});
+    await githubApi.recheck();
     notice.value = 'Состояние GitHub перепроверено.';
     await load();
   } catch (err) {
-    error.value = err?.message || 'Перепроверка GitHub не выполнена.';
+    error.value = githubErrorMessage(err, 'Перепроверка GitHub не выполнена.');
   } finally {
     busy.value = '';
   }
 }
 
-async function disconnect() {
-  if (busy.value || !(await confirmDialog(
-    'Отключить GitHub? Webhook будет удалён, а секреты стёрты. Ранее принятые обращения останутся в Inbox для чтения.',
+/**
+ * Отключение спрашивает человека: вместе с локальным ingress удаляется remote hook, а
+ * секреты стираются. Уже принятые обращения при этом остаются в Inbox для чтения.
+ */
+async function disconnect(): Promise<void> {
+  const confirmed = !busy.value && await confirmDialog(
+    'Отключить GitHub? Webhook будет удалён, а секреты стёрты. '
+      + 'Ранее принятые обращения останутся в Inbox для чтения.',
     { okText: 'Отключить' },
-  ))) return;
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
   busy.value = 'disconnect';
   error.value = '';
+
   try {
-    await api.post('/api/github/disconnect', {});
+    await githubApi.disconnect();
     notice.value = 'GitHub отключён.';
     await load();
   } catch (err) {
-    error.value = err?.message || 'Отключение GitHub не завершено.';
+    error.value = githubErrorMessage(err, 'Отключение GitHub не завершено.');
   } finally {
     busy.value = '';
   }
 }
 
-function validOptionalId(value) {
+// Пустое поле законно: идентификатор в Битрикс24 необязателен. Ноль и минус — нет.
+function validOptionalId(value: string): boolean {
   return !String(value).trim() || /^[1-9]\d*$/u.test(String(value).trim());
 }
 
-function idOrNull(value) {
+function idOrNull(value: string): number | null {
   const text = String(value).trim();
+
   return text ? Number(text) : null;
 }
 
-function rulePayload() {
-  const rule = {
-    repositoryId: status.value.repositoryId,
+/**
+ * Правило из формы. Автомат создания задач эта форма не редактирует, поэтому уже
+ * сохранённое значение переносится как есть: пропустив его, человек молча выключил
+ * бы автомат, о котором в этой форме нет ни слова.
+ */
+function rulePayload(): GitHubRuleInput {
+  const repositoryId = status.value.repositoryId || '';
+  const responsibleId = idOrNull(ruleForm.responsibleId);
+  const groupId = idOrNull(ruleForm.groupId);
+  const rule: GitHubRuleInput = {
+    repositoryId,
     project: ruleForm.project.trim(),
     kind: ruleForm.kind,
   };
-  const responsibleId = idOrNull(ruleForm.responsibleId);
-  const groupId = idOrNull(ruleForm.groupId);
+
   if (responsibleId !== null || groupId !== null || rules.value[0]?.b24) {
-    rule.b24 = { responsibleId, groupId, priority: Number(ruleForm.priority) };
+    rule.b24 = {
+      responsibleId,
+      groupId,
+      priority: priorityOf(ruleForm.priority),
+    };
   }
-  // Минимальная форма не редактирует autoTask, поэтому существующее
-  // безопасное значение сохраняем; для нового rule server включит auto off default.
-  if (preservedAutoTask) rule.autoTask = { ...preservedAutoTask };
+
+  if (preservedAutoTask) {
+    rule.autoTask = { ...preservedAutoTask };
+  }
+
   return rule;
 }
 
-async function saveRules(nextRules) {
-  if (busy.value || !providerWritable.value) return;
+// Ступень приоритета закрыта контрактом; форма отдаёт число, и оно приводится здесь.
+function priorityOf(value: number): 0 | 1 | 2 {
+  return value === 0 || value === 2 ? value : 1;
+}
+
+/**
+ * Сохранение allowlist. Пустой список — это осознанное «ничего не допущено», поэтому
+ * он проходит тем же путём, что и правило: убрать репозиторий из Inbox иначе нечем.
+ */
+async function saveRules(nextRules: GitHubRuleInput[]): Promise<void> {
+  if (busy.value || !providerWritable.value) {
+    return;
+  }
+
   busy.value = 'rules';
   error.value = '';
+
   try {
-    await api.put('/api/github/rules', {
-      repositoryId: status.value.repositoryId,
-      rules: nextRules,
-    });
+    await githubApi.saveRules(status.value.repositoryId || '', nextRules);
     notice.value = nextRules.length ? 'Репозиторий допущен в Inbox.' : 'Allowlist GitHub пуст.';
     await loadRules();
   } catch (err) {
-    error.value = err?.message || 'Правило GitHub не сохранено.';
+    error.value = githubErrorMessage(err, 'Правило GitHub не сохранено.');
   } finally {
     busy.value = '';
   }
 }
 
-async function changeAgentSearch(event) {
-  const enabled = event?.target?.checked === true;
-  if (event?.target) event.target.checked = agentSearchKnown.value && agentSearch.value;
+// Галочка остаётся контролируемой: DOM откатывается к известному состоянию, а новое
+// значение появится только после подтверждённого ответа сервера.
+function restoreAgentSearchBox(target: HTMLInputElement | null): void {
+  if (target) {
+    target.checked = agentSearchKnown.value && agentSearch.value;
+  }
+}
+
+/**
+ * Изменение доступа агентам. Это не обычная галочка: у неё CAS по отпечатку политики,
+ * подтверждение человека на включение и отдельный разбор потерянного ответа — после
+ * него прежнее значение перестаёт быть фактом, и выдавать его за факт нельзя.
+ */
+async function changeAgentSearch(event: Event): Promise<void> {
+  const target = event.target instanceof HTMLInputElement ? event.target : null;
+  const enabled = target?.checked === true;
+
+  restoreAgentSearchBox(target);
+
   if (busy.value || !providerWritable.value || rules.value.length !== 1
-      || !agentSearchKnown.value || !policyFingerprint.value) return;
-  if (enabled && !(await confirmDialog(
-    'Разрешить coding-агентам выбранного проекта искать содержимое GitHub Issues? Человеческий Inbox от этой настройки не изменится.',
+      || !agentSearchKnown.value || !policyFingerprint.value) {
+    return;
+  }
+
+  const confirmed = !enabled || await confirmDialog(
+    'Разрешить coding-агентам выбранного проекта искать содержимое GitHub Issues? '
+      + 'Человеческий Inbox от этой настройки не изменится.',
     { okText: 'Разрешить агентам' },
-  ))) return;
+  );
+
+  if (!confirmed) {
+    return;
+  }
 
   busy.value = 'agent-search';
   error.value = '';
   notice.value = '';
+
   try {
-    await api.put('/api/github/rules/agent-search', {
-      repositoryId: status.value.repositoryId,
-      expectedPolicyFingerprint: policyFingerprint.value,
+    await githubApi.setAgentSearch(
+      status.value.repositoryId || '',
+      policyFingerprint.value,
       enabled,
-    });
+    );
     notice.value = enabled
       ? 'Поиск по GitHub Issues разрешён агентам выбранного проекта.'
       : 'Поиск по GitHub Issues для агентов закрыт.';
     await loadRules();
   } catch (err) {
-    const mutationMessage = err?.message || 'Ответ изменения доступа не получен.';
-    try {
-      await readRulesSnapshot();
-      rulesLoaded.value = true;
-      if (!agentSearchKnown.value) {
-        throw new Error('Сервер не вернул достоверный policy fingerprint.');
-      }
-      const actual = agentSearch.value;
-      if (actual === enabled) {
-        error.value = '';
-        notice.value = `Повторная проверка подтвердила: поиск агентам ${actual ? 'разрешён' : 'закрыт'}.`;
-      } else {
-        notice.value = '';
-        error.value = `${mutationMessage} Повторная проверка подтвердила: `
-          + `поиск агентам ${actual ? 'разрешён' : 'закрыт'}, `
-          + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
-      }
-    } catch (refreshError) {
-      // Нельзя позволить повторный CAS со старым отпечатком и нельзя показывать
-      // прежний boolean как достоверное состояние после ambiguous commit.
-      policyFingerprint.value = '';
-      agentSearchKnown.value = false;
-      agentSearch.value = false;
-      rulesLoaded.value = true;
-      notice.value = '';
-      error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
-        + `${refreshError?.message || 'правила не удалось перечитать'}`;
-    }
+    await reportAmbiguousAgentSearch(err, enabled);
   } finally {
     busy.value = '';
   }
 }
 
-async function removeRule() {
-  if (!providerWritable.value || !(await confirmDialog(
-    'Убрать репозиторий из allowlist? Новые issues не будут попадать в Inbox.',
-    { okText: 'Убрать' },
-  ))) return;
-  await saveRules([]);
+/**
+ * Ответ на изменение доступа потерян. Единственный честный ход — перечитать политику
+ * и сказать человеку, что на сервере на самом деле: запрошенное могло примениться,
+ * могло не примениться, а если не читается и это — состояние неизвестно.
+ */
+async function reportAmbiguousAgentSearch(failure: unknown, enabled: boolean): Promise<void> {
+  const mutationMessage = githubErrorMessage(failure, 'Ответ изменения доступа не получен.');
+
+  try {
+    await readRulesSnapshot();
+    rulesLoaded.value = true;
+
+    if (!agentSearchKnown.value) {
+      throw new Error('Сервер не вернул достоверный policy fingerprint.');
+    }
+
+    const actual = agentSearch.value;
+
+    if (actual === enabled) {
+      error.value = '';
+      notice.value = `Повторная проверка подтвердила: поиск агентам ${
+        actual ? 'разрешён' : 'закрыт'}.`;
+
+      return;
+    }
+
+    notice.value = '';
+    error.value = `${mutationMessage} Повторная проверка подтвердила: `
+      + `поиск агентам ${actual ? 'разрешён' : 'закрыт'}, `
+      + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
+  } catch (refreshError) {
+    // Нельзя позволить повторный CAS со старым отпечатком и нельзя показывать
+    // прежний boolean как достоверное состояние после ambiguous commit.
+    policyFingerprint.value = '';
+    agentSearchKnown.value = false;
+    agentSearch.value = false;
+    rulesLoaded.value = true;
+    notice.value = '';
+    error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
+      + `${githubErrorMessage(refreshError, 'правила не удалось перечитать')}`;
+  }
 }
 
-function formatTime(value) {
+async function removeRule(): Promise<void> {
+  const confirmed = providerWritable.value && await confirmDialog(
+    'Убрать репозиторий из allowlist? Новые issues не будут попадать в Inbox.',
+    { okText: 'Убрать' },
+  );
+
+  if (confirmed) {
+    await saveRules([]);
+  }
+}
+
+function formatTime(value: number): string {
   const date = new Date(value);
+
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
 }
 
-function stateLabel(value) {
-  return ({ pending: 'Ожидает webhook ping', connected: 'Подключён', cleanup_pending: 'Очистка не завершена' })[value]
-    || 'Не подключён';
+function stateLabel(value: GitHubStatus['state']): string {
+  return ({
+    pending: 'Ожидает webhook ping',
+    connected: 'Подключён',
+    cleanup_pending: 'Очистка не завершена',
+  })[String(value)] || 'Не подключён';
 }
 
 onMounted(load);

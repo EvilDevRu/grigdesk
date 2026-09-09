@@ -21,10 +21,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
-import { TelegramRulesStore } from '../../server/src/lib/telegram/rules-store.js';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
+import { TelegramRulesStore } from '../../server/src/lib/telegram/rulesStore.ts';
 import b24Module from '../../server/src/modules/b24/index.js';
-import telegramModule from '../../server/src/modules/telegram/index.js';
+import telegramModule from '../../server/src/modules/telegram/index.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

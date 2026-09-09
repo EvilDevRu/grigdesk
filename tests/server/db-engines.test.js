@@ -4,7 +4,7 @@ import test from 'node:test';
 
 async function engine(name) {
   try {
-    return (await import(`../../server/src/lib/db/engines/${name}.js`)).default;
+    return (await import(`../../server/src/lib/db/engines/${name}.ts`)).default;
   } catch (error) {
     assert.fail(`движок ${name} ещё не реализован: ${error.message}`);
   }

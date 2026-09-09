@@ -6,7 +6,7 @@ import {
   encodeInboxRef,
   InboxRefCodec,
   InboxRefError,
-} from '../../server/src/lib/inbox/identity.js';
+} from '../../server/src/lib/inbox/identity.ts';
 
 const ACCOUNT = 'acc_identity_00000001';
 const OTHER_ACCOUNT = 'acc_identity_00000002';

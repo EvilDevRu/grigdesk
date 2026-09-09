@@ -86,7 +86,7 @@ async function component() {
   }
   componentPromise ||= compileVue(VIEW, {
     stubs: {
-      '../shared/api-client.js': API_STUB,
+      './api-client.js': API_STUB,
       '../ui.ts': UI_STUB,
       'vue-router': ROUTER_STUB,
     },

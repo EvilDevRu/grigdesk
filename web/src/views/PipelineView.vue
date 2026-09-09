@@ -1052,12 +1052,12 @@ import {
   UiTextarea,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.js';
-import { agentActivityLabel, silenceReason } from '../shared/agent-activity.js';
+import { agentActivityLabel, silenceReason } from '../../../shared/agentActivity.ts';
 import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiter-run.js';
 import { buildRewindNote, rewindQuestionsOf } from '../shared/rewind-note.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
-import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
+import { waitingReason, stripEmoji } from '../../../shared/pipelineWait.ts';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,

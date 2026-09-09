@@ -82,6 +82,32 @@ HTTP/MCP и отдельные CLI-процессы обновляют карт�
 заход обрывается целиком, уже записанные карты откатываются. Бюджет контекста считается
 на проект.
 
+## Слои раздела
+
+Сетевой JSON становится данными раздела только после проверки формы:
+
+- `shared/knowledgeContracts.ts` — формы ответов и `parse*` для каждой ручки на общем
+  каркасе `shared/contractDecoders.ts`. Типы выводятся из самих декодеров; ошибка называет
+  путь поля и не печатает отклонённое значение. Порядок полей записи повторяет ответ
+  сервера: предпросмотр импорта показывает человеку сам JSON обеих версий.
+- `web/src/shared/knowledgeApi.ts` — транспорт: адреса, тела запросов, multipart резервной
+  копии и проверка контракта до попадания в состояние страницы. Текст отказа собирает
+  `knowledgeErrorMessage`, машинный код — `knowledgeErrorCode`: по нему выключенный плагин
+  отличается от поломки базы.
+- `web/src/views/KnowledgeView.vue` — страница на TypeScript: список, черновик записи и
+  предпросмотр импорта типизированы контрактом.
+- `server/src/modules/knowledge/index.ts` — HTTP-граница: разбор запроса, коды отказов и
+  multipart. Хранилище и перенос объявлены интерфейсами `KnowledgeStore` и
+  `KnowledgeTransfer`; сама база в `server/src/lib/search/` тоже на TypeScript.
+- `server/src/lib/executors/work-tools/knowledgeSearch.ts` — рабочий tool агента: четыре
+  объявленные формы запроса и чистка ответа до обещанных полей.
+
+Типы проверяют общие команды среды `npm --prefix server run typecheck` и
+`npm --prefix web run typecheck`, входящие в `npm test` своих пакетов; `typecheck:knowledge`
+остаётся быстрой проверкой одной области.
+Формы ответов закрыты `tests/web/knowledge-contract.test.js`, отрицательные примеры типов —
+`tests/types/knowledge-contract.test.ts` и `tests/types/knowledge-server-contract.test.mts`.
+
 ## Замеры
 
 Исторический замер 29.08.2026: три пробные sample-записи; размер карт измерялся в байтах,

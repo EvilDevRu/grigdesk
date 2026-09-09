@@ -11,7 +11,7 @@ import {
   validateGitHubWebhookHeaders,
   validateOpenedIssuePayload,
   verifyGitHubWebhookSignature,
-} from '../../server/src/lib/github/webhook.js';
+} from '../../server/src/lib/github/webhook.ts';
 
 const SECRET = 'server-generated-webhook-secret';
 const HOOK_ID = '998877';

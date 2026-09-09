@@ -49,7 +49,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router';
 import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';
 import { usePluginsStore } from '../../stores/plugins.js';
-import { useTaskShelfStore } from '../../stores/task-shelf.js';
+import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { useUiContextSource } from '../../composables/useUiContextSource.js';
 import { NAV_ICONS } from '../nav-icons.js';
 import { TOOL_REGISTRY, TOOL_BY_ID, toolAvailability } from '../tools/registry.js';

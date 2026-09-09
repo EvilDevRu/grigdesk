@@ -1,7 +1,7 @@
 // Test adapter for module-telegram's account-aware dependency boundary.
 // Native archive/rules fixtures remain real; lifecycle/runtime internals are
 // exercised separately by telegram-connection/account-runtime tests.
-import { maskToken } from '../../../server/src/lib/telegram/token.js';
+import { maskToken } from '../../../server/src/lib/telegram/token.ts';
 
 const ACCOUNT_REF = 'acc_telegram_module_fixture_0001';
 

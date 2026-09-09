@@ -7,8 +7,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { TelegramPultActions } from '../../server/src/lib/telegram/pult/actions.js';
-import { PultSendQueue } from '../../server/src/lib/telegram/pult/send-queue.js';
+import { TelegramPultActions } from '../../server/src/lib/telegram/pult/actions.ts';
+import { PultSendQueue } from '../../server/src/lib/telegram/pult/sendQueue.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

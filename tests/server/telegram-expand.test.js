@@ -19,12 +19,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
 import {
   TelegramRulesStore,
   telegramRulesPolicyFingerprint,
-} from '../../server/src/lib/telegram/rules-store.js';
-import telegramModule from '../../server/src/modules/telegram/index.js';
+} from '../../server/src/lib/telegram/rulesStore.ts';
+import telegramModule from '../../server/src/modules/telegram/index.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

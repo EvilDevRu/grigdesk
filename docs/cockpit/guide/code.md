@@ -88,8 +88,10 @@ Raw-просмотр разрешает растровые PNG, JPEG, GIF, WebP,
 
 ## Проверка
 
-`npm --prefix server run typecheck:code` входит в серверный `npm test`.
-`npm --prefix web run typecheck:code` проверяет браузер и сервер; входит в веб-тесты.
+Типы проверяет общая команда среды: `npm --prefix server run typecheck` и
+`npm --prefix web run typecheck`. Они входят в `npm test` своих пакетов и накрывают весь
+собственный TypeScript, а не отдельный раздел. `typecheck:code` остаётся быстрой
+проверкой одной области при работе над ней.
 Отрицательные примеры в `tests/types/code-contract.test.ts` и
 `tests/types/code-server-contract.test.mts` запрещают ослаблять контракт до
 непроверенного JSON или стирать различия между успешным результатом и отказом.

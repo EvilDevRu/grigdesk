@@ -27,7 +27,7 @@ echo "→ Зависимости сервера…"
 
 # Installer фиксирует фактические Node/SQLite/FTS features. Провал не
 # блокирует остальной Cockpit: search останется degraded/disabled.
-"$NODE_BIN" --disable-warning=ExperimentalWarning \
+"$NODE_BIN" "${COCKPIT_NODE_TS_ARGS[@]}" \
   "$COCKPIT_DIR/server/scripts/knowledge-search-preflight.mjs" || true
 
 echo "→ Зависимости web + сборка…"

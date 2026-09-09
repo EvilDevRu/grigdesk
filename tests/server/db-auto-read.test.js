@@ -4,7 +4,7 @@ import test from 'node:test';
 async function evaluator() {
   let module;
   try {
-    module = await import('../../server/src/lib/db/auto-read.js');
+    module = await import('../../server/src/lib/db/autoRead.ts');
   } catch (error) {
     assert.fail(`единая политика автоподтверждения чтения ещё не реализована: ${error.message}`);
   }

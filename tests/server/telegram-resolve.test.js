@@ -12,10 +12,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
-import { parseTelegramLinks } from '../../server/src/lib/telegram/links.js';
-import { normalizeRules } from '../../server/src/lib/telegram/rules-store.js';
-import { messageOfForward, resolveLink, resolveText } from '../../server/src/lib/telegram/resolve.js';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
+import { parseTelegramLinks } from '../../server/src/lib/telegram/links.ts';
+import { normalizeRules } from '../../server/src/lib/telegram/rulesStore.ts';
+import { messageOfForward, resolveLink, resolveText } from '../../server/src/lib/telegram/resolve.ts';
 
 const BUGS = -1001234567890; // приватная группа, привязана к проекту alpha
 const SERVICE = 555000111; // служебный чат, куда бот пересылает сам себе

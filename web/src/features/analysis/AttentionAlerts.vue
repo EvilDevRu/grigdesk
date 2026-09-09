@@ -93,9 +93,14 @@
   </UiPopover>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useAnalysisStore } from '../../stores/analysis.js';
+import {
+  analyzeTask,
+  dismissAnalysis,
+  startAnalysisPolling,
+  useAnalysisStore,
+} from '../../actions/analysis';
 import {
   UiButton,
   UiFormActions,
@@ -105,10 +110,12 @@ import {
 
 const analysis = useAnalysisStore();
 
-// Шапка живёт на всех экранах, а startPolling у store идемпотентен.
-if (!analysis.disabled) analysis.startPolling();
+// Шапка живёт на всех экранах, а запуск опроса идемпотентен.
+if (!analysis.disabled) {
+  startAnalysisPolling();
+}
 
-const busy = ref(null);
+const busy = ref<string | number | null>(null);
 const popoverStyle = {
   width: 'min(400px, calc(100vw - 20px))',
 };
@@ -124,11 +131,11 @@ const items = computed(() => (analysis.disabled ? [] : analysis.issues).map((iss
  * Busy привязан к task id, чтобы обе конфликтующие операции конкретной строки
  * оставались недоступны до завершения запроса.
  */
-async function restart(id) {
+async function restart(id: number) {
   busy.value = id;
 
   try {
-    await analysis.analyze(id);
+    await analyzeTask(id);
   } finally {
     busy.value = null;
   }
@@ -138,11 +145,11 @@ async function restart(id) {
  * Скрытие использует тот же row-lock, что и перезапуск: повторный клик не должен
  * отправить конкурирующую команду для одной оценки.
  */
-async function dismiss(id) {
+async function dismiss(id: number) {
   busy.value = id;
 
   try {
-    await analysis.dismiss(id);
+    await dismissAnalysis(id);
   } finally {
     busy.value = null;
   }
@@ -157,7 +164,7 @@ async function restartAll() {
 
   try {
     for (const item of items.value) {
-      await analysis.analyze(item.task);
+      await analyzeTask(item.task);
     }
   } finally {
     busy.value = null;
@@ -173,7 +180,7 @@ async function dismissAll() {
 
   try {
     for (const item of items.value) {
-      await analysis.dismiss(item.task);
+      await dismissAnalysis(item.task);
     }
   } finally {
     busy.value = null;

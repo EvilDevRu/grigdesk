@@ -57,7 +57,7 @@ async function mountPanel(t, rows, { error = null } = {}) {
   try {
     Panel = await compileVue(webFile('src/views/shelf/TaskShelfPanel.vue'), {
       stubs: {
-        '../../stores/task-shelf.js': [
+        '../../stores/taskShelf.ts': [
           'export const useTaskShelfStore = () => globalThis.__taskShelfPanel.shelf;',
         ].join('\n'),
         '../../stores/ui.js': [
@@ -285,7 +285,7 @@ async function mountToolHost(t, { totalCount, litCount }) {
           'export const useHotkeysStore = () =>',
           '  ({ recording: null, toolByCombo: {}, comboOf: () => "" });',
         ].join('\n'),
-        '../../stores/task-shelf.js': [
+        '../../stores/taskShelf.ts': [
           'export const useTaskShelfStore = () => globalThis.__taskShelfHost.shelf;',
         ].join('\n'),
         '../../composables/useUiContextSource.js': [

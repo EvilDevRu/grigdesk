@@ -19,7 +19,7 @@ import path from 'node:path';
 
 import { contextCacheStatus } from '../chat/context-cache.js';
 import { createStepSink, cut } from '../chat/stream-steps.js';
-import { directSshSetting } from './_direct-ssh-policy.js';
+import { directSshSetting } from './_directSshPolicy.ts';
 import {
   DEFAULT_KEEP_ALIVE_MIN,
   DEFAULT_NUM_CTX,

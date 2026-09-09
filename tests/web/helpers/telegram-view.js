@@ -21,6 +21,9 @@ export async function compileTelegramView(_prefix = 'telegram') {
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/api-client.js': 'export const api = globalThis.__tgApi;',
+      // Транспорт раздела импортирует клиента соседним путём: заглушка
+      // сопоставляется по точной строке, и обе формы нужны одновременно.
+      './api-client.js': 'export const api = globalThis.__tgApi;',
       '../stores/plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__tgPluginsStore(...args);
       `,

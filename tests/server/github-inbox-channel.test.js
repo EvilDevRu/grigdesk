@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { InboxCoordinator } from '../../server/src/lib/inbox/coordinator.js';
-import { InboxRefCodec } from '../../server/src/lib/inbox/identity.js';
+import { InboxCoordinator } from '../../server/src/lib/inbox/coordinator.ts';
+import { InboxRefCodec } from '../../server/src/lib/inbox/identity.ts';
 import {
   createGitHubInboxChannel,
   GitHubInboxChannelError,
-} from '../../server/src/lib/github/inbox-channel.js';
+} from '../../server/src/lib/github/inboxChannel.ts';
 
 const ACCOUNT_REF = 'acc_github_inbox_0001';
 const REPOSITORY_ID = '123456';

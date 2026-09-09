@@ -140,13 +140,16 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useTaskShelfStore } from '../../stores/task-shelf.js';
+import { useTaskShelfStore } from '../../stores/taskShelf.ts';
+import type { ShelfRow } from '../../stores/taskShelf.ts';
 import { useUiStore } from '../../stores/ui.js';
 import { UiIconButton, UiSelectableRow } from '../../ui';
 
-const SOURCE_LABELS = {
+type PluralForms = [string, string, string];
+
+const SOURCE_LABELS: Record<string, string> = {
   analysis: 'оценка',
   pipeline: 'конвейер',
   comments: 'комментарии',
@@ -155,7 +158,7 @@ const SOURCE_LABELS = {
 
 const shelf = useTaskShelfStore();
 const ui = useUiStore();
-const panel = ref(null);
+const panel = ref<HTMLElement | null>(null);
 
 const groups = computed(() => [
   {
@@ -175,34 +178,74 @@ const groups = computed(() => [
   },
 ].filter((group) => group.rows.length));
 
+/**
+ * Шапка называет сначала события, потом объём наблюдения: человек приходит на полку
+ * за тем, что уже случилось, а не за списком.
+ */
 const summaryText = computed(() => {
-  if (!shelf.rows.length) return 'Задачи, по которым ждём событие';
+  if (!shelf.rows.length) {
+    return 'Задачи, по которым ждём событие';
+  }
+
   const total = `${shelf.rows.length} ${wordForm(shelf.rows.length, ['задача', 'задачи', 'задач'])}`;
-  if (!shelf.litCount) return `${total} под наблюдением`;
+
+  if (!shelf.litCount) {
+    return `${total} под наблюдением`;
+  }
+
   const events = `${shelf.litCount} ${wordForm(shelf.litCount, ['событие', 'события', 'событий'])}`;
+
   return `${events} · ${total}`;
 });
 
-function wordForm(value, forms) {
+/**
+ * Русские числительные: 11–19 всегда просят форму множественного числа, поэтому
+ * сотня проверяется раньше единиц.
+ */
+function wordForm(value: number, forms: PluralForms): string {
   const mod100 = Math.abs(value) % 100;
   const mod10 = mod100 % 10;
-  if (mod100 >= 11 && mod100 <= 19) return forms[2];
-  if (mod10 === 1) return forms[0];
-  if (mod10 >= 2 && mod10 <= 4) return forms[1];
+
+  if (mod100 >= 11 && mod100 <= 19) {
+    return forms[2];
+  }
+  if (mod10 === 1) {
+    return forms[0];
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return forms[1];
+  }
+
   return forms[2];
 }
 
-function ageLabel(value) {
+/**
+ * Возраст записи на полке. Сегодняшняя задача называется отдельно: «на полке 0 дней»
+ * человек читал бы как ошибку.
+ */
+function ageLabel(value: string): string {
   const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return 'дата неизвестна';
+
+  if (!Number.isFinite(timestamp)) {
+    return 'дата неизвестна';
+  }
+
   const days = Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000));
-  if (days === 0) return 'добавлена сегодня';
+
+  if (days === 0) {
+    return 'добавлена сегодня';
+  }
+
   return `на полке ${days} ${wordForm(days, ['день', 'дня', 'дней'])}`;
 }
 
-function fullDate(value) {
+function fullDate(value: string): string {
   const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return '';
+
+  if (!Number.isFinite(timestamp)) {
+    return '';
+  }
+
   return new Date(timestamp).toLocaleString('ru-RU', {
     day: 'numeric',
     month: 'long',
@@ -212,20 +255,21 @@ function fullDate(value) {
   });
 }
 
-function eventSource(row) {
-  return SOURCE_LABELS[row.source] || '';
+function eventSource(row: ShelfRow): string {
+  return SOURCE_LABELS[String(row.source)] || '';
 }
 
-function hasFooter(row) {
+function hasFooter(row: ShelfRow): boolean {
   return !!(row.details?.responsible || row.details?.deadline || row.details?.unread);
 }
 
-function unreadLabel(value) {
+function unreadLabel(value: number): string {
   return `${value} ${wordForm(value, ['непрочитанный', 'непрочитанных', 'непрочитанных'])}`;
 }
 
-function rowAriaLabel(row) {
+function rowAriaLabel(row: ShelfRow): string {
   const event = row.state === 'lit' && row.message ? `, новое событие: ${row.message}` : '';
+
   return `${row.title}, задача #${row.taskId}${event}`;
 }
 

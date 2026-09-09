@@ -6,7 +6,7 @@ import { knowledgeFixture, record } from './helpers/knowledge.js';
 let brokerModule;
 let brokerModuleError;
 try {
-  brokerModule = await import('../../server/src/lib/search/broker.js');
+  brokerModule = await import('../../server/src/lib/search/broker.ts');
 } catch (error) {
   brokerModuleError = error;
 }

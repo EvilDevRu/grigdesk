@@ -9,9 +9,9 @@ let modules;
 let modulesError;
 try {
   const [storeModule, serviceModule, apiModule] = await Promise.all([
-    import('../../server/src/lib/task-shelf-store.js'),
-    import('../../server/src/lib/task-shelf-service.js'),
-    import('../../server/src/modules/task-shelf/index.js'),
+    import('../../server/src/lib/taskShelfStore.ts'),
+    import('../../server/src/lib/taskShelfService.ts'),
+    import('../../server/src/modules/task-shelf/index.ts'),
   ]);
   modules = { storeModule, serviceModule, apiModule };
 } catch (error) {

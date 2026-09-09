@@ -6,7 +6,7 @@ import {
   telegramActivationCodec,
   telegramActivationEpochFor,
   telegramActivationMarker,
-} from '../../server/src/lib/telegram/activation.js';
+} from '../../server/src/lib/telegram/activation.ts';
 
 const marker = (afterSeq, afterOccurredAt) => ({ schema: 1, afterSeq, afterOccurredAt });
 

@@ -113,7 +113,8 @@ test('пустой allowlist виден явно, PUT передаёт rules[0..
         b24: { responsibleId: null, groupId: null, priority: 1 },
         autoTask: { enabled: false, minConfidence: 0.7, maxPerDay: 10 },
       }));
-      return { rules: storedRules };
+      // Сервер отвечает подтверждением и сохранённым правилом целиком.
+      return { ok: true, rules: storedRules };
     },
   };
   const { wrapper, settle } = await mountChannelView(t, 'github', { api });
@@ -133,6 +134,7 @@ test('пустой allowlist виден явно, PUT передаёт rules[0..
     },
   ]]);
   assert.match(wrapper.text(), /Новое правило не включает автоматическое/);
+  assert.equal(wrapper.find('[role="alert"]').exists(), false, 'сохранение прошло без отказа');
 });
 
 test('agentSearch legacy-default закрыт и включается отдельным подтверждённым CAS', async (t) => {
@@ -157,7 +159,7 @@ test('agentSearch legacy-default закрыт и включается отдел
       assert.equal(url, '/api/github/rules/agent-search');
       storedRule = { ...storedRule, agentSearch: body.enabled };
       fingerprint = 'ghpol1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-      return { rules: [storedRule], policyFingerprint: fingerprint };
+      return { ok: true, rules: [storedRule], policyFingerprint: fingerprint };
     },
   };
   const { wrapper, settle } = await mountChannelView(t, 'github', {
@@ -181,6 +183,8 @@ test('agentSearch legacy-default закрыт и включается отдел
     },
   ]]);
   assert.equal(wrapper.get('input[name="agentSearch"]').element.checked, true);
+  assert.match(wrapper.text(), /разрешён агентам выбранного проекта/iu);
+  assert.equal(wrapper.find('[role="alert"]').exists(), false);
 });
 
 test('agentSearch после потерянного ответа PUT перечитывает и различает фактический исход', async (t) => {
@@ -296,7 +300,11 @@ test('обычное редактирование rule не переносит a
         policyFingerprint: 'ghpol1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       } : CONNECTED;
     },
-    async put(url, body) { calls.push(['PUT', url, body]); return { rules: [storedRule] }; },
+    async put(url, body) {
+      calls.push(['PUT', url, body]);
+
+      return { ok: true, rules: [storedRule] };
+    },
   };
   const { wrapper, settle } = await mountChannelView(t, 'github', { api });
   await wrapper.get('input[name="project"]').setValue('cockpit-next');

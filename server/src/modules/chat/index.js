@@ -37,7 +37,7 @@ import {
   normalizeUiContext,
   pageHint,
 } from '../../lib/chat/ui-context.js';
-import { DISCUSSION_SECTION_TITLE, stripDiscussionSection } from '../../lib/telegram/discussion.js';
+import { DISCUSSION_SECTION_TITLE, stripDiscussionSection } from '../../lib/telegram/discussion.ts';
 import {
   KIMI_AUTH_PROFILE_ID,
   kimiSecurityProfile,
