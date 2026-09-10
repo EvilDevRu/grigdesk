@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.ui.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/showcaseContracts.ts",
+    "src/actions/showcase/**/*.ts",
+    "src/stores/showcase.ts",
+    "src/shared/showcaseApi.ts",
+    "src/views/showcase/**/*.vue",
+    "src/views/ShowcaseView.vue",
+    "../tests/types/showcase-contract.test.ts"
+  ]
+}

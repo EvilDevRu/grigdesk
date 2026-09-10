@@ -82,6 +82,8 @@ import type { SettingsModuleOptions } from './modules/settings/index.ts';
 import { normalizeDbResult } from './lib/db/result.ts';
 import { createDockerService } from './lib/docker/service.ts';
 import { createSandboxService } from './lib/sandboxes/service.ts';
+import { createShowcaseService } from './lib/showcase/service.ts';
+import { resolveInboxTriageTarget } from './lib/inbox/triage.ts';
 import { createKnowledgeClient } from './lib/search/client.ts';
 import { createKnowledgeBroker } from './lib/search/broker.ts';
 import { createKnowledgeTransfer } from './lib/search/transfer.ts';
@@ -122,6 +124,7 @@ import sshModule from './modules/ssh/index.ts';
 import dbModule from './modules/db/index.ts';
 import dockerModule from './modules/docker/index.ts';
 import sandboxesModule from './modules/sandboxes/index.ts';
+import showcaseModule from './modules/showcase/index.ts';
 import knowledgeModule from './modules/knowledge/index.ts';
 import { Analyzer } from './lib/analysis/analyzer.ts';
 import { AnalysisArbiter } from './lib/analysis/arbiter.ts';
@@ -452,6 +455,9 @@ async function build() {
     ),
   });
 
+
+
+
   // Живой запрос к БД. Хранится в памяти процесса: перезапуск обнуляет ленту, и это
   // честно — сессии БД его тоже не переживают.
   interface DbQueryRecord extends Record<string, unknown> {
@@ -753,6 +759,65 @@ async function build() {
     log: fastify.log,
   });
   telegramConnection.attachPoller(telegramPoller);
+
+  // Презентации: раздел держит свои ролики и журнал заданий, а цель показа берёт
+  // из реестра стендов и объявления профиля. Служба живёт весь срок сервера —
+  // запись браузера переживает перезапуск, и журнал заданий надо сверять на старте.
+  const showcaseService = createShowcaseService({
+    showcaseDir: config.showcaseDir,
+    authDir: config.showcaseAuthDir,
+    profilesDir: config.profilesDir,
+    stateDir: config.stateDir,
+    browserPath: config.showcaseBrowser || null,
+    voiceDir: config.showcaseVoiceDir,
+    bootstrapPython: process.env.COCKPIT_MEDIA_BOOTSTRAP_PYTHON || 'python3',
+    listProjects: () => listProjects(config, prefs),
+    broadcast: (event: string, data?: unknown) => fastify.sse?.broadcast?.(event, data),
+    // Расшифровка для самопроверки речи идёт через общий речевой runtime кокпита —
+    // тот же, что у диктовки и «Видео». Своей копии распознавания у раздела нет,
+    // а его недоступность делает проверку пропущенной, а не проваленной.
+    transcribe: async (file: string) => {
+      // Расшифровка приходит сегментами со своими границами; для сверки слов нужен
+      // сплошной текст, а границы фраз — предмет отдельного захода.
+      const result = await speechRuntime.transcribe({ filePath: file }) as {
+        transcript?: { segments?: { text?: unknown }[] };
+      };
+      const segments = result?.transcript?.segments ?? [];
+
+      return segments.map((segment) => String(segment?.text ?? '')).join(' ').trim();
+    },
+    // Модель сценария — своя настройка плагина, читается перед самым вызовом:
+    // смена модели действует со следующей генерации, без перезапуска. Резолвер тот
+    // же, что у остальных model-only мест: он и проверяет право читать недоверенный
+    // текст.
+    resolveScriptModel: (input) => resolveInboxTriageTarget(input),
+    scriptModelRef: () => readPluginSettings(fastify, 'showcase').scriptModel ?? null,
+    // Каналы доставки: сессией портала и аккаунтом Telegram владеет сервер, раздел
+    // получает их готовыми и вторых не заводит.
+    deliveryDeps: {
+      b24,
+      telegramConnected: () => telegramConnection.connection === 'connected',
+    },
+    // Пределы читаются при каждом обращении: смена настройки действует со следующего
+    // задания, без перезапуска сервера.
+    limits: () => {
+      const value = readPluginSettings(fastify, 'showcase');
+
+      return {
+        maxScenes: Math.max(1, Number(value.maxScenes) || 20),
+        maxSceneSeconds: 120,
+        maxTotalSeconds: 600,
+        retentionDays: Math.max(1, Number(value.retentionDays) || 30),
+        maxQueued: 4,
+        jobTimeoutMs: 30 * 60_000,
+      };
+    },
+  });
+
+  // Наблюдение за исполнителями записи; заводится после старта и снимается вместе
+  // с сервером.
+  let showcaseWatch: NodeJS.Timeout | null = null;
+
   const telegramInboxChannel = createTelegramInboxChannel({
     enabled: () => fastify.pluginEnabled('telegram'),
     state: async () => {
@@ -933,6 +998,12 @@ async function build() {
       if (id === 'analysis') {
         analyzer.pluginToggled(enabled);
       }
+      if (id === 'showcase') {
+        // Выключение не оставляет работающий конвейер: приём новых шагов
+        // прекращается, а идущие задания снимаются. Данные роликов остаются.
+        if (enabled) showcaseService.enable();
+        else await showcaseService.disable();
+      }
     },
   });
   await fastify.register<KnowledgeModuleOptions>(knowledgeModule, {
@@ -973,6 +1044,7 @@ async function build() {
   await fastify.register(dbModule, { service: dbService });
   await fastify.register(dockerModule, { service: dockerService });
   await fastify.register(sandboxesModule, { service: sandboxService });
+  await fastify.register(showcaseModule, { service: showcaseService });
   await fastify.register(chatModule, {
     factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
     taskExists: companionTaskExists,
@@ -1140,8 +1212,29 @@ async function build() {
     void sandboxService.resume().catch((error) => {
       fastify.log.warn({ err: error }, 'песочницы: сверка журнала после старта не удалась');
     });
+    // Запись браузера идёт отдельным процессом и переживает перезапуск, поэтому
+    // журнал заданий раздела сверяется с процессами. До сверки очередь новых
+    // заданий не выдаёт: второй worker на ту же цель испортил бы запись первому.
+    void showcaseService.recover().catch((error) => {
+      fastify.log.warn({ err: error }, 'презентации: сверка журнала заданий не удалась');
+    });
+    // Отсоединённый исполнитель пишет свой журнал файлом, поэтому сервер его
+    // перечитывает: подписки на чужой процесс нет, а зависший обязан стать видимой
+    // причиной, а не бесконечным «идёт».
+    showcaseWatch = setInterval(() => {
+      void showcaseService.pollWorkers().catch((error) => {
+        fastify.log.warn({ err: error }, 'презентации: наблюдение за исполнителем сорвалось');
+      });
+    }, 2000);
+    showcaseWatch.unref?.();
   });
   fastify.addHook('onClose', async () => {
+    if (showcaseWatch) {
+      clearInterval(showcaseWatch);
+      showcaseWatch = null;
+    }
+
+    await showcaseService.disable();
     sandboxService.stop();
     githubConnection.stop();
     telegramPult?.actions?.stop();

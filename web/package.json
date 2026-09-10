@@ -19,6 +19,7 @@
     "typecheck:docker": "vue-tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "vue-tsc -p tsconfig.code.json --noEmit",
     "typecheck:sandboxes": "vue-tsc -p tsconfig.sandboxes.json --noEmit",
+    "typecheck:showcase": "vue-tsc -p tsconfig.showcase.json --noEmit",
     "typecheck:knowledge": "vue-tsc -p tsconfig.knowledge.json --noEmit",
     "typecheck:shelf": "vue-tsc -p tsconfig.shelf.json --noEmit",
     "typecheck:video": "vue-tsc -p tsconfig.video.json --noEmit",
