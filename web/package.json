@@ -15,10 +15,11 @@
     "check:ui-styles": "node scripts/check-ui-control-styles.mjs",
     "test:ui-browser": "node scripts/check-ui-geometry.mjs",
     "test:components": "node --experimental-strip-types --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
-    "test": "npm run typecheck:ui && npm run typecheck:docker && npm run typecheck:code && npm run typecheck:sandboxes && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components",
+    "test": "npm run typecheck:ui && npm run typecheck:docker && npm run typecheck:code && npm run typecheck:sandboxes && npm run typecheck:showcase && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components",
     "typecheck:docker": "vue-tsc -p tsconfig.docker.json --noEmit && npm --prefix ../server run typecheck:docker",
     "typecheck:code": "vue-tsc -p tsconfig.code.json --noEmit && npm --prefix ../server run typecheck:code",
-    "typecheck:sandboxes": "vue-tsc -p tsconfig.sandboxes.json --noEmit && npm --prefix ../server run typecheck:sandboxes"
+    "typecheck:sandboxes": "vue-tsc -p tsconfig.sandboxes.json --noEmit && npm --prefix ../server run typecheck:sandboxes",
+    "typecheck:showcase": "vue-tsc -p tsconfig.showcase.json --noEmit && npm --prefix ../server run typecheck:showcase"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

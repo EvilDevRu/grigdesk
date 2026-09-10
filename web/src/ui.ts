@@ -1,5 +1,6 @@
 // Единственная публичная граница UI-kit. Production-consumers импортируют только отсюда.
 export { default as UiActionLink } from './components/primitives/UiActionLink.vue';
+export { default as UiAudio } from './components/primitives/UiAudio.vue';
 export { default as UiButton } from './components/primitives/UiButton.vue';
 export { default as UiCheckbox } from './components/primitives/UiCheckbox.vue';
 export { default as UiIconButton } from './components/primitives/UiIconButton.vue';
@@ -13,6 +14,7 @@ export { default as UiSpinner } from './components/primitives/UiSpinner.vue';
 export { default as UiSvgPressable } from './components/primitives/UiSvgPressable.vue';
 export { default as UiSwitch } from './components/primitives/UiSwitch.vue';
 export { default as UiTextarea } from './components/primitives/UiTextarea.vue';
+export { default as UiVideo } from './components/primitives/UiVideo.vue';
 
 export { default as UiChoiceList } from './components/composites/UiChoiceList.vue';
 export { default as UiCommandButton } from './components/composites/UiCommandButton.vue';

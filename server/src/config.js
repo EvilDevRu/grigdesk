@@ -164,6 +164,25 @@ export const config = {
     || path.join(__dirname, '..', '.state', 'sandboxes'),
   sandboxManualRange,
 
+  // Ролики раздела «Презентации»: записи, сцены и артефакты сборки. Каталог тяжёлый
+  // и растёт от каждого прогона, поэтому вынесен переменной — на этой машине его
+  // держат на диске побольше.
+  showcaseDir: process.env.COCKPIT_SHOWCASE_DIR || path.join(__dirname, '..', '.state', 'showcase'),
+  // Снимок входа тестовой учётки лежит ОТДЕЛЬНО от артефактов ролика и с правами
+  // 0700: это действующие права на стенде, и попасть в скачиваемый файл, экспорт
+  // или журнал он не должен.
+  showcaseAuthDir: process.env.COCKPIT_SHOWCASE_AUTH_DIR
+    || path.join(__dirname, '..', '.state', 'showcase-auth'),
+  // Локальный синтез речи раздела: своё python-окружение и скачанные голоса.
+  // Отдельно от media-venv распознавания намеренно — обновление голосового движка
+  // не должно менять состав, на котором проверена диктовка.
+  showcaseVoiceDir: process.env.COCKPIT_SHOWCASE_VOICE_DIR
+    || path.join(__dirname, '..', '.state', 'showcase-voice'),
+  // Браузер записи объявляется явно. Найденный в чужом кэше бинарник установкой
+  // зависимости раздела не считается: версия Playwright требует свою ревизию, и
+  // случайная чужая даёт то падающую запись, то пустой клип.
+  showcaseBrowser: process.env.COCKPIT_SHOWCASE_BROWSER || '',
+
   // Общие настройки кокпита (редактируются из UI, живут в .state).
   prefsPath: process.env.COCKPIT_PREFS_PATH || path.join(__dirname, '..', '.state', 'prefs.json'),
   // SSH-профили, известные host keys и журнал команд агента содержат адреса боевых

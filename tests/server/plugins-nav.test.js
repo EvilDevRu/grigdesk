@@ -30,6 +30,7 @@ test('системные инструменты имеют явные group/orde
       ssh: ['dock', 40],
       db: ['dock', 50],
       docker: ['dock', 60],
+      showcase: ['tools', 50],
     },
   );
 

@@ -47,6 +47,7 @@ const MIME_BY_EXT = {
     svg: 'image/svg+xml',
     pdf: 'application/pdf',
     txt: 'text/plain',
+    srt: 'application/x-subrip',
     mp4: 'video/mp4',
     m4v: 'video/mp4',
     mov: 'video/quicktime',

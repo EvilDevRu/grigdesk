@@ -8,10 +8,11 @@
   "scripts": {
     "start": "node --experimental-strip-types src/app.js",
     "dev": "node --experimental-strip-types --watch src/app.js",
-    "test": "npm run typecheck:docker && npm run typecheck:code && npm run typecheck:sandboxes && node --experimental-strip-types --test ../tests/server/*.test.js",
+    "test": "npm run typecheck:docker && npm run typecheck:code && npm run typecheck:sandboxes && npm run typecheck:showcase && node --experimental-strip-types --test ../tests/server/*.test.js",
     "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "tsc -p tsconfig.code.json --noEmit",
-    "typecheck:sandboxes": "tsc -p tsconfig.sandboxes.json --noEmit"
+    "typecheck:sandboxes": "tsc -p tsconfig.sandboxes.json --noEmit",
+    "typecheck:showcase": "tsc -p tsconfig.showcase.json --noEmit"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -27,6 +28,7 @@
     "fastify-plugin": "^5.0.1",
     "ioredis": "^6.0.0",
     "mysql2": "^3.24.3",
+    "playwright-core": "^1.62.1",
     "qrcode-generator": "^2.0.4",
     "ssh2": "^1.17.0"
   },
