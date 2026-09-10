@@ -43,11 +43,11 @@ export function compileSettingsView({
 
   return compileVue(SETTINGS_VIEW, {
     stubs: {
-      '../shared/api-client.js': `
+      '../shared/apiClient.ts': `
         export const api = globalThis[${globalName(prefix, 'Api')}];
       `,
       ...storeStubs,
-      '../composables/useUiContextSource.js': `
+      '../composables/useUiContextSource.ts': `
         export const useUiContextSource = () => ({
           update() {},
           focus() {},
@@ -55,7 +55,7 @@ export function compileSettingsView({
           dispose() {},
         });
       `,
-      '../shared/tools/launcher.js': `
+      '../shared/tools/launcher.ts': `
         export const useToolLauncher = () => ({ openTerminal() {} });
       `,
       '../shared/ProviderIcon.vue': `
@@ -71,7 +71,7 @@ export function compileSettingsView({
         export const useCockpitUpdateStore = (...args) =>
           globalThis[${globalName(prefix, 'Stores')}].useCockpitUpdateStore(...args);
       `,
-      '../composables/useSse.js': `
+      '../composables/useSse.ts': `
         export const useSse = () => ({ connected: { value: false } });
       `,
       './services/dialogs': `

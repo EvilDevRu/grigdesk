@@ -8,7 +8,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { fingerprintHostKeys } from '../../server/src/lib/gateway/ssh.js';
+import { fingerprintHostKeys } from '../../server/src/lib/gateway/ssh.ts';
 
 const execFileAsync = promisify(execFile);
 

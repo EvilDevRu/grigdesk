@@ -6,7 +6,7 @@ import path from 'node:path';
 let storageModule;
 let storageModuleError;
 try {
-  storageModule = await import('../../../server/src/lib/search/storage.js');
+  storageModule = await import('../../../server/src/lib/search/storage.ts');
 } catch (error) {
   storageModuleError = error;
 }

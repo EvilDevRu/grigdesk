@@ -9,20 +9,20 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatSessionBindingStore } from '../../server/src/lib/chat/session-binding-store.js';
+import { ChatSessionBindingStore } from '../../server/src/lib/chat/sessionBindingStore.ts';
 import {
   KIMI_AUTH_PROFILE_ID,
   KIMI_SECURITY_PROFILE,
-} from '../../server/src/lib/kimi/profile.js';
-import { KIMI_RETRY_CONTRACT } from '../../server/src/lib/chat/retry-contract.js';
-import chatModule from '../../server/src/modules/chat/index.js';
-import providersModule from '../../server/src/modules/providers/index.js';
-import kimiExecutor from '../../server/src/lib/executors/kimi.js';
-import claudeExecutor from '../../server/src/lib/executors/claude.js';
+} from '../../server/src/lib/kimi/profile.ts';
+import { KIMI_RETRY_CONTRACT } from '../../server/src/lib/chat/retryContract.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
+import providersModule from '../../server/src/modules/providers/index.ts';
+import kimiExecutor from '../../server/src/lib/executors/kimi.ts';
+import claudeExecutor from '../../server/src/lib/executors/claude.ts';
 import codexExecutor, {
   parseCodexSkillCommands,
   readCodexSkillCommands,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

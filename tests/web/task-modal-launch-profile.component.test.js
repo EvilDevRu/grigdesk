@@ -41,7 +41,7 @@ async function mountLaunchForm(t, { launchOptions }) {
     async post() { return {}; },
     async upload() { return {}; },
   };
-  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__taskModalLaunchUiStore = defineStore('task-modal-launch-ui', {
     state: () => ({ taskId: 42 }),
     actions: { close() {} },
@@ -141,7 +141,7 @@ test('TaskModal выбирает project-beta, перечитывает feature 
   ]);
   const optionCalls = [];
   const launchCalls = [];
-  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__taskModalLaunchRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__taskModalLaunchApi = {
     async get(url) {
       if (url.endsWith('/clarifications')) return { text: '' };

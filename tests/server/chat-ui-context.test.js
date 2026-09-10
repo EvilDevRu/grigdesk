@@ -10,8 +10,8 @@ import {
   contextPrefix,
   normalizeUiContext,
   pageHint,
-} from '../../server/src/lib/chat/ui-context.js';
-import chatModule from '../../server/src/modules/chat/index.js';
+} from '../../server/src/lib/chat/uiContext.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

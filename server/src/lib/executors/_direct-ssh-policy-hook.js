@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { evaluateDirectCommand } from './_direct-ssh-policy.js';
+import { evaluateDirectCommand } from './_directSshPolicy.ts';
 
 function deny(reason) {
   process.stdout.write(`${JSON.stringify({

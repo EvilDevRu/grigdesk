@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import { ACTIVE_UPDATE_STATES, cockpitUpdateTone } from '../shared/cockpit-update.js';
 
 export * from '../shared/cockpit-update.js';

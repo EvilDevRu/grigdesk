@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { createPermissionQueue } from '../../server/src/lib/chat/permission-queue.js';
+import { createPermissionQueue } from '../../server/src/lib/chat/permissionQueue.ts';
 
 async function managerFactory() {
   try {
-    const module = await import('../../server/src/lib/db/session-manager.js');
+    const module = await import('../../server/src/lib/db/sessionManager.ts');
     return module.createDbSessionManager || module.default;
   } catch (error) {
     assert.fail(`server-owned DB lifecycle ещё не реализован: ${error.message}`);

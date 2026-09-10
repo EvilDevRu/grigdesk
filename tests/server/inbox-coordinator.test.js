@@ -8,10 +8,10 @@ import {
   InboxCoordinator,
   InboxCoordinatorError,
   toPublicInboxItem,
-} from '../../server/src/lib/inbox/coordinator.js';
-import { canonicalJsonActivationCodec } from '../../server/src/lib/inbox/activation.js';
-import { InboxRefCodec } from '../../server/src/lib/inbox/identity.js';
-import { InboxStateStore } from '../../server/src/lib/inbox/state-store.js';
+} from '../../server/src/lib/inbox/coordinator.ts';
+import { canonicalJsonActivationCodec } from '../../server/src/lib/inbox/activation.ts';
+import { InboxRefCodec } from '../../server/src/lib/inbox/identity.ts';
+import { InboxStateStore } from '../../server/src/lib/inbox/stateStore.ts';
 
 const T0 = 1_786_172_400;
 

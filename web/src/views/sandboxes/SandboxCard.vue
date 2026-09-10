@@ -113,7 +113,7 @@
 import { computed, ref } from 'vue';
 import { UiButton, UiIconButton, UiInlineMessage, UiProgress } from '../../ui';
 import { sandboxUrl } from '../../shared/sandbox.js';
-import { writeClipboardText } from '../../shared/clipboard.js';
+import { writeClipboardText } from '../../shared/clipboard.ts';
 import type { SandboxEntry, SandboxJob } from '../../../../shared/sandboxContracts';
 
 const ICON = {

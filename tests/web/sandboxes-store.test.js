@@ -60,8 +60,8 @@ async function sectionFixture(t, api) {
 
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__sandboxStoreHarness.api;',
-      '../../composables/useSse.js': (
+      './apiClient.ts': 'export const api = globalThis.__sandboxStoreHarness.api;',
+      '../../composables/useSse.ts': (
         'export const sseSubscribe = (fn) => {'
         + ' globalThis.__sandboxStoreHarness.listeners.add(fn);'
         + ' return () => globalThis.__sandboxStoreHarness.listeners.delete(fn);'

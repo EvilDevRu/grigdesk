@@ -21,8 +21,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useChatStore } from '../stores/chat.js';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
-import { useDockViewport } from '../shared/tools/viewport.js';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { useDockViewport } from '../shared/tools/viewport.ts';
 import ChatList from './chat/ChatList.vue';
 import ChatSession from './chat/ChatSession.vue';
 

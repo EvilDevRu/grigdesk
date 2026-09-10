@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
-import systemModule from '../../server/src/modules/system/index.js';
+import systemModule from '../../server/src/modules/system/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

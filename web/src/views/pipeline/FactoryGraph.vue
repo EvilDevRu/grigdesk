@@ -182,36 +182,14 @@ import {
   runnerChainLabel,
   runnerModelLabel,
   runnerNodeLabel,
-} from '../../shared/runner-display.js';
-
-type GraphPosition = [number, number];
-type GraphNodeDefinition = [string, string?, string?];
-type GraphEdge = [string, string, string, string, string?];
-type LabelPosition = [number, number] | null;
-
-interface RunnerMetadata extends Record<string, unknown> {
-  switched?: boolean;
-}
-
-interface GraphNodeMetadata {
-  runner?: RunnerMetadata;
-}
-
-interface FactoryGraphData {
-  pos: Record<string, GraphPosition>;
-  nodes: Record<string, GraphNodeDefinition>;
-  edges: GraphEdge[];
-  statuses?: Record<string, string>;
-  loops?: Record<string, number>;
-  nodeMeta?: Record<string, GraphNodeMetadata>;
-  stall?: unknown;
-}
-
-interface ArbiterRun {
-  actor?: string;
-  model?: string | null;
-  elapsedSec?: number;
-}
+} from '../../shared/runnerDisplay.ts';
+import type {
+  ArbiterRun,
+  FactoryGraphData,
+  GraphNodeDefinition,
+  GraphPosition,
+  LabelPosition,
+} from '../../../../shared/factoryGraphContracts.ts';
 
 interface GraphStall {
   node: string | null;
@@ -284,7 +262,10 @@ const emit = defineEmits<{
   node: [node: GraphNodeElement, event: MouseEvent | KeyboardEvent];
 }>();
 
-const doneLike = new Set(['done', 'skip']);
+// Пройденный узел рисуется одинаково и когда он сделан, и когда законно пропущен.
+// Множество строк, а не статусов: неизвестного узла в карте статусов может не быть
+// вовсе, и такое отсутствие означает «ещё не дошли», а не ошибку.
+const doneLike = new Set<string | undefined>(['done', 'skip']);
 // Подсказка следа арбитра. Вердикты те же, что в `lib/arbiter-cards.js`; незнакомый
 // вердикт метки не даёт вовсе — выдумывать за сервер смысл нельзя.
 const ARBITER_NODE_TITLE: Record<string, string> = {

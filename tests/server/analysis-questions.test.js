@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
-import { buildTriagePrompt } from '../../server/src/lib/analysis/prompt.js';
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
+import { buildTriagePrompt } from '../../server/src/lib/analysis/prompt.ts';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-questions-'));

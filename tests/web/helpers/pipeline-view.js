@@ -32,14 +32,14 @@ function uiFacadeStub(prefix) {
 export function compilePipelineView(prefix) {
   return compileVue(VIEW_PATH, {
     stubs: {
-      '../shared/api-client.js': `export const api = globalThis.${prefix}Api;`,
-      '../composables/useSse.js': [
+      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../composables/useSse.ts': [
         'export function useSse(onEvent) {',
         `  globalThis.${prefix}SseHandler = onEvent;`,
         '  return { connected: { value: true } };',
         '}',
       ].join('\n'),
-      '../composables/useUiContextSource.js': [
+      '../composables/useUiContextSource.ts': [
         'export function useUiContextSource(...args) {',
         `  const helper = globalThis.${prefix}ContextSource;`,
         '  if (helper) return helper(...args);',
@@ -52,11 +52,11 @@ export function compilePipelineView(prefix) {
       '../stores/companion.js': (
         `export const useCompanionStore = globalThis.${prefix}CompanionStore;`
       ),
-      '../shared/md.js': 'export const mdToHtml = (value) => String(value || "");',
+      '../shared/md.ts': 'export const mdToHtml = (value) => String(value || "");',
       '../shared/sandbox.js': (
         'export const sandboxUrl = (port) => `http://sandbox.test:${port}`;'
       ),
-      '../shared/agent-activity.js': [
+      '../../../shared/agentActivity.ts': [
         'export const agentActivityLabel = () => "";',
         'export function silenceReason(task, window) {',
         '  const silence = task?.silence;',

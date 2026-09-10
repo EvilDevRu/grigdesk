@@ -16,7 +16,7 @@ let mountNonce = 0;
 export async function compileBoardView() {
   return compileVue(VIEW_PATH, {
     stubs: {
-      '../shared/format.js': `
+      '../shared/format.ts': `
         export const hoursToHM = (value) => String(value ?? 0);
         export const liveTimerSec = (task) => task.timerElapsed || 0;
         export const secToHMS = (value) => String(value ?? 0);
@@ -28,14 +28,18 @@ export async function compileBoardView() {
       '../stores/ui.js': `
         export const useUiStore = (...args) => globalThis.__boardViewStores.ui(...args);
       `,
-      '../stores/analysis.js': `
+      '../actions/analysis': `
         export const useAnalysisStore = (...args) => globalThis.__boardViewStores.analysis(...args);
+        export const analyzeTask = (...args) =>
+          globalThis.__boardViewStores.analysis().analyze(...args);
+        export const startAnalysisPolling = () =>
+          globalThis.__boardViewStores.analysis().startPolling?.();
       `,
       '../stores/task-favorites.js': `
         export const useTaskFavoritesStore = (...args) =>
           globalThis.__boardViewStores.favorites(...args);
       `,
-      '../stores/task-shelf.js': `
+      '../stores/taskShelf.ts': `
         export const useTaskShelfStore = (...args) =>
           globalThis.__boardViewStores.shelf(...args);
       `,
@@ -60,10 +64,10 @@ export async function compileBoardView() {
             + ' @click="$emit(\\'toggle\\')">{{ taskTitle }}</button>',
         };
       `,
-      '../shared/api-client.js': `
+      '../shared/apiClient.ts': `
         export const api = { get: async () => ({ tasks: [] }) };
       `,
-      '../composables/useSse.js': `
+      '../composables/useSse.ts': `
         export const useSse = () => ({});
       `,
     },

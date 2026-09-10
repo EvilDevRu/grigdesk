@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { factoryLaunchEnv } from '../../server/src/lib/factory-launch.js';
-import { routeStartArgs, stageAutoCompactEnv } from '../../server/src/lib/factory-route-cli.js';
+import { factoryLaunchEnv } from '../../server/src/lib/factoryLaunch.ts';
+import { routeStartArgs, stageAutoCompactEnv } from '../../server/src/lib/factoryRouteCli.ts';
 
 test('Cockpit passes every factory runtime root into the detached pipeline scope', () => {
   assert.deepEqual(factoryLaunchEnv({

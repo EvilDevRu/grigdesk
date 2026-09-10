@@ -19,7 +19,7 @@ import {
   parseInboxTriageVerdict,
   resolveInboxTriageTarget,
   runInboxTriage,
-} from '../../server/src/lib/inbox/triage.js';
+} from '../../server/src/lib/inbox/triage.ts';
 
 const T0 = 1_800_000_000;
 const SCOPE = 'typed-scope-ref';

@@ -90,12 +90,12 @@ test('UI boundary: AST ловит native dialogs, createElement и render contro
 
 test('UI boundary: clipboard exception точный и не скрывает второй control', (t) => {
   const repoRoot = writeFixtureRepo(t, {
-    'web/src/shared/clipboard.js': 'document.createElement("textarea");\n',
+    'web/src/shared/clipboard.ts': 'document.createElement("textarea");\n',
   });
   assert.deepEqual(compareUiBoundary(collectUiBoundary(repoRoot)), []);
 
   fs.appendFileSync(
-    path.join(repoRoot, 'web/src/shared/clipboard.js'),
+    path.join(repoRoot, 'web/src/shared/clipboard.ts'),
     'document.createElement("textarea");\ndocument.createElement("button");\n',
   );
   const errors = compareUiBoundary(collectUiBoundary(repoRoot)).join('\n');

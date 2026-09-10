@@ -1031,15 +1031,15 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { api } from '../shared/api-client.js';
-import { useSse } from '../composables/useSse.js';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
+import { api } from '../shared/apiClient.ts';
+import { useSse } from '../composables/useSse.ts';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useCompanionStore } from '../stores/companion.js';
-import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';
-import { mdToHtml } from '../shared/md.js';
+import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.ts';
+import { mdToHtml } from '../shared/md.ts';
 import {
   alertDialog,
   confirmDialog,
@@ -1052,12 +1052,12 @@ import {
   UiTextarea,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.js';
-import { agentActivityLabel, silenceReason } from '../shared/agent-activity.js';
+import { agentActivityLabel, silenceReason } from '../../../shared/agentActivity.ts';
 import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiter-run.js';
 import { buildRewindNote, rewindQuestionsOf } from '../shared/rewind-note.js';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
-import { waitingReason, stripEmoji } from '../shared/pipeline-wait.js';
+import { waitingReason, stripEmoji } from '../../../shared/pipelineWait.ts';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,
@@ -1072,7 +1072,7 @@ import {
   runnerModelEffortLabel,
   runnerNodeLabel,
   runnerReasonLabel,
-} from '../shared/runner-display.js';
+} from '../shared/runnerDisplay.ts';
 import ArbiterDecision from './pipeline/ArbiterDecision.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';

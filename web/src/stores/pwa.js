@@ -1,6 +1,6 @@
 // Состояние PWA: обновление, установка и локальные возможности текущего устройства.
 import { defineStore } from 'pinia';
-import { ensureNotifyPermission, notify } from '../shared/notify.js';
+import { ensureNotifyPermission, notify } from '../shared/notify.ts';
 
 const WAKE_LOCK_KEY = 'cockpit-screen-wake-lock';
 

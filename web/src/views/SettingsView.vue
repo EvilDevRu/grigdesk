@@ -2745,13 +2745,13 @@
 
 <script setup>
 import { computed, nextTick, ref, onMounted, onUnmounted, watch, watchEffect } from 'vue';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import { useProvidersStore } from '../stores/providers.js';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
-import { useToolLauncher } from '../shared/tools/launcher.js';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { useToolLauncher } from '../shared/tools/launcher.ts';
 import ProviderIcon from '../shared/ProviderIcon.vue';
 import ProviderUsageResources from '../features/providers/ProviderUsageResources.vue';
-import { NAV_ICONS } from '../shared/nav-icons.js';
+import { NAV_ICONS } from '../shared/navIcons.ts';
 import AccessOverview from './settings/AccessOverview.vue';
 import ToolHotkeys from './settings/ToolHotkeys.vue';
 import { useAuthStore } from '../stores/auth.js';
@@ -2786,7 +2786,7 @@ import {
   UiToggleButton,
   UiTooltip,
 } from '../ui';
-import { useSse } from '../composables/useSse.js';
+import { useSse } from '../composables/useSse.ts';
 import { FACTORY_DEBUG_LEVELS, factoryDebugPayload } from '../shared/factory-debug.js';
 
 // Настройки сгруппированы по табам — новые разделы добавляются записью в TABS.

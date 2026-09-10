@@ -52,7 +52,7 @@ let instance = 0;
 function patch(source) {
   return source
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__chatApi;')
+    .replace("import { api } from '../shared/apiClient.ts';", 'const api = globalThis.__chatApi;')
     .replace(
       "import { router } from '../router.js';",
       "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
@@ -71,14 +71,14 @@ function patch(source) {
       `import { normalizeCompanionRun } from "${COMPANION_RUN_URL}";`,
     )
     .replace(
-      "import { notify } from '../shared/notify.js';",
+      "import { notify } from '../shared/notify.ts';",
       'const notify = (...args) => globalThis.__chatNotifications.push(args);',
     )
     .replace(
-      "import { sseSubscribe } from '../composables/useSse.js';",
+      "import { sseSubscribe } from '../composables/useSse.ts';",
       'const sseSubscribe = (fn) => { globalThis.__chatSse = fn; return () => {}; };',
     )
-    .replace("import { mdToText } from '../shared/md.js';", 'const mdToText = (x) => x;')
+    .replace("import { mdToText } from '../shared/md.ts';", 'const mdToText = (x) => x;')
     .replace(
       "import { chatVisibility } from '../shared/chat-visibility.js';",
       'const chatVisibility = globalThis.__chatVisibility;',

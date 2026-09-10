@@ -14,8 +14,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { PROFILE_RE, listProjects } from '../../lib/profiles.js';
-import { projectRepos } from '../../lib/projects.js';
+import { PROFILE_RE, listProjects } from '../../lib/profiles.ts';
+import { projectRepos } from '../../lib/projects.ts';
 import { generateCommitTitle } from '../../lib/codeCommitMessage.ts';
 import type { CommitTargetResolver } from '../../lib/codeCommitMessage.ts';
 import type {
@@ -38,13 +38,6 @@ import {
   unstageWorktreeChanges,
   worktreeChanges,
 } from '../../lib/git.ts';
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-    pluginSettings?(id: string): unknown;
-  }
-}
 
 export interface CodeModuleConfig extends Record<string, unknown> {
   profilesDir: string;
@@ -96,8 +89,9 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Общий каталог проектов пока написан на JS. На границе плагина проверяется его
- * результат, чтобы произвольное legacy-значение не стало файловым корнем.
+ * Пути проекта приходят из bash-профиля и prefs — оба источника вне типов. На границе
+ * плагина результат каталога проверяется заново, чтобы произвольное значение не стало
+ * файловым корнем.
  */
 async function readProjectRepos(
   config: CodeModuleConfig,

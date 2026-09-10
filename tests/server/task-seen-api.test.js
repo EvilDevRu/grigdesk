@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TaskSeenStore } from '../../server/src/lib/task-seen-store.js';
-import { seenScopeFor, TaskSeenService } from '../../server/src/lib/task-seen-service.js';
-import taskSeenModule from '../../server/src/modules/task-seen/index.js';
+import { TaskSeenStore } from '../../server/src/lib/taskSeenStore.ts';
+import { seenScopeFor, TaskSeenService } from '../../server/src/lib/taskSeenService.ts';
+import taskSeenModule from '../../server/src/modules/task-seen/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

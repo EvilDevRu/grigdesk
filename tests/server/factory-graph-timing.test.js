@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 
 // Legacy-карточка читает движковую проекцию, route-v2 поверх неё использует
 // длительности реально стартовавших runner-процессов текущей trusted attempt.

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { defaults, parseAgentFile, serializeAgent } from '../../server/src/modules/agents/store.js';
+import { defaults, parseAgentFile, serializeAgent } from '../../server/src/modules/agents/store.ts';
 
 test('Легаси-семейство в шаблоне читается как класс модели', () => {
   const legacy = (model) => parseAgentFile(`---\nkind: agent\nmodel: ${model}\n---\n\nПромпт\n`);

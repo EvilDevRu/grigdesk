@@ -12,8 +12,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import ollama from '../server/src/lib/executors/ollama.js';
-import { createToolbox } from '../server/src/lib/executors/_ollama-tools.js';
+import ollama from '../server/src/lib/executors/ollama.ts';
+import { createToolbox } from '../server/src/lib/executors/_ollamaTools.ts';
 
 const model = process.argv[2] || 'qwen3.6:latest';
 const config = { prefsPath: path.join(os.tmpdir(), 'ollama-smoke-no-prefs.json') };

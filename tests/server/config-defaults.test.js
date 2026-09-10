@@ -4,7 +4,7 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const CONFIG_URL = pathToFileURL(path.join(ROOT, 'server/src/config.js')).href;
+const CONFIG_URL = pathToFileURL(path.join(ROOT, 'server/src/config.ts')).href;
 
 test('по умолчанию сервер использует встроенный engine', async () => {
   const savedHome = process.env.FACTORY_HOME;

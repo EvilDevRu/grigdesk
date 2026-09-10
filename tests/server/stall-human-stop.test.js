@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { detectStall } from '../../server/src/lib/stall.js';
+import { detectStall } from '../../server/src/lib/stall.ts';
 
 // Остановка `stop: human` — самая частая объявленная остановка маршрутов: замер по всем
 // опубликованным каталогам дал 2785 таких переходов против 184 `done`. При этом до

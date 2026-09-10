@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeNodeStatuses } from '../../server/src/lib/factory-graph.js';
+import { computeNodeStatuses } from '../../server/src/lib/factoryGraph.ts';
 
 // Хвост маршрута с приёмкой, порядок — как в цепочке машины.
 const POS = {

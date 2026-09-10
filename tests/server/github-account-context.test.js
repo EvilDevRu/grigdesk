@@ -15,8 +15,8 @@ import test from 'node:test';
 import {
   createGitHubAccountContextFactory,
   normalizeGitHubRepositoryFullName,
-} from '../../server/src/lib/github/account-context.js';
-import { githubIssueSemanticKey } from '../../server/src/lib/github/archive-store.js';
+} from '../../server/src/lib/github/accountContext.ts';
+import { githubIssueSemanticKey } from '../../server/src/lib/github/archiveStore.ts';
 
 const ACCOUNT = 'acc_github_context_0001';
 const REPOSITORY = '123456';

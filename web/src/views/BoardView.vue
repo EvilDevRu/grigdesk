@@ -366,19 +366,19 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
-import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.js';
+import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.ts';
 import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
-import { useAnalysisStore } from '../stores/analysis.js';
+import { analyzeTask, startAnalysisPolling, useAnalysisStore } from '../actions/analysis';
 import { useTaskFavoritesStore } from '../stores/task-favorites.js';
-import { useTaskShelfStore } from '../stores/task-shelf.js';
+import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
-import { api } from '../shared/api-client.js';
-import { useSse } from '../composables/useSse.js';
+import { api } from '../shared/apiClient.ts';
+import { useSse } from '../composables/useSse.ts';
 import { boardTaskListResetKey, selectBoardTasks } from '../shared/board-task-list.js';
 import {
   confirmDialog,
@@ -539,7 +539,7 @@ async function analyzeAllUnrated() {
     { title: 'Оценить все задачи без оценки', okText: 'Поставить в очередь' },
   ))) return;
   for (const t of list) {
-    try { await analysis.analyze(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
+    try { await analyzeTask(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
   }
 }
 
@@ -617,7 +617,7 @@ onMounted(() => {
   board.load();
   favorites.load(true);
   seen.load(true);
-  if (analysisEnabled.value) analysis.startPolling();
+  if (analysisEnabled.value) startAnalysisPolling();
   loadConveyor();
   ticker = setInterval(() => { now.value = Date.now(); }, 1000);
 });

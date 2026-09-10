@@ -11,7 +11,7 @@ import {
   readProcessIdentity,
   sameProcessIdentity,
   speechOptionsRevision,
-} from '../../server/src/lib/speech/index.js';
+} from '../../server/src/lib/speech/index.ts';
 
 function models() {
   return Object.values(SPEECH_MODEL_CATALOG).map((model) => ({

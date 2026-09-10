@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeNodeStatuses } from '../../server/src/lib/factory-graph.js';
+import { computeNodeStatuses } from '../../server/src/lib/factoryGraph.ts';
 
 const POS = {
   chairman: [0, 0], proof: [1, 0], translator: [2, 0], tests: [3, 0], build: [4, 0],

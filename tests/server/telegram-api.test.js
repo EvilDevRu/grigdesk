@@ -8,8 +8,8 @@ import {
   callBotApi,
   downloadFile,
   getFile,
-} from '../../server/src/lib/telegram/api.js';
-import * as telegramApi from '../../server/src/lib/telegram/api.js';
+} from '../../server/src/lib/telegram/api.ts';
+import * as telegramApi from '../../server/src/lib/telegram/api.ts';
 
 const TOKEN = '8123456789:AAHrEaLLyLoNgSeCrEtPaRt_x1y2z3w4v5u6';
 

@@ -42,9 +42,9 @@ import {
   cbData,
   encodeCb,
   parseCallback,
-} from '../../server/src/lib/telegram/pult/format.js';
+} from '../../server/src/lib/telegram/pult/format.ts';
 
-import * as format from '../../server/src/lib/telegram/pult/format.js';
+import * as format from '../../server/src/lib/telegram/pult/format.ts';
 
 test('постоянная клавиатура содержит четыре точные подписи навигации', () => {
   const markup = format.pultReplyKeyboard?.();
@@ -390,7 +390,7 @@ const liveTask = (over = {}) => ({
   ...over,
 });
 
-test('activityLine: правило «пишет или висит» берётся из общего agent-activity', () => {
+test('activityLine: правило «пишет или висит» берётся из общего agentActivity', () => {
   assert.equal(activityLine(liveTask()), 'Агент: агент пишет');
   assert.equal(
     activityLine(liveTask({ silence: { stage: 'BUILD', sec: 1_680, tool: 'mcp__playwright__browser_click' } })),

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import chatModule from '../../server/src/modules/chat/index.js';
+import chatModule from '../../server/src/modules/chat/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -13,7 +13,7 @@ const Fastify = requireFromServer('fastify');
 async function permissionQueue(options = {}) {
   let module;
   try {
-    module = await import('../../server/src/lib/chat/permission-queue.js');
+    module = await import('../../server/src/lib/chat/permissionQueue.ts');
   } catch (error) {
     assert.fail(`единая очередь подтверждений ещё не выделена: ${error.message}`);
   }
@@ -97,7 +97,7 @@ test('SSH-подтверждение живёт до общего техниче
 test('chat/index в auto-режиме не применяет autoDecision и remember к SSH', async (t) => {
   let brokerModule;
   try {
-    brokerModule = await import('../../server/src/lib/ssh/broker.js');
+    brokerModule = await import('../../server/src/lib/ssh/broker.ts');
   } catch (error) {
     assert.fail(`SSH broker ещё не реализован: ${error.message}`);
   }

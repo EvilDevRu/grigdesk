@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { listInstalledRunners } from '../../server/src/lib/runners-catalog.js';
+import { listInstalledRunners } from '../../server/src/lib/runnersCatalog.ts';
 
 test('каталог исполнителей: только валидные адаптеры, отсортированные', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runners-catalog-'));

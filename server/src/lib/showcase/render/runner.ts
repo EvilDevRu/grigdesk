@@ -13,7 +13,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { captureProcessIdentity } from '../../speech/model-jobs-process.js';
+import { captureProcessIdentity } from '../../speech/modelJobsProcess.ts';
 import { ShowcaseError } from '../errors.ts';
 import type { JobIdentity } from '../jobs.ts';
 
@@ -83,7 +83,7 @@ export async function launchWorker(input: WorkerLaunchInput): Promise<WorkerHand
   const script = input.script ?? { file: WORKER_SCRIPT, marker: 'showcaseWorker' };
   const child = spawn(
     input.nodeBin ?? process.execPath,
-    ['--experimental-strip-types', script.file, taskFile],
+    [script.file, taskFile],
     {
       detached: true,
       stdio: ['ignore', log.fd, log.fd],

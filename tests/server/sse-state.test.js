@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-import ssePlugin from '../../server/src/plugins/sse.js';
+import ssePlugin from '../../server/src/plugins/sse.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

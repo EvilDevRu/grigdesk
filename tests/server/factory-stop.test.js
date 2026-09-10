@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stopRouteOrchestrator } from '../../server/src/lib/factory-route-cli.js';
+import { stopRouteOrchestrator } from '../../server/src/lib/factoryRouteCli.ts';
 
 const runOk = async () => ({ ok: true, message: '' });
 const runNoSystemd = async () => ({ ok: false, message: 'systemctl: command not found' });

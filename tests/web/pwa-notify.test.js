@@ -3,7 +3,7 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const NOTIFY_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/shared/notify.js', import.meta.url),
+  new URL('../../web/src/shared/notify.ts', import.meta.url),
 )).href;
 let fixtureId = 0;
 

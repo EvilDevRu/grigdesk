@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { readActivity, readAgentLive, readRunSilence } from '../../server/src/lib/factory-cli.js';
+import { readActivity, readAgentLive, readRunSilence } from '../../server/src/lib/factoryCli.ts';
 
 test('activity follows the active run and renders Codex JSONL events', async (t) => {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-activity.'));

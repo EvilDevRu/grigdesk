@@ -8,19 +8,19 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 import {
   ModelJobError,
   ModelJobManager,
   readModelJobFile,
   writeModelJobFile,
-} from '../../server/src/lib/speech/model-jobs.js';
+} from '../../server/src/lib/speech/modelJobs.ts';
 import {
   processIdentityMatches,
   readProcessIdentity,
   signalOwnedProcess,
-} from '../../server/src/lib/speech/model-jobs-process.js';
-import settingsModule from '../../server/src/modules/settings/index.js';
+} from '../../server/src/lib/speech/modelJobsProcess.ts';
+import settingsModule from '../../server/src/modules/settings/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

@@ -2,9 +2,9 @@
 // Репозиторий может содержать недоверенный текст, поэтому модель запускается только
 // через одноразовый runUntrusted: без инструментов, cwd, MCP и продолжения сессии.
 
-import { resolveInboxTriageTarget } from './inbox/triage.js';
+import { resolveInboxTriageTarget } from './inbox/triage.ts';
 import { stagedCommitContext } from './git.ts';
-import { exactKeys, jsonCandidates, modelText } from './model-json.js';
+import { exactKeys, jsonCandidates, modelText } from './modelJson.ts';
 import type {
   CodeCommitTitleResponse,
   CodeStagedContext,

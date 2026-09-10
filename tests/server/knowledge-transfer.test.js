@@ -7,13 +7,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { measureKnowledgeContext } from '../../server/src/lib/search/context.js';
+import { measureKnowledgeContext } from '../../server/src/lib/search/context.ts';
 import { knowledgeStorageFactory, record } from './helpers/knowledge.js';
 
 let transferModule;
 let transferModuleError;
 try {
-  transferModule = await import('../../server/src/lib/search/transfer.js');
+  transferModule = await import('../../server/src/lib/search/transfer.ts');
 } catch (error) {
   transferModuleError = error;
 }

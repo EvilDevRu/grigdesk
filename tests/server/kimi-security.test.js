@@ -5,30 +5,32 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { stageKimiAttachments } from '../../server/src/lib/kimi/attachments.js';
-import { assertKimiRuntimeEnv, buildKimiRuntimeEnv } from '../../server/src/lib/kimi/env.js';
+import { stageKimiAttachments } from '../../server/src/lib/kimi/attachments.ts';
+import { assertKimiRuntimeEnv, buildKimiRuntimeEnv } from '../../server/src/lib/kimi/env.ts';
 import {
   assertResolvedEgressAddresses,
   isBlockedEgressIp,
   validateEgressTarget,
-} from '../../server/src/lib/kimi/egress-policy.js';
+} from '../../server/src/lib/kimi/egressPolicy.ts';
 import {
   assertUnixSocketPath,
   createKimiEgressProxy,
   MAX_UNIX_SOCKET_PATH_BYTES,
   parseConnectTarget,
-} from '../../server/src/lib/kimi/egress-proxy.js';
+} from '../../server/src/lib/kimi/egressProxy.ts';
 import {
   cgroupPathFromProc,
   inspectKimiRuntimeHost,
-} from '../../server/src/lib/kimi/runtime-preflight.js';
+} from '../../server/src/lib/kimi/runtimePreflight.ts';
 import {
   buildKimiSandboxLaunch,
   KIMI_EGRESS_SOCKET_FILE,
+  KIMI_SANDBOX_NODE,
+  KIMI_SANDBOX_WORK_MCP,
   resolveVisibleProjectRoot,
   WORKSPACE_LOCAL_TOML_FILE,
   WORKSPACE_MASK_DIR,
-} from '../../server/src/lib/kimi/sandbox.js';
+} from '../../server/src/lib/kimi/sandbox.ts';
 
 async function attachmentFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-attachments-'));
@@ -291,6 +293,68 @@ test('sandbox argv не bind-mount-ит host root/control state и хранит 
     egressSocketPath: proxy.socketPath,
     unit: 'cockpit-kimi-broad.service',
   }), /kimi_workspace_mount_contains_control_state/);
+});
+
+test('рабочий MCP получает Node самого кокпита, а не хостовый /usr/bin/node', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-worknode-'));
+  const workspace = path.join(root, 'workspace');
+  const chatsDir = path.join(root, 'chats');
+  const hostHome = path.join(root, 'host-home', '.kimi-code');
+  const binDir = path.join(root, 'bin');
+  const profile = path.join(root, 'state', 'chats', 'hash');
+  const broker = path.join(root, 'state', 'broker');
+  const egressDir = path.join(root, 'egress');
+  const workDir = path.join(root, 'work');
+  await Promise.all([
+    workspace, chatsDir, path.join(hostHome, 'credentials'), binDir, profile, broker,
+    egressDir, workDir,
+  ].map((dir) => fs.mkdir(dir, { recursive: true, mode: 0o700 })));
+  const kimiBin = path.join(binDir, 'kimi');
+  await fs.writeFile(kimiBin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await fs.writeFile(path.join(hostHome, 'credentials', 'kimi-code.json'), 'не читать', { mode: 0o600 });
+  const scriptPath = path.join(root, 'work-mcp.js');
+  await fs.writeFile(scriptPath, '// bridge\n', { mode: 0o600 });
+
+  const proxy = createKimiEgressProxy({
+    socketPath: path.join(egressDir, KIMI_EGRESS_SOCKET_FILE),
+  });
+  await proxy.start();
+  const workSocketPath = path.join(workDir, 'work.sock');
+  const workServer = net.createServer();
+  await new Promise((resolve) => { workServer.listen(workSocketPath, resolve); });
+  t.after(async () => {
+    await new Promise((resolve) => { workServer.close(resolve); });
+    await proxy.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const launch = await buildKimiSandboxLaunch({
+    config: {
+      kimiRuntimeHome: profile,
+      kimiRuntimeBroker: broker,
+      kimiBin,
+      kimiHome: hostHome,
+      chatsDir,
+      chatBindingsDir: path.join(chatsDir, '.bindings'),
+      rootDir: path.join(root, 'repo'),
+      kimiBwrapBin: '/usr/bin/bwrap',
+      kimiSystemdRunBin: '/usr/bin/systemd-run',
+      kimiCaBundle: '/etc/ssl/certs/ca-certificates.crt',
+    },
+    cwd: workspace,
+    egressSocketPath: proxy.socketPath,
+    workMcp: { socketPath: workSocketPath, scriptPath },
+    unit: 'cockpit-kimi-worknode.service',
+  });
+
+  const roBind = (source, destination) => launch.args.some((value, index) => value === '--ro-bind'
+    && launch.args[index + 1] === source && launch.args[index + 2] === destination);
+  assert.ok(roBind(await fs.realpath(scriptPath), KIMI_SANDBOX_WORK_MCP));
+  // Именно исполняемый файл текущего процесса: хостового /usr/bin/node может не быть.
+  assert.ok(roBind(await fs.realpath(process.execPath), KIMI_SANDBOX_NODE));
+  assert.equal(launch.args.includes('/usr/bin/node'), false);
+  // Снятие типов встроено в Node 22.18+: флагов в argv песочницы быть не должно.
+  assert.equal(launch.args.some((value) => /strip-types|transform-types/.test(value)), false);
 });
 
 test('resolveVisibleProjectRoot повторяет findProjectRoot kimi по видимым каталогам', async () => {

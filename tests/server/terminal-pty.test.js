@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { spawnPty } from '../../server/src/modules/terminal/index.js';
+import { spawnPty } from '../../server/src/modules/terminal/index.ts';
 
 function waitFor(check, message, timeout = 4000) {
   return new Promise((resolve, reject) => {

@@ -8,13 +8,13 @@ import {
   canonicalJsonActivationCodec,
   decodeActivationMarker,
   encodeActivationMarker,
-} from '../../server/src/lib/inbox/activation.js';
-import { InboxRefCodec } from '../../server/src/lib/inbox/identity.js';
+} from '../../server/src/lib/inbox/activation.ts';
+import { InboxRefCodec } from '../../server/src/lib/inbox/identity.ts';
 import {
   InboxStateStore,
   InboxStateStoreError,
   projectDecisionState,
-} from '../../server/src/lib/inbox/state-store.js';
+} from '../../server/src/lib/inbox/stateStore.ts';
 
 const CHANNEL = 'telegram';
 const ACCOUNT = 'acc_state_store_000001';

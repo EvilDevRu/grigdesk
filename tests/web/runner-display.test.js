@@ -14,7 +14,7 @@ import {
   runnerModelLabel,
   runnerNodeLabel,
   runnerReasonLabel,
-} from '../../web/src/shared/runner-display.js';
+} from '../../web/src/shared/runnerDisplay.ts';
 
 test('runner labels remain readable for built-in and future providers', () => {
   assert.equal(providerLabel('claude'), 'Claude');

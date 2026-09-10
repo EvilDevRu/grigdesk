@@ -7,7 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'analysis-open-questions-'));

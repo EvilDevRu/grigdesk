@@ -14,7 +14,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { contractDecoders } from '../../../../shared/contractDecoders.ts';
-import { PROFILE_RE } from '../profiles.js';
+import { PROFILE_RE } from '../profiles.ts';
 import { readSandboxRegistry } from '../sandboxes/registry.ts';
 import type { SandboxRegistryEntry } from '../sandboxes/registry.ts';
 import type {

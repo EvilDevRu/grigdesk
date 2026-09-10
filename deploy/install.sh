@@ -15,6 +15,7 @@ UNIT="cockpit-server.service"
 source "$COCKPIT_DIR/bin/lib/runtime-env.sh"
 source "$COCKPIT_DIR/bin/lib/media-runtime.sh"
 cockpit_install_media "$COCKPIT_DIR" "$@"
+# Версию проверяем до любой записи: юнит, который не сможет стартовать, ставить нельзя.
 cockpit_load_runtime_env "$COCKPIT_DIR"
 PORT="$COCKPIT_EFFECTIVE_PORT"
 TLS_PORT="$COCKPIT_EFFECTIVE_TLS_PORT"
@@ -27,7 +28,7 @@ echo "→ Зависимости сервера…"
 
 # Installer фиксирует фактические Node/SQLite/FTS features. Провал не
 # блокирует остальной Cockpit: search останется degraded/disabled.
-"$NODE_BIN" --disable-warning=ExperimentalWarning \
+"$NODE_BIN" "${COCKPIT_NODE_SQLITE_ARGS[@]}" \
   "$COCKPIT_DIR/server/scripts/knowledge-search-preflight.mjs" || true
 
 echo "→ Зависимости web + сборка…"

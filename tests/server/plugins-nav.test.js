@@ -10,7 +10,7 @@ import {
   normalizePluginNav,
   scanUserPlugins,
   settingsValues,
-} from '../../server/src/lib/plugins-registry.js';
+} from '../../server/src/lib/pluginsRegistry.ts';
 
 test('системные инструменты имеют явные group/order, а неизвестная группа нормализуется в rail', () => {
   assert.deepEqual(NAV_GROUPS, ['rail', 'tools', 'dock']);

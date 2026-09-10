@@ -6,8 +6,8 @@ import test from 'node:test';
 
 import {
   createTelegramAccountContextFactory,
-} from '../../server/src/lib/telegram/account-context.js';
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
+} from '../../server/src/lib/telegram/accountContext.ts';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
 
 const ACCOUNT_REF = 'acc_telegram_context_0001';
 const BOT_ID = '8123456789';

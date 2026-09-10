@@ -18,7 +18,7 @@ import test from 'node:test';
 import {
   InboxAttachmentAnalyzer,
   INBOX_ATTACHMENT_ANALYSIS_LIMITS,
-} from '../../server/src/lib/inbox/attachment-analysis.js';
+} from '../../server/src/lib/inbox/attachmentAnalysis.ts';
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',

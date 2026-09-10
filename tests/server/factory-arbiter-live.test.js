@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FactoryArbiterLive } from '../../server/src/lib/factory-arbiter-live.js';
+import { FactoryArbiterLive } from '../../server/src/lib/factoryArbiterLive.ts';
 
 // Пока арбитр работает, задача снаружи выглядит вставшей: та же плашка затыка, та же
 // кнопка. Прежний признак занятости жил только в нажавшем окне, поэтому обход вотчера
@@ -71,7 +71,7 @@ test('две задачи разбираются независимо друг �
 // остановленных задач нет, короткая пауза не должна превращаться в такой обход — иначе
 // вернётся грабля, убившая карточку «Слоты запуска».
 test('дешёвый фильтр отсекает обход, пока никто не встал', async () => {
-  const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
   let listed = 0;
   const watch = new FactoryArbiterWatch({
     sse: { subscribe: () => () => {} },
@@ -87,7 +87,7 @@ test('дешёвый фильтр отсекает обход, пока никт
 });
 
 test('появление остановленной задачи обход запускает', async () => {
-  const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
   let listed = 0;
   const watch = new FactoryArbiterWatch({
     sse: { subscribe: () => () => {} },
@@ -107,7 +107,7 @@ test('появление остановленной задачи обход за
 // срабатывания пятнадцатиминутной страховки — то есть перезапуск сервера добавлял бы
 // простоя ровно там, где автоматический путь и нужен.
 test('старт вотчера сам делает первый обход', async (t) => {
-  const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
 
   let checked = 0;
@@ -134,7 +134,7 @@ test('старт вотчера сам делает первый обход', as
 // остаётся `arbitrable` — вид остановки-то подходящий, — и без отдельного правила вотчер
 // брал бы её каждый час до бесконечности: тот же ход живого агента, тот же ответ.
 test('вотчер не перемалывает остановку, уже отданную человеку', async () => {
-  const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
   const decided = {
     task: '8507',
     readOnly: false,
@@ -173,7 +173,7 @@ test('вотчер не перемалывает остановку, уже от
 // Снятый тупик — не приговор: `resolve` возвращает курсор, маршрут едет дальше, и если
 // он встанет снова, разбирать надо. Запрет относится только к вердикту `human`.
 test('снятый арбитром тупик не запрещает следующий разбор', async () => {
-  const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
   const attempts = [];
   const watch = new FactoryArbiterWatch({
     sse: { subscribe: () => () => {} },

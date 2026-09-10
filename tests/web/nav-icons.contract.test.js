@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
-import { NAV_ICONS } from '../../web/src/shared/nav-icons.js';
-import { TOOL_REGISTRY } from '../../web/src/shared/tools/registry.js';
-import { SYSTEM } from '../../server/src/lib/plugins-registry.js';
+import { NAV_ICONS } from '../../web/src/shared/navIcons.ts';
+import { TOOL_REGISTRY } from '../../web/src/shared/tools/registry.ts';
+import { SYSTEM } from '../../server/src/lib/pluginsRegistry.ts';
 
 const root = new URL('../../', import.meta.url);
 
@@ -82,7 +82,7 @@ test('настройки берут иконки из общей карты, а 
 
   assert.deepEqual({
     ownMap: settings.includes('const PLUGIN_ICON_PATHS = {'),
-    sharedImport: settings.includes("from '../shared/nav-icons.js'"),
+    sharedImport: settings.includes("from '../shared/navIcons.ts'"),
   }, {
     ownMap: false,
     sharedImport: true,

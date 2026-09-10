@@ -116,7 +116,7 @@ async function runWorker(root, task) {
     'utf8',
   );
 
-  await run(process.execPath, ['--experimental-strip-types', WORKER, taskFile], {
+  await run(process.execPath, [WORKER, taskFile], {
     timeout: 120_000,
   }).catch(() => null);
 

@@ -10,10 +10,10 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { computeNodeStatuses } from '../../server/src/lib/factory-graph.js';
-import { readFactoryAttemptLedger } from '../../server/src/lib/factory-attempt-ledger.js';
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
-import factoryModule from '../../server/src/modules/factory/index.js';
+import { computeNodeStatuses } from '../../server/src/lib/factoryGraph.ts';
+import { readFactoryAttemptLedger } from '../../server/src/lib/factoryAttemptLedger.ts';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

@@ -1,4 +1,4 @@
-import { api } from './api-client.js';
+import { api } from './apiClient.ts';
 
 export const SPEECH_STREAM_ENDPOINT = '/api/chat/transcribe/stream';
 export const SPEECH_STREAM_PROTOCOL_VERSION = 1;

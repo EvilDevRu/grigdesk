@@ -40,8 +40,11 @@ async function compileView(view) {
   if (!componentPromises.has(view)) {
     componentPromises.set(view, compileVue(VIEWS[view], {
       stubs: {
-        '../shared/api-client.js': API_STUB,
-        '../composables/useSse.js': SSE_STUB,
+        '../shared/apiClient.ts': API_STUB,
+        // Транспорт раздела импортирует клиента соседним путём: заглушка
+        // сопоставляется по точной строке, и обе формы нужны одновременно.
+        './apiClient.ts': API_STUB,
+        '../composables/useSse.ts': SSE_STUB,
         './services/dialogs': DIALOGS_STUB,
       },
     }));

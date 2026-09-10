@@ -84,9 +84,11 @@ export function contractDecoders(fail: (path: string) => never) {
 
   /**
    * Перечислением закрыты значения, которые управляют кнопками и ветками показа:
-   * незнакомое состояние не должно тихо включать запасную ветку.
+   * незнакомое состояние не должно тихо включать запасную ветку. Числа сюда входят
+   * наравне со строками: ступень приоритета — такой же закрытый набор, как и статус,
+   * и «приоритет 7» должен отвергаться, а не молча доезжать до формы.
    */
-  function oneOf<const Values extends readonly (string | boolean)[]>(
+  function oneOf<const Values extends readonly (string | number | boolean)[]>(
     ...values: Values
   ): Decoder<Values[number]> {
     return (value, path) => {
@@ -102,6 +104,17 @@ export function contractDecoders(fail: (path: string) => never) {
 
   function nullable<Value>(decode: Decoder<Value>): Decoder<Value | null> {
     return (value, path) => (value === null ? null : decode(value, path));
+  }
+
+  /**
+   * Поля, которого может не быть вовсе: старая запись на диске, ответ модели без
+   * необязательного поля, свежий признак у прежних данных. Отсутствие и null здесь
+   * одно и то же — раздел показывает такое поле пустым местом, а не отказом.
+   */
+  function optional<Value>(decode: Decoder<Value>): Decoder<Value | null> {
+    return (value, path) => (
+      value === undefined || value === null ? null : decode(value, path)
+    );
   }
 
   function listOf<Value>(decode: Decoder<Value>): Decoder<Value[]> {
@@ -127,6 +140,7 @@ export function contractDecoders(fail: (path: string) => never) {
     nullable,
     numeric,
     objectOf,
+    optional,
     oneOf,
     record,
     text,

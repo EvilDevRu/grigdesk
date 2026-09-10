@@ -56,7 +56,7 @@ class FakeTransport extends EventEmitter {
 async function manager(t, extra = {}) {
   let module;
   try {
-    module = await import('../../server/src/lib/ssh/session-manager.js');
+    module = await import('../../server/src/lib/ssh/sessionManager.ts');
   } catch (error) {
     assert.fail(`server-owned SSH-сессии ещё не реализованы: ${error.message}`);
   }

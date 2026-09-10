@@ -21,16 +21,6 @@ import type {
   DockerStatsMessage,
 } from '../../../../shared/dockerContracts.ts';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-  }
-
-  interface FastifyRequest {
-    authKind?: 'session' | 'internal' | 'cli' | null;
-  }
-}
-
 interface DockerModuleOptions {
   service: DockerService;
 }

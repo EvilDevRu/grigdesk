@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import codex from '../../server/src/lib/executors/codex.js';
+import codex from '../../server/src/lib/executors/codex.ts';
 
 test('Codex executor aborts the CLI and returns a stopped turn with the new session id', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cockpit-codex-abort-'));

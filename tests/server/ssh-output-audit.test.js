@@ -21,7 +21,7 @@ function exportedFunction(module, names, contract) {
 
 test('срез вывода сохраняет начало и хвост и явно сообщает N из M', async () => {
   const module = await loadModule(
-    '../../server/src/lib/ssh/output.js',
+    '../../server/src/lib/ssh/output.ts',
     'ограничитель SSH-вывода ещё не реализован',
   );
   const limit = exportedFunction(
@@ -52,7 +52,7 @@ test('срез вывода сохраняет начало и хвост и я�
 
 test('срез вывода не ломает UTF-8 и удаляет ANSI-последовательности', async () => {
   const module = await loadModule(
-    '../../server/src/lib/ssh/output.js',
+    '../../server/src/lib/ssh/output.ts',
     'очистка SSH-вывода ещё не реализована',
   );
   const limit = exportedFunction(module, ['limitSshOutput', 'limitOutput'], 'нет ограничителя вывода');
@@ -69,7 +69,7 @@ test('срез вывода не ломает UTF-8 и удаляет ANSI-по�
 
 test('broker возвращает агенту ограниченный вывод, а не исходный поток', async () => {
   const module = await loadModule(
-    '../../server/src/lib/ssh/broker.js',
+    '../../server/src/lib/ssh/broker.ts',
     'SSH broker ещё не реализован',
   );
   const createBroker = exportedFunction(
@@ -129,7 +129,7 @@ test('журнал пишет ограниченный результат без
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-ssh-audit-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await loadModule(
-    '../../server/src/lib/ssh/audit.js',
+    '../../server/src/lib/ssh/audit.ts',
     'приватный SSH-журнал ещё не реализован',
   );
   const createAudit = exportedFunction(
@@ -193,7 +193,7 @@ test('журнал пишет ограниченный результат без
 
 test('срез ставит видимую метку разрыва и не склеивает голову с хвостом', async () => {
   const module = await loadModule(
-    '../../server/src/lib/ssh/output.js',
+    '../../server/src/lib/ssh/output.ts',
     'ограничитель SSH-вывода ещё не реализован',
   );
   const limit = exportedFunction(
@@ -222,7 +222,7 @@ test('срез ставит видимую метку разрыва и не с�
 
 test('на крошечном лимите метка разрыва не съедает сам вывод', async () => {
   const module = await loadModule(
-    '../../server/src/lib/ssh/output.js',
+    '../../server/src/lib/ssh/output.ts',
     'ограничитель SSH-вывода ещё не реализован',
   );
   const limit = exportedFunction(module, ['limitSshOutput', 'limitOutput'], 'нет ограничителя вывода');

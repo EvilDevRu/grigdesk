@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { CockpitUpdateManager } from '../../server/src/lib/cockpit-update.js';
-import { readPersistentState } from '../../server/src/lib/cockpit-release.js';
+import { CockpitUpdateManager } from '../../server/src/lib/cockpitUpdate.ts';
+import { readPersistentState } from '../../server/src/lib/cockpitRelease.ts';
 
 const HEAD = 'a'.repeat(40);
 const TARGET = 'b'.repeat(40);

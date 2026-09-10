@@ -10,7 +10,7 @@ import {
   parseMeetingPlan,
   runMeetingPlan,
   timecode,
-} from '../../server/src/lib/media/meeting-plan.js';
+} from '../../server/src/lib/media/meetingPlan.ts';
 
 const SEGMENTS = [
   { start: 0, end: 4, text: 'Привет, все на месте?' },
@@ -152,7 +152,7 @@ test('runMeetingPlan идёт только через недоверенный t
 });
 
 test('плагин «Видео» объявляет свою модель разбора, а не заимствует чужую', async () => {
-  const { SYSTEM } = await import('../../server/src/lib/plugins-registry.js');
+  const { SYSTEM } = await import('../../server/src/lib/pluginsRegistry.ts');
   const video = SYSTEM.find((plugin) => plugin.id === 'video');
   const setting = video.settings.find((item) => item.key === 'triageModel');
   assert.equal(setting.type, 'model');
@@ -208,7 +208,7 @@ test('резолвер снимает уровень, которого у мод
   // `--effort xhigh` у модели без такой возможности не игнорируется, а валит запуск CLI.
   // Настройка живёт долго и легко устаревает после обновления бинаря, поэтому уровень
   // сверяется с реестром перед каждым ходом.
-  const { resolveInboxTriageTarget } = await import('../../server/src/lib/inbox/triage.js');
+  const { resolveInboxTriageTarget } = await import('../../server/src/lib/inbox/triage.ts');
   const executor = { runUntrusted() {}, untrustedInput: { text: true } };
   const registry = async () => ({
     claude: [{ id: 'm', name: 'M', efforts: ['low', 'high'], inputModalities: ['text'] }],

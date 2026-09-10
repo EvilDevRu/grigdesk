@@ -7,7 +7,7 @@
 // Проверка нужна и заданиям записи, и установке голоса. Правило у них одно, и
 // разъезжаться этим двум копиям нельзя: разное понимание живости означает, что
 // в одном месте раздел ждёт покойника, а в другом убивает работающего.
-import { readProcessIdentity } from '../speech/model-jobs-process.js';
+import { readProcessIdentity } from '../speech/modelJobsProcess.ts';
 
 export interface ProcessIdentity {
   pid: number | null;

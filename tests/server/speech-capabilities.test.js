@@ -19,7 +19,7 @@ import {
   inspectSpeechModelCache,
   probeSpeechModelCache,
   runCudaCanary,
-} from '../../server/src/lib/speech/index.js';
+} from '../../server/src/lib/speech/index.ts';
 
 function snapshotPath(hfDir, repo, revision) {
   return path.join(

@@ -3,18 +3,72 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   CockpitReleaseService,
+  assertReleaseNodeRuntime,
   compareSemVer,
   parseRemoteTags,
   parseSemVer,
   releaseUrl,
   writePersistentState,
-} from '../../server/src/lib/cockpit-release.js';
+} from '../../server/src/lib/cockpitRelease.ts';
 
 const SHA_A = '1'.repeat(40);
 const SHA_B = '2'.repeat(40);
+
+// Старый worker запускает этот JS-файл в новом дереве обычным node --test.
+// До merge и замены web/dist он обязан узнать, сможет ли новый сервер стартовать.
+test('целевой релиз запускается текущим Node без флагов старого сервера', async () => {
+  await assertReleaseNodeRuntime(fileURLToPath(new URL('../../', import.meta.url)), {
+    required: true,
+  });
+});
+
+test('старый релиз без gate применим, а новый smoke требует проверку', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runtime-legacy.'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assertReleaseNodeRuntime(root);
+  await assert.rejects(assertReleaseNodeRuntime(root, { required: true }), {
+    safeCode: 'node_runtime_check_unavailable',
+  });
+});
+
+test('runtime probe не наследует NODE_OPTIONS и сообщает отказ целевого gate', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-runtime-probe.'));
+  const gateDir = path.join(root, 'server', 'src', 'lib');
+  const oldOptions = process.env.NODE_OPTIONS;
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => {
+    if (oldOptions === undefined) {
+      delete process.env.NODE_OPTIONS;
+    } else {
+      process.env.NODE_OPTIONS = oldOptions;
+    }
+  });
+  await mkdir(gateDir, { recursive: true });
+  await writeFile(path.join(root, 'package.json'), '{"type":"module"}\n');
+  await writeFile(path.join(gateDir, 'nodeVersion.ts'), [
+    'export function assertSupportedNode(): void {',
+    '  if (process.env.NODE_OPTIONS || process.execArgv.includes("--experimental-strip-types")) {',
+    '    throw new Error("probe унаследовал обход проверки runtime");',
+    '  }',
+    '  throw new Error("целевой релиз требует другой Node");',
+    '}',
+  ].join('\n'));
+  process.env.NODE_OPTIONS = '--experimental-strip-types';
+
+  await assert.rejects(assertReleaseNodeRuntime(root), (error) => {
+    assert.equal(error.safeCode, 'node_runtime_unsupported');
+    assert.match(error.message, /целевой релиз требует другой Node/);
+    assert.doesNotMatch(error.message, /унаследовал обход/);
+
+    return true;
+  });
+});
 
 test('strict SemVer accepts releases and rejects prefixes, leading zeroes and prereleases', () => {
   assert.deepEqual(parseSemVer('0.1.0'), { major: 0, minor: 1, patch: 0 });

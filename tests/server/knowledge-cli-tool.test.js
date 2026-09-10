@@ -8,7 +8,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { knowledgeStorageFactory, record } from './helpers/knowledge.js';
-import { runKnowledgeCli } from '../../server/src/lib/search/cli.js';
+import { runKnowledgeCli } from '../../server/src/lib/search/cli.ts';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 const KNOWLEDGE_BIN = path.join(ROOT, 'bin', 'knowledge');

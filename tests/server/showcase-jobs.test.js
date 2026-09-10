@@ -176,7 +176,7 @@ test('живой процесс после перезапуска остаётс
   const { record } = await jobs.enqueue(enqueueInput());
   const file = path.join(jobsDir, record.id, 'job.json');
   const stored = JSON.parse(await readFile(file, 'utf8'));
-  const identity = await import('../../server/src/lib/speech/model-jobs-process.js')
+  const identity = await import('../../server/src/lib/speech/modelJobsProcess.ts')
     .then((module) => module.readProcessIdentity(process.pid));
 
   await writeFile(file, JSON.stringify({

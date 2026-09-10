@@ -15,7 +15,7 @@ import test from 'node:test';
 
 import {
   TelegramRulesStore, matchRule, normalizeRules, telegramRulesPolicyFingerprint,
-} from '../../server/src/lib/telegram/rules-store.js';
+} from '../../server/src/lib/telegram/rulesStore.ts';
 
 const CHAT = -1001000000042; // явно синтетический приватный форум
 const PUB = 'example_team';

@@ -25,7 +25,7 @@ async function walk(dir, ext) {
 }
 
 async function subscribedNames() {
-  const source = await readFile(path.join(WEB_SRC, 'composables/useSse.js'), 'utf8');
+  const source = await readFile(path.join(WEB_SRC, 'composables/useSse.ts'), 'utf8');
   const list = source.match(/const EVENT_NAMES = \[([\s\S]*?)\];/);
   assert.ok(list, 'список подписки не найден — его нельзя переносить без обновления сторожа');
   return new Set([...list[1].matchAll(/'([a-z-]+)'/g)].map((m) => m[1]));
@@ -36,7 +36,7 @@ test('SSE: фронт подписан на все события, которы�
   const handled = new Set();
 
   for (const file of await walk(WEB_SRC, ['.js', '.ts', '.vue'])) {
-    if (file.endsWith(path.join('composables', 'useSse.js'))) continue;
+    if (file.endsWith(path.join('composables', 'useSse.ts'))) continue;
     const source = await readFile(file, 'utf8');
     // Ветки вида `name === 'chat-step'` — единственная форма реакции на SSE в кокпите.
     for (const match of source.matchAll(/name === '([a-z-]+)'/g)) handled.add(match[1]);

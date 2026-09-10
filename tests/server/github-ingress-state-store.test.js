@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { GitHubIngressStateStore } from '../../server/src/lib/github/ingress-state-store.js';
+import { GitHubIngressStateStore } from '../../server/src/lib/github/ingressStateStore.ts';
 
 const ACCOUNT = 'acc_github_ingress_state_01';
 const REPOSITORY = '123456';

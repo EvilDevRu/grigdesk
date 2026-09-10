@@ -3,10 +3,11 @@ import { appendFile, mkdir, mkdtemp, readFile, rename, rm, statfs } from 'node:f
 import path from 'node:path';
 
 import {
+  assertReleaseNodeRuntime,
   mutatePersistentState,
   parseRemoteTags,
   readPersistentState,
-} from '../lib/cockpit-release.js';
+} from '../lib/cockpitRelease.ts';
 
 const MAX_BUFFER = 4 * 1024 * 1024;
 
@@ -255,6 +256,8 @@ async function main() {
 
     workDir = await mkdtemp(path.join(path.dirname(statePath), 'cockpit-update-work.'));
     const source = await archiveSource(rootDir, job.targetSha, workDir);
+
+    await assertReleaseNodeRuntime(source);
 
     await stage(statePath, jobId, 'installing');
     await command('npm', ['ci', '--no-audit', '--no-fund'], { cwd: path.join(source, 'server') },

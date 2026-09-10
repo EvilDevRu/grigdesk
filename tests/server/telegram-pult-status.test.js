@@ -7,9 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramPultActions } from '../../server/src/lib/telegram/pult/actions.js';
-import { TelegramPultStateStore } from '../../server/src/lib/telegram/pult/state-store.js';
-import { PultSendQueue } from '../../server/src/lib/telegram/pult/send-queue.js';
+import { TelegramPultActions } from '../../server/src/lib/telegram/pult/actions.ts';
+import { TelegramPultStateStore } from '../../server/src/lib/telegram/pult/stateStore.ts';
+import { PultSendQueue } from '../../server/src/lib/telegram/pult/sendQueue.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

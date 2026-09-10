@@ -34,7 +34,7 @@ test('Путь базы из окружения попадает в сервер
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-knowledge-config-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const dbPath = path.join(root, 'knowledge.db');
-  const moduleUrl = new URL('../../server/src/config.js', import.meta.url).href;
+  const moduleUrl = new URL('../../server/src/config.ts', import.meta.url).href;
   const script = `import { config } from ${JSON.stringify(moduleUrl)};`
     + " process.stdout.write(config.knowledgeDbPath || '');";
   const result = await runNode([
@@ -51,7 +51,7 @@ test('Путь базы из окружения попадает в сервер
 });
 
 test('Путь базы по умолчанию находится вне рабочего дерева в приватном namespace', async () => {
-  const moduleUrl = new URL('../../server/src/config.js', import.meta.url).href;
+  const moduleUrl = new URL('../../server/src/config.ts', import.meta.url).href;
   const script = `import { config } from ${JSON.stringify(moduleUrl)};`
     + " process.stdout.write(config.knowledgeDbPath || '');";
   const result = await runNode([
@@ -78,7 +78,7 @@ test('Ленивый клиент не создаёт файл до первог
   t.after(() => rm(root, { recursive: true, force: true }));
   let clientModule;
   try {
-    clientModule = await import('../../server/src/lib/search/client.js');
+    clientModule = await import('../../server/src/lib/search/client.ts');
   } catch (error) {
     assert.fail(`Ленивый клиент знаний ещё не реализован: ${error.message}`);
   }

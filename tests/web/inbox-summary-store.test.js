@@ -1,32 +1,40 @@
+// Счётчик очереди во внешней оболочке: состояние живёт в сторе, а запрос, таймер
+// перепроверки и подписка на события — в операциях раздела. Тест проверяет обе
+// стороны границы: и поведение, и то, что стор её не переступает.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { pathToFileURL } from 'node:url';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
+import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const storePath = new URL('../../web/src/stores/inbox.js', import.meta.url);
-const piniaUrl = pathToFileURL(new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url).pathname).href;
-
-async function loadStore() {
-  const source = (await readFile(storePath, 'utf8'))
-    .replace("import { defineStore } from 'pinia';", `import { defineStore } from '${piniaUrl}';`)
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__inboxSummaryApi;')
-    .replace("import { sseSubscribe } from '../composables/useSse.js';", 'const sseSubscribe = globalThis.__inboxSummarySubscribe;');
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-}
+const ACTIONS_PATH = webFile('src/actions/inbox/index.ts');
+const STORE_PATH = webFile('src/stores/inbox.ts');
 
 const flush = async () => {
   for (let i = 0; i < 6; i += 1) await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
 };
 
+async function loadSection() {
+  return compileModule(ACTIONS_PATH, {
+    stubs: {
+      './apiClient.ts': 'export const api = globalThis.__inboxSummaryApi;',
+      '../../composables/useSse.ts': (
+        'export const sseSubscribe = (...args) => globalThis.__inboxSummarySubscribe(...args);'
+      ),
+    },
+  });
+}
+
 test('Inbox summary использует один SSE, минутный poll и очищается при выключенном плагине', async () => {
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
   let resolveInitial;
   const initial = new Promise((resolve) => { resolveInitial = resolve; });
-  const responses = [initial, { newCount: 5, mixedCount: 2, reviewCount: 8 }];
+  const responses = [initial, {
+    newCount: 5, mixedCount: 2, reviewCount: 8, truncated: false,
+  }];
   const calls = [];
   const intervals = [];
   const cleared = [];
@@ -53,11 +61,11 @@ test('Inbox summary использует один SSE, минутный poll и 
   globalThis.clearInterval = (handle) => cleared.push(handle);
 
   try {
-    const { useInboxStore } = await loadStore();
+    const module = await loadSection();
     setActivePinia(createPinia());
-    const store = useInboxStore();
+    const store = module.useInboxStore();
 
-    store.start();
+    module.startInboxSummary();
     assert.equal(store.loaded, false);
     assert.deepEqual(calls, ['/api/inbox/summary']);
     assert.equal(subscribers.length, 1);
@@ -71,17 +79,20 @@ test('Inbox summary использует один SSE, минутный poll и 
     // гарантирует одну повторную сверку после его завершения.
     subscribers[0]('inbox-changed');
     assert.equal(calls.length, 1);
-    resolveInitial({ newCount: 3, mixedCount: 1, reviewCount: 6 });
+    resolveInitial({
+      newCount: 3, mixedCount: 1, reviewCount: 6, truncated: false,
+    });
     await flush();
     assert.equal(store.reviewCount, 8, 'server учитывает ещё созревающие new');
     assert.equal(calls.length, 2);
 
-    responses.push({ newCount: 0, mixedCount: 3 });
+    responses.push({ newCount: 0, mixedCount: 3, truncated: false });
     intervals[0].callback();
     await flush();
     assert.equal(store.reviewCount, 3, 'до рестарта старого server сохраняется совместимый fallback');
 
     const disabled = new Error('disabled');
+    disabled.status = 404;
     disabled.data = { error: 'plugin_disabled' };
     responses.push(disabled);
     intervals[0].callback();
@@ -92,7 +103,7 @@ test('Inbox summary использует один SSE, минутный poll и 
     assert.equal(unsubscribed, 1);
     assert.deepEqual(cleared, [intervals[0]]);
 
-    store.stop();
+    module.stopInboxSummary();
     assert.equal(unsubscribed, 1);
     assert.deepEqual(cleared, [intervals[0]]);
   } finally {
@@ -101,4 +112,48 @@ test('Inbox summary использует один SSE, минутный poll и 
     delete globalThis.__inboxSummaryApi;
     delete globalThis.__inboxSummarySubscribe;
   }
+});
+
+test('повреждённая сводка не становится счётчиком очереди в шапке', async () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+
+  globalThis.__inboxSummaryApi = {
+    async get() {
+      return { newCount: 'много', mixedCount: 0, truncated: false };
+    },
+  };
+  globalThis.__inboxSummarySubscribe = () => () => {};
+  globalThis.setInterval = () => ({ unref() {} });
+  globalThis.clearInterval = () => {};
+
+  try {
+    const module = await loadSection();
+    setActivePinia(createPinia());
+    const store = module.useInboxStore();
+
+    module.startInboxSummary();
+    await flush();
+
+    assert.deepEqual({ reviewCount: store.reviewCount, loaded: store.loaded }, {
+      reviewCount: 0,
+      loaded: false,
+    });
+
+    module.stopInboxSummary();
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    delete globalThis.__inboxSummaryApi;
+    delete globalThis.__inboxSummarySubscribe;
+  }
+});
+
+test('стор входящих не знает ни путей API, ни таймера', async () => {
+  const source = await readFile(STORE_PATH, 'utf8');
+  const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
+
+  assert.deepEqual(imports, ['pinia']);
+  assert.equal(/\/api\//u.test(source), false, 'адреса API живут в слое операций');
+  assert.equal(/setInterval/u.test(source), false, 'таймер живёт в слое операций');
 });

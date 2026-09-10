@@ -6,7 +6,7 @@ import {
   normalizeChatTitle,
   visibleChatTitleStep,
   withChatTitleHook,
-} from '../../server/src/lib/chat/title-hook.js';
+} from '../../server/src/lib/chat/titleHook.ts';
 
 test('хук добавляется только к первому ходу, не создавая отдельного запроса', () => {
   assert.equal(withChatTitleHook('Проверь авторизацию', false), 'Проверь авторизацию');

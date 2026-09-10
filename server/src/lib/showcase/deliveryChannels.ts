@@ -30,12 +30,24 @@ export interface ChannelStatus {
 export interface DeliveryChannelDeps {
   // Клиент портала приходит извне: сессией владеет сервер, и раздел не заводит
   // вторую. Отсутствие клиента — обычное состояние установки без портала.
-  b24?: { uploadDiskFile?: (source: unknown) => Promise<{ id: string }> } | null;
+  //
+  // Форма клиента разделу неизвестна намеренно: ему нужен ровно один метод, которого
+  // у портала пока и нет. Объявить здесь готовый интерфейс значило бы сказать, что
+  // такой метод существует.
+  b24?: unknown;
   telegramConnected?: () => boolean;
 }
 
+/**
+ * Умеет ли клиент портала загрузить файл на диск. Проверяется наличие метода, а не
+ * тип клиента: раздел не знает его формы и не должен требовать её знать.
+ */
+function canUploadDiskFile(client: unknown): boolean {
+  return typeof (client as { uploadDiskFile?: unknown } | null)?.uploadDiskFile === 'function';
+}
+
 export function deliveryChannelStatuses(deps: DeliveryChannelDeps): ChannelStatus[] {
-  const b24Ready = typeof deps.b24?.uploadDiskFile === 'function';
+  const b24Ready = canUploadDiskFile(deps.b24);
 
   return [
     {

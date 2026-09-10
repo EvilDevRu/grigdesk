@@ -13,9 +13,23 @@ const MESSAGE_B = '[1,"message","github","acc","repo","9:b"]';
 const MESSAGE_SKIPPED = '[1,"message","github","acc","repo","10"]';
 const MESSAGE_TASK = '[1,"message","github","acc","repo","11"]';
 
+// Полное состояние канала, как его отдаёт сервер: границу приёма он присылает
+// всегда, даже когда её ещё не было — тогда полями стоит null.
 const channel = (over = {}) => ({
-  id: 'github', label: 'GitHub', plugin: 'enabled', connection: 'connected',
-  participation: 'active', readOnly: false, activationVersion: 3, ...over,
+  id: 'github',
+  label: 'GitHub',
+  plugin: 'enabled',
+  connection: 'connected',
+  participation: 'active',
+  activationVersion: 3,
+  currentEpoch: 1,
+  startedAtMs: 1_786_172_000_000,
+  endedAtMs: null,
+  endReason: null,
+  reason: null,
+  readOnly: false,
+  truncated: false,
+  ...over,
 });
 
 const message = (messageRef, over = {}) => ({

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { readNodeVerdicts } from '../../server/src/lib/factory-node-verdicts.js';
+import { readNodeVerdicts } from '../../server/src/lib/factoryNodeVerdicts.ts';
 
 // Вердикт узла — класс владельца провала и типизированные находки — до 28.08.2026 не
 // покидал журнал попытки: в провайдерскую проекцию попадал только однострочный дайджест

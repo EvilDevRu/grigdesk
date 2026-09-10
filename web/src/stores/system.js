@@ -1,6 +1,6 @@
 // Нагрузка «мозга» (CPU/RAM) — частый лёгкий поллинг для индикатора в шапке.
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 
 export const useSystemStore = defineStore('system', {
   state: () => ({ data: null, _polling: false, _timer: null }),

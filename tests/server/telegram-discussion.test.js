@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DISCUSSION_LIMITS, buildDiscussion } from '../../server/src/lib/telegram/discussion.js';
+import { DISCUSSION_LIMITS, buildDiscussion } from '../../server/src/lib/telegram/discussion.ts';
 
 const T0 = Date.UTC(2026, 7, 7, 9, 0, 0) / 1000;
 const CHAT = -1001000000042;

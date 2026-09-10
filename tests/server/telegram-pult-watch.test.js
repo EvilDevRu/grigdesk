@@ -13,16 +13,16 @@
 //  - отказ Telegram не роняет вотчер и не портит state: карточка уйдёт следующим
 //    обходом;
 //  - порог молчания берётся из ответа /api/tasks (silenceWindow), не из константы;
-//  - вотчер и /status считают одним правилом (pipeline-wait/agent-activity).
+//  - вотчер и /status считают одним правилом (shared/pipelineWait + agentActivity).
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { CARD_UI_VERSION, TelegramPultWatch } from '../../server/src/lib/telegram/pult/watch.js';
-import { TelegramPultStateStore } from '../../server/src/lib/telegram/pult/state-store.js';
-import { PultSendQueue } from '../../server/src/lib/telegram/pult/send-queue.js';
+import { CARD_UI_VERSION, TelegramPultWatch } from '../../server/src/lib/telegram/pult/watch.ts';
+import { TelegramPultStateStore } from '../../server/src/lib/telegram/pult/stateStore.ts';
+import { PultSendQueue } from '../../server/src/lib/telegram/pult/sendQueue.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

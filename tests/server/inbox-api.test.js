@@ -4,8 +4,8 @@ import test from 'node:test';
 
 import { readFile } from 'node:fs/promises';
 
-import inboxModule from '../../server/src/modules/inbox/index.js';
-import { encodeInboxRef, INBOX_REF_LIMITS } from '../../server/src/lib/inbox/identity.js';
+import inboxModule from '../../server/src/modules/inbox/index.ts';
+import { encodeInboxRef, INBOX_REF_LIMITS } from '../../server/src/lib/inbox/identity.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -399,6 +399,6 @@ test('реалистичный item ref длиннее дефолтного :par
 test('боевой сервер поднимает maxParamLength до потолка кодека refs', async () => {
   // Статическая сверка: фикстура выше доказывает, что опция нужна и достаточна, но она
   // своя. Значение должно быть выражено той же константой, иначе пределов правды станет два.
-  const source = await readFile(new URL('../../server/src/app.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../server/src/app.ts', import.meta.url), 'utf8');
   assert.match(source, /maxParamLength:\s*INBOX_REF_LIMITS\.encodedChars/);
 });

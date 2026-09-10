@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isBotTokenShape, maskToken } from '../../server/src/lib/telegram/token.js';
+import { isBotTokenShape, maskToken } from '../../server/src/lib/telegram/token.ts';
 
 const TOKEN = '8123456789:AAHrEaLLyLoNgSeCrEtPaRt_x1y2z3w4v5u6';
 

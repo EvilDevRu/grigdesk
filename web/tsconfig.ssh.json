@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/sshContracts.ts",
+    "src/shared/sshApi.ts",
+    "src/stores/ssh.ts",
+    "src/actions/ssh/**/*.ts",
+    "src/views/ssh/**/*.vue",
+    "src/views/SshView.vue",
+    "../tests/types/ssh-contract.test.ts"
+  ]
+}

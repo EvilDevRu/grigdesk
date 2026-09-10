@@ -1,10 +1,8 @@
 {
-  "extends": "./tsconfig.ui.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "allowJs": true,
-    "checkJs": false,
-    "allowImportingTsExtensions": true,
-    "noUncheckedIndexedAccess": true
+    "checkJs": false
   },
   "include": [
     "../shared/contractDecoders.ts",

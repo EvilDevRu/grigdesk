@@ -460,8 +460,8 @@ import {
   UiTooltip,
   useUiLayer,
 } from '../../ui';
-import { api } from '../api-client.js';
-import { useSse } from '../../composables/useSse.js';
+import { api } from '../apiClient.ts';
+import { useSse } from '../../composables/useSse.ts';
 import { useSystemStore } from '../../stores/system.js';
 import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -472,7 +472,7 @@ import { useChatStore } from '../../stores/chat.js';
 import { useBoardStore } from '../../stores/board.js';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
-import { useInboxStore } from '../../stores/inbox.js';
+import { startInboxSummary, stopInboxSummary, useInboxStore } from '../../actions/inbox';
 import { useDockStore } from '../../stores/dock.js';
 import {
   providerStatusHint,
@@ -490,8 +490,8 @@ import { createUsageWatch } from '../../features/providers/usageWatch.js';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
-import { TOOL_BY_ID } from '../tools/registry.js';
-import { useToolLauncher } from '../tools/launcher.js';
+import { TOOL_BY_ID } from '../tools/registry.ts';
+import { useToolLauncher } from '../tools/launcher.ts';
 
 const route = useRoute();
 const router = useRouter();
@@ -529,10 +529,10 @@ const plugins = usePluginsStore();
 plugins.load();
 const inboxStore = useInboxStore();
 watch(() => (plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
-  if (enabled) inboxStore.start();
-  else inboxStore.stop();
+  if (enabled) startInboxSummary();
+  else stopInboxSummary();
 }, { immediate: true });
-onUnmounted(() => inboxStore.stop());
+onUnmounted(() => stopInboxSummary());
 prov.load();
 prov.loadUsage();
 // Каталог Codex зависит не только от версии CLI, но и от rollout/доступа аккаунта.

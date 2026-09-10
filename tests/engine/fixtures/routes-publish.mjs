@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const fixtureDir = path.dirname(fileURLToPath(import.meta.url));
 const { RoutesStore } = await import(
-  path.resolve(fixtureDir, '../../../server/src/modules/routes/store.js')
+  path.resolve(fixtureDir, '../../../server/src/modules/routes/store.ts')
 );
 
 const [

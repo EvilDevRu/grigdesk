@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createExecEcho } from '../../server/src/lib/ssh/echo.js';
+import { createExecEcho } from '../../server/src/lib/ssh/echo.ts';
 
 const ESC = String.fromCharCode(27);
 

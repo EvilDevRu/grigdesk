@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ProviderUsageSeenStore, isFreshGroup } from '../../server/src/lib/provider-usage-seen.js';
+import { ProviderUsageSeenStore, isFreshGroup } from '../../server/src/lib/providerUsageSeen.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { CockpitReleaseService } from '../../server/src/lib/cockpit-release.js';
+import { CockpitReleaseService } from '../../server/src/lib/cockpitRelease.ts';
 
 const exec = promisify(execFile);
 async function git(cwd, ...args) {

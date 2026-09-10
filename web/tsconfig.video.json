@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../shared/contractDecoders.ts",
+    "../shared/mediaContracts.ts",
+    "src/shared/mediaApi.ts",
+    "src/stores/videoSession.ts",
+    "src/views/VideoView.vue",
+    "../tests/types/video-contract.test.ts"
+  ]
+}

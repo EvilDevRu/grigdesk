@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/lib/fastifyDecorations.ts",
+    "../shared/contractDecoders.ts",
+    "../shared/dbContracts.ts",
+    "src/lib/db/**/*.ts",
+    "src/lib/executors/work-tools/supervisedDb.ts",
+    "src/modules/db/**/*.ts",
+    "../tests/types/db-server-contract.test.mts"
+  ]
+}

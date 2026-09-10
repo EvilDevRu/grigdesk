@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
+import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 
 const CLAUDE_BIN = process.env.COCKPIT_CLAUDE_BIN || 'claude';
 

@@ -12,8 +12,8 @@ async function source(relative, contract) {
 
 test('«Базы» зарегистрированы одной встроенной панелью ToolHost', async () => {
   const [catalog, registry, shell, view] = await Promise.all([
-    source('web/src/shared/tools/catalog.js', 'DB отсутствует в паспорте инструментов'),
-    source('web/src/shared/tools/registry.js', 'DB отсутствует в реестре ToolHost'),
+    source('web/src/shared/tools/catalog.ts', 'DB отсутствует в паспорте инструментов'),
+    source('web/src/shared/tools/registry.ts', 'DB отсутствует в реестре ToolHost'),
     source('web/src/shared/layout/AppShell.vue', 'единый AppShell недоступен'),
     source('web/src/views/DbView.vue', 'route-adapter DB ещё не реализован'),
   ]);

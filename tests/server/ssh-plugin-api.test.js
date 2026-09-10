@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import { SYSTEM, isEnabled } from '../../server/src/lib/plugins-registry.js';
-import pluginsModule from '../../server/src/modules/plugins/index.js';
-import { config } from '../../server/src/config.js';
+import { SYSTEM, isEnabled } from '../../server/src/lib/pluginsRegistry.ts';
+import pluginsModule from '../../server/src/modules/plugins/index.ts';
+import { config } from '../../server/src/config.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -107,7 +107,7 @@ test('сервер клампит числовую настройку SSH по �
 test('каждый SSH route проверяет живое выключение плагина', async (t) => {
   let sshModule;
   try {
-    sshModule = await import('../../server/src/modules/ssh/index.js');
+    sshModule = await import('../../server/src/modules/ssh/index.ts');
   } catch (error) {
     assert.fail(`live-gated SSH API ещё не реализован: ${error.message}`);
   }
@@ -160,7 +160,7 @@ test('каждый SSH route проверяет живое выключение 
 test('HTTP route видит выключение SSH без перерегистрации плагина', async (t) => {
   let sshModule;
   try {
-    sshModule = await import('../../server/src/modules/ssh/index.js');
+    sshModule = await import('../../server/src/modules/ssh/index.ts');
   } catch (error) {
     assert.fail(`live-gated SSH API ещё не реализован: ${error.message}`);
   }
@@ -197,7 +197,7 @@ test('HTTP route видит выключение SSH без перерегист
 test('WebSocket terminal повторно читает флаг SSH при каждом upgrade', async (t) => {
   let sshModule;
   try {
-    sshModule = await import('../../server/src/modules/ssh/index.js');
+    sshModule = await import('../../server/src/modules/ssh/index.ts');
   } catch (error) {
     assert.fail(`SSH WebSocket ещё не реализован: ${error.message}`);
   }
@@ -246,7 +246,7 @@ test('WebSocket terminal повторно читает флаг SSH при ка�
 test('агентский broker отказывает сразу после живого выключения SSH', async () => {
   let module;
   try {
-    module = await import('../../server/src/lib/ssh/broker.js');
+    module = await import('../../server/src/lib/ssh/broker.ts');
   } catch (error) {
     assert.fail(`SSH broker ещё не реализован: ${error.message}`);
   }
@@ -278,7 +278,7 @@ test('агентский broker отказывает сразу после жи�
 test('отказ без пояснения принимается и доезжает до очереди', async (t) => {
   let sshModule;
   try {
-    sshModule = await import('../../server/src/modules/ssh/index.js');
+    sshModule = await import('../../server/src/modules/ssh/index.ts');
   } catch (error) {
     assert.fail(`live-gated SSH API ещё не реализован: ${error.message}`);
   }

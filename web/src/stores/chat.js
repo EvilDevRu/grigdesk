@@ -4,13 +4,13 @@
 // окон/устройств и переживает чистку браузера. Это единый источник истории для
 // полноразмерной страницы «Чаты» и компактного companion bridge.
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import { router } from '../router.js';
 import { useUiContextStore } from './ui-context.js';
 import { useProvidersStore } from './providers.js';
-import { notify } from '../shared/notify.js';
-import { sseSubscribe } from '../composables/useSse.js';
-import { mdToText } from '../shared/md.js';
+import { notify } from '../shared/notify.ts';
+import { sseSubscribe } from '../composables/useSse.ts';
+import { mdToText } from '../shared/md.ts';
 import { chatVisibility } from '../shared/chat-visibility.js';
 import { normalizeCompanionRun } from '../shared/companion-run.js';
 import {

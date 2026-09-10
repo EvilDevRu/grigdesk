@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCodexExecArgs } from '../../server/src/lib/executors/codex.js';
+import { buildCodexExecArgs } from '../../server/src/lib/executors/codex.ts';
 
 test('Codex first message keeps execution policy on exec', () => {
   assert.deepEqual(buildCodexExecArgs({

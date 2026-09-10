@@ -20,8 +20,8 @@ import {
   parseArbiterDecision,
   readArbitrationContext,
   stopIsArbitrable,
-} from '../../server/src/lib/factory-arbiter.js';
-import { routeGotoArgs } from '../../server/src/lib/factory-route-cli.js';
+} from '../../server/src/lib/factoryArbiter.ts';
+import { routeGotoArgs } from '../../server/src/lib/factoryRouteCli.ts';
 
 const TASK = '900022';
 const ATTEMPT = 'a_0123456789abcdef0123456789abcdef';
@@ -410,7 +410,7 @@ test('возврат курсора называет исполнителя то
 // задачу, которую только что не смог разобрать.
 
 async function watcher({ auto = true, tasks = [], arbitrate } = {}) {
-  const { FactoryArbiterWatch } = await import('../../server/src/lib/factory-arbiter-watch.js');
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
   const calls = [];
   const notes = [];
   const instance = new FactoryArbiterWatch({
@@ -596,7 +596,7 @@ test('снятый тупик тоже называет себя одной ст
 // разборе) и блокирует лишь нативные правки и перенаправление в файл. Ложное ограничение
 // прямо сужало арбитра — он отказывался от проверок, которые ему доступны.
 test('промпт не врёт про возможности и называет бюджет времени', async () => {
-  const { buildArbiterPrompt } = await import('../../server/src/lib/factory-arbiter.js');
+  const { buildArbiterPrompt } = await import('../../server/src/lib/factoryArbiter.ts');
   const prompt = buildArbiterPrompt({
     task: '8507',
     node: 'build',
@@ -628,7 +628,7 @@ test('промпт не врёт про возможности и называе
 // копия в тексте промпта разошлась бы с резаком, и агент планировал бы не тот бюджет.
 test('бюджет промпта берётся из лимита хода, а не из второй копии числа', async () => {
   const source = await readFile(
-    new URL('../../server/src/modules/factory/index.js', import.meta.url),
+    new URL('../../server/src/modules/factory/index.ts', import.meta.url),
     'utf8',
   );
 

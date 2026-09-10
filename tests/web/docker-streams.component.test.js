@@ -164,7 +164,7 @@ async function mountStream(t, name) {
 
   const component = await compileVue(webFile(`src/views/docker/${name}.vue`), {
     stubs: {
-      '../../shared/api-client.js': (
+      '../../shared/apiClient.ts': (
         'export const api = { wsUrl: (path) => `ws://cockpit.test${path}` };'
       ),
       '@xterm/xterm': 'export const Terminal = globalThis.__dockerStreamsRuntime.FakeTerminal;',

@@ -9,9 +9,9 @@ let modules;
 let modulesError;
 try {
   const [storeModule, serviceModule, apiModule] = await Promise.all([
-    import('../../server/src/lib/task-shelf-store.js'),
-    import('../../server/src/lib/task-shelf-service.js'),
-    import('../../server/src/modules/task-shelf/index.js'),
+    import('../../server/src/lib/taskShelfStore.ts'),
+    import('../../server/src/lib/taskShelfService.ts'),
+    import('../../server/src/modules/task-shelf/index.ts'),
   ]);
   modules = { storeModule, serviceModule, apiModule };
 } catch (error) {
@@ -310,8 +310,8 @@ test('Поздний acknowledge после DELETE не воскрешает з�
 
 test('Приложение регистрирует account-scoped полку после живого plugin gate', async () => {
   const [config, app] = await Promise.all([
-    readFile(new URL('../../server/src/config.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../server/src/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../server/src/config.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../../server/src/app.ts', import.meta.url), 'utf8'),
   ]);
   const pluginsPosition = app.lastIndexOf('register(pluginsModule');
   const shelfPosition = app.lastIndexOf('register(taskShelfModule');

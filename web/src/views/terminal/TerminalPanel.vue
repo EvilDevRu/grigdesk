@@ -23,7 +23,7 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import { UiButton, UiCommandButton } from '../../ui';
 
 const props = defineProps({

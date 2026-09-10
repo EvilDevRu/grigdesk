@@ -17,6 +17,9 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
       { id: 'cockpit', factory: false },
       { id: 'factory-project', factory: true },
     ],
+    files: [],
+    audit: [],
+    remotePath: '.',
     sessions: [
       {
         id: 'session-a',
@@ -38,7 +41,15 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
     async load() {},
     async loadProjects() {},
     async saveConnection(connection) { savedConnections.push(connection); },
+    async closeSession() {},
+    async setAgentAccess() {},
+    async listFiles() {},
+    async uploadFile() {},
+    downloadUrl: (path) => `/api/ssh/download?path=${path}`,
     activate(id) { this.activeId = id; },
+    bindTerminal() {},
+    sendInput() {},
+    resize() {},
     detach() {},
     ...storeOverrides,
   });
@@ -57,8 +68,30 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
   try {
     component = await compileVue(PANEL_PATH, {
       stubs: {
-        '../../stores/ssh.js': 'export const useSshStore = () => globalThis.__sshPanelStore;',
-        '../../stores/chat.js': 'export const useChatStore = () => globalThis.__sshPanelChatStore;',
+        '../../actions/ssh': `
+          const bridge = () => globalThis.__sshPanelStore;
+          export const useSshStore = bridge;
+          export const loadSsh = (...args) => bridge().load(...args);
+          export const loadSshProjects = (...args) => bridge().loadProjects(...args);
+          export const saveSshConnection = (...args) => bridge().saveConnection(...args);
+          export const probeSshHostKey = (...args) => bridge().probeHostKey(...args);
+          export const decideSshHostKey = (...args) => bridge().decideHostKey(...args);
+          export const connectSshSession = (...args) => bridge().connect(...args);
+          export const closeSshSession = (...args) => bridge().closeSession(...args);
+          export const setSshAgentAccess = (...args) => bridge().setAgentAccess(...args);
+          export const listSshFiles = (...args) => bridge().listFiles(...args);
+          export const uploadSshFile = (...args) => bridge().uploadFile(...args);
+          export const sshDownloadUrl = (...args) => bridge().downloadUrl(...args);
+          export const activateSshSession = (...args) => bridge().activate(...args);
+          export const bindSshTerminal = (...args) => bridge().bindTerminal(...args);
+          export const sendSshInput = (...args) => bridge().sendInput(...args);
+          export const resizeSshTerminal = (...args) => bridge().resize(...args);
+          export const detachSshTerminal = (...args) => bridge().detach(...args);
+          export const watchSsh = () => {};
+        `,
+        '../../shared/chatApprovals.js': (
+          'export const useChatApprovals = () => globalThis.__sshPanelChatStore;'
+        ),
         './services/dialogs': `
           export const promptDialog = (options) => globalThis.__chatPermissionPrompt(options);
           export const confirmDialog = () => Promise.resolve(false);

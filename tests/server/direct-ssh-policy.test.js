@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
 
-import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
+import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
 
 function hookCommand() {
   const args = claudeProviderSettingsArgs({ blockDirectSsh: true });

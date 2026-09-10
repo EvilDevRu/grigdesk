@@ -8,9 +8,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { createStepSink } from '../../server/src/lib/chat/stream-steps.js';
-import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codex-steps.js';
-import codex from '../../server/src/lib/executors/codex.js';
+import { createStepSink } from '../../server/src/lib/chat/streamSteps.ts';
+import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
 import { CODEX_APP_SERVER_COMPATIBILITY } from '../fixtures/codex-app-server/rich-turn-0.149.0.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');

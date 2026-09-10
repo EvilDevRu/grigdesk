@@ -14,7 +14,7 @@ async function load(relative, contract) {
 
 test('результат режется по строкам и помечается недоверенным', async () => {
   const module = await load(
-    '../../server/src/lib/db/result.js',
+    '../../server/src/lib/db/result.ts',
     'нормализатор недоверенного DB-результата ещё не реализован',
   );
   const normalize = module.normalizeDbResult || module.limitDbResult || module.default;
@@ -44,7 +44,7 @@ test('результат режется по строкам и помечает�
 
 test('байтовый бюджет сохраняет только целые строки и честное число N из M', async () => {
   const module = await load(
-    '../../server/src/lib/db/result.js',
+    '../../server/src/lib/db/result.ts',
     'байтовый срез недоверенного DB-результата ещё не реализован',
   );
   const normalize = module.normalizeDbResult || module.limitDbResult || module.default;
@@ -78,7 +78,7 @@ test('байтовый бюджет сохраняет только целые �
 
 test('прерванный поток не выдумывает полное число строк', async () => {
   const module = await load(
-    '../../server/src/lib/db/result.js',
+    '../../server/src/lib/db/result.ts',
     'нормализатор прерванного DB-результата ещё не реализован',
   );
   const normalize = module.normalizeDbResult || module.limitDbResult || module.default;
@@ -103,7 +103,7 @@ test('журнал хранит авторазрешённый запрос бе
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-audit-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await load(
-    '../../server/src/lib/db/audit.js',
+    '../../server/src/lib/db/audit.ts',
     'приватный 30-дневный DB-журнал ещё не реализован',
   );
   const create = module.createDbAudit || module.default;
@@ -146,7 +146,7 @@ test('очистка журнала удаляет записи старше т�
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, '2026-07-01.ndjson'), '{"query":"old"}\n');
   const module = await load(
-    '../../server/src/lib/db/audit.js',
+    '../../server/src/lib/db/audit.ts',
     'очистка DB-журнала ещё не реализована',
   );
   const create = module.createDbAudit || module.default;

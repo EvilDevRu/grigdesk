@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { writeClipboardText } from '../../web/src/shared/clipboard.js';
+import { writeClipboardText } from '../../web/src/shared/clipboard.ts';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 test('clipboard helper использует secure API и один очищаемый textarea fallback', async (t) => {

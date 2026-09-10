@@ -10,7 +10,7 @@ import {
   generateTelegramAccountRef,
   normalizeTelegramBotIdentity,
   telegramBotIdentity,
-} from '../../server/src/lib/telegram/account-bindings.js';
+} from '../../server/src/lib/telegram/accountBindings.ts';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tg-bindings-'));

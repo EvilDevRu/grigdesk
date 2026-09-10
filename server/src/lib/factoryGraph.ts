@@ -1,0 +1,253 @@
+// Порт логики графа конвейера из factory/lib/dashboard.py:
+//  - загрузка схемы профиля (profiles/<profile>/graph.json),
+//  - расчёт статуса каждого узла (pipeline_statuses),
+//  - разбор возвратов/остановок из журнала (loop_facts).
+// Геометрия узлов и кривые рёбер считаются на клиенте (graph-geom.js) — здесь только данные.
+import fs from 'node:fs';
+import path from 'node:path';
+import { resolveNode } from './stages.ts';
+import type { ResolvedNode } from './stages.ts';
+
+// Значение реестра → статус узла (_ST_MAP, dashboard.py:281). Остальное → pending.
+const ST_MAP: Record<string, string | undefined> = {
+  done: 'done', approved: 'done', running: 'run', waiting: 'wait',
+  failed: 'stall', rejected: 'stall', blocked: 'skipbad',
+};
+
+// Разметка одного маршрута в graph.json профиля: холст, позиции и рёбра.
+export interface ProfileRouteLayout {
+  vb: string;
+  pos: Record<string, [number, number]>;
+  edges: Array<[string, string, string, string, string]>;
+}
+
+// Схема профиля: узлы-оверрайды, ключи реестра, маршруты и их разметка.
+export interface ProfileGraphFile {
+  nodes?: Record<string, string[]>;
+  keys?: Record<string, string>;
+  optional?: Record<string, string[]>;
+  routes?: Record<string, ProfileRouteLayout | undefined>;
+  runner_keys?: Record<string, Record<string, string>>;
+  default_route?: string;
+}
+
+// Определение графа маршрута в контракте UI.
+export interface ProfileGraphDef {
+  nodes: Record<string, ResolvedNode>;
+  keys: Record<string, string>;
+  runnerKeys: Record<string, string>;
+  optional: string[];
+  vb: string;
+  pos: Record<string, [number, number]>;
+  edges: Array<[string, string, string, string, string]>;
+  route: string;
+}
+
+const _cache = new Map<string, ProfileGraphFile>(); // profilesDir + profile → parsed graph.json
+
+/** Загружает и кеширует схему профиля. */
+export function loadGraph(profilesDir: string, profile: string): ProfileGraphFile {
+  const key = `${profilesDir}\0${profile}`;
+  const cached = _cache.get(key);
+  if (cached) return cached;
+  const file = path.join(profilesDir, profile, 'graph.json');
+  const g = JSON.parse(fs.readFileSync(file, 'utf8')) as ProfileGraphFile;
+  _cache.set(key, g);
+  return g;
+}
+
+/** Определение графа для маршрута: узлы, ключи, optional, vb, pos, edges. */
+export function graphForRoute(g: ProfileGraphFile, route: string): ProfileGraphDef {
+  // Разметки может не быть вовсе. Профиль, перешедший на route-v2, держит nodes/routes/pos
+  // только ради read-only показа старых реестров, а после чистки graph.json их не остаётся:
+  // картинку рисует закреплённый бандл (route-graph.js). Сюда такой профиль попадает лишь
+  // историческим реестром без CATALOG_PROTOCOL=route-v2 — и падал на `r.pos`, отдавая
+  // человеку «Cannot read properties of undefined» вместо ответа, чего именно смотреть нечем.
+  const r = g.routes?.[route] || g.routes?.[String(g.default_route)];
+  if (!r?.pos) {
+    const known = Object.keys(g.routes || {});
+    throw new Error(
+      `в graph.json профиля нет разметки маршрута «${route || g.default_route || '—'}»`
+      + (known.length
+        ? `; в файле есть только ${known.join(', ')}`
+        : ': профиль перешёл на route-v2, у исторического реестра схемы больше нет'),
+    );
+  }
+  const optional = new Set([...(g.optional?.['*'] || []), ...(g.optional?.[route] || [])]);
+  // Узлы: оверрайд профиля поверх глобального каталога стадий (stages.js).
+  const nodes: Record<string, ResolvedNode> = {};
+  for (const id of Object.keys(r.pos)) nodes[id] = resolveNode(id, g.nodes?.[id]);
+  const runnerKeys = Object.fromEntries(Object.entries({
+    ...(g.runner_keys?.['*'] || {}),
+    ...(g.runner_keys?.[route] || {}),
+  }).filter(([id]) => id in r.pos));
+  return {
+    nodes,                     // id → [kind, label, sub] (профиль + каталог)
+    keys: g.keys || {},        // id → registry key
+    // Визуальный узел может быть внутренней фазой одного runner-stage:
+    // например plan/skeptic/translator на feature-маршруте выполняет единый PLAN.
+    // Маппинг route-specific и не смешивается со status keys.
+    runnerKeys,
+    optional: [...optional],
+    vb: r.vb,
+    pos: r.pos,                // id → [x, y]
+    edges: r.edges,            // [src, dst, label, class, routing]
+    route,
+  };
+}
+
+/**
+ * Статус каждого узла схемы (порт pipeline_statuses, dashboard.py:305).
+ * Упрощения относительно оригинала: sandbox-статус выводим из прогресса цепочки
+ * (без docker), browser-fe_dirty спецкейс и pipeline_stall опущены.
+ *
+ * `cursorNode` — узел из курсора trusted-журнала, если он известен. Реестр это лишь
+ * вторичная проекция, и `running` в ней переживает прерванный заход (TERM демону,
+ * убитый процесс, упавший хост): узел горит работой сколько угодно долго, хотя маршрут
+ * давно ушёл дальше. Журнал знает, чем маршрут занят на самом деле, поэтому при
+ * известном курсоре именно он расставляет фронт.
+ */
+export function computeNodeStatuses({
+  pf, pos, keys, optional, mtimeMs, cursorNode = null, forwardOnFailure = [],
+}: {
+  pf: Record<string, string | undefined>;
+  pos: Record<string, unknown>;
+  keys: Record<string, string | undefined>;
+  optional: readonly string[];
+  mtimeMs?: number | null;
+  cursorNode?: string | null;
+  forwardOnFailure?: readonly string[];
+}): Record<string, string> {
+  const opt = new Set(optional);
+  const forwardFail = new Set(forwardOnFailure);
+  const chain = Object.keys(pos).filter((n) => n !== 'sandbox');
+  const st: Record<string, string> = {};
+  const unknown = new Set<string>();
+
+  for (const nid of chain) {
+    // Два кандидата ключа (как в посеве агентов): ключ реестра из graph.json и UPPER(id).
+    // Они расходятся у плана: движок ведёт этап под PLAN, а агент плана по ходу выставляет
+    // PLANS/SKEPTIC/VALIDATE/TRANSLATOR. Пока агент не записал свой ключ, узел горит от
+    // движкового — иначе первые минуты этапа схема выглядит мёртвой («не вижу работу»).
+    const key = keys[nid] || nid.toUpperCase();
+    const alt = nid.toUpperCase();
+    let raw = pf[key];
+    if ((raw === undefined || raw === 'pending') && alt !== key && pf[alt] !== undefined) raw = pf[alt];
+    if (raw === undefined) { unknown.add(nid); st[nid] = 'pending'; continue; }
+    if (raw === 'skipped') st[nid] = opt.has(nid) ? 'skip' : 'skipbad';
+    // Провал узла, чей контракт ведёт маршрут ВПЕРЁД, остановкой не является:
+    // так выглядит член совета, у которого кончилась квота провайдера. Красный
+    // `stall` здесь врал бы — он означает «конвейер упёрся, нужен человек», а
+    // маршрут прошёл мимо. Курсор узла проверяется ниже и вернёт ему активность.
+    else if (raw === 'failed' && forwardFail.has(nid)) st[nid] = 'skip';
+    else st[nid] = ST_MAP[raw] || 'pending';
+  }
+
+  // idle-заполнение: незаписанные этапы ДО последнего тронутого = «нет данных».
+  const touched = chain.map((n, i) => (st[n] !== 'pending' ? i : -1)).filter((i) => i >= 0);
+  if (touched.length) {
+    const last = touched.at(-1) ?? 0;
+    for (const n of chain.slice(0, last)) if (unknown.has(n)) st[n] = 'idle';
+  }
+
+  const doneLike = new Set(['done', 'skip']);
+
+  // Ворота ждут, если всё до них пройдено (не дожидаясь записи waiting).
+  // Только для исторических реестров: v1-движок записи waiting не делал, и без
+  // доинференса штатная пауза была невидима. Реестр route-v2 — проекция, которую
+  // узел пишет ДО коммита в журнал: этап отработал, диспетчер встал fail-closed,
+  // курсор остался на узле, а реестр уже «done» → доинференс рисовал воротам
+  // ложное «ждёт тебя», и решение уезжало в CAS, обязанный отказать (наблюдавшийся
+  // reject на gate_accept при курсоре на lint). В v2 пауза на воротах — явная
+  // запись движка (GATE_*=waiting + STALLED_HUMAN=1), верим только ей.
+  if (pf.CATALOG_PROTOCOL !== 'route-v2') {
+    chain.forEach((nid, i) => {
+      if (!nid.startsWith('gate_') || st[nid] !== 'pending') return;
+      if (chain.slice(0, i).every((p) => doneLike.has(String(st[p])))) st[nid] = 'wait';
+    });
+  }
+
+  // Гард ворот: недоделанный хвост маршрута → «преждевременно».
+  chain.forEach((nid, i) => {
+    if (st[nid] === 'wait' && nid.startsWith('gate_')) {
+      const unfinished = chain.slice(0, i).filter(
+        (p) => !doneLike.has(String(st[p])) && st[p] !== 'idle' && !opt.has(p),
+      );
+      if (unfinished.length) st[nid] = 'premature';
+    }
+  });
+
+  // Линейность: активен ровно один узел. Опорная точка — курсор журнала, если он
+  // известен; иначе (исторический реестр, нечитаемый ledger) более поздний из активных.
+  // Сам фронт гасить нельзя — а ветка `i < keep ? 'done' : 'pending'` гасила: при
+  // i === keep условие ложно, и узел, ради которого правило и затевалось, уезжал
+  // в pending вместе с остальными. Наружу это выглядело как полностью остановившийся
+  // конвейер при живом работающем этапе (наблюдалось, когда реестр держал running у
+  // прерванного chairman и у идущего tests, схема гасила оба).
+  const active = chain
+    .map((n, i) => (['run', 'wait'].includes(String(st[n])) ? i : -1))
+    .filter((i) => i >= 0);
+  const cursorIndex = cursorNode ? chain.indexOf(cursorNode) : -1;
+  // Курсор бьёт проекцию даже когда активный узел ровно один: застрявший `running`
+  // остаётся в реестре и после того, как маршрут ушёл вперёд, и в одиночку выглядит
+  // как «повис на этом этапе». Правило «более поздний» такой случай не ловит вовсе.
+  const keep = cursorIndex >= 0 ? cursorIndex : (active.length > 1 ? active.at(-1) ?? -1 : -1);
+  if (keep >= 0) {
+    chain.forEach((n, i) => {
+      if (!['run', 'wait'].includes(String(st[n])) || i === keep) return;
+      st[n] = i < keep ? 'done' : 'pending';
+    });
+  }
+
+  // Возврат после отклонённой приёмки: в реестре хвост остаётся `done` с прошлого
+  // круга, поэтому пройденным выглядит то, что маршруту предстоит пройти заново.
+  if (pf.GATE_ACCEPT === 'rejected' && !['done', 'running'].includes(String(pf.SHIP))) {
+    if (cursorIndex >= 0) {
+      // Курсор знает, докуда маршрут дошёл в ЭТОМ круге: левее — пройдено, правее —
+      // предстоит. Доинферировать точку возврата при известном курсоре нельзя: подсветка
+      // build поверх журнала рисовала работу на давно пройденном узле, уводила реально
+      // идущий следом узел в pending и занижала прогресс, а по истечении пятиминутного
+      // окна объявляла build ждущим человека — карточка желтела целиком, хотя ворот,
+      // требующих решения, не было и чип «ждут тебя» её законно не считал.
+      for (const n of chain.slice(cursorIndex + 1)) st[n] = 'pending';
+    } else {
+      // Курсор неизвестен (исторический реестр v1, нечитаемый ledger): точку возврата
+      // приходится доинферировать — другого источника фронта здесь нет.
+      const back = chain.includes('build') ? 'build' : chain.find((n) => !n.startsWith('gate_'));
+      if (back) {
+        const bi = chain.indexOf(back);
+        for (const n of chain.slice(bi)) st[n] = 'pending';
+        const recent = mtimeMs && Date.now() - mtimeMs < 300000;
+        st[back] = recent ? 'run' : 'wait';
+      }
+    }
+  }
+
+  // Песочница: done, если цепочка тронута.
+  st.sandbox = touched.length ? 'done' : 'pending';
+  return st;
+}
+
+// Что журнал говорит о возвратах: сколько их было по каждой причине и где встали.
+export interface LoopFacts {
+  loops: Record<string, number>;
+  halted: string | null;
+  haltMsg: string;
+}
+
+/** Возвраты и остановки из журнала этапов (порт loop_facts, dashboard.py:663). */
+export function parseLoops(stagesLogText: string | null | undefined): LoopFacts {
+  const f: LoopFacts = { loops: {}, halted: null, haltMsg: '' };
+  if (!stagesLogText) return f;
+  for (const line of stagesLogText.split('\n')) {
+    let m = /возврат в (\S+) из-за (\w+)/.exec(line);
+    if (m) {
+      const key = String(m[2]).toLowerCase();
+      f.loops[key] = (f.loops[key] || 0) + 1;
+    }
+    m = /(\w+): (\d+) возврата не помогли/.exec(line);
+    if (m) { f.halted = String(m[1]).toLowerCase(); f.haltMsg = `${m[2]} возврата не помогли`; }
+    if (/этап \w+ \(попытка/.test(line) || line.includes('маршрут:')) f.halted = null;
+  }
+  return f;
+}

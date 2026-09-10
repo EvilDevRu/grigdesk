@@ -4,11 +4,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 import {
   resolveLegacyModel,
   resolveModelRef,
-} from '../../server/src/lib/chat/model-ref.js';
+} from '../../server/src/lib/chat/modelRef.ts';
 
 const registry = {
   claude: [{

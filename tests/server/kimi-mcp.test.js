@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import kimi, { composeKimiMcpServers } from '../../server/src/lib/executors/kimi.js';
+import kimi, { composeKimiMcpServers } from '../../server/src/lib/executors/kimi.ts';
 
 test('Kimi объединяет user/project MCP, проект перекрывает имя и секреты не выходят', () => {
   const servers = composeKimiMcpServers({

@@ -21,6 +21,7 @@ const RECORD = {
   tags: ['queue'],
   updatedAt: '2026-08-29T00:00:00.000Z',
   revision: 3,
+  provenance: null,
 };
 
 function listResponse() {
@@ -250,7 +251,7 @@ test('DELETE-клиент отправляет CAS-тело и не повтор
   };
   t.after(() => { globalThis.fetch = originalFetch; });
   const { api } = await import(
-    `../../web/src/shared/api-client.js?knowledge-delete=${Date.now()}`
+    `../../web/src/shared/apiClient.ts?knowledge-delete=${Date.now()}`
   );
   let caught;
   try {
@@ -356,7 +357,7 @@ test('Download-клиент получает Blob и имя вложения с 
     });
   };
   t.after(() => { globalThis.fetch = originalFetch; });
-  const { api } = await import(`../../web/src/shared/api-client.js?knowledge-download=${Date.now()}`);
+  const { api } = await import(`../../web/src/shared/apiClient.ts?knowledge-download=${Date.now()}`);
 
   const result = await api.download('/api/knowledge/backup/export');
 
@@ -384,7 +385,7 @@ test('Download-клиент разбирает JSON-ошибку и уведом
     headers: { 'Content-Type': 'application/json' },
   });
   t.after(() => { globalThis.fetch = originalFetch; });
-  const { api } = await import(`../../web/src/shared/api-client.js?knowledge-download-error=${Date.now()}`);
+  const { api } = await import(`../../web/src/shared/apiClient.ts?knowledge-download-error=${Date.now()}`);
   const notices = [];
   api.onUnauthorized((data) => notices.push(data));
   let caught;

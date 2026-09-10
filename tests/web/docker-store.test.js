@@ -87,7 +87,7 @@ async function storeFixture(t, api) {
   globalThis.__dockerStoreHarness = { api };
   const module = await compileModule(STORE_PATH, {
     stubs: {
-      './api-client.js': (
+      './apiClient.ts': (
         'export const api = globalThis.__dockerStoreHarness.api;'
       ),
     },

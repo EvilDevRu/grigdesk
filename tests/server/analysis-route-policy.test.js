@@ -4,8 +4,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import os from 'node:os';
 import path from 'node:path';
 
-import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
-import { parseRouteMap, resolveDepth, resolveRoute } from '../../server/src/lib/analysis/route-policy.js';
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
+import { parseRouteMap, resolveDepth, resolveRoute } from '../../server/src/lib/analysis/routePolicy.ts';
 
 const ROUTE_MAP = 'feature:light=trivial feature:mid=small feature:full=feature '
   + 'debug:light=fix debug:mid=fix debug:full=debug perf:full=perf';

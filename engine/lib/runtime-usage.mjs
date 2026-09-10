@@ -19,18 +19,18 @@ import {
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 
-import { canonicalJson } from '../../server/src/lib/analytics/canonical.js';
+import { canonicalJson } from '../../server/src/lib/analytics/canonical.ts';
 import {
   ANALYTICS_EXTRACTOR_VERSION,
   normalizeProviderUsage,
-} from '../../server/src/lib/analytics/normalizers.js';
+} from '../../server/src/lib/analytics/normalizers.ts';
 import {
   assertUsageDocument,
   buildUsageDocument,
   encodeUsageDocument,
   publishUsageDocument,
-} from '../../server/src/lib/analytics/usage-document.js';
-import { ensurePrivateDirectory } from '../../server/src/lib/analytics/durable-fs.js';
+} from '../../server/src/lib/analytics/usageDocument.ts';
+import { ensurePrivateDirectory } from '../../server/src/lib/analytics/durableFs.ts';
 
 const EVENTS_READ_FD = 7;
 const EVENTS_WRITE_FD = 8;

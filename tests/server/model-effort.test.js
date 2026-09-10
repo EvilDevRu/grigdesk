@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveRequestedEffort } from '../../server/src/lib/model-effort.js';
+import { resolveRequestedEffort } from '../../server/src/lib/modelEffort.ts';
 
 test('explicit effort is accepted only when the live catalog reports it', () => {
   assert.deepEqual(

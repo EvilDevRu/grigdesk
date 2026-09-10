@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mdToHtml, mdToText } from '../../web/src/shared/md.js';
+import { mdToHtml, mdToText } from '../../web/src/shared/md.ts';
 
 test('GFM рендерит ссылки, списки, таблицы и inline code', () => {
   const html = mdToHtml([

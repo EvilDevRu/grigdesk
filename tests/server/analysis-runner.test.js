@@ -6,7 +6,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
-import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 
 const RESULT = {
   task: 42,

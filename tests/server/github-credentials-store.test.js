@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { GitHubCredentialsStore } from '../../server/src/lib/github/credentials-store.js';
+import { GitHubCredentialsStore } from '../../server/src/lib/github/credentialsStore.ts';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'github-credentials-'));

@@ -11,7 +11,7 @@ import {
   loadFactoryLaunchProfile,
   normalizeFactoryLaunchInputs,
   routeInstrumentationMode,
-} from '../../server/src/lib/factory-launch-contract.js';
+} from '../../server/src/lib/factoryLaunchContract.ts';
 
 async function fixture(t, { deliveryActions = 'task-comment' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-launch-contract-'));

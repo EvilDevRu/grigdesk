@@ -23,7 +23,7 @@
     <section class="panel">
       <header class="phead">
         <span class="ttl">{{ profile || '—' }}</span>
-        <span v-if="published" class="hash mono" :title="currentHash">current {{ shortHash(currentHash) }}</span>
+        <span v-if="published" class="hash mono" :title="currentHash ?? undefined">current {{ shortHash(currentHash) }}</span>
         <span v-else class="muted">маршрутов ещё нет</span>
         <span class="grow"></span>
         <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
@@ -86,7 +86,12 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { api } from '../shared/api-client.js';
+
+import type { FactoryGraphData } from '../../../shared/factoryGraphContracts.ts';
+import type { RouteRevision } from '../../../shared/routesContracts.ts';
+import { publishSummary } from '../../../shared/routesContracts.ts';
+import { failureText } from '../shared/apiClient.ts';
+import { routesApi } from '../shared/routesApi.ts';
 import {
   UiButton,
   UiSelectableRow,
@@ -94,7 +99,7 @@ import {
   UiTooltip,
   confirmDialog,
 } from '../ui';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import ProjectSwitcher from '../features/projects/ProjectSwitcher.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 
@@ -104,154 +109,293 @@ import FactoryGraph from './pipeline/FactoryGraph.vue';
 // Редактора здесь нет намеренно: схема попытки закреплена хешем, и правка
 // «на лету» означала бы, что бегущая задача идёт по одному, а показывается
 // другое.
-const profiles = ref([]);
-const profile = ref(localStorage.getItem('cockpit-project') || '');
+
+// Строка списка маршрутов: id и хеш его ревизии из состава каталога.
+interface RouteEntry {
+  id: string;
+  hash: string;
+}
+
+// Что сейчас делает кнопка. Пустая строка — ничего: раздел не занят.
+type BusyMode = '' | 'validate' | 'publish' | 'rollback';
+
+const PROJECT_KEY = 'cockpit-project';
+
+const profiles = ref<string[]>([]);
+const profile = ref(localStorage.getItem(PROJECT_KEY) || '');
 const loading = ref(true);
 const error = ref('');
 const publishSupported = ref(false);
-const currentHash = ref(null);
-const revisions = ref([]);
+const currentHash = ref<string | null>(null);
+const revisions = ref<RouteRevision[]>([]);
 const selectedRoute = ref('');
-const graph = ref(null);
+const graph = ref<FactoryGraphData | null>(null);
 const graphError = ref('');
 const graphLoading = ref(false);
-const busy = ref('');            // 'validate' | 'publish' | 'rollback'
+const busy = ref<BusyMode>('');
 const notice = ref('');
-const report = ref(null);        // сырой ответ публикатора — в «подробностях»
+// Сырой ответ публикатора — его показывают в «подробностях» как есть: формат
+// принадлежит скрипту профиля, и толковать его кокпит не вправе.
+const report = ref<Record<string, unknown> | null>(null);
 
-const helpPanel = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы — в профиле проекта (routes/), здесь только проверка, публикация и откат.';
-const helpRevisions = 'Ревизия — слепок каталога, адресуемый хешем его содержимого. Откат переводит указатель current на выбранную ревизию: новые попытки пойдут по ней, уже бегущие останутся на своей.';
+const helpPanel = 'Опубликованный маршрут неизменяем: попытка закрепляет хеш каталога'
+  + ' и идёт по нему до конца, поэтому публикация не трогает то, что уже бежит, — она'
+  + ' лишь добавляет ревизию и переводит указатель для новых попыток. Правка схемы —'
+  + ' в профиле проекта (routes/), здесь только проверка, публикация и откат.';
+const helpRevisions = 'Ревизия — слепок каталога, адресуемый хешем его содержимого.'
+  + ' Откат переводит указатель current на выбранную ревизию: новые попытки пойдут'
+  + ' по ней, уже бегущие останутся на своей.';
 
 const routesContext = useUiContextSource('routes', { layer: 'page', active: false });
-watch([profile, selectedRoute], ([project, route], [previousProject] = []) => {
-  if (!project) { routesContext.blur(); return; }
+
+watch([profile, selectedRoute], ([project, route], previous) => {
+  // Первый вызов с `immediate` приходит без прошлых значений: смена проекта тогда
+  // ещё не «смена», и фокус контекста забирается заново, а не обновляется.
+  const previousProject = previous?.[0];
+
+  if (!project) {
+    routesContext.blur();
+
+    return;
+  }
+
   const next = { details: { project, route: route || null } };
-  if (project !== previousProject) routesContext.focus(next);
-  else routesContext.update(next);
+
+  if (project !== previousProject) {
+    routesContext.focus(next);
+  } else {
+    routesContext.update(next);
+  }
 }, { immediate: true });
 
-const currentRevision = computed(() => revisions.value.find((r) => r.isCurrent) || null);
+const currentRevision = computed(() => (
+  revisions.value.find((revision) => revision.isCurrent) || null
+));
+
 // Состав каталога: id маршрута → хеш его ревизии (пины каталога).
-const routeList = computed(() => Object.entries(currentRevision.value?.routes || {})
+const routeList = computed<RouteEntry[]>(() => Object.entries(currentRevision.value?.routes || {})
   .map(([id, hash]) => ({ id, hash }))
-  .sort((a, b) => a.id.localeCompare(b.id)));
-const selected = computed(() => routeList.value.find((r) => r.id === selectedRoute.value) || null);
+  .sort((left, right) => left.id.localeCompare(right.id)));
+
+const selected = computed(() => (
+  routeList.value.find((route) => route.id === selectedRoute.value) || null
+));
+
 const published = computed(() => Boolean(currentHash.value));
 
-function shortHash(hash) { return hash ? String(hash).slice(0, 12) : '—'; }
-function fmtWhen(iso) {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('ru-RU', {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+function shortHash(hash: string | null | undefined): string {
+  return hash ? String(hash).slice(0, 12) : '—';
+}
+
+/** Дата ревизии человеку. Непонятная строка показывается прочерком, а не «Invalid Date». */
+function fmtWhen(iso: string): string {
+  const date = new Date(iso);
+
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
-function say(text, bad = false) {
+
+/**
+ * Короткое сообщение в шапке. Оно гасится само, но только если его не сменили: иначе
+ * старый таймер стёр бы уже другое, более свежее сообщение.
+ */
+function say(text: string, bad = false): void {
   notice.value = bad ? `Ошибка: ${text}` : text;
-  setTimeout(() => { if (notice.value.includes(text)) notice.value = ''; }, bad ? 8000 : 3000);
+  setTimeout(() => {
+    if (notice.value.includes(text)) {
+      notice.value = '';
+    }
+  }, bad ? 8000 : 3000);
 }
 
-async function load() {
-  loading.value = true; error.value = '';
+/**
+ * Схема выбранного маршрута. Отдельный отказ: недоступная схема не должна выглядеть
+ * как недоступный раздел — список ревизий при этом остаётся рабочим.
+ */
+async function loadGraph(): Promise<void> {
+  graph.value = null;
+  graphError.value = '';
+
+  const route = selected.value;
+
+  if (!route) {
+    return;
+  }
+
+  graphLoading.value = true;
+
+  try {
+    graph.value = await routesApi.graph(profile.value, route.id, route.hash, currentHash.value);
+  } catch (failure) {
+    graphError.value = failureText(failure);
+  } finally {
+    graphLoading.value = false;
+  }
+}
+
+/**
+ * Читает список профилей (один раз) и ревизии выбранного. Выбор маршрута сохраняется,
+ * пока он есть в каталоге: после публикации человек ожидает остаться там же, где был.
+ */
+async function load(): Promise<void> {
+  loading.value = true;
+  error.value = '';
+
   try {
     if (!profiles.value.length) {
-      profiles.value = (await api.get('/api/profiles')).profiles || [];
-      if (profiles.value.length && !profiles.value.includes(profile.value)) {
-        profile.value = profiles.value[0];
-        localStorage.setItem('cockpit-project', profile.value);
+      profiles.value = await routesApi.profiles();
+
+      const first = profiles.value[0];
+
+      if (first && !profiles.value.includes(profile.value)) {
+        profile.value = first;
+        localStorage.setItem(PROJECT_KEY, first);
       }
     }
-    if (!profile.value) return;
-    const data = await api.get(`/api/routes/${profile.value}/revisions`);
-    publishSupported.value = !!data.publishSupported;
+    if (!profile.value) {
+      return;
+    }
+
+    const data = await routesApi.revisions(profile.value);
+
+    publishSupported.value = data.publishSupported;
     currentHash.value = data.currentCatalogHash;
-    revisions.value = data.revisions || [];
-    if (!routeList.value.some((r) => r.id === selectedRoute.value)) {
+    revisions.value = data.revisions;
+
+    if (!routeList.value.some((route) => route.id === selectedRoute.value)) {
       selectedRoute.value = routeList.value[0]?.id || '';
     }
+
     await loadGraph();
-  } catch (e) { error.value = e.message; }
-  finally { loading.value = false; }
+  } catch (failure) {
+    error.value = failureText(failure);
+  } finally {
+    loading.value = false;
+  }
 }
 
-async function loadGraph() {
-  graph.value = null; graphError.value = '';
-  if (!selected.value) return;
-  graphLoading.value = true;
-  try {
-    const { id, hash } = selected.value;
-    // ?c=<catalogHash> в URL обязателен: когда-то схема отдавалась с immutable, и браузер
-    // до сих пор может держать тот старый ответ по голому пути — иной query = промах кеша.
-    graph.value = (await api.get(`/api/routes/${profile.value}/routes/${id}/${hash}/graph?c=${currentHash.value}`)).graph;
-  } catch (e) { graphError.value = e.message; }
-  finally { graphLoading.value = false; }
-}
+function selectRoute(id: string): void {
+  if (id === selectedRoute.value) {
+    return;
+  }
 
-function selectRoute(id) {
-  if (id === selectedRoute.value) return;
   selectedRoute.value = id;
   loadGraph();
 }
 
-function switchProfile(next) {
-  if (next === profile.value) return;
-  profile.value = next; localStorage.setItem('cockpit-project', next);
-  selectedRoute.value = ''; graph.value = null; report.value = null; notice.value = '';
-  revisions.value = []; currentHash.value = null;
+/**
+ * Смена проекта сбрасывает ВСЁ показанное. Чужая схема, чужой отчёт публикации и
+ * чужой хеш каталога рядом с новым именем читаются как свои — и человек принимает
+ * решение по данным другого проекта.
+ */
+function switchProfile(next: string): void {
+  if (next === profile.value) {
+    return;
+  }
+
+  profile.value = next;
+  localStorage.setItem(PROJECT_KEY, next);
+  selectedRoute.value = '';
+  graph.value = null;
+  report.value = null;
+  notice.value = '';
+  revisions.value = [];
+  currentHash.value = null;
   load();
 }
 
-function onProjectCreated({ id, profiles: fresh }) {
-  if (fresh.length) profiles.value = fresh;
+function onProjectCreated({ id, profiles: fresh }: { id: string; profiles: string[] }): void {
+  if (fresh.length) {
+    profiles.value = fresh;
+  }
+
   switchProfile(id);
 }
 
-// Проверка и публикация делает сам профиль (routes/publish.mjs) — состав
-// маршрутов, промпты и bootstrap знает только он. Кокпит передаёт ровно два
-// своих аргумента: куда публиковать и поверх какой ревизии.
-async function run(mode) {
-  if (busy.value) return;
-  if (mode === 'publish' && !(await confirmDialog(
-    `Опубликовать каталог «${profile.value}»? Новые попытки пойдут по новой ревизии; уже бегущие останутся на своей.`,
-    { okText: 'Опубликовать' },
-  ))) return;
-  busy.value = mode; notice.value = ''; report.value = null;
+/**
+ * Проверка и публикация делает сам профиль (routes/publish.mjs) — состав маршрутов,
+ * промпты и bootstrap знает только он. Кокпит передаёт ровно два своих аргумента:
+ * куда публиковать и поверх какой ревизии.
+ */
+async function run(mode: 'validate' | 'publish'): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+  if (mode === 'publish') {
+    const confirmed = await confirmDialog(
+      `Опубликовать каталог «${profile.value}»? Новые попытки пойдут по новой ревизии;`
+      + ' уже бегущие останутся на своей.',
+      { okText: 'Опубликовать' },
+    );
+
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  busy.value = mode;
+  notice.value = '';
+  report.value = null;
+
   try {
-    const body = mode === 'publish'
-      ? { mode, expectedCatalogHash: currentHash.value }
-      : { mode };
-    const res = await api.post(`/api/routes/${profile.value}/publish`, body);
-    report.value = res.result;
+    const response = await routesApi.publish(profile.value, mode, currentHash.value);
+
+    report.value = response.result;
+
     if (mode === 'publish') {
+      const summary = publishSummary(response.result);
+
       await load();
-      say(res.result?.catalogCreated === false
+      say(summary.catalogCreated === false
         ? 'Ревизия не изменилась — публиковать было нечего'
-        : `Опубликовано: ${shortHash(res.result?.catalogHash)}`);
+        : `Опубликовано: ${shortHash(summary.catalogHash)}`);
     } else {
       say('Проверка прошла');
     }
-  } catch (e) { say(e.message, true); }
-  finally { busy.value = ''; }
+  } catch (failure) {
+    say(failureText(failure), true);
+  } finally {
+    busy.value = '';
+  }
 }
 
-// Откат — тот же CAS, что и публикация: указатель двигается, только если он
-// сейчас там, где мы думаем. Иначе кто-то опубликовал параллельно, и мы бы
-// молча затёрли его ревизию.
-async function rollback(rev) {
-  if (busy.value || rev.isCurrent) return;
-  if (!(await confirmDialog(
-    `Перевести current на ревизию ${shortHash(rev.catalogHash)} от ${fmtWhen(rev.createdAt)}?`,
+/**
+ * Откат — тот же CAS, что и публикация: указатель двигается, только если он сейчас
+ * там, где мы думаем. Иначе кто-то опубликовал параллельно, и мы бы молча затёрли
+ * его ревизию. После отказа список перечитывается: он уже другой.
+ */
+async function rollback(revision: RouteRevision): Promise<void> {
+  if (busy.value || revision.isCurrent) {
+    return;
+  }
+
+  const confirmed = await confirmDialog(
+    `Перевести current на ревизию ${shortHash(revision.catalogHash)}`
+    + ` от ${fmtWhen(revision.createdAt)}?`,
     { okText: 'Откатить' },
-  ))) return;
-  busy.value = 'rollback'; notice.value = '';
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  busy.value = 'rollback';
+  notice.value = '';
+
   try {
-    await api.put(`/api/routes/${profile.value}/current`, {
-      desiredCatalogHash: rev.catalogHash,
-      expectedCatalogHash: currentHash.value,
-    });
+    await routesApi.rollback(profile.value, revision.catalogHash, currentHash.value);
     await load();
-    say(`Текущая ревизия — ${shortHash(rev.catalogHash)}`);
-  } catch (e) { say(e.message, true); await load(); }
-  finally { busy.value = ''; }
+    say(`Текущая ревизия — ${shortHash(revision.catalogHash)}`);
+  } catch (failure) {
+    say(failureText(failure), true);
+    await load();
+  } finally {
+    busy.value = '';
+  }
 }
 
 onMounted(load);

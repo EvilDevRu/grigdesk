@@ -1,7 +1,7 @@
 // Плагины кокпита: список с сервера, вкл/выкл, настройки.
 // Питает блок плагинов в сайдбаре (под разделителем) и вкладку «Настройки → Плагины».
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
 

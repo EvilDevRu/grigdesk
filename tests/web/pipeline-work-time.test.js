@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { pipelineWorkSec } from '../../web/src/shared/format.js';
+import { pipelineWorkSec } from '../../web/src/shared/format.ts';
 
 test('ожидание на воротах не входит в чистое время работы', () => {
   const timing = {

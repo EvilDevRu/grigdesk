@@ -8,7 +8,7 @@ const Fastify = requireFromServer('fastify');
 async function fixture(t, authKind) {
   let module;
   try {
-    module = await import('../../server/src/modules/ssh/index.js');
+    module = await import('../../server/src/modules/ssh/index.ts');
   } catch (error) {
     assert.fail(`human-only SFTP API ещё не реализован: ${error.message}`);
   }

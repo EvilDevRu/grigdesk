@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SYSTEM, isEnabled } from '../../server/src/lib/plugins-registry.js';
+import { SYSTEM, isEnabled } from '../../server/src/lib/pluginsRegistry.ts';
 
 const byId = (id) => SYSTEM.find((m) => m.id === id);
 

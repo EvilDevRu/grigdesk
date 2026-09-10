@@ -6,10 +6,10 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
-import { claudeSessionArgs } from '../../server/src/lib/executors/_claude-stream.js';
-import codex from '../../server/src/lib/executors/codex.js';
-import { createWorkTools } from '../../server/src/lib/executors/index.js';
-import { runContainedKimi } from '../../server/src/lib/kimi/runtime.js';
+import { claudeSessionArgs } from '../../server/src/lib/executors/_claudeStream.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
+import { createWorkTools } from '../../server/src/lib/executors/index.ts';
+import { runContainedKimi } from '../../server/src/lib/kimi/runtime.ts';
 
 function workTools(enabled) {
   return createWorkTools({
@@ -188,13 +188,13 @@ test('descriptor БД содержит только list schema query и не р
 
 test('состав work-tools задаёт реестр без fallback-списков у исполнителей', async () => {
   const files = [
-    'server/src/lib/executors/index.js',
-    'server/src/lib/executors/claude.js',
-    'server/src/lib/executors/_claude-stream.js',
-    'server/src/lib/executors/codex.js',
-    'server/src/lib/kimi/runtime.js',
-    'server/src/lib/executors/_ollama-tools.js',
-    'server/src/lib/executors/work-ipc.js',
+    'server/src/lib/executors/index.ts',
+    'server/src/lib/executors/claude.ts',
+    'server/src/lib/executors/_claudeStream.ts',
+    'server/src/lib/executors/codex.ts',
+    'server/src/lib/kimi/runtime.ts',
+    'server/src/lib/executors/_ollamaTools.ts',
+    'server/src/lib/executors/workIpc.ts',
     'server/src/lib/executors/work-mcp.js',
   ];
   const offenders = [];

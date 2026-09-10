@@ -4,13 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 import {
   SPEECH_DEFAULTS,
   SpeechSettingsStore,
-} from '../../server/src/lib/speech-settings.js';
-import { SYSTEM } from '../../server/src/lib/plugins-registry.js';
-import settingsModule from '../../server/src/modules/settings/index.js';
+} from '../../server/src/lib/speechSettings.ts';
+import { SYSTEM } from '../../server/src/lib/pluginsRegistry.ts';
+import settingsModule from '../../server/src/modules/settings/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

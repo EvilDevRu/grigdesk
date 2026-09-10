@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { InboxRefCodec } from '../../server/src/lib/inbox/identity.js';
-import { InboxTaskService } from '../../server/src/lib/inbox/task-service.js';
+import { InboxRefCodec } from '../../server/src/lib/inbox/identity.ts';
+import { InboxTaskService } from '../../server/src/lib/inbox/taskService.ts';
 
 const ACCOUNT = 'acc_inbox_task_service_01';
 const REVISION = `v1_${'a'.repeat(43)}`;

@@ -1,0 +1,66 @@
+// Общая проверка всего собственного TypeScript интерфейса. Области остаются
+// отдельными командами ради быстрой обратной связи, но итог миграции считает эта.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Переходно: в web/src ещё остаётся собственный JavaScript. checkJs выключен,
+    // чтобы невыведенные формы соседей не выдавались за проверенные; allowJs
+    // снимается вместе с последним .js этой области.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.vue",
+    "dev/**/*.ts",
+    "dev/**/*.vue",
+    "../shared/**/*.ts",
+    "../tests/types/*.ts"
+  ],
+  // Компоненты, script которых ещё не объявлен TypeScript: их разметку проверять
+  // нечем — типов у их же собственного кода пока нет. Список ведёт волна web и
+  // сверяется со снимком остатка миграции, поэтому спрятать в нём новый файл нельзя.
+  "exclude": [
+    "src/App.vue",
+    "src/features/board/BoardTimerPopover.vue",
+    "src/features/companion/CompanionAvatar.vue",
+    "src/features/companion/CompanionHost.vue",
+    "src/features/companion/CompanionRobot.vue",
+    "src/features/companion/CompanionTopbarButton.vue",
+    "src/features/documents/DocumentPanel.vue",
+    "src/features/pipeline/PipelineTopbarPopover.vue",
+    "src/features/projects/ProjectSwitcher.vue",
+    "src/features/providers/ProviderUsageResources.vue",
+    "src/features/pwa/UpdateBanner.vue",
+    "src/shared/ProviderIcon.vue",
+    "src/shared/layout/AppShell.vue",
+    "src/shared/layout/ToolDock.vue",
+    "src/shared/layout/ToolHost.vue",
+    "src/shared/layout/ToolsGrid.vue",
+    "src/shared/layout/TopbarActions.vue",
+    "src/views/BoardView.vue",
+    "src/views/ChatsView.vue",
+    "src/views/DbView.vue",
+    "src/views/DiffView.vue",
+    "src/views/DocumentsView.vue",
+    "src/views/LoginView.vue",
+    "src/views/OpenDiffButton.vue",
+    "src/views/PipelineView.vue",
+    "src/views/SettingsView.vue",
+    "src/views/TaskModal.vue",
+    "src/views/TerminalView.vue",
+    "src/views/ToolsView.vue",
+    "src/views/board/MiniChart.vue",
+    "src/views/board/TaskFavoriteButton.vue",
+    "src/views/chat/ChatList.vue",
+    "src/views/chat/ChatPermission.vue",
+    "src/views/chat/ChatQuestion.vue",
+    "src/views/chat/ChatSession.vue",
+    "src/views/chat/EffortSlider.vue",
+    "src/views/chat/StepList.vue",
+    "src/views/diff/DiffPanel.vue",
+    "src/views/pipeline/ArbiterDecision.vue",
+    "src/views/settings/ToolHotkeys.vue",
+    "src/views/terminal/TerminalPanel.vue"
+  ]
+}

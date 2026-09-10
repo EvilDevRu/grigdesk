@@ -16,7 +16,7 @@ import {
   listRepositoryIssuesPage,
   pingRepositoryHook,
   updateRepositoryHook,
-} from '../../server/src/lib/github/api.js';
+} from '../../server/src/lib/github/api.ts';
 
 const TOKEN = 'github_pat_11AA00_reallySecretValue9876';
 const OWNER = 'example-org';

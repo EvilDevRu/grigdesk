@@ -10,7 +10,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { X509Certificate } from 'node:crypto';
 
-import { LocalTls, TlsInputError, localAddresses, normalizeAddresses } from '../../server/src/lib/tls/local.js';
+import { LocalTls, TlsInputError, localAddresses, normalizeAddresses } from '../../server/src/lib/tls/local.ts';
 
 async function tempTls(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-tls.'));

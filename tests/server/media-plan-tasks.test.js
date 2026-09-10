@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import mediaModule from '../../server/src/modules/media/index.js';
+import mediaModule from '../../server/src/modules/media/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

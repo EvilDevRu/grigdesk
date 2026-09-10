@@ -5,17 +5,17 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatTurnLocks } from '../../server/src/lib/chat/turn-locks.js';
-import { ChatSessionBindingStore } from '../../server/src/lib/chat/session-binding-store.js';
+import { ChatTurnLocks } from '../../server/src/lib/chat/turnLocks.ts';
+import { ChatSessionBindingStore } from '../../server/src/lib/chat/sessionBindingStore.ts';
 import {
   KIMI_RETRY_CONTRACT,
   mayRetryEmptyRun,
-} from '../../server/src/lib/chat/retry-contract.js';
+} from '../../server/src/lib/chat/retryContract.ts';
 import {
   KIMI_AUTH_PROFILE_ID,
   KIMI_SECURITY_PROFILE,
-} from '../../server/src/lib/kimi/profile.js';
-import chatModule from '../../server/src/modules/chat/index.js';
+} from '../../server/src/lib/kimi/profile.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

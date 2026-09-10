@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { graphForRoute } from '../../server/src/lib/factory-graph.js';
+import { graphForRoute } from '../../server/src/lib/factoryGraph.ts';
 
 // Профиль на route-v2 держит nodes/routes в graph.json только ради read-only показа старых
 // реестров, а после чистки не держит вовсе. Исторический реестр (без CATALOG_PROTOCOL) такого

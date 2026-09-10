@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 
 async function load(relative, contract) {
   try {
@@ -28,7 +28,7 @@ test('пароль не сохраняется в профиле БД и пуб�
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-db-profile-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await load(
-    '../../server/src/lib/db/store.js',
+    '../../server/src/lib/db/store.ts',
     'приватное хранилище DB-профилей ещё не реализовано',
   );
   const create = module.createDbStore || module.createProfileStore || module.default;
@@ -60,7 +60,7 @@ test('пароль не сохраняется в профиле БД и пуб�
 
 test('DB-сессия затирает входной буфер пароля после открытия драйвера', async () => {
   const module = await load(
-    '../../server/src/lib/db/session-manager.js',
+    '../../server/src/lib/db/sessionManager.ts',
     'server-owned DB-сессии ещё не реализованы',
   );
   const create = module.createDbSessionManager || module.default;
@@ -106,7 +106,7 @@ test('пароль DB-сессии отсутствует в prefs журнал�
     pluginSettings: { db: { autoRead: false, maxRows: 1000 } },
   });
   const auditModule = await load(
-    '../../server/src/lib/db/audit.js',
+    '../../server/src/lib/db/audit.ts',
     'приватный DB-журнал ещё не реализован',
   );
   const createAudit = auditModule.createDbAudit || auditModule.default;
@@ -122,7 +122,7 @@ test('пароль DB-сессии отсутствует в prefs журнал�
     password: sentinel,
   });
   const sessionModule = await load(
-    '../../server/src/lib/db/session-manager.js',
+    '../../server/src/lib/db/sessionManager.ts',
     'server-owned DB-сессии ещё не реализованы',
   );
   const createSessions = sessionModule.createDbSessionManager || sessionModule.default;

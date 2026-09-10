@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
-import analysisModule from '../../server/src/modules/analysis/index.js';
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
+import analysisModule from '../../server/src/modules/analysis/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

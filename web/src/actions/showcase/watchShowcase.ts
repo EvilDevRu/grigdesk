@@ -1,4 +1,4 @@
-import { sseSubscribe } from '../../composables/useSse.js';
+import { sseSubscribe } from '../../composables/useSse.ts';
 import { parseShowcaseProgressEvent } from '../../../../shared/showcaseContracts';
 import { loadShowcase } from './loadShowcase';
 import { loadShowcaseVoices } from './setupShowcaseVoice';

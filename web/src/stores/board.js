@@ -1,7 +1,7 @@
 // Кеш доски B24. При переходе в раздел данные показываются мгновенно из кеша,
 // обновление идёт в фоне + периодический поллинг (не тормозит навигацию).
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import { boardActivity, boardTaskIds } from '../shared/board-activity.js';
 import { useTaskSeenStore } from './task-seen.js';
 

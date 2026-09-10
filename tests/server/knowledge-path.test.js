@@ -6,9 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { cockpitCliPath } from '../../server/src/lib/cli-path.js';
-import { routeLaunchEnv } from '../../server/src/lib/factory-route-cli.js';
-import { openKnowledgeStorage } from '../../server/src/lib/search/storage.js';
+import { cockpitCliPath } from '../../server/src/lib/cliPath.ts';
+import { routeLaunchEnv } from '../../server/src/lib/factoryRouteCli.ts';
+import { openKnowledgeStorage } from '../../server/src/lib/search/storage.ts';
 import { record } from './helpers/knowledge.js';
 
 const exec = promisify(execFile);

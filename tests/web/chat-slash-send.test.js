@@ -28,7 +28,7 @@ let instance = 0;
 function patch(source) {
   return source
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
-    .replace("import { api } from '../shared/api-client.js';", 'const api = globalThis.__slashChatApi;')
+    .replace("import { api } from '../shared/apiClient.ts';", 'const api = globalThis.__slashChatApi;')
     .replace(
       "import { router } from '../router.js';",
       "const router = { currentRoute: { value: { path: '/chats', meta: {} } } };"
@@ -46,14 +46,14 @@ function patch(source) {
       + ' return { id, model: { id }, provider: { id: provider } }; } });',
     )
     .replace(
-      "import { notify } from '../shared/notify.js';",
+      "import { notify } from '../shared/notify.ts';",
       'const notify = () => {};',
     )
     .replace(
-      "import { sseSubscribe } from '../composables/useSse.js';",
+      "import { sseSubscribe } from '../composables/useSse.ts';",
       'const sseSubscribe = () => () => {};',
     )
-    .replace("import { mdToText } from '../shared/md.js';", 'const mdToText = (x) => x;')
+    .replace("import { mdToText } from '../shared/md.ts';", 'const mdToText = (x) => x;')
     .replace(
       "import { normalizeCompanionRun } from '../shared/companion-run.js';",
       `import { normalizeCompanionRun } from "${COMPANION_RUN_URL}";`,

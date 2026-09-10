@@ -4,9 +4,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { Analyzer } from '../../server/src/lib/analysis/analyzer.js';
+import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 
-const ARBITER_URL = new URL('../../server/src/lib/analysis/arbiter.js', import.meta.url);
+const ARBITER_URL = new URL('../../server/src/lib/analysis/arbiter.ts', import.meta.url);
 
 /** До появления модуля возвращает явный красный результат вместо suite-level import error. */
 async function createArbiter(options) {

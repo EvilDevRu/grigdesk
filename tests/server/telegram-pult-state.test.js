@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramPultStateStore, PULT_STATE_MAX_CARDS } from '../../server/src/lib/telegram/pult/state-store.js';
+import { TelegramPultStateStore, PULT_STATE_MAX_CARDS } from '../../server/src/lib/telegram/pult/stateStore.ts';
 
 const T0 = Date.UTC(2026, 7, 19, 10, 0, 0);
 const silent = { warn() {}, error() {}, info() {} };

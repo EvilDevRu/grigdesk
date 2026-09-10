@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { withRetry } from '../../server/src/lib/retry.js';
-import { kimiUsageIsRetryable } from '../../server/src/lib/kimi/usage.js';
+import { withRetry } from '../../server/src/lib/retry.ts';
+import { kimiUsageIsRetryable } from '../../server/src/lib/kimi/usage.ts';
 
 // Общий повтор заведён 22.08.2026 вместо трёх разъехавшихся копий: у одной было две
 // попытки подряд БЕЗ паузы (обе попадали в одно моргание сети), у другой повтора не было

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import {
   TelegramCredentialsStore,
-} from '../../server/src/lib/telegram/credentials-store.js';
+} from '../../server/src/lib/telegram/credentialsStore.ts';
 
 const token = '8123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghi';
 

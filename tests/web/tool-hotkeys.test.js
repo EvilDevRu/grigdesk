@@ -9,9 +9,9 @@ import {
   formatCombo,
   isLayoutSwitch,
   normalizeCombo,
-} from '../../web/src/shared/hotkeys/combo.js';
+} from '../../web/src/shared/hotkeys/combo.ts';
 import { DEFAULT_HOTKEYS, HOTKEYS_KEY, useHotkeysStore } from '../../web/src/stores/hotkeys.js';
-import { TOOL_CATALOG } from '../../web/src/shared/tools/catalog.js';
+import { TOOL_CATALOG } from '../../web/src/shared/tools/catalog.ts';
 
 const source = (relative) => readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
 
@@ -157,7 +157,7 @@ test('настройка клавиш открыта в разделе устр�
   // Паспорт инструментов отделён от панелей ровно ради этого: настройка и store читают
   // список, не втягивая Monaco и терминал в свой граф загрузки.
   for (const text of [card, store]) {
-    assert.doesNotMatch(text, /tools\/registry\.js/, 'списка панелей здесь быть не должно');
-    assert.match(text, /tools\/catalog\.js/);
+    assert.doesNotMatch(text, /tools\/registry\.ts/, 'списка панелей здесь быть не должно');
+    assert.match(text, /tools\/catalog\.ts/);
   }
 });

@@ -17,9 +17,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { TelegramArchiveStore } from '../../server/src/lib/telegram/archive-store.js';
-import { TelegramBotSettingsStore } from '../../server/src/lib/telegram/account-context.js';
-import telegramModule from '../../server/src/modules/telegram/index.js';
+import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
+import { TelegramBotSettingsStore } from '../../server/src/lib/telegram/accountContext.ts';
+import telegramModule from '../../server/src/modules/telegram/index.ts';
 import {
   TelegramModuleCredentials,
   telegramModuleConnection,

@@ -12,7 +12,7 @@ import path from 'node:path';
 import {
   readFactoryAttemptLedger,
   verifyFactoryAttemptEnvironment,
-} from '../../server/src/lib/factory-attempt-ledger.js';
+} from '../../server/src/lib/factoryAttemptLedger.ts';
 
 const ATTEMPT = 'a_0123456789abcdef0123456789abcdef';
 const ROUTE_HASH = 'a'.repeat(64);

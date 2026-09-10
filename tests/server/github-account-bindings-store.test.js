@@ -8,8 +8,8 @@ import {
   GitHubAccountBindings,
   GitHubStoreError,
   githubRepositoryIdentity,
-} from '../../server/src/lib/github/account-bindings.js';
-import { GitHubCredentialsStore } from '../../server/src/lib/github/credentials-store.js';
+} from '../../server/src/lib/github/accountBindings.ts';
+import { GitHubCredentialsStore } from '../../server/src/lib/github/credentialsStore.ts';
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'github-bindings-'));

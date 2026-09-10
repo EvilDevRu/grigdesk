@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
 
 // Отказ политики прав внутри хода. Движок пишет их числом в `DENIALS_<STAGE>`, кокпит
 // показывает чипом в модалке узла. Смысл величины — предупредить о ПОДМЕНЕ проверки:

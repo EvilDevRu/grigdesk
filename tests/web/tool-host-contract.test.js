@@ -34,7 +34,7 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
 
 test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаются независимо', async () => {
   const [registry, codeLoading] = await Promise.all([
-    source('web/src/shared/tools/registry.js'),
+    source('web/src/shared/tools/registry.ts'),
     source('web/src/views/code/codePanelLoading.ts'),
   ]);
 
@@ -56,7 +56,7 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
 test('Узкий route полки объявлен как tool и не создаёт отдельный dock state', async () => {
   const [router, catalog, dock] = await Promise.all([
     source('web/src/router.js'),
-    source('web/src/shared/tools/catalog.js'),
+    source('web/src/shared/tools/catalog.ts'),
     source('web/src/stores/dock.js'),
   ]);
 
@@ -73,7 +73,7 @@ test('Узкий route полки объявлен как tool и не созд�
 
 test('планшет 760–899 остаётся route-only, док и третья колонка начинаются с 900', async () => {
   const [viewport, shell, host] = await Promise.all([
-    source('web/src/shared/tools/viewport.js'),
+    source('web/src/shared/tools/viewport.ts'),
     source('web/src/shared/layout/AppShell.vue'),
     source('web/src/shared/layout/ToolHost.vue'),
   ]);

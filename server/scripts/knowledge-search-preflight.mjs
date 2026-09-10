@@ -2,8 +2,8 @@
 
 // Отдельный процесс для предварительной проверки поиска по базе знаний при запуске и установке.
 // DatabaseSync синхронен, поэтому этот код принципиально не импортируется в цикл событий Fastify.
-import { runKnowledgeSearchRuntimePreflight } from '../src/lib/search/runtime-preflight.js';
-import { KNOWLEDGE_SEARCH_PREFLIGHT_PROTOCOL } from '../src/lib/search/runtime-preflight-client.js';
+import { runKnowledgeSearchRuntimePreflight } from '../src/lib/search/runtimePreflight.ts';
+import { KNOWLEDGE_SEARCH_PREFLIGHT_PROTOCOL } from '../src/lib/search/runtimePreflightClient.ts';
 
 const args = process.argv.slice(2);
 const jsonMode = args.length === 1 && args[0] === '--json';

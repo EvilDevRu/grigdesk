@@ -10,7 +10,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import codex from '../../server/src/lib/executors/codex.js';
+import codex from '../../server/src/lib/executors/codex.ts';
 
 const execFileAsync = promisify(execFile);
 const CODEX_BIN = process.env.COCKPIT_CODEX_BIN || 'codex';

@@ -6,7 +6,7 @@ import {
   classifyMcpScope,
   composeMcpServers,
   parseClaudeMcpList,
-} from '../../server/src/lib/executors/claude.js';
+} from '../../server/src/lib/executors/claude.ts';
 
 // Синтетический, но форматно точный вывод `claude mcp list`.
 const SYNTHETIC_OUTPUT = [

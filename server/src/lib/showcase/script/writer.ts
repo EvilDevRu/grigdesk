@@ -7,7 +7,7 @@
 //
 // Негодный ответ не меняет сохранённую редакцию: у человека остаётся то, что он
 // уже принял, а не половина новой версии.
-import { exactKeys, jsonCandidates, modelText } from '../../model-json.js';
+import { exactKeys, jsonCandidates, modelText } from '../../modelJson.ts';
 import type { ShowcaseAction } from '../../../../../shared/showcaseContracts.ts';
 import { BRIEF_MAX, BRIEF_MIN } from './prompt.ts';
 import type { ScriptScreen } from './prompt.ts';

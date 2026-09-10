@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createAcpClient, initializeKimiAcp } from '../server/src/lib/kimi/acp-client.js';
+import { createAcpClient, initializeKimiAcp } from '../server/src/lib/kimi/acpClient.ts';
 
 const KIMI_BIN = process.env.COCKPIT_KIMI_BIN || path.join(os.homedir(), '.kimi-code', 'bin', 'kimi');
 

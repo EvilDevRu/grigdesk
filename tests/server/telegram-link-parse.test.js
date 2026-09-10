@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   parseTelegramLinks,
   telegramMessageLink,
-} from '../../server/src/lib/telegram/links.js';
+} from '../../server/src/lib/telegram/links.ts';
 
 const one = (text) => {
   const links = parseTelegramLinks(text);

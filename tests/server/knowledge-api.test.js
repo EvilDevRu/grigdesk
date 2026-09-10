@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import { createKnowledgeTransfer } from '../../server/src/lib/search/transfer.js';
+import { createKnowledgeTransfer } from '../../server/src/lib/search/transfer.ts';
 import { knowledgeFixture, record } from './helpers/knowledge.js';
 
 let knowledgeModule;
 let knowledgeModuleError;
 try {
-  knowledgeModule = (await import('../../server/src/modules/knowledge/index.js')).default;
+  knowledgeModule = (await import('../../server/src/modules/knowledge/index.ts')).default;
 } catch (error) {
   knowledgeModuleError = error;
 }

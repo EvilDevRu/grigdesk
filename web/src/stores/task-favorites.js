@@ -1,7 +1,7 @@
 // Серверное избранное B24-задач. Мутации server-confirmed: строка под фильтром
 // не исчезает до успешного DELETE, а ошибка не требует сложного rollback.
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 
 function taskKey(value) {
   return String(value ?? '').trim();

@@ -269,7 +269,7 @@
             </span>
             <div>
               <b>Авторазбор встречи</b>
-              <small v-if="planModel">{{ planModel.model || planModel }}</small>
+              <small v-if="planModel">{{ modelText(planModel) }}</small>
               <small v-else>Модель пока не выбрана</small>
             </div>
           </div>
@@ -710,7 +710,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import {
@@ -730,28 +730,71 @@ import {
   UiToggleButton,
   confirmDialog,
 } from '../ui';
-import { api } from '../shared/api-client.js';
-import { writeClipboardText } from '../shared/clipboard.js';
-import { mmss } from '../shared/format.js';
+import { api } from '../shared/apiClient.ts';
+import { mediaApi } from '../shared/mediaApi.ts';
+import { writeClipboardText } from '../shared/clipboard.ts';
+import { mmss } from '../shared/format.ts';
 import { usePluginsStore } from '../stores/plugins.js';
-import { useDocumentPreviewStore } from '../stores/document-preview.js';
+import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
 import { useUiStore } from '../stores/ui.js';
-import { canWidenClip, useVideoSessionStore } from '../stores/video-session.js';
+import { canWidenClip, useVideoSessionStore } from '../stores/videoSession.ts';
+import type { VideoDraft } from '../stores/videoSession.ts';
+import type { MediaStorageUsage, MediaTranscriptSegment } from '../../../shared/mediaContracts.ts';
+
+// Соседние сторы ещё на JavaScript: раздел объявляет ровно то, что читает у них.
+interface VideoPluginsSource {
+  loaded: boolean;
+  load(): unknown;
+  enabled(id: string): boolean;
+  byId(id: string): { values?: Record<string, unknown> } | null;
+}
+
+interface VideoPreviewOptions {
+  src: string;
+  name?: string;
+  mime?: string;
+}
+
+interface VideoPreviewSource {
+  showImage(options: VideoPreviewOptions): void;
+  showVideo(options: VideoPreviewOptions): void;
+}
 
 // Раздел — плагин «Видео → задачи»: выключенный показывает заглушку вместо формы.
-const plugins = usePluginsStore();
-const preview = useDocumentPreviewStore();
+const plugins = usePluginsStore() as unknown as VideoPluginsSource;
+const preview = useDocumentPreviewStore() as unknown as VideoPreviewSource;
 const ui = useUiStore();
-if (!plugins.loaded) plugins.load();
+
+if (!plugins.loaded) {
+  plugins.load();
+}
+
 const pluginOff = computed(() => plugins.loaded && !plugins.enabled('video'));
 // Модель разбора — своя настройка этого плагина. Нет её — раздел работает как раньше,
 // вручную: кнопка авторазбора просто не предлагается.
-const planModel = computed(() => plugins.byId('video')?.values?.triageModel || null);
+const planModel = computed<unknown>(() => plugins.byId('video')?.values?.triageModel || null);
+
+/**
+ * Имя модели для строки настройки. Ссылка приходит либо парой «исполнитель и модель»,
+ * либо готовой строкой: раздел показывает то, что в ней названо моделью.
+ */
+function modelText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  const model = value !== null && typeof value === 'object'
+    ? (value as { model?: unknown }).model
+    : null;
+
+  return typeof model === 'string' && model ? model : String(value ?? '');
+}
 
 // Сам разбор встречи живёт в сторе, а не здесь: страница — обычный route-компонент,
 // и переход в соседний раздел уносил бы вместе с ней id уже идущего распознавания.
 // Компонент остаётся отображением: расшифровка на экране, кнопки и превью.
 const session = useVideoSessionStore();
+
 session.hydrate();
 
 const {
@@ -824,37 +867,50 @@ const MEDIA_ACCEPT = [
   ...MEDIA_EXTENSIONS.flatMap((ext) => [`.${ext}`, `.${ext.toUpperCase()}`]),
 ].join(',');
 
-const doctorOk = ref(null);
+const doctorOk = ref<boolean | null>(null);
 // Сколько записей лежит на диске мозга и как долго они там живут. Раздел хранит
 // исходники ради кадров и фрагментов, и без этой строки рост виден только по
 // свободному месту на диске — то есть слишком поздно.
-const storage = ref(null);
+const storage = ref<MediaStorageUsage | null>(null);
 // Расшифровка свёрнута по умолчанию: раздел отвечает на «какие задачи», а реплики
 // нужны, когда формулировку хочется сверить с записью.
 const showTranscript = ref(false);
 
-/** Байты в человеческом виде — для строки о разобранном файле. */
-function mb(bytes) {
+/**
+ * Байты в человеческом виде — для строки о разобранном файле. Гигабайты нужны не
+ * файлу, а хранилищу: записи копятся, и «1434.6 МБ» читается хуже, чем «1.4 ГБ».
+ */
+function mb(bytes: unknown): string {
   const value = Number(bytes);
-  if (!Number.isFinite(value) || value <= 0) return '';
-  // Гигабайты нужны не файлу, а хранилищу: записи копятся, и «1434.6 МБ» читается
-  // хуже, чем «1.4 ГБ», — а понять счёт идёт уже на гигабайты как раз и надо.
-  if (value >= 1073741824) return `${(value / 1073741824).toFixed(1)} ГБ`;
-  return value >= 1048576 ? `${(value / 1048576).toFixed(1)} МБ` : `${Math.round(value / 1024)} КБ`;
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return '';
+  }
+  if (value >= 1073741824) {
+    return `${(value / 1073741824).toFixed(1)} ГБ`;
+  }
+
+  return value >= 1048576
+    ? `${(value / 1048576).toFixed(1)} МБ`
+    : `${Math.round(value / 1024)} КБ`;
 }
 
-api.get('/api/media/doctor')
-  .then((d) => {
-    doctorOk.value = d.ok;
-    storage.value = d.storage || null;
+mediaApi.doctor()
+  .then((report) => {
+    doctorOk.value = report.ok;
+    storage.value = report.storage;
   })
-  .catch(() => { doctorOk.value = false; });
+  .catch(() => {
+    doctorOk.value = false;
+  });
 
 /** Срок хранения записей словами: сервер отдаёт его миллисекундами вместе с размером. */
 const storageNote = computed(() => {
   const value = storage.value;
 
-  if (!value?.files) return '';
+  if (!value?.files) {
+    return '';
+  }
 
   const days = Math.round((Number(value.ttlMs) || 0) / 86400000);
   const kept = days ? ` и удаляются через ${days} дн.` : '';
@@ -862,16 +918,24 @@ const storageNote = computed(() => {
   return `Записи остаются в Cockpit${kept} — сейчас ${value.files} на диске, ${mb(value.bytes)}`;
 });
 
-/** Байты кадра. Имя собрал сервер, путь на диске наружу не выходит вовсе. */
-function frameUrl(name) { return `${BASE}/api/media/frame/${name}`; }
-function clipUrl(name) { return `${BASE}/api/media/clip/${name}`; }
+// Байты кадра и фрагмента: имя собрал сервер, путь на диске наружу не выходит вовсе.
+function frameUrl(name: string): string {
+  return mediaApi.frameUrl(name);
+}
+
+function clipUrl(name: string): string {
+  return mediaApi.clipUrl(name);
+}
 
 // Кадр и фрагмент открываются ОБЩИМ просмотрщиком кокпита (тем же, что показывает
 // картинки чата), а не новой вкладкой. Разбор встречи — работа в одном экране: уход
 // на соседнюю вкладку ради картинки уносит из виду набранные черновики, а возвращаться
 // приходится руками. Escape, возврат фокуса и слой поверх страницы там уже свои.
-function showFrame(d) {
-  if (!d.frame) return;
+function showFrame(d: VideoDraft) {
+  if (!d.frame) {
+    return;
+  }
+
   preview.showImage({
     src: frameUrl(d.frame.name),
     name: `Кадр записи на ${mmss(d.frame.at)}`,
@@ -879,8 +943,11 @@ function showFrame(d) {
   });
 }
 
-function showClip(d) {
-  if (!d.clip) return;
+function showClip(d: VideoDraft) {
+  if (!d.clip) {
+    return;
+  }
+
   preview.showVideo({
     src: clipUrl(d.clip.name),
     name: `Фрагмент ${mmss(d.clip.from)} – ${mmss(d.clip.to)}`,
@@ -895,9 +962,15 @@ function showClip(d) {
  */
 const speechTail = computed(() => {
   const total = mediaDuration.value;
-  const last = segments.value.length ? Number(segments.value.at(-1).end) : null;
-  if (!total || !Number.isFinite(last)) return null;
+  const lastSegment = segments.value.at(-1);
+  const last = lastSegment ? Number(lastSegment.end) : null;
+
+  if (!total || last === null || !Number.isFinite(last)) {
+    return null;
+  }
+
   const silence = total - last;
+
   return silence > 60 && silence / total > 0.2 ? { last, silence } : null;
 });
 
@@ -918,21 +991,29 @@ const PARA_CHARS = 700;      // и потолок на случай непрер
  * него абзац вырастает в нечитаемую простыню.
  */
 const paragraphs = computed(() => {
-  const out = [];
-  let current = null;
-  let prevEnd = null;
+  const out: { start: number; text: string }[] = [];
+  let current: { start: number; text: string } | null = null;
+  let prevEnd: number | null = null;
+
   for (const seg of segments.value) {
     const text = (seg.text || '').trim();
-    if (!text) continue;
+
+    if (!text) {
+      continue;
+    }
+
     const gap = prevEnd == null ? 0 : (seg.start || 0) - prevEnd;
+
     if (!current || gap > PAUSE_SEC || current.text.length > PARA_CHARS) {
       current = { start: seg.start || 0, text };
       out.push(current);
     } else {
       current.text += ` ${text}`;
     }
+
     prevEnd = seg.end ?? seg.start ?? prevEnd;
   }
+
   return out;
 });
 const plainText = computed(() => paragraphs.value
@@ -940,7 +1021,12 @@ const plainText = computed(() => paragraphs.value
   .join('\n\n'));
 
 const copied = ref(false);
-let copiedTimer = null;
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Копирование расшифровки. Отказ буфера (нет разрешения, небезопасный контекст) —
+ * не молчаливая пропажа: человеку называется запасной путь.
+ */
 async function copyText() {
   const ok = await writeClipboardText(plainText.value);
 
@@ -952,13 +1038,20 @@ async function copyText() {
 
   copied.value = true;
   clearTimeout(copiedTimer);
-  copiedTimer = setTimeout(() => { copied.value = false; }, 1600);
+  copiedTimer = setTimeout(() => {
+    copied.value = false;
+  }, 1600);
 }
 
+/**
+ * Скачивание расшифровки файлом. Object URL освобождается сразу после клика: ссылка
+ * нужна ровно на время, пока браузер забирает содержимое.
+ */
 function downloadText() {
   const blob = new Blob([plainText.value], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+
   a.href = url;
   a.download = `расшифровка-${new Date().toISOString().slice(0, 10)}.txt`;
   document.body.appendChild(a);
@@ -986,7 +1079,9 @@ async function clearSession() {
       { danger: true, okText: 'Убрать' },
     );
 
-    if (!ok) return;
+    if (!ok) {
+      return;
+    }
   }
 
   session.reset();
@@ -1000,23 +1095,64 @@ async function clearSession() {
 // `null`, и `CREATED_BY` порталу не передаётся вовсе (docs/cockpit/b24.md). Но на
 // встрече поводы приносят разные люди, и задача «от того, кто просил» читается иначе,
 // чем «от меня»; портал такое поле принимает, поэтому выбор отдан человеку.
-const b24users = ref([]);
-const b24groups = ref([]);
-api.get('/api/b24/users').then((d) => { b24users.value = d.users || []; }).catch(() => {});
-api.get('/api/b24/groups').then((d) => { b24groups.value = d.groups || []; }).catch(() => {});
+// Ростер и проекты принадлежат плагину B24: его контракт живёт отдельно, а разделу
+// «Видео» от него нужны только имя и идентификатор для селекта.
+interface B24Option {
+  id: number | string;
+  name?: string;
+  title?: string;
+}
+
+const b24users = ref<B24Option[]>([]);
+const b24groups = ref<B24Option[]>([]);
+
+/**
+ * Список для селекта из ответа портала. Ростер принадлежит плагину B24, и раздел
+ * читает из него только массив: непонятная форма превращается в пустой выбор.
+ */
+function optionList(value: unknown, key: string): B24Option[] {
+  const source = value !== null && typeof value === 'object'
+    ? (value as Record<string, unknown>)[key]
+    : null;
+
+  return Array.isArray(source) ? source as B24Option[] : [];
+}
+
+api.get('/api/b24/users').then((d) => {
+  b24users.value = optionList(d, 'users');
+}).catch(() => {});
+api.get('/api/b24/groups').then((d) => {
+  b24groups.value = optionList(d, 'groups');
+}).catch(() => {});
 
 // Смена общего выбора догоняет только те черновики, которые человек не трогал сам.
 watch(defCreator, (value, prev) => {
-  for (const d of drafts.value) if (d.createdById === prev) d.createdById = value;
+  for (const d of drafts.value) {
+    if (d.createdById === prev) {
+      d.createdById = value;
+    }
+  }
 });
 watch(defResponsible, (value, prev) => {
-  for (const d of drafts.value) if (d.responsibleId === prev) d.responsibleId = value;
+  for (const d of drafts.value) {
+    if (d.responsibleId === prev) {
+      d.responsibleId = value;
+    }
+  }
 });
 watch(defGroup, (value, prev) => {
-  for (const d of drafts.value) if (d.groupId === prev) d.groupId = value;
+  for (const d of drafts.value) {
+    if (d.groupId === prev) {
+      d.groupId = value;
+    }
+  }
 });
 watch(defPriority, (value, prev) => {
-  for (const d of drafts.value) if (d.priority === prev) d.priority = value;
+  for (const d of drafts.value) {
+    if (d.priority === prev) {
+      d.priority = value;
+    }
+  }
 });
 
 // Перетаскивание файла на карточку. Счётчик enter/leave нужен потому, что `dragleave`
@@ -1025,7 +1161,7 @@ watch(defPriority, (value, prev) => {
 const dragDepth = ref(0);
 const dragOver = computed(() => dragDepth.value > 0);
 
-function onDragEnter(event) {
+function onDragEnter(event: DragEvent) {
   if (event.dataTransfer?.types?.includes('Files')) {
     dragDepth.value++;
   }
@@ -1042,7 +1178,7 @@ function onDragLeave() {
  * перетаскивание не перебивает: у пикера в это время `disabled`, и второй путь
  * обязан вести себя так же, иначе запись подменялась бы на середине распознавания.
  */
-function onDrop(event) {
+function onDrop(event: DragEvent) {
   dragDepth.value = 0;
 
   if (uploading.value || needsPoll.value) {
@@ -1059,7 +1195,9 @@ function onDrop(event) {
 // Возврат в раздел дочитывает статусы частей и, если разбор ещё идёт, продолжает
 // поллинг. После перезагрузки страницы у восстановленных частей есть только jobId:
 // расшифровка и прогресс лежат на сервере и приезжают этим же запросом.
-onMounted(() => { void session.resume(); });
+onMounted(() => {
+  void session.resume();
+});
 
 // Уход со страницы дожимает снимок сеанса: отложенная запись пережила бы саму вью и
 // сработала бы неизвестно когда. Поллинг при этом не трогаем — он принадлежит сеансу

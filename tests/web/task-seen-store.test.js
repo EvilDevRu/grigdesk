@@ -20,7 +20,7 @@ async function loadActualStore() {
   const code = (await readFile(STORE_PATH, 'utf8'))
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
     .replace(
-      "import { api } from '../shared/api-client.js';",
+      "import { api } from '../shared/apiClient.ts';",
       'const api = globalThis.__taskSeenApi;',
     );
   actualStoreModule = await import(

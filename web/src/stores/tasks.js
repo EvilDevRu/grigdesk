@@ -1,7 +1,7 @@
 // Кеш деталей задач B24 + действия (таймер/завершить/коммент) через кокпит.
 // Цель — управлять задачей НЕ выходя в портал (исключить сторонние ресурсы).
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import { useBoardStore } from './board.js';
 
 export const useTasksStore = defineStore('tasks', {

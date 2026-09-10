@@ -78,17 +78,17 @@ export function compileChatSession(prefix) {
         'export const useRouter = () =>',
         `  globalThis.${prefix}Router || { push() {} };`,
       ].join('\n'),
-      '../../shared/api-client.js': `export const api = globalThis.${prefix}Api;`,
+      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
       '../../features/speech/provider.js': speechProviderStub(prefix),
       '../../stores/chat.js': [
         `export const CONTEXT_WINDOW = globalThis.${prefix}ContextWindow || 200000;`,
         `export const useChatStore = globalThis.${prefix}ChatStore;`,
       ].join('\n'),
-      '../../shared/chat-context.js': [
+      '../../../../shared/chatContext.ts': [
         'export const contextFill = (...args) =>',
         '  globalThis.__sharedChatContextFill(...args);',
       ].join('\n'),
-      '../../shared/clipboard.js': [
+      '../../shared/clipboard.ts': [
         'export async function writeClipboardText(...args) {',
         `  const helper = globalThis.${prefix}WriteClipboardText;`,
         '  return helper ? helper(...args) : true;',
@@ -104,19 +104,19 @@ export function compileChatSession(prefix) {
       './ChatQuestion.vue': inertComponentStub('chat-question-stub'),
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
       '../../ui': uiFacadeStub(prefix),
-      '../../shared/md.js': 'export const mdToHtml = (text) => String(text || "");',
+      '../../shared/md.ts': 'export const mdToHtml = (text) => String(text || "");',
       '../../features/documents/links.js': 'export const documentLinkFromClick = () => "";',
       '../../features/code/links.ts': [
         'export const chatFileLinkHref = () => "";',
         'export const codeLinkFromClick = () => null;',
         'export const loadCodeRoots = () => Promise.resolve([]);',
       ].join('\n'),
-      '../../shared/tools/launcher.js': [
+      '../../shared/tools/launcher.ts': [
         'export function useToolLauncher() {',
         `  return globalThis.${prefix}ToolLauncher || { openTool() {} };`,
         '}',
       ].join('\n'),
-      '../../stores/document-preview.js': [
+      '../../stores/documentPreview.ts': [
         'export function useDocumentPreviewStore() {',
         `  return globalThis.${prefix}DocumentPreview || { show() {}, showImage() {} };`,
         '}',

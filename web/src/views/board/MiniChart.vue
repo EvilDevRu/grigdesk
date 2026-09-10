@@ -29,7 +29,7 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import { hoursToHM } from '../../shared/format.js';
+import { hoursToHM } from '../../shared/format.ts';
 
 // Компактный линейный график: «Вы» (сплошная) + «Коллеги» (пунктир). SVG, без библиотек.
 // Наведение — тултип с чтением конкретного дня; заголовок — последний день С ДАННЫМИ

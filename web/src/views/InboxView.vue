@@ -103,13 +103,14 @@
           <h2>{{ item.title }}</h2>
           <p v-if="item.description" class="description">{{ item.description }}</p>
           <p class="meta">{{ item.project }} · {{ item.kind }} · {{ formatTime(item.firstAt) }}</p>
-          <div v-if="autoTaskState(item)" class="auto-state" :class="autoTaskState(item).kind">
+          <div v-for="auto in autoTaskStates(item)" :key="`${item.ref}:auto`"
+               class="auto-state" :class="auto.kind">
             <p>
-              <UiSpinner v-if="autoTaskState(item).kind === 'judging'" decorative />
-              {{ autoTaskState(item).text }}
+              <UiSpinner v-if="auto.kind === 'judging'" decorative />
+              {{ auto.text }}
             </p>
-            <ul v-if="autoTaskState(item).attachments?.length" class="blocked-attachments">
-              <li v-for="(attachment, blockedIndex) in autoTaskState(item).attachments"
+            <ul v-if="auto.attachments?.length" class="blocked-attachments">
+              <li v-for="(attachment, blockedIndex) in auto.attachments"
                   :key="`${item.ref}:blocked:${blockedIndex}`">
                 <strong>{{ attachment.label }}</strong>
                 <span v-if="attachment.reason"> — {{ attachment.reason }}</span>
@@ -130,9 +131,10 @@
           <p v-if="itemReadOnly(item)" class="read-only item-read-only">
             Канал отключён: это обращение доступно только для чтения.
           </p>
-          <div v-if="itemAlerts[item.ref]" class="item-alert" :class="itemAlerts[item.ref].kind"
-               :role="itemAlerts[item.ref].kind === 'bad' ? 'alert' : 'status'">
-            <span>{{ itemAlerts[item.ref].text }}</span>
+          <div v-for="alert in itemAlertList(item)" :key="`${item.ref}:alert`"
+               class="item-alert" :class="alert.kind"
+               :role="alert.kind === 'bad' ? 'alert' : 'status'">
+            <span>{{ alert.text }}</span>
           </div>
 
           <div class="messages">
@@ -216,7 +218,24 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { api } from '../shared/api-client.js';
+import {
+  inboxApi,
+  inboxBlockedAttachments,
+  inboxErrorCode,
+  inboxErrorMessage,
+  inboxPluginDisabled,
+} from '../shared/inboxApi.ts';
+import type {
+  InboxAttachment,
+  InboxBlockedAttachment,
+  InboxChannel,
+  InboxDecision,
+  InboxDecisionInput,
+  InboxDecisionResult,
+  InboxItem,
+  InboxList,
+  InboxMessage,
+} from '../../../shared/inboxContracts.ts';
 import {
   UiActionLink,
   UiButton,
@@ -227,7 +246,7 @@ import {
   confirmDialog,
   promptDialog,
 } from '../ui';
-import { useSse } from '../composables/useSse.js';
+import { useSse } from '../composables/useSse.ts';
 
 // Inbox показывает только public projection общего API. Provider identity,
 // accountRef и native payload в браузере не нужны и здесь не ожидаются.
@@ -241,15 +260,26 @@ const notice = ref('');
 const noticeKind = ref('good');
 const busy = ref('');
 const activeSection = ref('review');
-const payload = ref({ items: [], channels: [], errors: [], truncated: false, worker: null });
-const selection = reactive({});
-const itemAlerts = reactive({});
+const payload = ref<InboxList>({
+  items: [],
+  channels: [],
+  errors: [],
+  truncated: false,
+  limit: null,
+  worker: null,
+});
+const selection = reactive<Record<string, string[]>>({});
+const itemAlerts = reactive<Record<string, {
+  kind: string;
+  text: string;
+  retry?: { revision: string; messageRefs: string[] };
+}>>({});
 // Набранное пояснение живёт до успешной отправки: карточка может обновиться по
 // SSE прямо во время набора, а переписывать абзац заново человек не должен.
-const noteDrafts = reactive({});
+const noteDrafts = reactive<Record<string, string>>({});
 const nowMs = ref(Date.now());
 let loadVersion = 0;
-let clockTimer = null;
+let clockTimer: ReturnType<typeof setInterval> | null = null;
 
 const channelsById = computed(() => new Map(
   payload.value.channels.map((channel) => [channel.id, channel]),
@@ -259,7 +289,8 @@ const channelsById = computed(() => new Map(
 // несколько задач карточка полностью покрыта решениями, но остаётся `mixed`. По статусу
 // она висела бы в «К разбору» без единой доступной кнопки, а из «Истории» выпадала бы
 // вовсе. Правило то же, что у серверного счётчика очереди.
-const pendingMessages = (item) => (item.messages || []).filter((message) => !message.decision);
+const pendingMessages = (item: InboxItem) => (item.messages || [])
+  .filter((message) => !message.decision);
 const reviewItems = computed(() => payload.value.items.filter(
   (item) => pendingMessages(item).length > 0,
 ));
@@ -277,19 +308,30 @@ const analysisBlocksByRef = computed(() => new Map(
     .map((entry) => [entry.ref, entry]),
 ));
 
+// Почему автозадачи молчат. Причины разные, и следующий шаг у них разный: у одной не
+// выбрана модель, у другой не подключён Битрикс24, у третьей упал сам разбор. Свести
+// их к общему «остановлено» значило бы отправить человека искать неисправность вслепую.
 const automationNotice = computed(() => {
   const worker = payload.value.worker;
-  if (!worker) return null;
-  if (worker.readiness === 'no_model') return {
-    kind: 'warn',
-    text: 'Автозадачи приостановлены: в плагине «Входящие» не выбрана модель разбора.',
-    settings: true,
-  };
-  if (worker.readiness === 'no_b24') return {
-    kind: 'warn',
-    text: 'Автозадачи приостановлены: Битрикс24 не подключён.',
-    settings: false,
-  };
+
+  if (!worker) {
+    return null;
+  }
+  if (worker.readiness === 'no_model') {
+    return {
+      kind: 'warn',
+      text: 'Автозадачи приостановлены: в плагине «Входящие» не выбрана модель разбора.',
+      settings: true,
+    };
+  }
+  if (worker.readiness === 'no_b24') {
+    return {
+      kind: 'warn',
+      text: 'Автозадачи приостановлены: Битрикс24 не подключён.',
+      settings: false,
+    };
+  }
+
   const incompatibleModel = [
     'executor_unavailable',
     'invalid_model_ref',
@@ -302,63 +344,101 @@ const automationNotice = computed(() => {
     'unsupported_media',
     'unsupported_model',
   ];
-  if (incompatibleModel.includes(worker.readiness)
-      || incompatibleModel.includes(worker.lastReason)) return {
-    kind: 'warn',
-    text: 'Автозадачи приостановлены: выбранная модель не поддерживает безопасный разбор входящих.',
-    settings: true,
-  };
-  if (worker.readiness === 'stopped') return {
-    kind: 'bad', text: 'Автообработчик входящих остановлен.', settings: false,
-  };
-  if (worker.readiness === 'unavailable') return {
-    kind: 'bad', text: 'Состояние автообработчика временно недоступно.', settings: false,
-  };
-  if (['snapshot_failed', 'tick_failed'].includes(worker.lastReason)) return {
-    kind: 'bad', text: 'Последний автоматический разбор завершился технической ошибкой.', settings: false,
-  };
+
+  if (incompatibleModel.includes(String(worker.readiness))
+      || incompatibleModel.includes(String(worker.lastReason))) {
+    return {
+      kind: 'warn',
+      text: 'Автозадачи приостановлены: выбранная модель не поддерживает '
+        + 'безопасный разбор входящих.',
+      settings: true,
+    };
+  }
+  if (worker.readiness === 'stopped') {
+    return {
+      kind: 'bad',
+      text: 'Автообработчик входящих остановлен.',
+      settings: false,
+    };
+  }
+  if (worker.readiness === 'unavailable') {
+    return {
+      kind: 'bad',
+      text: 'Состояние автообработчика временно недоступно.',
+      settings: false,
+    };
+  }
+  if (['snapshot_failed', 'tick_failed'].includes(String(worker.lastReason))) {
+    return {
+      kind: 'bad',
+      text: 'Последний автоматический разбор завершился технической ошибкой.',
+      settings: false,
+    };
+  }
+
   return null;
 });
 
-function isPluginDisabled(err) {
-  return err?.status === 404 && err?.data?.error === 'plugin_disabled';
+function selectable(message: InboxMessage | undefined): boolean {
+  return Boolean(message) && (!message?.decision || message.decision.status === 'skipped');
 }
 
-function selectable(message) {
-  return Boolean(message) && (!message.decision || message.decision.status === 'skipped');
-}
+// Ключ выбора: новые сообщения выбираются вместе, а пропущенные — только внутри
+// одного решения, иначе возврат к разбору задел бы соседнее чужое решение.
+function selectionKey(message: InboxMessage | undefined): string {
+  if (!message?.decision) {
+    return 'new';
+  }
+  if (message.decision.status !== 'skipped') {
+    return '';
+  }
 
-function selectionKey(message) {
-  if (!message?.decision) return 'new';
-  if (message.decision.status !== 'skipped') return '';
   return `skipped:${message.decision.decisionId}:${message.decision.version}`;
 }
 
-function normalizeSelection(item, refs) {
+/**
+ * Выбор внутри одной карточки. Смешивать новые сообщения с пропущенными нельзя:
+ * первые становятся задачей, вторые возвращаются к разбору — это разные решения,
+ * и общая кнопка на них означала бы два действия под одним нажатием.
+ */
+function normalizeSelection(item: InboxItem, refs: string[]): string[] {
   const messagesByRef = new Map(item.messages.map((message) => [message.messageRef, message]));
   const allowed = refs.map((ref) => messagesByRef.get(ref)).filter(selectable);
   const key = selectionKey(allowed[0]);
-  if (!key) return [];
+
+  if (!key) {
+    return [];
+  }
+
   const accepted = new Set(allowed.filter((message) => selectionKey(message) === key)
-    .map((message) => message.messageRef));
+    .map((message) => message?.messageRef));
+
   return item.messages.map((message) => message.messageRef).filter((ref) => accepted.has(ref));
 }
 
-function sameRefs(left, right) {
+function sameRefs(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((ref, index) => ref === right[index]);
 }
 
-function syncSelection(items) {
+// Выбор и плашки живут рядом с карточками: пропавшие уносятся вместе с ними, а у
+// выживших выбор пересобирается — сообщение могло стать решённым, пока человек
+// смотрел в другую сторону, и прежняя отметка означала бы уже не то же самое.
+function syncSelection(items: InboxItem[]): void {
   const live = new Set(items.map((item) => item.ref));
+
   for (const ref of Object.keys(selection)) {
-    if (!live.has(ref)) delete selection[ref];
+    if (!live.has(ref)) {
+      delete selection[ref];
+    }
   }
   for (const ref of Object.keys(itemAlerts)) {
-    if (!live.has(ref)) delete itemAlerts[ref];
+    if (!live.has(ref)) {
+      delete itemAlerts[ref];
+    }
   }
   for (const item of items) {
     if (Object.hasOwn(selection, item.ref)) {
-      selection[item.ref] = normalizeSelection(item, selection[item.ref]);
+      selection[item.ref] = normalizeSelection(item, selection[item.ref] || []);
     } else {
       const fresh = item.messages.filter((message) => !message.decision)
         .map((message) => message.messageRef);
@@ -366,113 +446,174 @@ function syncSelection(items) {
         ? fresh
         : item.messages.filter((message) => message.decision?.status === 'skipped')
           .map((message) => message.messageRef);
+
       selection[item.ref] = normalizeSelection(item, initial);
     }
+
     const retry = itemAlerts[item.ref]?.retry;
+
     if (retry && (retry.revision !== item.revision
-        || !sameRefs(retry.messageRefs, selection[item.ref]))) delete itemAlerts[item.ref];
+        || !sameRefs(retry.messageRefs, selection[item.ref] || []))) {
+      delete itemAlerts[item.ref];
+    }
   }
 }
 
-async function load() {
+// Полная перезагрузка раздела. Ответ, пришедший позже своего запроса, отбрасывается:
+// SSE и ручное обновление легко обгоняют друг друга, и старый список затёр бы новый
+// прямо под руками у человека.
+async function load(): Promise<void> {
   const own = ++loadVersion;
-  if (!payload.value.items.length && !payload.value.channels.length) loading.value = true;
+
+  if (!payload.value.items.length && !payload.value.channels.length) {
+    loading.value = true;
+  }
+
   try {
-    const data = await api.get('/api/inbox');
-    if (own !== loadVersion) return;
-    const next = {
-      items: Array.isArray(data?.items) ? data.items : [],
-      channels: Array.isArray(data?.channels) ? data.channels : [],
-      errors: Array.isArray(data?.errors) ? data.errors : [],
-      truncated: data?.truncated === true,
-      worker: data?.worker && typeof data.worker === 'object' ? data.worker : null,
-    };
+    const next = await inboxApi.list();
+
+    if (own !== loadVersion) {
+      return;
+    }
+
     payload.value = next;
     syncSelection(next.items);
     unavailable.value = false;
     error.value = '';
   } catch (err) {
-    if (own !== loadVersion) return;
-    if (isPluginDisabled(err)) {
+    if (own !== loadVersion) {
+      return;
+    }
+    if (inboxPluginDisabled(err)) {
       unavailable.value = true;
       error.value = '';
       payload.value = {
-        items: [], channels: [], errors: [], truncated: false, worker: null,
+        items: [],
+        channels: [],
+        errors: [],
+        truncated: false,
+        limit: null,
+        worker: null,
       };
     } else {
-      error.value = err?.message || 'Не удалось загрузить входящие.';
+      error.value = inboxErrorMessage(err, 'Не удалось загрузить входящие.');
     }
   } finally {
-    if (own === loadVersion) loading.value = false;
+    if (own === loadVersion) {
+      loading.value = false;
+    }
   }
 }
 
-function selectedRefs(item) {
+function selectedRefs(item: InboxItem): string[] {
   return selection[item.ref] || [];
 }
 
-function toggleMessage(item, messageRef, checked) {
+// Отметка одного сообщения. Новые и пропущенные не смешиваются: отметка другого рода
+// сбрасывает прежний выбор, иначе одна кнопка означала бы два разных решения сразу.
+function toggleMessage(item: InboxItem, messageRef: string, checked: boolean): void {
   const target = item.messages.find((message) => message.messageRef === messageRef);
-  if (!target || !selectable(target)) return;
+
+  if (!target || !selectable(target)) {
+    return;
+  }
+
   const refs = new Set(selectedRefs(item));
+
   if (checked) {
     const key = selectionKey(target);
+
     for (const message of selectedMessages(item)) {
-      if (selectionKey(message) !== key) refs.delete(message.messageRef);
+      if (selectionKey(message) !== key) {
+        refs.delete(message.messageRef);
+      }
     }
+
     refs.add(messageRef);
+  } else {
+    refs.delete(messageRef);
   }
-  else refs.delete(messageRef);
+
   selection[item.ref] = normalizeSelection(item, [...refs]);
   delete itemAlerts[item.ref];
 }
 
-function selectedMessages(item) {
+function selectedMessages(item: InboxItem): InboxMessage[] {
   const refs = new Set(selectedRefs(item));
+
   return item.messages.filter((message) => refs.has(message.messageRef));
 }
 
-function canDecide(item) {
+function canDecide(item: InboxItem): boolean {
   const messages = selectedMessages(item);
+
   return messages.length > 0 && messages.every((message) => !message.decision);
 }
 
-function resetDecision(item) {
+/**
+ * Решение, к которому относится выбор. Вернуть к разбору можно только целое чужое
+ * решение: половина пропущенных сообщений одного решения — это уже другое решение,
+ * и записывать его поверх прежнего нельзя.
+ */
+function resetDecision(item: InboxItem): InboxDecision | null {
   const messages = selectedMessages(item);
-  if (!messages.length || messages.some((message) => message.decision?.status !== 'skipped')) return null;
-  const first = messages[0].decision;
-  return messages.every((message) => message.decision.decisionId === first.decisionId
-      && message.decision.version === first.version)
+
+  if (!messages.length || messages.some((message) => message.decision?.status !== 'skipped')) {
+    return null;
+  }
+
+  const first = messages[0]?.decision;
+
+  if (!first) {
+    return null;
+  }
+
+  return messages.every((message) => message.decision?.decisionId === first.decisionId
+      && message.decision?.version === first.version)
     ? first
     : null;
 }
 
-function selectionMode(item) {
-  if (canDecide(item)) return 'new';
-  if (resetDecision(item)) return 'skipped';
+// Что сейчас можно сделать с выбором: поставить задачу, вернуть к разбору или ничего.
+// Шаблон спрашивает об этом одним словом вместо трёх проверок на каждой карточке.
+function selectionMode(item: InboxItem): string {
+  if (canDecide(item)) {
+    return 'new';
+  }
+  if (resetDecision(item)) {
+    return 'skipped';
+  }
+
   return 'none';
 }
 
-function taskLinks(item) {
+// Ссылки на созданные задачи. Разбитая на части карточка ведёт в несколько задач,
+// поэтому дубли по адресу снимаются, а подпись называет номер только при выборе.
+function taskLinks(item: InboxItem) {
   const decisions = [item.decision, ...item.messages.map((message) => message.decision)];
   const seen = new Set();
+
   return decisions.filter((decision) => {
-    if (!decision?.taskUrl || seen.has(decision.taskUrl)) return false;
+    if (!decision?.taskUrl || seen.has(decision.taskUrl)) {
+      return false;
+    }
+
     seen.add(decision.taskUrl);
+
     return true;
   }).map((decision, index, links) => ({
-    url: decision.taskUrl,
+    url: String(decision?.taskUrl || ''),
     label: links.length === 1
       ? 'Открыть задачу'
-      : `Открыть задачу ${decision.taskId || index + 1}`,
+      : `Открыть задачу ${decision?.taskId || index + 1}`,
   }));
 }
 
-function itemReadOnly(item) {
+function itemReadOnly(item: InboxItem): boolean {
   return channelsById.value.get(item.channel?.id)?.readOnly !== false;
 }
 
-const notificationReasons = Object.freeze({
+const notificationReasons: Record<string, string> = Object.freeze({
   unreachable: 'связь с Telegram оборвалась',
   rejected: 'канал отклонил отправку',
   plugin_disabled: 'канал выключен',
@@ -486,34 +627,65 @@ const notificationReasons = Object.freeze({
  * чате придётся человеку — а он об этом узнавал только из журнала сервера.
  * Правило `enabled` уважаем: у чата без галки ответа и не ждали.
  */
-function notificationFailure(notification) {
-  if (!notification || notification.enabled === false || notification.sent === true) return '';
-  const why = notificationReasons[notification.reason];
+function notificationFailure(notification: InboxDecisionResult['notification']): string {
+  if (!notification || notification.enabled === false || notification.sent === true) {
+    return '';
+  }
+
+  const why = notificationReasons[String(notification.reason)];
+
   return `, но ответ в исходный чат не отправлен${why ? ` (${why})` : ''} — сообщите там сами`;
 }
 
-async function mutateItem(item, action, { operatorNote = '' } = {}) {
-  if (busy.value || itemReadOnly(item)) return;
+/**
+ * Одно решение по карточке: задача, пропуск или возврат к разбору.
+ *
+ * Ревизия карточки и версия решения уезжают в теле — это оптимистичная блокировка.
+ * Отказ по протухшим данным не повторяется вслепую: список перечитывается, а человеку
+ * говорят, что обращение изменилось, — слепой повтор создал бы вторую задачу.
+ */
+async function mutateItem(
+  item: InboxItem,
+  action: string,
+  { operatorNote = '' }: { operatorNote?: string } = {},
+): Promise<void> {
+  if (busy.value || itemReadOnly(item)) {
+    return;
+  }
+
   const messageRefs = [...selectedRefs(item)];
-  const body = { revision: item.revision, messageRefs };
+  const body: InboxDecisionInput = { revision: item.revision, messageRefs };
+
   if (action === 'reset') {
     const decision = resetDecision(item);
-    if (!decision) return;
+
+    if (!decision) {
+      return;
+    }
+
     body.decisionId = decision.decisionId;
     body.decisionVersion = decision.version;
-  } else if (!canDecide(item)) return;
+  } else if (!canDecide(item)) {
+    return;
+  }
   if (action === 'task' && operatorNote) {
     body.operatorNote = operatorNote;
   }
+
   busy.value = `${item.ref}:${action}`;
   error.value = '';
   notice.value = '';
   noticeKind.value = 'good';
   delete itemAlerts[item.ref];
+
   try {
-    const done = await api.post(`/api/inbox/items/${encodeURIComponent(item.ref)}/${action}`, body);
-    const undelivered = action === 'task' && notificationFailure(done?.notification);
-    if (undelivered) noticeKind.value = 'warn';
+    const done = await inboxApi.decide(item.ref, action, body);
+    const undelivered = action === 'task' && notificationFailure(done.notification);
+
+    if (undelivered) {
+      noticeKind.value = 'warn';
+    }
+
     notice.value = action === 'task' ? `Задача создана${undelivered}`
       : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю'
         : 'Обращение возвращено к разбору';
@@ -521,11 +693,14 @@ async function mutateItem(item, action, { operatorNote = '' } = {}) {
     delete noteDrafts[item.ref];
     await load();
   } catch (err) {
-    const code = err?.data?.error;
+    const code = inboxErrorCode(err);
+
     if (['stale_item', 'stale_decision', 'account_changed'].includes(code)) {
       const text = 'Обращение изменилось — данные обновлены';
+
       delete selection[item.ref];
       await load();
+
       if (visibleItems.value.some((entry) => entry.ref === item.ref)) {
         itemAlerts[item.ref] = { kind: 'warn', text };
       } else {
@@ -537,12 +712,13 @@ async function mutateItem(item, action, { operatorNote = '' } = {}) {
       // пересказать суть. Модалка открывается сразу — отдельная плашка с кнопкой
       // означала бы лишний клик ровно там, где решение уже принято.
       openNoteDialog(item, messageRefs, {
-        message: err?.message || 'Содержимое вложений разобрано не полностью.',
-        attachments: Array.isArray(err?.data?.attachments) ? err.data.attachments : [],
+        message: inboxErrorMessage(err, 'Содержимое вложений разобрано не полностью.'),
+        attachments: inboxBlockedAttachments(err),
       });
     } else {
       itemAlerts[item.ref] = {
-        kind: 'bad', text: err?.message || 'Не удалось выполнить действие с обращением.',
+        kind: 'bad',
+        text: inboxErrorMessage(err, 'Не удалось выполнить действие с обращением.'),
       };
     }
   } finally {
@@ -558,21 +734,29 @@ async function mutateItem(item, action, { operatorNote = '' } = {}) {
  * задачу без сути. Теперь человек, который видел вложение в самом канале,
  * пересказывает его — и этот текст уходит модели наравне с обращением.
  */
-async function openNoteDialog(item, messageRefs, { message, attachments }) {
+async function openNoteDialog(
+  item: InboxItem,
+  messageRefs: string[],
+  { message, attachments }: { message: string; attachments: InboxBlockedAttachment[] },
+): Promise<void> {
   const lines = [message];
+
   if (attachments.length) {
     lines.push('', 'Не удалось разобрать:');
+
     for (const attachment of attachments) {
       lines.push(attachment.reason
         ? `• ${attachment.label} — ${attachment.reason}`
         : `• ${attachment.label}`);
     }
   }
+
   lines.push(
     '',
     'Опишите своими словами, что там было и что нужно сделать.',
     'Текст уйдёт на разбор модели вместе с обращением и попадёт в описание задачи.',
   );
+
   const answer = await promptDialog({
     title: 'Опишите содержимое вложений',
     text: lines.join('\n'),
@@ -580,54 +764,74 @@ async function openNoteDialog(item, messageRefs, { message, attachments }) {
     okText: 'Разобрать и создать задачу',
     value: noteDrafts[item.ref] || '',
   });
-  if (answer === null) return;
+
+  if (answer === null) {
+    return;
+  }
+
   const note = String(answer).trim();
+
   // Черновик переживает и пустой ввод, и смену карточки: человек мог написать
   // абзац, и терять его из-за подсказки или гонки с новым сообщением нельзя.
   noteDrafts[item.ref] = note;
+
   if (!note) {
     itemAlerts[item.ref] = {
       kind: 'warn',
-      text: 'Без пояснения задача потеряет суть вложения. Нажмите «Создать задачу» ещё раз и опишите содержимое.',
+      text: 'Без пояснения задача потеряет суть вложения. '
+        + 'Нажмите «Создать задачу» ещё раз и опишите содержимое.',
     };
+
     return;
   }
+
   const current = payload.value.items.find((entry) => entry.ref === item.ref);
+
   if (!current || current.revision !== item.revision
       || !sameRefs(messageRefs, selectedRefs(item))) {
     itemAlerts[item.ref] = {
       kind: 'warn',
-      text: 'Обращение или выбор изменились, пока вы писали. Проверьте выбор и нажмите «Создать задачу» — текст пояснения сохранён.',
+      text: 'Обращение или выбор изменились, пока вы писали. Проверьте выбор '
+        + 'и нажмите «Создать задачу» — текст пояснения сохранён.',
     };
+
     return;
   }
+
   await mutateItem(item, 'task', { operatorNote: note });
 }
 
-async function changeParticipation(channel, action) {
-  if (busy.value || channel.readOnly || !Number.isSafeInteger(channel.activationVersion)) return;
+// Приём новых обращений каналом. Пауза не копит backlog: пришедшее за неё в очередь
+// потом не вернётся, поэтому остановка спрашивает подтверждение, а включение — нет.
+async function changeParticipation(channel: InboxChannel, action: string): Promise<void> {
+  if (busy.value || channel.readOnly || !Number.isSafeInteger(channel.activationVersion)) {
+    return;
+  }
   if (action === 'deactivate' && !(await confirmDialog(
-    'Остановить приём? Сообщения, пришедшие во время паузы, не попадут в очередь после возобновления.',
+    'Остановить приём? Сообщения, пришедшие во время паузы, '
+    + 'не попадут в очередь после возобновления.',
     { okText: 'Остановить приём' },
-  ))) return;
+  ))) {
+    return;
+  }
+
   busy.value = `${channel.id}:${action}`;
   error.value = '';
+
   try {
-    await api.post(`/api/inbox/channels/${encodeURIComponent(channel.id)}/${action}`, {
-      activationVersion: channel.activationVersion,
-    });
+    await inboxApi.changeParticipation(channel.id, action, channel.activationVersion);
     notice.value = action === 'activate'
       ? `${channel.label}: приём новых обращений включён.`
       : `${channel.label}: приём остановлен; пауза не станет backlog.`;
     await load();
   } catch (err) {
-    error.value = err?.message || 'Не удалось изменить приём канала.';
+    error.value = inboxErrorMessage(err, 'Не удалось изменить приём канала.');
   } finally {
     busy.value = '';
   }
 }
 
-function statusLabel(status) {
+function statusLabel(status: string): string {
   return ({
     new: 'К разбору',
     mixed: 'Частично разобрано',
@@ -637,17 +841,23 @@ function statusLabel(status) {
 }
 
 /** «Частично» верно только пока есть что разбирать: разбитая карточка покрыта целиком. */
-function itemStatusLabel(item) {
-  if (item.status === 'mixed' && !pendingMessages(item).length) return 'Разобрано по частям';
+function itemStatusLabel(item: InboxItem): string {
+  if (item.status === 'mixed' && !pendingMessages(item).length) {
+    return 'Разобрано по частям';
+  }
+
   return statusLabel(item.status);
 }
 
-function connectionLabel(connection) {
-  return ({ connected: 'Подключён', disconnected: 'Не подключён', degraded: 'Ошибка канала' })[connection]
-    || 'Состояние неизвестно';
+function connectionLabel(connection: string): string {
+  return ({
+    connected: 'Подключён',
+    disconnected: 'Не подключён',
+    degraded: 'Ошибка канала',
+  })[connection] || 'Состояние неизвестно';
 }
 
-function participationLabel(participation) {
+function participationLabel(participation: string): string {
   return ({
     active: 'Включён',
     deactivated: 'На паузе',
@@ -655,49 +865,73 @@ function participationLabel(participation) {
   })[participation] || 'Состояние неизвестно';
 }
 
-function channelSettingsHref(id) {
-  return ({ telegram: '#/telegram', github: '#/github' })[id] || '';
+function channelSettingsHref(id: string): string {
+  return ({ telegram: '#/telegram', github: '#/github' } as Record<string, string>)[id] || '';
 }
 
-function formatTime(value) {
+// Время приходит и в секундах, и в миллисекундах: у сообщений канала — Unix seconds,
+// у служебных отметок кокпита — миллисекунды. Различаем их по величине, а не по полю:
+// поле у разных каналов называется по-разному, а порядок величины — общий.
+function formatTime(value: number): string {
   const numeric = Number(value);
   const millis = numeric > 0 && numeric < 10_000_000_000 ? numeric * 1000 : numeric;
   const date = new Date(millis);
+
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ru-RU');
 }
 
-function formatRemaining(value) {
+// Остаток тишины до авторазбора. Секунды показываются только вместе с минутами:
+// «через 0 мин» человек читает как «уже сейчас», а это неправда.
+function formatRemaining(value: number): string {
   const total = Math.max(1, Math.ceil(value / 1000));
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
-  if (!minutes) return `${seconds} с`;
+
+  if (!minutes) {
+    return `${seconds} с`;
+  }
+
   return seconds ? `${minutes} мин ${seconds} с` : `${minutes} мин`;
 }
 
-function formatBytes(value) {
+// Размер вложения человеческой единицей. Отрицательное и нечисловое значение — это
+// не ноль, а «размер неизвестен»: пустая подпись честнее выдуманных «0 Б».
+function formatBytes(value: unknown): string {
   const size = Number(value);
-  if (!Number.isFinite(size) || size < 0) return '';
-  if (size < 1024) return `${Math.round(size)} Б`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} КБ`;
+
+  if (!Number.isFinite(size) || size < 0) {
+    return '';
+  }
+  if (size < 1024) {
+    return `${Math.round(size)} Б`;
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} КБ`;
+  }
+
   return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} МБ`;
 }
 
-function attachmentLabel(attachment) {
-  const kind = String(attachment?.displayLabel || attachment?.kind || 'Вложение').trim() || 'Вложение';
+// Подпись вложения: род, имя файла и размер. Имя, повторяющее род, не показывается —
+// иначе строка читалась бы как «Фото: Фото» у файлов без собственного названия.
+function attachmentLabel(attachment: InboxAttachment): string {
+  const kind = String(attachment?.displayLabel || attachment?.kind || 'Вложение').trim();
   const name = String(attachment?.name || '').trim();
   const size = formatBytes(attachment?.size);
-  return [name && name !== kind ? `${kind}: ${name}` : kind, size].filter(Boolean).join(' · ');
+  const label = kind || 'Вложение';
+
+  return [name && name !== label ? `${label}: ${name}` : label, size].filter(Boolean).join(' · ');
 }
 
-function attachmentAnalysis(attachment, item) {
+// Ход разбора вложения для человека. Канал мог его вовсе не начинать, поэтому
+// подпись всегда есть: она берётся из состояния самой карточки.
+function attachmentAnalysis(attachment: InboxAttachment, item: InboxItem) {
   const rawAnalysis = attachment?.attachmentAnalysis ?? attachment?.analysis ?? null;
-  const nested = rawAnalysis && typeof rawAnalysis === 'object'
-    ? rawAnalysis
-    : null;
+  const nested = rawAnalysis && typeof rawAnalysis === 'object' ? rawAnalysis : null;
   const status = String(
     (typeof rawAnalysis === 'string' ? rawAnalysis : nested?.status) || attachment?.status || '',
   ).toLowerCase();
-  const labels = {
+  const labels: Record<string, string> = {
     queued: 'Ждёт разбора',
     pending: 'Ждёт разбора',
     processing: 'Разбирается',
@@ -718,6 +952,7 @@ function attachmentAnalysis(attachment, item) {
   const autoTaskDone = item?.status === 'task' && item?.decision?.by === 'auto';
   let fallbackStatus = 'pending';
   let fallbackLabel = 'Будет проверено до задачи';
+
   if (blocked) {
     fallbackStatus = 'failed';
     fallbackLabel = 'Не удалось разобрать';
@@ -729,6 +964,7 @@ function attachmentAnalysis(attachment, item) {
   } else if (item?.status === 'skipped') {
     fallbackLabel = 'Не разбиралось';
   }
+
   return {
     status: status || fallbackStatus,
     label: labels[status] || fallbackLabel,
@@ -736,41 +972,83 @@ function attachmentAnalysis(attachment, item) {
   };
 }
 
-function autoTaskState(item) {
-  // Живое состояние воркера сильнее расписания: между обратным отсчётом и готовым
-  // решением проходят минуты разбора, и карточка обязана показывать эту работу.
+// Обёртка для шаблона: ноль или один элемент вместо повторных вызовов с проверкой
+// на каждой строке. Наличие состояния проверяется один раз, а не четырежды.
+function autoTaskStates(item: InboxItem) {
+  const state = autoTaskState(item);
+
+  return state ? [state] : [];
+}
+
+// То же для плашки обращения: она либо есть, либо её нет.
+function itemAlertList(item: InboxItem) {
+  const alert = itemAlerts[item.ref];
+
+  return alert ? [alert] : [];
+}
+
+// Что происходит с автозадачей этой карточки. Живое состояние воркера сильнее
+// расписания: между обратным отсчётом и готовым решением проходят минуты разбора,
+// и карточка обязана показывать эту работу, а не молчаливый обратный отсчёт.
+function autoTaskState(item: InboxItem) {
   const judging = payload.value.worker?.judging;
-  if (judging?.ref === item.ref && ['new', 'mixed'].includes(item.status)) return {
-    kind: 'judging',
-    text: 'Разбирается прямо сейчас: модель читает обращение и решает, какие задачи создать.',
-  };
-  if (item.status !== 'new' || !item.autoTask || typeof item.autoTask !== 'object') return null;
-  if (item.autoTask.enabled !== true) return {
-    kind: 'off', text: 'Автосоздание выключено для этого источника.',
-  };
+
+  if (judging?.ref === item.ref && ['new', 'mixed'].includes(item.status)) {
+    return {
+      kind: 'judging',
+      text: 'Разбирается прямо сейчас: модель читает обращение '
+        + 'и решает, какие задачи создать.',
+    };
+  }
+  if (item.status !== 'new' || !item.autoTask || typeof item.autoTask !== 'object') {
+    return null;
+  }
+  if (item.autoTask.enabled !== true) {
+    return {
+      kind: 'off',
+      text: 'Автосоздание выключено для этого источника.',
+    };
+  }
+
   const analysisBlock = analysisBlocksByRef.value.get(item.ref);
-  if (analysisBlock) return {
-    kind: 'blocked',
-    text: `Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите «Создать задачу» и опишите содержимое${
-      Number.isSafeInteger(analysisBlock.retryAtMs)
-        ? ` либо дождитесь новой попытки после ${formatTime(analysisBlock.retryAtMs)}`
-        : ''}.`,
-    // Причина у каждого файла своя: потолок Telegram в 20 МБ не лечится
-    // ожиданием, а сетевой сбой лечится. Без неё человек не знает, что делать.
-    attachments: Array.isArray(analysisBlock.attachments) ? analysisBlock.attachments : [],
-  };
+
+  if (analysisBlock) {
+    return {
+      kind: 'blocked',
+      text: 'Вложения не удалось полностью разобрать. Автозадача не создастся; нажмите '
+        + `«Создать задачу» и опишите содержимое${
+          Number.isSafeInteger(analysisBlock.retryAtMs)
+            ? ` либо дождитесь новой попытки после ${formatTime(Number(analysisBlock.retryAtMs))}`
+            : ''}.`,
+      // Причина у каждого файла своя: потолок Telegram в 20 МБ не лечится
+      // ожиданием, а сетевой сбой лечится. Без неё человек не знает, что делать.
+      attachments: Array.isArray(analysisBlock.attachments) ? analysisBlock.attachments : [],
+    };
+  }
+
   const readyAtMs = Number(item.autoTask.readyAtMs);
-  if (Number.isFinite(readyAtMs) && readyAtMs > nowMs.value) return {
-    kind: 'waiting',
-    text: `Авторазбор через ${formatRemaining(readyAtMs - nowMs.value)} тишины. Новые сообщения продлят ожидание.`,
-  };
+
+  if (Number.isFinite(readyAtMs) && readyAtMs > nowMs.value) {
+    return {
+      kind: 'waiting',
+      text: `Авторазбор через ${formatRemaining(readyAtMs - nowMs.value)} тишины. `
+        + 'Новые сообщения продлят ожидание.',
+    };
+  }
+
   const readiness = payload.value.worker?.readiness;
-  if (readiness && readiness !== 'ready') return {
-    kind: 'blocked', text: 'Обращение готово к авторазбору, но автоматика приостановлена.',
-  };
+
+  if (readiness && readiness !== 'ready') {
+    return {
+      kind: 'blocked',
+      text: 'Обращение готово к авторазбору, но автоматика приостановлена.',
+    };
+  }
+
   return {
     kind: 'queued',
-    text: 'Обращение готово к авторазбору. Если модель не уверена, оно останется здесь для ручного решения.',
+    text: 'Обращение готово к авторазбору. Если модель не уверена, '
+      + 'оно останется здесь для ручного решения.',
   };
 }
 
@@ -778,14 +1056,23 @@ function rememberPluginsTab() {
   localStorage.setItem('cockpit-settings-tab', 'plugins');
 }
 
-useSse((name) => { if (name === 'inbox-changed') load(); });
+useSse((name: string) => {
+  if (name === 'inbox-changed') {
+    void load();
+  }
+});
 onMounted(() => {
   load();
-  clockTimer = setInterval(() => { nowMs.value = Date.now(); }, 1000);
-  clockTimer.unref?.();
+  clockTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 1000);
+  (clockTimer as { unref?: () => void }).unref?.();
 });
 onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer);
+  if (clockTimer) {
+    clearInterval(clockTimer);
+  }
+
   clockTimer = null;
 });
 </script>

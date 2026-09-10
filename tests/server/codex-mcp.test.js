@@ -4,7 +4,7 @@ import test from 'node:test';
 import codex, {
   composeCodexMcpServers,
   parseCodexMcpInventory,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 test('Codex inventory не выдаёт конфигурацию за живое подключение и скрывает секреты', () => {
   const servers = parseCodexMcpInventory([

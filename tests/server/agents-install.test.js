@@ -6,8 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import agentsModule from '../../server/src/modules/agents/index.js';
-import { AgentsStore, defaults, serializeAgent } from '../../server/src/modules/agents/store.js';
+import agentsModule from '../../server/src/modules/agents/index.ts';
+import { AgentsStore, defaults, serializeAgent } from '../../server/src/modules/agents/store.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

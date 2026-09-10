@@ -37,7 +37,7 @@ async function makeWatch(t) {
 
   const module = await compileModule(webFile('src/stores/notify-watch.js'), {
     stubs: {
-      '../shared/api-client.js': [
+      '../shared/apiClient.ts': [
         'export const api = {',
         '  async get(url) {',
         '    const harness = globalThis.__notifyWatchHarness;',
@@ -48,7 +48,7 @@ async function makeWatch(t) {
         '  },',
         '};',
       ].join('\n'),
-      '../shared/notify.js': [
+      '../shared/notify.ts': [
         'export const notify = (title, body, tag) => {',
         '  globalThis.__notifyWatchHarness.notifications.push({ title, body, tag });',
         '  return Promise.resolve(true);',

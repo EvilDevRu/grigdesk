@@ -7,7 +7,7 @@ import test from 'node:test';
 let shelfModule;
 let shelfModuleError;
 try {
-  shelfModule = await import('../../server/src/lib/task-shelf-store.js');
+  shelfModule = await import('../../server/src/lib/taskShelfStore.ts');
 } catch (error) {
   shelfModuleError = error;
 }
@@ -77,6 +77,31 @@ test('Первая постановка канонизирует id и назн�
     snapshot: snapshot(),
     addedAtIsServerTime: true,
   });
+});
+
+test('Время оценки принимается числом, а запись прошлого формата переводится', async (t) => {
+  const { store } = await fixture(t);
+  const withAnalysis = (queuedAt) => ({
+    ...input(),
+    snapshot: {
+      ...snapshot(),
+      analysis: {
+        state: 'queued',
+        queuedAt,
+        startedAt: null,
+        finishedAt: null,
+        generatedAt: null,
+      },
+    },
+  });
+  const numeric = await store.put('scope-a', 42, withAnalysis(1_788_249_600_000));
+  const legacy = await store.put('scope-b', 42, withAnalysis('2026-09-01T08:00:00.000Z'));
+
+  assert.deepEqual([
+    numeric.entries[0]?.snapshot.analysis?.queuedAt,
+    legacy.entries[0]?.snapshot.analysis?.queuedAt,
+  ], [1_788_249_600_000, 1_788_249_600_000]);
+  await assert.rejects(() => store.put('scope-c', 42, withAnalysis('позавчера')));
 });
 
 test('Повторная запись без изменений сохраняет revision и addedAt', async (t) => {

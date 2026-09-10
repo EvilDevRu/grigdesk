@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { GitHubRulesStore } from '../../server/src/lib/github/rules-store.js';
+import { GitHubRulesStore } from '../../server/src/lib/github/rulesStore.ts';
 
 const ACCOUNT = 'acc_CCCCCCCCCCCCCCCCCCCCCC';
 const REPOSITORY = '777';

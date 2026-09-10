@@ -16,7 +16,7 @@ import {
   parseCodeRouteHref,
   parseCodeTarget,
 } from '../../web/src/features/code/links.ts';
-import { mdToHtml } from '../../web/src/shared/md.js';
+import { mdToHtml } from '../../web/src/shared/md.ts';
 
 const ROOTS = [
   { project: 'cockpit', repo: 'main', root: '/home/user/Workspace/cockpit', main: true, branch: 'dev' },

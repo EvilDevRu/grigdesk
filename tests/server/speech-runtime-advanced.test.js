@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   SPEECH_MODEL_CATALOG,
   SpeechRuntime,
-} from '../../server/src/lib/speech/index.js';
+} from '../../server/src/lib/speech/index.ts';
 
 function models(cachedIds = ['medium']) {
   return Object.values(SPEECH_MODEL_CATALOG).map((model) => ({

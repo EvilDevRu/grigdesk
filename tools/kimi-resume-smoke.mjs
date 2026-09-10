@@ -27,7 +27,7 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createAcpClient, initializeKimiAcp } from '../server/src/lib/kimi/acp-client.js';
+import { createAcpClient, initializeKimiAcp } from '../server/src/lib/kimi/acpClient.ts';
 
 const reportArgIndex = process.argv.indexOf('--report');
 const reportPath = reportArgIndex >= 0 ? (process.argv[reportArgIndex + 1] || '') : '';

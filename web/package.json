@@ -14,12 +14,24 @@
     "check:ui": "node scripts/check-ui-suite.mjs",
     "check:ui-styles": "node scripts/check-ui-control-styles.mjs",
     "test:ui-browser": "node scripts/check-ui-geometry.mjs",
-    "test:components": "node --experimental-strip-types --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
-    "test": "npm run typecheck:ui && npm run typecheck:docker && npm run typecheck:code && npm run typecheck:sandboxes && npm run typecheck:showcase && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components",
-    "typecheck:docker": "vue-tsc -p tsconfig.docker.json --noEmit && npm --prefix ../server run typecheck:docker",
-    "typecheck:code": "vue-tsc -p tsconfig.code.json --noEmit && npm --prefix ../server run typecheck:code",
-    "typecheck:sandboxes": "vue-tsc -p tsconfig.sandboxes.json --noEmit && npm --prefix ../server run typecheck:sandboxes",
-    "typecheck:showcase": "vue-tsc -p tsconfig.showcase.json --noEmit && npm --prefix ../server run typecheck:showcase"
+    "test:components": "node --max-old-space-size=768 --test --test-concurrency=4 ../tests/web/*.test.js",
+    "test": "npm run typecheck && npm run typecheck:tests && npm run typecheck:scripts && npm run check:sfc && npm run check:ui && npm run check:ui-styles && npm run check:readability && npm run test:components",
+    "typecheck:docker": "vue-tsc -p tsconfig.docker.json --noEmit",
+    "typecheck:code": "vue-tsc -p tsconfig.code.json --noEmit",
+    "typecheck:sandboxes": "vue-tsc -p tsconfig.sandboxes.json --noEmit",
+    "typecheck:showcase": "vue-tsc -p tsconfig.showcase.json --noEmit",
+    "typecheck:knowledge": "vue-tsc -p tsconfig.knowledge.json --noEmit",
+    "typecheck:shelf": "vue-tsc -p tsconfig.shelf.json --noEmit",
+    "typecheck:video": "vue-tsc -p tsconfig.video.json --noEmit",
+    "typecheck:triage": "vue-tsc -p tsconfig.triage.json --noEmit",
+    "typecheck:ssh": "vue-tsc -p tsconfig.ssh.json --noEmit",
+    "typecheck:github": "vue-tsc -p tsconfig.github.json --noEmit",
+    "typecheck:db": "vue-tsc -p tsconfig.db.json --noEmit",
+    "typecheck:inbox": "vue-tsc -p tsconfig.inbox.json --noEmit",
+    "typecheck:telegram": "vue-tsc -p tsconfig.telegram.json --noEmit",
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "typecheck:tests": "vue-tsc -p tsconfig.tests.json --noEmit"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -41,5 +53,8 @@
     "vite": "^6.0.5",
     "vite-plugin-pwa": "^1.3.0",
     "vue-tsc": "^2.2.12"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

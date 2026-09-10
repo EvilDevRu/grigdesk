@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import factoryModule from '../../server/src/modules/factory/index.js';
+import factoryModule from '../../server/src/modules/factory/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

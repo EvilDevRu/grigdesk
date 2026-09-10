@@ -65,7 +65,7 @@
             <span class="path-mark">1</span>
             <span class="path-copy">
               <b>Бот подключён</b>
-              <small v-if="privacyKnown && bot.canReadAllGroupMessages">Группы доступны целиком</small>
+              <small v-if="privacyKnown && bot?.canReadAllGroupMessages">Группы доступны целиком</small>
               <small v-else>Проверь режим приватности</small>
             </span>
           </a>
@@ -94,17 +94,17 @@
                 <span class="status-dot" :class="pollState?.kind === 'good' ? 'on' : 'warn'"></span>
                 <div>
                   <div class="section-kicker">Подключённый бот</div>
-                  <div class="name">@{{ bot.username }}</div>
+                  <div class="name">@{{ bot?.username }}</div>
                 </div>
               </div>
             </div>
 
-            <div v-if="privacyKnown && bot.canReadAllGroupMessages" class="state good">
+            <div v-if="privacyKnown && bot?.canReadAllGroupMessages" class="state good">
               ✓ Режим приватности выключен — в группах бот видит переписку целиком.
             </div>
             <div v-else-if="privacyKnown" class="state warn">
               <b>Бот пока не видит переписку в группах.</b>
-              {{ bot.privacyHint }}
+              {{ bot?.privacyHint }}
               Выключи режим у @BotFather и нажми «Проверить».
             </div>
             <div v-else class="state">
@@ -115,7 +115,7 @@
             <div v-if="providerReason" class="state warn">Причина provider: {{ providerReason }}</div>
 
             <p class="muted sub">
-              Следующий шаг: добавь @{{ bot.username }} в рабочий чат обычным
+              Следующий шаг: добавь @{{ bot?.username }} в рабочий чат обычным
               «Добавить участника» и отправь тестовое сообщение.
             </p>
 
@@ -142,8 +142,8 @@
             <details class="technical">
               <summary>Данные подключения</summary>
               <div class="muted sub technical-data">
-                id {{ bot.botId }} · токен {{ bot.tokenHint }}
-                <template v-if="bot.connectedAt"> · подключён {{ fmtMs(bot.connectedAt) }}</template>
+                id {{ bot?.botId }} · токен {{ bot?.tokenHint }}
+                <template v-if="bot?.connectedAt"> · подключён {{ fmtMs(bot?.connectedAt) }}</template>
               </div>
             </details>
           </section>
@@ -824,7 +824,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Native-раздел канала Telegram: подключение бота, услышанные чаты, служебная
 // личка и allowlist «чат/тема → проект». Общая очередь и её activation живут
 // отдельно на `/inbox`; Telegram не владеет её карточками, решениями и моделью.
@@ -854,76 +854,184 @@ import {
   UiSelect,
   UiSpinner,
 } from '../ui';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
+import {
+  telegramApi,
+  telegramErrorMessage,
+  telegramPluginDisabled,
+} from '../shared/telegramApi.ts';
+import { isTelegramPolicyFingerprint } from '../../../shared/telegramContracts.ts';
+import type {
+  TelegramBot,
+  TelegramChat,
+  TelegramPoll,
+  TelegramPult,
+  TelegramRule,
+  TelegramRules,
+  TelegramStatus,
+  TelegramTopic,
+} from '../../../shared/telegramContracts.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 
+// Состояние канала закрыто перечислением на границе сети: «подключается» и
+// «отвалился» ведут человека к разным действиям, и своего значения раздел не
+// придумывает — он показывает ровно то, что назвал сервер.
+type ConnectionState = NonNullable<TelegramStatus['connection']>;
+
+// Что раздел сейчас делает. Пустая строка — «ничего»: одновременных операций у
+// формы нет, поэтому одного поля хватает и на блокировку, и на подпись кнопки.
+type BusyKind = '' | 'connect' | 'recheck' | 'disconnect' | 'rules' | 'agent-search'
+  | 'service' | 'pult';
+
+// Половина автомата у правила: включён ли, с какого порога уверенности заводить
+// задачу и сколько таких задач в сутки. Границы те же, что у сервера.
+interface AutoTaskForm {
+  enabled: boolean;
+  minConfidence: number;
+  maxPerDay: number;
+}
+
+// Правило в форме — та же запись, что и в контракте, но с промежуточными
+// состояниями полей ввода: пока адрес не выбран, он законно пуст, а `null` и
+// пустая строка значат разное — «адреса нет» против «имя ещё не введено».
+type RuleForm = Omit<TelegramRule, 'draft' | 'autoLaunch' | 'agentSearch' | 'b24'> & {
+  // Поля сервера, которых у нового правила нет вовсе: дописывать их пустыми
+  // значило бы отправить на сохранение то, чего человек не заполнял.
+  draft?: TelegramRule['draft'];
+  autoLaunch?: TelegramRule['autoLaunch'];
+  // Доступ агентов правит только своя ручка, и обычное сохранение его снимает
+  // из тела запроса целиком — значит поле обязано быть удаляемым.
+  agentSearch?: boolean | null;
+  b24: {
+    responsibleId: number | null;
+    groupId: number | null;
+    priority: number;
+  };
+};
+
+// Ростер и проекты портала приходят из соседнего раздела и своего контракта
+// здесь не имеют: разделу «Телеграма» нужны только имя и числовой id.
+interface B24User {
+  id: number;
+  name: string;
+}
+
+interface B24Group {
+  id?: unknown;
+  name?: unknown;
+}
+
+// Проект в селекте правила. `missing` помечает сохранённый, но сейчас
+// недоступный: подменять такой на «без проекта» нельзя — правило уедет не туда.
+interface B24GroupOption {
+  id: number;
+  name: string;
+  missing: boolean;
+}
+
+// Что написать про опрос. Вид подсказки — часть данных, а не только цвет:
+// «слушает» и «не идёт» ведут человека к разным действиям.
+interface PollNote {
+  kind: 'good' | 'warn';
+  text: string;
+}
+
 const plugins = usePluginsStore();
-if (!plugins.loaded) plugins.load();
+
+if (!plugins.loaded) {
+  plugins.load();
+}
+
 const pluginOff = computed(() => plugins.loaded && !plugins.enabled('telegram'));
 
-const bot = ref(null);
-const poll = ref(null);   // состояние опроса: подключённый бот и идущий опрос — разное
-const providerConnection = ref('disconnected');
+const bot = ref<TelegramBot | null>(null);
+const poll = ref<TelegramPoll | null>(null);   // подключённый бот и идущий опрос — разное
+const providerConnection = ref<ConnectionState>('disconnected');
 const providerReason = ref('');
-const chats = ref([]);    // что бот уже слышал
-const rules = ref([]);    // рабочая копия правил: правится на месте, уезжает целиком
-const savedRules = ref('[]'); // слепок того, что лежит на сервере — по нему видно несохранённое
+const chats = ref<TelegramChat[]>([]);         // что бот уже слышал
+const rules = ref<RuleForm[]>([]);             // рабочая копия: правится на месте, уезжает целиком
+const savedRules = ref('[]');                  // слепок сервера — по нему видно несохранённое
 // CAS именно содержимого policy, а не времени загрузки и не mutable bot display.
 // Без него старая вкладка могла целиком перезаписать более новое разрешение.
 const rulesPolicyFingerprint = ref('');
-const POLICY_FINGERPRINT_RE = /^telegram-rules-v1:[0-9a-f]{64}$/u;
 // После ambiguous PUT старое значение agentSearch нельзя показывать как факт,
 // пока отдельный GET rules не подтвердил policy и её новый CAS fingerprint.
 const agentSearchStateKnown = ref(false);
-const projects = ref([]);
+const projects = ref<string[]>([]);
 const loading = ref(true);
 const token = ref('');
-const busy = ref('');     // '' | lifecycle | 'rules' | 'agent-search' | 'service' | 'pult'
+const busy = ref<BusyKind>('');
 const error = ref('');
 const note = ref('');
 
 const connected = computed(() => !!bot.value?.configured);
 const providerWritable = computed(() => connected.value && providerConnection.value === 'connected');
 const canConnect = computed(() => providerConnection.value !== 'degraded');
-// null — старая запись без этого поля: выдумывать состояние приватности нельзя.
+// undefined — старая запись без этого поля: выдумывать состояние приватности нельзя.
 const privacyKnown = computed(() => typeof bot.value?.canReadAllGroupMessages === 'boolean');
 
 // Двe меры времени, и путать их нельзя: своё состояние кокпит считает в
 // миллисекундах, а даты сообщений приходят от Bot API в секундах и такими же
 // лежат в архиве. Поэтому две функции с явными именами, а не одна «универсальная».
-function fmtMs(ms) {
-  if (!ms) return '';
+function fmtMs(ms: number | null | undefined): string {
+  if (!ms) {
+    return '';
+  }
+
   return new Date(ms).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' });
 }
-function fmtSec(sec) { return fmtMs(Number(sec || 0) * 1000); }
 
-function plural(n, forms) {
-  const a = Math.abs(n) % 100;
+function fmtSec(sec: number | null | undefined): string {
+  return fmtMs(Number(sec || 0) * 1000);
+}
+
+// Русское склонение по числу: «1 правило», «2 правила», «5 правил». Формы
+// приходят от места вызова — общего словаря на раздел заводить незачем.
+function plural(n: number | null | undefined, forms: readonly [string, string, string]): string {
+  const a = Math.abs(n ?? 0) % 100;
   const b = a % 10;
-  if (a > 10 && a < 20) return forms[2];
-  if (b > 1 && b < 5) return forms[1];
+
+  if (a > 10 && a < 20) {
+    return forms[2];
+  }
+  if (b > 1 && b < 5) {
+    return forms[1];
+  }
+
   return b === 1 ? forms[0] : forms[2];
 }
 
-const CHAT_KIND = {
-  private: 'личный чат', group: 'группа', supergroup: 'супергруппа', channel: 'канал',
+const CHAT_KIND: Record<string, string> = {
+  private: 'личный чат',
+  group: 'группа',
+  supergroup: 'супергруппа',
+  channel: 'канал',
 };
-const chatKind = (c) => [CHAT_KIND[c.type] || c.type || 'чат', c.isForum ? 'с темами' : '']
-  .filter(Boolean).join(', ');
+
+const chatKind = (c: TelegramChat) => [
+  CHAT_KIND[c.type ?? ''] || c.type || 'чат',
+  c.isForum ? 'с темами' : '',
+].filter(Boolean).join(', ');
 
 // Что написать про опрос. Отдельно от «бот подключён»: токен может быть цел, а
 // апдейты забирать второй экземпляр — тогда сообщения не придут вообще, и это
 // должно быть видно словами, а не отсутствием чатов в списке.
-const pollState = computed(() => {
+const pollState = computed<PollNote | null>(() => {
   if (connected.value && !providerWritable.value) {
     return {
       kind: 'warn',
       text: 'Provider сейчас не готов к записи. Архив и ранее принятые обращения доступны только для чтения.',
     };
   }
+
   const p = poll.value;
-  if (!p) return null;
-  if (p.lastError) return { kind: 'warn', text: p.lastError.message };
+
+  if (!p) {
+    return null;
+  }
+  if (p.lastError) {
+    return { kind: 'warn', text: p.lastError.message };
+  }
   if (!p.running) {
     return {
       kind: 'warn',
@@ -931,18 +1039,28 @@ const pollState = computed(() => {
         + 'или перезапусти сервер, тогда опрос заведётся сам.',
     };
   }
+
   const parts = ['✓ Бот слушает Телеграм.'];
-  if (p.lastMessageAt) parts.push(`Последнее сообщение — ${fmtMs(p.lastMessageAt)}.`);
-  else if (p.lastPollAt) parts.push(`Сообщений пока не было, последний ответ Телеграма — ${fmtMs(p.lastPollAt)}.`);
+
+  if (p.lastMessageAt) {
+    parts.push(`Последнее сообщение — ${fmtMs(p.lastMessageAt)}.`);
+  } else if (p.lastPollAt) {
+    parts.push(`Сообщений пока не было, последний ответ Телеграма — ${fmtMs(p.lastPollAt)}.`);
+  }
+
   return { kind: 'good', text: parts.join(' ') };
 });
 
-async function loadChats() {
+// Список чатов вторичен и грузится отдельно от статуса: бот подключён и без
+// него, а отказ архива не должен стирать с экрана рабочее подключение.
+async function loadChats(): Promise<void> {
   try {
-    chats.value = (await api.get('/api/telegram/chats')).chats || [];
+    chats.value = await telegramApi.chats();
   } catch (e) {
     // Список чатов вторичен: из-за него не должно пропадать подключение бота.
-    if (e.data?.error !== 'plugin_disabled') error.value = e.message;
+    if (!telegramPluginDisabled(e)) {
+      error.value = telegramErrorMessage(e, 'Не удалось загрузить список чатов.');
+    }
   }
 }
 
@@ -954,41 +1072,60 @@ async function loadChats() {
 // свой — служебная копия видна всем участникам, и уведомление о ней успевает
 // уйти до удаления. Поэтому в списке только личка, которую бот уже слышал.
 const serviceOptions = computed(() => {
-  const out = new Map();
+  const out = new Map<string, string>();
+
   for (const c of chats.value) {
-    if (c.type === 'private') out.set(String(c.id), c.title || `чат ${c.id}`);
+    if (c.type === 'private') {
+      out.set(String(c.id), c.title || `чат ${c.id}`);
+    }
   }
+
   // Назначенный чат остаётся в списке, даже если архив о нём молчит: иначе селект
   // показывал бы «не выбран» при работающей пересылке.
   const cur = bot.value?.serviceChatId;
-  if (cur && !out.has(String(cur))) out.set(String(cur), bot.value.serviceChatTitle || `чат ${cur}`);
+
+  if (cur && !out.has(String(cur))) {
+    out.set(String(cur), bot.value?.serviceChatTitle || `чат ${cur}`);
+  }
+
   return [...out].map(([value, label]) => ({ value, label }));
 });
 
 const serviceChoice = ref('');
 const serviceSaved = computed(() => (bot.value?.serviceChatId ? String(bot.value.serviceChatId) : ''));
+
 // Селект идёт за сервером: bot.value присваивается в пяти местах (загрузка,
 // подключение, перепроверка, отключение, само сохранение), и ловить их поимённо
 // — верный способ забыть одно.
-watch(serviceSaved, (id) => { serviceChoice.value = id; }, { immediate: true });
+watch(serviceSaved, (id) => {
+  serviceChoice.value = id;
+}, { immediate: true });
+
 const serviceDirty = computed(() => serviceChoice.value !== serviceSaved.value);
 
-async function saveService() {
-  if (busy.value || !providerWritable.value) return;
+// Пересылка служебной копии включается и снимается одной ручкой: сервер отвечает
+// уже нормализованным ботом, и подпись под селектом берётся из его ответа.
+async function saveService(): Promise<void> {
+  if (busy.value || !providerWritable.value) {
+    return;
+  }
+
   busy.value = 'service';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/service-chat', {
-      botId: bot.value.botId,
-      chatId: serviceChoice.value ? Number(serviceChoice.value) : null,
-    });
+    const res = await telegramApi.setServiceChat(
+      bot.value?.botId,
+      serviceChoice.value ? Number(serviceChoice.value) : null,
+    );
+
     bot.value = res.bot;
     note.value = bot.value.serviceChatId
       ? `Служебный чат — ${bot.value.serviceChatTitle || bot.value.serviceChatId}.`
       : 'Служебный чат снят: пересылать сообщения бот больше не будет.';
   } catch (e) {
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось сохранить служебный чат.');
     // Отказ сервера не должен оставлять в селекте то, чего сервер не принял.
     serviceChoice.value = serviceSaved.value;
   } finally {
@@ -1001,7 +1138,7 @@ async function saveService() {
 // Блок `pult` приходит из /api/telegram/status и не содержит сырого id чата
 // (маска + заголовок). Владелец — только личка, которую бот уже слышал,
 // включение — 6-значным кодом в неё же (двустороннее доказательство владения).
-const pult = ref(null);
+const pult = ref<TelegramPult | null>(null);
 const pultChoice = ref('');
 const pultCode = ref('');
 
@@ -1009,62 +1146,78 @@ const pultOptions = computed(() => chats.value
   .filter((c) => c.type === 'private')
   .map((c) => ({ value: String(c.id), label: c.title || `чат ${c.id}` })));
 
-async function pultRequest() {
-  if (busy.value || !providerWritable.value || !pultChoice.value) return;
+// Запрос кода: сервер шлёт его в саму личку, и это первая половина доказательства
+// владения — вторая приходит обратно введённым кодом.
+async function pultRequest(): Promise<void> {
+  if (busy.value || !providerWritable.value || !pultChoice.value) {
+    return;
+  }
+
   busy.value = 'pult';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/pult', {
-      botId: bot.value.botId,
-      chatId: Number(pultChoice.value),
-    });
+    const res = await telegramApi.requestPult(bot.value?.botId, Number(pultChoice.value));
+
     pult.value = res.pult;
     note.value = 'Код отправлен в личку — введи его ниже, он действует 10 минут.';
   } catch (e) {
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось отправить код.');
   } finally {
     busy.value = '';
   }
 }
 
-async function pultConfirm() {
-  if (busy.value || !providerWritable.value || !pultCode.value.trim()) return;
+// Подтверждение кода включает пульт. Текст отказа сервер уже пишет по-человечески
+// (код не совпал, код протух), поэтому наружу он идёт как есть.
+async function pultConfirm(): Promise<void> {
+  if (busy.value || !providerWritable.value || !pultCode.value.trim()) {
+    return;
+  }
+
   busy.value = 'pult';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/pult/confirm', {
-      botId: bot.value.botId,
-      code: pultCode.value.trim(),
-    });
+    const res = await telegramApi.confirmPult(bot.value?.botId, pultCode.value.trim());
+
     pult.value = res.pult;
     pultCode.value = '';
     note.value = `Пульт включён: бот слушает личку ${pult.value?.chatTitle || pult.value?.chatHint || ''}.`;
   } catch (e) {
     // Текст сервера уже человеческий (код не совпал / протух) — показываем как есть.
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось включить пульт.');
   } finally {
     busy.value = '';
   }
 }
 
-async function pultDisable() {
+// Выключение пульта спрашивает человека: выбор чата переживёт выключение, а вот
+// код придётся получать заново, и молча терять его нельзя.
+async function pultDisable(): Promise<void> {
   const ok = await confirmDialog(
     'Выключить пульт? Бот перестанет присылать карточки и принимать команды. '
       + 'Выбор чата сохранится, но для включения понадобится новый код.',
     { danger: true, okText: 'Выключить' },
   );
-  if (!ok || busy.value) return;
+
+  if (!ok || busy.value) {
+    return;
+  }
+
   busy.value = 'pult';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/pult/disable', { botId: bot.value.botId });
+    const res = await telegramApi.disablePult(bot.value?.botId);
+
     pult.value = res.pult;
     note.value = 'Пульт выключен.';
   } catch (e) {
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось выключить пульт.');
   } finally {
     busy.value = '';
   }
@@ -1072,24 +1225,30 @@ async function pultDisable() {
 
 // --- правила «чат или тема → проект» ---
 
+const b24users = ref<B24User[]>([]);
+
 // Ростер портала для селекта ответственного. Пустой список — не беда: задача
 // без ответственного уходит на владельца сессии, и это разумный дефолт.
-const b24users = ref([]);
-async function loadUsers() {
+async function loadUsers(): Promise<void> {
   try {
-    b24users.value = (await api.get('/api/b24/users')).users || [];
+    const res = await api.get('/api/b24/users') as { users?: B24User[] };
+
+    b24users.value = res?.users || [];
   } catch {
     // Портал не настроен или не отвечает — правила от этого не ломаются.
   }
 }
 
+const b24groups = ref<B24Group[]>([]);
+const b24GroupsFailed = ref(false);
+
 // Проекты портала для GROUP_ID задачи. В форме показываем имена, числовой id
 // остаётся только значением option и уезжает в уже существующий контракт правила.
-const b24groups = ref([]);
-const b24GroupsFailed = ref(false);
-async function loadGroups() {
+async function loadGroups(): Promise<void> {
   try {
-    b24groups.value = (await api.get('/api/b24/groups')).groups || [];
+    const res = await api.get('/api/b24/groups') as { groups?: B24Group[] };
+
+    b24groups.value = res?.groups || [];
     b24GroupsFailed.value = false;
   } catch {
     // Сохранённые правила всё равно остаются редактируемыми: ниже подмешиваем
@@ -1098,37 +1257,65 @@ async function loadGroups() {
   }
 }
 
-/** Положительное целое из поля ввода; пусто и мусор — «не задано». */
-function toId(v) {
-  if (v === null || v === undefined || String(v).trim() === '') return null;
+/**
+ * Положительное целое из поля ввода; пусто и мусор — «не задано».
+ *
+ * Ноль и отрицательное тоже «не задано»: id ответственного и проекта портал
+ * нумерует с единицы, а нулём поле обнулилось бы молча.
+ */
+function toId(v: unknown): number | null {
+  if (v === null || v === undefined || String(v).trim() === '') {
+    return null;
+  }
+
   const n = Number(v);
+
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 // Проект могли архивировать или убрать из доступных уже после сохранения правила.
 // Не подменяем такое значение на «без проекта» при следующей несвязанной правке.
-const b24GroupOptions = computed(() => {
-  const out = new Map();
+const b24GroupOptions = computed<B24GroupOption[]>(() => {
+  const out = new Map<number, B24GroupOption>();
+
   for (const group of b24groups.value) {
     const id = toId(group?.id);
     const name = String(group?.name || '').trim();
-    if (id && name) out.set(id, { id, name, missing: false });
-  }
-  for (const rule of rules.value) {
-    const id = toId(rule.b24?.groupId);
-    if (id && !out.has(id)) {
-      out.set(id, { id, name: `Проект #${id} (сохранён, но сейчас недоступен)`, missing: true });
+
+    if (id && name) {
+      out.set(id, {
+        id,
+        name,
+        missing: false,
+      });
     }
   }
+
+  for (const rule of rules.value) {
+    const id = toId(rule.b24?.groupId);
+
+    if (id && !out.has(id)) {
+      out.set(id, {
+        id,
+        name: `Проект #${id} (сохранён, но сейчас недоступен)`,
+        missing: true,
+      });
+    }
+  }
+
   return [...out.values()];
 });
 
 // --- автомат «заводить задачи без меня» ---
 
-// Те же дефолты, что у сервера (lib/telegram/rules-store.js). Копия здесь
+// Те же дефолты, что у сервера (lib/telegram/rulesStore.ts). Копия здесь
 // осознанная: форма обязана показать новое правило до того, как сервер его
 // увидит, а тянуть ради трёх чисел общий модуль в браузер незачем.
-const AUTO_TASK = { enabled: false, minConfidence: 0.7, maxPerDay: 10 };
+const AUTO_TASK: AutoTaskForm = {
+  enabled: false,
+  minConfidence: 0.7,
+  maxPerDay: 10,
+};
 
 /**
  * Число в границах; «не задано» — это дефолт, а НЕ ноль.
@@ -1137,27 +1324,35 @@ const AUTO_TASK = { enabled: false, minConfidence: 0.7, maxPerDay: 10 };
  * пустой строкой, а `Number('')` — ноль. Нулевой порог означал бы «заводи задачу
  * по любому разбору» — стирание поля не имеет права ослаблять автомат.
  */
-function toNum(v, lo, hi, def) {
-  if (v === null || v === undefined || String(v).trim() === '') return def;
+function toNum(v: unknown, lo: number, hi: number, def: number): number {
+  if (v === null || v === undefined || String(v).trim() === '') {
+    return def;
+  }
+
   const n = Number(v);
+
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
 }
 
 /** Половина автомата у правила. Читаем, не дописывая: правило могло приехать без неё. */
-const autoOf = (r) => (r.autoTask && typeof r.autoTask === 'object' ? r.autoTask : AUTO_TASK);
+const autoOf = (r: RuleForm): AutoTaskForm => (
+  r.autoTask && typeof r.autoTask === 'object' ? r.autoTask : AUTO_TASK
+);
 
-function setAuto(r, key, value) {
-  r.autoTask = { ...autoOf(r), [key]: value };
+function setAuto(r: RuleForm, key: keyof AutoTaskForm, value: boolean | number): void {
+  r.autoTask = { ...autoOf(r), [key]: value } as AutoTaskForm;
 }
 
 // Порог показываем процентами: «0.7» человек читает хуже, чем «70».
-const pctOf = (r) => Math.round(toNum(autoOf(r).minConfidence, 0, 1, AUTO_TASK.minConfidence) * 100);
+const pctOf = (r: RuleForm) => Math.round(
+  toNum(autoOf(r).minConfidence, 0, 1, AUTO_TASK.minConfidence) * 100,
+);
 
-function setPct(r, value) {
+function setPct(r: RuleForm, value: unknown): void {
   setAuto(r, 'minConfidence', Math.round(toNum(value, 0, 100, AUTO_TASK.minConfidence * 100)) / 100);
 }
 
-function setCap(r, value) {
+function setCap(r: RuleForm, value: unknown): void {
   setAuto(r, 'maxPerDay', Math.round(toNum(value, 0, 100, AUTO_TASK.maxPerDay)));
 }
 
@@ -1166,21 +1361,27 @@ function setCap(r, value) {
  * ввода всё строки, а правило хранит числа — иначе тема «42» приехала бы
  * строкой, а стёртое поле пустой строкой вместо «весь чат».
  */
-function payload() {
+function payload(): unknown[] {
   return rules.value.map((r) => {
     // agentSearch server-owned для обычного PUT: его меняет только отдельный
     // opt-in endpoint. Иначе несвязанная правка B24 могла бы снять или выдать
     // агентский доступ одним spread старой формы.
     const humanRule = { ...r };
+
     delete humanRule.agentSearch;
+
     const thread = Number(r.threadId);
     const chatId = Number(r.chatId);
     const b24 = r.b24 || {};
     const priority = Number(b24.priority);
+
     return {
       ...humanRule,
       project: String(r.project || '').trim(),
-      chatId: r.chatId === null || r.chatId === '' || !Number.isSafeInteger(chatId) ? null : chatId,
+      chatId: r.chatId === null || r.chatId === undefined
+        || String(r.chatId) === '' || !Number.isSafeInteger(chatId)
+        ? null
+        : chatId,
       // Пустое поле имени — это «имя ещё не введено», а не имя из пустой строки.
       username: String(r.username ?? '').trim() || null,
       threadId: Number.isSafeInteger(thread) && thread > 0 ? thread : null,
@@ -1212,88 +1413,131 @@ const dirty = computed(() => JSON.stringify(payload()) !== savedRules.value);
 // обязательно — бота могли убрать из чата, и без своей строки правило нельзя
 // было бы ни увидеть, ни снять, хотя разрешение продолжает действовать.
 const chatOptions = computed(() => {
-  const out = new Map();
-  for (const c of chats.value) out.set(c.id, c.title || `чат ${c.id}`);
+  const out = new Map<number, string>();
+
+  for (const c of chats.value) {
+    out.set(c.id, c.title || `чат ${c.id}`);
+  }
+
   for (const r of rules.value) {
     if (r.chatId !== null && r.chatId !== undefined && !out.has(Number(r.chatId))) {
       out.set(Number(r.chatId), r.title || `чат ${r.chatId}`);
     }
   }
+
   return [...out].map(([id, label]) => ({ value: `id:${id}`, label }));
 });
 
 // HTTP Bot API не умеет перечислять форумные темы. Сервер собирает их из
 // `message_thread_id` уже услышанных сообщений и отдаёт только для выбранного
 // чата — так открытие страницы не сканирует архивы всех групп подряд.
-const topicsByChat = ref({});
-const topicLoading = ref({});
-const topicErrors = ref({});
+const topicsByChat = ref<Record<string, TelegramTopic[]>>({});
+const topicLoading = ref<Record<string, boolean>>({});
+const topicErrors = ref<Record<string, string>>({});
 
-function ruleChatId(r) {
+// Числовой id чата у правила: либо задан прямо, либо ищется по публичному имени
+// среди услышанных — у ссылки `t.me/имя` числового id нет вовсе.
+function ruleChatId(r: RuleForm): number | null {
   const direct = Number(r.chatId);
-  if (Number.isSafeInteger(direct) && direct !== 0) return direct;
+
+  if (Number.isSafeInteger(direct) && direct !== 0) {
+    return direct;
+  }
+
   const username = String(r.username || '').replace(/^@/, '').toLowerCase();
-  if (!username) return null;
+
+  if (!username) {
+    return null;
+  }
+
   return chats.value.find((c) => String(c.username || '').toLowerCase() === username)?.id ?? null;
 }
 
-const topicKey = (chatId) => String(chatId);
-const topicsOf = (r) => topicsByChat.value[topicKey(ruleChatId(r))] || [];
-const topicsLoaded = (r) => Object.prototype.hasOwnProperty.call(
+const topicKey = (chatId: number | null) => String(chatId);
+const topicsOf = (r: RuleForm) => topicsByChat.value[topicKey(ruleChatId(r))] || [];
+const topicsLoaded = (r: RuleForm) => Object.prototype.hasOwnProperty.call(
   topicsByChat.value, topicKey(ruleChatId(r)),
 );
-const topicsBusy = (r) => !!topicLoading.value[topicKey(ruleChatId(r))];
-const topicsError = (r) => topicErrors.value[topicKey(ruleChatId(r))] || '';
-const topicChoice = (r) => (toId(r.threadId) ? String(toId(r.threadId)) : '');
-const topicKnown = (r) => topicsOf(r).some((t) => t.id === toId(r.threadId));
-const topicLabel = (t) => {
-  if (t.title) return `${t.title} · тема ${t.id}`;
+const topicsBusy = (r: RuleForm) => !!topicLoading.value[topicKey(ruleChatId(r))];
+const topicsError = (r: RuleForm) => topicErrors.value[topicKey(ruleChatId(r))] || '';
+const topicChoice = (r: RuleForm) => (toId(r.threadId) ? String(toId(r.threadId)) : '');
+const topicKnown = (r: RuleForm) => topicsOf(r).some((t) => t.id === toId(r.threadId));
+
+const topicLabel = (t: TelegramTopic) => {
+  if (t.title) {
+    return `${t.title} · тема ${t.id}`;
+  }
+
   const count = Number(t.messages || 0);
+
   return `Тема ${t.id} · ${count} ${plural(count, ['сообщение', 'сообщения', 'сообщений'])}`;
 };
 
-/** Корень темы открывается как обычное сообщение с id, равным thread_id. */
-function topicLink(r) {
+/**
+ * Корень темы открывается как обычное сообщение с id, равным thread_id.
+ *
+ * Публичный чат адресуется именем, приватная супергруппа — своим `-100`-номером;
+ * всё остальное ссылки не имеет, и выдумывать её вместо пустой строки нельзя.
+ */
+function topicLink(r: RuleForm): string {
   const threadId = toId(r.threadId);
   const chatId = ruleChatId(r);
-  if (!threadId || chatId === null) return '';
+
+  if (!threadId || chatId === null) {
+    return '';
+  }
+
   const chat = chats.value.find((c) => Number(c.id) === Number(chatId));
   const username = String(chat?.username || r.username || '').replace(/^@/, '').trim();
+
   if (/^[a-zA-Z][a-zA-Z0-9_]{4,31}$/.test(username)) {
     return `https://t.me/${username}/${threadId}`;
   }
+
   const id = String(chatId);
+
   return /^-100\d+$/.test(id) ? `https://t.me/c/${id.slice(4)}/${threadId}` : '';
 }
 
-async function loadTopics(chatId, { force = false } = {}) {
+// Темы одного чата. Повторный заход по тому же чату молчит, если справочник уже
+// прочитан: `force` нужен кнопке «обновить», а обычное открытие правила — нет.
+async function loadTopics(chatId: unknown, { force = false }: { force?: boolean } = {}): Promise<void> {
   const id = Number(chatId);
-  if (!Number.isSafeInteger(id) || id === 0) return;
+
+  if (!Number.isSafeInteger(id) || id === 0) {
+    return;
+  }
+
   const key = topicKey(id);
-  if (topicLoading.value[key] || (!force && Object.prototype.hasOwnProperty.call(topicsByChat.value, key))) return;
+  const known = Object.prototype.hasOwnProperty.call(topicsByChat.value, key);
+
+  if (topicLoading.value[key] || (!force && known)) {
+    return;
+  }
 
   topicLoading.value[key] = true;
   topicErrors.value[key] = '';
+
   try {
-    const res = await api.get(`/api/telegram/chats/${encodeURIComponent(id)}/topics`);
-    topicsByChat.value[key] = Array.isArray(res?.topics) ? res.topics : [];
+    topicsByChat.value[key] = await telegramApi.topics(id);
   } catch (e) {
     // Ручной ввод остаётся рабочим даже со старым сервером или временной ошибкой
     // архива; общей красной плашкой вторичный справочник страницу не перекрывает.
-    topicErrors.value[key] = e.message || 'Не удалось загрузить темы.';
+    topicErrors.value[key] = telegramErrorMessage(e, 'Не удалось загрузить темы.');
   } finally {
     topicLoading.value[key] = false;
   }
 }
 
-const loadTopicsForRule = (r, force = false) => loadTopics(ruleChatId(r), { force });
+const loadTopicsForRule = (r: RuleForm, force = false) => loadTopics(ruleChatId(r), { force });
 
-async function loadRuleTopics() {
+async function loadRuleTopics(): Promise<void> {
   const ids = [...new Set(rules.value.map(ruleChatId).filter((id) => id !== null))];
+
   await Promise.all(ids.map((id) => loadTopics(id)));
 }
 
-function setThread(r, value) {
+function setThread(r: RuleForm, value: string | number | null): void {
   r.threadId = value === '' ? null : toId(value);
 }
 
@@ -1302,39 +1546,78 @@ function setThread(r, value) {
 // же сохранение увело бы правило не туда.
 const projectOptions = computed(() => {
   const out = new Set(projects.value);
-  for (const r of rules.value) if (r.project) out.add(r.project);
+
+  for (const r of rules.value) {
+    if (r.project) {
+      out.add(r.project);
+    }
+  }
+
   return [...out];
 });
 
-const chatMode = (r) => {
-  if (r.chatId !== null && r.chatId !== undefined && r.chatId !== '') return `id:${r.chatId}`;
+// Чем адресован чат правила: номером из списка, публичным именем или ничем.
+// Пустая строка и «name» — разные состояния, и селект обязан их различать.
+const chatMode = (r: RuleForm) => {
+  if (r.chatId !== null && r.chatId !== undefined && String(r.chatId) !== '') {
+    return `id:${r.chatId}`;
+  }
+
   return r.username === null || r.username === undefined ? '' : 'name';
 };
 
-function setChat(r, value) {
+// Смена адреса обнуляет всё, что к нему привязано: заголовок и тема относятся к
+// прежнему чату, и оставить их значило бы показать правило чужим местом.
+function setChat(r: RuleForm, value: string | number | null): void {
+  // Селект отдаёт строку, число или «не выбрано»: приводим один раз, иначе
+  // пустое значение пришлось бы ловить отдельной веткой в каждом сравнении.
+  const choice = String(value ?? '');
+
   r.title = '';
   r.threadId = null;
-  if (value === 'name') {
+
+  if (choice === 'name') {
     // Публичный чат привязывается именем: в ссылке t.me/имя числового id нет вовсе.
     r.chatId = null;
     r.username = '';
+
     return;
   }
+
   r.username = null;
-  r.chatId = value ? Number(value.slice(3)) : null;
-  const known = chatOptions.value.find((o) => o.value === value);
-  if (known) r.title = known.label;
-  if (r.chatId !== null) loadTopics(r.chatId);
+  r.chatId = choice ? Number(choice.slice(3)) : null;
+
+  const known = chatOptions.value.find((o) => o.value === choice);
+
+  if (known) {
+    r.title = known.label;
+  }
+  if (r.chatId !== null) {
+    loadTopics(r.chatId);
+  }
 }
 
-function addRule() {
-  if (!providerWritable.value) return;
+// Новое правило заводится закрытым: ни ответов в чат, ни доступа агентов, ни
+// автомата — каждое из трёх включается отдельным осознанным решением.
+function addRule(): void {
+  if (!providerWritable.value) {
+    return;
+  }
+
   rules.value.push({
-    project: '', chatId: null, username: null, title: '', threadId: null,
+    project: '',
+    chatId: null,
+    username: null,
+    title: '',
+    threadId: null,
     // Вид по умолчанию — баг: тема с жалобами и есть главный источник поводов,
     // «Идея» ставится осознанно. Приоритет 1 — средний, коды портала: 0/1/2.
     kind: 'bug',
-    b24: { responsibleId: null, groupId: null, priority: 1 },
+    b24: {
+      responsibleId: null,
+      groupId: null,
+      priority: 1,
+    },
     // Ответы выключены: включение — осознанное решение для конкретного чата/темы.
     notifyTaskCreated: false,
     // Human allowlist не подразумевает право модели читать внешний источник.
@@ -1345,55 +1628,70 @@ function addRule() {
   });
 }
 
-async function loadRules() {
+// Правила и темы их чатов одним ходом: без справочника тем селект показывал бы
+// пустой список там, где тема у правила уже выбрана.
+async function loadRules(): Promise<void> {
   try {
     await readRulesSnapshot();
     await loadRuleTopics();
   } catch (e) {
-    if (e.data?.error !== 'plugin_disabled') error.value = e.message;
+    if (!telegramPluginDisabled(e)) {
+      error.value = telegramErrorMessage(e, 'Не удалось загрузить правила.');
+    }
   }
 }
 
-function applyRulesSnapshot(res) {
-  rules.value = Array.isArray(res?.rules) ? res.rules : [];
-  projects.value = Array.isArray(res?.projects) ? res.projects : [];
-  rulesPolicyFingerprint.value = POLICY_FINGERPRINT_RE.test(res?.policyFingerprint || '')
-    ? res.policyFingerprint
-    : '';
+// Снимок политики на экран. Отпечаток проверен уже на границе сети, поэтому
+// «состояние доступа известно» здесь означает ровно «ответ сервера прочитан».
+function applyRulesSnapshot(res: TelegramRules): void {
+  rules.value = res.rules;
+  projects.value = res.projects ?? [];
+  rulesPolicyFingerprint.value = res.policyFingerprint;
   agentSearchStateKnown.value = Boolean(rulesPolicyFingerprint.value);
   savedRules.value = JSON.stringify(payload());
 }
 
-async function readRulesSnapshot({ requireFingerprint = false } = {}) {
-  const res = await api.get('/api/telegram/rules');
+// Перечитывание правил. `requireFingerprint` нужен разбору потерянного ответа:
+// там без достоверного CAS показывать состояние доступа нельзя вовсе.
+async function readRulesSnapshot({ requireFingerprint = false }: {
+  requireFingerprint?: boolean;
+} = {}): Promise<TelegramRules> {
+  const res = await telegramApi.rules();
+
   applyRulesSnapshot(res);
+
   if (requireFingerprint && !agentSearchStateKnown.value) {
     throw new Error('Сервер не вернул достоверный policy fingerprint.');
   }
+
   return res;
 }
 
-async function saveRules() {
-  if (busy.value || !providerWritable.value) return;
-  if (!POLICY_FINGERPRINT_RE.test(rulesPolicyFingerprint.value)) {
-    error.value = 'Не получен отпечаток правил. Перечитайте список перед сохранением.';
+// Сохранение allowlist целиком под своим CAS. Ответ сервера — уже нормализованные
+// правила: берём их, а не свою копию, иначе на экране осталась бы форма до
+// проверки, а на диске другая.
+async function saveRules(): Promise<void> {
+  if (busy.value || !providerWritable.value) {
     return;
   }
+  if (!isTelegramPolicyFingerprint(rulesPolicyFingerprint.value)) {
+    error.value = 'Не получен отпечаток правил. Перечитайте список перед сохранением.';
+
+    return;
+  }
+
   busy.value = 'rules';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.put('/api/telegram/rules', {
-      botId: bot.value.botId,
-      policyFingerprint: rulesPolicyFingerprint.value,
-      rules: payload(),
-    });
-    // Ответ сервера — уже нормализованные правила: берём их, а не свою копию,
-    // иначе на экране осталась бы форма до проверки, а на диске другая.
-    if (!POLICY_FINGERPRINT_RE.test(res.policyFingerprint || '')) {
-      throw new Error('Сервер сохранил правила, но не вернул их новый отпечаток. Перечитайте список.');
-    }
-    rules.value = res.rules || [];
+    const res = await telegramApi.saveRules(
+      payload(),
+      bot.value?.botId,
+      rulesPolicyFingerprint.value,
+    );
+
+    rules.value = res.rules;
     rulesPolicyFingerprint.value = res.policyFingerprint;
     agentSearchStateKnown.value = true;
     savedRules.value = JSON.stringify(payload());
@@ -1402,13 +1700,15 @@ async function saveRules() {
       : 'Правил не осталось — чаты снова закрыты.';
   } catch (e) {
     // Текст валидатора уже человеческий и с номером правила — показываем как есть.
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось сохранить правила.');
   } finally {
     busy.value = '';
   }
 }
 
-function agentSearchRuleRef(r) {
+// Адрес правила в том виде, в каком его понимает отдельная ручка доступа агентов:
+// четыре поля, по которым сервер находит ту же запись в своей политике.
+function agentSearchRuleRef(r: RuleForm) {
   return {
     project: String(r.project || '').trim(),
     chatId: r.chatId === null || r.chatId === undefined ? null : Number(r.chatId),
@@ -1417,19 +1717,75 @@ function agentSearchRuleRef(r) {
   };
 }
 
-async function setAgentSearch(r, event) {
-  const enabled = event.target.checked === true;
-  const requestedRule = agentSearchRuleRef(r);
-  // DOM уже переставил checkbox, но policy ещё не commit-нута. Возвращаем
-  // authoritative вид сразу и меняем его только ответом сервера.
-  event.target.checked = agentSearchStateKnown.value && r.agentSearch === true;
-  if (busy.value || !providerWritable.value) return;
-  if (dirty.value) {
-    error.value = 'Сначала сохраните обычные изменения правила, затем меняйте доступ агентов.';
+/**
+ * Разбор потерянного ответа на изменение доступа. Прежнее значение перестаёт быть
+ * фактом: сервер мог commit-нуть решение и не донести ответ, поэтому состояние
+ * перечитывается, а несовпадение с запрошенным называется человеку прямо.
+ */
+async function confirmAgentSearch(
+  requestedRule: ReturnType<typeof agentSearchRuleRef>,
+  enabled: boolean,
+  mutationMessage: string,
+): Promise<void> {
+  await readRulesSnapshot({ requireFingerprint: true });
+
+  const current = rules.value.find((candidate) => {
+    const ref = agentSearchRuleRef(candidate);
+
+    return ref.project === requestedRule.project
+      && ref.chatId === requestedRule.chatId
+      && ref.username === requestedRule.username
+      && ref.threadId === requestedRule.threadId;
+  });
+
+  if (!current) {
+    note.value = '';
+    error.value = `${mutationMessage} Повторная проверка подтвердила: правило больше не существует.`;
+
     return;
   }
-  if (!agentSearchStateKnown.value || !POLICY_FINGERPRINT_RE.test(rulesPolicyFingerprint.value)) {
+
+  const actual = current.agentSearch === true;
+
+  if (actual === enabled) {
+    error.value = '';
+    note.value = `Повторная проверка подтвердила: агентский поиск ${actual ? 'разрешён' : 'закрыт'}.`;
+
+    return;
+  }
+
+  note.value = '';
+  error.value = `${mutationMessage} Повторная проверка подтвердила: `
+    + `агентский поиск ${actual ? 'разрешён' : 'закрыт'}, `
+    + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
+}
+
+/**
+ * Доступ агентов к переписке — не обычная галочка: у неё CAS по отпечатку политики,
+ * подтверждение человека на включение и свой разбор потерянного ответа. Пока сервер
+ * не подтвердил решение, на экране остаётся прежнее известное состояние.
+ */
+async function setAgentSearch(r: RuleForm, event: Event): Promise<void> {
+  const target = event.target instanceof HTMLInputElement ? event.target : null;
+  const enabled = target?.checked === true;
+  const requestedRule = agentSearchRuleRef(r);
+
+  // DOM уже переставил checkbox, но policy ещё не commit-нута. Возвращаем
+  // authoritative вид сразу и меняем его только ответом сервера.
+  if (target) {
+    target.checked = agentSearchStateKnown.value && r.agentSearch === true;
+  }
+  if (busy.value || !providerWritable.value) {
+    return;
+  }
+  if (dirty.value) {
+    error.value = 'Сначала сохраните обычные изменения правила, затем меняйте доступ агентов.';
+
+    return;
+  }
+  if (!agentSearchStateKnown.value || !isTelegramPolicyFingerprint(rulesPolicyFingerprint.value)) {
     error.value = 'Не получен отпечаток правил. Перечитайте список перед изменением доступа.';
+
     return;
   }
   if (enabled) {
@@ -1438,23 +1794,25 @@ async function setAgentSearch(r, event) {
         + 'Право относится только к этому правилу и по умолчанию всегда выключено.',
       { okText: 'Разрешить' },
     );
-    if (!confirmed) return;
+
+    if (!confirmed) {
+      return;
+    }
   }
 
   busy.value = 'agent-search';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.put('/api/telegram/rules/agent-search', {
-      botId: bot.value.botId,
+    const res = await telegramApi.setAgentSearch({
+      botId: bot.value?.botId,
       rule: requestedRule,
       enabled,
       expectedPolicyFingerprint: rulesPolicyFingerprint.value,
     });
-    if (!POLICY_FINGERPRINT_RE.test(res.policyFingerprint || '')) {
-      throw new Error('Сервер изменил доступ, но не вернул новый отпечаток. Перечитайте список.');
-    }
-    rules.value = res.rules || [];
+
+    rules.value = res.rules;
     rulesPolicyFingerprint.value = res.policyFingerprint;
     agentSearchStateKnown.value = true;
     savedRules.value = JSON.stringify(payload());
@@ -1462,56 +1820,39 @@ async function setAgentSearch(r, event) {
       ? 'Агентский поиск разрешён для выбранного правила.'
       : 'Агентский поиск для выбранного правила запрещён.';
   } catch (e) {
-    const mutationMessage = e?.message || 'Ответ изменения доступа не получен.';
+    const mutationMessage = telegramErrorMessage(e, 'Ответ изменения доступа не получен.');
+
     try {
-      await readRulesSnapshot({ requireFingerprint: true });
-      const current = rules.value.find((candidate) => {
-        const ref = agentSearchRuleRef(candidate);
-        return ref.project === requestedRule.project
-          && ref.chatId === requestedRule.chatId
-          && ref.username === requestedRule.username
-          && ref.threadId === requestedRule.threadId;
-      });
-      if (!current) {
-        note.value = '';
-        error.value = `${mutationMessage} Повторная проверка подтвердила: правило больше не существует.`;
-      } else {
-        const actual = current.agentSearch === true;
-        if (actual === enabled) {
-          error.value = '';
-          note.value = `Повторная проверка подтвердила: агентский поиск ${actual ? 'разрешён' : 'закрыт'}.`;
-        } else {
-          note.value = '';
-          error.value = `${mutationMessage} Повторная проверка подтвердила: `
-            + `агентский поиск ${actual ? 'разрешён' : 'закрыт'}, `
-            + `запрошенное ${enabled ? 'включение' : 'выключение'} не применено.`;
-        }
-      }
+      await confirmAgentSearch(requestedRule, enabled, mutationMessage);
     } catch (refreshError) {
       rulesPolicyFingerprint.value = '';
       agentSearchStateKnown.value = false;
       note.value = '';
       error.value = `${mutationMessage} Состояние доступа не подтверждено (неизвестно): `
-        + `${refreshError?.message || 'правила не удалось перечитать'}`;
+        + `${telegramErrorMessage(refreshError, 'правила не удалось перечитать')}`;
     }
   } finally {
     busy.value = '';
   }
 }
 
-async function load() {
+// Первая загрузка раздела. Справочники тянутся только у подключённого бота: без
+// токена сервер о чатах ничего не знает, а пустые списки выглядели бы как ответ.
+async function load(): Promise<void> {
   loading.value = true;
+
   try {
-    const res = await api.get('/api/telegram/status');
+    const res = await telegramApi.status();
+
     bot.value = res.bot;
-    poll.value = res.poll;
-    pult.value = res.pult || null;
-    providerConnection.value = typeof res.connection === 'string'
-      ? res.connection
-      : (res.bot?.configured ? 'connected' : 'disconnected');
-    providerReason.value = typeof res.reason === 'string' ? res.reason : '';
+    poll.value = res.poll ?? null;
+    pult.value = res.pult ?? null;
+    providerConnection.value = res.connection
+      ?? (res.bot.configured ? 'connected' : 'disconnected');
+    providerReason.value = res.reason ?? '';
     error.value = '';
-    if (bot.value?.configured) {
+
+    if (bot.value.configured) {
       await loadChats();
       await loadRules();
       await loadUsers();
@@ -1519,22 +1860,32 @@ async function load() {
     }
   } catch (e) {
     // Выключенный плагин — не ошибка: заглушку покажет pluginOff.
-    if (e.data?.error !== 'plugin_disabled') error.value = e.message;
+    if (!telegramPluginDisabled(e)) {
+      error.value = telegramErrorMessage(e, 'Не удалось загрузить раздел.');
+    }
   } finally {
     loading.value = false;
   }
 }
+
 onMounted(load);
 
-async function connect() {
-  if (!token.value.trim() || busy.value || !canConnect.value) return;
+// Подключение бота: сервер сам проверяет токен через getMe и оставляет секрет у
+// себя. Справочники тянутся тем же ходом — до подключения их просто не было.
+async function connect(): Promise<void> {
+  if (!token.value.trim() || busy.value || !canConnect.value) {
+    return;
+  }
+
   busy.value = 'connect';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/connect', { token: token.value.trim() });
+    const res = await telegramApi.connect(token.value.trim());
+
     bot.value = res.bot;
-    poll.value = res.poll;
+    poll.value = res.poll ?? null;
     providerConnection.value = 'connected';
     providerReason.value = '';
     token.value = '';   // проверенный токен уже на сервере, в поле ему делать нечего
@@ -1544,21 +1895,28 @@ async function connect() {
     // не было и списка проектов — без этого селект проекта пустой до F5.
     await Promise.all([loadRules(), loadUsers(), loadGroups()]);
   } catch (e) {
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось подключить бота.');
   } finally {
     busy.value = '';
   }
 }
 
-async function recheck() {
-  if (busy.value) return;
+// Перепроверка токена и режима приватности. Она же лечит опрос, не заведшийся
+// при старте сервера: ответ getMe возвращает канал в рабочее состояние.
+async function recheck(): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   busy.value = 'recheck';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/recheck', {});
+    const res = await telegramApi.recheck();
+
     bot.value = res.bot;
-    poll.value = res.poll;
+    poll.value = res.poll ?? null;
     providerConnection.value = 'connected';
     providerReason.value = '';
     note.value = bot.value.canReadAllGroupMessages
@@ -1566,26 +1924,35 @@ async function recheck() {
       : 'Проверено. Режим приватности всё ещё включён.';
     await loadChats();
   } catch (e) {
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось перепроверить бота.');
   } finally {
     busy.value = '';
   }
 }
 
-async function disconnect() {
+// Отключение стирает токен на сервере и гасит приём. Спрашиваем: принятые
+// обращения останутся, но вернуть бота без нового токена будет нечем.
+async function disconnect(): Promise<void> {
   const ok = await confirmDialog(
     `Отключить бота @${bot.value?.username || ''}? Токен будет стёрт, приём в Inbox остановится. `
-      + 'Ранее принятые обращения останутся только для чтения; для возврата понадобится вставить токен и отдельно возобновить приём.',
+      + 'Ранее принятые обращения останутся только для чтения; для возврата понадобится '
+      + 'вставить токен и отдельно возобновить приём.',
     { danger: true, okText: 'Отключить' },
   );
-  if (!ok || busy.value) return;
+
+  if (!ok || busy.value) {
+    return;
+  }
+
   busy.value = 'disconnect';
   error.value = '';
   note.value = '';
+
   try {
-    const res = await api.post('/api/telegram/disconnect', {});
+    const res = await telegramApi.disconnect();
+
     bot.value = res.bot;
-    poll.value = res.poll;
+    poll.value = res.poll ?? null;
     providerConnection.value = 'disconnected';
     providerReason.value = '';
     chats.value = [];
@@ -1595,9 +1962,10 @@ async function disconnect() {
     // Настройка пульта живёт в namespace бота и переживёт возврат того же бота,
     // но без подключения показывать её нечем.
     pult.value = null;
-    note.value = 'Бот отключён, токен стёрт. Ранее принятые обращения остаются в общем Inbox только для чтения.';
+    note.value = 'Бот отключён, токен стёрт. Ранее принятые обращения остаются в общем Inbox '
+      + 'только для чтения.';
   } catch (e) {
-    error.value = e.message;
+    error.value = telegramErrorMessage(e, 'Не удалось отключить бота.');
   } finally {
     busy.value = '';
   }

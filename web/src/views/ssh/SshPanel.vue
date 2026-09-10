@@ -127,7 +127,7 @@
                 <UiButton
                   variant="solid"
                   tone="accent"
-                  @click="chat.answerPerm(approval.pid, true, false, '', '')"
+                  @click="allow(approval)"
                 >
                   Разрешить
                 </UiButton>
@@ -261,7 +261,7 @@
               <UiSwitch
                 :model-value="activeSession.agentAllowed"
                 :aria-label="`Доступ агента к ${activeSession.label}`"
-                @update:model-value="store.setAgentAccess?.(activeSession.id, $event)"
+                @update:model-value="toggleAgentAccess(activeSession.id, $event)"
               />
             </div>
 
@@ -287,18 +287,18 @@
           <div class="ssh-sftp__body">
             <div class="ssh-files-bar">
               <UiInput v-model="remotePath" aria-label="Путь на сервере" />
-              <UiButton @click="store.listFiles?.(remotePath)">Открыть</UiButton>
+              <UiButton @click="openRemotePath">Открыть</UiButton>
               <UiFilePicker label="Загрузить файл" @change="uploadFiles" />
             </div>
             <ul v-if="store.files?.length" class="ssh-files">
-              <li v-for="file in store.files" :key="file.path || file.name">
+              <li v-for="file in store.files" :key="file.name">
                 <span>
-                  <i aria-hidden="true">{{ file.directory ? '▸' : '·' }}</i>
+                  <i aria-hidden="true">{{ file.type === 'directory' ? '▸' : '·' }}</i>
                   {{ file.name }}
                 </span>
                 <a
-                  v-if="!file.directory"
-                  :href="store.downloadUrl?.(file.path || file.name)"
+                  v-if="file.type !== 'directory'"
+                  :href="sshDownloadUrl(file.name)"
                 >
                   Скачать
                 </a>
@@ -339,7 +339,7 @@
                 <time>{{ formatAuditDate(entry.at) }}</time>
               </header>
               <pre>{{ entry.command }}</pre>
-              <pre v-if="entry.output" class="ssh-audit__output">{{ entry.output }}</pre>
+              <pre v-if="entry.output" class="ssh-audit__output">{{ auditOutputText(entry) }}</pre>
             </article>
           </div>
           <p v-else class="ssh-audit__empty">Команд агента ещё не было.</p>
@@ -581,10 +581,12 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
+import type { IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+
 import {
   UiButton,
   UiField,
@@ -602,22 +604,53 @@ import {
   alertDialog,
   confirmDialog,
 } from '../../ui';
-import { useSshStore } from '../../stores/ssh.js';
-import { useChatStore } from '../../stores/chat.js';
+import type { SshAuditEntry, SshConnection, SshSession } from '../../../../shared/sshContracts.ts';
+import {
+  activateSshSession,
+  bindSshTerminal,
+  closeSshSession,
+  connectSshSession,
+  decideSshHostKey,
+  detachSshTerminal,
+  listSshFiles,
+  loadSsh,
+  loadSshProjects,
+  probeSshHostKey,
+  resizeSshTerminal,
+  saveSshConnection,
+  sendSshInput,
+  setSshAgentAccess,
+  sshDownloadUrl,
+  uploadSshFile,
+  useSshStore,
+  watchSsh,
+} from '../../actions/ssh';
+import { useChatApprovals } from '../../shared/chatApprovals.js';
+import type { ChatApproval } from '../../shared/chatApprovals.js';
 
-const props = defineProps({
-  active: { type: Boolean, default: true },
-  compact: { type: Boolean, default: false },
-  presentation: { type: String, default: 'page' },
-});
+const props = withDefaults(
+  defineProps<{
+    active?: boolean;
+    compact?: boolean;
+    presentation?: string;
+  }>(),
+  {
+    active: true,
+    compact: false,
+    presentation: 'page',
+  },
+);
 
 const store = useSshStore();
-const chat = useChatStore();
-const terminalHost = ref(null);
-const sessionTabs = ref(null);
-const connectionsRegion = ref(null);
-const passwords = reactive({});
-const comments = reactive({});
+const chat = useChatApprovals();
+
+watchSsh();
+
+const terminalHost = ref<HTMLElement | null>(null);
+const sessionTabs = ref<{ $el?: HTMLElement } | HTMLElement | null>(null);
+const connectionsRegion = ref<HTMLElement | null>(null);
+const passwords = reactive<Record<string, string>>({});
+const comments = reactive<Record<string, string>>({});
 const remotePath = ref('.');
 const savingConnection = ref(false);
 const connectingId = ref('');
@@ -631,15 +664,15 @@ const draft = reactive({
   user: '',
 });
 
-const sshApprovals = computed(() => Object.values(chat.pending || [])
+const sshApprovals = computed(() => Object.values(chat.pending || {})
   .filter((item) => item.origin === 'ssh'));
 const activeSession = computed(() => (store.sessions || [])
   .find((item) => item.id === store.activeId));
 const selectedSessionId = computed({
   get: () => store.activeId || store.sessions?.[0]?.id || '',
-  set: (sessionId) => {
+  set: (sessionId: string) => {
     if (sessionId && sessionId !== store.activeId) {
-      activateSession(sessionId);
+      void activateSession(sessionId);
     }
   },
 });
@@ -654,9 +687,11 @@ const projectPlaceholder = computed(() => {
 const refreshLoading = computed(() => store.loading || store.projectsLoading);
 
 const sessionsByConnection = computed(() => {
-  const groups = new Map();
+  const groups = new Map<string, SshSession[]>();
+
   for (const session of store.sessions || []) {
     const sessions = groups.get(session.connectionId) || [];
+
     sessions.push(session);
     groups.set(session.connectionId, sessions);
   }
@@ -664,17 +699,26 @@ const sessionsByConnection = computed(() => {
   return groups;
 });
 
-const connectionSessions = (connectionId) => sessionsByConnection.value.get(connectionId) || [];
-const connectionSessionCount = (connectionId) => connectionSessions(connectionId).length;
-const connectionIsActive = (connectionId) => activeSession.value?.connectionId === connectionId;
+const connectionSessions = (connectionId: string) => (
+  sessionsByConnection.value.get(connectionId) || []
+);
+const connectionSessionCount = (connectionId: string) => connectionSessions(connectionId).length;
+const connectionIsActive = (connectionId: string) => (
+  activeSession.value?.connectionId === connectionId
+);
 
-const auditDecisionLabel = (decision) => ({
+const auditDecisionLabel = (decision: string | null | undefined) => ({
   allow: 'Разрешено',
   deny: 'Отказано',
-}[decision] || decision || 'Без решения');
+}[String(decision)] || decision || 'Без решения');
 
-function formatAuditDate(value) {
+/**
+ * Время записи журнала человеку. Непонятное значение показывается как есть: подменять
+ * его «сегодня» нельзя — рядом стоит команда, и время должно быть её.
+ */
+function formatAuditDate(value: string): string {
   const date = new Date(value);
+
   if (!Number.isFinite(date.getTime())) {
     return value;
   }
@@ -687,10 +731,16 @@ function formatAuditDate(value) {
   }).format(date);
 }
 
-let terminal;
-let fit;
-let terminalInput;
-let terminalObserver;
+// Вывод команды агента журнал хранит вместе со счётом байт, а показывает человеку
+// сам текст: срез виден отдельной строкой рядом.
+function auditOutputText(entry: SshAuditEntry): string {
+  return entry.output ? entry.output.text : '';
+}
+
+let terminal: Terminal | null = null;
+let fit: FitAddon | null = null;
+let terminalInput: IDisposable | undefined;
+let terminalObserver: ResizeObserver | undefined;
 let resizeFrame = 0;
 let lastTerminalSize = '';
 let disposed = false;
@@ -699,7 +749,7 @@ let disposed = false;
  * Xterm создаётся только перед реальным подключением. Так пустая SSH-панель не
  * показывает чёрный терминал с курсором и не платит за невостребованный renderer.
  */
-async function ensureTerminal() {
+async function ensureTerminal(): Promise<boolean> {
   if (disposed) {
     return false;
   }
@@ -708,6 +758,7 @@ async function ensureTerminal() {
   }
 
   await nextTick();
+
   if (disposed || !terminalHost.value) {
     return false;
   }
@@ -741,8 +792,8 @@ async function ensureTerminal() {
   fit = new FitAddon();
   terminal.loadAddon?.(fit);
   terminal.open(terminalHost.value);
-  store.bindTerminal?.(terminal);
-  terminalInput = terminal.onData?.((data) => store.sendInput?.(data));
+  bindSshTerminal(terminal);
+  terminalInput = terminal.onData?.((data: string) => sendSshInput(data));
 
   if (typeof ResizeObserver !== 'undefined') {
     terminalObserver = new ResizeObserver(scheduleTerminalFit);
@@ -756,7 +807,7 @@ async function ensureTerminal() {
  * Видимая геометрия xterm и удалённого PTY меняется одним шагом. Последний
  * размер запоминается, чтобы ResizeObserver не засыпал SSH одинаковыми пакетами.
  */
-function fitTerminal() {
+function fitTerminal(): void {
   if (!props.active || !activeSession.value || !terminal || !fit) {
     return;
   }
@@ -769,20 +820,24 @@ function fitTerminal() {
 
   const cols = Number(terminal.cols);
   const rows = Number(terminal.rows);
+
   if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols < 1 || rows < 1) {
     return;
   }
 
   const size = `${cols}:${rows}`;
+
   if (size === lastTerminalSize) {
     return;
   }
 
   lastTerminalSize = size;
-  store.resize?.(cols, rows);
+  resizeSshTerminal(cols, rows);
 }
 
-function scheduleTerminalFit() {
+// Кадр анимации вместо прямого вызова: ResizeObserver срабатывает пачкой, а перетяжка
+// границы дока даёт их десятками подряд.
+function scheduleTerminalFit(): void {
   if (resizeFrame) {
     cancelAnimationFrame(resizeFrame);
   }
@@ -793,34 +848,34 @@ function scheduleTerminalFit() {
   });
 }
 
-async function refresh() {
-  await Promise.all([
-    store.load(),
-    Promise.resolve(store.loadProjects?.()),
-  ]);
+// Раздел и каталог проектов читаются вместе: форма нового сервера бесполезна без
+// списка проектов, а список сессий — без самих серверов.
+async function refresh(): Promise<void> {
+  await Promise.all([loadSsh(), loadSshProjects()]);
 }
 
-async function activateSession(sessionId) {
+async function activateSession(sessionId: string): Promise<void> {
   const ready = await ensureTerminal();
+
   if (!ready || disposed) {
     return;
   }
 
-  store.activate(sessionId);
+  activateSshSession(sessionId);
 }
 
-function sessionTabId(sessionId) {
+function sessionTabId(sessionId: string): string {
   return `ssh-session-tab-${String(sessionId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
 
-function sessionProjectLabel(session) {
+function sessionProjectLabel(session: SshSession): string {
   const connection = (store.connections || [])
     .find((item) => item.id === session.connectionId);
 
   return String(session.projectId || connection?.projectId || 'не указан');
 }
 
-function sessionTargetBase(session) {
+function sessionTargetBase(session: SshSession): string {
   const values = [session.label, session.role]
     .map((value) => String(value || '').trim())
     .filter((value, index, items) => value && items.indexOf(value) === index);
@@ -830,13 +885,17 @@ function sessionTargetBase(session) {
     || 'SSH-сессия';
 }
 
-/** Полная видимая метка различает повторные входы в один сервер порядковым номером. */
-function sessionTargetLabel(session) {
+/**
+ * Полная видимая метка различает повторные входы в один сервер порядковым номером:
+ * две вкладки с одинаковым названием человек путает, а закрывает он их по одной.
+ */
+function sessionTargetLabel(session: SshSession): string {
   const project = sessionProjectLabel(session);
   const target = sessionTargetBase(session);
   const sameTarget = (store.sessions || []).filter((item) => (
     sessionProjectLabel(item) === project && sessionTargetBase(item) === target
   ));
+
   if (sameTarget.length < 2) {
     return target;
   }
@@ -846,7 +905,9 @@ function sessionTargetLabel(session) {
   return `${target} · ${Math.max(position, 1)}`;
 }
 
-function sessionTabTitle(session) {
+// Подсказка вкладки называет проект, саму сессию и адрес входа: одной метки мало,
+// когда в проекте открыто несколько одинаковых по названию серверов.
+function sessionTabTitle(session: SshSession): string {
   const endpoint = [session.host, session.port].filter(Boolean).join(':');
   const identity = [session.user, endpoint].filter(Boolean).join('@');
   const parts = [
@@ -858,7 +919,9 @@ function sessionTabTitle(session) {
   return parts.join(' — ');
 }
 
-function sessionTabAriaLabel(session) {
+// То же для чтения с экрана: порядок частей общий, но разделитель — запятая, иначе
+// длинное тире читается вслух как часть адреса.
+function sessionTabAriaLabel(session: SshSession): string {
   const endpoint = [session.host, session.port].filter(Boolean).join(':');
   const identity = [session.user, endpoint].filter(Boolean).join('@');
   const parts = [
@@ -870,18 +933,27 @@ function sessionTabAriaLabel(session) {
   return parts.join(', ');
 }
 
-async function focusSessionTab(sessionId) {
+// Фокус переносится на вкладку по её сессии, а не по позиции: список к этому моменту
+// мог уже перестроиться ответом сервера.
+async function focusSessionTab(sessionId: string): Promise<void> {
   await nextTick();
-  const tabsRoot = sessionTabs.value?.$el || sessionTabs.value;
+
+  const root = sessionTabs.value;
+  const tabsRoot = (root && '$el' in root ? root.$el : root) as HTMLElement | null;
   const tab = [...(tabsRoot?.querySelectorAll?.('[role="tab"]') || [])]
-    .find((item) => item.dataset.sessionId === sessionId);
-  tab?.focus();
+    .find((item) => (item as HTMLElement).dataset.sessionId === sessionId);
+
+  (tab as HTMLElement | undefined)?.focus();
 }
 
-/** Карточка сервера возвращает в живую сессию без нового probe и ввода пароля. */
-async function openConnectionSession(connectionId) {
+/**
+ * Карточка сервера возвращает в живую сессию без нового probe и ввода пароля:
+ * сессия уже открыта на сервере, и второй вход завёл бы рядом ещё одну.
+ */
+async function openConnectionSession(connectionId: string): Promise<void> {
   const sessions = connectionSessions(connectionId);
   const session = sessions.find((item) => item.id === store.activeId) || sessions.at(-1);
+
   if (!session) {
     return;
   }
@@ -889,13 +961,18 @@ async function openConnectionSession(connectionId) {
   if (store.activeId !== session.id) {
     await activateSession(session.id);
   }
+
   await nextTick();
   terminal?.focus?.();
 }
 
-/** Закрытие активной вкладки выбирает соседа и сохраняет непрерывный roving focus. */
-async function closeActiveSession() {
+/**
+ * Закрытие активной вкладки выбирает соседа и сохраняет непрерывный roving focus:
+ * иначе фокус улетает в начало страницы, и клавиатурная работа обрывается.
+ */
+async function closeActiveSession(): Promise<void> {
   const sessionId = store.activeId;
+
   if (!sessionId || closingSessionId.value) {
     return;
   }
@@ -903,16 +980,19 @@ async function closeActiveSession() {
   const sessions = store.sessions || [];
   const index = sessions.findIndex((session) => session.id === sessionId);
   const replacementId = sessions[index + 1]?.id || sessions[index - 1]?.id || '';
+
   closingSessionId.value = sessionId;
 
   try {
-    await store.closeSession?.(sessionId);
+    await closeSshSession(sessionId);
+
     if (disposed) {
       return;
     }
     if (!replacementId) {
       await nextTick();
       connectionsRegion.value?.focus();
+
       return;
     }
     if (!(store.sessions || []).some((session) => session.id === replacementId)) {
@@ -926,7 +1006,8 @@ async function closeActiveSession() {
       await activateSession(sessionId);
       await focusSessionTab(sessionId);
     }
-    await alertDialog(error?.message || 'Не удалось закрыть SSH-сессию', { title: 'SSH' });
+
+    await alertDialog(errorText(error, 'Не удалось закрыть SSH-сессию'), { title: 'SSH' });
   } finally {
     if (closingSessionId.value === sessionId) {
       closingSessionId.value = '';
@@ -934,13 +1015,25 @@ async function closeActiveSession() {
   }
 }
 
+// Отказ приходит из сети и своего типа не обещает: человеку показывается сообщение
+// ошибки, а при его отсутствии — понятный текст самой операции.
+function errorText(error: unknown, fallback: string): string {
+  const message = error !== null && typeof error === 'object'
+    ? (error as { message?: unknown }).message
+    : undefined;
+
+  return typeof message === 'string' && message ? message : fallback;
+}
+
 onMounted(async () => {
   await refresh();
+
   if (disposed) {
     return;
   }
 
   const sessionId = store.activeId || store.sessions?.[0]?.id;
+
   if (sessionId) {
     await activateSession(sessionId);
     scheduleTerminalFit();
@@ -950,6 +1043,7 @@ onMounted(async () => {
 watch(activeSession, async (session) => {
   if (!session) {
     lastTerminalSize = '';
+
     return;
   }
 
@@ -982,18 +1076,25 @@ onBeforeUnmount(() => {
 
   terminalObserver?.disconnect?.();
   terminalInput?.dispose?.();
-  store.detach?.();
+  detachSshTerminal();
   terminal?.dispose?.();
 });
 
-async function openConnection(connection) {
+/**
+ * Вход на сервер. Ключ хоста проверяется до пароля: молчаливое доверие первому
+ * ответившему означало бы отдать пароль root тому, кто занял адрес. Пароль стирается
+ * в любом исходе — и после успеха, и после отказа.
+ */
+async function openConnection(connection: SshConnection): Promise<void> {
   if (connectingId.value) {
     return;
   }
 
   connectingId.value = connection.id;
+
   try {
-    const check = await store.probeHostKey(connection.id);
+    const check = await probeSshHostKey(connection.id);
+
     if (check.status !== 'trusted') {
       const changed = check.status === 'changed';
       const accepted = await confirmDialog(
@@ -1005,36 +1106,43 @@ async function openConnection(connection) {
           danger: changed,
         },
       );
+
       if (!accepted) {
         return;
       }
 
-      await store.decideHostKey(check.challengeId, changed ? 'replace' : 'trust');
+      await decideSshHostKey(String(check.challengeId), changed ? 'replace' : 'trust');
     }
 
     if (!await ensureTerminal()) {
       return;
     }
 
-    await store.connect(connection.id, passwords[connection.id] || '');
+    await connectSshSession(connection.id, passwords[connection.id] || '');
   } catch (error) {
-    await alertDialog(error?.message || 'Не удалось подключиться', { title: 'SSH' });
+    await alertDialog(errorText(error, 'Не удалось подключиться'), { title: 'SSH' });
   } finally {
     passwords[connection.id] = '';
+
     if (connectingId.value === connection.id) {
       connectingId.value = '';
     }
   }
 }
 
-async function saveConnection() {
+/**
+ * Сохранение нового сервера. Проект обязателен: без него соединение не принадлежит
+ * ничему, и агент не сможет получить к нему доступ ни при каком решении человека.
+ */
+async function saveConnection(): Promise<void> {
   if (savingConnection.value || !draft.projectId) {
     return;
   }
 
   savingConnection.value = true;
+
   try {
-    await store.saveConnection({
+    await saveSshConnection({
       ...draft,
       port: Number(draft.port) || 22,
     });
@@ -1047,22 +1155,39 @@ async function saveConnection() {
       user: '',
     });
   } catch (error) {
-    await alertDialog(error?.message || 'Не удалось сохранить соединение', { title: 'SSH' });
+    await alertDialog(errorText(error, 'Не удалось сохранить соединение'), { title: 'SSH' });
   } finally {
     savingConnection.value = false;
   }
 }
 
-async function uploadFiles(files) {
+// Файл кладётся в открытый каталог под своим именем: путь собирается здесь, а не в
+// операции, потому что «куда» видно только на экране.
+async function uploadFiles(files: File[]): Promise<void> {
   const file = files?.[0];
+
   if (file) {
     const destination = `${remotePath.value.replace(/\/$/, '')}/${file.name}`;
-    await store.uploadFile?.(file, destination);
+
+    await uploadSshFile(file, destination);
   }
 }
 
-function deny(approval) {
+function openRemotePath(): void {
+  void listSshFiles(remotePath.value);
+}
+
+function toggleAgentAccess(sessionId: string, allowed: boolean): void {
+  void setSshAgentAccess(sessionId, allowed);
+}
+
+function allow(approval: ChatApproval): void {
+  chat.answerPerm(approval.pid, true, false, '', '');
+}
+
+function deny(approval: ChatApproval): void {
   const comment = String(comments[approval.pid] || '').trim();
+
   chat.answerPerm(approval.pid, false, false, comment, '');
 }
 </script>

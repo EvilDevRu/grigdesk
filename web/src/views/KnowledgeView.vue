@@ -80,7 +80,10 @@
             </div>
           </div>
           <UiField label="Решение" required>
-            <UiSelect v-model="importDecisions[conflict.id]">
+            <UiSelect
+              :model-value="conflictDecision(conflict.id)"
+              @update:model-value="setConflictDecision(conflict.id, $event)"
+            >
               <option value="" disabled>Выберите решение</option>
               <option value="keep-current">Оставить в базе</option>
               <option value="use-import">Взять из файла</option>
@@ -102,8 +105,10 @@
           class="knowledge-view__item"
         >
           <UiButton @click="openRecord(item.id)">{{ item.title }}</UiButton>
-          <span v-if="item.fragment" class="knowledge-view__fragment">{{ item.fragment }}</span>
-          <span v-if="item.tags?.length" class="knowledge-view__tags">
+          <span v-if="fragmentOf(item)" class="knowledge-view__fragment">
+            {{ fragmentOf(item) }}
+          </span>
+          <span v-if="item.tags.length" class="knowledge-view__tags">
             {{ item.tags.join(', ') }}
           </span>
         </article>
@@ -147,11 +152,20 @@
   </main>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { api } from '../shared/api-client.js';
+import { knowledgeApi, knowledgeErrorCode, knowledgeErrorMessage } from '../shared/knowledgeApi.ts';
+import type {
+  KnowledgeFacets,
+  KnowledgeImportDecision,
+  KnowledgeImportPreview,
+  KnowledgeImportResolution,
+  KnowledgeRecord,
+  KnowledgeRecordInput,
+  KnowledgeSearchItem,
+} from '../../../shared/knowledgeContracts.ts';
 import {
   UiButton,
   UiField,
@@ -166,96 +180,135 @@ import {
   confirmDialog,
 } from '../ui.ts';
 
-const items = ref([]);
-const facets = ref({ projects: [], tags: [] });
+// Список показывает либо записи базы, либо находки поиска: у находки есть фрагмент
+// совпадения и нет полного текста.
+type KnowledgeEntry = KnowledgeRecord | KnowledgeSearchItem;
+
+/**
+ * Черновик редактора. Теги человек правит одной строкой, а пустой id означает ещё не
+ * созданную запись: по нему же решается, куда уйдёт сохранение — в POST или в PUT.
+ */
+interface KnowledgeDraft {
+  id: string;
+  revision: number;
+  project: string;
+  repository: string;
+  kind: string;
+  title: string;
+  body: string;
+  tagsText: string;
+}
+
+const items = ref<KnowledgeEntry[]>([]);
+const facets = ref<KnowledgeFacets>({ projects: [], tags: [] });
 const query = ref('');
 const projectFilter = ref('');
 const tagFilter = ref('');
-const draft = ref(null);
+const draft = ref<KnowledgeDraft | null>(null);
 const loading = ref(false);
 const error = ref('');
 const disabled = ref(false);
 const transferBusy = ref(false);
 const transferError = ref('');
 const transferResult = ref('');
-const importPreview = ref(null);
-const importDecisions = ref({});
-const importFile = shallowRef(null);
+const importPreview = ref<KnowledgeImportPreview | null>(null);
+const importDecisions = ref<Record<string, KnowledgeImportDecision | ''>>({});
+const importFile = shallowRef<File | null>(null);
 const route = useRoute();
 const router = useRouter();
 
+function conflictDecision(id: string): KnowledgeImportDecision | '' {
+  return importDecisions.value[id] ?? '';
+}
+
 const allConflictsResolved = computed(() => (
-  (importPreview.value?.conflicts || []).every((conflict) => (
-    ['keep-current', 'use-import'].includes(importDecisions.value[conflict.id])
-  ))
+  (importPreview.value?.conflicts ?? []).every((conflict) => conflictDecision(conflict.id) !== '')
 ));
 
-function errorText(caught) {
-  return String(caught?.data?.message || caught?.message || 'Не удалось выполнить операцию.');
+/**
+ * Общий control отдаёт выбор строкой. Раздел запоминает только известные решения,
+ * чтобы посторонняя строка не выглядела как ответ человека по конфликту.
+ */
+function setConflictDecision(id: string, value: unknown): void {
+  importDecisions.value[id] = value === 'keep-current' || value === 'use-import' ? value : '';
 }
 
-function queryString(values) {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(values)) {
-    if (value) {
-      params.set(key, value);
-    }
-  }
-  const suffix = params.toString();
-  return suffix ? `?${suffix}` : '';
+function fragmentOf(entry: KnowledgeEntry): string {
+  return 'fragment' in entry ? entry.fragment : '';
 }
 
-function editable(record) {
+function editable(record: KnowledgeRecord): KnowledgeDraft {
   return {
-    ...record,
-    tagsText: Array.isArray(record.tags) ? record.tags.join(', ') : '',
+    id: record.id,
+    revision: record.revision,
+    project: record.project,
+    repository: record.repository,
+    kind: record.kind,
+    title: record.title,
+    body: record.body,
+    tagsText: record.tags.join(', '),
   };
 }
 
-function recordText(record) {
+function recordText(record: unknown): string {
   return JSON.stringify(record, null, 2);
 }
 
+/**
+ * Скачивает резервную копию одним действием человека. Object URL освобождается в любом
+ * исходе: ссылка живёт ровно столько, сколько нужно браузеру для сохранения файла.
+ */
 async function exportKnowledge() {
   transferBusy.value = true;
   transferError.value = '';
   transferResult.value = '';
+
   try {
-    const result = await api.download('/api/knowledge/backup/export');
-    const objectUrl = URL.createObjectURL(result.blob);
+    const backup = await knowledgeApi.exportBackup();
+    const objectUrl = URL.createObjectURL(backup.blob);
+
     try {
       const link = document.createElement('a');
+
       link.href = objectUrl;
-      link.download = result.filename
+      link.download = backup.filename
         || `cockpit-knowledge-${new Date().toISOString().slice(0, 10)}.json`;
       link.click();
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
+
     transferResult.value = 'Резервная копия скачана.';
   } catch (caught) {
-    transferError.value = errorText(caught);
+    transferError.value = knowledgeErrorMessage(caught);
   } finally {
     transferBusy.value = false;
   }
 }
 
-async function previewImport(files) {
-  if (!Array.isArray(files) || files.length !== 1) {
+/**
+ * Предпросмотр строится по одному выбранному файлу, и сам файл запоминается: применение
+ * обязано уйти по тому же содержимому, которое человек только что сверил глазами.
+ */
+async function previewImport(files: File[]) {
+  const [file] = files;
+
+  if (!Array.isArray(files) || files.length !== 1 || !file) {
     transferError.value = 'Выберите ровно один файл резервной копии.';
+
     return;
   }
+
   transferBusy.value = true;
   transferError.value = '';
   transferResult.value = '';
-  importFile.value = files[0];
+  importFile.value = file;
+
   try {
-    const formData = new FormData();
-    formData.append('file', importFile.value);
-    importPreview.value = await api.upload('/api/knowledge/backup/import/preview', formData);
+    importPreview.value = await knowledgeApi.previewImport(file);
     importDecisions.value = {};
   } catch (caught) {
-    transferError.value = errorText(caught);
+    transferError.value = knowledgeErrorMessage(caught);
   } finally {
     transferBusy.value = false;
   }
@@ -266,35 +319,52 @@ async function previewImport(files) {
  * preview и выборы остаются на экране, чтобы человек осознанно сверил их снова.
  */
 async function applyImport() {
-  if (!importPreview.value || !importFile.value || !allConflictsResolved.value) {
+  const preview = importPreview.value;
+  const file = importFile.value;
+
+  if (!preview || !file || !allConflictsResolved.value) {
     return;
   }
+
+  const resolutions: KnowledgeImportResolution[] = [];
+
+  for (const conflict of preview.conflicts) {
+    const decision = conflictDecision(conflict.id);
+
+    if (decision === '') {
+      return;
+    }
+
+    resolutions.push({
+      id: conflict.id,
+      decision,
+      expectedCurrentRevision: conflict.currentRevision,
+    });
+  }
+
   transferBusy.value = true;
   transferError.value = '';
   transferResult.value = '';
-  const resolutions = importPreview.value.conflicts.map((conflict) => ({
-    id: conflict.id,
-    decision: importDecisions.value[conflict.id],
-    expectedCurrentRevision: conflict.currentRevision,
-  }));
+
   try {
-    const formData = new FormData();
-    formData.append('file', importFile.value);
-    formData.append('snapshotHash', importPreview.value.snapshotHash);
-    formData.append('resolutions', JSON.stringify(resolutions));
-    const result = await api.upload('/api/knowledge/backup/import/apply', formData);
+    const result = await knowledgeApi.applyImport(file, preview.snapshotHash, resolutions);
+
     importPreview.value = null;
     importDecisions.value = {};
     importFile.value = null;
     transferResult.value = `Импорт применён. Записей в базе: ${result.total}.`;
     await loadList();
   } catch (caught) {
-    transferError.value = errorText(caught);
+    transferError.value = knowledgeErrorMessage(caught);
   } finally {
     transferBusy.value = false;
   }
 }
 
+/**
+ * Закрывает импорт целиком: и предпросмотр, и выбранные решения, и сам файл. Оставить
+ * что-то одно значило бы применить решения к другому содержимому.
+ */
 function closeImport() {
   importPreview.value = null;
   importDecisions.value = {};
@@ -302,149 +372,187 @@ function closeImport() {
   transferError.value = '';
 }
 
+/**
+ * Пересборка карт — отдельное действие человека: она переписывает файлы оглавления в
+ * репозиториях и потому не увязана ни с экспортом, ни с импортом.
+ */
 async function updateMaps() {
   transferBusy.value = true;
   transferError.value = '';
   transferResult.value = '';
+
   try {
-    const result = await api.post('/api/knowledge/maps/refresh');
+    const result = await knowledgeApi.refreshMaps();
+
     transferResult.value = `Обновлено карт: ${result.mapCount}; записей: ${result.recordCount}.`;
   } catch (caught) {
-    transferError.value = errorText(caught);
+    transferError.value = knowledgeErrorMessage(caught);
   } finally {
     transferBusy.value = false;
   }
 }
 
-/** Загружает authoritative список; plugin_disabled превращается в штатную заглушку. */
+/**
+ * Загружает authoritative список. Выключенный плагин — штатное состояние, а не отказ:
+ * он превращается в заглушку и не показывает человеку красную ошибку.
+ */
 async function loadList() {
   loading.value = true;
   error.value = '';
+
   try {
-    const result = await api.get(`/api/knowledge${queryString({
+    const result = await knowledgeApi.list({
       project: projectFilter.value,
       tag: tagFilter.value,
-    })}`);
-    items.value = result.items || [];
-    facets.value = result.facets || { projects: [], tags: [] };
+    });
+
+    items.value = result.items;
+    facets.value = result.facets;
     disabled.value = false;
   } catch (caught) {
-    if (caught?.data?.error === 'plugin_disabled') {
+    if (knowledgeErrorCode(caught) === 'plugin_disabled') {
       disabled.value = true;
     } else {
-      error.value = errorText(caught);
+      error.value = knowledgeErrorMessage(caught);
     }
   } finally {
     loading.value = false;
   }
 }
 
+/**
+ * Поиск заменяет список находками с фрагментами совпадения. Фасеты остаются от списка:
+ * их считает вся база, а не выборка запроса.
+ */
 async function search() {
   loading.value = true;
   error.value = '';
+
   try {
-    const result = await api.get(`/api/knowledge/search${queryString({
-      q: query.value,
+    items.value = await knowledgeApi.search({
+      query: query.value,
       project: projectFilter.value,
       tag: tagFilter.value,
-    })}`);
-    items.value = result.items || [];
+    });
   } catch (caught) {
-    error.value = errorText(caught);
+    error.value = knowledgeErrorMessage(caught);
   } finally {
     loading.value = false;
   }
 }
 
-async function loadRecord(id) {
+/**
+ * Полный текст записи приходит отдельным запросом: ни список, ни находки поиска его не
+ * содержат, и открытая запись всегда свежая, а не собранная из строки списка.
+ */
+async function loadRecord(id: string) {
   error.value = '';
+
   try {
-    const result = await api.get(`/api/knowledge/${id}`);
-    draft.value = editable(result.record);
+    draft.value = editable(await knowledgeApi.read(id));
   } catch (caught) {
-    error.value = errorText(caught);
+    error.value = knowledgeErrorMessage(caught);
   }
 }
 
-async function openRecord(id) {
+async function openRecord(id: string) {
   if (String(route.params.id || '') === id) {
     await loadRecord(id);
+
     return;
   }
+
   await router.push(`/knowledge/${id}`);
 }
 
 function startCreate() {
   error.value = '';
-  draft.value = editable({
+  draft.value = {
+    id: '',
+    revision: 0,
     project: '',
     repository: '',
     kind: 'fact',
     title: '',
     body: '',
-    tags: [],
-  });
+    tagsText: '',
+  };
 }
 
 /**
  * Проверяет владельца темы до удаления пустых тегов, чтобы исправление черновика
  * не отправило запись без доступной карты и резервной копии.
  */
-function payload() {
-  const tags = draft.value.tagsText.split(',').map((tag) => tag.normalize('NFKC').trim());
+function payload(current: KnowledgeDraft): KnowledgeRecordInput {
+  const tags = current.tagsText.split(',').map((tag) => tag.normalize('NFKC').trim());
 
-  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tags[0])) {
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(tags[0] ?? '')) {
     throw new Error(
       'Первый тег обязателен: используйте строчные латинские буквы, цифры и дефис между ними.',
     );
   }
 
   return {
-    project: draft.value.project,
-    repository: draft.value.repository,
-    kind: draft.value.kind,
-    title: draft.value.title,
-    body: draft.value.body,
+    project: current.project,
+    repository: current.repository,
+    kind: current.kind,
+    title: current.title,
+    body: current.body,
     tags: tags.filter(Boolean),
   };
 }
 
-/** Неуспешная мутация не повторяется и не заменяет введённый человеком черновик. */
+/**
+ * Неуспешная мутация не повторяется и не заменяет введённый человеком черновик: правки
+ * остаются на экране, и решение отправить их снова принимает человек.
+ */
 async function save() {
   error.value = '';
+
   const current = draft.value;
+
+  if (!current) {
+    return;
+  }
+
   try {
-    const result = current.id
-      ? await api.put(`/api/knowledge/${current.id}`, {
-        ...payload(),
-        expectedRevision: current.revision,
-      })
-      : await api.post('/api/knowledge', payload());
-    draft.value = editable(result.record);
+    const record = current.id
+      ? await knowledgeApi.update(current.id, payload(current), current.revision)
+      : await knowledgeApi.create(payload(current));
+
+    draft.value = editable(record);
   } catch (caught) {
-    error.value = errorText(caught);
+    error.value = knowledgeErrorMessage(caught);
   }
 }
 
+/**
+ * Удаление подтверждает человек, а сервер сверяет ревизию: запись, изменённую в другом
+ * окне, стереть вслепую нельзя.
+ */
 async function remove() {
   const current = draft.value;
+
   if (!current?.id || !await confirmDialog(`Удалить запись «${current.title}»?`)) {
     return;
   }
+
   error.value = '';
+
   try {
-    await api.del(`/api/knowledge/${current.id}`, { expectedRevision: current.revision });
+    await knowledgeApi.remove(current.id, current.revision);
     items.value = items.value.filter((item) => item.id !== current.id);
     draft.value = null;
     await router.push('/knowledge');
   } catch (caught) {
-    error.value = errorText(caught);
+    error.value = knowledgeErrorMessage(caught);
   }
 }
 
 async function closeEditor() {
   draft.value = null;
   error.value = '';
+
   if (route.params.id) {
     await router.push('/knowledge');
   }

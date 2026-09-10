@@ -155,7 +155,10 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { api } from '../shared/api-client.js';
+
+import type { AgentCard } from '../../../shared/agentsContracts.ts';
+import { agentsApi } from '../shared/agentsApi.ts';
+import { failureText } from '../shared/apiClient.ts';
 import {
   UiButton, UiIconButton,
   UiInput,
@@ -169,7 +172,7 @@ import {
   UiTooltip,
   confirmDialog,
 } from '../ui';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
 
 // База агентов (ролей конвейера): слева список, справа редактор карточки.
 // Агент — заготовка роли: метаданные + начало задания. Ни одно поле не исполняется:
@@ -179,29 +182,57 @@ import { useUiContextSource } from '../composables/useUiContextSource.js';
 // боевое значение — иначе раздел читается как настройки запуска, которыми он не является.
 // Два уровня рекомендаций: обычные (подпись, форма, класс модели, промпт) и «Профи»
 // (ключ реестра, сноска, таймаут, бюджет, флаги) — скрыты за тумблером.
-const agents = ref([]);
+
+// Черновик карточки: та же форма, что у сохранённой. Отдельного типа для нового
+// агента не нужно — создание от правки отличает адрес запроса, а не форма тела.
+type AgentForm = AgentCard;
+
+const PRO_KEY = 'cockpit-agents-pro';
+
+const agents = ref<AgentCard[]>([]);
 const loading = ref(false);
 const error = ref('');
 const selectedId = ref('');
-const form = ref(null);        // редактируемая копия
-const isNew = ref(false);      // режим создания нового агента
+// Редактируемая копия: правка карточки не должна менять список до сохранения.
+const form = ref<AgentForm | null>(null);
+// Режим создания: у нового агента ещё нет id, и удалять его нечего.
+const isNew = ref(false);
 const saving = ref(false);
 const notice = ref('');
-const installing = ref(false);   // идёт установка стандартного набора
-const installNotice = ref('');   // итог установки в шапке списка
-const pro = ref(localStorage.getItem('cockpit-agents-pro') === '1');
+// Идёт установка стандартного набора; её итог показывается в шапке списка.
+const installing = ref(false);
+const installNotice = ref('');
+const pro = ref(localStorage.getItem(PRO_KEY) === '1');
+// Ступени усилия приходят из реестра исполнителей: перечислять их здесь нельзя —
+// новая ступень CLI тогда просто пропала бы из выбора.
+const efforts = ref<string[]>([]);
+
 const agentsContext = useUiContextSource('agents', { layer: 'page', active: false });
+
 watch(selectedId, (agentId) => {
-  if (agentId) agentsContext.focus({ details: { agentId } });
-  else agentsContext.blur();
+  if (agentId) {
+    agentsContext.focus({ details: { agentId } });
+  } else {
+    agentsContext.blur();
+  }
 }, { immediate: true });
+
+watch(pro, (value) => localStorage.setItem(PRO_KEY, value ? '1' : '0'));
 
 const kinds = [
   { v: 'agent', label: '🤖 Агент' },
   { v: 'human', label: '👤 Человек' },
   { v: 'code', label: '</> Код' },
 ];
-const kindIcon = { agent: '🤖', human: '👤', code: '</>' };
+
+// Значок рода — свободный словарь: файл базы пишет человек, и незнакомый род должен
+// доехать до списка без значка, а не исчезнуть вместе с карточкой.
+const kindIcon: Record<string, string> = {
+  agent: '🤖',
+  human: '👤',
+  code: '</>',
+};
+
 // Класс модели, а не семейство: база агентов общая для всех проектов, а проекты
 // живут на разных исполнителях. Какое семейство закрывает класс — дело runners.env.
 const tiers = [
@@ -209,129 +240,283 @@ const tiers = [
   { v: 'balanced', label: 'Сбалансированная — рутина по спецификации' },
   { v: 'cheap', label: 'Экономная — механика и проверки' },
 ];
-const tierLabel = Object.fromEntries(tiers.map((t) => [t.v, t.label.split(' — ')[0]]));
-// Чипы в списке — это рекомендации, а не то, чем этап реально пойдёт: пишем это прямо
-// в подсказке, иначе они читаются как «вот на чём он запустится».
-function adviceTitle(a) {
-  const parts = [];
-  if (a.tier) parts.push(`модель класса «${tierLabel[a.tier] || a.tier}»`);
-  if (a.effort) parts.push(`effort ${a.effort}`);
-  return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет — модель и effort берутся из runners.env проекта.`;
-}
-// Эффорты — из реестра исполнителей, без хардкода.
-const providers = ref([]);
+
+// Короткая подпись класса: до тире — название, после — пояснение для селекта.
+const tierLabel: Record<string, string> = Object.fromEntries(
+  tiers.map((tier) => [tier.v, tier.label.split(' — ')[0] ?? tier.label]),
+);
 
 // Описания настроек для тултипов — языком человека, не движка.
 const help = {
-  label: 'Как этап будет подписан на схеме конвейера — текст внутри блока. Например «Разведка» или «Приёмка кода».',
-  kind: 'Кто делает этап: 🤖 агент — работает ИИ; 👤 человек — конвейер останавливается и ждёт решения человека; </> код — выполняется команда на хосте. Здесь это заготовка для нового блока: у этапов уже собранной схемы форма задана самой схемой.',
-  tier: 'Насколько сильная модель нужна этапу: рассуждающая — для сложного анализа, сбалансированная — для рутины по готовой спецификации, экономная — для механики и проверок. Конкретную модель (opus, sonnet…) здесь не выбирают: база агентов общая для всех проектов, а какой моделью закрыть класс — решает runners.env проекта. Это пометка человеку, который собирает маршрут; запуск её не читает.',
-  effort: 'Сколько усилий модели тратить на обдумывание хода — пометка тому, кто собирает маршрут. На запуск не влияет: фактический effort этапа берётся из runners.env проекта.',
-  sub: 'Мелкая приписка под названием блока на схеме — уточнение, чем этап занят (например «lint · tests»).',
-  key: 'Короткое имя этапа в реестре задачи (runKey): под ним движок хранит результат этапа и показывает его в дашборде и логах. Здесь — предложение для нового узла; у собранной схемы ключ берётся из неё.',
-  timeout: 'За сколько секунд этап должен уложиться — ориентир тому, кто собирает маршрут; 0 — без рекомендации. Боевой лимит принадлежит опубликованному маршруту, и агент узнаёт его из служебного «регламента времени» в конце промпта.',
-  budget: 'Ориентир объёма работы этапа для автора маршрута; 0 — без рекомендации. В маршрутах бюджет задан именованным классом (standard, large), так что число отсюда никуда не едет.',
-  flags: 'Две пометки для нового узла: read-only — этапу нельзя писать в репозиторий (только смотрит и отчитывается), optional — этап разрешено штатно пропустить. Настоящую файловую политику и допустимые исходы задаёт маршрут.',
-  prompt: 'С чего начинается задание этапа. Это заготовка: боевой текст живёт в маршруте профиля (routes/<маршрут>/prompts/), туда его переносят отсюда — правка заготовки собранные маршруты не меняет. Данные задачи (номер, ветку, отчёты предыдущих этапов) движок подставляет сам отдельными блоками.',
+  label: 'Как этап будет подписан на схеме конвейера — текст внутри блока.'
+    + ' Например «Разведка» или «Приёмка кода».',
+  kind: 'Кто делает этап: 🤖 агент — работает ИИ; 👤 человек — конвейер останавливается'
+    + ' и ждёт решения человека; </> код — выполняется команда на хосте. Здесь это'
+    + ' заготовка для нового блока: у этапов уже собранной схемы форма задана самой схемой.',
+  tier: 'Насколько сильная модель нужна этапу: рассуждающая — для сложного анализа,'
+    + ' сбалансированная — для рутины по готовой спецификации, экономная — для механики'
+    + ' и проверок. Конкретную модель (opus, sonnet…) здесь не выбирают: база агентов'
+    + ' общая для всех проектов, а какой моделью закрыть класс — решает runners.env'
+    + ' проекта. Это пометка человеку, который собирает маршрут; запуск её не читает.',
+  effort: 'Сколько усилий модели тратить на обдумывание хода — пометка тому, кто собирает'
+    + ' маршрут. На запуск не влияет: фактический effort этапа берётся из runners.env проекта.',
+  sub: 'Мелкая приписка под названием блока на схеме — уточнение, чем этап занят'
+    + ' (например «lint · tests»).',
+  key: 'Короткое имя этапа в реестре задачи (runKey): под ним движок хранит результат'
+    + ' этапа и показывает его в дашборде и логах. Здесь — предложение для нового узла;'
+    + ' у собранной схемы ключ берётся из неё.',
+  timeout: 'За сколько секунд этап должен уложиться — ориентир тому, кто собирает маршрут;'
+    + ' 0 — без рекомендации. Боевой лимит принадлежит опубликованному маршруту, и агент'
+    + ' узнаёт его из служебного «регламента времени» в конце промпта.',
+  budget: 'Ориентир объёма работы этапа для автора маршрута; 0 — без рекомендации.'
+    + ' В маршрутах бюджет задан именованным классом (standard, large), так что число'
+    + ' отсюда никуда не едет.',
+  flags: 'Две пометки для нового узла: read-only — этапу нельзя писать в репозиторий'
+    + ' (только смотрит и отчитывается), optional — этап разрешено штатно пропустить.'
+    + ' Настоящую файловую политику и допустимые исходы задаёт маршрут.',
+  prompt: 'С чего начинается задание этапа. Это заготовка: боевой текст живёт в маршруте'
+    + ' профиля (routes/<маршрут>/prompts/), туда его переносят отсюда — правка заготовки'
+    + ' собранные маршруты не меняет. Данные задачи (номер, ветку, отчёты предыдущих'
+    + ' этапов) движок подставляет сам отдельными блоками.',
 };
 
 // Что это за раздел вообще — главный вопрос к нему. Держим ответ в трёх абзацах:
 // что здесь лежит, чего оно НЕ делает и зачем тогда нужно.
 const helpPage = [
-  'Агент здесь — описание роли конвейера: как этап подписан на схеме, какого класса модель ему нужна и с чего начинается его задание.',
-  'Это библиотека, а не настройки запуска. Прогон задачи отсюда не читает ничего: боевой промпт этапа лежит в маршруте проекта (profiles/<проект>/routes/<маршрут>/prompts/), а модель, effort и лимиты — в runners.env профиля. Правка карточки не трогает ни собранные маршруты, ни бегущие задачи.',
-  'Смысл — держать формулировку роли в одном месте: описать её один раз и переносить в маршруты проектов, а не выдумывать заново под каждый. Все поля карточки — рекомендации автору маршрута.',
+  'Агент здесь — описание роли конвейера: как этап подписан на схеме, какого класса'
+    + ' модель ему нужна и с чего начинается его задание.',
+  'Это библиотека, а не настройки запуска. Прогон задачи отсюда не читает ничего:'
+    + ' боевой промпт этапа лежит в маршруте проекта, а модель, effort и лимиты —'
+    + ' в runners.env профиля. Правка карточки не трогает ни собранные маршруты,'
+    + ' ни бегущие задачи.',
+  'Смысл — держать формулировку роли в одном месте: описать её один раз и переносить'
+    + ' в маршруты проектов, а не выдумывать заново под каждый. Все поля карточки —'
+    + ' рекомендации автору маршрута.',
 ];
 
-watch(pro, (v) => localStorage.setItem('cockpit-agents-pro', v ? '1' : '0'));
-
 const groups = computed(() => kinds
-  .map((k) => ({ ...k, items: agents.value.filter((a) => a.kind === k.v) }))
-  .filter((g) => g.items.length));
+  .map((kind) => ({ ...kind, items: agents.value.filter((agent) => agent.kind === kind.v) }))
+  .filter((group) => group.items.length));
 
-// Модель шаблоном не выбирается, поэтому и ступени эффорта берём объединением по
-// всем исполнителям реестра: какая из них применится — решит политика профиля.
-const effortOptions = computed(() => [...new Set(providers.value
-  .flatMap((p) => p.models || [])
-  .flatMap((m) => m.efforts || []))]);
+const effortOptions = computed(() => efforts.value);
 
-const original = computed(() => agents.value.find((a) => a.id === selectedId.value) || null);
+const original = computed(() => (
+  agents.value.find((agent) => agent.id === selectedId.value) || null
+));
+
 const dirty = computed(() => {
-  if (isNew.value) return true;
-  if (!form.value || !original.value) return false;
+  if (isNew.value) {
+    return true;
+  }
+  if (!form.value || !original.value) {
+    return false;
+  }
+
   return JSON.stringify(form.value) !== JSON.stringify(original.value);
 });
 
-async function load() {
-  loading.value = true; error.value = '';
+/**
+ * Подсказка к чипам списка. Чипы — рекомендации автору маршрута, а не то, чем этап
+ * реально пойдёт: без этой оговорки они читаются как «вот на чём он запустится».
+ */
+function adviceTitle(agent: AgentCard): string {
+  const parts: string[] = [];
+
+  if (agent.tier) {
+    parts.push(`модель класса «${tierLabel[agent.tier] || agent.tier}»`);
+  }
+  if (agent.effort) {
+    parts.push(`effort ${agent.effort}`);
+  }
+
+  return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет —`
+    + ' модель и effort берутся из runners.env проекта.';
+}
+
+/** Копия карточки для правки: список не должен меняться до сохранения. */
+function editableCopy(agent: AgentCard): AgentForm {
+  return { ...agent };
+}
+
+/**
+ * Читает список и, если ничего не выбрано, открывает первую карточку. Реестр моделей
+ * тянется отдельно и молча: его недоступность не должна мешать правке агента.
+ */
+async function load(): Promise<void> {
+  loading.value = true;
+  error.value = '';
+
   try {
-    agents.value = (await api.get('/api/agents')).agents || [];
-    if (!selectedId.value && agents.value.length) select(agents.value[0].id);
-  } catch (e) { error.value = e.message; }
-  finally { loading.value = false; }
-  // Реестр моделей — отдельно и без блокировки списка (селекты дозаполнятся).
-  try { providers.value = (await api.get('/api/providers')).providers || []; } catch { /* остаётся пусто */ }
+    agents.value = await agentsApi.list();
+
+    const first = agents.value[0];
+
+    if (!selectedId.value && first) {
+      await select(first.id);
+    }
+  } catch (failure) {
+    error.value = failureText(failure);
+  } finally {
+    loading.value = false;
+  }
+
+  try {
+    efforts.value = await agentsApi.efforts();
+  } catch {
+    // Реестр исполнителей недоступен — селект усилий останется пустым.
+  }
 }
 
-async function select(id) {
-  const a = agents.value.find((x) => x.id === id);
-  if (!a) return;
-  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
-  selectedId.value = id; isNew.value = false; notice.value = '';
-  form.value = JSON.parse(JSON.stringify(a));
+/**
+ * Открывает карточку в редакторе. Несохранённая правка не теряется молча: человека
+ * спрашивают, и отказ оставляет его на прежней карточке.
+ */
+async function select(id: string): Promise<void> {
+  const agent = agents.value.find((item) => item.id === id);
+
+  if (!agent) {
+    return;
+  }
+
+  const dropChanges = !dirty.value
+    || await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' });
+
+  if (!dropChanges) {
+    return;
+  }
+
+  selectedId.value = id;
+  isNew.value = false;
+  notice.value = '';
+  form.value = editableCopy(agent);
 }
 
-async function createNew() {
-  if (dirty.value && !(await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' }))) return;
-  selectedId.value = ''; isNew.value = true; notice.value = '';
+/**
+ * Пустая карточка нового агента. Значения полей совпадают с серверными умолчаниями:
+ * иначе создание молча меняло бы то, чего человек не заполнял.
+ */
+async function createNew(): Promise<void> {
+  const dropChanges = !dirty.value
+    || await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' });
+
+  if (!dropChanges) {
+    return;
+  }
+
+  selectedId.value = '';
+  isNew.value = true;
+  notice.value = '';
   form.value = {
-    id: '', kind: 'agent', label: '', sub: '', key: '', tier: '', effort: '',
-    timeout: 0, budget: 0, readonly: false, optional: false, prompt: '',
+    id: '',
+    kind: 'agent',
+    label: '',
+    sub: '',
+    key: '',
+    tier: '',
+    effort: '',
+    timeout: 0,
+    budget: 0,
+    readonly: false,
+    optional: false,
+    prompt: '',
   };
 }
 
-async function save() {
-  if (!form.value) return;
-  saving.value = true; notice.value = '';
+/**
+ * Сохраняет карточку и перечитывает список. Перечитывание обязательно: сервер
+ * нормализует поля при записи, и оставленная форма разошлась бы с файлом на диске.
+ */
+async function save(): Promise<void> {
+  const draft = form.value;
+
+  if (!draft) {
+    return;
+  }
+
+  saving.value = true;
+  notice.value = '';
+
   try {
     if (isNew.value) {
-      const created = await api.post('/api/agents', form.value);
-      isNew.value = false; selectedId.value = created.id;
+      const created = await agentsApi.create(draft);
+
+      isNew.value = false;
+      selectedId.value = created.id;
     } else {
-      await api.put(`/api/agents/${selectedId.value}`, form.value);
+      await agentsApi.update(selectedId.value, draft);
     }
+
     await load();
-    const cur = agents.value.find((a) => a.id === selectedId.value);
-    if (cur) form.value = JSON.parse(JSON.stringify(cur));
+
+    const current = agents.value.find((agent) => agent.id === selectedId.value);
+
+    if (current) {
+      form.value = editableCopy(current);
+    }
+
     notice.value = 'Сохранено';
-    setTimeout(() => { notice.value = ''; }, 2000);
-  } catch (e) { notice.value = `Ошибка: ${e.message}`; }
-  finally { saving.value = false; }
+    setTimeout(() => {
+      notice.value = '';
+    }, 2000);
+  } catch (failure) {
+    notice.value = `Ошибка: ${failureText(failure)}`;
+  } finally {
+    saving.value = false;
+  }
 }
 
-async function del() {
-  if (!selectedId.value || isNew.value) return;
-  if (!(await confirmDialog(`Удалить агента «${form.value.label || selectedId.value}»?`, { danger: true, okText: 'Удалить' }))) return;
+/**
+ * Удаление карточки. У несозданного агента удалять нечего: пока он не сохранён,
+ * на сервере его нет вовсе, и запрос отправился бы в никуда.
+ */
+async function del(): Promise<void> {
+  if (!selectedId.value || isNew.value) {
+    return;
+  }
+
+  const title = form.value?.label || selectedId.value;
+  const confirmed = await confirmDialog(`Удалить агента «${title}»?`, {
+    danger: true,
+    okText: 'Удалить',
+  });
+
+  if (!confirmed) {
+    return;
+  }
+
   try {
-    await api.del(`/api/agents/${selectedId.value}`);
-    selectedId.value = ''; form.value = null;
+    await agentsApi.remove(selectedId.value);
+    selectedId.value = '';
+    form.value = null;
     await load();
-  } catch (e) { notice.value = `Ошибка: ${e.message}`; }
+  } catch (failure) {
+    notice.value = `Ошибка: ${failureText(failure)}`;
+  }
 }
 
-// Доустановка отсутствующих агентов из стандартного набора (server/seed/agents).
-// Create-only: свои правки и одноимённые агенты не перезаписываются, жать можно смело.
-async function install() {
-  installing.value = true; installNotice.value = '';
+/**
+ * Доустановка отсутствующих агентов из стандартного набора (server/seed/agents).
+ * Create-only: свои правки и одноимённые агенты не перезаписываются, жать можно смело.
+ */
+async function install(): Promise<void> {
+  installing.value = true;
+  installNotice.value = '';
+
   try {
-    const r = await api.post('/api/agents/install');
+    const result = await agentsApi.install();
+
     await load();
-    installNotice.value = r.created?.length
-      ? `Установлено агентов: ${r.created.length}`
+    installNotice.value = result.created?.length
+      ? `Установлено агентов: ${result.created.length}`
       : 'Все агенты набора уже есть';
-    setTimeout(() => { installNotice.value = ''; }, 4000);
-  } catch (e) { installNotice.value = `Ошибка: ${e.message}`; }
-  finally { installing.value = false; }
+    setTimeout(() => {
+      installNotice.value = '';
+    }, 4000);
+  } catch (failure) {
+    installNotice.value = `Ошибка: ${failureText(failure)}`;
+  } finally {
+    installing.value = false;
+  }
 }
 
 onMounted(load);

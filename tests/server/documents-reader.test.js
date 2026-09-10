@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { DocumentReader } from '../../server/src/lib/documents/reader.js';
-import documentsModule from '../../server/src/modules/documents/index.js';
+import { DocumentReader } from '../../server/src/lib/documents/reader.ts';
+import documentsModule from '../../server/src/modules/documents/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

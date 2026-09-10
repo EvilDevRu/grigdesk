@@ -9,7 +9,7 @@ async function hostKeys(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   let module;
   try {
-    module = await import('../../server/src/lib/ssh/host-keys.js');
+    module = await import('../../server/src/lib/ssh/hostKeys.ts');
   } catch (error) {
     assert.fail(`надзор host key ещё не реализован: ${error.message}`);
   }

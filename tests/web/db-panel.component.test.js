@@ -5,13 +5,30 @@ import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 const PANEL = webFile('src/views/db/DbPanel.vue');
+const DB_ACTIONS_STUB = `
+  const bridge = () => globalThis.__dbPanelStore;
+  export const useDbStore = bridge;
+  export const loadDb = (...args) => bridge().load(...args);
+  export const loadDbProjects = (...args) => bridge().loadProjects?.(...args);
+  export const loadDbSshSessions = (...args) => bridge().loadSshSessions?.(...args);
+  export const loadDbSchema = (...args) => bridge().loadSchema?.(...args);
+  export const openDbSession = (...args) => bridge().openSession?.(...args);
+  export const closeDbSession = (...args) => bridge().closeSession?.(...args);
+  export const setDbAgentAccess = (...args) => bridge().setAgentAccess?.(...args);
+  export const saveDbProfile = (...args) => bridge().saveProfile?.(...args);
+  export const runDbQuery = (...args) => bridge().runQuery?.(...args);
+  export const cancelDbQuery = (...args) => bridge().cancelQuery?.(...args);
+  export const watchDb = () => {};
+`;
 
 async function mountPanel(t, store, props = {}) {
   const browser = await installUiBrowser(t, 'http://cockpit.test/#/db');
   globalThis.__dbPanelStore = store;
   const component = await compileVue(PANEL, {
     stubs: {
-      '../../stores/db.js': 'export const useDbStore = () => globalThis.__dbPanelStore;',
+      // Заглушка сопоставляется по точной строке импорта: панель зовёт операции
+      // раздела, а состояние берёт из того же реактивного объекта.
+      '../../actions/db': DB_ACTIONS_STUB,
     },
   });
   const { mount, flushPromises } = await import(
@@ -49,7 +66,7 @@ test('панель БД объединяет сессии схему консо�
   try {
     component = await compileVue(PANEL, {
       stubs: {
-        '../../stores/db.js': 'export const useDbStore = () => globalThis.__dbPanelStore;',
+        '../../actions/db': DB_ACTIONS_STUB,
       },
     });
   } catch (error) {
@@ -98,7 +115,9 @@ test('панель передаёт выбранную SSH-сессию при �
   };
   const component = await compileVue(PANEL, {
     stubs: {
-      '../../stores/db.js': 'export const useDbStore = () => globalThis.__dbPanelStore;',
+      // Заглушка сопоставляется по точной строке импорта: панель зовёт операции
+      // раздела, а состояние берёт из того же реактивного объекта.
+      '../../actions/db': DB_ACTIONS_STUB,
     },
   });
   const { mount, flushPromises } = await import(
@@ -120,11 +139,7 @@ test('панель передаёт выбранную SSH-сессию при �
   await wrapper.findAll('button').find((button) => button.text() === 'Открыть сессию').trigger('click');
   await flushPromises();
 
-  assert.deepEqual(calls, [[
-    'profile-a',
-    'secret',
-    { sshSessionId: 'ssh-session-a' },
-  ]]);
+  assert.deepEqual(calls, [['profile-a', 'secret', 'ssh-session-a']]);
 });
 
 test('панель БД использует каркас ToolHost и явные пустые состояния', async (t) => {

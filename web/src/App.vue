@@ -39,9 +39,9 @@ import { useBoardStore } from './stores/board.js';
 import { useSystemStore } from './stores/system.js';
 import { useAuthStore } from './stores/auth.js';
 import { useTaskFavoritesStore } from './stores/task-favorites.js';
-import { useTaskShelfStore } from './stores/task-shelf.js';
+import { useTaskShelfStore } from './stores/taskShelf.ts';
 import { useTaskSeenStore } from './stores/task-seen.js';
-import { useVideoSessionStore } from './stores/video-session.js';
+import { useVideoSessionStore } from './stores/videoSession.ts';
 
 const auth = useAuthStore();
 

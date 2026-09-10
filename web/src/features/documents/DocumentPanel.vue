@@ -35,8 +35,8 @@
 // Переиспользуемое ядро viewer-а: route-страница — лишь одна оболочка. Компонент
 // получает стабильный DocumentRef, читает API и не сохраняет содержимое в store/localStorage.
 import { computed, nextTick, ref, watch } from 'vue';
-import { api } from '../../shared/api-client.js';
-import { mdToHtml } from '../../shared/md.js';
+import { api } from '../../shared/apiClient.ts';
+import { mdToHtml } from '../../shared/md.ts';
 import { documentRefAssetHref, documentRefRouteHref } from './links.js';
 import { UiButton, UiSpinner } from '../../ui';
 

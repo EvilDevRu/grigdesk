@@ -72,15 +72,15 @@ test('COMP-RUN-02: без данных о ходе чипы не выдумыв�
 
 test('COMP-RUN-03: шкала контекста у пузыря и полного чата — одна и та же', async () => {
   const [{ contextFill }, chatSession, host] = await Promise.all([
-    import('../../web/src/shared/chat-context.js'),
+    import('../../shared/chatContext.ts'),
     source('web/src/views/chat/ChatSession.vue'),
     source('web/src/features/companion/CompanionHost.vue'),
   ]);
 
   // Обе поверхности обязаны считать одним модулем: копия арифметики разошлась бы,
   // и предупреждение в одном месте противоречило бы проценту в другом.
-  assert.match(chatSession, /from '\.\.\/\.\.\/shared\/chat-context\.js'/);
-  assert.match(host, /from '\.\.\/\.\.\/shared\/chat-context\.js'/);
+  assert.match(chatSession, /from '(\.\.\/){4}shared\/chatContext\.ts'/);
+  assert.match(host, /from '(\.\.\/){4}shared\/chatContext\.ts'/);
   assert.doesNotMatch(chatSession, /const CTX_CEIL_RATIO/, 'константы порога живут в общем модуле');
 
   // Выключенное автосжатие не схлопывает шкалу в ноль, а отдаёт её потолку окна.

@@ -20,7 +20,7 @@ import type {} from '@fastify/multipart';
 import { SHOWCASE_ID_RE } from '../../../../shared/showcaseContracts.ts';
 import type { ShowcaseAction, ShowcaseTargetRef } from '../../../../shared/showcaseContracts.ts';
 import { mediaTypeOf } from '../../lib/showcase/artifacts.ts';
-import { PROFILE_RE } from '../../lib/profiles.js';
+import { PROFILE_RE } from '../../lib/profiles.ts';
 import { toPublicJob } from '../../lib/showcase/jobs.ts';
 import type { ShowcaseService } from '../../lib/showcase/service.ts';
 

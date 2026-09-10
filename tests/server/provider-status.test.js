@@ -8,7 +8,7 @@ import {
   createProviderStatusProbe,
   parseStatuspageSummary,
   VENDOR_FAULT_USAGE_STATES,
-} from '../../server/src/lib/provider-status.js';
+} from '../../server/src/lib/providerStatus.ts';
 
 function jsonResponse(data, { ok = true, status = 200 } = {}) {
   return { ok, status, async json() { return data; } };

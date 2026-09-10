@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ArbiterCardsStore } from '../../server/src/lib/arbiter-cards.js';
+import { ArbiterCardsStore } from '../../server/src/lib/arbiterCards.ts';
 
 // Карточка арбитра — единственное место, где машинный вердикт узла превращается в
 // человеческую формулировку. До 28.08.2026 она нигде не сохранялась: HTTP-путь показывал

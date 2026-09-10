@@ -11,9 +11,9 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import factoryModule from '../../server/src/modules/factory/index.js';
-import { parsePipeline } from '../../server/src/lib/pipeline-parse.js';
-import authPlugin from '../../server/src/plugins/auth.js';
+import factoryModule from '../../server/src/modules/factory/index.ts';
+import { parsePipeline } from '../../server/src/lib/pipelineParse.ts';
+import authPlugin from '../../server/src/plugins/auth.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -360,7 +360,7 @@ test('runner_preflight_failed marker остаётся fail-closed', async (t) =>
   // не было» за ним нет, поэтому marker снимать нельзя — иначе ослабление одного
   // случая тихо распространится на другой.
   const source = await readFile(
-    new URL('../../server/src/modules/factory/index.js', import.meta.url),
+    new URL('../../server/src/modules/factory/index.ts', import.meta.url),
     'utf8',
   );
   const guard = source.slice(source.indexOf('const provenPreSideEffect'));

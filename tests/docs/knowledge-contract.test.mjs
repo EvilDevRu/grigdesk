@@ -3,7 +3,7 @@ import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { measureKnowledgeContext } from '../../server/src/lib/search/context.js';
+import { measureKnowledgeContext } from '../../server/src/lib/search/context.ts';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 

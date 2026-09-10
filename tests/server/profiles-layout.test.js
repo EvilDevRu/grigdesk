@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
-import { listFactoryProfiles, listProjects, profileHasCapability } from '../../server/src/lib/profiles.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import { listFactoryProfiles, listProjects, profileHasCapability } from '../../server/src/lib/profiles.ts';
 
 test('server discovers only directory-based profiles with graph.json', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-profiles-layout-'));

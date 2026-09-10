@@ -7,11 +7,11 @@ import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
-import claude from '../../server/src/lib/executors/claude.js';
-import { claudeSessionArgs } from '../../server/src/lib/executors/_claude-stream.js';
-import codex from '../../server/src/lib/executors/codex.js';
-import { createToolbox } from '../../server/src/lib/executors/_ollama-tools.js';
-import { runContainedKimi } from '../../server/src/lib/kimi/runtime.js';
+import claude from '../../server/src/lib/executors/claude.ts';
+import { claudeSessionArgs } from '../../server/src/lib/executors/_claudeStream.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
+import { createToolbox } from '../../server/src/lib/executors/_ollamaTools.ts';
+import { runContainedKimi } from '../../server/src/lib/kimi/runtime.ts';
 
 class KimiWorkMcpProcess extends EventEmitter {
   constructor(toolName = 'supervised_ssh') {
@@ -150,7 +150,7 @@ function runMcpChild(server, messages) {
 }
 
 async function workTools(options) {
-  const module = await import('../../server/src/lib/executors/index.js');
+  const module = await import('../../server/src/lib/executors/index.ts');
   const create = module.createWorkTools || module.workTools;
   assert.equal(
     typeof create,
@@ -584,7 +584,7 @@ test('knowledge_search не принимает delete даже при перед
 });
 
 test('реальный work MCP получает descriptors и выполняет tools/call через IPC', async (t) => {
-  const { createWorkIpc } = await import('../../server/src/lib/executors/work-ipc.js');
+  const { createWorkIpc } = await import('../../server/src/lib/executors/workIpc.ts');
   const calls = [];
   const work = await workTools({
     projectId: 'project-a',

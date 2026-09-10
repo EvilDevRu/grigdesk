@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { detectStall } from '../../server/src/lib/stall.js';
+import { detectStall } from '../../server/src/lib/stall.ts';
 
 // Журнал задачи ведётся месяцами и переживает любое число прогонов. Пока окна поиска не
 // было, причина бралась первая попавшаяся с конца — то есть могла принадлежать заходу

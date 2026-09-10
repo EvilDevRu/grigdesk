@@ -6,8 +6,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
-import { mergeMessages, mergeChat } from '../../server/src/lib/chat/merge-chat.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import { mergeMessages, mergeChat } from '../../server/src/lib/chat/mergeChat.ts';
 
 const msg = (role, text) => ({ role, text });
 

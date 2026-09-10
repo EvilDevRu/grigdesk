@@ -183,17 +183,17 @@ async function mountHost(t) {
       '../../stores/plugins.js': [
         'export const usePluginsStore = () => globalThis.__hotkeyHost.plugins;',
       ].join('\n'),
-      '../../stores/task-shelf.js': [
+      '../../stores/taskShelf.ts': [
         'export const useTaskShelfStore = () => ({ totalCount: 0, litCount: 0 });',
       ].join('\n'),
-      '../../composables/useUiContextSource.js': [
+      '../../composables/useUiContextSource.ts': [
         'export const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
       ].join('\n'),
-      '../tools/viewport.js': [
+      '../tools/viewport.ts': [
         'import { ref } from "vue";',
         'export const useDockViewport = () => ({ dockCapable: ref(true) });',
       ].join('\n'),
-      '../tools/registry.js': [
+      '../tools/registry.ts': [
         'const component = { template: "<div></div>" };',
         'export const TOOL_REGISTRY = [',
         '  { id: "code", route: "/code", label: "Код", icon: "code", plugin: "code", component },',

@@ -1,8 +1,8 @@
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
-import { familyModels } from '../shared/model-family.js';
+import { api } from '../shared/apiClient.ts';
+import { familyModels } from '../shared/modelFamily.ts';
 
 let usageAt = 0;
 
