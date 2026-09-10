@@ -7,17 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {} from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 
-import { isLocalRequest, isSecureRequest } from '../../plugins/auth.js';
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-  }
-
-  interface FastifyRequest {
-    authKind?: 'session' | 'internal' | 'cli' | null;
-  }
-}
+import { isLocalRequest, isSecureRequest } from '../../plugins/auth.ts';
 
 /**
  * Служба SSH собирается в приложении из хранилища, менеджера сессий и журнала.

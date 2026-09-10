@@ -6,5 +6,5 @@ _self="$(readlink -f "$0")"
 _root="$(cd "$(dirname "$_self")/.." && pwd)"
 source "$_root/bin/lib/runtime-env.sh"
 cockpit_load_runtime_env "$_root" || exit 2
-exec node "${COCKPIT_NODE_ENV_ARGS[@]}" "${COCKPIT_NODE_TS_ARGS[@]}" \
+exec node "${COCKPIT_NODE_ENV_ARGS[@]}" "${COCKPIT_NODE_SQLITE_ARGS[@]}" \
   "$_root/server/src/lib/search/cli.ts" "$@"

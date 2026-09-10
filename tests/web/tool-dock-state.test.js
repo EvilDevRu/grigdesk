@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/p
 import { useDockStore, clampDockWidth } from '../../web/src/stores/dock.js';
 import { normalizeNavItem, sortNavItems } from '../../web/src/stores/plugins.js';
 import { aggregateNavBadges, inboxNavBadge } from '../../web/src/shared/nav-badges.js';
-import { launchTool } from '../../web/src/shared/tools/launcher.js';
+import { launchTool } from '../../web/src/shared/tools/launcher.ts';
 
 function memoryStorage(seed = {}) {
   const data = new Map(Object.entries(seed));

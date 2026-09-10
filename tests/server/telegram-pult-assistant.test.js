@@ -713,9 +713,9 @@ function restartTurn(over = {}) {
 test('боевой onReady не ждёт сверку через внутренний Fastify inject', async () => {
   // actions.start() внутри вызывает /api/chat/active через fastify.inject. Если ждать
   // этот Promise в onReady, inject ждёт тот же onReady и сервер падает по hook timeout.
-  const source = await readFile(new URL('../../server/src/app.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /await\s+telegramPult\.actions\.start\(\)/u);
-  assert.match(source, /void\s+telegramPult\.actions\.start\(\)\.catch/u);
+  const source = await readFile(new URL('../../server/src/app.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /await\s+telegramPult\??\.?actions\??\.?start\(\)/u);
+  assert.match(source, /void\s+telegramPult\??\.?actions\??\.?start\(\)\.catch/u);
 });
 
 test('маркер без active-хода после рестарта убирает Стоп и один раз просит повторить вопрос', async (t) => {

@@ -5,6 +5,7 @@
     "checkJs": false
   },
   "include": [
+    "src/lib/fastifyDecorations.ts",
     "src/lib/media/**/*.ts",
     "../tests/types/media-server-contract.test.mts"
   ]

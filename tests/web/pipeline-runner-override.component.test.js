@@ -317,7 +317,7 @@ test('tasks.setStageRunner шлёт POST /api/tasks/:id/runner/override (пус�
   code = code
     .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
     .replace(
-      "import { api } from '../shared/api-client.js';",
+      "import { api } from '../shared/apiClient.ts';",
       'const api = globalThis.__pipelineRunnerStoreApi;',
     )
     .replace(

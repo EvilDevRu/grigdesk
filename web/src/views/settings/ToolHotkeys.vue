@@ -60,9 +60,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useHotkeysStore } from '../../stores/hotkeys.js';
 import { usePluginsStore } from '../../stores/plugins.js';
-import { NAV_ICONS } from '../../shared/nav-icons.js';
-import { TOOL_CATALOG, toolAvailability } from '../../shared/tools/catalog.js';
-import { comboFromEvent, formatCombo, isLayoutSwitch } from '../../shared/hotkeys/combo.js';
+import { NAV_ICONS } from '../../shared/navIcons.ts';
+import { TOOL_CATALOG, toolAvailability } from '../../shared/tools/catalog.ts';
+import { comboFromEvent, formatCombo, isLayoutSwitch } from '../../shared/hotkeys/combo.ts';
 import { UiButton } from '../../ui';
 
 const hotkeys = useHotkeysStore();

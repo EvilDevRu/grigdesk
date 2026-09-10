@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeProviderUsage } from '../../server/src/lib/analytics/normalizers.js';
+import { normalizeProviderUsage } from '../../server/src/lib/analytics/normalizers.ts';
 
 const RUN = Object.freeze({
   taskId: 't42',

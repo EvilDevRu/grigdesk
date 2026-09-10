@@ -1,6 +1,6 @@
 // Единый контроллер диктовки: управляет захватом речи, распознаванием и состоянием всех потребителей UI.
 import { reactive, readonly } from 'vue';
-import { api as defaultApi } from '../../shared/api-client.js';
+import { api as defaultApi } from '../../shared/apiClient.ts';
 import { createSpeechStream } from '../../shared/speech-stream.js';
 
 const DEFAULT_BROWSER_DRAIN_TIMEOUT_MS = 1800;

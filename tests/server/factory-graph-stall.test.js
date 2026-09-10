@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { FactoryStateAdapter } from '../../server/src/adapters/factory-state.js';
-import { detectStall } from '../../server/src/lib/stall.js';
+import { FactoryStateAdapter } from '../../server/src/adapters/factoryState.ts';
+import { detectStall } from '../../server/src/lib/stall.ts';
 
 test('graph exposes a human stall on the affected node instead of showing it as running', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-graph-stall-'));

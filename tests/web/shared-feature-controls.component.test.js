@@ -39,7 +39,7 @@ function compileProjectSwitcher() {
   projectSwitcherPromise ||= compileVue(PROJECT_SWITCHER_PATH, {
     stubs: {
       './services/dialogs': DIALOG_SERVICE_STUB,
-      '../../shared/api-client.js': API_STUB,
+      '../../shared/apiClient.ts': API_STUB,
     },
   });
 

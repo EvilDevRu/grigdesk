@@ -4,14 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { MediaAdapter } from '../../server/src/adapters/media.js';
+import { MediaAdapter } from '../../server/src/adapters/media.ts';
 import {
   DEFAULT_VIDEO_INITIAL_PROMPT,
   SPEECH_MODEL_CATALOG,
   SpeechRuntime,
   pythonEnv,
   resolveSpeechOptions,
-} from '../../server/src/lib/speech/index.js';
+} from '../../server/src/lib/speech/index.ts';
 
 test('каталог моделей закрепляет allowlist полными commit SHA', () => {
   assert.deepEqual(Object.keys(SPEECH_MODEL_CATALOG), [

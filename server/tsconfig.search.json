@@ -5,6 +5,7 @@
     "checkJs": false
   },
   "include": [
+    "src/lib/fastifyDecorations.ts",
     "src/lib/search/**/*.ts",
     "../tests/types/search-server-contract.test.mts"
   ]

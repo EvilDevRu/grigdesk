@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createPermissionQueue } from '../../server/src/lib/chat/permission-queue.js';
+import { createPermissionQueue } from '../../server/src/lib/chat/permissionQueue.ts';
 
 async function brokerFactory() {
   let module;

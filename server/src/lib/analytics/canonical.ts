@@ -8,18 +8,48 @@ const DEFAULT_LIMITS = Object.freeze({
 });
 
 export class AnalyticsCanonicalError extends Error {
-  constructor(message) {
+  readonly code = 'analytics_canonical_invalid';
+
+  constructor(message: string) {
     super(message);
     this.name = 'AnalyticsCanonicalError';
-    this.code = 'analytics_canonical_invalid';
   }
 }
 
-const fail = (message) => {
+/**
+ * Отказ сериализации. Объявлен функцией, а не стрелкой в const: только у объявления
+ * компилятор считает `never` признаком «дальше кода нет» и сужает по нему тип.
+ */
+function fail(message: string): never {
   throw new AnalyticsCanonicalError(message);
-};
+}
 
-function assertUnicode(value, where) {
+// Что вообще может стать каноническим JSON: без дробных чисел, дат и классов.
+// Decimal, счётчики и деньги передаются каноническими СТРОКАМИ — иначе точность
+// теряется молча, а хеш перестаёт совпадать между процессами.
+export type CanonicalValue =
+  | null
+  | boolean
+  | number
+  | string
+  | CanonicalValue[]
+  | { [key: string]: CanonicalValue };
+
+// Границы разбора: они защищают от чужого раздувшегося ввода, а не от своей ошибки.
+export interface CanonicalLimits {
+  bytes?: number;
+  depth?: number;
+  values?: number;
+}
+
+interface NormalizeState {
+  limits: Required<CanonicalLimits>;
+  seen: Set<object>;
+  values: number;
+}
+
+/** RFC 8785 запрещает непарные суррогаты: такая строка не имеет канонической формы. */
+function assertUnicode(value: string, where: string): void {
   for (let index = 0; index < value.length; index += 1) {
     const unit = value.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
@@ -34,7 +64,17 @@ function assertUnicode(value, where) {
   }
 }
 
-function normalize(value, state, where, depth) {
+/**
+ * Приводит значение к канонической форме и попутно проверяет его допустимость.
+ * Отказ здесь честнее молчаливого приведения: хеш от «почти того же» значения
+ * не совпадёт с чужим, и расхождение всплывёт уже в сверке журналов.
+ */
+function normalize(
+  value: unknown,
+  state: NormalizeState,
+  where: string,
+  depth: number,
+): CanonicalValue {
   state.values += 1;
   if (state.values > state.limits.values) {
     fail(`Canonical JSON превышает ${state.limits.values} значений.`);
@@ -61,7 +101,9 @@ function normalize(value, state, where, depth) {
     }
     if (state.seen.has(value)) fail(`${where}: циклическая ссылка запрещена.`);
     state.seen.add(value);
-    const out = value.map((item, index) => normalize(item, state, `${where}[${index}]`, depth + 1));
+    const out = value.map(
+      (item: unknown, index: number) => normalize(item, state, `${where}[${index}]`, depth + 1),
+    );
     state.seen.delete(value);
     return out;
   }
@@ -74,11 +116,13 @@ function normalize(value, state, where, depth) {
   }
   if (state.seen.has(value)) fail(`${where}: циклическая ссылка запрещена.`);
   state.seen.add(value);
-  const out = {};
+  const source = value as Record<string, unknown>;
+  const out: Record<string, CanonicalValue> = {};
+
   // Array#sort без comparator использует UTF-16 code units — именно порядок RFC 8785.
-  for (const key of Object.keys(value).sort()) {
+  for (const key of Object.keys(source).sort()) {
     assertUnicode(key, `${where} key`);
-    out[key] = normalize(value[key], state, `${where}.${key}`, depth + 1);
+    out[key] = normalize(source[key], state, `${where}.${key}`, depth + 1);
   }
   state.seen.delete(value);
   return out;
@@ -88,7 +132,7 @@ function normalize(value, state, where, depth) {
  * RFC 8785 для analytics schemas: строки/boolean/null/safe integers/arrays/plain objects.
  * Decimal, monotonic counters и money намеренно передаются canonical strings.
  */
-export function canonicalJson(value, limits = {}) {
+export function canonicalJson(value: unknown, limits: CanonicalLimits = {}): string {
   const normalizedLimits = {
     bytes: limits.bytes ?? DEFAULT_LIMITS.bytes,
     depth: limits.depth ?? DEFAULT_LIMITS.depth,
@@ -109,23 +153,35 @@ export function canonicalJson(value, limits = {}) {
   return json;
 }
 
-export function sha256Canonical(value, limits) {
+export function sha256Canonical(value: unknown, limits?: CanonicalLimits): string {
   return createHash('sha256').update(canonicalJson(value, limits), 'utf8').digest('hex');
 }
 
 /** eventHash не входит в preimage; завершающий LF добавляется только в segment line. */
-export function lifecycleEventHash(event) {
+export function lifecycleEventHash(event: unknown): string {
   if (!event || typeof event !== 'object' || Array.isArray(event)) {
     fail('Lifecycle event обязан быть объектом.');
   }
   if (!Object.hasOwn(event, 'eventHash')) fail('Lifecycle event не содержит eventHash.');
-  const preimage = { ...event };
+
+  const preimage = { ...(event as Record<string, unknown>) };
+
   delete preimage.eventHash;
+
   return sha256Canonical(preimage, { bytes: 64 * 1024 });
 }
 
-export function sealLifecycleEvent(event) {
+// Запечатанное событие: его хеш посчитан от него самого без поля хеша.
+export type SealedLifecycleEvent = Readonly<Record<string, unknown> & { eventHash: string }>;
+
+/**
+ * Проставляет событию его собственный хеш. Поле сначала обнуляется, а не удаляется:
+ * состав ключей входит в канонический вид, и удаление дало бы другой хеш.
+ */
+export function sealLifecycleEvent(event: Record<string, unknown>): SealedLifecycleEvent {
   const sealed = { ...event, eventHash: '' };
+
   sealed.eventHash = lifecycleEventHash(sealed);
+
   return Object.freeze(sealed);
 }

@@ -5,15 +5,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { normalizeShelfTaskId } from '../../lib/taskShelfStore.ts';
 import type { TaskShelfResult, TaskShelfService } from '../../lib/taskShelfService.ts';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-    sse?: {
-      broadcast?(name: string, payload?: unknown): unknown;
-    };
-  }
-}
-
 export interface TaskShelfModuleOptions {
   shelf: TaskShelfService;
 }

@@ -8,7 +8,7 @@ import {
   parseTelegramRules,
   parseTelegramStatus,
 } from '../../shared/telegramContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { telegramApi, telegramPluginDisabled } from '../../web/src/shared/telegramApi.ts';
 
 const FINGERPRINT = `telegram-rules-v1:${'a1b2c3d4'.repeat(8)}`;

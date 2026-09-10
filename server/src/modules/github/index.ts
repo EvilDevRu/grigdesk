@@ -46,15 +46,6 @@ const PUBLIC_MESSAGES = Object.freeze({
 });
 const POLICY_FINGERPRINT_RE = /^ghpol1:[0-9a-f]{64}$/u;
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-    sse?: {
-      broadcast?(name: string, payload?: unknown): unknown;
-    };
-  }
-}
-
 type Payload = Record<string, unknown>;
 
 // Аренда namespace одного подключённого репозитория. Пока она текущая, правила

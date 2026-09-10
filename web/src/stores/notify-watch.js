@@ -5,8 +5,8 @@
 // Данные — те же /api/tasks + /api/tasks/:id/graph, что у страницы конвейера; дёргается
 // по SSE state-change (AppShell) + редкий страховочный интервал.
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
-import { notify } from '../shared/notify.js';
+import { api } from '../shared/apiClient.ts';
+import { notify } from '../shared/notify.ts';
 import { stripEmoji, waitingReason } from '../../../shared/pipelineWait.ts';
 import { silenceReason } from '../../../shared/agentActivity.ts';
 import {

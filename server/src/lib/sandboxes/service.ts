@@ -18,10 +18,10 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
-import { readLaunchLog } from '../factory-route-cli.js';
-import { listFactoryProfiles, PROFILE_RE } from '../profiles.js';
-import { releaseSlot, reservedTasks, reserveSlot } from '../sandbox-slots.js';
-import { readProcessIdentity } from '../speech/model-jobs-process.js';
+import { readLaunchLog } from '../factoryRouteCli.ts';
+import { listFactoryProfiles, PROFILE_RE } from '../profiles.ts';
+import { releaseSlot, reservedTasks, reserveSlot } from '../sandboxSlots.ts';
+import { readProcessIdentity } from '../speech/modelJobsProcess.ts';
 import { SANDBOX_TASK_RE, toSandboxJob } from '../../../../shared/sandboxContracts.ts';
 import type {
   SandboxActionResponse,

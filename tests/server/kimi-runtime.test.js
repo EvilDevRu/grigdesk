@@ -11,7 +11,12 @@ import {
   permissionPresentation,
   runContainedKimi,
   selectPermissionOutcome,
-} from '../../server/src/lib/kimi/runtime.js';
+} from '../../server/src/lib/kimi/runtime.ts';
+import {
+  KIMI_SANDBOX_NODE,
+  KIMI_SANDBOX_WORK_MCP,
+  KIMI_SANDBOX_WORK_SOCKET,
+} from '../../server/src/lib/kimi/sandbox.ts';
 
 class FakeAcpProcess extends EventEmitter {
   constructor({ localCommands } = {}) {
@@ -190,6 +195,57 @@ test('contained runtime даже при false сохраняет сетевую 
   assert.equal(launchConfig.kimiRuntimeHome.includes('chat-private-a'), false);
   assert.ok(Buffer.byteLength(launchOptions.egressSocketPath) <= 107);
   assert.match(launchOptions.egressSocketPath, /\/broker\/r\/[a-f0-9]{20}\/e\.sock$/);
+});
+
+test('contained runtime объявляет сессии рабочий MCP по путям внутри песочницы', async (t) => {
+  const f = await fixture(t);
+  const child = new FakeAcpProcess();
+  const hostScript = path.join(f.root, 'work-mcp.js');
+  const hostSocket = path.join(f.root, 'work.sock');
+  let launchOptions;
+  await runContainedKimi({
+    config: f.config,
+    chatKey: 'chat-work-mcp',
+    cwd: f.cwd,
+    message: 'offline fake prompt',
+    model: 'kimi-code/k3',
+    permissionMode: 'default',
+    providerSettings: { blockDirectSsh: false },
+    mcpServers: [
+      { name: 'other', command: 'node', args: ['keep-me.js'] },
+      {
+        name: 'cockpit-work',
+        command: process.execPath,
+        args: [hostScript, '--socket', hostSocket, '--nonce', 'nonce-42'],
+      },
+    ],
+    onPermission: async () => ({ allow: true }),
+    deps: {
+      assertVersion: async () => '0.31.1',
+      createProxy: () => ({ async start() {}, async close() {} }),
+      preflight: async () => ({ decision: 'GO_CONTAINED_MVP', checks: {} }),
+      buildLaunch: async (options) => {
+        launchOptions = options;
+        return { command: 'fake', args: [], cwdReal: f.cwd, unit: 'cockpit-kimi-fake.service' };
+      },
+      spawn: () => child,
+      stopUnit: async () => {},
+    },
+  });
+
+  // Сборке запуска отдаются ХОСТОВЫЕ пути: она их и монтирует.
+  assert.deepEqual(launchOptions.workMcp, { scriptPath: hostScript, socketPath: hostSocket });
+  const opened = child.messages.find((message) => message.method === 'session/new');
+  const servers = opened.params.mcpServers;
+  // Чужая запись не переписывается: подменяется ровно мост кокпита.
+  assert.deepEqual(servers[0], { name: 'other', command: 'node', args: ['keep-me.js'] });
+  assert.equal(servers[1].command, KIMI_SANDBOX_NODE);
+  assert.deepEqual(servers[1].args, [
+    KIMI_SANDBOX_WORK_MCP, '--socket', KIMI_SANDBOX_WORK_SOCKET, '--nonce', 'nonce-42',
+  ]);
+  // Хостовые пути и флаги снятия типов внутрь сессии не уезжают.
+  assert.equal(servers[1].args.includes(hostScript), false);
+  assert.equal(servers[1].args.some((value) => /strip-types|transform-types/.test(value)), false);
 });
 
 test('permission mapper выбирает только allow_once/reject и ACP question option', () => {

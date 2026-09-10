@@ -1,16 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
-import { isLocalRequest, isSecureRequest } from '../../plugins/auth.js';
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-  }
-
-  interface FastifyRequest {
-    authKind?: 'session' | 'internal' | 'cli' | null;
-  }
-}
+import { isLocalRequest, isSecureRequest } from '../../plugins/auth.ts';
 
 type Payload = Record<string, unknown>;
 

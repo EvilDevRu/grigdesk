@@ -21,7 +21,7 @@ import {
   AnalyticsDurableFsError,
   DURABLE_FS_STAGES,
   createDurableFs,
-} from '../../server/src/lib/analytics/durable-fs.js';
+} from '../../server/src/lib/analytics/durableFs.ts';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const permissions = (stat) => stat.mode & 0o777;

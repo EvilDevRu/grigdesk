@@ -28,7 +28,7 @@
 
 <script setup>
 import { ref } from 'vue';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import {
   alertDialog,
   promptDialog,

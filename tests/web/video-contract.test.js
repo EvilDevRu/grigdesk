@@ -9,7 +9,7 @@ import {
   parseMediaPlan,
   parseMediaUpload,
 } from '../../shared/mediaContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { mediaApi } from '../../web/src/shared/mediaApi.ts';
 
 const segments = [

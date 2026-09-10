@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 
 test('ACCESS-01: prefs локального TLS и совместимости шлюза переживают запись', async (t) => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-access-'));

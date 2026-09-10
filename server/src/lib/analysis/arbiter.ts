@@ -1,9 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { resolveModelRef } from '../chat/model-ref.js';
-import { supportsScopedWorkspace } from '../executors/index.js';
-import { createWorkIpc } from '../executors/work-ipc.js';
+import { resolveModelRef } from '../chat/modelRef.ts';
+import { supportsScopedWorkspace } from '../executors/index.ts';
+import { createWorkIpc } from '../executors/workIpc.ts';
 import { createRepoHistoryTools } from './repoHistory.ts';
 import type { Analyzer } from './analyzer.ts';
 import type {

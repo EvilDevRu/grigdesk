@@ -8,9 +8,9 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { COMPANION_DEFAULTS, normalizeCompanionSettings } from '../../server/src/lib/companion-settings.js';
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
-import chatModule from '../../server/src/modules/chat/index.js';
+import { COMPANION_DEFAULTS, normalizeCompanionSettings } from '../../server/src/lib/companionSettings.ts';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

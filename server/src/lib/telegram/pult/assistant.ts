@@ -2,7 +2,7 @@
 // preflight, durable user/turn marker и фактический старт POST, но не ответ модели.
 import { randomBytes } from 'node:crypto';
 
-import { resolveModelRef, sameModelRef } from '../../chat/model-ref.js';
+import { resolveModelRef, sameModelRef } from '../../chat/modelRef.ts';
 import { contextFill } from '../../../../../shared/chatContext.ts';
 import {
   cbData,

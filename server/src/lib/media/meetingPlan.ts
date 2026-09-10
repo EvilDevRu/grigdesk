@@ -27,7 +27,7 @@ import {
   exactKeys,
   jsonCandidates,
   modelText,
-} from '../model-json.js';
+} from '../modelJson.ts';
 
 type LogPort = {
   warn?: (details: unknown, message: string) => void;

@@ -1,14 +1,14 @@
 // Нормализация данных о потреблении из потоков провайдеров в единые аналитические образцы и сегменты.
 import { createHash } from 'node:crypto';
 
-import { canonicalJson } from './canonical.js';
-import { addDecimals } from './decimal.js';
+import { canonicalJson } from './canonical.ts';
+import { addDecimals } from './decimal.ts';
 import {
   AnalyticsExactJsonError,
   decimalFromJsonNumber,
   exactUnsignedInteger,
   parseExactJson,
-} from './exact-json.js';
+} from './exactJson.ts';
 
 const EXTRACTOR_VERSION = 'usage-normalizer-1';
 const MAX_RAW_BYTES = 512 * 1024 * 1024;
@@ -22,30 +22,57 @@ const DIALECTS = Object.freeze({
 });
 
 export class AnalyticsNormalizerError extends Error {
-  constructor(code, message) {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
     super(message);
     this.name = 'AnalyticsNormalizerError';
     this.code = code;
   }
 }
 
-const fail = (code, message) => {
+/**
+ * Отказ нормализации. Объявлен функцией, а не стрелкой в const: только у объявления
+ * компилятор считает `never` признаком «дальше кода нет» и сужает по нему тип.
+ */
+function fail(code: string, message: string): never {
   throw new AnalyticsNormalizerError(code, message);
-};
+}
 
-const digest = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
+// Свободная запись из потока провайдера: форма у каждого своя, и общего типа у неё нет.
+type Row = Record<string, unknown>;
 
-function deterministicId(prefix, tuple) {
+// Разобранный поток: строки с их местом в файле и признак обрыва последней строки.
+// Обрыв — не ошибка: процесс могли остановить, и такой хвост честно помечается.
+interface StreamRow extends Row {
+  // Полезная нагрузка уже проверена разбором: до сюда доходит только объект.
+  value: Row;
+  sourceOrdinal: string;
+  byteOffset: string;
+  lineHash: string;
+}
+
+interface ParsedStream {
+  rows: StreamRow[];
+  hasTornTail: boolean;
+}
+
+// Прогон, вокруг которого считается потребление: идентичность, окно и модель.
+export type RunContext = Record<string, unknown>;
+
+const digest = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+
+function deterministicId(prefix: string, tuple: readonly unknown[]): string {
   return `${prefix}_${digest(canonicalJson([1, prefix, tuple])).slice(0, 32)}`;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Row {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
-function canonicalInstant(value) {
+function canonicalInstant(value: unknown): string | null {
   if (typeof value !== 'string' || !INSTANT_RE.test(value)) return null;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value
@@ -53,9 +80,10 @@ function canonicalInstant(value) {
     : null;
 }
 
-function billingWindow(run) {
+function billingWindow(run: RunContext | undefined): Row {
   const notBefore = canonicalInstant(run?.startedAt);
   const notAfter = canonicalInstant(run?.finishedAt);
+
   if (notBefore && notAfter && notBefore <= notAfter) {
     const basis = run?.billingWindowBasis === 'derived_run_window'
       ? 'derived_run_window'
@@ -65,7 +93,7 @@ function billingWindow(run) {
   return { kind: 'unknown', basis: 'unknown' };
 }
 
-function selected(record, keys) {
+function selected(record: unknown, keys: readonly string[]): Row {
   const output = Object.create(null);
   for (const key of keys) {
     if (isRecord(record) && Object.hasOwn(record, key)) output[key] = record[key];
@@ -73,7 +101,7 @@ function selected(record, keys) {
   return output;
 }
 
-function sanitizeModelUsage(value) {
+function sanitizeModelUsage(value: unknown): unknown {
   if (!isRecord(value)) return value;
   const output = Object.create(null);
   for (const rawModel of Object.keys(value)) {
@@ -86,7 +114,7 @@ function sanitizeModelUsage(value) {
   return output;
 }
 
-function sanitizeProviderValue(provider, value) {
+function sanitizeProviderValue(provider: string, value: Row): Row | null {
   if (provider === 'codex') {
     if (value.type === 'thread.started') return selected(value, ['type', 'thread_id']);
     if (value.type === 'turn.completed') {
@@ -108,15 +136,21 @@ function sanitizeProviderValue(provider, value) {
       'type', 'session_id', 'request_id', 'parent_tool_use_id', 'timestamp',
     ]);
     if (Object.hasOwn(value, 'message')) {
-      output.message = selected(value.message, ['id', 'model']);
+      const message = selected(value.message, ['id', 'model']);
+
+      output.message = message;
+
       if (isRecord(value.message) && Object.hasOwn(value.message, 'usage')) {
-        output.message.usage = selected(value.message.usage, [
+        const usage = selected(value.message.usage, [
           'input_tokens', 'output_tokens', 'cache_read_input_tokens',
           'cache_creation_input_tokens', 'service_tier', 'inference_geo', 'speed',
         ]);
+
+        message.usage = usage;
+
         if (isRecord(value.message.usage)
             && Object.hasOwn(value.message.usage, 'cache_creation')) {
-          output.message.usage.cache_creation = selected(value.message.usage.cache_creation, [
+          usage.cache_creation = selected(value.message.usage.cache_creation, [
             'ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens',
           ]);
         }
@@ -137,13 +171,23 @@ function sanitizeProviderValue(provider, value) {
   return null;
 }
 
+// Одна строка потока провайдера вместе со своим местом в файле: смещение и хеш
+// нужны, чтобы образец можно было найти в исходнике и сверить.
+export interface ProviderUsageRowInput {
+  provider: string;
+  text: unknown;
+  sourceOrdinal: unknown;
+  byteOffset: unknown;
+  lineHash: unknown;
+}
+
 export function parseProviderUsageRow({
   provider,
   text,
   sourceOrdinal,
   byteOffset,
   lineHash,
-}) {
+}: ProviderUsageRowInput): Row | null {
   if (!Object.hasOwn(DIALECTS, provider)
       || typeof text !== 'string'
       || typeof sourceOrdinal !== 'string' || !/^[1-9][0-9]*$/.test(sourceOrdinal)
@@ -159,7 +203,8 @@ export function parseProviderUsageRow({
   // только потому, что игнорируемая нагрузка содержит неканоническое число или Unicode-значение.
   // JSON.parse используется лишь как ограниченный разбор внешней оболочки; каждая строка
   // с учётом потребления ниже разбирается повторно точным анализатором, сохраняющим дубли ключей и чисел.
-  let envelope;
+  let envelope: unknown;
+
   try {
     envelope = JSON.parse(text);
   } catch {
@@ -171,7 +216,8 @@ export function parseProviderUsageRow({
     : envelope.type === 'assistant' || envelope.type === 'result'
       || (envelope.type === 'system' && envelope.subtype === 'init');
   if (!supportedEnvelope) return null;
-  let value;
+  let value: unknown;
+
   try {
     value = parseExactJson(text, { bytes: MAX_LINE_BYTES });
   } catch (error) {
@@ -186,7 +232,7 @@ export function parseProviderUsageRow({
   return { value: sanitized, sourceOrdinal, byteOffset, lineHash };
 }
 
-function parseJsonLines(rawText, provider) {
+function parseJsonLines(rawText: unknown, provider: string): ParsedStream {
   if (typeof rawText !== 'string') fail('rawTypeInvalid', 'rawText обязан быть строкой.');
   if (Buffer.byteLength(rawText, 'utf8') > MAX_RAW_BYTES) {
     fail('rawOversize', `Provider raw превышает ${MAX_RAW_BYTES} bytes.`);
@@ -196,10 +242,9 @@ function parseJsonLines(rawText, provider) {
   if (!hasTornTail) pieces.pop();
   if (pieces.length > MAX_LINES) fail('rawLineCap', `Provider raw превышает ${MAX_LINES} lines.`);
 
-  const rows = [];
+  const rows: StreamRow[] = [];
   let byteOffset = 0;
-  for (let index = 0; index < pieces.length; index += 1) {
-    const line = pieces[index];
+  for (const [index, line] of pieces.entries()) {
     const lineBytes = Buffer.byteLength(line, 'utf8');
     if (lineBytes > MAX_LINE_BYTES) fail('rawLineOversize', `Provider line превышает ${MAX_LINE_BYTES} bytes.`);
     if (line.length === 0) fail('rawEmptyLine', `Provider raw содержит пустую line ${index + 1}.`);
@@ -211,7 +256,7 @@ function parseJsonLines(rawText, provider) {
       byteOffset: String(byteOffset),
       lineHash: digest(line),
       });
-      if (row !== null) rows.push(row);
+      if (row !== null) rows.push(row as StreamRow);
     } catch (error) {
       if (error instanceof AnalyticsNormalizerError) {
         fail(error.code, `Provider line ${index + 1} не прошла strict extraction.`);
@@ -223,7 +268,11 @@ function parseJsonLines(rawText, provider) {
   return { rows, hasTornTail };
 }
 
-function unknownResult(provider, dialect, diagnostics) {
+function unknownResult(
+  provider: string | null,
+  dialect: string | null,
+  diagnostics: readonly string[],
+): Row {
   return {
     provider,
     normalizerDialect: dialect,
@@ -242,7 +291,18 @@ function unknownResult(provider, dialect, diagnostics) {
   };
 }
 
-function emptyTokenSummary() {
+// Сводка токенов: набор метрик закрыт, и отсутствующей среди них быть не может.
+// Открытый словарь заставлял бы подставлять ноль на каждом чтении и прятал бы опечатку.
+export interface TokenSummary {
+  uncachedInput: string;
+  output: string;
+  cacheRead: string;
+  cacheWrite5m: string;
+  cacheWrite1h: string;
+  cacheWriteUnknown: string;
+}
+
+function emptyTokenSummary(): TokenSummary {
   return {
     uncachedInput: '0',
     output: '0',
@@ -253,7 +313,7 @@ function emptyTokenSummary() {
   };
 }
 
-function exactUint(record, key, where) {
+function exactUint(record: Row, key: string, where: string): string | null {
   if (!isRecord(record) || !Object.hasOwn(record, key)) {
     fail('counterComponentMissing', `${where}.${key}: required counter отсутствует.`);
   }
@@ -271,7 +331,7 @@ function exactUint(record, key, where) {
   }
 }
 
-function exactCost(record, key, where) {
+function exactCost(record: Row, key: string, where: string): string | null {
   if (!isRecord(record) || !Object.hasOwn(record, key)) {
     fail('modelCostMissing', `${where}.${key}: exact cost отсутствует.`);
   }
@@ -289,23 +349,33 @@ function exactCost(record, key, where) {
   }
 }
 
-const uintAdd = (...values) => values.reduce((sum, value) => sum + BigInt(value), 0n).toString();
-const uintSubtract = (left, right) => {
+const uintAdd = (...values: string[]) => values.reduce(
+  (sum, value) => sum + BigInt(value),
+  0n,
+).toString();
+const uintSubtract = (left: string, right: string) => {
   const result = BigInt(left) - BigInt(right);
   if (result < 0n) fail('negativeDelta', 'Negative cumulative delta запрещён.');
   return result.toString();
 };
 
-function uintVectorNondecreasing(previous, current, keys) {
-  return keys.every((key) => BigInt(current[key]) >= BigInt(previous[key]));
+function uintVectorNondecreasing(
+  previous: Record<string, string>,
+  current: Record<string, string>,
+  keys: readonly string[],
+): boolean {
+  return keys.every((key) => BigInt(current[key] ?? '0') >= BigInt(previous[key] ?? '0'));
 }
 
-function decimalParts(value) {
-  const [whole, fraction = ''] = value.split('.');
+// Каноническое значение разбирается на коэффициент и порядок: сравнивать
+// десятичные строки текстом нельзя — «0.10» и «0.1» равны, а лексикографически нет.
+function decimalParts(value: string): { coefficient: bigint; scale: number } {
+  const [whole = '', fraction = ''] = value.split('.');
+
   return { coefficient: BigInt(`${whole}${fraction}`), scale: fraction.length };
 }
 
-function compareDecimal(left, right) {
+function compareDecimal(left: string, right: string): number {
   const a = decimalParts(left);
   const b = decimalParts(right);
   const scale = Math.max(a.scale, b.scale);
@@ -314,7 +384,13 @@ function compareDecimal(left, right) {
   return aValue === bValue ? 0 : aValue < bValue ? -1 : 1;
 }
 
-function sampleId(run, provider, dialect, row, scope) {
+function sampleId(
+  run: RunContext,
+  provider: string,
+  dialect: string,
+  row: Row,
+  scope: unknown,
+): string {
   return deterministicId('sa', [
     run?.taskId ?? null,
     run?.attemptId ?? null,
@@ -328,18 +404,38 @@ function sampleId(run, provider, dialect, row, scope) {
   ]);
 }
 
-function billingProduct(provider) {
+function billingProduct(provider: string): string | null {
   if (provider === 'claude') return 'messages';
   if (provider === 'codex') return 'responses';
+
   return null;
 }
 
-function resolvedModelFromRun(run) {
+function resolvedModelFromRun(run: RunContext): string | null {
   const value = run?.resolvedModel;
   return typeof value === 'string' && value.length > 0 && value.length <= 160
     && !/[\u0000-\u001f\u007f]/u.test(value)
     ? value
     : null;
+}
+
+// Из чего складывается один сегмент потребления. Атрибуты ценообразования и окно
+// приходят от конкретного провайдера, поэтому объявлены свободно.
+interface UsageSegmentInput {
+  run: RunContext;
+  provider: string;
+  dialect: string;
+  sampleIds: string[];
+  metric: string;
+  quantity: string;
+  resolvedModel?: string | null;
+  cacheMode?: string | null;
+  cacheTtl?: string | null;
+  reasoningTokens?: string | null;
+  pricingAttributes?: Row | null;
+  segmentWindow?: Row | null;
+  completeness: string;
+  source: string;
 }
 
 function usageSegment({
@@ -357,8 +453,8 @@ function usageSegment({
   segmentWindow = null,
   completeness,
   source,
-}) {
-  const attributes = {
+}: UsageSegmentInput): Row {
+  const attributes: Row = {
     billingProduct: billingProduct(provider),
     serviceTier: pricingAttributes?.serviceTier ?? null,
     inferenceGeo: pricingAttributes?.inferenceGeo ?? null,
@@ -410,14 +506,29 @@ function tokenSegments({
   source,
   metricCompleteness = null,
   availableMetrics = null,
-}) {
-  const definitions = [
-    ['input_tokens', vector.uncachedInput, 'none', null, null, 'uncachedInput'],
-    ['output_tokens', vector.output, null, null, vector.reasoningOutput ?? null, 'output'],
-    ['cache_read_tokens', vector.cacheRead, 'read', null, null, 'cacheRead'],
-    ['cache_write_tokens', vector.cacheWrite5m, 'write', '5m', null, 'cacheWrite5m'],
-    ['cache_write_tokens', vector.cacheWrite1h, 'write', '1h', null, 'cacheWrite1h'],
-    ['cache_write_tokens', vector.cacheWriteUnknown, 'write', 'unknown', null, 'cacheWriteUnknown'],
+}: {
+  run: RunContext;
+  provider: string;
+  dialect: string;
+  sampleIds: string[];
+  vector: Record<string, string>;
+  resolvedModel?: string | null;
+  completeness: string;
+  source: string;
+  metricCompleteness?: Record<string, string> | null;
+  availableMetrics?: Set<string> | null;
+}): Row[] {
+  // [метрика, количество, режим кеша, срок кеша, токены рассуждения, ключ вектора]
+  // Отсутствующая метрика — это ноль: вектор собирается выше и всегда полон, а
+  // подстановка здесь защищает от опечатки в имени ключа, а не от чужих данных.
+  const amount = (key: string) => vector[key] ?? '0';
+  const definitions: [string, string, string | null, string | null, string | null, string][] = [
+    ['input_tokens', amount('uncachedInput'), 'none', null, null, 'uncachedInput'],
+    ['output_tokens', amount('output'), null, null, vector.reasoningOutput ?? null, 'output'],
+    ['cache_read_tokens', amount('cacheRead'), 'read', null, null, 'cacheRead'],
+    ['cache_write_tokens', amount('cacheWrite5m'), 'write', '5m', null, 'cacheWrite5m'],
+    ['cache_write_tokens', amount('cacheWrite1h'), 'write', '1h', null, 'cacheWrite1h'],
+    ['cache_write_tokens', amount('cacheWriteUnknown'), 'write', 'unknown', null, 'cacheWriteUnknown'],
   ];
   return definitions
     .filter(([, quantity, , , , key]) => (
@@ -442,45 +553,87 @@ function tokenSegments({
 const CODEX_COUNTER_KEYS = Object.freeze([
   'inputTokens', 'cachedInputTokens', 'cacheWriteInputTokens',
   'outputTokens', 'reasoningOutputTokens',
-]);
+] as const);
 
-function codexResumeBaseline(run, dialect, threadId) {
+// Накопительные счётчики codex: набор закрыт контрактом диалекта. Открытый словарь
+// требовал бы подставлять ноль на каждом чтении и прятал бы опечатку в имени.
+type CodexCounterKey = typeof CODEX_COUNTER_KEYS[number];
+type CodexCounters = Record<CodexCounterKey, string>;
+
+// Итог поиска базовой линии продолженного прогона: либо вектор счётчиков, либо
+// причина, по которой его нельзя использовать. Пустой ответ здесь запрещён — иначе
+// «нет базовой линии» и «база не подошла» выглядели бы одинаково.
+interface CodexBaseline {
+  baseline: CodexCounters | null;
+  diagnostic: string | null;
+}
+
+/**
+ * Базовая линия счётчиков для продолженного прогона codex. Счётчики провайдера
+ * накопительные, и без проверенной базы разница посчиталась бы от нуля — то есть
+ * весь прошлый расход записался бы этому прогону второй раз.
+ */
+function codexResumeBaseline(
+  run: RunContext,
+  dialect: string,
+  threadId: unknown,
+): CodexBaseline {
   const reference = run?.parentUsageRef;
-  const checkpoint = reference?.terminalCounterCheckpoint;
-  if (!isRecord(reference) || reference.resumeVerified !== true || !isRecord(checkpoint)
+
+  if (!isRecord(reference)) {
+    return { baseline: null, diagnostic: 'baselineMissing' };
+  }
+
+  const checkpoint = reference.terminalCounterCheckpoint;
+
+  if (reference.resumeVerified !== true || !isRecord(checkpoint)
       || checkpoint.resumeEligible !== true || !isRecord(checkpoint.vector)) {
     return { baseline: null, diagnostic: 'baselineMissing' };
   }
+
+  const vector = checkpoint.vector;
+  const generation = run?.lineageGeneration;
+
   if (typeof threadId !== 'string' || threadId.length < 1
       || run?.requestedProviderScope !== threadId
       || checkpoint.counterScope !== threadId
       || checkpoint.dialect !== dialect
       || checkpoint.extractorVersion !== EXTRACTOR_VERSION
-      || !Number.isSafeInteger(run?.lineageGeneration) || run.lineageGeneration < 1) {
+      || !Number.isSafeInteger(generation) || Number(generation) < 1) {
     return { baseline: null, diagnostic: 'scopeConflict' };
   }
-  if (!Array.isArray(checkpoint.presenceMask)
-      || checkpoint.presenceMask.length !== CODEX_COUNTER_KEYS.length
-      || CODEX_COUNTER_KEYS.some((key, index) => checkpoint.presenceMask[index] !== key)
-      || Object.keys(checkpoint.vector).sort().join('\u0000')
+
+  const mask = checkpoint.presenceMask;
+
+  if (!Array.isArray(mask)
+      || mask.length !== CODEX_COUNTER_KEYS.length
+      || CODEX_COUNTER_KEYS.some((key, index) => mask[index] !== key)
+      || Object.keys(vector).sort().join('\u0000')
         !== [...CODEX_COUNTER_KEYS].sort().join('\u0000')
       || CODEX_COUNTER_KEYS.some((key) => (
-        typeof checkpoint.vector[key] !== 'string'
-          || !/^(?:0|[1-9][0-9]{0,29})$/u.test(checkpoint.vector[key])
+        typeof vector[key] !== 'string'
+          || !/^(?:0|[1-9][0-9]{0,29})$/u.test(String(vector[key]))
       ))) {
     return { baseline: null, diagnostic: 'baselineMissing' };
   }
-  return { baseline: checkpoint.vector, diagnostic: null };
+
+  return { baseline: vector as unknown as CodexCounters, diagnostic: null };
 }
 
-function normalizeCodex({ provider, dialect, parsed, run }) {
-  const diagnostics = new Set();
+function normalizeCodex({ provider, dialect, parsed, run }: {
+  provider: string;
+  dialect: string;
+  parsed: ParsedStream;
+  run: RunContext;
+}): Row {
+  const diagnostics = new Set<string>();
+
   if (parsed.hasTornTail) diagnostics.add('tornRawTail');
-  const threadRows = [];
-  const usageRows = [];
-  let firstUsageIndex = null;
-  for (let index = 0; index < parsed.rows.length; index += 1) {
-    const row = parsed.rows[index];
+
+  const threadRows: (StreamRow & { rowIndex: number })[] = [];
+  const usageRows: StreamRow[] = [];
+  let firstUsageIndex: number | null = null;
+  for (const [index, row] of parsed.rows.entries()) {
     if (row.value.type === 'thread.started') threadRows.push({ ...row, rowIndex: index });
     if (row.value.type === 'turn.completed' && isRecord(row.value.usage)) {
       if (firstUsageIndex === null) firstUsageIndex = index;
@@ -494,13 +647,18 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
     ]);
   }
 
-  const precedingThreads = threadRows.filter((row) => row.rowIndex < firstUsageIndex);
-  const threadId = precedingThreads.length === 1
-    && typeof precedingThreads[0].value.thread_id === 'string'
-    && precedingThreads[0].value.thread_id.length > 0
-    && precedingThreads[0].value.thread_id.length <= 160
-    && !/[\u0000-\u001f\u007f]/u.test(precedingThreads[0].value.thread_id)
-    ? precedingThreads[0].value.thread_id
+  const usageStart = firstUsageIndex ?? 0;
+  const precedingThreads = threadRows.filter((row) => row.rowIndex < usageStart);
+  // Идентификатор потока берётся, только если он ОДИН до первой записи расхода:
+  // два потока означают, что счётчики принадлежат разным сессиям, и складывать их
+  // нельзя. Границы длины и запрет управляющих символов — контракт scope.
+  const onlyThread = precedingThreads.length === 1 ? precedingThreads[0] : null;
+  const rawThreadId = onlyThread?.value.thread_id;
+  const threadId = typeof rawThreadId === 'string'
+    && rawThreadId.length > 0
+    && rawThreadId.length <= 160
+    && !/[\u0000-\u001f\u007f]/u.test(rawThreadId)
+    ? rawThreadId
     : null;
   const freshProof = run?.providerSessionMode === 'fresh'
     && run?.providerScopeUnique === true
@@ -510,7 +668,8 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
     && precedingThreads.length === 1
     && threadId !== null;
 
-  let baseline;
+  let baseline: CodexCounters;
+
   if (freshProof || legacyProof) {
     baseline = {
       inputTokens: '0', cachedInputTokens: '0', cacheWriteInputTokens: '0',
@@ -519,7 +678,7 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
   } else if (run?.providerSessionMode === 'resume') {
     const verified = codexResumeBaseline(run, dialect, threadId);
     if (verified.baseline === null) {
-      diagnostics.add(verified.diagnostic);
+      diagnostics.add(verified.diagnostic ?? 'baselineMissing');
       return {
         ...unknownResult(provider, dialect, [...diagnostics]),
         completeness: 'conflict',
@@ -536,25 +695,39 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
   }
 
   const keys = CODEX_COUNTER_KEYS;
-  const zero = Object.freeze(Object.fromEntries(keys.map((key) => [key, '0'])));
+  const zero = Object.freeze(
+    Object.fromEntries(keys.map((key) => [key, '0'])),
+  ) as unknown as CodexCounters;
   const initialGeneration = run?.providerSessionMode === 'resume'
     ? String(run.lineageGeneration)
     : '0';
-  const generations = [{
+  // Поколение счётчиков: один непрерывный отрезок накопления в пределах одного
+  // scope. Новый `thread.started` посреди потока начинает следующее поколение —
+  // счётчики там снова идут с нуля, и продолжать прежнюю разницу нельзя.
+  interface CounterGeneration {
+    scope: string | null;
+    generation: string;
+    baseline: CodexCounters;
+    rows: StreamRow[];
+  }
+
+  const generations: CounterGeneration[] = [{
     scope: threadId,
     generation: initialGeneration,
     baseline,
     rows: [],
   }];
-  const seenScopes = new Set([threadId]);
-  let active = generations[0];
-  for (let index = 0; index < parsed.rows.length; index += 1) {
-    const row = parsed.rows[index];
-    if (row.value.type === 'thread.started' && index >= firstUsageIndex) {
+  // Терминальное значение счётчиков поколения держится рядом, а не дописывается в
+  // саму запись: поколение — данные разбора, а это итог его обхода.
+  const terminalByGeneration = new Map<CounterGeneration, CodexCounters>();
+  const seenScopes = new Set<string | null>([threadId]);
+  let active: CounterGeneration = generations[0] as CounterGeneration;
+  for (const [index, row] of parsed.rows.entries()) {
+    if (row.value.type === 'thread.started' && index >= usageStart) {
       const nextScope = row.value.thread_id;
       const validScope = typeof nextScope === 'string' && nextScope.length > 0
         && nextScope.length <= 160 && !/[\u0000-\u001f\u007f]/u.test(nextScope);
-      if (!freshProof || !validScope || seenScopes.has(nextScope)) {
+      if (!freshProof || !validScope || seenScopes.has(String(nextScope))) {
         diagnostics.add('cumulativeResetAmbiguous');
         return {
           ...unknownResult(provider, dialect, [...diagnostics]),
@@ -562,13 +735,13 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
         };
       }
       active = {
-        scope: nextScope,
+        scope: String(nextScope),
         generation: String(generations.length),
-        baseline: zero,
+        baseline: { ...zero },
         rows: [],
       };
       generations.push(active);
-      seenScopes.add(nextScope);
+      seenScopes.add(String(nextScope));
       diagnostics.add('cumulativeResetAccepted');
       continue;
     }
@@ -577,12 +750,21 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
     }
   }
 
-  const samples = [];
-  const segmentInputs = [];
+  // Вход одного сегмента: образцы поколения, его вектор и список метрик, которые
+  // в этом поколении вообще известны.
+  interface SegmentInput {
+    sampleIds: string[];
+    vector: Record<string, string>;
+    availableMetrics: Set<string>;
+    generationIssues: Set<string>;
+  }
+
+  const samples: Row[] = [];
+  const segmentInputs: SegmentInput[] = [];
   const summary = emptyTokenSummary();
-  const componentIssues = new Set();
+  const componentIssues = new Set<string>();
   let sawUnexplainedDecrease = false;
-  const rawFields = Object.freeze({
+  const rawFields: Record<string, string> = Object.freeze({
     inputTokens: 'input_tokens',
     cachedInputTokens: 'cached_input_tokens',
     cacheWriteInputTokens: 'cache_write_input_tokens',
@@ -590,14 +772,18 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
     reasoningOutputTokens: 'reasoning_output_tokens',
   });
   for (const generation of generations) {
-    const previous = { ...generation.baseline };
-    const generationIssues = new Set();
-    const generationSampleIds = [];
+    const previous: CodexCounters = { ...generation.baseline };
+    const generationIssues = new Set<string>();
+    const generationSampleIds: string[] = [];
+
     for (const row of generation.rows) {
-      const vector = {};
+      const vector: Partial<CodexCounters> = {};
+
       for (const key of keys) {
         try {
-          const value = exactUint(row.value.usage, rawFields[key], 'usage');
+          const usage = row.value.usage as Row;
+          const value = exactUint(usage, String(rawFields[key]), 'usage') ?? '0';
+
           vector[key] = value;
           if (BigInt(value) < BigInt(previous[key])) {
             diagnostics.add('cumulativeResetAmbiguous');
@@ -629,7 +815,7 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
         eventAt: null,
       });
     }
-    generation.terminal = previous;
+    terminalByGeneration.set(generation, previous);
     const inputDelta = uintSubtract(previous.inputTokens, generation.baseline.inputTokens);
     const cachedDelta = uintSubtract(
       previous.cachedInputTokens,
@@ -681,15 +867,17 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
     if (generationSampleIds.length > 0) {
       segmentInputs.push({
         sampleIds: generationSampleIds,
-        vector,
+        vector: vector as Record<string, string>,
         availableMetrics,
         generationIssues,
       });
     }
   }
 
-  const terminalGeneration = generations[generations.length - 1];
-  const terminal = terminalGeneration.terminal ?? terminalGeneration.baseline;
+  // Последнее поколение существует всегда: первое заведено до обхода. Подстановка
+  // здесь — не запасной путь, а признание того, что индекс массива необязателен.
+  const terminalGeneration = generations[generations.length - 1] as CounterGeneration;
+  const terminal = terminalByGeneration.get(terminalGeneration) ?? terminalGeneration.baseline;
   const processFinal = run?.processComplete === true && !parsed.hasTornTail && !legacyProof;
   const exactComplete = processFinal && componentIssues.size === 0;
   const completeness = exactComplete
@@ -706,7 +894,7 @@ function normalizeCodex({ provider, dialect, parsed, run }) {
       presenceMask: keys,
       dialect,
       extractorVersion: EXTRACTOR_VERSION,
-      lifecycleEventHash: HASH_RE.test(run?.lifecycleEventHash ?? '')
+      lifecycleEventHash: HASH_RE.test(String(run?.lifecycleEventHash ?? ''))
         ? run.lifecycleEventHash
         : null,
       checkpointHash: digest(canonicalJson([
@@ -767,20 +955,33 @@ const CLAUDE_COUNTERS = Object.freeze([
   'inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens',
 ]);
 
-function claudeModelEntry(rawModel, entry) {
+// Запись расхода одной модели из накопительного снимка claude. Стоимость бывает
+// неизвестной: её отсутствие — отдельное замечание, а не ноль.
+interface ClaudeModelEntry {
+  rawModel: string;
+  canonicalModel: string;
+  providerScope: string | null;
+  contextWindow: string | null;
+  maxOutputTokens: string | null;
+  vector: Record<string, string>;
+  cost: string | null;
+  costIssue: string | null;
+}
+
+function claudeModelEntry(rawModel: string, entry: unknown): ClaudeModelEntry {
   if (!isRecord(entry)) fail('modelUsageInvalid', `modelUsage.${rawModel} обязан быть object.`);
   if (typeof rawModel !== 'string' || rawModel.length < 1 || rawModel.length > 160
       || /[\u0000-\u001f\u007f]/u.test(rawModel)) {
     fail('modelUsageInvalid', 'modelUsage raw model identity invalid.');
   }
-  const canonicalModel = entry.canonicalModel === undefined
+  const canonicalModel: unknown = entry.canonicalModel === undefined
     ? rawModel
     : entry.canonicalModel;
   if (typeof canonicalModel !== 'string' || canonicalModel.length < 1
       || canonicalModel.length > 160 || /[\u0000-\u001f\u007f]/u.test(canonicalModel)) {
     fail('modelUsageInvalid', `modelUsage.${rawModel}.canonicalModel invalid.`);
   }
-  const providerScope = entry.provider === undefined ? null : entry.provider;
+  const providerScope: unknown = entry.provider === undefined ? null : entry.provider;
   if (providerScope !== null && (typeof providerScope !== 'string'
       || providerScope.length < 1 || providerScope.length > 160
       || /[\u0000-\u001f\u007f]/u.test(providerScope))) {
@@ -792,8 +993,8 @@ function claudeModelEntry(rawModel, entry) {
     cacheReadInputTokens: exactUint(entry, 'cacheReadInputTokens', `modelUsage.${rawModel}`),
     cacheCreationInputTokens: exactUint(entry, 'cacheCreationInputTokens', `modelUsage.${rawModel}`),
   };
-  let cost = null;
-  let costIssue = null;
+  let cost: string | null = null;
+  let costIssue: string | null = null;
   try {
     cost = exactCost(entry, 'costUSD', `modelUsage.${rawModel}`);
   } catch (error) {
@@ -804,20 +1005,20 @@ function claudeModelEntry(rawModel, entry) {
   return {
     rawModel,
     canonicalModel,
-    providerScope,
+    providerScope: providerScope as string | null,
     contextWindow: Object.hasOwn(entry, 'contextWindow')
       ? exactUint(entry, 'contextWindow', `modelUsage.${rawModel}`)
       : null,
     maxOutputTokens: Object.hasOwn(entry, 'maxOutputTokens')
       ? exactUint(entry, 'maxOutputTokens', `modelUsage.${rawModel}`)
       : null,
-    vector,
+    vector: vector as Record<string, string>,
     cost,
     costIssue,
   };
 }
 
-function sameClaudeIdentity(left, right) {
+function sameClaudeIdentity(left: ClaudeModelEntry, right: ClaudeModelEntry): boolean {
   return left.rawModel === right.rawModel
     && left.canonicalModel === right.canonicalModel
     && left.providerScope === right.providerScope
@@ -830,7 +1031,7 @@ const ASSISTANT_COUNTERS = Object.freeze([
   'cacheWrite5m', 'cacheWrite1h',
 ]);
 
-function optionalStableText(value, where) {
+function optionalStableText(value: unknown, where: string): string | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== 'string' || value.length < 1 || value.length > 256
       || /[\u0000-\u001f\u007f]/u.test(value)) {
@@ -839,7 +1040,7 @@ function optionalStableText(value, where) {
   return value;
 }
 
-function requestWindow(entry, run) {
+function requestWindow(entry: AssistantEntry, run: RunContext): Row {
   const fallback = billingWindow(run);
   if (entry.timestampMissing || entry.firstAt === null || entry.lastAt === null) return fallback;
   return {
@@ -850,18 +1051,55 @@ function requestWindow(entry, run) {
   };
 }
 
-function assistantEntry(row, outerSession, run) {
+// Итог обхода потока claude: склеенные ходы, их образцы, накопленные замечания и
+// признак того, что данные противоречивы и складывать их нельзя.
+interface ClaudeAssistants {
+  entries: Map<string, AssistantEntry>;
+  samples: Row[];
+  diagnostics: Set<string>;
+  conflict: boolean;
+}
+
+// Один ход ассистента claude: его опознание, модель, атрибуты тарификации и вектор
+// счётчиков. Ключ строится из request_id либо id сообщения — по нему ходы одного
+// запроса склеиваются, а чужой ход не сливается с ними.
+interface AssistantEntry {
+  key: string;
+  requestId: string | null;
+  messageId: string | null;
+  parentToolUseId: string | null;
+  resolvedModel: string;
+  pricingAttributes: Row;
+  vector: Record<string, string>;
+  eventAt: string | null;
+  timestampMissing: boolean;
+  row: StreamRow;
+  // Дописываются при склейке ходов одного запроса.
+  sampleIds?: string[];
+  firstAt?: string | null;
+  lastAt?: string | null;
+}
+
+function assistantEntry(
+  row: StreamRow,
+  outerSession: unknown,
+  run: RunContext,
+): AssistantEntry | null {
   const value = row.value;
-  if (value.session_id !== outerSession || !isRecord(value.message)
-      || !isRecord(value.message.usage)) return null;
+  const message = value.message;
+
+  if (value.session_id !== outerSession || !isRecord(message)
+      || !isRecord(message.usage)) return null;
   const requestId = optionalStableText(value.request_id, 'assistant.request_id');
-  const messageId = optionalStableText(value.message.id, 'assistant.message.id');
+  const messageId = optionalStableText(message.id, 'assistant.message.id');
   if (requestId === null && messageId === null) {
     fail('assistantIdentityMissing', 'Assistant row не содержит request_id/message.id.');
   }
-  const model = optionalStableText(value.message.model, 'assistant.message.model');
+  const model = optionalStableText(message.model, 'assistant.message.model');
+
   if (model === null) fail('assistantIdentityMissing', 'Assistant row не содержит model.');
-  const usage = value.message.usage;
+
+  const usage = message.usage;
   const cacheCreation = usage.cache_creation;
   if (!isRecord(cacheCreation)) {
     fail('assistantCacheSplitMissing', 'Assistant cache_creation split отсутствует.');
@@ -882,7 +1120,8 @@ function assistantEntry(row, outerSession, run) {
       'assistant.usage.cache_creation',
     ),
   };
-  if (uintAdd(vector.cacheWrite5m, vector.cacheWrite1h) !== vector.cacheCreationInputTokens) {
+  if (uintAdd(String(vector.cacheWrite5m), String(vector.cacheWrite1h))
+      !== vector.cacheCreationInputTokens) {
     fail('assistantCacheSplitConflict', 'Assistant cache creation total не сходится с 5m+1h.');
   }
   const timestamp = canonicalInstant(value.timestamp);
@@ -897,6 +1136,7 @@ function assistantEntry(row, outerSession, run) {
     }
   }
   const key = requestId !== null ? `request:${requestId}` : `message:${messageId}`;
+
   return {
     key,
     requestId,
@@ -909,14 +1149,14 @@ function assistantEntry(row, outerSession, run) {
       speed: optionalStableText(usage.speed, 'assistant.usage.speed'),
       contextBand: null,
     },
-    vector,
+    vector: vector as Record<string, string>,
     eventAt,
     timestampMissing: eventAt === null,
     row,
   };
 }
 
-function sameAssistantIdentity(left, right) {
+function sameAssistantIdentity(left: AssistantEntry, right: AssistantEntry): boolean {
   return left.requestId === right.requestId
     && left.messageId === right.messageId
     && left.parentToolUseId === right.parentToolUseId
@@ -924,15 +1164,23 @@ function sameAssistantIdentity(left, right) {
     && JSON.stringify(left.pricingAttributes) === JSON.stringify(right.pricingAttributes);
 }
 
-function collectClaudeAssistants(parsed, outerSession, run, provider, dialect) {
-  const diagnostics = new Set();
-  const entries = new Map();
-  const messageOwners = new Map();
-  const samples = [];
+function collectClaudeAssistants(
+  parsed: ParsedStream,
+  outerSession: unknown,
+  run: RunContext,
+  provider: string,
+  dialect: string,
+): ClaudeAssistants {
+  const diagnostics = new Set<string>();
+  const entries = new Map<string, AssistantEntry>();
+  const messageOwners = new Map<string, string>();
+  const samples: Row[] = [];
   let conflict = false;
+
   for (const row of parsed.rows) {
     if (row.value.type !== 'assistant') continue;
-    let emission;
+
+    let emission: AssistantEntry | null;
     try {
       emission = assistantEntry(row, outerSession, run);
     } catch (error) {
@@ -942,29 +1190,36 @@ function collectClaudeAssistants(parsed, outerSession, run, provider, dialect) {
       continue;
     }
     if (emission === null) continue;
-    if (emission.messageId !== null) {
-      const owner = messageOwners.get(emission.messageId);
-      if (owner !== undefined && owner !== emission.key) {
+
+    // Ключ запроса и id сообщения — строки по построению `assistantEntry`.
+    const emissionKey = String(emission.key);
+    const messageId = emission.messageId === null ? null : String(emission.messageId);
+
+    if (messageId !== null) {
+      const owner = messageOwners.get(messageId);
+
+      if (owner !== undefined && owner !== emissionKey) {
         diagnostics.add('assistantRequestConflict');
         conflict = true;
         continue;
       }
-      messageOwners.set(emission.messageId, emission.key);
+      messageOwners.set(messageId, emissionKey);
     }
-    const id = sampleId(run, provider, dialect, row, `${outerSession}:${emission.key}`);
+
+    const id = sampleId(run, provider, dialect, row, `${outerSession}:${emissionKey}`);
     samples.push({
       sampleId: id,
       sourceOrdinal: row.sourceOrdinal,
       byteOffset: row.byteOffset,
       lineHash: row.lineHash,
-      counterScope: `${outerSession}:${emission.key}`,
+      counterScope: `${outerSession}:${emissionKey}`,
       counterGeneration: '0',
       quantitySemantics: 'cumulative_snapshot',
       vector: emission.vector,
       providerEventId: emission.requestId,
       eventAt: emission.eventAt,
     });
-    const previous = entries.get(emission.key);
+    const previous = entries.get(emissionKey);
     if (previous && (!sameAssistantIdentity(previous, emission)
       || !uintVectorNondecreasing(previous.vector, emission.vector, ASSISTANT_COUNTERS))) {
       diagnostics.add('assistantRequestConflict');
@@ -972,8 +1227,9 @@ function collectClaudeAssistants(parsed, outerSession, run, provider, dialect) {
       continue;
     }
     const sampleIds = previous?.sampleIds ?? [];
+
     sampleIds.push(id);
-    entries.set(emission.key, {
+    entries.set(emissionKey, {
       ...emission,
       sampleIds,
       firstAt: previous?.firstAt ?? emission.eventAt,
@@ -981,14 +1237,44 @@ function collectClaudeAssistants(parsed, outerSession, run, provider, dialect) {
       timestampMissing: (previous?.timestampMissing ?? false) || emission.timestampMissing,
     });
   }
-  return { entries, samples, diagnostics, conflict };
+  return {
+    entries,
+    samples,
+    diagnostics,
+    conflict,
+  };
 }
 
-function sumAssistantVector(entries) {
-  const sum = Object.fromEntries(ASSISTANT_COUNTERS.map((key) => [key, '0']));
-  for (const entry of entries) {
-    for (const key of ASSISTANT_COUNTERS) sum[key] = uintAdd(sum[key], entry.vector[key]);
+/**
+ * Порядок образцов: сперва по месту строки в исходном файле, при совпадении — по
+ * идентификатору. Устойчивость нужна для повторяемости: один и тот же raw обязан
+ * давать одну и ту же проекцию, иначе хеши документов разойдутся между прогонами.
+ */
+function sampleOrder(left: Row, right: Row): number {
+  const leftOrdinal = BigInt(String(left.sourceOrdinal));
+  const rightOrdinal = BigInt(String(right.sourceOrdinal));
+
+  if (leftOrdinal !== rightOrdinal) {
+    return leftOrdinal < rightOrdinal ? -1 : 1;
   }
+
+  const leftId = String(left.sampleId);
+  const rightId = String(right.sampleId);
+
+  return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+}
+
+function sumAssistantVector(entries: AssistantEntry[]): Record<string, string> {
+  const sum: Record<string, string> = Object.fromEntries(
+    ASSISTANT_COUNTERS.map((key) => [key, '0']),
+  );
+
+  for (const entry of entries) {
+    for (const key of ASSISTANT_COUNTERS) {
+      sum[key] = uintAdd(String(sum[key]), String(entry.vector[key]));
+    }
+  }
+
   return sum;
 }
 
@@ -1003,16 +1289,27 @@ function assistantMetricSegments({
   dialect,
   completeness,
   source,
-}) {
+}: {
+  entries: AssistantEntry[];
+  field: string;
+  metric: string;
+  cacheMode?: string | null;
+  cacheTtl?: string | null;
+  run: RunContext;
+  provider: string;
+  dialect: string;
+  completeness: string;
+  source: string;
+}): Row[] {
   return entries
-    .filter((entry) => BigInt(entry.vector[field]) > 0n)
+    .filter((entry) => BigInt(entry.vector[field] ?? '0') > 0n)
     .map((entry) => usageSegment({
       run,
       provider,
       dialect,
-      sampleIds: entry.sampleIds,
+      sampleIds: entry.sampleIds ?? [],
       metric,
-      quantity: entry.vector[field],
+      quantity: entry.vector[field] ?? '0',
       resolvedModel: entry.resolvedModel,
       cacheMode,
       cacheTtl,
@@ -1023,7 +1320,21 @@ function assistantMetricSegments({
     }));
 }
 
-function lowerBoundFromAssistants({ assistants, run, provider, dialect, providerRootResult, diagnostics }) {
+function lowerBoundFromAssistants({
+  assistants,
+  run,
+  provider,
+  dialect,
+  providerRootResult,
+  diagnostics,
+}: {
+  assistants: ClaudeAssistants;
+  run: RunContext;
+  provider: string;
+  dialect: string;
+  providerRootResult: unknown;
+  diagnostics: Set<string>;
+}): Row | null {
   const entries = [...assistants.entries.values()];
   if (entries.length === 0) return null;
   const total = sumAssistantVector(entries);
@@ -1064,8 +1375,13 @@ function lowerBoundFromAssistants({ assistants, run, provider, dialect, provider
   };
 }
 
-function normalizeClaude({ provider, dialect, parsed, run }) {
-  const diagnostics = new Set();
+function normalizeClaude({ provider, dialect, parsed, run }: {
+  provider: string;
+  dialect: string;
+  parsed: ParsedStream;
+  run: RunContext;
+}): Row {
+  const diagnostics = new Set<string>();
   if (parsed.hasTornTail) diagnostics.add('tornRawTail');
   const initRows = parsed.rows.filter(({ value }) => value.type === 'system' && value.subtype === 'init');
   const firstInit = initRows[0];
@@ -1082,13 +1398,13 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
   const assistants = collectClaudeAssistants(parsed, outerSession, run, provider, dialect);
   for (const code of assistants.diagnostics) diagnostics.add(code);
 
-  const rootCandidates = [];
-  const billingRows = [];
+  const rootCandidates: StreamRow[] = [];
+  const billingRows: StreamRow[] = [];
   let lastBillingRowIndex = -1;
   let lastChargeableRowIndex = -1;
   let lastUnsupportedResultIndex = -1;
-  for (let rowIndex = 0; rowIndex < parsed.rows.length; rowIndex += 1) {
-    const row = parsed.rows[rowIndex];
+
+  for (const [rowIndex, row] of parsed.rows.entries()) {
     const value = row.value;
     if (value.type === 'assistant' && value.session_id === outerSession) {
       lastChargeableRowIndex = rowIndex;
@@ -1109,7 +1425,8 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
   }
   let providerRootResult = null;
   if (rootCandidates.length === 1) {
-    const row = rootCandidates[0];
+    const row = rootCandidates[0] as StreamRow;
+
     providerRootResult = {
       sourceOrdinal: row.sourceOrdinal,
       subtype: typeof row.value.subtype === 'string' ? row.value.subtype : null,
@@ -1137,10 +1454,10 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
     };
   }
 
-  const samples = [];
-  const previous = new Map();
-  const sampleIdsByModel = new Map();
-  let terminalEntries = null;
+  const samples: Row[] = [];
+  const previous = new Map<string, ClaudeModelEntry>();
+  const sampleIdsByModel = new Map<string, string[]>();
+  let terminalEntries: Map<string, ClaudeModelEntry> | null = null;
   let modelConflict = false;
   let sawEmpty = false;
   try {
@@ -1155,8 +1472,8 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
         }
         continue;
       }
-      const current = new Map();
-      const canonicalIdentities = new Set();
+      const current = new Map<string, ClaudeModelEntry>();
+      const canonicalIdentities = new Set<string>();
       for (const rawModel of rawModels) {
         const entry = claudeModelEntry(rawModel, usage[rawModel]);
         if (canonicalIdentities.has(entry.canonicalModel)) {
@@ -1239,25 +1556,28 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
   const completeness = fullyDrained ? 'complete' : 'partial';
   const source = fullyDrained ? 'provider_final' : 'provider_partial';
   const summary = emptyTokenSummary();
-  const usageSegments = [];
-  const breakdown = [];
+  const usageSegments: Row[] = [];
+  const breakdown: Row[] = [];
   const usableAssistantEntries = assistants.conflict ? [] : [...assistants.entries.values()];
-  const matchedAssistantKeys = new Set();
-  for (const rawModel of [...terminalEntries.keys()].sort()) {
-    const entry = terminalEntries.get(rawModel);
+  const matchedAssistantKeys = new Set<string>();
+
+  for (const [rawModel, entry] of [...terminalEntries.entries()].sort(
+    ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
+  )) {
     const requestEntries = usableAssistantEntries.filter((request) => (
       request.resolvedModel === entry.canonicalModel || request.resolvedModel === rawModel
     ));
     requestEntries.forEach((request) => matchedAssistantKeys.add(request.key));
     const requestTotal = sumAssistantVector(requestEntries);
-    summary.uncachedInput = uintAdd(summary.uncachedInput, entry.vector.inputTokens);
-    summary.output = uintAdd(summary.output, entry.vector.outputTokens);
-    summary.cacheRead = uintAdd(summary.cacheRead, entry.vector.cacheReadInputTokens);
+    summary.uncachedInput = uintAdd(summary.uncachedInput, String(entry.vector.inputTokens));
+    summary.output = uintAdd(summary.output, String(entry.vector.outputTokens));
+    summary.cacheRead = uintAdd(summary.cacheRead, String(entry.vector.cacheReadInputTokens));
     if (entry.cost !== null) {
       breakdown.push({ model: entry.canonicalModel, rawModel, amount: entry.cost });
     }
 
-    const metricDefinitions = [
+    // [поле итога, поле хода ассистента, метрика, режим кеша]
+    const metricDefinitions: [string, string, string, string | null][] = [
       ['inputTokens', 'inputTokens', 'input_tokens', null],
       ['outputTokens', 'outputTokens', 'output_tokens', null],
       ['cacheReadInputTokens', 'cacheReadInputTokens', 'cache_read_tokens', 'read'],
@@ -1275,15 +1595,15 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
           completeness,
           source,
         }));
-      } else if (BigInt(entry.vector[finalField]) > 0n) {
+      } else if (BigInt(entry.vector[finalField] ?? '0') > 0n) {
         if (requestEntries.length > 0) diagnostics.add('assistantReconciliationMismatch');
         usageSegments.push(usageSegment({
           run,
           provider,
           dialect,
-          sampleIds: sampleIdsByModel.get(rawModel),
+          sampleIds: sampleIdsByModel.get(rawModel) ?? [],
           metric,
-          quantity: entry.vector[finalField],
+          quantity: entry.vector[finalField] ?? '0',
           resolvedModel: entry.canonicalModel,
           cacheMode,
           completeness: requestEntries.length > 0 ? 'partial' : completeness,
@@ -1294,11 +1614,11 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
 
     const cacheMatches = requestEntries.length > 0
       && requestTotal.cacheCreationInputTokens === entry.vector.cacheCreationInputTokens
-      && uintAdd(requestTotal.cacheWrite5m, requestTotal.cacheWrite1h)
+      && uintAdd(String(requestTotal.cacheWrite5m), String(requestTotal.cacheWrite1h))
         === entry.vector.cacheCreationInputTokens;
     if (cacheMatches) {
-      summary.cacheWrite5m = uintAdd(summary.cacheWrite5m, requestTotal.cacheWrite5m);
-      summary.cacheWrite1h = uintAdd(summary.cacheWrite1h, requestTotal.cacheWrite1h);
+      summary.cacheWrite5m = uintAdd(summary.cacheWrite5m, String(requestTotal.cacheWrite5m));
+      summary.cacheWrite1h = uintAdd(summary.cacheWrite1h, String(requestTotal.cacheWrite1h));
       usageSegments.push(
         ...assistantMetricSegments({
           entries: requestEntries,
@@ -1329,16 +1649,16 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
       if (requestEntries.length > 0) diagnostics.add('assistantReconciliationMismatch');
       summary.cacheWriteUnknown = uintAdd(
         summary.cacheWriteUnknown,
-        entry.vector.cacheCreationInputTokens,
+        String(entry.vector.cacheCreationInputTokens),
       );
-      if (BigInt(entry.vector.cacheCreationInputTokens) > 0n) {
+      if (BigInt(entry.vector.cacheCreationInputTokens ?? '0') > 0n) {
         usageSegments.push(usageSegment({
           run,
           provider,
           dialect,
-          sampleIds: sampleIdsByModel.get(rawModel),
+          sampleIds: sampleIdsByModel.get(rawModel) ?? [],
           metric: 'cache_write_tokens',
-          quantity: entry.vector.cacheCreationInputTokens,
+          quantity: entry.vector.cacheCreationInputTokens ?? '0',
           resolvedModel: entry.canonicalModel,
           cacheMode: 'write',
           cacheTtl: 'unknown',
@@ -1354,7 +1674,7 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
   const providerReportedCost = fullyDrained && breakdown.length === terminalEntries.size
     ? {
       currency: 'USD',
-      amount: addDecimals(...breakdown.map((item) => item.amount)),
+      amount: addDecimals(...breakdown.map((item) => String(item.amount))),
       semantics: 'run_total',
       breakdown,
     }
@@ -1367,11 +1687,7 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
     source,
     completeness,
     provenance: 'exact',
-    samples: [...samples, ...assistants.samples].sort((left, right) => (
-      BigInt(left.sourceOrdinal) < BigInt(right.sourceOrdinal) ? -1
-        : BigInt(left.sourceOrdinal) > BigInt(right.sourceOrdinal) ? 1
-          : left.sampleId < right.sampleId ? -1 : left.sampleId > right.sampleId ? 1 : 0
-    )),
+    samples: [...samples, ...assistants.samples].sort(sampleOrder),
     usageSegments,
     tokenSummary: summary,
     providerReportedCost,
@@ -1383,14 +1699,22 @@ function normalizeClaude({ provider, dialect, parsed, run }) {
 }
 
 /** Общая pure-функция runtime/backfill: одинаковый raw даёт одинаковую projection. */
-export function normalizeProviderUsage({ provider, dialect, rawText, run = {} }) {
+export function normalizeProviderUsage({ provider, dialect, rawText, run = {} }: {
+  provider: string;
+  dialect: unknown;
+  rawText: unknown;
+  run?: RunContext;
+}): Row {
   if (!Object.hasOwn(DIALECTS, provider) || typeof dialect !== 'string') {
-    return unknownResult(provider ?? null, dialect ?? null, ['unsupportedProvider']);
+    return unknownResult(provider ?? null, typeof dialect === 'string' ? dialect : null, [
+      'unsupportedProvider',
+    ]);
   }
-  if (!DIALECTS[provider].has(dialect)) {
+  if (!DIALECTS[provider as keyof typeof DIALECTS].has(dialect)) {
     return unknownResult(provider, dialect, ['unsupportedDialect']);
   }
-  let parsed;
+
+  let parsed: ParsedStream;
   try {
     parsed = parseJsonLines(rawText, provider);
   } catch (error) {
@@ -1413,11 +1737,19 @@ export function normalizeProviderUsageRows({
   rows,
   hasTornTail = false,
   run = {},
-}) {
+}: {
+  provider: string;
+  dialect: unknown;
+  rows?: unknown;
+  hasTornTail?: boolean;
+  run?: RunContext;
+}): Row {
   if (!Object.hasOwn(DIALECTS, provider) || typeof dialect !== 'string') {
-    return unknownResult(provider ?? null, dialect ?? null, ['unsupportedProvider']);
+    return unknownResult(provider ?? null, typeof dialect === 'string' ? dialect : null, [
+      'unsupportedProvider',
+    ]);
   }
-  if (!DIALECTS[provider].has(dialect)) {
+  if (!DIALECTS[provider as keyof typeof DIALECTS].has(dialect)) {
     return unknownResult(provider, dialect, ['unsupportedDialect']);
   }
   if (!Array.isArray(rows) || rows.length > MAX_LINES || typeof hasTornTail !== 'boolean') {
@@ -1431,7 +1763,7 @@ export function normalizeProviderUsageRows({
       return { ...unknownResult(provider, dialect, ['rawRowsInvalid']), completeness: 'conflict' };
     }
   }
-  const parsed = { rows, hasTornTail };
+  const parsed: ParsedStream = { rows: rows as StreamRow[], hasTornTail };
   return provider === 'codex'
     ? normalizeCodex({ provider, dialect, parsed, run })
     : normalizeClaude({ provider, dialect, parsed, run });

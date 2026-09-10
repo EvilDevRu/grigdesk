@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url';
 export const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 // Всё, что кокпит запускает как самостоятельную программу. Часть — своим процессом
-// (MCP-мосты, воркеры, CLI), часть — снаружи shell-лаунчерами.
+// (MCP-мосты, воркеры, CLI), часть — снаружи shell-лаунчерами, часть — прогоном тестов.
+// Разница между ними только в том, кто нажимает кнопку: строковый путь одинаково
+// невидим компилятору во всех трёх случаях.
 export const ENTRYPOINTS: readonly string[] = [
     'server/src/app.js',
     'server/scripts/knowledge-search-preflight.mjs',
@@ -24,24 +26,15 @@ export const ENTRYPOINTS: readonly string[] = [
     'server/src/lib/media/ingestWorker.ts',
     'server/src/lib/search/worker.ts',
     'server/src/lib/search/cli.ts',
+    // Node-помощник движка: его зовут shell-скрипты runner-launcher.sh и
+    // runtime-analytics.sh, и импортом это не видно вовсе.
+    'engine/lib/runtime-usage.mjs',
+    // Конфигурация сборки интерфейса — тоже программа: её исполняет Vite.
+    'web/vite.config.js',
+    // Фикстуры, которые тест запускает отдельным процессом.
+    'tests/fixtures/knowledge-maps-worker.mjs',
+    'tests/fixtures/codex-app-server/rich-turn-0.149.0.mjs',
 ];
-
-// Кто передаёт снятие типов каждой такой точке входа. Список — не украшение:
-// программа, чей граф дошёл до TypeScript, обязана запускаться с флагом, иначе на
-// минимальной поддерживаемой версии Node она не стартует вовсе. Появилась новая
-// строка — значит, у её запуска нужно проверить argv, а у песочницы Kimi ещё и
-// монтирование транзитивных модулей.
-export const TYPE_STRIPPING_LAUNCHERS: Readonly<Record<string, string>> = Object.freeze({
-    'server/src/app.js':
-        'server/package.json start/dev, bin/cockpit, bin/restart, deploy/cockpit-server.service',
-    'server/scripts/knowledge-search-preflight.mjs':
-        'bin/cockpit, bin/restart, deploy/install.sh, deploy/cockpit-server.service',
-    'server/src/lib/search/cli.ts': 'bin/knowledge',
-    'server/src/lib/search/worker.ts': 'worker_threads наследует execArgv родителя',
-    'server/src/lib/media/ingestWorker.ts': 'startIngestJob через nodeTsArgv',
-    'server/src/lib/executors/_direct-ssh-policy-hook.js':
-        'DIRECT_SSH_HOOK_COMMAND через NODE_TS_ARGS',
-});
 
 // Каталоги, которые сервер обходит сам: файл здесь подключается по факту наличия,
 // а не по импорту. Пропустить их значило бы не проверить именно ту часть, где
@@ -52,6 +45,10 @@ const SCANNED_DIRS: readonly { dir: string; skip: (name: string) => boolean }[] 
         // На `_` — вспомогательные модули исполнителей, index.js — сам загрузчик.
         skip: (name) => name === 'index.js' || name.startsWith('_'),
     },
+    // Зонды и guard-ы: каждый файл здесь — самостоятельная программа, и ссылку на неё
+    // держит либо package script, либо человек в терминале.
+    { dir: 'tools', skip: () => false },
+    { dir: 'web/scripts', skip: (name) => name.endsWith('.py') },
 ];
 
 const SPEC_RE = /(?:^|[^\w.])(?:import|export)\s[^'"();]*?from\s*(['"])(\.[^'"]*)\1/g;
@@ -92,9 +89,9 @@ function reachableFrom(root: string, entry: string, broken: BrokenReference[]): 
 }
 
 /**
- * Точки входа, чей граф доходит до TypeScript. Такую программу нельзя запускать
- * голым `node`: на минимальной поддерживаемой версии снятие типов ещё не включено,
- * и она не стартует вовсе. Список сверяется с тем, где флаги действительно передают.
+ * Точки входа, чей граф доходит до TypeScript. С минимумом Node 22.18 такую программу
+ * запускают обычным `node`: снятие типов встроено. Список нужен, чтобы видеть, какие
+ * запуски вообще зависят от рантайма — например, alias песочницы Kimi.
  */
 export function entrypointsWithTypeScript(root: string = REPO_ROOT): string[] {
     const broken: BrokenReference[] = [];
@@ -159,6 +156,12 @@ export function brokenEntrypointReferences(root: string = REPO_ROOT): BrokenRefe
     const seen = new Set<string>();
     const queue = roots.map((path) => join(root, path));
     const broken: BrokenReference[] = [];
+
+    for (const entry of ENTRYPOINTS) {
+        if (!isFile(join(root, entry))) {
+            broken.push({ from: '(точка входа)', spec: entry });
+        }
+    }
 
     while (queue.length) {
         const current = queue.pop();

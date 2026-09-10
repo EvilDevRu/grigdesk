@@ -14,10 +14,10 @@ import { createRequire } from 'node:module';
 import {
   claudeSessionArgs,
   openClaudeStreamSession,
-} from '../../server/src/lib/executors/_claude-stream.js';
-import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.js';
-import { ChatLiveSessions } from '../../server/src/lib/chat/live-sessions.js';
-import chatModule from '../../server/src/modules/chat/index.js';
+} from '../../server/src/lib/executors/_claudeStream.ts';
+import { claudeProviderSettingsArgs } from '../../server/src/lib/executors/claude.ts';
+import { ChatLiveSessions } from '../../server/src/lib/chat/liveSessions.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
 
 const FAKE_CLI = `
 import readline from 'node:readline';
@@ -292,8 +292,8 @@ test('простой закрывает сессию, стоп доезжает 
 // ── Контракт исполнителей и гейт настройки ─────────────────────────────────────
 
 test('claude и codex объявляют живую сессию, а самопробуждение — только claude', async () => {
-  const claude = (await import('../../server/src/lib/executors/claude.js')).default;
-  const codex = (await import('../../server/src/lib/executors/codex.js')).default;
+  const claude = (await import('../../server/src/lib/executors/claude.ts')).default;
+  const codex = (await import('../../server/src/lib/executors/codex.ts')).default;
 
   assert.equal(claude.session?.mode, 'persistent');
   // Фоновые задачи и субагенты отчитываются сами — это проверено живым замером CLI.
@@ -337,7 +337,7 @@ test('долгоживущий Claude получает те же default-on SSH-
 test('модуль чата гейтит живую сессию настройкой и не убивает процесс стопом', async () => {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(
-    new URL('../../server/src/modules/chat/index.js', import.meta.url),
+    new URL('../../server/src/modules/chat/index.ts', import.meta.url),
     'utf8',
   );
 
@@ -350,7 +350,7 @@ test('модуль чата гейтит живую сессию настрой�
   assert.equal(source.includes("fastify.sse.broadcast('chat-orphan'"), true);
 
   const prefs = await readFile(
-    new URL('../../server/src/lib/prefs-store.js', import.meta.url),
+    new URL('../../server/src/lib/prefsStore.ts', import.meta.url),
     'utf8',
   );
   // Неизвестные ключи PrefsStore.write отбрасывает — без дефолта тумблер не сохранится.

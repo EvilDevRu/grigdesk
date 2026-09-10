@@ -460,8 +460,8 @@ import {
   UiTooltip,
   useUiLayer,
 } from '../../ui';
-import { api } from '../api-client.js';
-import { useSse } from '../../composables/useSse.js';
+import { api } from '../apiClient.ts';
+import { useSse } from '../../composables/useSse.ts';
 import { useSystemStore } from '../../stores/system.js';
 import { usePwaStore } from '../../stores/pwa.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -490,8 +490,8 @@ import { createUsageWatch } from '../../features/providers/usageWatch.js';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
-import { TOOL_BY_ID } from '../tools/registry.js';
-import { useToolLauncher } from '../tools/launcher.js';
+import { TOOL_BY_ID } from '../tools/registry.ts';
+import { useToolLauncher } from '../tools/launcher.ts';
 
 const route = useRoute();
 const router = useRouter();

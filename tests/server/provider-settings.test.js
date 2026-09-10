@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { applyProviderSetting, resolveProviderSettings } from '../../server/src/lib/provider-settings.js';
+import { applyProviderSetting, resolveProviderSettings } from '../../server/src/lib/providerSettings.ts';
 import claude, {
   buildClaudeUntrustedArgs,
   claudeProviderSettingsArgs,
-} from '../../server/src/lib/executors/claude.js';
-import codex from '../../server/src/lib/executors/codex.js';
-import kimi from '../../server/src/lib/executors/kimi.js';
-import ollama from '../../server/src/lib/executors/ollama.js';
+} from '../../server/src/lib/executors/claude.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
+import kimi from '../../server/src/lib/executors/kimi.ts';
+import ollama from '../../server/src/lib/executors/ollama.ts';
 
 const EXECUTOR = {
   id: 'demo',

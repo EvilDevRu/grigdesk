@@ -63,8 +63,8 @@ async function sshSection(t, api, sockets = []) {
 
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__sshStoreApi;',
-      '../../composables/useSse.js': 'export const sseSubscribe = () => () => {};',
+      './apiClient.ts': 'export const api = globalThis.__sshStoreApi;',
+      '../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
     },
   });
   const { createPinia, setActivePinia } = await import(
@@ -116,7 +116,7 @@ test('raw API не ставит JSON Content-Type на парольный connec
     });
   };
 
-  const { api } = await import(`../../web/src/shared/api-client.js?ssh-raw=${Date.now()}`);
+  const { api } = await import(`../../web/src/shared/apiClient.ts?ssh-raw=${Date.now()}`);
   const password = new TextEncoder().encode('SSH_PASSWORD_SENTINEL_91006');
 
   if (typeof api.postBytes !== 'function') {

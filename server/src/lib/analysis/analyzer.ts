@@ -12,14 +12,14 @@ import type { TriageProfile } from './profile.ts';
 import { buildTriagePrompt } from './prompt.ts';
 import { parseRouteMap, resolveRoute } from './routePolicy.ts';
 import { createRepoHistoryTools } from './repoHistory.ts';
-import { supportsScopedWorkspace } from '../executors/index.js';
-import { createWorkIpc } from '../executors/work-ipc.js';
-import { refreshRepos } from '../git-refresh.js';
+import { supportsScopedWorkspace } from '../executors/index.ts';
+import { createWorkIpc } from '../executors/workIpc.ts';
+import { refreshRepos } from '../gitRefresh.ts';
 import {
   resolveChatAttachment,
   resolveLegacyChatAttachment,
-} from '../chat/attachments.js';
-import { resolveLegacyModel, resolveModelRef } from '../chat/model-ref.js';
+} from '../chat/attachments.ts';
+import { resolveLegacyModel, resolveModelRef } from '../chat/modelRef.ts';
 import { stripDiscussionSection } from '../telegram/discussion.ts';
 import type {
   Analysis,

@@ -9,14 +9,22 @@
 // авторизации, значит покрывает и upgrade вебсокета, и percent-encoded пути — Fastify матчит
 // роут до хуков, и решение принимается по шаблону роута, а не по сырой строке.
 import fp from 'fastify-plugin';
-import { decideHttpRequest } from '../lib/tls/local.js';
+import type { FastifyInstance } from 'fastify';
+import type { TLSSocket } from 'node:tls';
+
+import { decideHttpRequest } from '../lib/tls/local.ts';
+import type { TlsRuntime } from '../lib/tls/local.ts';
+
+export interface HttpScopeOptions {
+  tlsRuntime: TlsRuntime;
+}
 
 /**
  * Хост без порта. Значение приходит из заголовка `Host`, то есть от клиента, поэтому
  * пропускаем только литеральный адрес или простое имя: в `Location` не должно уехать ничего,
  * что превратит редирект в переход на чужой сайт.
  */
-export function redirectHost(rawHost) {
+export function redirectHost(rawHost: unknown): string {
   const value = String(rawHost || '').trim();
   if (!value) return '';
   if (value.startsWith('[')) {
@@ -25,22 +33,23 @@ export function redirectHost(rawHost) {
     const inner = value.slice(1, end);
     return /^[0-9a-fA-F:.]+$/.test(inner) ? `[${inner}]` : '';
   }
-  const host = value.split(':')[0];
+  const host = value.split(':')[0] ?? '';
+
   return /^[a-zA-Z0-9.-]+$/.test(host) ? host : '';
 }
 
-async function httpScopePlugin(fastify, opts) {
+async function httpScopePlugin(fastify: FastifyInstance, opts: HttpScopeOptions): Promise<void> {
   const { tlsRuntime } = opts;
 
   fastify.addHook('onRequest', async (request, reply) => {
-    // По https решать нечего.
-    if (request.socket.encrypted) return;
+    // На https решать нечего; признак шифрования есть только у TLS-сокета.
+    if ((request.socket as TLSSocket).encrypted) return;
 
     const decision = decideHttpRequest({
       // Адрес СОКЕТА, а не `request.ip`: за шлюзом `request.ip` — это клиент из
       // `X-Forwarded-For`, и запросы туннеля улетали бы в редирект на домашний адрес.
       remoteAddress: request.socket.remoteAddress,
-      routeUrl: request.routeOptions?.url || request.routerPath || '',
+      routeUrl: request.routeOptions?.url || '',
       httpsUp: !!tlsRuntime?.up,
       upgrade: !!request.raw.headers.upgrade,
     });
@@ -63,7 +72,7 @@ async function httpScopePlugin(fastify, opts) {
     }
     return reply
       .code(301)
-      .header('location', `https://${host}:${tlsRuntime.port}${request.raw.url}`)
+      .header('location', `https://${host}:${tlsRuntime.port ?? ''}${request.raw.url ?? ''}`)
       .send();
   });
 }

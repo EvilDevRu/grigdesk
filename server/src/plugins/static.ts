@@ -6,8 +6,14 @@ import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { FastifyInstance } from 'fastify';
 
-async function staticPlugin(fastify, opts) {
+export interface StaticPluginOptions {
+  webDist: string;
+  stateDir: string;
+}
+
+async function staticPlugin(fastify: FastifyInstance, opts: StaticPluginOptions): Promise<void> {
   const { webDist, stateDir } = opts;
 
   const shotsDir = path.join(stateDir, 'shots');

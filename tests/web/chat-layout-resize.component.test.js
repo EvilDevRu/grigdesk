@@ -47,8 +47,8 @@ async function compileSfc(path, id, patch = (code) => code) {
 
 const compileChatsView = () => compileSfc(CHATS_VIEW_PATH, 'data-v-chats-resize', (code) => code
   .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__chatsResizeStore;')
-  .replace("import { useUiContextSource } from '../composables/useUiContextSource.js';", 'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });')
-  .replace("import { useDockViewport } from '../shared/tools/viewport.js';", 'const useDockViewport = () => ({ dockCapable: globalThis.__chatsDockCapable });')
+  .replace("import { useUiContextSource } from '../composables/useUiContextSource.ts';", 'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });')
+  .replace("import { useDockViewport } from '../shared/tools/viewport.ts';", 'const useDockViewport = () => ({ dockCapable: globalThis.__chatsDockCapable });')
   .replace("import ChatList from './chat/ChatList.vue';", 'const ChatList = { emits: ["open"], template: "<aside class=\\"cl\\"><button class=\\"stub-open\\" @click=\\"$emit(\\\'open\\\')\\"></button></aside>" };')
   .replace("import ChatSession from './chat/ChatSession.vue';", 'const ChatSession = { props: ["sid"], template: "<div class=\\"cs\\"></div>" };'));
 

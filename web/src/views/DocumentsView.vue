@@ -14,7 +14,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import TopbarActions from '../shared/layout/TopbarActions.vue';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
 import { UiIconButton, UiSpinner } from '../ui';

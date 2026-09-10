@@ -19,8 +19,8 @@ const flush = async () => {
 async function loadSection() {
   return compileModule(ACTIONS_PATH, {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__inboxSummaryApi;',
-      '../../composables/useSse.js': (
+      './apiClient.ts': 'export const api = globalThis.__inboxSummaryApi;',
+      '../../composables/useSse.ts': (
         'export const sseSubscribe = (...args) => globalThis.__inboxSummarySubscribe(...args);'
       ),
     },

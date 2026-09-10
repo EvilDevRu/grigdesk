@@ -2,8 +2,8 @@
 // PUT/DELETE, а rows — локальная проекция существующих board/analysis/pipeline stores.
 import { markRaw, watch } from 'vue';
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
-import { notify } from '../shared/notify.js';
+import { api } from '../shared/apiClient.ts';
+import { notify } from '../shared/notify.ts';
 import { shelfApi } from '../shared/shelfApi.ts';
 import taskShelfDecision, { isShelfTaskCompleted } from '../shared/taskShelfDecision.ts';
 import type {
@@ -13,7 +13,7 @@ import type {
 } from '../shared/taskShelfDecision.ts';
 import { parseShelfState } from '../../../shared/shelfContracts.ts';
 import type { ShelfEntry, ShelfReason } from '../../../shared/shelfContracts.ts';
-import { sseSubscribe } from '../composables/useSse.js';
+import { sseSubscribe } from '../composables/useSse.ts';
 import { useAnalysisStore } from './analysis.ts';
 import { useNotifyWatchStore } from './notify-watch.js';
 import { useBoardStore } from './board.js';

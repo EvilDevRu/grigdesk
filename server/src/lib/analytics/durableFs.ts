@@ -37,8 +37,16 @@ export const DURABLE_FS_STAGES = Object.freeze({
   EXACT_UNLINK_DIRECTORY_FSYNCED: 'exact_unlink_directory_fsynced',
 });
 
+// Подробности отказа, безопасные для публичной границы: код системного вызова, но
+// не путь и не текст ядра. Путь в сообщении раскрыл бы устройство приватного состояния.
+export type DurableFailureDetails = Record<string, string>;
+
 export class AnalyticsDurableFsError extends Error {
-  constructor(code, message, details = undefined) {
+  readonly code: string;
+
+  readonly details?: Readonly<DurableFailureDetails>;
+
+  constructor(code: string, message: string, details?: DurableFailureDetails) {
     super(message);
     this.name = 'AnalyticsDurableFsError';
     this.code = code;
@@ -46,20 +54,27 @@ export class AnalyticsDurableFsError extends Error {
   }
 }
 
-function fail(code, message, details) {
+/**
+ * Отказ операции. Объявлен функцией, а не стрелкой в const: только у объявления
+ * компилятор считает `never` признаком «дальше кода нет» и сужает по нему тип.
+ */
+function fail(code: string, message: string, details?: DurableFailureDetails): never {
   throw new AnalyticsDurableFsError(code, message, details);
 }
 
-function safeIoFailure(error) {
+/** Наружу уходит код операции, а не сообщение ядра: путь в нём раскрыл бы состояние. */
+function safeIoFailure(error: unknown): AnalyticsDurableFsError {
   if (error instanceof AnalyticsDurableFsError) return error;
+  const syscall = (error as { code?: unknown } | null)?.code;
+
   return new AnalyticsDurableFsError(
     'durableIoFailure',
     'Операция durable analytics state не завершена.',
-    error?.code ? { syscallCode: String(error.code) } : undefined,
+    syscall ? { syscallCode: String(syscall) } : undefined,
   );
 }
 
-function assertDirectory(directory) {
+function assertDirectory(directory: unknown): string {
   if (typeof directory !== 'string' || directory.length === 0 || directory.includes('\0')) {
     fail('invalidDirectory', 'Каталог durable state задан некорректно.');
   }
@@ -70,29 +85,32 @@ function assertDirectory(directory) {
   return resolved;
 }
 
-function assertName(name) {
+function assertName(name: unknown): string {
   if (typeof name !== 'string' || !BASENAME_RE.test(name) || name === '.' || name === '..') {
     fail('invalidName', 'Имя durable state файла задано некорректно.');
   }
   return name;
 }
 
-function assertRequiredMode(value) {
-  if (value !== null && (!Number.isSafeInteger(value) || value < 0 || value > 0o777)) {
+function assertRequiredMode(value: unknown): number | null {
+  if (value !== null && (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 0o777)) {
     fail('invalidMode', 'Ожидаемый mode durable state задан некорректно.');
   }
-  return value;
+
+  return value as number | null;
 }
 
-function assertLimit(value, fallback = DEFAULT_MAX_BYTES) {
-  const limit = value ?? fallback;
+function assertLimit(value: unknown, fallback = DEFAULT_MAX_BYTES): number {
+  const limit = Number(value ?? fallback);
+
   if (!Number.isSafeInteger(limit) || limit < 0 || limit > 2 ** 31) {
     fail('invalidLimit', 'Ограничение размера durable state задано некорректно.');
   }
+
   return limit;
 }
 
-function asBytes(value, maxBytes) {
+function asBytes(value: unknown, maxBytes: number): Buffer {
   const bytes = Buffer.isBuffer(value)
     ? Buffer.from(value)
     : value instanceof Uint8Array
@@ -105,15 +123,25 @@ function asBytes(value, maxBytes) {
   return Buffer.from(bytes);
 }
 
-function sha256(bytes) {
+function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function permissions(stat) {
+// Статистика читается в BigInt: inode и наносекунды не помещаются в number.
+type BigIntStats = {
+  dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint;
+  mode: bigint; nlink: bigint;
+};
+
+// Отпечаток файла строками: сравнение идёт текстом, и приведение к number
+// потеряло бы и inode, и наносекунды.
+export type DurableFingerprint = Readonly<Record<string, string>>;
+
+function permissions(stat: BigIntStats): number {
   return Number(stat.mode & 0o777n);
 }
 
-function fingerprint(stat) {
+function fingerprint(stat: BigIntStats): DurableFingerprint {
   return Object.freeze({
     dev: String(stat.dev),
     ino: String(stat.ino),
@@ -124,46 +152,54 @@ function fingerprint(stat) {
   });
 }
 
-function assertFingerprint(value, { requireNlink = false } = {}) {
+function assertFingerprint(value: unknown, { requireNlink = false } = {}): DurableFingerprint {
   if (!value || typeof value !== 'object'
       || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
     fail('invalidFingerprint', 'Fingerprint durable state задан некорректно.');
   }
+  const source = value as Record<string, unknown>;
   const required = ['dev', 'ino', 'size', 'mtimeNs'];
+
   if (requireNlink) required.push('nlink');
+
+  const bounded = (field: unknown) => (
+    typeof field === 'string' && field.length <= 32 && UINT_RE.test(field)
+  );
+
   for (const key of required) {
-    if (typeof value[key] !== 'string' || value[key].length > 32 || !UINT_RE.test(value[key])) {
+    if (!bounded(source[key])) {
       fail('invalidFingerprint', 'Fingerprint durable state задан некорректно.');
     }
   }
   for (const key of ['mode', 'nlink']) {
-    if (value[key] !== undefined
-        && (typeof value[key] !== 'string' || value[key].length > 32 || !UINT_RE.test(value[key]))) {
+    if (source[key] !== undefined && !bounded(source[key])) {
       fail('invalidFingerprint', 'Fingerprint durable state задан некорректно.');
     }
   }
+
   return Object.freeze({
-    dev: value.dev,
-    ino: value.ino,
-    size: value.size,
-    mtimeNs: value.mtimeNs,
-    ...(value.mode === undefined ? {} : { mode: value.mode }),
-    ...(value.nlink === undefined ? {} : { nlink: value.nlink }),
+    dev: String(source.dev),
+    ino: String(source.ino),
+    size: String(source.size),
+    mtimeNs: String(source.mtimeNs),
+    ...(source.mode === undefined ? {} : { mode: String(source.mode) }),
+    ...(source.nlink === undefined ? {} : { nlink: String(source.nlink) }),
   });
 }
 
-function assertBoolean(value, name) {
+function assertBoolean(value: unknown, name: string): boolean {
   if (typeof value !== 'boolean') {
     fail('invalidOption', `Параметр ${name} должен быть boolean.`);
   }
   return value;
 }
 
-function sameIdentity(left, right) {
+function sameIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-function sameSnapshot(left, right) {
+/** Тот же файл И то же содержимое: одной identity мало — файл могли переписать. */
+function sameSnapshot(left: BigIntStats, right: BigIntStats): boolean {
   return sameIdentity(left, right)
     && left.size === right.size
     && left.mtimeNs === right.mtimeNs
@@ -172,18 +208,31 @@ function sameSnapshot(left, right) {
     && left.nlink === right.nlink;
 }
 
-function matchesFingerprint(stat, expected, { includeNlink = true } = {}) {
+function matchesFingerprint(
+  stat: BigIntStats,
+  expected: DurableFingerprint,
+  { includeNlink = true } = {},
+): boolean {
   const actual = fingerprint(stat);
   return ['dev', 'ino', 'size', 'mtimeNs', 'mode']
     .every((key) => expected[key] === undefined || actual[key] === expected[key])
     && (!includeNlink || expected.nlink === undefined || actual.nlink === expected.nlink);
 }
 
-function procEntry(directoryHandle, name) {
+function procEntry(directoryHandle: { fd: number }, name: string): string {
   return `/proc/self/fd/${directoryHandle.fd}/${name}`;
 }
 
-async function emitStage(runtime, stage, values = {}) {
+// Ход операции: каждый шаг объявляется наружу, чтобы отказ был локализуем по стадии.
+export interface DurableRuntime {
+  stage: (stage: string, values: Readonly<Record<string, unknown>>) => void | Promise<void>;
+}
+
+async function emitStage(
+  runtime: DurableRuntime,
+  stage: string,
+  values: Record<string, unknown> = {},
+): Promise<void> {
   await runtime.stage(stage, Object.freeze({ ...values }));
 }
 
@@ -197,8 +246,19 @@ function defaultSyscalls() {
   };
 }
 
-async function readChildOutput(stream, state, field) {
-  stream.on('data', (chunk) => {
+// Вывод помощника ограничен: чужой процесс не должен раздуть память сервера.
+interface HelperOutput {
+  stdout: string;
+  stderr: string;
+  overflow: boolean;
+}
+
+function readChildOutput(
+  stream: NodeJS.ReadableStream | null,
+  state: HelperOutput,
+  field: 'stdout' | 'stderr',
+): void {
+  stream?.on('data', (chunk: Buffer) => {
     state[field] += chunk.toString('utf8');
     if (Buffer.byteLength(state[field], 'utf8') > HELPER_OUTPUT_CAP) {
       state.overflow = true;
@@ -206,14 +266,35 @@ async function readChildOutput(stream, state, field) {
   });
 }
 
+// Ответ помощника: `status` обязателен, остальное зависит от операции.
+export interface DirfdResponse {
+  status: string;
+  [field: string]: unknown;
+}
+
+export interface DirfdRequest {
+  operation: string;
+  [field: string]: unknown;
+}
+
+/**
+ * Операции с дескриптором каталога делает отдельный python-помощник: у Node нет
+ * `*at`-вызовов, а без них цель операции нельзя привязать к уже проверенному
+ * каталогу — между проверкой и записью путь успевают подменить.
+ */
 async function runDirfdOperation({
   directoryHandle,
   request,
   pythonBinary = 'python3',
   helperPath = HELPER_PATH,
-}) {
-  return new Promise((resolve, reject) => {
-    let child;
+}: {
+  directoryHandle: { fd: number };
+  request: DirfdRequest;
+  pythonBinary?: string;
+  helperPath?: string;
+}): Promise<DirfdResponse> {
+  return new Promise<DirfdResponse>((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
     try {
       child = spawn(pythonBinary, [helperPath], {
         stdio: ['pipe', 'pipe', 'pipe', directoryHandle.fd],
@@ -222,7 +303,11 @@ async function runDirfdOperation({
       reject(error);
       return;
     }
-    const output = { stdout: '', stderr: '', overflow: false };
+    const output: HelperOutput = {
+      stdout: '',
+      stderr: '',
+      overflow: false,
+    };
     readChildOutput(child.stdout, output, 'stdout');
     readChildOutput(child.stderr, output, 'stderr');
     const timer = setTimeout(() => {
@@ -233,7 +318,7 @@ async function runDirfdOperation({
       clearTimeout(timer);
       reject(error);
     });
-    child.once('close', (code, signal) => {
+    child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timer);
       if (output.overflow) {
         reject(Object.assign(new Error('helper output overflow'), { code: 'EOVERFLOW' }));
@@ -244,44 +329,76 @@ async function runDirfdOperation({
         return;
       }
       try {
-        const parsed = JSON.parse(output.stdout.trim());
-        if (!parsed || typeof parsed !== 'object' || typeof parsed.status !== 'string') {
+        const parsed: unknown = JSON.parse(output.stdout.trim());
+        const response = parsed as DirfdResponse | null;
+
+        if (!response || typeof response !== 'object' || typeof response.status !== 'string') {
           throw new Error('invalid helper response');
         }
-        resolve(parsed);
+        resolve(response);
       } catch {
         reject(Object.assign(new Error('invalid helper response'), { code: 'EPROTO' }));
       }
     });
-    child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify(request));
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(JSON.stringify(request));
   });
 }
 
-async function openValidatedDirectory(runtime, directory, { create, privateDirectory }) {
+// Системные вызовы подменяются в проверках: настоящая файловая система там не нужна.
+export interface DurableSyscalls {
+  mkdir: typeof fsMkdir;
+  lstat: typeof fsLstat;
+  open: typeof fsOpen;
+  randomBytes: typeof randomBytes;
+  dirfdOperation: typeof runDirfdOperation;
+}
+
+interface DurableContext extends DurableRuntime {
+  syscalls: DurableSyscalls;
+}
+
+type DirectoryHandle = Awaited<ReturnType<typeof fsOpen>>;
+
+/** Код системного вызова у брошенного значения: до сюда доезжают и чужие ошибки. */
+function syscallCode(error: unknown): string {
+  return String((error as { code?: unknown } | null)?.code ?? '');
+}
+
+/**
+ * Открывает каталог покомпонентно, каждый раз проверяя, что открытый inode — тот же,
+ * что назван путём. Так подмена компонента симлинком между проверкой и открытием
+ * перестаёт быть возможной: дальше все операции идут от дескриптора.
+ */
+async function openValidatedDirectory(
+  runtime: DurableContext,
+  directory: unknown,
+  { create, privateDirectory }: { create?: boolean; privateDirectory?: boolean },
+): Promise<DirectoryHandle> {
   const resolved = assertDirectory(directory);
   const components = resolved.split(path.sep).filter(Boolean);
   const flags = FS_CONSTANTS.O_RDONLY
     | (FS_CONSTANTS.O_DIRECTORY || 0)
     | (FS_CONSTANTS.O_NOFOLLOW || 0);
-  let handle;
+  let handle: DirectoryHandle | null = null;
+
   try {
     handle = await runtime.syscalls.open(path.parse(resolved).root, flags);
     for (const component of components) {
       const anchored = procEntry(handle, component);
-      let namedBefore;
+      let namedBefore: BigIntStats & { isDirectory: () => boolean; isSymbolicLink: () => boolean };
       let created = false;
       try {
         namedBefore = await runtime.syscalls.lstat(anchored, { bigint: true });
       } catch (error) {
-        if (error?.code !== 'ENOENT' || !create) throw error;
+        if (syscallCode(error) !== 'ENOENT' || !create) throw error;
         try {
           await runtime.syscalls.mkdir(anchored, { mode: 0o700 });
           created = true;
           // Создание дочернего directory entry durable только после fsync родителя.
           await handle.sync();
         } catch (mkdirError) {
-          if (mkdirError?.code !== 'EEXIST') throw mkdirError;
+          if (syscallCode(mkdirError) !== 'EEXIST') throw mkdirError;
         }
         namedBefore = await runtime.syscalls.lstat(anchored, { bigint: true });
       }
@@ -329,24 +446,46 @@ async function openValidatedDirectory(runtime, directory, { create, privateDirec
   } catch (error) {
     await handle?.close().catch(() => {});
     if (error instanceof AnalyticsDurableFsError) throw error;
-    if (!create && error?.code === 'ENOENT') {
+    if (!create && syscallCode(error) === 'ENOENT') {
       fail('directoryMissing', 'Durable state directory отсутствует.');
     }
-    if (['ELOOP', 'ENOTDIR'].includes(error?.code)) {
+    if (['ELOOP', 'ENOTDIR'].includes(syscallCode(error))) {
       fail('unsafeDirectory', 'Durable state directory не прошёл nofollow-проверку.');
     }
     throw safeIoFailure(error);
   }
 }
 
-async function stableReadWithHandle(runtime, directoryHandle, {
-  name,
-  maxBytes,
-  expectedFingerprint = null,
-  expectedSha256 = null,
-  requiredMode = null,
-  requireSingleLink = true,
-}) {
+// Что читатель знает о файле заранее. Каждое ожидание проверяется ПОСЛЕ чтения:
+// файл могли подменить между открытием и последним байтом.
+// Прочитанный файл вместе с доказательствами его неизменности за время чтения.
+export interface StableFile {
+  bytes: Buffer;
+  sha256: string;
+  fingerprint: DurableFingerprint;
+}
+
+export interface StableReadOptions {
+  name: unknown;
+  maxBytes?: unknown;
+  expectedFingerprint?: unknown;
+  expectedSha256?: string | null;
+  requiredMode?: number | null;
+  requireSingleLink?: boolean;
+}
+
+async function stableReadWithHandle(
+  runtime: DurableContext,
+  directoryHandle: DirectoryHandle,
+  {
+    name,
+    maxBytes,
+    expectedFingerprint = null,
+    expectedSha256 = null,
+    requiredMode = null,
+    requireSingleLink = true,
+  }: StableReadOptions,
+): Promise<StableFile> {
   const trustedName = assertName(name);
   const limit = assertLimit(maxBytes);
   assertRequiredMode(requiredMode);
@@ -400,11 +539,13 @@ async function stableReadWithHandle(runtime, directoryHandle, {
       bytes: offset + extraBytes,
     });
     const after = await handle.stat({ bigint: true });
-    let namedAfter;
+    let namedAfter: BigIntStats;
     try {
       namedAfter = await runtime.syscalls.lstat(anchoredPath, { bigint: true });
     } catch (error) {
-      if (error?.code === 'ENOENT') fail('fileChanged', 'Durable state target исчез во время чтения.');
+      if (syscallCode(error) === 'ENOENT') {
+        fail('fileChanged', 'Durable state target исчез во время чтения.');
+      }
       throw error;
     }
     if (offset !== bytes.length || extraBytes !== 0 || !sameSnapshot(before, after)
@@ -426,8 +567,8 @@ async function stableReadWithHandle(runtime, directoryHandle, {
     });
   } catch (error) {
     if (error instanceof AnalyticsDurableFsError) throw error;
-    if (error?.code === 'ENOENT') fail('fileMissing', 'Durable state target отсутствует.');
-    if (['ELOOP', 'ENXIO', 'ENODEV'].includes(error?.code)) {
+    if (syscallCode(error) === 'ENOENT') fail('fileMissing', 'Durable state target отсутствует.');
+    if (['ELOOP', 'ENXIO', 'ENODEV'].includes(syscallCode(error))) {
       fail('unsafeFile', 'Durable state target не прошёл nofollow-проверку.');
     }
     throw safeIoFailure(error);
@@ -436,7 +577,12 @@ async function stableReadWithHandle(runtime, directoryHandle, {
   }
 }
 
-async function helper(runtime, directoryHandle, request) {
+/** Один вызов помощника с общей обработкой отказа: наружу уходит только код. */
+async function helper(
+  runtime: DurableContext & { pythonBinary?: string; helperPath?: string },
+  directoryHandle: DirectoryHandle,
+  request: DirfdRequest,
+): Promise<DirfdResponse> {
   try {
     const response = await runtime.syscalls.dirfdOperation({
       directoryHandle,
@@ -453,8 +599,12 @@ async function helper(runtime, directoryHandle, request) {
   }
 }
 
-function helperError(response, fallbackCode = 'durableIoFailure') {
-  const mapping = {
+/** Перевод отказа помощника в код операции: чужой текст наружу не уходит. */
+function helperError(
+  response: DirfdResponse,
+  fallbackCode = 'durableIoFailure',
+): AnalyticsDurableFsError {
+  const mapping: Record<string, string> = {
     missing: 'fileMissing',
     changed: 'fileChanged',
     hash_mismatch: 'hashMismatch',
@@ -467,17 +617,30 @@ function helperError(response, fallbackCode = 'durableIoFailure') {
     helper_failure: 'durableIoFailure',
     cross_device: 'durableIoFailure',
   };
-  const code = mapping[response.code] || fallbackCode;
+  const code = mapping[String(response.code)] || fallbackCode;
   return new AnalyticsDurableFsError(code, 'Dirfd-операция durable state не завершена.');
 }
 
-async function exactUnlinkWithHandle(runtime, directoryHandle, {
-  name,
-  snapshot,
-  maxBytes,
-  requiredMode = null,
-  privateDirectory = true,
-}) {
+// Точное удаление: файл сносится, только если он всё ещё тот же самый.
+export interface ExactUnlinkOptions {
+  name: unknown;
+  snapshot: { fingerprint: unknown; sha256: unknown };
+  maxBytes?: unknown;
+  requiredMode?: number | null;
+  privateDirectory?: boolean;
+}
+
+async function exactUnlinkWithHandle(
+  runtime: DurableContext,
+  directoryHandle: DirectoryHandle,
+  {
+    name,
+    snapshot,
+    maxBytes,
+    requiredMode = null,
+    privateDirectory = true,
+  }: ExactUnlinkOptions,
+): Promise<Record<string, unknown>> {
   const response = await helper(runtime, directoryHandle, {
     operation: 'unlink',
     name,
@@ -496,7 +659,7 @@ async function exactUnlinkWithHandle(runtime, directoryHandle, {
   }
   if (response.status === 'error') {
     if (['missing', 'changed', 'hash_mismatch', 'too_large', 'unsafe_file', 'unsafe_mode']
-      .includes(response.code)) {
+      .includes(String(response.code))) {
       fail('exactTargetChanged', 'Exact durable state target изменился перед unlink.');
     }
     throw helperError(response);
@@ -504,11 +667,16 @@ async function exactUnlinkWithHandle(runtime, directoryHandle, {
   fail('durableIoFailure', 'Dirfd helper вернул неизвестный результат.');
 }
 
-async function cleanupTemp(runtime, directoryHandle, {
-  name,
-  snapshot,
-  maxBytes,
-}) {
+/** Снос временного файла и fsync каталога: без него публикация не считается завершённой. */
+async function cleanupTemp(
+  runtime: DurableContext,
+  directoryHandle: DirectoryHandle,
+  { name, snapshot, maxBytes }: {
+    name: string;
+    snapshot: { fingerprint: unknown; sha256: unknown };
+    maxBytes?: unknown;
+  },
+): Promise<void> {
   await exactUnlinkWithHandle(runtime, directoryHandle, {
     name,
     snapshot,
@@ -526,7 +694,10 @@ async function cleanupTemp(runtime, directoryHandle, {
   });
 }
 
-async function ensurePrivateDirectoryImpl(runtime, { directory } = {}) {
+async function ensurePrivateDirectoryImpl(
+  runtime: DurableContext,
+  { directory }: { directory?: unknown } = {},
+): Promise<Readonly<{ mode: number; fingerprint: DurableFingerprint }>> {
   const handle = await openValidatedDirectory(runtime, directory, {
     create: true,
     privateDirectory: true,
@@ -539,16 +710,19 @@ async function ensurePrivateDirectoryImpl(runtime, { directory } = {}) {
   }
 }
 
-async function readStableFileImpl(runtime, {
-  directory,
-  name,
-  maxBytes = DEFAULT_MAX_BYTES,
-  expectedFingerprint = null,
-  expectedSha256 = null,
-  requiredMode = null,
-  privateDirectory = false,
-  requireSingleLink = true,
-} = {}) {
+async function readStableFileImpl(
+  runtime: DurableContext,
+  {
+    directory,
+    name,
+    maxBytes = DEFAULT_MAX_BYTES,
+    expectedFingerprint = null,
+    expectedSha256 = null,
+    requiredMode = null,
+    privateDirectory = false,
+    requireSingleLink = true,
+  }: StableReadOptions & { directory?: unknown; privateDirectory?: boolean } = { name: '' },
+): Promise<StableFile> {
   assertBoolean(privateDirectory, 'privateDirectory');
   assertBoolean(requireSingleLink, 'requireSingleLink');
   const handle = await openValidatedDirectory(runtime, directory, {
@@ -569,17 +743,26 @@ async function readStableFileImpl(runtime, {
   }
 }
 
-async function publishImmutableImpl(runtime, {
-  directory,
-  name,
-  bytes: input,
-  maxBytes = DEFAULT_MAX_BYTES,
-} = {}) {
+async function publishImmutableImpl(
+  runtime: DurableContext,
+  {
+    directory,
+    name,
+    bytes: input,
+    maxBytes = DEFAULT_MAX_BYTES,
+  }: {
+    directory?: unknown;
+    name?: unknown;
+    bytes?: unknown;
+    maxBytes?: unknown;
+  } = {},
+): Promise<Readonly<Record<string, unknown>>> {
   const targetName = assertName(name);
   const limit = assertLimit(maxBytes);
   const bytes = asBytes(input, limit);
   const digest = sha256(bytes);
-  let suffix;
+  let suffix: string;
+
   try {
     const entropy = runtime.syscalls.randomBytes(12);
     if (!Buffer.isBuffer(entropy) || entropy.length !== 12) {
@@ -594,8 +777,11 @@ async function publishImmutableImpl(runtime, {
     create: true,
     privateDirectory: true,
   });
-  let tempHandle;
-  let tempSnapshot;
+  // Закрытие отмечается флагом, а не обнулением ссылки: обнуление сузило бы тип до
+  // `null`, и уборка в finally перестала бы компилироваться.
+  let tempHandle: Awaited<ReturnType<typeof fsOpen>> | null = null;
+  let tempClosed = false;
+  let tempSnapshot: { fingerprint: DurableFingerprint; sha256: string } | null = null;
   try {
     const flags = FS_CONSTANTS.O_WRONLY
       | FS_CONSTANTS.O_CREAT
@@ -615,7 +801,7 @@ async function publishImmutableImpl(runtime, {
       }
       tempSnapshot = Object.freeze({ bytes, sha256: digest, fingerprint: fingerprint(written) });
       await tempHandle.close();
-      tempHandle = null;
+      tempClosed = true;
     } catch (error) {
       if (error instanceof AnalyticsDurableFsError) throw error;
       throw safeIoFailure(error);
@@ -679,8 +865,8 @@ async function publishImmutableImpl(runtime, {
       fail('durableIoFailure', 'Dirfd helper вернул неизвестный результат.');
     }
 
-    let existing = null;
-    let conflictReason = null;
+    let existing: StableFile | null = null;
+    let conflictReason: unknown = null;
     try {
       existing = await stableReadWithHandle(runtime, directoryHandle, {
         name: targetName,
@@ -699,15 +885,16 @@ async function publishImmutableImpl(runtime, {
       maxBytes: limit,
     });
     if (conflictReason || !existing || existing.sha256 !== digest || !existing.bytes.equals(bytes)) {
+      // Наружу уходят только размеры и хеши: содержимое чужой записи не наше дело.
       throw new AnalyticsDurableFsError(
         'immutableConflict',
         'Immutable target уже существует с другим содержимым.',
-        Object.freeze({
+        {
           requestedSha256: digest,
-          existingSha256: existing?.sha256 ?? null,
-          requestedBytes: bytes.length,
-          existingBytes: existing?.bytes.length ?? null,
-        }),
+          existingSha256: String(existing?.sha256 ?? ''),
+          requestedBytes: String(bytes.length),
+          existingBytes: String(existing?.bytes.length ?? ''),
+        },
       );
     }
     return Object.freeze({
@@ -717,21 +904,35 @@ async function publishImmutableImpl(runtime, {
       fingerprint: existing.fingerprint,
     });
   } finally {
-    await tempHandle?.close().catch(() => {});
+    if (!tempClosed) await tempHandle?.close().catch(() => {});
     await directoryHandle.close().catch(() => {});
   }
 }
 
-async function recoverOrphanTempImpl(runtime, {
-  directory,
-  name,
-  expectedSha256,
-  expectedFingerprint = null,
-  maxBytes = DEFAULT_MAX_BYTES,
-} = {}) {
+/**
+ * Уборка временного файла, оставшегося от прерванной публикации. Сносится он только
+ * при совпадении и имени, и хеша: чужой файл в том же каталоге трогать нельзя.
+ */
+async function recoverOrphanTempImpl(
+  runtime: DurableContext,
+  {
+    directory,
+    name,
+    expectedSha256,
+    expectedFingerprint = null,
+    maxBytes = DEFAULT_MAX_BYTES,
+  }: {
+    directory?: unknown;
+    name?: unknown;
+    expectedSha256?: string;
+    expectedFingerprint?: unknown;
+    maxBytes?: unknown;
+  } = {},
+): Promise<Readonly<Record<string, unknown>>> {
   const tempName = assertName(name);
   const match = TEMP_RE.exec(tempName);
-  if (!match || !SHA256_RE.test(expectedSha256) || match[1] !== expectedSha256) {
+
+  if (!match || !SHA256_RE.test(String(expectedSha256)) || match[1] !== expectedSha256) {
     fail('orphanMismatch', 'Orphan temp не принадлежит ожидаемой immutable publication.');
   }
   const limit = assertLimit(maxBytes);
@@ -740,7 +941,8 @@ async function recoverOrphanTempImpl(runtime, {
     privateDirectory: true,
   });
   try {
-    let snapshot;
+    let snapshot: StableFile;
+
     try {
       snapshot = await stableReadWithHandle(runtime, directoryHandle, {
         name: tempName,
@@ -751,7 +953,7 @@ async function recoverOrphanTempImpl(runtime, {
         requireSingleLink: false,
       });
     } catch (error) {
-      if (error?.code === 'fileMissing') return Object.freeze({ outcome: 'missing' });
+      if (syscallCode(error) === 'fileMissing') return Object.freeze({ outcome: 'missing' });
       if (error instanceof AnalyticsDurableFsError) {
         throw new AnalyticsDurableFsError(
           'orphanMismatch',
@@ -760,7 +962,7 @@ async function recoverOrphanTempImpl(runtime, {
       }
       throw error;
     }
-    if (!['1', '2'].includes(snapshot.fingerprint.nlink)) {
+    if (!['1', '2'].includes(String(snapshot.fingerprint.nlink))) {
       fail('orphanMismatch', 'Orphan temp имеет недопустимое число hardlinks.');
     }
     await cleanupTemp(runtime, directoryHandle, {
@@ -779,22 +981,34 @@ async function recoverOrphanTempImpl(runtime, {
   }
 }
 
-async function unlinkExactFileImpl(runtime, {
-  directory,
-  name,
-  expectedFingerprint,
-  expectedSha256,
-  maxBytes = DEFAULT_MAX_BYTES,
-  requiredMode = null,
-  requireSingleLink = true,
-  privateDirectory = false,
-} = {}) {
+async function unlinkExactFileImpl(
+  runtime: DurableContext,
+  {
+    directory,
+    name,
+    expectedFingerprint,
+    expectedSha256,
+    maxBytes = DEFAULT_MAX_BYTES,
+    requiredMode = null,
+    requireSingleLink = true,
+    privateDirectory = false,
+  }: {
+    directory?: unknown;
+    name?: unknown;
+    expectedFingerprint?: unknown;
+    expectedSha256?: string;
+    maxBytes?: unknown;
+    requiredMode?: number | null;
+    requireSingleLink?: boolean;
+    privateDirectory?: boolean;
+  } = {},
+): Promise<Readonly<Record<string, unknown>>> {
   const targetName = assertName(name);
   const expected = assertFingerprint(expectedFingerprint);
   assertRequiredMode(requiredMode);
   assertBoolean(requireSingleLink, 'requireSingleLink');
   assertBoolean(privateDirectory, 'privateDirectory');
-  if (!SHA256_RE.test(expectedSha256)) {
+  if (!SHA256_RE.test(String(expectedSha256))) {
     fail('invalidHash', 'Exact unlink требует ожидаемый SHA-256.');
   }
   const limit = assertLimit(maxBytes);
@@ -869,6 +1083,11 @@ export function createDurableFs({
   stage = async () => {},
   pythonBinary = 'python3',
   helperPath = HELPER_PATH,
+}: {
+  syscalls?: Partial<DurableSyscalls>;
+  stage?: DurableRuntime['stage'];
+  pythonBinary?: string;
+  helperPath?: string;
 } = {}) {
   if (!syscalls || typeof syscalls !== 'object' || typeof stage !== 'function') {
     throw new TypeError('createDurableFs: syscalls object и stage function обязательны.');
@@ -880,11 +1099,21 @@ export function createDurableFs({
     helperPath,
   });
   return Object.freeze({
-    ensurePrivateDirectory: (input) => ensurePrivateDirectoryImpl(runtime, input),
-    readStableFile: (input) => readStableFileImpl(runtime, input),
-    publishImmutable: (input) => publishImmutableImpl(runtime, input),
-    recoverOrphanTemp: (input) => recoverOrphanTempImpl(runtime, input),
-    unlinkExactFile: (input) => unlinkExactFileImpl(runtime, input),
+    ensurePrivateDirectory: (
+      input?: Parameters<typeof ensurePrivateDirectoryImpl>[1],
+    ) => ensurePrivateDirectoryImpl(runtime, input),
+    readStableFile: (
+      input?: Parameters<typeof readStableFileImpl>[1],
+    ) => readStableFileImpl(runtime, input),
+    publishImmutable: (
+      input?: Parameters<typeof publishImmutableImpl>[1],
+    ) => publishImmutableImpl(runtime, input),
+    recoverOrphanTemp: (
+      input?: Parameters<typeof recoverOrphanTempImpl>[1],
+    ) => recoverOrphanTempImpl(runtime, input),
+    unlinkExactFile: (
+      input?: Parameters<typeof unlinkExactFileImpl>[1],
+    ) => unlinkExactFileImpl(runtime, input),
   });
 }
 

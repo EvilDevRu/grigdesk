@@ -60,7 +60,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.ts';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import {
   UiButton, UiIconButton, UiPressable, UiSpinner, UiToggleButton,
 } from '../../ui';

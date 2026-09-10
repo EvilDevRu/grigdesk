@@ -288,14 +288,14 @@ async function mountToolHost(t, { totalCount, litCount }) {
         '../../stores/taskShelf.ts': [
           'export const useTaskShelfStore = () => globalThis.__taskShelfHost.shelf;',
         ].join('\n'),
-        '../../composables/useUiContextSource.js': [
+        '../../composables/useUiContextSource.ts': [
           'export const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
         ].join('\n'),
-        '../tools/viewport.js': [
+        '../tools/viewport.ts': [
           'import { ref } from "vue";',
           'export const useDockViewport = () => ({ dockCapable: ref(true) });',
         ].join('\n'),
-        '../tools/registry.js': [
+        '../tools/registry.ts': [
           'const component = { template: "<div></div>" };',
           'export const TOOL_REGISTRY = [{',
           '  id: "shelf", route: "/shelf", label: "Полка", icon: "shelf",',

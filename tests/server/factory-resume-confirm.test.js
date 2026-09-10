@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import {
   confirmRouteResume, logLength, readLogSince, routeFailure,
-} from '../../server/src/lib/factory-route-cli.js';
+} from '../../server/src/lib/factoryRouteCli.ts';
 
 const ATTEMPT = 'a_00112233445566778899aabbccddeeff';
 

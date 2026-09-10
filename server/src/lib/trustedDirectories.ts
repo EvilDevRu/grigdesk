@@ -13,10 +13,11 @@ export class TrustedDirectoryInputError extends Error {}
  * запуск Cockpit. Существование каталогов здесь не проверяем — подключённый диск
  * может временно отсутствовать; CLI сам вернёт понятную ошибку только при запуске.
  */
-export function normalizeStoredTrustedDirectories(value) {
+export function normalizeStoredTrustedDirectories(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const result = [];
+
+  const seen = new Set<string>();
+  const result: string[] = [];
   for (const raw of value) {
     if (typeof raw !== 'string') continue;
     const trimmed = raw.trim();
@@ -34,7 +35,7 @@ export function normalizeStoredTrustedDirectories(value) {
  * Строгая проверка значения из API. realpath схлопывает `..` и симлинки, поэтому
  * один физический каталог не попадёт в список дважды и симлинком нельзя замаскировать `/`.
  */
-export async function validateTrustedDirectories(value) {
+export async function validateTrustedDirectories(value: unknown): Promise<string[]> {
   if (!Array.isArray(value)) {
     throw new TrustedDirectoryInputError('Каталоги должны быть переданы списком.');
   }
@@ -42,8 +43,9 @@ export async function validateTrustedDirectories(value) {
     throw new TrustedDirectoryInputError(`Можно указать не больше ${MAX_DIRECTORIES} каталогов.`);
   }
 
-  const seen = new Set();
-  const result = [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+
   for (const raw of value) {
     if (typeof raw !== 'string' || !raw.trim()) {
       throw new TrustedDirectoryInputError('Путь к каталогу не может быть пустым.');
@@ -53,8 +55,8 @@ export async function validateTrustedDirectories(value) {
       throw new TrustedDirectoryInputError(`Нужен абсолютный путь: ${requested}`);
     }
 
-    let resolved;
-    let stat;
+    let resolved: string;
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
     try {
       resolved = await fs.realpath(requested);
       stat = await fs.stat(resolved);

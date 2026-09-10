@@ -5,13 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { B24Adapter } from '../../server/src/adapters/b24.js';
-import { TaskFavoritesStore } from '../../server/src/lib/task-favorites-store.js';
+import { B24Adapter } from '../../server/src/adapters/b24.ts';
+import { TaskFavoritesStore } from '../../server/src/lib/taskFavoritesStore.ts';
 import {
   favoriteScopeFor,
   TaskFavoritesService,
-} from '../../server/src/lib/task-favorites-service.js';
-import taskFavoritesModule from '../../server/src/modules/task-favorites/index.js';
+} from '../../server/src/lib/taskFavoritesService.ts';
+import taskFavoritesModule from '../../server/src/modules/task-favorites/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

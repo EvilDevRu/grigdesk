@@ -12,8 +12,8 @@ async function source(relative, contract) {
 
 test('SSH зарегистрирован одной встроенной панелью ToolHost', async () => {
   const [catalog, registry, shell, view] = await Promise.all([
-    source('web/src/shared/tools/catalog.js', 'SSH отсутствует в паспорте инструментов'),
-    source('web/src/shared/tools/registry.js', 'SSH отсутствует в реестре ToolHost'),
+    source('web/src/shared/tools/catalog.ts', 'SSH отсутствует в паспорте инструментов'),
+    source('web/src/shared/tools/registry.ts', 'SSH отсутствует в реестре ToolHost'),
     source('web/src/shared/layout/AppShell.vue', 'единый AppShell недоступен'),
     source('web/src/views/SshView.vue', 'route-adapter SSH ещё не реализован'),
   ]);

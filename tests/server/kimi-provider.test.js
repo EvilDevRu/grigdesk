@@ -6,15 +6,15 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
-import kimi from '../../server/src/lib/executors/kimi.js';
-import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.js';
+import kimi from '../../server/src/lib/executors/kimi.ts';
+import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.ts';
 import {
   classifyKimiUsageResponse,
   parseReadyUrl,
   parseKimiUsageBars,
   parseKimiUsageResources,
   requestKimiManagedUsage,
-} from '../../server/src/lib/kimi/usage.js';
+} from '../../server/src/lib/kimi/usage.ts';
 
 test('Kimi setup-карточка проверяет системный CLI и login без чтения credentials', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-provider-'));

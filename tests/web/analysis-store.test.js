@@ -23,7 +23,7 @@ async function analysisFixture(t, api, { pluginEnabled = false } = {}) {
   };
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__analysisStoreHarness.api;',
+      './apiClient.ts': 'export const api = globalThis.__analysisStoreHarness.api;',
       './plugins.js': (
         'export const usePluginsStore = () => globalThis.__analysisStoreHarness.plugins;'
       ),

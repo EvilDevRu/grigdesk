@@ -6,8 +6,8 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
-import chatModule from '../../server/src/modules/chat/index.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

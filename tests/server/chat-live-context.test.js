@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import claude from '../../server/src/lib/executors/claude.js';
+import claude from '../../server/src/lib/executors/claude.ts';
 
 /** Фальшивый CLI: печатает готовый stream-json и завершается. */
 async function fakeClaude(t, events) {

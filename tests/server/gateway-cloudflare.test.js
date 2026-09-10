@@ -10,13 +10,13 @@ import {
   findZone,
   listGatewayDnsRecords,
   zoneCandidates,
-} from '../../server/src/lib/gateway/cloudflare.js';
+} from '../../server/src/lib/gateway/cloudflare.ts';
 import {
   dnsAnswersAbsent,
   dnsAnswersMatch,
   GatewaySetupError,
   parseSetupInput,
-} from '../../server/src/lib/gateway/installer.js';
+} from '../../server/src/lib/gateway/installer.ts';
 
 const TOKEN = 'cloudflare-secret-token-1234';
 const DOMAIN = 'cockpit.example.com';

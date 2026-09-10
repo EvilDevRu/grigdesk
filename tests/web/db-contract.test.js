@@ -11,7 +11,7 @@ import {
   parseDbSchema,
   parseDbSessions,
 } from '../../shared/dbContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { dbApi } from '../../web/src/shared/dbApi.ts';
 
 const PROFILE = {

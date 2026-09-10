@@ -4,16 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
-import claudeExecutor from '../../server/src/lib/executors/claude.js';
-import codexExecutor from '../../server/src/lib/executors/codex.js';
-import kimiExecutor from '../../server/src/lib/executors/kimi.js';
-import ollamaExecutor from '../../server/src/lib/executors/ollama.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
+import claudeExecutor from '../../server/src/lib/executors/claude.ts';
+import codexExecutor from '../../server/src/lib/executors/codex.ts';
+import kimiExecutor from '../../server/src/lib/executors/kimi.ts';
+import ollamaExecutor from '../../server/src/lib/executors/ollama.ts';
 import {
   TrustedDirectoryInputError,
   normalizeStoredTrustedDirectories,
   validateTrustedDirectories,
-} from '../../server/src/lib/trusted-directories.js';
+} from '../../server/src/lib/trustedDirectories.ts';
 
 test('исполнители объявляют фактическую поддержку доверенных каталогов', () => {
   assert.equal(claudeExecutor.trustedDirectories, true);

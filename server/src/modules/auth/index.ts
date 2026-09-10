@@ -1,20 +1,37 @@
 // Модуль входа: состояние, логин, выход, первичная настройка и смена пароля.
 import fp from 'fastify-plugin';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+
+import type { AuthStore } from '../../lib/authStore.ts';
+import type { CockpitConfig } from '../../config.ts';
 import {
   sessionCookie, clearCookie, readCookie, SESSION_COOKIE, isSecureRequest, cookieDomain,
-} from '../../plugins/auth.js';
+} from '../../plugins/auth.ts';
+
+export interface AuthModuleOptions {
+  authStore: AuthStore;
+  config: Pick<CockpitConfig, 'publicDomain'>;
+}
+
+// Тело запросов входа: приходит из сети, поэтому каждое поле недоверенное.
+interface AuthBody {
+  login?: unknown;
+  password?: unknown;
+  currentPassword?: unknown;
+}
 
 // Ограничение попыток входа. Без него пароль перебирается по сети за вечер.
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 10;
-/** @type {Map<string, {count: number, until: number}>} */
-const attempts = new Map();
+// Счётчик неудач по адресу: ключ — адрес клиента, значение — сколько и до какого
+// момента. Живёт в памяти процесса: перезапуск обнуляет, и это допустимо.
+const attempts = new Map<string, { count: number; until: number }>();
 
-function attemptKey(request) {
+function attemptKey(request: FastifyRequest): string {
   return request.ip || 'unknown';
 }
 
-function tooMany(request) {
+function tooMany(request: FastifyRequest): boolean {
   const rec = attempts.get(attemptKey(request));
   if (!rec) return false;
   if (rec.until <= Date.now()) {
@@ -24,7 +41,7 @@ function tooMany(request) {
   return rec.count >= MAX_ATTEMPTS;
 }
 
-function registerFailure(request) {
+function registerFailure(request: FastifyRequest): void {
   const key = attemptKey(request);
   const rec = attempts.get(key);
   if (!rec || rec.until <= Date.now()) {
@@ -35,7 +52,7 @@ function registerFailure(request) {
   rec.until = Date.now() + WINDOW_MS;
 }
 
-function clearFailures(request) {
+function clearFailures(request: FastifyRequest): void {
   attempts.delete(attemptKey(request));
 }
 
@@ -43,9 +60,16 @@ function clearFailures(request) {
  * Задержка на неудачный вход: тормозит перебор и заодно сглаживает разницу во времени
  * между «нет такого логина» и «пароль неверный».
  */
-const slowDown = () => new Promise((r) => setTimeout(r, 400));
+const slowDown = () => new Promise<void>((resolve) => {
+  setTimeout(resolve, 400);
+});
 
-async function authModule(fastify, opts) {
+/** Текст отказа хранилища: сообщение о слабом пароле человек должен увидеть целиком. */
+function failureText(error: unknown): string {
+  return String((error as { message?: unknown } | null)?.message || error);
+}
+
+async function authModule(fastify: FastifyInstance, opts: AuthModuleOptions): Promise<void> {
   const { authStore, config } = opts;
 
   // Параметры cookie считаем по КАЖДОМУ запросу, а не один раз на старте:
@@ -53,7 +77,7 @@ async function authModule(fastify, opts) {
   //    ставило бы cookie без Secure именно снаружи, где он и нужен;
   //  - Domain: нужен, чтобы cookie уезжала на поддомены стендов, но только когда запрос
   //    пришёл на публичный домен (на localhost чужой Domain браузер отбросит).
-  const cookieOpts = (request) => ({
+  const cookieOpts = (request: FastifyRequest) => ({
     secure: isSecureRequest(request),
     domain: cookieDomain(request, config?.publicDomain),
   });
@@ -75,17 +99,18 @@ async function authModule(fastify, opts) {
     if (authStore.isConfigured()) {
       return reply.code(409).send({ error: 'already_configured', message: 'Пароль уже задан. Меняется в настройках после входа.' });
     }
-    const { login, password } = request.body || {};
+    const { login, password } = (request.body || {}) as AuthBody;
+
     try {
-      authStore.setCredentials({ login, password });
+      authStore.setCredentials({ login: String(login ?? ''), password: String(password ?? '') });
     } catch (err) {
-      return reply.code(400).send({ error: 'bad_password', message: err.message });
+      return reply.code(400).send({ error: 'bad_password', message: failureText(err) });
     }
     // Сразу впускаем — иначе пользователь задал пароль и тут же вводит его снова.
     const s = authStore.createSession();
     return reply
       .header('Set-Cookie', sessionCookie(s.id, { maxAgeSec: s.maxAgeSec, ...cookieOpts(request) }))
-      .send({ ok: true, login: login || '' });
+      .send({ ok: true, login: String(login ?? '') });
   });
 
   fastify.post('/api/auth/login', async (request, reply) => {
@@ -95,7 +120,8 @@ async function authModule(fastify, opts) {
     if (tooMany(request)) {
       return reply.code(429).send({ error: 'too_many_attempts', message: 'Слишком много попыток. Подождите 15 минут.' });
     }
-    const { login, password } = request.body || {};
+    const { login, password } = (request.body || {}) as AuthBody;
+
     if (!authStore.check({ login, password })) {
       registerFailure(request);
       await slowDown();
@@ -122,7 +148,7 @@ async function authModule(fastify, opts) {
   // Смена логина/пароля из настроек. Требуем текущий пароль: украденная сессия не должна
   // позволять сменить пароль и запереть владельца.
   fastify.post('/api/auth/password', async (request, reply) => {
-    const { currentPassword, login, password } = request.body || {};
+    const { currentPassword, login, password } = (request.body || {}) as AuthBody;
     const acc = authStore.readAccount();
     if (!authStore.check({ login: acc?.login, password: currentPassword })) {
       await slowDown();
@@ -130,9 +156,12 @@ async function authModule(fastify, opts) {
     }
     try {
       // setCredentials сбрасывает все сессии — сразу выдаём новую, чтобы не выкинуть себя.
-      authStore.setCredentials({ login: login ?? acc?.login ?? '', password });
+      authStore.setCredentials({
+        login: String(login ?? acc?.login ?? ''),
+        password: String(password ?? ''),
+      });
     } catch (err) {
-      return reply.code(400).send({ error: 'bad_password', message: err.message });
+      return reply.code(400).send({ error: 'bad_password', message: failureText(err) });
     }
     const s = authStore.createSession();
     return reply

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { AccountRuntimeManager } from '../../server/src/lib/account-runtime.js';
+import { AccountRuntimeManager } from '../../server/src/lib/accountRuntime.ts';
 import { GitHubAccountBindings } from '../../server/src/lib/github/accountBindings.ts';
 import { createGitHubAccountContextFactory } from '../../server/src/lib/github/accountContext.ts';
 import {

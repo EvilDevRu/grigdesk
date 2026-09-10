@@ -17,7 +17,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 # NODE и рабочая директория подставит install.sh (шаблонные плейсхолдеры).
-ExecStart=__NODE__ --experimental-strip-types __COCKPIT_DIR__/server/src/app.js
+ExecStart=__NODE__ __COCKPIT_DIR__/server/src/app.ts
 WorkingDirectory=__COCKPIT_DIR__/server
 # PATH задаём явно: у systemd user-сервиса он берётся из окружения сессии, зафиксированного
 # при логине, и НЕ содержит ~/.local/bin, ~/.kimi-code/bin и каталога node. Без этого кокпит не находит CLI
@@ -42,7 +42,7 @@ EnvironmentFile=-__COCKPIT_DIR__/.env
 ExecStartPre=__COCKPIT_DIR__/deploy/require-vpn.sh
 # Предварительная проверка SQLite синхронна, поэтому идёт отдельным короткоживущим процессом. Префикс
 # `-` оставляет Cockpit работать, даже если поиск по базе знаний недоступен.
-ExecStartPre=-__NODE__ --disable-warning=ExperimentalWarning --experimental-strip-types __COCKPIT_DIR__/server/scripts/knowledge-search-preflight.mjs
+ExecStartPre=-__NODE__ --disable-warning=ExperimentalWarning __COCKPIT_DIR__/server/scripts/knowledge-search-preflight.mjs
 Restart=always
 # 5с вместо 2с: пауза заметна только при ожидании VPN, а журнал не забивается.
 RestartSec=5

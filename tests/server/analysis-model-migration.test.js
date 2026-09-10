@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const CONFIG_URL = pathToFileURL(path.join(ROOT, 'server/src/config.js')).href;
+const CONFIG_URL = pathToFileURL(path.join(ROOT, 'server/src/config.ts')).href;
 
 function memoryPrefs(initial = {}) {
   let stored = structuredClone(initial);

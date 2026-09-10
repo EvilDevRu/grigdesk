@@ -119,15 +119,15 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
 
   const VideoView = await compileVue(VIEW_PATH, {
     stubs: {
-      '../shared/api-client.js': 'export const api = globalThis.__vidApi;',
+      '../shared/apiClient.ts': 'export const api = globalThis.__vidApi;',
       // Транспорт раздела зовёт общий клиент своим путём: заглушка сопоставляется по
       // точной строке импорта, и у shared/mediaApi.ts она отдельная.
-      './api-client.js': `export const api = {
+      './apiClient.ts': `export const api = {
         url: (path) => path,
         get: (...args) => globalThis.__vidApi.get(...args),
         post: (...args) => globalThis.__vidApi.post(...args),
       };`,
-      '../shared/clipboard.js': 'export const writeClipboardText = async () => true;',
+      '../shared/clipboard.ts': 'export const writeClipboardText = async () => true;',
       '../stores/plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
       `,
@@ -136,7 +136,7 @@ async function mountVideoView(t, { api, planModel = null, confirmAnswer = true, 
       './plugins.js': `
         export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
       `,
-      '../stores/document-preview.js': `
+      '../stores/documentPreview.ts': `
         export const useDocumentPreviewStore = (...args) => globalThis.__vidPreviewStore(...args);
       `,
       '../stores/ui.js': `

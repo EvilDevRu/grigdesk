@@ -5,6 +5,7 @@
     "checkJs": false
   },
   "include": [
+    "src/lib/fastifyDecorations.ts",
     "../shared/contractDecoders.ts",
     "src/lib/sandboxes/**/*.ts",
     "src/modules/sandboxes/**/*.ts",

@@ -1,9 +1,11 @@
 // Общие перечисления, идентификаторы и проверки контрактов аналитики фабрики.
 import { createHash } from 'node:crypto';
 
-import { canonicalJson } from './canonical.js';
+import { canonicalJson } from './canonical.ts';
 
-const freezeEnum = (...values) => Object.freeze(values);
+const freezeEnum = <const Values extends readonly string[]>(
+  ...values: Values
+) => Object.freeze(values);
 
 export const ANALYTICS_ENUMS = Object.freeze({
   visitReason: freezeEnum(
@@ -49,6 +51,10 @@ const IDENTITY = Object.freeze({
   eventId: /^ev_[a-f0-9]{32}$/,
 });
 
+// Виды идентификаторов аналитики. Каждый закреплён образцом: подделать чужой вид
+// нельзя, а неизвестный вид отвергается вместе с записью.
+export type AnalyticsIdentityKind = keyof typeof IDENTITY;
+
 const ID_PREFIX = Object.freeze({
   orchestratorSessionId: 'os',
   nodeVisitId: 'nv',
@@ -59,14 +65,16 @@ const ID_PREFIX = Object.freeze({
 });
 
 export class AnalyticsContractError extends Error {
-  constructor(message) {
+  readonly code = 'analytics_contract_invalid';
+
+  constructor(message: string) {
     super(message);
     this.name = 'AnalyticsContractError';
-    this.code = 'analytics_contract_invalid';
   }
 }
 
-export function assertAnalyticsIdentity(kind, value) {
+/** Проверяет идентификатор по образцу его вида и возвращает его же — уже как строку. */
+export function assertAnalyticsIdentity(kind: AnalyticsIdentityKind, value: unknown): string {
   const pattern = IDENTITY[kind];
   if (!pattern || typeof value !== 'string' || !pattern.test(value)) {
     throw new AnalyticsContractError(`${kind}: недопустимая analytics identity.`);
@@ -74,7 +82,14 @@ export function assertAnalyticsIdentity(kind, value) {
   return value;
 }
 
-export function analyticsId(kind, tuple) {
+/**
+ * Детерминированный идентификатор от кортежа-ключа. Один и тот же ключ обязан давать
+ * один и тот же id: события приходят из разных процессов, и склеиваются они именно по нему.
+ */
+export function analyticsId(
+  kind: keyof typeof ID_PREFIX,
+  tuple: readonly unknown[],
+): string {
   const prefix = ID_PREFIX[kind];
   if (!prefix || !Array.isArray(tuple) || tuple.length === 0) {
     throw new AnalyticsContractError(`${kind}: deterministic id contract не определён.`);

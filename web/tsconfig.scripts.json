@@ -8,6 +8,7 @@
     "checkJs": false
   },
   "include": [
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "scripts/**/*.mjs"
   ]
 }

@@ -20,29 +20,41 @@
  * не меняет и не расходует. Читающей ручке лимитов — да, списанию кредита — нет.
  */
 
-const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+// Что настраивает вызывающий. Решение «что вообще повторять» остаётся у него: только
+// он знает, какой ответ окончателен, а какой лечится ожиданием.
+export interface RetryOptions<Value> {
+  // сколько всего попыток, включая первую
+  attempts?: number;
+  // паузы между попытками; последняя длится до конца, если попыток больше
+  delaysMs?: number[];
+  // повторить при таком ответе?
+  retryWhen?: (value: Value) => boolean;
+  // повторить при исключении? По умолчанию да: брошенная ошибка почти всегда транспортная.
+  retryOnError?: (error: unknown) => boolean;
+  // подменяется в проверках, чтобы не ждать по-настоящему
+  sleep?: (ms: number) => Promise<void>;
+}
 
 /**
- * @param {(attempt: number) => Promise<any>} run операция; получает номер попытки с нуля
- * @param {object} [options]
- * @param {number} [options.attempts=3] сколько всего попыток, включая первую
- * @param {number[]} [options.delaysMs=[400,1200]] паузы между попытками; последняя длится
- *   до конца, если попыток больше
- * @param {(value: any) => boolean} [options.retryWhen] повторить при таком ответе?
- * @param {(error: unknown) => boolean} [options.retryOnError] повторить при исключении?
- *   По умолчанию да: брошенная ошибка почти всегда транспортная.
- * @param {(ms: number) => Promise<void>} [options.sleep] для тестов
- * @returns {Promise<any>} последний ответ; если все попытки бросили — бросает последнюю ошибку
+ * Выполняет операцию с повторами. Возвращает последний ответ; если все попытки
+ * бросили — бросает последнюю ошибку. Номер попытки идёт с нуля.
  */
-export async function withRetry(run, {
-  attempts = 3,
-  delaysMs = [400, 1200],
-  retryWhen = () => false,
-  retryOnError = () => true,
-  sleep = defaultSleep,
-} = {}) {
-  let lastValue;
-  let lastError = null;
+export async function withRetry<Value>(
+  run: (attempt: number) => Promise<Value>,
+  {
+    attempts = 3,
+    delaysMs = [400, 1200],
+    retryWhen = () => false,
+    retryOnError = () => true,
+    sleep = defaultSleep,
+  }: RetryOptions<Value> = {},
+): Promise<Value> {
+  let lastValue: Value | undefined;
+  let lastError: unknown = null;
   let hasValue = false;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -64,5 +76,7 @@ export async function withRetry(run, {
   }
 
   if (!hasValue && lastError) throw lastError;
-  return lastValue;
+
+  // Сюда доходят только с полученным значением: иначе выше брошена последняя ошибка.
+  return lastValue as Value;
 }

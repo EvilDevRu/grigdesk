@@ -13,11 +13,11 @@ import path from 'node:path';
 
 import {
   TICKET_LIMITS, TicketError, buildTicket, serializeTicket, validateTicket, writeTicketFile,
-} from '../../server/src/lib/factory-ticket.js';
+} from '../../server/src/lib/factoryTicket.ts';
 import {
   parseRouteWorkTime, routeAbandonArgs, routeCheckArgs, routeGateArgs, routeGotoArgs,
   routeFailure, routeMessage, routeResumeArgs, routeStartArgs, routeWorkTimeArgs, startRegistryIdentity,
-} from '../../server/src/lib/factory-route-cli.js';
+} from '../../server/src/lib/factoryRouteCli.ts';
 
 const CONFIG = {
   factoryBin: '/engine/bin/factory',

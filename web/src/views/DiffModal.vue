@@ -32,7 +32,9 @@
       </div>
     </template>
 
-    <DiffPanel :task-id="diff.taskId" class="diff-dialog__panel" />
+    <!-- Пустая строка вместо null: у панели нет «задачи не выбрано», и её
+         собственное значение по умолчанию — та же пустая строка. -->
+    <DiffPanel :task-id="diff.taskId ?? ''" class="diff-dialog__panel" />
   </UiDialog>
 </template>
 

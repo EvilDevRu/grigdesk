@@ -33,14 +33,6 @@ import {
   uploadsUsage,
 } from '../../lib/media/storage.ts';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-    mediaClipPath?(name: string): string | null;
-    mediaFramePath?(name: string): string | null;
-  }
-}
-
 // Потолок частей одной встречи. Не про безопасность (каждый id всё равно проверяется
 // как свой job), а про здравый смысл: запись режут на единицы файлов, а не на сотни,
 // и потолок держит стоимость склейки предсказуемой.

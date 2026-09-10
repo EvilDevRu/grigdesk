@@ -1,8 +1,17 @@
 // Модуль health — базовая проверка живости и сводка окружения сервера.
 import fp from 'fastify-plugin';
 import os from 'node:os';
+import type { FastifyInstance } from 'fastify';
 
-async function healthModule(fastify, opts) {
+import type { CockpitConfig } from '../../config.ts';
+
+export interface HealthModuleOptions {
+  config: Pick<CockpitConfig, 'stateDir' | 'factoryHome'>;
+  // Состояние фабрики ещё на JavaScript: отсюда нужен только счёт задач.
+  factoryState: { listTaskIds(): Promise<unknown[]> };
+}
+
+async function healthModule(fastify: FastifyInstance, opts: HealthModuleOptions): Promise<void> {
   const { config, factoryState } = opts;
 
   fastify.get('/api/health', async () => {

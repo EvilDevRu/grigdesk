@@ -7,13 +7,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { normalizeProviderUsage } from '../../server/src/lib/analytics/normalizers.js';
+import { normalizeProviderUsage } from '../../server/src/lib/analytics/normalizers.ts';
 import {
   AnalyticsUsageDocumentError,
+  assertUsageDocument,
   buildUsageDocument,
   encodeUsageDocument,
   publishUsageDocument,
-} from '../../server/src/lib/analytics/usage-document.js';
+} from '../../server/src/lib/analytics/usageDocument.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Ajv2020 = requireFromServer('ajv/dist/2020').default;
@@ -117,6 +118,60 @@ test('usage document fail-closed проверяет fingerprint, quantities и s
   assert.throws(
     () => document({ normalization: tooMany }),
     /10 000/i,
+  );
+});
+
+test('прочитанный usage document отвергает массивы вместо строковых перечислений', () => {
+  const schema = JSON.parse(readFileSync(
+    new URL('../../schemas/analytics/usage-document.schema.json', import.meta.url),
+    'utf8',
+  ));
+  const validate = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
+  const fields = [
+    ['source'],
+    ['completeness'],
+    ['providerSessionMode'],
+    ['usageSegments', 0, 'source'],
+    ['usageSegments', 0, 'completeness'],
+    ['usageSegments', 0, 'billingWindow', 'basis'],
+  ];
+
+  for (const keys of fields) {
+    const stored = JSON.parse(encodeUsageDocument(document()).toString('utf8'));
+
+    stored.usageSegments[0].billingWindow = {
+      kind: 'closed',
+      notBefore: run.startedAt,
+      notAfter: run.finishedAt,
+      basis: 'derived_run_window',
+    };
+    assert.equal(validate(stored), true, JSON.stringify(validate.errors));
+
+    const parent = keys.slice(0, -1).reduce((value, key) => value[key], stored);
+    const field = keys.at(-1);
+    const name = keys.join('.');
+
+    parent[field] = [parent[field]];
+
+    assert.equal(validate(stored), false, name);
+    assert.throws(() => assertUsageDocument(stored), AnalyticsUsageDocumentError, name);
+    assert.throws(() => encodeUsageDocument(stored), AnalyticsUsageDocumentError, name);
+  }
+});
+
+test('сборка usage document не превращает неверный тип перечисления в допустимую строку', () => {
+  for (const field of ['source', 'completeness']) {
+    assert.throws(
+      () => document({ normalization: { ...normalization, [field]: [normalization[field]] } }),
+      AnalyticsUsageDocumentError,
+      field,
+    );
+  }
+
+  assert.throws(
+    () => document({ providerSessionMode: ['fresh'] }),
+    AnalyticsUsageDocumentError,
+    'providerSessionMode',
   );
 });
 

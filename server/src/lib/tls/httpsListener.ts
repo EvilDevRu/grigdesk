@@ -12,15 +12,36 @@
 //    (в noServer-режиме), и без переноса терминал по `wss://` молча не подключался бы;
 //  - таймауты — дефолты Node рвут долгие соединения, а у нас SSE и PTY живут часами.
 import https from 'node:https';
+import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
+// Что от приложения нужно этому модулю: публичный роутер Fastify и его http-сервер.
+// Полный тип Fastify здесь избыточен — переносится ровно роутинг и таймауты.
+export interface RoutedApp {
+  routing: (request: IncomingMessage, response: ServerResponse) => void;
+  server: HttpServer;
+}
+
+export interface HttpsPair {
+  key: Buffer;
+  cert: Buffer;
+}
+
+// Итог подъёма: отказ возвращается, а не бросается — занятый порт не повод гасить кокпит.
+export type HttpsStart =
+  | { ok: true; server: https.Server; port: number }
+  | { ok: false; error: string };
 
 /**
  * Собрать https-сервер поверх готового приложения. Слушателей НЕ вешает — вызывать после
  * `app.ready()`/`app.listen()`, иначе плагин вебсокета ещё не зарегистрировал свой upgrade.
  */
-export function buildHttpsServer({ app, key, cert }) {
+export function buildHttpsServer({ app, key, cert }: HttpsPair & { app: RoutedApp }): https.Server {
   const server = https.createServer({ key, cert });
   server.on('request', (req, res) => app.routing(req, res));
-  for (const listener of app.server.listeners('upgrade')) server.on('upgrade', listener);
+  for (const listener of app.server.listeners('upgrade')) {
+    server.on('upgrade', listener as (...args: unknown[]) => void);
+  }
   server.keepAliveTimeout = app.server.keepAliveTimeout;
   server.headersTimeout = app.server.headersTimeout;
   server.requestTimeout = app.server.requestTimeout;
@@ -37,11 +58,11 @@ export function buildHttpsServer({ app, key, cert }) {
  */
 export async function startHttpsListener({
   app, key, cert, port, host,
-}) {
+}: HttpsPair & { app: RoutedApp; port: number; host: string }): Promise<HttpsStart> {
   const server = buildHttpsServer({ app, key, cert });
   try {
-    await new Promise((resolve, reject) => {
-      const onError = (err) => reject(err);
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => reject(err);
       server.once('error', onError);
       server.listen(port, host, () => {
         server.removeListener('error', onError);
@@ -50,7 +71,11 @@ export async function startHttpsListener({
     });
   } catch (err) {
     server.close();
-    return { ok: false, error: err.message };
+
+    return { ok: false, error: String((err as { message?: unknown } | null)?.message || err) };
   }
-  return { ok: true, server, port: server.address()?.port ?? port };
+
+  const address = server.address() as AddressInfo | null;
+
+  return { ok: true, server, port: address?.port ?? port };
 }

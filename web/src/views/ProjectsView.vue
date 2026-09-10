@@ -84,7 +84,10 @@
 // тут они read-only); у кокпитного проекта пути редактируются здесь и живут в prefs.
 import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { api } from '../shared/api-client.js';
+
+import type { Project, ProjectRepoInput } from '../../../shared/projectsContracts.ts';
+import { failureText } from '../shared/apiClient.ts';
+import { projectsApi } from '../shared/projectsApi.ts';
 import {
   UiButton,
   UiIconButton,
@@ -92,89 +95,161 @@ import {
   UiTooltip,
   alertDialog,
 } from '../ui';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
-import { useToolLauncher } from '../shared/tools/launcher.js';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { useToolLauncher } from '../shared/tools/launcher.ts';
+
+// Открытый редактор путей одного проекта. Строки — черновик формы: пустая пара
+// «метка/путь» здесь законна, а отфильтрует её сохранение.
+interface RepoEditor {
+  id: string;
+  repos: ProjectRepoInput[];
+  saving: boolean;
+  msg: string;
+}
+
+const PROJECT_KEY = 'cockpit-project';
 
 const router = useRouter();
 const { openCode } = useToolLauncher();
-const projects = ref([]);
+const projects = ref<Project[]>([]);
 const loading = ref(true);
 const error = ref('');
 const newId = ref('');
 const creating = ref(false);
-// Редактор путей: { id, repos: [{key, dir}], saving, msg } — открыт для одного проекта.
-const edit = ref(null);
+const edit = ref<RepoEditor | null>(null);
 const projectsContext = useUiContextSource('projects', { layer: 'page', active: false });
+
 watch(() => edit.value?.id || '', (project) => {
   // Карточки не имеют выбранного repository: публикуем только реально открытый editor,
   // не первый путь и не абсолютные `dir` из формы.
-  if (project) projectsContext.focus({ details: { project } });
-  else projectsContext.blur();
+  if (project) {
+    projectsContext.focus({ details: { project } });
+  } else {
+    projectsContext.blur();
+  }
 }, { immediate: true });
 
-const help = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код». У проекта фабрики пути задаёт его профиль (PROFILE_TRIAGE_REPOS); у проекта, заведённого здесь, пути хранятся в кокпите.';
+const help = 'Проект связывает всё по имени: профиль фабрики, схемы конвейера'
+  + ' (раздел «Маршруты») и пути репозиториев на диске — их читает плагин «Код».'
+  + ' У проекта фабрики пути задаёт его профиль (PROFILE_TRIAGE_REPOS); у проекта,'
+  + ' заведённого здесь, пути хранятся в кокпите.';
 
-async function load() {
-  loading.value = true; error.value = '';
-  try { projects.value = (await api.get('/api/projects')).projects || []; }
-  catch (e) { error.value = e.message; }
-  finally { loading.value = false; }
+/**
+ * Перечитывает реестр проектов. Отказ показывается ВМЕСТО списка, а не поверх
+ * пустого: иначе «проектов нет» и «не удалось прочитать» выглядят одинаково.
+ */
+async function load(): Promise<void> {
+  loading.value = true;
+  error.value = '';
+
+  try {
+    projects.value = await projectsApi.list();
+  } catch (failure) {
+    error.value = failureText(failure);
+  } finally {
+    loading.value = false;
+  }
 }
+
 onMounted(load);
 
-async function create() {
-  const id = newId.value.trim();
-  if (!id) return;
-  creating.value = true;
-  try {
-    await api.post('/api/profiles', { id });
-    newId.value = '';
-    await load();
-    // Свежезаведённому проекту сразу открываем редактор путей — ради них он и заводился.
-    const p = projects.value.find((x) => x.id === id);
-    if (p) startEdit(p);
-  } catch (e) { alertDialog(`Не удалось создать проект: ${e.message}`); }
-  finally { creating.value = false; }
+/**
+ * Пути правятся у кокпитных проектов И у фабричных БЕЗ путей в профиле (кокпитный
+ * фолбэк): сервер в этом случае PUT принимает, и прятать кнопку было бы нечестно.
+ * Фабричные пути остаются read-only — их источник один, и это профиль.
+ */
+function canEdit(project: Project): boolean {
+  return !project.factory || !project.repos.some((repo) => repo.from === 'factory');
 }
 
-// Пути правятся у кокпитных проектов И у фабричных БЕЗ путей в профиле (кокпитный фолбэк):
-// сервер в этом случае PUT принимает, прятать кнопку нечестно. Фабричные пути — read-only.
-function canEdit(p) { return !p.factory || !p.repos.some((r) => r.from === 'factory'); }
-
-function startEdit(p) {
+/** Открывает редактор путей. У проекта без путей показывается одна пустая строка. */
+function startEdit(project: Project): void {
   edit.value = {
-    id: p.id,
-    repos: p.repos.length ? p.repos.map((r) => ({ key: r.key, dir: r.dir })) : [{ key: '', dir: '' }],
+    id: project.id,
+    repos: project.repos.length
+      ? project.repos.map((repo) => ({ key: repo.key, dir: repo.dir }))
+      : [{ key: '', dir: '' }],
     saving: false,
     msg: '',
   };
 }
-function addRow() { edit.value?.repos.push({ key: '', dir: '' }); }
-function delRow(i) { edit.value?.repos.splice(i, 1); }
 
-async function save() {
-  if (!edit.value || edit.value.saving) return;
-  const repos = edit.value.repos
-    .map((r) => ({ key: r.key.trim(), dir: r.dir.trim() }))
-    .filter((r) => r.key || r.dir);
-  edit.value.saving = true; edit.value.msg = '';
+function addRow(): void {
+  edit.value?.repos.push({ key: '', dir: '' });
+}
+
+function delRow(index: number): void {
+  edit.value?.repos.splice(index, 1);
+}
+
+/**
+ * Заводит проект и сразу открывает ему редактор путей: ради путей его и создают,
+ * а пустая карточка в списке ничего не объясняет.
+ */
+async function create(): Promise<void> {
+  const id = newId.value.trim();
+
+  if (!id) {
+    return;
+  }
+
+  creating.value = true;
+
   try {
-    await api.put(`/api/projects/${edit.value.id}`, { repos });
-    edit.value = null;
+    await projectsApi.create(id);
+    newId.value = '';
     await load();
-  } catch (e) {
-    edit.value.msg = e.message;
-    edit.value.saving = false;
+
+    const created = projects.value.find((project) => project.id === id);
+
+    if (created) {
+      startEdit(created);
+    }
+  } catch (failure) {
+    alertDialog(`Не удалось создать проект: ${failureText(failure)}`);
+  } finally {
+    creating.value = false;
   }
 }
 
-// Клик по схеме ведёт в «Маршруты» с уже выбранным проектом: раздел читает выбор
-// из localStorage (тот же ключ, что у переключателя проектов).
-function toRoutes(id) {
-  localStorage.setItem('cockpit-project', id);
+/**
+ * Сохраняет пути. Пустые строки формы отбрасываются, а отказ остаётся В редакторе:
+ * закрыть его значило бы потерять набранное вместе с причиной отказа.
+ */
+async function save(): Promise<void> {
+  const editor = edit.value;
+
+  if (!editor || editor.saving) {
+    return;
+  }
+
+  const repos = editor.repos
+    .map((repo) => ({ key: repo.key.trim(), dir: repo.dir.trim() }))
+    .filter((repo) => repo.key || repo.dir);
+
+  editor.saving = true;
+  editor.msg = '';
+
+  try {
+    await projectsApi.saveRepos(editor.id, repos);
+    edit.value = null;
+    await load();
+  } catch (failure) {
+    editor.msg = failureText(failure);
+    editor.saving = false;
+  }
+}
+
+/**
+ * Клик по схеме ведёт в «Маршруты» с уже выбранным проектом: раздел читает выбор
+ * из localStorage — тот же ключ, что у переключателя проектов.
+ */
+function toRoutes(id: string): void {
+  localStorage.setItem(PROJECT_KEY, id);
   router.push('/routes');
 }
-function toCode(id) {
+
+function toCode(id: string): void {
   openCode({ project: id });
 }
 </script>

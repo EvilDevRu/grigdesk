@@ -42,7 +42,7 @@ function query(url) {
 async function compileCodeView() {
   return compileVue(VIEW_PATH, {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__codeViewApi;',
+      './apiClient.ts': 'export const api = globalThis.__codeViewApi;',
       '../../shared/monaco': `
         export const monaco = globalThis.__codeViewMonaco;
         export const langOf = (path) => path.split('.').pop() || 'plaintext';

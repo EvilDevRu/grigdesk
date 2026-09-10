@@ -9,7 +9,7 @@ import {
   parseInboxList,
   parseInboxSummary,
 } from '../../shared/inboxContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { inboxApi, inboxBlockedAttachments, inboxPluginDisabled } from '../../web/src/shared/inboxApi.ts';
 
 const MESSAGE = {

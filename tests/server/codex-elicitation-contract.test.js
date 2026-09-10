@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   codexElicitationPresentation,
   codexElicitationResponse,
-} from '../../server/src/lib/executors/_codex-elicitation.js';
+} from '../../server/src/lib/executors/_codexElicitation.ts';
 
 function formParams(overrides = {}) {
   return {

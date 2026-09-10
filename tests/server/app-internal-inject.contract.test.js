@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const APP = fileURLToPath(new URL('../../server/src/app.js', import.meta.url));
+const APP = fileURLToPath(new URL('../../server/src/app.ts', import.meta.url));
 
 test('каждый fastify.inject в app.js передаёт x-cockpit-internal', () => {
   const src = readFileSync(APP, 'utf8');

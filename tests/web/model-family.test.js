@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   familyModels,
   resolveModelFamily,
-} from '../../web/src/shared/model-family.js';
+} from '../../web/src/shared/modelFamily.ts';
 
 const providers = [{
   id: 'codex',

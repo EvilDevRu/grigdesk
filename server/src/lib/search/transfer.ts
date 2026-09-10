@@ -9,7 +9,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 
-import { acquireKernelFileLock } from '../kernel-lock.js';
+import { acquireKernelFileLock } from '../kernelLock.ts';
 import { measureKnowledgeContext } from './context.ts';
 import { KnowledgeError, invalidArguments, unavailable } from './errors.ts';
 

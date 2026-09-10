@@ -11,7 +11,7 @@ import {
   parseKnowledgeRemoval,
   parseKnowledgeSearch,
 } from '../../shared/knowledgeContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import {
   knowledgeApi,
   knowledgeErrorCode,

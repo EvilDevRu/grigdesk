@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { stoppedTurnBrief } from '../../server/src/lib/chat/stopped-brief.js';
+import { stoppedTurnBrief } from '../../server/src/lib/chat/stoppedBrief.ts';
 
 test('досье нет, когда история пуста или остановки не было', () => {
   assert.equal(stoppedTurnBrief(null), '');

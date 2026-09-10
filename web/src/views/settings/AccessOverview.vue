@@ -189,7 +189,11 @@ const gatewayDomain = computed(() => props.gatewayPublicDomain
 const desiredGatewayDomain = computed(() => (props.gatewayJob?.state === 'done' ? props.gatewayJob.domain : '')
   || props.gatewaySetup?.domain
   || '');
-const normalizeDomain = (value) => String(value || '').trim().toLowerCase().replace(/\.$/, '');
+// Домен сравнивается без регистра и без точки на конце: «Пример.RU.» и «пример.ru» —
+// один и тот же адрес, и расхождение здесь читалось бы как «шлюз не настроен».
+const normalizeDomain = (value: unknown): string => (
+  String(value || '').trim().toLowerCase().replace(/\.$/, '')
+);
 const gatewayRestartPending = computed(() => {
   if (props.gatewayJob?.state === 'done' && props.gatewayJob.needsRestart) return true;
   const desired = normalizeDomain(desiredGatewayDomain.value);
@@ -205,7 +209,7 @@ const gatewayCheckMatches = computed(() => {
   return String(props.gatewayChecks?.gateway || '').trim() === configuredGateway;
 });
 const gatewayJobVerifyStep = computed(() => props.gatewayJob?.steps
-  ?.find((step) => step.key === 'verify') || null);
+  ?.find((step: { key?: string }) => step.key === 'verify') || null);
 const gatewayJobMatches = computed(() => normalizeDomain(props.gatewayJob?.domain)
   === normalizeDomain(gatewayDomain.value));
 const gatewayVerified = computed(() => (
@@ -268,7 +272,9 @@ const localExplanation = computed(() => {
   if (props.localHttpsEnabled) {
     return 'После настройки сетевой HTTP перенаправляется на HTTPS. Внешний шлюз от этого не меняется.';
   }
-  return `Доступ дома остаётся по HTTP :${httpPort.value}. Сертификаты сохраняются, внешний шлюз не меняется.`;
+
+  return `Доступ дома остаётся по HTTP :${httpPort.value}. Сертификаты сохраняются,`
+    + ' внешний шлюз не меняется.';
 });
 
 const gatewayStatus = computed(() => {

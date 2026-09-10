@@ -6,12 +6,12 @@ import test from 'node:test';
 
 import {
   createStepSink, cutMiddle, STEP_TEXT_LIMIT,
-} from '../../server/src/lib/chat/stream-steps.js';
-import { toClaudeSteps } from '../../server/src/lib/executors/_claude-steps.js';
-import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codex-steps.js';
-import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimi-steps.js';
-import { createToolbox } from '../../server/src/lib/executors/_ollama-tools.js';
-import codex from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/chat/streamSteps.ts';
+import { toClaudeSteps } from '../../server/src/lib/executors/_claudeSteps.ts';
+import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
+import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimiSteps.ts';
+import { createToolbox } from '../../server/src/lib/executors/_ollamaTools.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
 
 test('Claude Write объявляет изменяемый файл в нейтральном шаге', () => {
   const steps = toClaudeSteps({

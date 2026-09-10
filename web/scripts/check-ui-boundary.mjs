@@ -255,7 +255,7 @@ function analyzeScript(report, file, source, suffix = '', language = '') {
       if (isCreateElementCall(node)) {
         const tag = node.arguments[0] ? staticString(node.arguments[0]) : null;
         if (CONTROL_TAGS.has(tag)) {
-          if (file === 'web/src/shared/clipboard.js' && tag === 'textarea') {
+          if (file === 'web/src/shared/clipboard.ts' && tag === 'textarea') {
             report.clipboardTextareaCount += 1;
           } else {
             incrementFinding(
@@ -376,7 +376,7 @@ export function collectUiBoundary(repoRoot = DEFAULT_REPO_ROOT) {
 
   for (const absoluteFile of sourceFiles(resolvedRoot)) {
     const file = relativeFile(resolvedRoot, absoluteFile);
-    if (file === 'web/src/shared/clipboard.js') report.clipboardFilePresent = true;
+    if (file === 'web/src/shared/clipboard.ts') report.clipboardFilePresent = true;
     const source = fs.readFileSync(absoluteFile, 'utf8');
     if (absoluteFile.endsWith('.vue')) analyzeVue(report, resolvedRoot, absoluteFile, file, source);
     else if (SCRIPT_EXTENSIONS.has(path.extname(absoluteFile))) analyzeScript(report, file, source);
@@ -403,7 +403,7 @@ export function compareUiBoundary(report) {
 
   if (report.clipboardFilePresent && report.clipboardTextareaCount !== 1) {
     errors.push(
-      `clipboard: существующий web/src/shared/clipboard.js обязан содержать ровно один `
+      `clipboard: существующий web/src/shared/clipboard.ts обязан содержать ровно один `
       + `createElement("textarea"), найдено ${report.clipboardTextareaCount}`,
     );
   }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
-import { useDocumentPreviewStore } from '../../web/src/stores/document-preview.js';
+import { useDocumentPreviewStore } from '../../web/src/stores/documentPreview.ts';
 
 test('общий viewer переключается между документом и изображением без двух модалок', () => {
   setActivePinia(createPinia());

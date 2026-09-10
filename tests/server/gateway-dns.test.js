@@ -8,7 +8,7 @@ import {
   dnsAnswersMatch,
   forcedVpnGateEnv,
   resolvePublic,
-} from '../../server/src/lib/gateway/installer.js';
+} from '../../server/src/lib/gateway/installer.ts';
 
 const DOMAIN = 'cockpit.example.com';
 const IP = '203.0.113.17';

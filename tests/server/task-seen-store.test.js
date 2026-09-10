@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   normalizeSeenTaskId,
   TaskSeenStore,
-} from '../../server/src/lib/task-seen-store.js';
+} from '../../server/src/lib/taskSeenStore.ts';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-task-seen-'));

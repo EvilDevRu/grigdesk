@@ -1,4 +1,4 @@
-import { sseSubscribe } from '../../composables/useSse.js';
+import { sseSubscribe } from '../../composables/useSse.ts';
 import { useSshStore } from '../../stores/ssh.ts';
 import { loadSsh, reloadSshAudit } from './loadSsh.ts';
 import { runtimeOf } from './sshRuntime.ts';

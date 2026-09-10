@@ -4,7 +4,7 @@
 // связывает immutable bot.id со случайным accountRef; disconnect останавливает
 // ingress, закрывает текущую activation epoch, стирает только active credential
 // и переустанавливает тот же namespace offline для read-only истории.
-import { AccountRuntimeManager } from '../account-runtime.js';
+import { AccountRuntimeManager } from '../accountRuntime.ts';
 import * as realBotApi from './api.ts';
 import { isBotTokenShape, maskToken } from './token.ts';
 import {

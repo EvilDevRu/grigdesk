@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildKimiHostLaunch } from '../../server/src/lib/kimi/host-launch.js';
+import { buildKimiHostLaunch } from '../../server/src/lib/kimi/hostLaunch.ts';
 
 async function fixture(t, { credentialMode = 0o600 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-kimi-host-launch-test-'));

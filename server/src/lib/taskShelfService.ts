@@ -1,6 +1,7 @@
 // Предметный слой полки: scope всегда выводится из текущей портальной сессии,
 // а клиент получает только непрозрачный хеш и полный server-confirmed снимок.
-import { b24AccountScope } from './b24-account-scope.js';
+import { b24AccountScope } from './b24AccountScope.ts';
+import type { B24Identity } from './b24AccountScope.ts';
 import type { ShelfSnapshot, TaskShelfStore } from './taskShelfStore.ts';
 import type { ShelfState } from '../../../shared/shelfContracts.ts';
 
@@ -47,10 +48,10 @@ export class TaskShelfService {
   }
 
   async _scope(): Promise<string> {
-    let identity;
     try {
-      identity = await this.b24.accountIdentity();
-      return b24AccountScope(identity);
+      const identity = await this.b24.accountIdentity();
+
+      return b24AccountScope(identity as B24Identity | null);
     } catch (error) {
       throw new TaskShelfIdentityError(undefined, error);
     }

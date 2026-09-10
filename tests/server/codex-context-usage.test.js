@@ -9,7 +9,7 @@ import {
   parseCodexTokenInfoLine,
   readCodexThreadTokenInfo,
   readLatestCodexTokenInfo,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 test('Codex cumulative input does not count cached input twice', () => {
   assert.equal(codexTotalInputTokens({

@@ -18,16 +18,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { VENV_PYTHON } from './preflight.ts';
-import { nodeTsArgv } from '../nodeTsRuntime.ts';
-import { readProcessIdentity } from '../speech/model-jobs-process.js';
-import { normalizeSpeechOptions } from '../speech/options.js';
-import { speechModelMissing, speechUnavailable } from '../speech/errors.js';
+import { readProcessIdentity } from '../speech/modelJobsProcess.ts';
+import { normalizeSpeechOptions } from '../speech/options.ts';
+import { speechModelMissing, speechUnavailable } from '../speech/errors.ts';
 import {
     buildTranscribeArgv,
     decodeIngestJob,
     encodeIngestJob,
     pythonEnv,
-} from '../speech/transport.js';
+} from '../speech/transport.ts';
 
 // Что вернул внешний процесс. Оба потока нужны целиком: stdout несёт JSON
 // распознавания, а stderr — единственное объяснение отказа ffmpeg или python.
@@ -109,9 +108,9 @@ export interface IngestJobOptions extends IngestOptions {
     workerPath?: string;
 }
 
-// Состояние задачи распознавания на диске. Транспорт (ещё JavaScript) выводит
-// форму по объектному литералу и теряет поля, которые дописывает воркер, поэтому
-// они объявлены здесь ровно тем, чем их зовут разбор и сам воркер.
+// Состояние задачи распознавания на диске. У транспорта своя, более узкая форма
+// (`result`/`error` там ещё недоверенные): здесь поля объявлены ровно тем, чем их
+// зовут разбор и сам воркер, поэтому порт остаётся отдельным.
 export interface IngestJob {
     schemaVersion: number;
     jobId: string;
@@ -664,9 +663,7 @@ export function startIngestJob(
     if (pythonPath) childEnv.COCKPIT_MEDIA_PYTHON = pythonPath;
     childEnv.COCKPIT_TRANSCRIBE_PY = transcribePath || DEFAULT_TRANSCRIBE_PY;
     childEnv.COCKPIT_MEDIA_HF_DIR = mediaHfDir;
-    // Дочерний процесс НЕ наследует флаги родителя, а воркер — TypeScript: без
-    // явного снятия типов он не стартует на минимальной поддерживаемой версии Node.
-    const child = (deps.spawn || spawn)(process.execPath, nodeTsArgv(workerPath, [statusPath]), {
+    const child = (deps.spawn || spawn)(process.execPath, [workerPath, statusPath], {
         detached: true,
         stdio: 'ignore',
         env: childEnv,

@@ -10,21 +10,21 @@ import {
   mergeProviderUsage,
   normalizeProviderUsage,
   unsupportedProviderUsage,
-} from '../../server/src/lib/provider-usage.js';
+} from '../../server/src/lib/providerUsage.ts';
 import {
   classifyClaudeUsageResponse,
   fetchClaudeUsage,
   parseClaudeUsagePayload,
   parseClaudeUsageResources,
-} from '../../server/src/lib/executors/claude.js';
-import { claudeOauthMetadata } from '../../server/src/lib/executors/_claude-catalog.js';
+} from '../../server/src/lib/executors/claude.ts';
+import { claudeOauthMetadata } from '../../server/src/lib/executors/_claudeCatalog.ts';
 import {
   classifyCodexUsageResponse,
   consumeCodexRateLimitReset,
   parseCodexRateLimits,
   parseCodexUsageResources,
   readCodexRateLimits,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 test('usage contract never turns an executor error into an empty popup', () => {
   const status = normalizeProviderUsage({

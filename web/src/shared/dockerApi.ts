@@ -1,4 +1,4 @@
-import { api } from './api-client.js';
+import { api } from './apiClient.ts';
 import {
   parseDockerHealth,
   parseDockerOkResponse,

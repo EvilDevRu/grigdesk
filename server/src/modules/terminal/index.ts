@@ -7,18 +7,43 @@ import fp from 'fastify-plugin';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { FastifyInstance } from 'fastify';
+import type { Writable } from 'node:stream';
+
+// Сообщение от клиента: ввод или изменение размера. Разбирается из недоверенного
+// JSON, поэтому каждое поле проверяется отдельно.
+interface TerminalMessage {
+  t?: unknown;
+  d?: unknown;
+  cols?: unknown;
+  rows?: unknown;
+}
 
 export const MAX_SESSIONS = 6; // разумный потолок параллельных терминалов
 let active = 0;
 const HELPER = fileURLToPath(new URL('./pty-helper.py', import.meta.url));
 
-function clampInt(v, def, min, max) {
-  const n = parseInt(v, 10);
+/** Число из недоверенного значения в заданных границах; мусор даёт умолчание. */
+function clampInt(value: unknown, def: number, min: number, max: number): number {
+  const n = parseInt(String(value), 10);
   if (!Number.isFinite(n)) return def;
   return Math.min(max, Math.max(min, n));
 }
 
-export function spawnPty({ cols, rows, shell, home, python = process.env.COCKPIT_TERMINAL_PYTHON || 'python3' }) {
+export function spawnPty({
+  cols,
+  rows,
+  shell,
+  home,
+  python = process.env.COCKPIT_TERMINAL_PYTHON || 'python3',
+}: {
+  cols: number;
+  rows: number;
+  shell: string;
+  home: string;
+  python?: string;
+}): ChildProcessWithoutNullStreams {
   return spawn(python, [
     HELPER,
     '--cols', String(cols),
@@ -33,8 +58,10 @@ export function spawnPty({ cols, rows, shell, home, python = process.env.COCKPIT
   });
 }
 
-async function terminalModule(fastify) {
-  fastify.get('/api/terminal', { websocket: true }, (socket, req) => {
+async function terminalModule(fastify: FastifyInstance): Promise<void> {
+  fastify.get<{ Querystring: { cols?: string; rows?: string } }>('/api/terminal', {
+    websocket: true,
+  }, (socket, req) => {
     // Доступ проверен глобальным гардом (plugins/auth.js): хуки Fastify выполняются и для
     // WS-роутов, поэтому без валидной сессии сюда не доходят. Прежний `?token=` убран —
     // секрет в query-параметре оседает в логах, cookie этого не делает.
@@ -49,26 +76,40 @@ async function terminalModule(fastify) {
     fastify.log.info({ pid: child.pid, cols, rows }, 'terminal: PTY запущен');
 
     // PTY → клиент (сырые байты, включая управляющие последовательности).
-    const toClient = (d) => { if (socket.readyState === 1) socket.send(d); };
+    const toClient = (chunk: Buffer) => {
+      if (socket.readyState === 1) socket.send(chunk);
+    };
     child.stdout.on('data', toClient);
     child.stderr.on('data', toClient);
 
     // Клиент → PTY. Ввод и управление идут разными fd, поэтому JSON resize
     // невозможно случайно напечатать в shell.
-    socket.on('message', (raw) => {
-      let msg;
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
-      if (msg.t === 'in' && typeof msg.d === 'string' && child.stdin.writable) child.stdin.write(msg.d);
-      if (msg.t === 'resize' && child.stdio[3]?.writable) {
+    // Управляющий поток PTY: изменение размера и закрытие идут отдельным fd, чтобы
+    // JSON нельзя было случайно напечатать в shell.
+    const control = child.stdio[3] as Writable | undefined;
+
+    socket.on('message', (raw: Buffer) => {
+      let msg: TerminalMessage;
+
+      try {
+        msg = JSON.parse(raw.toString()) as TerminalMessage;
+      } catch {
+        return;
+      }
+      if (msg.t === 'in' && typeof msg.d === 'string' && child.stdin.writable) {
+        child.stdin.write(msg.d);
+      }
+      if (msg.t === 'resize' && control?.writable) {
         const nextCols = clampInt(msg.cols, cols, 20, 500);
         const nextRows = clampInt(msg.rows, rows, 5, 200);
-        child.stdio[3].write(`${JSON.stringify({ t: 'resize', cols: nextCols, rows: nextRows })}\n`);
+
+        control.write(`${JSON.stringify({ t: 'resize', cols: nextCols, rows: nextRows })}\n`);
       }
     });
 
     let finished = false;
-    let killTimer = null;
-    const finish = (code, error = null) => {
+    let killTimer: NodeJS.Timeout | null = null;
+    const finish = (code: number | null, error: Error | null = null) => {
       if (finished) return;
       finished = true;
       if (killTimer) clearTimeout(killTimer);
@@ -79,7 +120,11 @@ async function terminalModule(fastify) {
     };
     const stop = () => {
       if (finished) return;
-      try { child.stdio[3]?.write(`${JSON.stringify({ t: 'close' })}\n`); } catch { /* helper уже мёртв */ }
+      try {
+        control?.write(`${JSON.stringify({ t: 'close' })}\n`);
+      } catch {
+        /* helper уже мёртв */
+      }
       try { child.stdin.end(); } catch { /* ignore */ }
       if (!killTimer) {
         killTimer = setTimeout(() => {

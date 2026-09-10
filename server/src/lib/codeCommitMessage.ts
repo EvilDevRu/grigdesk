@@ -4,7 +4,7 @@
 
 import { resolveInboxTriageTarget } from './inbox/triage.ts';
 import { stagedCommitContext } from './git.ts';
-import { exactKeys, jsonCandidates, modelText } from './model-json.js';
+import { exactKeys, jsonCandidates, modelText } from './modelJson.ts';
 import type {
   CodeCommitTitleResponse,
   CodeStagedContext,

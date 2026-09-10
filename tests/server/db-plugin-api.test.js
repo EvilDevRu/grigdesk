@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import { config } from '../../server/src/config.js';
-import { SYSTEM, isEnabled } from '../../server/src/lib/plugins-registry.js';
+import { config } from '../../server/src/config.ts';
+import { SYSTEM, isEnabled } from '../../server/src/lib/pluginsRegistry.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

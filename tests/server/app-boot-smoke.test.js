@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const APP = fileURLToPath(new URL('../../server/src/app.js', import.meta.url));
+const APP = fileURLToPath(new URL('../../server/src/app.ts', import.meta.url));
 
 /**
  * Свободный порт спрашивается у системы. Ноль в COCKPIT_PORT не подходит: сервер
@@ -89,7 +89,7 @@ function isolatedEnv(root, port) {
 test('сервер поднимается и закрывает /api гардом', { timeout: 120_000 }, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cockpit-boot-'));
   const port = await freePort();
-  const child = spawn(process.execPath, ['--experimental-strip-types', APP], {
+  const child = spawn(process.execPath, [APP], {
     env: isolatedEnv(root, port),
     stdio: ['ignore', 'pipe', 'pipe'],
   });

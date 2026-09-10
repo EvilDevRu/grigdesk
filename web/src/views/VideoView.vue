@@ -730,12 +730,12 @@ import {
   UiToggleButton,
   confirmDialog,
 } from '../ui';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import { mediaApi } from '../shared/mediaApi.ts';
-import { writeClipboardText } from '../shared/clipboard.js';
-import { mmss } from '../shared/format.js';
+import { writeClipboardText } from '../shared/clipboard.ts';
+import { mmss } from '../shared/format.ts';
 import { usePluginsStore } from '../stores/plugins.js';
-import { useDocumentPreviewStore } from '../stores/document-preview.js';
+import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
 import { useUiStore } from '../stores/ui.js';
 import { canWidenClip, useVideoSessionStore } from '../stores/videoSession.ts';
 import type { VideoDraft } from '../stores/videoSession.ts';

@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Кокпит: API-сервер (Fastify). Host-native, читает состояние фабрики и командует ей.",
-  "main": "src/app.js",
+  "main": "src/app.ts",
   "scripts": {
-    "start": "node --experimental-strip-types src/app.js",
-    "dev": "node --experimental-strip-types --watch src/app.js",
-    "test": "npm run typecheck && node --experimental-strip-types --test ../tests/server/*.test.js",
+    "start": "node src/app.ts",
+    "dev": "node --watch src/app.ts",
+    "test": "npm run typecheck && npm run typecheck:tests && node --test ../tests/server/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:docker": "tsc -p tsconfig.docker.json --noEmit",
     "typecheck:code": "tsc -p tsconfig.code.json --noEmit",
@@ -23,10 +23,11 @@
     "typecheck:inbox": "tsc -p tsconfig.inbox.json --noEmit",
     "typecheck:telegram": "tsc -p tsconfig.telegram.json --noEmit",
     "typecheck:search": "tsc -p tsconfig.search.json --noEmit",
-    "typecheck:media": "tsc -p tsconfig.media.json --noEmit"
+    "typecheck:media": "tsc -p tsconfig.media.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",

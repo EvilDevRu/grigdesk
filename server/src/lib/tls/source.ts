@@ -5,13 +5,22 @@ import { readFileSync } from 'node:fs';
 import tlsLib from 'node:tls';
 import { X509Certificate } from 'node:crypto';
 
+import type { LocalTls } from './local.ts';
+
+// Откуда взялась пара сокета. `env` — явное намерение оператора, `state` — кнопка в
+// браузере, `none` — https не поднимается. Различать их обязательно: у отказа
+// в первом случае нет запасного пути, во втором он есть.
+export interface TlsSource {
+  source: 'env' | 'state' | 'none';
+  key?: Buffer;
+  cert?: Buffer;
+  fingerprint?: string;
+  error?: string;
+}
+
 /**
- * @param {object} opts
- * @param {string} opts.keyPath   COCKPIT_TLS_KEY (пусто — не задан)
- * @param {string} opts.certPath  COCKPIT_TLS_CERT
- * @param {boolean} opts.modeEnabled  HTTPS в карточке «Доступ → В домашней сети» (prefs.accessLocalHttps)
- * @param {{load: () => object}} opts.localTls
- * @returns {{source: 'env'|'state'|'none', key?: Buffer, cert?: Buffer, fingerprint?: string, error?: string}}
+ * `keyPath`/`certPath` — COCKPIT_TLS_KEY и COCKPIT_TLS_CERT, `modeEnabled` — тумблер
+ * «Доступ → В домашней сети» из настроек.
  *
  * Разница в поведении при ошибке намеренная. Пути в env — явное намерение оператора (шлюз,
  * ручной сертификат), тихо проигнорировать его нельзя: падаем сразу с понятной ошибкой.
@@ -19,18 +28,27 @@ import { X509Certificate } from 'node:crypto';
  * по http, иначе кнопка в браузере устраивает вечный крэш-луп под `Restart=always`, а чинить
  * его можно только с консоли мозга — это отдельный сценарий восстановления после сбоя.
  */
-export function loadTlsSource({ keyPath, certPath, modeEnabled, localTls }) {
+export function loadTlsSource({ keyPath, certPath, modeEnabled, localTls }: {
+  keyPath: string;
+  certPath: string;
+  modeEnabled: boolean;
+  localTls: Pick<LocalTls, 'load'>;
+}): TlsSource {
   if (!!keyPath !== !!certPath) {
     throw new Error('COCKPIT_TLS_KEY и COCKPIT_TLS_CERT должны быть заданы вместе');
   }
   if (keyPath && certPath) {
-    let key; let cert;
+    let key: Buffer;
+    let cert: Buffer;
+
     try {
       key = readFileSync(keyPath);
       cert = readFileSync(certPath);
       tlsLib.createSecureContext({ key, cert });
     } catch (err) {
-      throw new Error(`Не годится TLS-сертификат (COCKPIT_TLS_KEY / COCKPIT_TLS_CERT): ${err.message}`);
+      const reason = String((err as { message?: unknown } | null)?.message || err);
+
+      throw new Error(`Не годится TLS-сертификат (COCKPIT_TLS_KEY / COCKPIT_TLS_CERT): ${reason}`);
     }
     return {
       source: 'env', key, cert, fingerprint: new X509Certificate(cert).fingerprint256,

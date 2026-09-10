@@ -12,7 +12,7 @@ import {
   readRunnerAttempts,
   readRunnerWorkTime,
   resolveRunnerState,
-} from '../../server/src/lib/runner-state.js';
+} from '../../server/src/lib/runnerState.ts';
 
 test('runner state follows engine precedence and exposes an emergency switch', () => {
   const profile = {

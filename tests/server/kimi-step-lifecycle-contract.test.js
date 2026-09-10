@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimi-steps.js';
+import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimiSteps.ts';
 import { lineDiff, unifiedDiff } from '../../web/src/shared/diff.js';
 
 const fixture = JSON.parse(readFileSync(

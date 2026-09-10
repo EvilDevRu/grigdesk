@@ -16,12 +16,6 @@ import type {
   KnowledgeSearchResponse,
 } from '../../../../shared/knowledgeContracts.ts';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-  }
-}
-
 export interface KnowledgeQueryFilters {
   query?: string;
   project?: string;

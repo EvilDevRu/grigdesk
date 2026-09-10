@@ -1,9 +1,34 @@
-export function resolveRequestedEffort(value, supportedLevels) {
-  const effort = typeof value === 'string' ? value.trim() : '';
-  if (!effort) return { ok: true, effort: undefined };
+// Выбор ступени усилия для хода. Лестницу объявляет сама модель, поэтому список
+// уровней приходит снаружи: зашитый здесь набор устарел бы на первом же обновлении CLI.
 
-  const levels = Array.isArray(supportedLevels) ? supportedLevels : [];
-  if (levels.includes(effort)) return { ok: true, effort };
+// Итог разбора. Отсутствие ступени — законный ответ «умолчание исполнителя», и
+// отличается он от отказа полем `ok`, а не пустой строкой: пустая строка у CLI
+// означала бы попытку передать `--effort ""`.
+export interface EffortChoice {
+    ok: boolean;
+    effort: string | undefined;
+    levels?: string[];
+}
 
-  return { ok: false, effort: undefined, levels };
+export function resolveRequestedEffort(
+    value: unknown,
+    supportedLevels: unknown,
+): EffortChoice {
+    const effort = typeof value === 'string' ? value.trim() : '';
+
+    if (!effort) {
+        return { ok: true, effort: undefined };
+    }
+
+    const levels = Array.isArray(supportedLevels) ? supportedLevels as string[] : [];
+
+    if (levels.includes(effort)) {
+        return { ok: true, effort };
+    }
+
+    return {
+        ok: false,
+        effort: undefined,
+        levels,
+    };
 }

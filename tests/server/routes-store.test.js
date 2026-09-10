@@ -16,12 +16,12 @@ import test from 'node:test';
 import {
   hashRoutesBytes,
   RoutesStore,
-} from '../../server/src/modules/routes/store.js';
+} from '../../server/src/modules/routes/store.ts';
 import {
   validatePromptFiles,
   validateRoute,
-} from '../../server/src/modules/routes/schema.js';
-import { acquireKernelFileLock } from '../../server/src/lib/kernel-lock.js';
+} from '../../server/src/modules/routes/schema.ts';
+import { acquireKernelFileLock } from '../../server/src/lib/kernelLock.ts';
 
 const PROFILE = 'demo-profile';
 

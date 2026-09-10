@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { createPermissionQueue } from '../../server/src/lib/chat/permission-queue.js';
+import { createPermissionQueue } from '../../server/src/lib/chat/permissionQueue.ts';
 
 async function managerFactory() {
   try {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { AccountRuntimeManager } from '../../server/src/lib/account-runtime.js';
+import { AccountRuntimeManager } from '../../server/src/lib/accountRuntime.ts';
 
 const deferred = () => {
   let resolve;

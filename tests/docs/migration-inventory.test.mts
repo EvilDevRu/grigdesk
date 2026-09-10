@@ -8,7 +8,7 @@ import {
 } from '../../tools/migrationInventory.mts';
 
 const UPDATE_HINT = 'Остаток миграции изменился. Обнови снимок:'
-  + ' node --experimental-strip-types tools/migrationInventory.ts --write';
+  + ' node tools/migrationInventory.mts --write';
 
 /**
  * Рубеж переноса на TypeScript. Проверяется не «стало меньше», а точное совпадение

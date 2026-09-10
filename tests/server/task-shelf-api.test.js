@@ -310,8 +310,8 @@ test('Поздний acknowledge после DELETE не воскрешает з�
 
 test('Приложение регистрирует account-scoped полку после живого plugin gate', async () => {
   const [config, app] = await Promise.all([
-    readFile(new URL('../../server/src/config.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../server/src/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../server/src/config.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../../server/src/app.ts', import.meta.url), 'utf8'),
   ]);
   const pluginsPosition = app.lastIndexOf('register(pluginsModule');
   const shelfPosition = app.lastIndexOf('register(taskShelfModule');

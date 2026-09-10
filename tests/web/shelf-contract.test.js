@@ -6,7 +6,7 @@ import {
   parseShelfEntrySnapshot,
   parseShelfState,
 } from '../../shared/shelfContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { shelfApi } from '../../web/src/shared/shelfApi.ts';
 
 const snapshot = {

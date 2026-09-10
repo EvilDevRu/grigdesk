@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { autoDecision } from '../../server/src/lib/chat/auto-approve.js';
+import { autoDecision } from '../../server/src/lib/chat/autoApprove.ts';
 
 function presentation({ kind = 'execute', title = '', description = '', isQuestion = false } = {}) {
   return {

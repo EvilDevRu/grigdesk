@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { SpeechRuntime } from '../../server/src/lib/speech/index.js';
-import chatModule from '../../server/src/modules/chat/index.js';
+import { SpeechRuntime } from '../../server/src/lib/speech/index.ts';
+import chatModule from '../../server/src/modules/chat/index.ts';
 import mediaModule from '../../server/src/modules/media/index.ts';
-import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.js';
+import authPlugin, { SESSION_COOKIE } from '../../server/src/plugins/auth.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

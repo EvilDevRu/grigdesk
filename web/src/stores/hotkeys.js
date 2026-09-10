@@ -2,8 +2,8 @@
 // клавиатура планшета, рабочего компьютера и мозга разные, и общая настройка чинила бы
 // одно устройство за счёт другого. Состав инструментов сюда не дублируется — он в registry.
 import { defineStore } from 'pinia';
-import { TOOL_CATALOG } from '../shared/tools/catalog.js';
-import { comboIssue, normalizeCombo } from '../shared/hotkeys/combo.js';
+import { TOOL_CATALOG } from '../shared/tools/catalog.ts';
+import { comboIssue, normalizeCombo } from '../shared/hotkeys/combo.ts';
 
 export const HOTKEYS_KEY = 'cockpit-tool-hotkeys';
 

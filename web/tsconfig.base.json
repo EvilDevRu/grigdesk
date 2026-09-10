@@ -5,7 +5,10 @@
     "useDefineForClassFields": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // ES2023.Array — только объявления `findLast`/`toSorted` и соседей: код уже
+    // пользуется ими в бою, а браузеры держат их с 2022 года. `target` намеренно
+    // остаётся ES2022 — его читает esbuild при сборке, и менять вывод незачем.
+    "lib": ["ES2022", "ES2023.Array", "DOM", "DOM.Iterable"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "allowImportingTsExtensions": true,

@@ -13,7 +13,7 @@ async function providersStore(t, api) {
 
   const module = await compileModule(STORE_PATH, {
     stubs: {
-      '../shared/api-client.js': 'export const api = globalThis.__providersStoreApi;',
+      '../shared/apiClient.ts': 'export const api = globalThis.__providersStoreApi;',
     },
   });
   const { createPinia, setActivePinia } = await import(

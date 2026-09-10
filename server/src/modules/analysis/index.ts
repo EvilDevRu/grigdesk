@@ -6,12 +6,6 @@ import type { Analyzer } from '../../lib/analysis/analyzer.ts';
 import type { AnalysisArbiter } from '../../lib/analysis/arbiter.ts';
 import type { AnalysisClarifications } from '../../../../shared/analysisContracts.ts';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-  }
-}
-
 export interface AnalysisModuleOptions {
   analyzer: Analyzer;
   arbiter?: AnalysisArbiter | null;

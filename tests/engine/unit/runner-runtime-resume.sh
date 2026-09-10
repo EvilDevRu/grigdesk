@@ -20,7 +20,7 @@ make_parent_document() {
   local run_id=$1 observed_scope=$2 checkpoint_scope=$3 completeness=$4
   local eligible=$5 checkpoint_hash=$6 output=$7
   "$NODE_BIN" --input-type=module - \
-    "$FACTORY_HOME/../server/src/lib/analytics/usage-document.js" \
+    "$FACTORY_HOME/../server/src/lib/analytics/usageDocument.ts" \
     "$run_id" "$observed_scope" "$checkpoint_scope" "$completeness" \
     "$eligible" "$checkpoint_hash" "$output" <<'NODE'
 import { chmodSync, writeFileSync } from 'node:fs';
@@ -30,7 +30,7 @@ const [modulePath, runId, observedScope, checkpointScope, completeness,
   eligibleRaw, checkpointHash, output] = process.argv.slice(2);
 const { buildUsageDocument, encodeUsageDocument } = await import(pathToFileURL(modulePath));
 const { ANALYTICS_EXTRACTOR_VERSION } = await import(
-  new URL('./normalizers.js', pathToFileURL(modulePath)),
+  new URL('./normalizers.ts', pathToFileURL(modulePath)),
 );
 const eligible = eligibleRaw === 'true';
 const vector = Object.freeze({

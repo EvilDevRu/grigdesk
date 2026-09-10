@@ -854,7 +854,7 @@ import {
   UiSelect,
   UiSpinner,
 } from '../ui';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 import {
   telegramApi,
   telegramErrorMessage,

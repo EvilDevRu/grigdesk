@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 
 test('chat history moves from active to archive before permanent removal', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cockpit-chat-history-'));

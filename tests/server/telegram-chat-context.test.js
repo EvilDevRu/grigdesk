@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import chatModule from '../../server/src/modules/chat/index.js';
+import chatModule from '../../server/src/modules/chat/index.ts';
 import telegramModule from '../../server/src/modules/telegram/index.ts';
 import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
 import { TelegramRulesStore } from '../../server/src/lib/telegram/rulesStore.ts';

@@ -4,7 +4,7 @@ import test from 'node:test';
 
 test('четыре DB-инвалидации входят в единственную SSE-подписку вкладки', async () => {
   const source = await readFile(
-    new URL('../../web/src/composables/useSse.js', import.meta.url),
+    new URL('../../web/src/composables/useSse.ts', import.meta.url),
     'utf8',
   );
   const list = source.match(/const EVENT_NAMES = \[([\s\S]*?)\];/);

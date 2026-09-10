@@ -152,7 +152,7 @@ test('runMeetingPlan идёт только через недоверенный t
 });
 
 test('плагин «Видео» объявляет свою модель разбора, а не заимствует чужую', async () => {
-  const { SYSTEM } = await import('../../server/src/lib/plugins-registry.js');
+  const { SYSTEM } = await import('../../server/src/lib/pluginsRegistry.ts');
   const video = SYSTEM.find((plugin) => plugin.id === 'video');
   const setting = video.settings.find((item) => item.key === 'triageModel');
   assert.equal(setting.type, 'model');

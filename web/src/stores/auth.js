@@ -3,7 +3,7 @@
 // Секретов здесь не хранится: сервер отдаёт сессионную httpOnly-cookie, JS её не видит и
 // видеть не должен. Стор знает только «пущен или нет».
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({

@@ -11,12 +11,12 @@ import path from 'node:path';
 import {
   claudeCatalog,
   claudeCatalogCacheKey,
-} from '../../server/src/lib/executors/_claude-catalog.js';
+} from '../../server/src/lib/executors/_claudeCatalog.ts';
 import {
   mergeCatalog,
   mergeCatalogModel,
-} from '../../server/src/lib/models-registry.js';
-import claude from '../../server/src/lib/executors/claude.js';
+} from '../../server/src/lib/modelsRegistry.ts';
+import claude from '../../server/src/lib/executors/claude.ts';
 
 /** Запись реестра в том виде, в каком она лежит в бандле CLI. */
 function entry(id, family, displayName, context, caps, out = 'default:64000,upper:128000') {

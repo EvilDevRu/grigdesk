@@ -5,6 +5,7 @@
     "checkJs": false
   },
   "include": [
+    "src/lib/fastifyDecorations.ts",
     "../shared/contractDecoders.ts",
     "../shared/inboxContracts.ts",
     "src/lib/inbox/**/*.ts",

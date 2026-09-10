@@ -5,15 +5,6 @@ import { randomInt } from 'node:crypto';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-    sse?: {
-      broadcast?(name: string, payload?: unknown): unknown;
-    };
-  }
-}
-
 import * as realBotApi from '../../lib/telegram/api.ts';
 import { normalizeTelegramBotId } from '../../lib/telegram/accountBindings.ts';
 import { scrubToken } from '../../lib/telegram/api.ts';

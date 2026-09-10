@@ -54,15 +54,20 @@ export const PUBLIC_HTTP_ROUTES = new Set([
   '/api/settings/tls/ca.svg',
 ]);
 
+/** Текст брошенного значения: до сюда доезжают и ошибки Node, и чужие строки. */
+function failureText(error: unknown): string {
+  return String((error as { message?: unknown } | null)?.message || error);
+}
+
 /** Ошибка входных данных (400), а не сбой генерации (500). */
 export class TlsInputError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'TlsInputError';
   }
 }
 
-export function isLoopbackAddress(addr) {
+export function isLoopbackAddress(addr: unknown): boolean {
   if (!addr) return false;
   const ip = String(addr).replace(/^::ffff:/, '');
   if (ip === '::1') return true;
@@ -73,12 +78,12 @@ export function isLoopbackAddress(addr) {
  * Приватный адрес — то есть «из дома», а не из интернета.
  * Нужен там, где отдаём корень без сессии: наружу через шлюз он уходить не должен.
  */
-export function isPrivateAddress(addr) {
+export function isPrivateAddress(addr: unknown): boolean {
   if (!addr) return false;
   const ip = String(addr).replace(/^::ffff:/, '');
   if (isLoopbackAddress(ip)) return true;
   if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
+    const [a, b] = ip.split('.').map(Number) as [number, number];
     if (a === 10) return true;
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
@@ -104,12 +109,20 @@ export function isPrivateAddress(addr) {
  * улетали бы в редирект на локальный https-адрес, до которого снаружи не достучаться.
  * Сосед же всегда `127.0.0.1` — туннель приходит на loopback.
  */
-export function decideHttpRequest({ remoteAddress, routeUrl, httpsUp, upgrade = false }) {
+// Что делать с запросом на открытом сокете: пустить, отправить на https или порвать.
+export type HttpDecision = 'pass' | 'redirect' | 'drop';
+
+export function decideHttpRequest({ remoteAddress, routeUrl, httpsUp, upgrade = false }: {
+  remoteAddress?: string | undefined;
+  routeUrl?: string;
+  httpsUp?: boolean;
+  upgrade?: boolean;
+}): HttpDecision {
   // https не поднялся (нет сертификата, битый файл, занятый порт) — работаем как раньше.
   // Иначе кокпит стал бы недоступен из сети, и чинить пришлось бы с консоли мозга.
   if (!httpsUp) return 'pass';
   if (isLoopbackAddress(remoteAddress)) return 'pass';
-  if (PUBLIC_HTTP_ROUTES.has(routeUrl)) return 'pass';
+  if (PUBLIC_HTTP_ROUTES.has(routeUrl ?? '')) return 'pass';
   // `wss://` браузер сам не подставит, а открытый `ws://` в сети — это PTY-шелл открытым текстом.
   if (upgrade) return 'drop';
   return 'redirect';
@@ -132,7 +145,7 @@ const SKIP_IFACE = /^(docker|br-|veth|virbr|vmnet|tailscale|zt)|(^|[-_])(tun|tap
  * Второй пояс — маска. Имена туннелей бывают произвольными (`customvpn`, `corpnet`), но сеть у них
  * точка-точка: в /30 и уже клиенту места нет, домашней сети такой маски не бывает.
  */
-function isPointToPoint(item) {
+function isPointToPoint(item: { cidr?: string | null; netmask?: string }): boolean {
   const fromCidr = Number(String(item.cidr || '').split('/')[1]);
   if (Number.isInteger(fromCidr)) return fromCidr >= 30;
   return item.netmask === '255.255.255.252'
@@ -140,13 +153,21 @@ function isPointToPoint(item) {
     || item.netmask === '255.255.255.255';
 }
 
-export function localAddresses() {
-  const out = [];
+// Адрес машины и интерфейс, на котором он найден: интерфейс показывается человеку,
+// чтобы он узнал свою домашнюю сеть среди прочих.
+export interface LocalAddress {
+  address: string;
+  iface: string;
+}
+
+export function localAddresses(): LocalAddress[] {
+  const out: LocalAddress[] = [];
   for (const [iface, list] of Object.entries(os.networkInterfaces())) {
     if (SKIP_IFACE.test(iface)) continue;
     for (const item of list || []) {
       if (item.internal) continue;
-      if (item.family !== 'IPv4' && item.family !== 4) continue;
+      // Разные версии Node называют семейство то строкой, то числом.
+      if (String(item.family) !== 'IPv4' && String(item.family) !== '4') continue;
       if (isPointToPoint(item)) continue;
       out.push({ address: item.address, iface });
     }
@@ -162,14 +183,15 @@ export function localAddresses() {
  *  - конфиг openssl понимает ещё `$ENV::` и `.include`.
  * `net.isIP` пропускает только настоящий адрес, в SAN уходит его канонизированный вид.
  */
-export function normalizeAddresses(input) {
+export function normalizeAddresses(input: unknown): string[] {
   if (!Array.isArray(input) || input.length === 0) {
     throw new TlsInputError('Укажите хотя бы один адрес.');
   }
   if (input.length > MAX_ADDRESSES) {
     throw new TlsInputError(`Слишком много адресов (максимум ${MAX_ADDRESSES}).`);
   }
-  const out = [];
+  const out: string[] = [];
+
   for (const raw of input) {
     const value = String(raw ?? '').trim();
     if (!net.isIP(value)) {
@@ -183,11 +205,19 @@ export function normalizeAddresses(input) {
   return out;
 }
 
-function fingerprintOf(pem) {
+function fingerprintOf(pem: string | Buffer): string {
   return new X509Certificate(pem).fingerprint256;
 }
 
-function certFacts(pem) {
+// Факты о сертификате для карточки «Доступ»: отпечаток, срок и адреса из SAN.
+export interface CertificateFacts {
+  fingerprint: string;
+  notAfter: string;
+  daysLeft: number;
+  san: string[];
+}
+
+function certFacts(pem: string | Buffer): CertificateFacts {
   const cert = new X509Certificate(pem);
   const notAfter = new Date(cert.validTo);
   const san = String(cert.subjectAltName || '')
@@ -203,19 +233,65 @@ function certFacts(pem) {
 }
 
 /** Адреса из SAN — без префиксов «IP Address:»/«DNS:», чтобы сравнивать с адресами машины. */
-function sanAddresses(san) {
+function sanAddresses(san: string[]): string[] {
   return san
     .filter((s) => /^IP Address:/i.test(s))
     .map((s) => s.replace(/^IP Address:\s*/i, '').trim());
 }
 
+// Живое состояние https-сокета. Оно ОТДЕЛЬНО от файлов на диске: сертификат вступает
+// в силу только после перезапуска, и «файлы есть» не означает «слушает».
+export interface TlsRuntime {
+  source?: string;
+  port?: number | null;
+  httpPort?: number | null;
+  up?: boolean;
+  error?: string;
+  fingerprint?: string;
+  server?: unknown;
+}
+
+// Состояние выпуска на диске. Маркер `enabled` отделён от наличия файлов намеренно —
+// см. пояснение у `readState`.
+export interface LocalTlsState {
+  enabled?: boolean;
+  [field: string]: unknown;
+}
+
+// Пара для сокета либо причина, по которой её нет. Причина — текст для человека:
+// «выключено» и «битый файл» он должен различать без чтения журнала.
+export type LocalTlsPair =
+  | { ok: true; key: Buffer; cert: Buffer; fingerprint: string }
+  | { ok: false; reason: string };
+
+// Сведения о сертификате на диске. Отсутствие файла — не отказ: карточка «Доступ»
+// показывает его как «ещё не выпущен».
+export type CertificateInfo =
+  | ({ exists: true; pem: string } & CertificateFacts)
+  | { exists: false };
+
 export class LocalTls {
+  readonly dir: string;
+
+  readonly caDir: string;
+
+  readonly keyPath: string;
+
+  readonly certPath: string;
+
+  readonly statePath: string;
+
+  readonly caKeyPath: string;
+
+  readonly caCertPath: string;
+
+  private _busy: boolean;
+
   /**
-   * @param {object} opts
-   * @param {string} opts.dir каталог листа (`server/.state/tls`)
-   * @param {string} opts.caDir каталог корня (вне репозитория)
+   * `dir` — каталог листа (`server/.state/tls`), `caDir` — каталог корня вне репозитория:
+   * корень переживает переустановку кокпита, лист выпускается заново.
    */
-  constructor({ dir, caDir }) {
+  constructor({ dir, caDir }: { dir: string; caDir: string }) {
     this.dir = dir;
     this.caDir = caDir;
     this.keyPath = path.join(dir, 'key.pem');
@@ -233,16 +309,17 @@ export class LocalTls {
    * переименование двух файлов не атомарно, обрыв посередине давал бы «есть cert, нет key»,
    * то есть тихий старт по http (cookie без Secure) при UI, показывающем «включено».
    */
-  readState() {
+  readState(): LocalTlsState | null {
     try {
-      const raw = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
-      return (raw && typeof raw === 'object') ? raw : null;
+      const raw: unknown = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
+
+      return (raw && typeof raw === 'object') ? raw as LocalTlsState : null;
     } catch {
       return null;
     }
   }
 
-  writeState(patch) {
+  writeState(patch: LocalTlsState): LocalTlsState {
     fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const next = { ...(this.readState() || {}), ...patch };
     const tmp = `${this.statePath}.tmp`;
@@ -260,25 +337,29 @@ export class LocalTls {
    * Поэтому пара проверяется `createSecureContext` заранее: он ловит и мусор, и ключ не от
    * этого сертификата.
    */
-  load() {
+  load(): LocalTlsPair {
     const state = this.readState();
+
     if (!state?.enabled) return { ok: false, reason: 'disabled' };
-    let key; let cert;
+
+    let key: Buffer;
+    let cert: Buffer;
+
     try {
       key = fs.readFileSync(this.keyPath);
       cert = fs.readFileSync(this.certPath);
     } catch (err) {
-      return { ok: false, reason: `не читается файл сертификата: ${err.message}` };
+      return { ok: false, reason: `не читается файл сертификата: ${failureText(err)}` };
     }
     try {
       tls.createSecureContext({ key, cert });
     } catch (err) {
-      return { ok: false, reason: `сертификат не годится: ${err.message}` };
+      return { ok: false, reason: `сертификат не годится: ${failureText(err)}` };
     }
     return { ok: true, key, cert, fingerprint: fingerprintOf(cert) };
   }
 
-  caInfo() {
+  caInfo(): CertificateInfo {
     try {
       const pem = fs.readFileSync(this.caCertPath, 'utf8');
       return { exists: true, pem, ...certFacts(pem) };
@@ -287,16 +368,17 @@ export class LocalTls {
     }
   }
 
-  leafInfo() {
+  leafInfo(): CertificateInfo {
     try {
       const pem = fs.readFileSync(this.certPath, 'utf8');
-      return { exists: true, ...certFacts(pem) };
+
+      return { exists: true, pem, ...certFacts(pem) };
     } catch {
       return { exists: false };
     }
   }
 
-  async opensslAvailable() {
+  async opensslAvailable(): Promise<boolean> {
     try {
       await exec('openssl', ['version']);
       return true;
@@ -310,7 +392,7 @@ export class LocalTls {
    * иначе «файлы есть» читается как «работает», хотя сертификат вступает в силу только
    * после перезапуска.
    */
-  async status(runtime = {}) {
+  async status(runtime: TlsRuntime = {}): Promise<Record<string, unknown>> {
     const state = this.readState();
     const ca = this.caInfo();
     const leaf = this.leafInfo();
@@ -394,7 +476,7 @@ export class LocalTls {
    * Всё пишется во временный каталог и переносится только после проверки — оборванная
    * генерация не должна оставить сервер с половиной пары.
    */
-  async generate({ addresses }) {
+  async generate({ addresses }: { addresses: unknown }): Promise<Record<string, unknown>> {
     if (this._busy) throw new TlsInputError('Генерация уже идёт.');
     const list = normalizeAddresses(addresses);
     if (!await this.opensslAvailable()) {
@@ -449,6 +531,9 @@ export class LocalTls {
 
       const facts = certFacts(cert.toString('utf8'));
       const ca = this.caInfo();
+      // Корень уже создан выше по ходу выпуска; отпечаток пустой означал бы, что
+      // его файл исчез между генерацией и чтением — тогда и записывать нечего.
+      const caFingerprint = ca.exists ? ca.fingerprint : '';
       // Маркер — последним: он и есть «включено».
       this.writeState({
         enabled: true,
@@ -457,9 +542,10 @@ export class LocalTls {
         san: facts.san,
         addresses: list,
         fingerprint: facts.fingerprint,
-        caFingerprint: ca.fingerprint || '',
+        caFingerprint: caFingerprint,
       });
-      return { addresses: list, ...facts, caFingerprint: ca.fingerprint || '' };
+
+      return { addresses: list, ...facts, caFingerprint };
     } finally {
       this._busy = false;
       if (tmpDir) await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});

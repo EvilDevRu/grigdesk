@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import { B24Client } from '../../server/src/lib/b24/b24-client.js';
-import b24Module from '../../server/src/modules/b24/index.js';
+import { B24Client } from '../../server/src/lib/b24/client.ts';
+import b24Module from '../../server/src/modules/b24/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

@@ -76,8 +76,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { UiDialog, UiIconButton, UiSpinner } from '../ui';
-import { api } from '../shared/api-client.js';
-import { useDocumentPreviewStore } from '../stores/document-preview.js';
+import { documentsApi } from '../shared/documentsApi.ts';
+import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
 import {
   documentLinkFromClick,
@@ -154,9 +154,7 @@ watch(
     resolving.value = true;
 
     try {
-      const resolved = await api.post('/api/documents/resolve', {
-        path: target.open,
-      });
+      const resolved = await documentsApi.resolve(target.open);
 
       if (currentGeneration !== generation) {
         return;

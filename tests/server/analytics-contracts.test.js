@@ -7,18 +7,18 @@ import {
   canonicalJson,
   lifecycleEventHash,
   sha256Canonical,
-} from '../../server/src/lib/analytics/canonical.js';
+} from '../../server/src/lib/analytics/canonical.ts';
 import {
   addDecimals,
   canonicalDecimal,
   multiplyDivideDecimal,
   roundDecimal,
-} from '../../server/src/lib/analytics/decimal.js';
+} from '../../server/src/lib/analytics/decimal.ts';
 import {
   ANALYTICS_ENUMS,
   analyticsId,
   assertAnalyticsIdentity,
-} from '../../server/src/lib/analytics/contracts.js';
+} from '../../server/src/lib/analytics/contracts.ts';
 
 test('RFC 8785 subset имеет общий UTF-16 порядок ключей и byte-stable hash', () => {
   const value = {

@@ -11,7 +11,7 @@ async function compilePanel() {
     stubs: {
       '@xterm/xterm': 'export const Terminal = globalThis.__terminalPanelTerminal;',
       '@xterm/addon-fit': 'export const FitAddon = globalThis.__terminalPanelFitAddon;',
-      '../../shared/api-client.js': 'export const api = globalThis.__terminalPanelApi;',
+      '../../shared/apiClient.ts': 'export const api = globalThis.__terminalPanelApi;',
     },
   });
 }

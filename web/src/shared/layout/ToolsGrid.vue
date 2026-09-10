@@ -18,7 +18,7 @@
 </template>
 
 <script setup>
-import { NAV_ICONS } from '../nav-icons.js';
+import { NAV_ICONS } from '../navIcons.ts';
 
 defineProps({
   items: { type: Array, default: () => [] },

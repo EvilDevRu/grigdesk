@@ -46,7 +46,7 @@ with open(output, "w", encoding="utf-8") as target:
 make_usage_document() {
   local run_id=$1 epoch=$2 observed_at=$3
   "$NODE_BIN" --input-type=module - \
-    "$FACTORY_HOME/../server/src/lib/analytics/usage-document.js" \
+    "$FACTORY_HOME/../server/src/lib/analytics/usageDocument.ts" \
     "$usage_dir/$run_id.json" "$attempt" "$run_id" "$epoch" "$observed_at" <<'NODE'
 import { chmodSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';

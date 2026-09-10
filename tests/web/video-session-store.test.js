@@ -19,13 +19,13 @@ const module = await compileModule(webFile('src/stores/videoSession.ts'), {
   stubs: {
     // Ленивый прокси, а не значение: стаб выполняется на импорте модуля, то есть до
     // того, как тест подставит свой api, и снимок `globalThis` остался бы пустым.
-    '../shared/api-client.js': `export const api = {
+    '../shared/apiClient.ts': `export const api = {
       get: (...args) => globalThis.__videoSessionApi.get(...args),
       post: (...args) => globalThis.__videoSessionApi.post(...args),
     };`,
     // Транспорт раздела ходит в общий клиент своим путём — заглушка сопоставляется
     // по точной строке импорта, поэтому у shared/mediaApi.ts она отдельная.
-    './api-client.js': `export const api = {
+    './apiClient.ts': `export const api = {
       url: (path) => path,
       get: (...args) => globalThis.__videoSessionApi.get(...args),
       post: (...args) => globalThis.__videoSessionApi.post(...args),

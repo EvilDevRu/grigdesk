@@ -31,7 +31,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { parseDockerLogMessage } from '../../../../shared/dockerContracts';
 import type { DockerContainer, DockerLogFrame, DockerLogMessage } from '../../../../shared/dockerContracts';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import { UiCheckbox, UiSearchInput } from '../../ui';
 
 type LogStatus = 'connecting' | 'open' | 'closed' | 'error';

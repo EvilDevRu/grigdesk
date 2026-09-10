@@ -11,9 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import routesApi from '../../server/src/modules/routes/api.js';
-import routesModule from '../../server/src/modules/routes/index.js';
-import { RoutesError } from '../../server/src/modules/routes/schema.js';
+import routesApi from '../../server/src/modules/routes/api.ts';
+import routesModule from '../../server/src/modules/routes/index.ts';
+import { RoutesError } from '../../server/src/modules/routes/schema.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

@@ -5,7 +5,7 @@ import {
   provide,
   watch,
 } from 'vue';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import { useChatStore } from '../../stores/chat.js';
 import {
   createDictationController,

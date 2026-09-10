@@ -5,15 +5,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import { safeInboxSourceUrl } from '../../lib/inbox/draft.ts';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    pluginEnabled(id: string): boolean;
-    sse?: {
-      broadcast?(name: string, payload?: unknown): unknown;
-    };
-  }
-}
-
 type Payload = Record<string, unknown>;
 
 // Координатор и служба решений приходят из приложения. Здесь объявлено ровно то,

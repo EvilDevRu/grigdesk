@@ -11,7 +11,7 @@ import {
   parseSshSessionOpened,
   parseSshSessions,
 } from '../../shared/sshContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { sshApi } from '../../web/src/shared/sshApi.ts';
 
 const connection = {

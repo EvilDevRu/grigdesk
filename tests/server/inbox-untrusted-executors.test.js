@@ -7,7 +7,7 @@ import test from 'node:test';
 import claude, {
   buildClaudeUntrustedArgs,
   buildClaudeUntrustedInput,
-} from '../../server/src/lib/executors/claude.js';
+} from '../../server/src/lib/executors/claude.ts';
 
 test('Claude untrusted argv отключает инструменты, customizations, MCP и persistence', () => {
   const args = buildClaudeUntrustedArgs({

@@ -855,8 +855,8 @@
 import { ref, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
-import { api } from '../shared/api-client.js';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
+import { api } from '../shared/apiClient.ts';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import {
   confirmDialog,
   UiButton,
@@ -885,9 +885,9 @@ import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.js';
 import { useTaskSeenStore } from '../stores/task-seen.js';
 import { useDictationController } from '../features/speech/provider.js';
-import { liveTimerSec, secToHMS } from '../shared/format.js';
-import { mdToHtml } from '../shared/md.js';
-import { providerLabel } from '../shared/runner-display.js';
+import { liveTimerSec, secToHMS } from '../shared/format.ts';
+import { mdToHtml } from '../shared/md.ts';
+import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 

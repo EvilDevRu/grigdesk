@@ -1,4 +1,4 @@
-import { sseSubscribe } from '../../composables/useSse.js';
+import { sseSubscribe } from '../../composables/useSse.ts';
 import { inboxApi, inboxPluginDisabled } from '../../shared/inboxApi.ts';
 import { useInboxStore } from '../../stores/inbox.ts';
 import { runtimeOf } from './inboxRuntime.ts';

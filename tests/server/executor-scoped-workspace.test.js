@@ -6,8 +6,8 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
-import claude from '../../server/src/lib/executors/claude.js';
-import codex from '../../server/src/lib/executors/codex.js';
+import claude from '../../server/src/lib/executors/claude.ts';
+import codex from '../../server/src/lib/executors/codex.ts';
 
 test('Claude и Codex объявляют проверяемый scoped workspace для триажа', () => {
   assert.deepEqual({

@@ -10,8 +10,8 @@ import {
   FactoryDebugSettings,
   FactoryDebugInputError,
   parseFactoryDebugView,
-} from '../../server/src/lib/factory-debug.js';
-import settingsModule from '../../server/src/modules/settings/index.js';
+} from '../../server/src/lib/factoryDebug.ts';
+import settingsModule from '../../server/src/modules/settings/index.ts';
 
 const requireFromServer = createRequire(
   new URL('../../server/package.json', import.meta.url),

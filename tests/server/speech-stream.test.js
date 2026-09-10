@@ -20,12 +20,12 @@ import {
   STREAM_WORKER_PY,
   buildSpeechStreamArgv,
   createSpeechStreamProcess,
-} from '../../server/src/lib/speech/stream-process.js';
+} from '../../server/src/lib/speech/streamProcess.ts';
 import {
   SpeechStreamSession,
   advanceLocalAgreement,
-} from '../../server/src/lib/speech/stream.js';
-import { SpeechRuntime } from '../../server/src/lib/speech/index.js';
+} from '../../server/src/lib/speech/stream.ts';
+import { SpeechRuntime } from '../../server/src/lib/speech/index.ts';
 
 function deferred() {
   let resolve;

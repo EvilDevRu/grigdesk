@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRouteDef } from '../../server/src/lib/route-graph.js';
+import { buildRouteDef } from '../../server/src/lib/routeGraph.ts';
 
 const stop = { stop: 'human' };
 

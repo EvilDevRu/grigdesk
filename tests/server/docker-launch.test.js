@@ -15,9 +15,10 @@ function shellQuote(value) {
 }
 
 /**
- * Запуск проверяется в отдельном каталоге без Cockpit и Docker хоста. Node сначала
- * отключает автоматическое исполнение TS, как на минимальной версии без флага.
- * Только аргументы настоящего launcher могут включить его для импорта плагина.
+ * Запуск проверяется в отдельном каталоге без Cockpit и Docker хоста. `node` в PATH
+ * подменён обёрткой того же рантайма: фикстура должна видеть ровно тот Node, которым
+ * идёт прогон, а не случайный из системного PATH. Флагов обёртка не добавляет —
+ * минимум 22.18 исполняет TypeScript сам, и проверяется именно это.
  */
 async function fixture(t, { stubNpm = false } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'docker-ts-launch-'));
@@ -32,7 +33,7 @@ async function fixture(t, { stubNpm = false } = {}) {
   await copyFile(path.join(root, 'bin/lib/runtime-env.sh'), path.join(directory, 'bin/lib/runtime-env.sh'));
   await writeFile(path.join(directory, 'tools/node'), [
     '#!/usr/bin/env bash',
-    `exec ${shellQuote(process.execPath)} --no-experimental-strip-types "$@"`,
+    `exec ${shellQuote(process.execPath)} "$@"`,
     '',
   ].join('\n'), { mode: 0o755 });
   await writeFile(path.join(directory, 'tools/ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -49,7 +50,9 @@ async function fixture(t, { stubNpm = false } = {}) {
   }));
   const serviceUrl = new URL('../../server/src/lib/docker/service.ts', import.meta.url).href;
   const moduleUrl = new URL('../../server/src/modules/docker/index.ts', import.meta.url).href;
-  await writeFile(path.join(directory, 'server/src/app.js'), [
+  // Лаунчеры репозитория указывают на `app.ts`: боевая сборка сервера живёт там,
+  // а `app.js` остался однострочным shim-ом установленного юнита.
+  await writeFile(path.join(directory, 'server/src/app.ts'), [
     "import { writeFile } from 'node:fs/promises';",
     `import { createDockerService } from ${JSON.stringify(serviceUrl)};`,
     `import dockerModule from ${JSON.stringify(moduleUrl)};`,
@@ -75,7 +78,7 @@ async function fixture(t, { stubNpm = false } = {}) {
   };
 }
 
-test('bin/cockpit запускает TS Docker при выключенной по умолчанию поддержке типов', async (t) => {
+test('bin/cockpit запускает TS Docker без отдельной компиляции и без флагов', async (t) => {
   const { directory, proof, env } = await fixture(t, { stubNpm: true });
 
   await execute('bash', [path.join(directory, 'bin/cockpit'), 'run'], {

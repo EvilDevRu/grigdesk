@@ -16,61 +16,95 @@ const DECIMAL_RE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/u;
 const MAX_SIGNIFICANT_DIGITS = 30;
 const MAX_SCALE = 18;
 
-function uint(value) {
+// `meta.env` — плоская карта строк: лончер движка пишет её как обычный env-файл.
+export type MetaEnv = Record<string, string | undefined>;
+
+// Разобранный расход попытки. Числа остаются СТРОКАМИ: токены выходят за 2^53, а у
+// стоимости до 18 знаков после точки — прогон через `number` молча терял бы точность.
+// `null` означает «провайдер не сообщил» и в ноль не превращается.
+export interface MetaUsage {
+  in: string | null;
+  out: string | null;
+  cacheRead: string | null;
+  cacheWrite: string | null;
+  cacheWrite5m: string | null;
+  cacheWrite1h: string | null;
+  cacheWriteUnknown: string | null;
+  costUsd: string | null;
+  completeness: 'complete' | 'partial';
+  // exact — атомарное зеркало schema 2; approximate — история старых прогонов.
+  provenance: 'exact' | 'approximate';
+}
+
+function uint(value: unknown): string | null {
   return typeof value === 'string' && UINT_RE.test(value) ? value : null;
 }
 
 /** Валидирует каноническую десятичную строку; нормализовать нельзя — alias запрещён. */
-function canonicalDecimal(value) {
+function canonicalDecimal(value: unknown): string | null {
   if (typeof value !== 'string' || !DECIMAL_RE.test(value)) return null;
-  const [whole, fraction = ''] = value.split('.');
+  const [whole = '', fraction = ''] = value.split('.');
   const digits = `${whole}${fraction}`.replace(/^0+/u, '') || '0';
   if (digits.length > MAX_SIGNIFICANT_DIGITS || fraction.length > MAX_SCALE) return null;
   return value;
 }
 
 /** Сумма канонических целых строк. Точная: слагаемые уже проверены `uint()`. */
-function addUints(...values) {
+function addUints(...values: string[]): string {
   return values.reduce((sum, value) => sum + BigInt(value), 0n).toString();
 }
 
-function legacyCost(value) {
+function legacyCost(value: unknown): string | null {
   if (typeof value !== 'string' || !LEGACY_COST_RE.test(value)) return null;
-  const [whole, fraction = ''] = value.split('.');
+
+  const [whole = '', fraction = ''] = value.split('.');
   const trimmed = fraction.replace(/0+$/u, '');
   return trimmed.length > 0 ? `${whole}.${trimmed}` : whole;
 }
 
-function schema2(meta) {
+/** Атомарное зеркало запуска: лончер пишет его целиком после завершения процесса. */
+function schema2(meta: MetaEnv): MetaUsage | null {
+  const complete = meta.USAGE_COMPLETE;
+
   if (meta.META_COMPLETE !== '1' || meta.USAGE_SCHEMA !== '2'
-      || !['0', '1'].includes(meta.USAGE_COMPLETE)) return null;
-  const fields = {
-    in: uint(meta.TOKENS_IN),
-    out: uint(meta.TOKENS_OUT),
-    cacheRead: uint(meta.TOKENS_CACHE_READ),
-    cacheWrite5m: uint(meta.TOKENS_CACHE_WRITE_5M),
-    cacheWrite1h: uint(meta.TOKENS_CACHE_WRITE_1H),
-    cacheWriteUnknown: uint(meta.TOKENS_CACHE_WRITE_UNKNOWN),
-  };
-  if (Object.values(fields).some((value) => value === null)) return null;
+      || (complete !== '0' && complete !== '1')) return null;
+
+  // Поля читаются по одному: пропуск любого означает не «ноль», а неполное зеркало,
+  // и такую запись показывать как расход нельзя.
+  const tokensIn = uint(meta.TOKENS_IN);
+  const tokensOut = uint(meta.TOKENS_OUT);
+  const cacheRead = uint(meta.TOKENS_CACHE_READ);
+  const cacheWrite5m = uint(meta.TOKENS_CACHE_WRITE_5M);
+  const cacheWrite1h = uint(meta.TOKENS_CACHE_WRITE_1H);
+  const cacheWriteUnknown = uint(meta.TOKENS_CACHE_WRITE_UNKNOWN);
+
+  if (tokensIn === null || tokensOut === null || cacheRead === null
+      || cacheWrite5m === null || cacheWrite1h === null || cacheWriteUnknown === null) {
+    return null;
+  }
+
   const costUsd = Object.hasOwn(meta, 'COST_USD') ? canonicalDecimal(meta.COST_USD) : null;
+
   if (Object.hasOwn(meta, 'COST_USD') && costUsd === null) return null;
+
   return Object.freeze({
-    ...fields,
+    in: tokensIn,
+    out: tokensOut,
+    cacheRead,
+    cacheWrite5m,
+    cacheWrite1h,
+    cacheWriteUnknown,
     // 5m и 1h держатся отдельно: у них разный тариф, и смешивать их нельзя.
     // Сумма нужна только для одной компактной строки карточки.
-    cacheWrite: addUints(
-      fields.cacheWrite5m,
-      fields.cacheWrite1h,
-      fields.cacheWriteUnknown,
-    ),
+    cacheWrite: addUints(cacheWrite5m, cacheWrite1h, cacheWriteUnknown),
     costUsd,
-    completeness: meta.USAGE_COMPLETE === '1' ? 'complete' : 'partial',
+    completeness: complete === '1' ? 'complete' : 'partial',
     provenance: 'exact',
   });
 }
 
-function schema1(meta) {
+/** Прежний формат: остаётся только ради истории и честно помечается приблизительным. */
+function schema1(meta: MetaEnv): MetaUsage | null {
   const fields = {
     in: uint(meta.TOKENS_IN),
     out: uint(meta.TOKENS_OUT),
@@ -97,9 +131,13 @@ function schema1(meta) {
  * пишет целиком после завершения процесса; schema 1 остаётся только для истории
  * старых прогонов и честно помечается `provenance: 'approximate'`.
  */
-export function normalizedMetaUsage(meta) {
-  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null;
+export function normalizedMetaUsage(value: unknown): MetaUsage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const meta = value as MetaEnv;
+
   if (meta.SCHEMA === '2') return schema2(meta);
   if (meta.SCHEMA === '1') return schema1(meta);
+
   return null;
 }

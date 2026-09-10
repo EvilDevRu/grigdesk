@@ -246,7 +246,7 @@ import {
   confirmDialog,
   promptDialog,
 } from '../ui';
-import { useSse } from '../composables/useSse.js';
+import { useSse } from '../composables/useSse.ts';
 
 // Inbox показывает только public projection общего API. Provider identity,
 // accountRef и native payload в браузере не нужны и здесь не ожидаются.

@@ -8,7 +8,7 @@ import {
   parseGitHubRulesSaved,
   parseGitHubStatus,
 } from '../../shared/githubContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { githubApi, githubPluginDisabled } from '../../web/src/shared/githubApi.ts';
 
 const FINGERPRINT = `ghpol1:${'a'.repeat(64)}`;

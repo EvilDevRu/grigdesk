@@ -5,15 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.js';
-import ollama from '../../server/src/lib/executors/ollama.js';
+import { getExecutor, getProviderAdapters } from '../../server/src/lib/executors/index.ts';
+import ollama from '../../server/src/lib/executors/ollama.ts';
 import {
   estimateMaxNumCtx,
   kvBytesPerToken,
   systemMemory,
-} from '../../server/src/lib/executors/_ollama-client.js';
-import { createToolbox } from '../../server/src/lib/executors/_ollama-tools.js';
-import { executeProviderUsageAction } from '../../server/src/lib/provider-usage.js';
+} from '../../server/src/lib/executors/_ollamaClient.ts';
+import { createToolbox } from '../../server/src/lib/executors/_ollamaTools.ts';
+import { executeProviderUsageAction } from '../../server/src/lib/providerUsage.ts';
 
 // Синтетическая MoE-модель: круглые размеры и аппаратные бюджеты не сняты
 // с конкретного хоста. head_count_kv: null закрепляет fallback GQA-эвристики.

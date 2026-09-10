@@ -565,11 +565,11 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import { useDictationController } from '../../features/speech/provider.js';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
 import { contextFill } from '../../../../shared/chatContext.ts';
-import { writeClipboardText } from '../../shared/clipboard.js';
+import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.js';
 import { useUiStore } from '../../stores/ui.js';
 import { useProvidersStore } from '../../stores/providers.js';
@@ -588,11 +588,11 @@ import {
   UiTextarea,
   UiTooltip,
 } from '../../ui';
-import { mdToHtml } from '../../shared/md.js';
+import { mdToHtml } from '../../shared/md.ts';
 import { documentLinkFromClick } from '../../features/documents/links.js';
 import { chatFileLinkHref, codeLinkFromClick, loadCodeRoots } from '../../features/code/links.ts';
-import { useToolLauncher } from '../../shared/tools/launcher.js';
-import { useDocumentPreviewStore } from '../../stores/document-preview.js';
+import { useToolLauncher } from '../../shared/tools/launcher.ts';
+import { useDocumentPreviewStore } from '../../stores/documentPreview.ts';
 import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
 
 // Полноразмерная сессия на единственной странице «Чаты».

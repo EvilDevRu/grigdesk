@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { parseB24TaskId } from './b24-task-id.js';
+import { parseB24TaskId } from './b24TaskId.ts';
 import type {
   ShelfAnalysisSnapshot,
   ShelfAnalysisState,

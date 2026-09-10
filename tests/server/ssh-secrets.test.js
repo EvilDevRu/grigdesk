@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PrefsStore } from '../../server/src/lib/prefs-store.js';
+import { PrefsStore } from '../../server/src/lib/prefsStore.ts';
 
 class FakeSsh2Client extends EventEmitter {
   connect(options) {

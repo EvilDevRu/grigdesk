@@ -113,7 +113,7 @@
 <script setup>
 import { computed, onUnmounted, ref } from 'vue';
 
-import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.js';
+import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.ts';
 import { UiButton, UiIconButton, UiInlineMessage, UiPopover } from '../../ui';
 
 const props = defineProps({

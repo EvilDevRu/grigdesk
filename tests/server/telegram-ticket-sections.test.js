@@ -25,7 +25,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import factoryModule from '../../server/src/modules/factory/index.js';
+import factoryModule from '../../server/src/modules/factory/index.ts';
 import telegramModule from '../../server/src/modules/telegram/index.ts';
 import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
 import {
@@ -33,7 +33,7 @@ import {
   telegramModuleConnection,
 } from './helpers/telegram-account-module.js';
 import { TelegramRulesStore } from '../../server/src/lib/telegram/rulesStore.ts';
-import { parsePipeline } from '../../server/src/lib/pipeline-parse.js';
+import { parsePipeline } from '../../server/src/lib/pipelineParse.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

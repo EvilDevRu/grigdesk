@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseClaudeEfforts } from '../../server/src/lib/executors/claude.js';
+import { parseClaudeEfforts } from '../../server/src/lib/executors/claude.ts';
 
 test('Claude effort discovery reads choices wrapped onto the next help line', () => {
   const help = [

@@ -30,8 +30,8 @@ async function dbSection(t, api) {
   globalThis.__dbStoreApi = api;
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__dbStoreApi;',
-      '../../composables/useSse.js': 'export const sseSubscribe = () => () => {};',
+      './apiClient.ts': 'export const api = globalThis.__dbStoreApi;',
+      '../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
     },
   });
   const { createPinia, setActivePinia } = await import(
@@ -142,7 +142,7 @@ test('raw API сохраняет заголовок выбранной SSH-се�
       headers: { 'Content-Type': 'application/json' },
     });
   };
-  const { api } = await import(`../../web/src/shared/api-client.js?db-raw=${Date.now()}`);
+  const { api } = await import(`../../web/src/shared/apiClient.ts?db-raw=${Date.now()}`);
   await api.postBytes(
     '/api/db/profiles/fixture/sessions',
     new TextEncoder().encode('secret'),

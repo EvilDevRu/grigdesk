@@ -366,7 +366,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
-import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.js';
+import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.ts';
 import { useBoardStore } from '../stores/board.js';
 import { useUiStore } from '../stores/ui.js';
 import { analyzeTask, startAnalysisPolling, useAnalysisStore } from '../actions/analysis';
@@ -377,8 +377,8 @@ import { useTaskSeenStore } from '../stores/task-seen.js';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
-import { api } from '../shared/api-client.js';
-import { useSse } from '../composables/useSse.js';
+import { api } from '../shared/apiClient.ts';
+import { useSse } from '../composables/useSse.ts';
 import { boardTaskListResetKey, selectBoardTasks } from '../shared/board-task-list.js';
 import {
   confirmDialog,

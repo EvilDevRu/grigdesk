@@ -1031,15 +1031,15 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { api } from '../shared/api-client.js';
-import { useSse } from '../composables/useSse.js';
-import { useUiContextSource } from '../composables/useUiContextSource.js';
+import { api } from '../shared/apiClient.ts';
+import { useSse } from '../composables/useSse.ts';
+import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useUiStore } from '../stores/ui.js';
 import { useTasksStore } from '../stores/tasks.js';
 import { useBoardStore } from '../stores/board.js';
 import { useCompanionStore } from '../stores/companion.js';
-import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.js';
-import { mdToHtml } from '../shared/md.js';
+import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.ts';
+import { mdToHtml } from '../shared/md.ts';
 import {
   alertDialog,
   confirmDialog,
@@ -1072,7 +1072,7 @@ import {
   runnerModelEffortLabel,
   runnerNodeLabel,
   runnerReasonLabel,
-} from '../shared/runner-display.js';
+} from '../shared/runnerDisplay.ts';
 import ArbiterDecision from './pipeline/ArbiterDecision.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import OpenDiffButton from './OpenDiffButton.vue';

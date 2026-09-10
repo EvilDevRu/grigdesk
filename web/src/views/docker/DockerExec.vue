@@ -15,7 +15,7 @@ import { FitAddon } from '@xterm/addon-fit';
 
 import { parseDockerExecMessage } from '../../../../shared/dockerContracts';
 import type { DockerContainer, DockerExecInput } from '../../../../shared/dockerContracts';
-import { api } from '../../shared/api-client.js';
+import { api } from '../../shared/apiClient.ts';
 import { UiButton } from '../../ui';
 
 type ExecStatus = 'connecting' | 'open' | 'closed' | 'error';

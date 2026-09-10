@@ -379,7 +379,7 @@ async function analysisFixture({ enabled = true, autoAdd = true, shelfError = nu
   };
   const module = await compileModule(webFile('src/actions/analysis/index.ts'), {
     stubs: {
-      './api-client.js': 'export const api = globalThis.__shelfAnalysisHarness.api;',
+      './apiClient.ts': 'export const api = globalThis.__shelfAnalysisHarness.api;',
       '../../stores/taskShelf.ts': [
         'export const useTaskShelfStore = () => globalThis.__shelfAnalysisHarness.shelf;',
       ].join('\n'),
@@ -502,15 +502,15 @@ async function reactiveStoreFixture({
   globalThis.__taskShelfStoreHarness = harness;
   const module = await compileModule(webFile('src/stores/taskShelf.ts'), {
     stubs: {
-      '../shared/api-client.js': 'export const api = globalThis.__taskShelfStoreHarness.api;',
-      './api-client.js': 'export const api = globalThis.__taskShelfStoreHarness.api;',
-      '../shared/notify.js': [
+      '../shared/apiClient.ts': 'export const api = globalThis.__taskShelfStoreHarness.api;',
+      './apiClient.ts': 'export const api = globalThis.__taskShelfStoreHarness.api;',
+      '../shared/notify.ts': [
         'export const notify = (...args) => {',
         '  globalThis.__taskShelfStoreHarness.notifications.push(args);',
         '  return Promise.resolve(true);',
         '};',
       ].join('\n'),
-      '../composables/useSse.js': [
+      '../composables/useSse.ts': [
         'export const sseSubscribe = (handler) => {',
         '  globalThis.__taskShelfStoreHarness.sseHandler = handler;',
         '  return () => { globalThis.__taskShelfStoreHarness.sseHandler = null; };',

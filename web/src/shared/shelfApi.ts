@@ -1,4 +1,4 @@
-import { api } from './api-client.js';
+import { api } from './apiClient.ts';
 import { parseShelfEntrySnapshot, parseShelfState } from '../../../shared/shelfContracts.ts';
 import type { ShelfPutInput, ShelfReason, ShelfState } from '../../../shared/shelfContracts.ts';
 

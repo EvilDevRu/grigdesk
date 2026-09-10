@@ -10,7 +10,28 @@
 // вместо страницы логина). Поэтому статика ПУБЛИЧНА (в ней нет секретов), оболочка грузится
 // всегда, спрашивает `/api/auth/state` и сама показывает экран входа по 401.
 import fp from 'fastify-plugin';
-import { PUBLIC_HTTP_ROUTES } from '../lib/tls/local.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+
+import type { AuthStore } from '../lib/authStore.ts';
+import { PUBLIC_HTTP_ROUTES } from '../lib/tls/local.ts';
+
+export interface AuthPluginOptions {
+  authStore: AuthStore;
+  // Поднят ли собственный TLS: от этого зависит только предупреждение в журнале.
+  tlsEnabled?: boolean;
+  // Адрес доверенного прокси; пусто — заголовки пересылки игнорируются.
+  trustProxy?: string | false;
+  // Секрет процесса для дочернего CLI и токен локальных CLI-потребителей.
+  internalToken?: string;
+  cliToken?: string;
+}
+
+// Параметры cookie сессии. `secure` решается ПО ЗАПРОСУ: за шлюзом до нас доезжает http.
+export interface SessionCookieOptions {
+  maxAgeSec: number;
+  secure: boolean;
+  domain: string;
+}
 
 export const SESSION_COOKIE = 'cockpit_sid';
 
@@ -42,7 +63,7 @@ const PROTECTED_STATIC = ['/shots/'];
  * Значение одной cookie из заголовка. Своими руками, чтобы не тащить @fastify/cookie:
  * нужна ровно одна cookie, и та в одном месте.
  */
-export function readCookie(header, name) {
+export function readCookie(header: unknown, name: string): string | null {
   if (!header) return null;
   for (const part of String(header).split(';')) {
     const i = part.indexOf('=');
@@ -60,7 +81,7 @@ export function readCookie(header, name) {
  * уедет без флага Secure именно там, где он нужнее всего. `request.protocol` у Fastify учитывает
  * `X-Forwarded-Proto`, но ТОЛЬКО когда включён trustProxy (иначе заголовок игнорируется).
  */
-export function isSecureRequest(request) {
+export function isSecureRequest(request: FastifyRequest): boolean {
   return request.protocol === 'https';
 }
 
@@ -76,7 +97,7 @@ export function isSecureRequest(request) {
  * поэтому дополнительно требуем ОТСУТСТВИЕ следов проксирования. Любой признак пересылки —
  * значит запрос пришёл извне, и настройку мы не отдаём.
  */
-export function isLocalRequest(request) {
+export function isLocalRequest(request: FastifyRequest): boolean {
   const ip = request.ip || '';
   const local = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
   const forwarded = !!(request.headers['x-forwarded-for']
@@ -100,7 +121,7 @@ export function isLocalRequest(request) {
  * Цена: cookie становится видна всем поддоменам публичного домена. Все они наши (стенды),
  * а `HttpOnly` не даёт прочитать её из JS — приемлемо.
  */
-export function cookieDomain(request, publicDomain) {
+export function cookieDomain(request: FastifyRequest, publicDomain: unknown): string {
   if (!publicDomain) return '';
   const base = String(publicDomain).trim().toLowerCase().replace(/\.$/, '');
   const host = String(request.hostname || '').toLowerCase().replace(/:\d+$/, '');
@@ -113,7 +134,11 @@ export function cookieDomain(request, publicDomain) {
  * Secure ставим только когда браузер реально говорит по https: на http он cookie с Secure
  * выбрасывает, и вход сломался бы молча.
  */
-export function sessionCookie(id, { maxAgeSec, secure, domain }) {
+export function sessionCookie(id: string, {
+  maxAgeSec,
+  secure,
+  domain,
+}: SessionCookieOptions): string {
   const parts = [
     `${SESSION_COOKIE}=${encodeURIComponent(id)}`,
     'Path=/',
@@ -126,14 +151,14 @@ export function sessionCookie(id, { maxAgeSec, secure, domain }) {
   return parts.join('; ');
 }
 
-export function clearCookie({ secure, domain }) {
+export function clearCookie({ secure, domain }: Omit<SessionCookieOptions, 'maxAgeSec'>): string {
   const parts = [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
   if (domain) parts.push(`Domain=${domain}`);
   if (secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-async function authPlugin(fastify, opts) {
+async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Promise<void> {
   const { authStore, tlsEnabled, trustProxy, internalToken, cliToken } = opts;
 
   // Provenance успешной авторизации нужен внутренним control-plane ручкам. Наличие
@@ -160,7 +185,7 @@ async function authPlugin(fastify, opts) {
     // Матченный роут — это шаблон вида `/api/tasks/:id/graph`: он не зависит ни от кодирования,
     // ни от query, ни от лишних слэшей. Если роут не совпал (404) — пусто, и запрос уходит
     // в SPA-fallback, никаких данных API там нет.
-    const routeUrl = request.routeOptions?.url || request.routerPath || '';
+    const routeUrl = request.routeOptions?.url || '';
 
     // Оболочка (web/dist) остаётся публичной — без неё не показать даже экран входа.
     // Закрываем API и артефакты приёмки; всё остальное статика.

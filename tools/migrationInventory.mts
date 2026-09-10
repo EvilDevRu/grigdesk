@@ -6,7 +6,7 @@
 // Поэтому список хранится снимком и сверяется тестом: убыль требует обновить
 // снимок в том же заходе, а новая запись в нём — сознательное решение человека.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,8 @@ const SKIP_DIRS = new Set([
 // Область плана: у каждой свой владелец правок и свой этап. Порядок важен —
 // файл относится к ПЕРВОЙ подошедшей области, поэтому вложенные пути идут выше.
 const AREAS: readonly { id: string; prefix: string }[] = [
+    { id: 'bin', prefix: 'bin/' },
+    { id: 'deploy', prefix: 'deploy/' },
     { id: 'server', prefix: 'server/src/' },
     { id: 'serverScripts', prefix: 'server/scripts/' },
     { id: 'web', prefix: 'web/src/' },
@@ -42,7 +44,65 @@ const AREAS: readonly { id: string; prefix: string }[] = [
     { id: 'tests', prefix: 'tests/' },
 ];
 
-const CODE_EXTENSIONS = ['.js', '.mjs', '.cjs'];
+// Собственный исполняемый JavaScript во всех формах, которые вообще может встретить
+// этот проект. JSX здесь пока не встречается, но его отсутствие должно быть фактом
+// проверки, а не следствием того, что расширение забыли перечислить.
+// Единственный разрешённый JavaScript вне остатка миграции. У каждой строки своя
+// причина и своё условие снятия: «оставили как было» причиной не считается.
+export interface CompatibilityEntry {
+    path: string;
+    reason: string;
+    removeWhen: string;
+    // Файл выпускается сборкой и в репозитории отсутствует: проверять его наличие
+    // нечем, но и остатком миграции он не является.
+    generated?: boolean;
+}
+
+export const COMPATIBILITY: readonly CompatibilityEntry[] = Object.freeze([
+    {
+        path: 'server/src/app.js',
+        reason: 'Установленный юнит запускает именно это имя; лаунчер до перерендера юнита.',
+        removeWhen: 'Человек перерисовал юнит из шаблона и подтвердил удачный перезапуск.',
+    },
+    {
+        path: 'server/src/lib/chat/permission-mcp.js',
+        reason: 'Живой сервер запускает файл по пути из дерева на каждый ход агента.',
+        removeWhen: 'Сервер перезапущен на новом коде, и всплывашка разрешений проверена.',
+    },
+    {
+        path: 'server/src/lib/executors/work-mcp.js',
+        reason: 'Живой сервер запускает файл на каждую сессию; он же монтируется в песочницу.',
+        removeWhen: 'Сервер перезапущен, инструменты cockpit-work доступны в чате.',
+    },
+    {
+        path: 'server/src/lib/executors/_direct-ssh-policy-hook.js',
+        reason: 'Хук запускается на каждый Bash-вызов агента; его отсутствие тихо снимает запрет.',
+        removeWhen: 'Сервер перезапущен, прямой SSH в чате по-прежнему блокируется.',
+    },
+    {
+        path: 'server/src/workers/cockpit-update-worker.js',
+        reason: 'Обновлятель прошлой версии запускает воркер по этому имени.',
+        removeWhen: 'Обновление прошло хотя бы один релиз с новым именем воркера.',
+    },
+    {
+        path: 'server/scripts/knowledge-search-preflight.mjs',
+        reason: 'Установленный юнит и лаунчеры зовут preflight по этому имени.',
+        removeWhen: 'Юнит перерисован, лаунчеры указывают на TypeScript-вход.',
+    },
+    {
+        path: 'tests/server/cockpit-release.test.js',
+        reason: 'Старый воркер обновления прогоняет этот файл в НОВОМ дереве без флагов.',
+        removeWhen: 'Обновлятель на TypeScript установлен минимум один релиз.',
+    },
+    {
+        path: 'web/public/notification-sw.js',
+        reason: 'Workbox подключает его importScripts по литеральному имени; выпуск сборки.',
+        removeWhen: 'Никогда: это выход сборки, а не исходник. Источник — web/src/sw/.',
+        generated: true,
+    },
+]);
+
+const CODE_EXTENSIONS = ['.js', '.mjs', '.cjs', '.jsx'];
 
 export interface MigrationInventory {
     // Собственный исполняемый JavaScript по областям плана.
@@ -96,32 +156,65 @@ function vueScriptIsJs(source: string): boolean {
  * Сколько ошибок общей проверки интерфейса приходится на каждый файл. Запускается
  * настоящий компилятор: считать долг по своему разбору значило бы верить не тому,
  * что проверяет прогон.
+ *
+ * Отказ САМОЙ проверки не имеет права выглядеть нулевым долгом. Отсутствие компилятора,
+ * убитый сигналом процесс, ошибка конфигурации и незнакомая диагностика — это провал
+ * измерения, и он бросается, а не превращается в пустой словарь.
  */
 export function collectTypecheckDebt(root: string = REPO_ROOT): Record<string, number> {
     const compiler = join(root, 'web', 'node_modules', '.bin', 'vue-tsc');
-    let output = '';
+    const project = join(root, 'web', 'tsconfig.json');
+    const run = spawnSync(compiler, ['-p', project, '--noEmit'], {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+    });
 
-    try {
-        execFileSync(compiler, ['-p', join(root, 'web', 'tsconfig.json'), '--noEmit'], {
-            encoding: 'utf8',
-            maxBuffer: 32 * 1024 * 1024,
-        });
-    } catch (failure) {
-        output = String((failure as { stdout?: unknown }).stdout ?? '');
+    if (run.error) {
+        throw new Error(`Не удалось запустить ${compiler}: ${run.error.message}`);
+    }
+    if (run.signal) {
+        throw new Error(`Проверка типов убита сигналом ${run.signal}; долг не измерен.`);
     }
 
+    const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+    const diagnostics = output.split('\n').filter((line) => /error TS\d+/.test(line));
     const debt: Record<string, number> = {};
+    const unparsed: string[] = [];
 
-    for (const line of output.split('\n')) {
-        const match = /^(\S+?)\(\d+,\d+\): error TS/.exec(line);
+    for (const line of diagnostics) {
+        const match = /^(\S+?)\((\d+),(\d+)\): error TS/.exec(line);
 
-        if (match?.[1]) {
-            // Компилятор печатает путь относительно СВОЕГО рабочего каталога, а его
-            // выбирает вызывающая команда: из корня и из web/ строки разные.
-            const path = relative(root, resolve(process.cwd(), match[1])).split(sep).join('/');
-
-            debt[path] = (debt[path] ?? 0) + 1;
+        if (!match?.[1]) {
+            // Ошибка конфигурации или незнакомый формат: у неё нет файла, и молча
+            // отбросить её значило бы объявить сломанный проект чистым.
+            unparsed.push(line.trim());
+            continue;
         }
+        // Компилятор печатает путь относительно СВОЕГО рабочего каталога, а его
+        // выбирает вызывающая команда: из корня и из web/ строки разные.
+        const path = relative(root, resolve(process.cwd(), match[1])).split(sep).join('/');
+
+        debt[path] = (debt[path] ?? 0) + 1;
+    }
+
+    if (unparsed.length) {
+        throw new Error(`Проверка типов вернула диагностику без файла:\n${unparsed.join('\n')}`);
+    }
+
+    const total = Object.values(debt).reduce((sum, count) => sum + count, 0);
+
+    if (run.status !== 0 && total === 0) {
+        throw new Error(
+            `Проверка типов завершилась кодом ${run.status}, но ни одной ошибки не разобрано:`
+            + `\n${output.trim().slice(0, 2000)}`,
+        );
+    }
+    // Итоговая строка компилятора — независимый счёт: расхождение означает, что разбор
+    // потерял часть диагностики, а не что долг уменьшился.
+    const summary = /Found (\d+) errors?/.exec(output);
+
+    if (summary?.[1] && Number(summary[1]) !== total) {
+        throw new Error(`Компилятор насчитал ${summary[1]} ошибок, разобрано ${total}.`);
     }
 
     return Object.fromEntries(Object.entries(debt).sort(([left], [right]) => (
@@ -172,13 +265,25 @@ const GENERAL_PROJECTS: readonly { config: string; compiler: string }[] = [
     // проверять покрытие интерфейса им значило бы «не вижу, значит нет».
     { config: 'web/tsconfig.json', compiler: 'web/node_modules/.bin/vue-tsc' },
     { config: 'web/tsconfig.scripts.json', compiler: 'web/node_modules/.bin/tsc' },
+    // Тесты проверяются той же базой, что и проверяемый ими код: до этих проектов
+    // перенесённый на TypeScript тест компилятор не открывал вовсе.
+    { config: 'server/tsconfig.tests.json', compiler: 'server/node_modules/.bin/tsc' },
+    { config: 'web/tsconfig.tests.json', compiler: 'web/node_modules/.bin/vue-tsc' },
 ];
 
-// Образцы для guard-ов интерфейса: часть из них намеренно неверна, и объявлять их
-// TypeScript нельзя — тогда проверять было бы нечего.
-const COVERAGE_EXCEPTIONS = new Set(['tests/web/fixtures/']);
+// Образцы для guard-ов интерфейса. Исключение поимённое, а не по каталогу: три SFC
+// намеренно нарушают порядок блоков, один — границу примитивов, и объявить их
+// TypeScript значило бы лишить соответствующие проверки предмета. Остальные файлы
+// каталога — обычные компоненты-стенды и обязаны проверяться как весь интерфейс.
+const COVERAGE_EXCEPTIONS: readonly string[] = [
+    'tests/web/fixtures/ui/boundary/LegacyControl.vue',
+    'tests/web/fixtures/ui/sfc/ScriptAfterStyle.vue',
+    'tests/web/fixtures/ui/sfc/ScriptFirst.vue',
+    'tests/web/fixtures/ui/sfc/ScriptFirstWithTemplateLiteral.vue',
+    'tests/web/fixtures/ui/sfc/Valid.vue',
+];
 
-const TS_EXTENSIONS = ['.ts', '.mts', '.cts', '.vue'];
+const TS_EXTENSIONS = ['.ts', '.mts', '.cts', '.tsx', '.vue'];
 
 /** Файлы, которые проект берёт по своим include/exclude — без обхода импортов. */
 function projectFiles(root: string, project: { config: string; compiler: string }): string[] {
@@ -215,13 +320,27 @@ export function uncheckedTypeScript(root: string = REPO_ROOT): string[] {
         if (covered.has(path) || legacyVue.has(path)) {
             continue;
         }
-        if ([...COVERAGE_EXCEPTIONS].some((prefix) => path.startsWith(prefix))) {
+        if (COVERAGE_EXCEPTIONS.includes(path)) {
             continue;
         }
         unchecked.push(path);
     }
 
     return unchecked.sort();
+}
+
+/**
+ * Остаток, который ещё нужно перенести: весь собственный JavaScript за вычетом
+ * списка совместимости. Именно это число обязано дойти до нуля — «сколько всего
+ * .js в дереве» им не является, потому что часть файлов остаётся по контракту.
+ */
+export function remainingBeyondCompatibility(root: string = REPO_ROOT): string[] {
+    const allowed = new Set(COMPATIBILITY.map((entry) => entry.path));
+
+    return Object.values(collectMigrationInventory(root).legacy)
+        .flat()
+        .filter((path) => !allowed.has(path))
+        .sort();
 }
 
 export const MIGRATION_BASELINE_PATH = fileURLToPath(
@@ -254,5 +373,9 @@ if (invokedAsCli) {
 
         process.stdout.write(`${'vue'.padEnd(14)} ${String(inventory.vue.length).padStart(4)}\n`);
         process.stdout.write(`${'долг типов'.padEnd(14)} ${String(debt).padStart(4)}\n`);
+        process.stdout.write(
+            `${'--- осталось'.padEnd(14)} ${String(remainingBeyondCompatibility().length).padStart(4)}`
+            + ` (без списка совместимости)\n`,
+        );
     }
 }

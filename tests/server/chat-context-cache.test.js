@@ -5,7 +5,7 @@ import {
   contextCacheStatus,
   normalizeContextCache,
   reportedContextCache,
-} from '../../server/src/lib/chat/context-cache.js';
+} from '../../server/src/lib/chat/contextCache.ts';
 
 test('contextCache сохраняет только известные неотрицательные целые токены', () => {
   assert.deepEqual(reportedContextCache({

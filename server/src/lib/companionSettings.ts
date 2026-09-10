@@ -18,7 +18,19 @@ const MODEL_MAX = 200;
 // а `--effort xhigh` у модели без такой ступени роняет запуск CLI.
 const EFFORT_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
-export const COMPANION_DEFAULTS = Object.freeze({
+// Ссылка на модель: обе половины обязательны вместе. Половинка бессмысленна —
+// ход всё равно уйдёт умолчанием реестра, а показанный огрызок обещал бы выбор.
+export interface CompanionModelRef {
+  provider: string;
+  model: string;
+}
+
+export interface CompanionSettings {
+  modelRef: CompanionModelRef | null;
+  effort: string;
+}
+
+export const COMPANION_DEFAULTS: Readonly<CompanionSettings> = Object.freeze({
   // null = «модель по умолчанию из реестра исполнителей», как у нового чата.
   modelRef: null,
   // '' = «умолчание исполнителя»: уровень не передаётся вовсе.
@@ -26,15 +38,19 @@ export const COMPANION_DEFAULTS = Object.freeze({
 });
 
 /** Управляющие символы уехали бы в аргументы CLI — такая строка отвергается целиком. */
-function hasControlChars(value) {
+function hasControlChars(value: string): boolean {
   for (const char of value) {
-    const code = char.codePointAt(0);
+    // Итерация по строке даёт непустые символы, но кодовая точка объявлена
+    // необязательной: подстановка нуля здесь безопаснее приведения типа.
+    const code = char.codePointAt(0) ?? 0;
+
     if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
   }
   return false;
 }
 
-function cleanString(value, max) {
+/** Строка в границах: пустая и слишком длинная одинаково означают «не задано». */
+function cleanString(value: unknown, max: number): string {
   if (typeof value !== 'string' || hasControlChars(value)) return '';
   const trimmed = value.trim();
   return trimmed.length && trimmed.length <= max ? trimmed : '';
@@ -45,11 +61,13 @@ function cleanString(value, max) {
  * Наличие модели в живом реестре здесь НЕ проверяется — CLI мог отвалиться или
  * обновиться, а выбор человека остаётся его выбором (UI покажет «нет в реестре»).
  */
-export function normalizeCompanionSettings(value) {
-  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const ref = raw.modelRef && typeof raw.modelRef === 'object' && !Array.isArray(raw.modelRef)
+export function normalizeCompanionSettings(value: unknown): CompanionSettings {
+  const raw = (value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {}) as { modelRef?: unknown; effort?: unknown };
+  const ref = (raw.modelRef && typeof raw.modelRef === 'object' && !Array.isArray(raw.modelRef)
     ? raw.modelRef
-    : {};
+    : {}) as { provider?: unknown; model?: unknown };
   const provider = cleanString(ref.provider, 64).toLowerCase();
   const model = cleanString(ref.model, MODEL_MAX);
   // Полупустая ссылка бессмысленна: без обеих половин ход всё равно уйдёт дефолтом

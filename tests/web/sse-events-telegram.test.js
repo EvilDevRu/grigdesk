@@ -9,7 +9,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const SSE_PATH = path.join(REPO_ROOT, 'web', 'src', 'composables', 'useSse.js');
+const SSE_PATH = path.join(REPO_ROOT, 'web', 'src', 'composables', 'useSse.ts');
 const TELEGRAM_VIEW_PATH = path.join(REPO_ROOT, 'web', 'src', 'views', 'TelegramView.vue');
 const APP_SHELL_PATH = path.join(REPO_ROOT, 'web', 'src', 'shared', 'layout', 'AppShell.vue');
 

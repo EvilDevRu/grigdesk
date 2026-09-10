@@ -26,7 +26,7 @@ ENV_ARG=("${COCKPIT_NODE_ENV_ARGS[@]}")
 
 # Отказ probe не является поводом гасить Cockpit: в такой среде degraded
 # будет только knowledge search. DatabaseSync остаётся в этом коротком subprocess.
-node "${COCKPIT_NODE_TS_ARGS[@]}" \
+node "${COCKPIT_NODE_SQLITE_ARGS[@]}" \
   "$ROOT/server/scripts/knowledge-search-preflight.mjs" || true
 
 listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
@@ -52,7 +52,7 @@ fi
 
 mkdir -p "$(dirname "$LOG")"
 cd "$ROOT"
-setsid nohup node "${ENV_ARG[@]}" --experimental-strip-types server/src/app.js </dev/null >>"$LOG" 2>&1 &
+setsid nohup node "${ENV_ARG[@]}" server/src/app.ts </dev/null >>"$LOG" 2>&1 &
 disown
 
 # Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health

@@ -132,7 +132,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import type { DockerContainer } from '../../../../shared/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
-import { NAV_ICONS } from '../../shared/nav-icons.js';
+import { NAV_ICONS } from '../../shared/navIcons.ts';
 import { UiIconButton, UiInlineMessage, UiTab, UiTabs } from '../../ui';
 import DockerCleanup from './DockerCleanup.vue';
 import DockerContainers from './DockerContainers.vue';

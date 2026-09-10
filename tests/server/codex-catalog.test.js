@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   codexModelFamily,
   parseCodexModelList,
-} from '../../server/src/lib/executors/codex.js';
+} from '../../server/src/lib/executors/codex.ts';
 
 test('Codex model/list becomes a current picker without duplicate aliases', () => {
   const models = parseCodexModelList({

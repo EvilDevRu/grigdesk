@@ -9,8 +9,8 @@
 // сервере и перечитывается по jobId, а её копия в браузере копила бы мегабайты.
 import { defineStore } from 'pinia';
 
-import { api } from '../shared/api-client.js';
-import { mmss } from '../shared/format.js';
+import { api } from '../shared/apiClient.ts';
+import { mmss } from '../shared/format.ts';
 import { mediaApi } from '../shared/mediaApi.ts';
 import type {
   MediaClip,

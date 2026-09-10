@@ -12,12 +12,12 @@ async function chatStore(t, api) {
   globalThis.__sshApprovalApi = api;
   const module = await compileModule(CHAT_STORE, {
     stubs: {
-      '../shared/api-client.js': 'export const api = globalThis.__sshApprovalApi;',
-      '../composables/useSse.js': 'export const sseSubscribe = () => () => {};',
+      '../shared/apiClient.ts': 'export const api = globalThis.__sshApprovalApi;',
+      '../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
       '../router.js': 'export const router = { currentRoute: { value: {} }, push() {} };',
       './ui-context.js': 'export const useUiContextStore = () => ({ current: null });',
       './providers.js': 'export const useProvidersStore = () => ({ providers: [] });',
-      '../shared/notify.js': 'export const notify = () => {};',
+      '../shared/notify.ts': 'export const notify = () => {};',
     },
   });
   const { createPinia, setActivePinia } = await import(

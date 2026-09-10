@@ -29,7 +29,7 @@ const SESSION_ID_BYTES = 32;
  * Хеш пароля в самодостаточном виде: параметры + соль + хеш в одной строке.
  * Так можно поднять стоимость в будущем, не ломая уже сохранённые пароли.
  */
-function hashPassword(password) {
+function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
   const key = crypto.scryptSync(password, salt, KEY_LEN, {
     N: SCRYPT_N, r: SCRYPT_r, p: SCRYPT_p, maxmem: SCRYPT_MAXMEM,
@@ -41,10 +41,12 @@ function hashPassword(password) {
  * Проверка пароля против сохранённого хеша. Сравнение — timing-safe: обычное `===`
  * на строках выходит из цикла на первом различии и подсказывает длину общего префикса.
  */
-function verifyPassword(password, stored) {
+function verifyPassword(password: string, stored: string): boolean {
   try {
-    const [scheme, N, r, p, saltHex, keyHex] = String(stored).split('$');
+    const [scheme, N, r, p, saltHex = '', keyHex = ''] = String(stored).split('$');
+
     if (scheme !== 'scrypt') return false;
+
     const key = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), keyHex.length / 2, {
       N: Number(N), r: Number(r), p: Number(p), maxmem: SCRYPT_MAXMEM,
     });
@@ -56,12 +58,31 @@ function verifyPassword(password, stored) {
   }
 }
 
+// Учётная запись на диске: логин может быть пустым, хеш — нет. Отсутствие записи
+// означает «пароль ещё не задан», и кокпит показывает первичную настройку.
+export interface AuthAccount {
+  login: string;
+  hash: string;
+}
+
+// Что кокпит рассказывает о входе наружу: ни хеша, ни идентификаторов сессий.
+export interface AuthPublicView {
+  configured: boolean;
+  login: string;
+  sessions: number;
+}
+
 export class AuthStore {
-  /** @param {{ accountPath: string, sessionsPath: string }} opts */
-  constructor({ accountPath, sessionsPath }) {
+  readonly accountPath: string;
+
+  readonly sessionsPath: string;
+
+  // sessionId → срок годности в миллисекундах.
+  readonly sessions: Map<string, number>;
+
+  constructor({ accountPath, sessionsPath }: { accountPath: string; sessionsPath: string }) {
     this.accountPath = accountPath;
     this.sessionsPath = sessionsPath;
-    /** @type {Map<string, number>} sessionId → срок годности (ms) */
     this.sessions = new Map();
     this._loadSessions();
   }
@@ -69,10 +90,12 @@ export class AuthStore {
   // ── Учётная запись ──
 
   /** { login, hash } или null, если пароль ещё не задан. */
-  readAccount() {
+  readAccount(): AuthAccount | null {
     try {
-      const a = JSON.parse(fs.readFileSync(this.accountPath, 'utf8'));
+      const a = JSON.parse(fs.readFileSync(this.accountPath, 'utf8')) as Partial<AuthAccount>;
+
       if (!a.hash) return null;
+
       return { login: a.login || '', hash: a.hash };
     } catch {
       return null;
@@ -80,7 +103,7 @@ export class AuthStore {
   }
 
   /** Настроен ли вход. Пока нет — кокпит показывает первичную настройку пароля. */
-  isConfigured() {
+  isConfigured(): boolean {
     return this.readAccount() !== null;
   }
 
@@ -88,7 +111,7 @@ export class AuthStore {
    * Задать логин и пароль. Все существующие сессии сбрасываются: смена пароля обязана
    * выкидывать всех, иначе украденная cookie продолжает работать.
    */
-  setCredentials({ login, password }) {
+  setCredentials({ login, password }: { login?: string; password?: string }): { login: string } {
     if (!password || password.length < 8) throw new Error('Пароль должен быть не короче 8 символов');
     fs.mkdirSync(path.dirname(this.accountPath), { recursive: true });
     fs.writeFileSync(
@@ -101,7 +124,7 @@ export class AuthStore {
   }
 
   /** Проверка логина и пароля. Логин сверяем, только если он задан. */
-  check({ login, password }) {
+  check({ login, password }: { login?: unknown; password?: unknown }): boolean {
     const acc = this.readAccount();
     if (!acc) return false;
     if (acc.login && String(login || '') !== acc.login) {
@@ -114,17 +137,18 @@ export class AuthStore {
 
   // ── Сессии ──
 
-  _loadSessions() {
+  private _loadSessions(): void {
     try {
-      const raw = JSON.parse(fs.readFileSync(this.sessionsPath, 'utf8'));
+      const raw: unknown = JSON.parse(fs.readFileSync(this.sessionsPath, 'utf8'));
       const now = Date.now();
-      for (const [id, exp] of Object.entries(raw || {})) {
+
+      for (const [id, exp] of Object.entries((raw ?? {}) as Record<string, unknown>)) {
         if (typeof exp === 'number' && exp > now) this.sessions.set(id, exp);
       }
     } catch { /* нет файла — пустой набор */ }
   }
 
-  _saveSessions() {
+  private _saveSessions(): void {
     try {
       fs.mkdirSync(path.dirname(this.sessionsPath), { recursive: true });
       fs.writeFileSync(
@@ -136,7 +160,7 @@ export class AuthStore {
   }
 
   /** Новая сессия. Сохраняем на диск: рестарт сервера не должен выкидывать с планшета. */
-  createSession() {
+  createSession(): { id: string; maxAgeSec: number } {
     const id = crypto.randomBytes(SESSION_ID_BYTES).toString('hex');
     this.sessions.set(id, Date.now() + SESSION_TTL_MS);
     this._saveSessions();
@@ -144,7 +168,7 @@ export class AuthStore {
   }
 
   /** Валидна ли сессия (с попутной очисткой просроченных). */
-  isValidSession(id) {
+  isValidSession(id: string | undefined | null): boolean {
     if (!id) return false;
     const exp = this.sessions.get(id);
     if (!exp) return false;
@@ -156,18 +180,18 @@ export class AuthStore {
     return true;
   }
 
-  dropSession(id) {
+  dropSession(id: string | undefined | null): void {
     if (id && this.sessions.delete(id)) this._saveSessions();
   }
 
   /** «Выйти со всех устройств». */
-  dropAllSessions() {
+  dropAllSessions(): void {
     this.sessions.clear();
     this._saveSessions();
   }
 
   /** Безопасное представление для UI. */
-  publicView() {
+  publicView(): AuthPublicView {
     const acc = this.readAccount();
     return {
       configured: !!acc,

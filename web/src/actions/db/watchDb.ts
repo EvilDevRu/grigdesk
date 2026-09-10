@@ -1,4 +1,4 @@
-import { sseSubscribe } from '../../composables/useSse.js';
+import { sseSubscribe } from '../../composables/useSse.ts';
 import { useDbStore } from '../../stores/db.ts';
 import { loadDb, refreshDbAudit, refreshDbQueries } from './loadDb.ts';
 import { runtimeOf } from './dbRuntime.ts';

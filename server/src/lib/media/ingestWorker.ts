@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import { ingestRecording, writeIngestJobFile } from './ingest.ts';
 import type { IngestFileDeps, IngestJob, SpeechOptions } from './ingest.ts';
-import { isCudaRuntimeFailure } from '../speech/errors.js';
-import { decodeIngestJob, encodeIngestJob } from '../speech/transport.js';
+import { isCudaRuntimeFailure } from '../speech/errors.ts';
+import { decodeIngestJob, encodeIngestJob } from '../speech/transport.ts';
 
 // Что подменяют проверки транспорта: чтение состояния, часы, таймер прогресса и
 // сам разбор. Живой воркер берёт настоящие — python здесь запускается по-честному.

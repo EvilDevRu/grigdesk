@@ -18,7 +18,7 @@ import {
   buildTranscribeArgv,
   decodeIngestJob,
   encodeIngestJob,
-} from '../../server/src/lib/speech/transport.js';
+} from '../../server/src/lib/speech/transport.ts';
 
 const SENTINEL_SPEECH = Object.freeze({
   scenario: 'video',
@@ -418,13 +418,12 @@ test('detached video job сохраняет speech целиком и перед�
   assert.equal('HF_HUB_CACHE' in spawned.options.env, false);
   assert.equal('HUGGINGFACE_HUB_CACHE' in spawned.options.env, false);
   assert.equal(unrefCalled, true);
-  // Воркер — TypeScript, а флаги родителя дочернему процессу не достаются.
-  assert.deepEqual(spawned.args.slice(0, 2), [
-    '--disable-warning=ExperimentalWarning',
-    '--experimental-strip-types',
-  ]);
-  assert.equal(spawned.args.at(-1), result.statusPath);
-  assert.match(spawned.args.at(-2), /ingestWorker\.ts$/);
+  // Воркер запускается тем же рантаймом и без флагов: минимум Node исполняет
+  // TypeScript сам, а лишний аргумент здесь уехал бы уже в саму программу.
+  assert.equal(spawned.cmd, process.execPath);
+  assert.deepEqual(spawned.args.length, 2);
+  assert.match(spawned.args[0], /ingestWorker\.ts$/);
+  assert.equal(spawned.args[1], result.statusPath);
   // Метка запущенного воркера лежит отдельно от состояния: сам воркер читает
   // состояние сразу после старта и своей записью затёр бы её.
   const workerPath = path.join(jobsDir, 'job-fixed.worker.json');

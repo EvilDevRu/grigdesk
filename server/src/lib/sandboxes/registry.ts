@@ -10,8 +10,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { parsePipeline } from '../pipeline-parse.js';
-import { parseSandboxRepositories } from '../sandbox-env.js';
+import { parsePipeline } from '../pipelineParse.ts';
+import { parseSandboxRepositories } from '../sandboxEnv.ts';
 import { parseSandboxJournalRecord, SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts.ts';
 import type { SandboxJournalRecord, SandboxRepo } from '../../../../shared/sandboxContracts.ts';
 
@@ -93,7 +93,7 @@ async function readEntry(stateDir: string, task: string): Promise<SandboxRegistr
     apiPort: uint(env.API_PORT),
     workspaceMode: sandbox.workspaceMode,
     standOwnership: String(env.STAND_OWNERSHIP || ''),
-    repos: repos.map((repo: SandboxRepo) => ({
+    repos: repos.map((repo) => ({
       name: repo.name,
       path: repo.path,
       branch: repo.branch,

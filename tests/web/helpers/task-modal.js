@@ -95,8 +95,8 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
   return compileVue(TASK_MODAL_PATH, {
     stubs: {
       'vue-router': 'export const useRouter = () => ({ push() {} });',
-      '../shared/api-client.js': `export const api = globalThis.${prefix}Api;`,
-      '../composables/useUiContextSource.js': contextSourceStub(prefix),
+      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../composables/useUiContextSource.ts': contextSourceStub(prefix),
       '../stores/ui.js': `export const useUiStore = globalThis.${prefix}UiStore;`,
       '../stores/tasks.js': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
       '../stores/board.js': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
@@ -143,12 +143,12 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         'export const useDictationController = () =>',
         `  globalThis.${prefix}DictationController || fallbackController;`,
       ].join('\n'),
-      '../shared/format.js': [
+      '../shared/format.ts': [
         'export const liveTimerSec = (task) => task?.timerElapsed || 0;',
         'export const secToHMS = (value) => String(value ?? 0);',
       ].join('\n'),
-      '../shared/md.js': 'export const mdToHtml = (value) => String(value || "");',
-      '../shared/runner-display.js': [
+      '../shared/md.ts': 'export const mdToHtml = (value) => String(value || "");',
+      '../shared/runnerDisplay.ts': [
         `export const providerLabel = (id) => {`,
         `  const helper = globalThis.${prefix}RunnerDisplay?.providerLabel;`,
         '  return helper ? helper(id) : String(id || "");',

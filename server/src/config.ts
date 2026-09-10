@@ -33,6 +33,7 @@ if (!manualRangeParts || Number(manualRangeParts[1]) > Number(manualRangeParts[2
   throw new Error(`COCKPIT_SANDBOX_MANUAL_RANGE: нужен диапазон «от-до», получено "${manualRangeRaw}"`);
 }
 const sandboxManualRange = {
+  // Границы уже проверены разбором выше: сюда доходит только пара целых чисел.
   from: Number(manualRangeParts[1]),
   to: Number(manualRangeParts[2]),
 };
@@ -298,3 +299,8 @@ export const config = {
   // Режим.
   isDev: process.env.NODE_ENV === 'development',
 };
+
+// Конфигурация — доменная модель, а не свободный словарь: потребитель обязан ссылаться
+// на этот тип, а не описывать у себя своё представление о полях. Форма выводится из
+// самого объекта — второго списка полей, который разошёлся бы с ним, в проекте нет.
+export type CockpitConfig = typeof config;

@@ -1,8 +1,8 @@
 // Сборка, проверка и атомарная публикация неизменяемых документов потребления раннеров.
-import { canonicalJson } from './canonical.js';
-import { assertAnalyticsIdentity } from './contracts.js';
-import { canonicalDecimal } from './decimal.js';
-import { publishImmutable } from './durable-fs.js';
+import { canonicalJson } from './canonical.ts';
+import { assertAnalyticsIdentity } from './contracts.ts';
+import { canonicalDecimal } from './decimal.ts';
+import { publishImmutable } from './durableFs.ts';
 
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const MAX_SEGMENTS = 10_000;
@@ -32,24 +32,88 @@ const OUTER_KEYS = Object.freeze([
 ]);
 
 export class AnalyticsUsageDocumentError extends Error {
-  constructor(code, message) {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
     super(message);
     this.name = 'AnalyticsUsageDocumentError';
     this.code = code;
   }
 }
 
-const fail = (code, message) => {
+/**
+ * Отказ проверки. Объявлен функцией, а не стрелкой в const: только у объявления
+ * компилятор считает `never` признаком «дальше кода нет» и сужает по нему тип.
+ */
+function fail(code: string, message: string): never {
   throw new AnalyticsUsageDocumentError(code, message);
-};
+}
 
-function isRecord(value) {
+// Неизменяемый документ потребления раннера. Все количества и деньги — КАНОНИЧЕСКИЕ
+// СТРОКИ: токены выходят за 2^53, а у цены до восемнадцати знаков, и `number` терял бы
+// точность молча. Поля читаются из недоверенного ввода и проверяются по одному.
+export interface UsageDocument {
+  schemaVersion: 1;
+  taskId: string;
+  attemptId: string;
+  nodeVisitId: string;
+  nodeExecutionId: string;
+  dispatchId: string;
+  runId: string;
+  epoch: number;
+  provider: string;
+  requestedModel: string | null;
+  resolvedModel: string | null;
+  source: string;
+  completeness: string;
+  observedAt: string;
+  extractorVersion: string | null;
+  normalizerDialect: string | null;
+  normalizerVersion: string | null;
+  sourceFingerprint: Record<string, unknown>;
+  providerSessionMode: string;
+  requestedProviderScope: string | null;
+  observedProviderScope: string | null;
+  parentUsageRef: Record<string, unknown> | null;
+  terminalCounterCheckpoint: Record<string, unknown> | null;
+  lastObservedCounter: Record<string, unknown> | null;
+  resumeEligible: boolean;
+  usageSamples: Record<string, unknown>[];
+  usageSegments: Record<string, unknown>[];
+  tokenSummary: Record<string, string>;
+  providerReportedCost: Record<string, unknown> | null;
+  providerRootResult: unknown;
+  diagnostics: string[];
+}
+
+// Поля, которые складывает вызывающий. Их проверяет тот же `assertUsageDocument`:
+// собранный документ и прочитанный с диска обязаны проходить одну проверку.
+export interface UsageDocumentInput {
+  identity: Record<string, unknown>;
+  provider: string;
+  requestedModel?: string | null;
+  resolvedModel?: string | null;
+  observedAt: string;
+  sourceFingerprint: unknown;
+  providerSessionMode: string;
+  requestedProviderScope?: unknown;
+  observedProviderScope?: unknown;
+  parentUsageRef?: unknown;
+  normalization: Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
-function exactKeys(record, keys, where) {
+/** Ровно объявленный набор полей: лишнее поле означает документ не по контракту. */
+function exactKeys(
+  record: unknown,
+  keys: readonly string[],
+  where: string,
+): asserts record is Record<string, unknown> {
   if (!isRecord(record)) fail('invalidDocument', `${where}: ожидался object.`);
   const actual = Object.keys(record).sort();
   const expected = [...keys].sort();
@@ -58,7 +122,11 @@ function exactKeys(record, keys, where) {
   }
 }
 
-function stringOrNull(value, where, { max = 160, pattern = null } = {}) {
+function stringOrNull(
+  value: unknown,
+  where: string,
+  { max = 160, pattern = null }: { max?: number; pattern?: RegExp | null } = {},
+): string | null {
   if (value === null) return null;
   if (typeof value !== 'string' || value.length < 1 || value.length > max
       || (pattern && !pattern.test(value))) {
@@ -67,7 +135,7 @@ function stringOrNull(value, where, { max = 160, pattern = null } = {}) {
   return value;
 }
 
-function instant(value, where) {
+function instant(value: unknown, where: string): string {
   if (typeof value !== 'string' || !INSTANT_RE.test(value)) {
     fail('invalidDocument', `${where}: ожидался canonical UTC instant.`);
   }
@@ -78,21 +146,21 @@ function instant(value, where) {
   return value;
 }
 
-function uint(value, where, { positive = false } = {}) {
+function uint(value: unknown, where: string, { positive = false } = {}): string {
   if (typeof value !== 'string' || !UINT_RE.test(value) || (positive && value === '0')) {
     fail('invalidDocument', `${where}: ожидался canonical uint decimal string.`);
   }
   return value;
 }
 
-function decimal(value, where) {
+function decimal(value: unknown, where: string): string {
   if (canonicalDecimal(value, { significantDigits: 30, maxScale: 18, where }) === null) {
     fail('invalidQuantity', `${where}: quantity/cost не является canonical decimal.`);
   }
-  return value;
+  return value as string;
 }
 
-function hash(value, where, { nullable = false } = {}) {
+function hash(value: unknown, where: string, { nullable = false } = {}): string | null {
   if (nullable && value === null) return null;
   if (typeof value !== 'string' || !HASH_RE.test(value)) {
     fail('invalidDocument', `${where}: ожидался SHA-256.`);
@@ -100,20 +168,29 @@ function hash(value, where, { nullable = false } = {}) {
   return value;
 }
 
-function cloneJson(value, where) {
+/**
+ * Копия значения после проверки его каноничности. Клон обязателен: документ
+ * неизменяем, а вызывающий вправе продолжать менять свой объект.
+ */
+function cloneJson<Value>(value: Value, where: string): Value {
   try {
     canonicalJson(value, { bytes: MAX_DOCUMENT_BYTES });
+
     return structuredClone(value);
   } catch (error) {
-    fail('invalidDocument', `${where}: значение не входит в canonical JSON contract (${error.message}).`);
+    const reason = String((error as { message?: unknown } | null)?.message || error);
+
+    fail('invalidDocument', `${where}: значение не входит в canonical JSON contract (${reason}).`);
   }
 }
 
-function validateFingerprint(value) {
+function validateFingerprint(value: unknown): void {
   exactKeys(value, [
     'dev', 'ino', 'size', 'mtimeNs', 'sha256', 'finalFstatHash', 'rawFsyncCompleted',
   ], 'sourceFingerprint');
-  for (const field of ['dev', 'ino', 'size', 'mtimeNs']) uint(value[field], `sourceFingerprint.${field}`);
+  for (const field of ['dev', 'ino', 'size', 'mtimeNs']) {
+    uint(value[field], `sourceFingerprint.${field}`);
+  }
   hash(value.sha256, 'sourceFingerprint.sha256');
   hash(value.finalFstatHash, 'sourceFingerprint.finalFstatHash');
   if (typeof value.rawFsyncCompleted !== 'boolean') {
@@ -121,7 +198,7 @@ function validateFingerprint(value) {
   }
 }
 
-function validateBillingWindow(value, where) {
+function validateBillingWindow(value: unknown, where: string): void {
   if (!isRecord(value)) fail('invalidDocument', `${where}: billingWindow обязан быть object.`);
   if (value.kind === 'unknown') {
     exactKeys(value, ['kind', 'basis'], where);
@@ -129,23 +206,28 @@ function validateBillingWindow(value, where) {
     return;
   }
   exactKeys(value, ['kind', 'notBefore', 'notAfter', 'basis'], where);
+
   if (value.kind !== 'closed'
+      || typeof value.basis !== 'string'
       || !['provider_billing', 'provider_event', 'trusted_run_window', 'derived_run_window']
         .includes(value.basis)) {
     fail('invalidDocument', `${where}: неизвестный closed billingWindow.`);
   }
   instant(value.notBefore, `${where}.notBefore`);
   instant(value.notAfter, `${where}.notAfter`);
-  if (value.notBefore > value.notAfter) fail('invalidDocument', `${where}: notBefore > notAfter.`);
+  if (String(value.notBefore) > String(value.notAfter)) {
+    fail('invalidDocument', `${where}: notBefore > notAfter.`);
+  }
 }
 
-function validateSamples(samples) {
+function validateSamples(samples: unknown): Set<unknown> {
   if (!Array.isArray(samples) || samples.length > MAX_SAMPLES) {
     fail('invalidDocument', `usageSamples превышают cap ${MAX_SAMPLES}.`);
   }
-  const ids = new Set();
+  const ids = new Set<unknown>();
+
   for (const [index, sample] of samples.entries()) {
-    if (!isRecord(sample) || !SAMPLE_ID_RE.test(sample.sampleId ?? '')) {
+    if (!isRecord(sample) || !SAMPLE_ID_RE.test(String(sample.sampleId ?? ''))) {
       fail('invalidDocument', `usageSamples[${index}]: invalid sampleId.`);
     }
     if (ids.has(sample.sampleId)) fail('invalidDocument', `usageSamples[${index}]: duplicate sampleId.`);
@@ -154,6 +236,7 @@ function validateSamples(samples) {
     uint(sample.byteOffset, `usageSamples[${index}].byteOffset`);
     hash(sample.lineHash, `usageSamples[${index}].lineHash`);
     if (!isRecord(sample.vector)) fail('invalidDocument', `usageSamples[${index}].vector invalid.`);
+
     for (const [key, quantity] of Object.entries(sample.vector)) {
       if (!DIALECT_RE.test(key)) fail('invalidDocument', `usageSamples[${index}].vector key invalid.`);
       decimal(quantity, `usageSamples[${index}].vector.${key}`);
@@ -162,21 +245,25 @@ function validateSamples(samples) {
   return ids;
 }
 
-function validateSegments(segments, sampleIds) {
+function validateSegments(segments: unknown, sampleIds: Set<unknown>): void {
   if (!Array.isArray(segments) || segments.length > MAX_SEGMENTS) {
     fail('invalidDocument', `usageSegments превышают cap 10 000.`);
   }
-  const ids = new Set();
+  const ids = new Set<unknown>();
+
   for (const [index, segment] of segments.entries()) {
     const where = `usageSegments[${index}]`;
-    if (!isRecord(segment) || !SEGMENT_ID_RE.test(segment.segmentId ?? '')) {
+
+    if (!isRecord(segment) || !SEGMENT_ID_RE.test(String(segment.segmentId ?? ''))) {
       fail('invalidDocument', `${where}: invalid segmentId.`);
     }
     if (ids.has(segment.segmentId)) fail('invalidDocument', `${where}: duplicate segmentId.`);
     ids.add(segment.segmentId);
-    if (!isRecord(segment.sampleRange)
-        || !sampleIds.has(segment.sampleRange.firstSampleId)
-        || !sampleIds.has(segment.sampleRange.lastSampleId)) {
+    const range = segment.sampleRange;
+
+    if (!isRecord(range)
+        || !sampleIds.has(range.firstSampleId)
+        || !sampleIds.has(range.lastSampleId)) {
       fail('invalidDocument', `${where}.sampleRange не ссылается на usageSamples.`);
     }
     validateBillingWindow(segment.billingWindow, `${where}.billingWindow`);
@@ -184,14 +271,15 @@ function validateSegments(segments, sampleIds) {
     stringOrNull(segment.unit, `${where}.unit`, { max: 40, pattern: DIALECT_RE });
     decimal(segment.quantity, `${where}.quantity`);
     stringOrNull(segment.resolvedModel, `${where}.resolvedModel`, { max: 160 });
-    if (!SOURCE.has(segment.source) || !COMPLETENESS.has(segment.completeness)) {
+    if (typeof segment.source !== 'string' || !SOURCE.has(segment.source)
+        || typeof segment.completeness !== 'string' || !COMPLETENESS.has(segment.completeness)) {
       fail('invalidDocument', `${where}: source/completeness invalid.`);
     }
     cloneJson(segment.attributes, `${where}.attributes`);
   }
 }
 
-function validateTokenSummary(value) {
+function validateTokenSummary(value: unknown): void {
   exactKeys(value, [
     'uncachedInput', 'output', 'cacheRead',
     'cacheWrite5m', 'cacheWrite1h', 'cacheWriteUnknown',
@@ -199,15 +287,19 @@ function validateTokenSummary(value) {
   for (const [key, quantity] of Object.entries(value)) decimal(quantity, `tokenSummary.${key}`);
 }
 
-function validateReportedCost(value) {
+function validateReportedCost(value: unknown): void {
   if (value === null) return;
   exactKeys(value, ['currency', 'amount', 'semantics', 'breakdown'], 'providerReportedCost');
-  if (value.currency !== 'USD' || value.semantics !== 'run_total' || !Array.isArray(value.breakdown)) {
+
+  const breakdown = value.breakdown;
+  if (value.currency !== 'USD' || value.semantics !== 'run_total' || !Array.isArray(breakdown)) {
     fail('invalidDocument', 'providerReportedCost contract invalid.');
   }
   decimal(value.amount, 'providerReportedCost.amount');
-  if (value.breakdown.length > 1_000) fail('invalidDocument', 'providerReportedCost breakdown oversize.');
-  for (const [index, entry] of value.breakdown.entries()) {
+
+  if (breakdown.length > 1_000) fail('invalidDocument', 'providerReportedCost breakdown oversize.');
+
+  for (const [index, entry] of breakdown.entries()) {
     exactKeys(entry, ['model', 'rawModel', 'amount'], `providerReportedCost.breakdown[${index}]`);
     stringOrNull(entry.model, `providerReportedCost.breakdown[${index}].model`, { max: 160 });
     stringOrNull(entry.rawModel, `providerReportedCost.breakdown[${index}].rawModel`, { max: 160 });
@@ -215,7 +307,7 @@ function validateReportedCost(value) {
   }
 }
 
-function validateCheckpoint(value, where) {
+function validateCheckpoint(value: unknown, where: string): void {
   if (value === null) return;
   if (!isRecord(value) || typeof value.resumeEligible !== 'boolean') {
     fail('invalidDocument', `${where}: invalid counter checkpoint.`);
@@ -232,7 +324,7 @@ function validateCheckpoint(value, where) {
   cloneJson(value, where);
 }
 
-function validateParentUsageRef(value) {
+function validateParentUsageRef(value: unknown): void {
   if (value === null) return;
   exactKeys(value, [
     'runId', 'documentHash', 'checkpointHash', 'provider', 'normalizerDialect',
@@ -251,19 +343,23 @@ function validateParentUsageRef(value) {
   });
 }
 
-export function assertUsageDocument(document) {
+/**
+ * Полная проверка документа. Она одна и та же для собранного здесь и прочитанного с
+ * диска: расхождение проверок означало бы, что часть документов никто не сверял.
+ */
+export function assertUsageDocument(document: unknown): UsageDocument {
   exactKeys(document, OUTER_KEYS, 'usageDocument');
   if (document.schemaVersion !== 1) fail('invalidDocument', 'schemaVersion обязан быть 1.');
   for (const field of [
     'taskId', 'attemptId', 'nodeVisitId', 'nodeExecutionId', 'dispatchId', 'runId',
-  ]) {
+  ] as const) {
     try {
       assertAnalyticsIdentity(field, document[field]);
     } catch {
       fail('invalidDocument', `${field}: invalid analytics identity.`);
     }
   }
-  if (!Number.isSafeInteger(document.epoch) || document.epoch < 1) {
+  if (!Number.isSafeInteger(document.epoch) || Number(document.epoch) < 1) {
     fail('invalidDocument', 'epoch обязан быть positive safe integer.');
   }
   if (typeof document.provider !== 'string' || !PROVIDER_RE.test(document.provider)) {
@@ -271,7 +367,10 @@ export function assertUsageDocument(document) {
   }
   stringOrNull(document.requestedModel, 'requestedModel');
   stringOrNull(document.resolvedModel, 'resolvedModel');
-  if (!SOURCE.has(document.source) || !COMPLETENESS.has(document.completeness)) {
+  // Проверяем исходный тип: String(["complete"]) скрыл бы повреждённое поле,
+  // которое затем не пройдёт строгую схему события reconciliation.
+  if (typeof document.source !== 'string' || !SOURCE.has(document.source)
+      || typeof document.completeness !== 'string' || !COMPLETENESS.has(document.completeness)) {
     fail('invalidDocument', 'source/completeness invalid.');
   }
   instant(document.observedAt, 'observedAt');
@@ -279,14 +378,18 @@ export function assertUsageDocument(document) {
     stringOrNull(document[field], field, { max: 128, pattern: DIALECT_RE });
   }
   validateFingerprint(document.sourceFingerprint);
-  if (!SESSION_MODE.has(document.providerSessionMode)) fail('invalidDocument', 'providerSessionMode invalid.');
+  if (typeof document.providerSessionMode !== 'string' || !SESSION_MODE.has(document.providerSessionMode)) {
+    fail('invalidDocument', 'providerSessionMode invalid.');
+  }
   stringOrNull(document.requestedProviderScope, 'requestedProviderScope', { max: 160 });
   stringOrNull(document.observedProviderScope, 'observedProviderScope', { max: 160 });
   validateParentUsageRef(document.parentUsageRef);
   validateCheckpoint(document.terminalCounterCheckpoint, 'terminalCounterCheckpoint');
   validateCheckpoint(document.lastObservedCounter, 'lastObservedCounter');
+  const checkpoint = document.terminalCounterCheckpoint as { resumeEligible?: unknown } | null;
+
   if (typeof document.resumeEligible !== 'boolean'
-      || document.resumeEligible !== (document.terminalCounterCheckpoint?.resumeEligible === true)) {
+      || document.resumeEligible !== (checkpoint?.resumeEligible === true)) {
     fail('invalidDocument', 'resumeEligible не сходится с terminalCounterCheckpoint.');
   }
   const sampleIds = validateSamples(document.usageSamples);
@@ -297,21 +400,26 @@ export function assertUsageDocument(document) {
   if (!Array.isArray(document.diagnostics) || document.diagnostics.length > 128) {
     fail('invalidDocument', 'diagnostics invalid/oversize.');
   }
-  const sortedCodes = [...new Set(document.diagnostics)].sort();
-  if (sortedCodes.length !== document.diagnostics.length
-      || sortedCodes.some((code, index) => code !== document.diagnostics[index])
+  const diagnostics = document.diagnostics as unknown[];
+  const sortedCodes = [...new Set(diagnostics)].sort();
+
+  if (sortedCodes.length !== diagnostics.length
+      || sortedCodes.some((code, index) => code !== diagnostics[index])
       || sortedCodes.some((code) => typeof code !== 'string' || !CODE_RE.test(code))) {
     fail('invalidDocument', 'diagnostics обязаны быть unique sorted bounded codes.');
   }
   const bytes = Buffer.byteLength(`${canonicalJson(document, { bytes: MAX_DOCUMENT_BYTES })}\n`, 'utf8');
   if (bytes > MAX_DOCUMENT_BYTES) fail('documentOversize', 'Usage document превышает 2 MiB.');
-  return document;
+
+  // Каждое поле проверено выше по одному: приведение здесь фиксирует итог проверки,
+  // а не заменяет её.
+  return document as unknown as UsageDocument;
 }
 
-function deepFreeze(value) {
+function deepFreeze<Value>(value: Value): Value {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child);
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
   }
   return value;
 }
@@ -328,7 +436,7 @@ export function buildUsageDocument({
   observedProviderScope = null,
   parentUsageRef = null,
   normalization,
-}) {
+}: UsageDocumentInput): UsageDocument {
   if (!isRecord(identity) || !isRecord(normalization)) {
     fail('invalidDocument', 'identity и normalization обязательны.');
   }
@@ -340,7 +448,7 @@ export function buildUsageDocument({
     fail('invalidDocument', `usageSamples превышают cap ${MAX_SAMPLES}.`);
   }
   const document = {
-    schemaVersion: 1,
+    schemaVersion: 1 as const,
     taskId: identity.taskId,
     attemptId: identity.attemptId,
     nodeVisitId: identity.nodeVisitId,
@@ -367,24 +475,37 @@ export function buildUsageDocument({
       'terminalCounterCheckpoint',
     ),
     lastObservedCounter: cloneJson(normalization.lastObservedCounter, 'lastObservedCounter'),
-    resumeEligible: normalization.terminalCounterCheckpoint?.resumeEligible === true,
+    resumeEligible: (normalization.terminalCounterCheckpoint as {
+      resumeEligible?: unknown;
+    } | null)?.resumeEligible === true,
     usageSamples: cloneJson(normalization.samples, 'usageSamples'),
     usageSegments: cloneJson(normalization.usageSegments, 'usageSegments'),
     tokenSummary: cloneJson(normalization.tokenSummary, 'tokenSummary'),
     providerReportedCost: cloneJson(normalization.providerReportedCost, 'providerReportedCost'),
     providerRootResult: cloneJson(normalization.providerRootResult, 'providerRootResult'),
-    diagnostics: [...new Set(normalization.diagnostics ?? [])].sort(),
+    diagnostics: [...new Set((normalization.diagnostics ?? []) as string[])].sort(),
   };
+
   assertUsageDocument(document);
-  return deepFreeze(document);
+
+  return deepFreeze(document) as unknown as UsageDocument;
 }
 
-export function encodeUsageDocument(document) {
+export function encodeUsageDocument(document: unknown): Buffer {
   assertUsageDocument(document);
   return Buffer.from(`${canonicalJson(document, { bytes: MAX_DOCUMENT_BYTES })}\n`, 'utf8');
 }
 
-export async function publishUsageDocument({ directory, document, durable = null }) {
+// Публикатор подменяется в проверках: настоящая запись на диск там не нужна.
+export interface UsagePublisher {
+  publishImmutable?: typeof publishImmutable;
+}
+
+export async function publishUsageDocument({ directory, document, durable = null }: {
+  directory: string;
+  document: UsageDocument;
+  durable?: UsagePublisher | null;
+}): Promise<Readonly<Record<string, unknown>>> {
   const bytes = encodeUsageDocument(document);
   const publisher = durable?.publishImmutable ?? publishImmutable;
   if (typeof publisher !== 'function') fail('invalidPublisher', 'Immutable publisher недоступен.');

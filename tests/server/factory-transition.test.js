@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ManualStageTransitionError,
   manualStageTransitionPairs,
-} from '../../server/src/lib/factory-transition.js';
+} from '../../server/src/lib/factoryTransition.ts';
 
 const stages = ['BUILD', 'REVIEW', 'LINT', 'GATE_ACCEPT', 'SHIP'];
 

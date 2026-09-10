@@ -5,7 +5,7 @@ import {
   mergeCatalogModel,
   modelInfoFromRegistry,
   resolveModelEfforts,
-} from '../../server/src/lib/models-registry.js';
+} from '../../server/src/lib/modelsRegistry.ts';
 
 const registry = {
   codex: [

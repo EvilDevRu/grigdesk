@@ -7,15 +7,9 @@
 import fp from 'fastify-plugin';
 import type { FastifyReply } from 'fastify';
 
-import { PROFILE_RE } from '../../lib/profiles.js';
+import { PROFILE_RE } from '../../lib/profiles.ts';
 import { SANDBOX_TASK_RE } from '../../../../shared/sandboxContracts.ts';
 import type { SandboxService } from '../../lib/sandboxes/service.ts';
-
-declare module 'fastify' {
-  interface FastifyRequest {
-    authKind?: 'session' | 'internal' | 'cli' | null;
-  }
-}
 
 interface SandboxesModuleOptions {
   service: SandboxService;

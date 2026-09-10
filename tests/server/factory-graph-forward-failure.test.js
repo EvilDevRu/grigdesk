@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { computeNodeStatuses } from '../../server/src/lib/factory-graph.js';
-import { buildRouteDef } from '../../server/src/lib/route-graph.js';
+import { computeNodeStatuses } from '../../server/src/lib/factoryGraph.ts';
+import { buildRouteDef } from '../../server/src/lib/routeGraph.ts';
 
 // Член совета, у которого кончилась квота провайдера: реестр пишет ему `failed`
 // (движок так же проецирует исчерпанный бюджет повторов), но контракт узла ведёт

@@ -11,10 +11,10 @@ import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 
-import { LocalTls, decideHttpRequest, isPrivateAddress } from '../../server/src/lib/tls/local.js';
-import { startHttpsListener } from '../../server/src/lib/tls/https-listener.js';
-import { loadTlsSource } from '../../server/src/lib/tls/source.js';
-import httpScopePlugin, { redirectHost } from '../../server/src/plugins/http-scope.js';
+import { LocalTls, decideHttpRequest, isPrivateAddress } from '../../server/src/lib/tls/local.ts';
+import { startHttpsListener } from '../../server/src/lib/tls/httpsListener.ts';
+import { loadTlsSource } from '../../server/src/lib/tls/source.ts';
+import httpScopePlugin, { redirectHost } from '../../server/src/plugins/httpScope.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');

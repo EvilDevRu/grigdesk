@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { SYSTEM } from '../../server/src/lib/plugins-registry.js';
+import { SYSTEM } from '../../server/src/lib/pluginsRegistry.ts';
 import { webFile } from './helpers/compile-vue.js';
 import { compileSettingsView } from './helpers/settings-view.js';
 

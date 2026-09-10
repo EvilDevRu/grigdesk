@@ -4,15 +4,15 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { resolveModelRef } from '../chat/model-ref.js';
+import { resolveModelRef } from '../chat/modelRef.ts';
 import {
   boundedText,
   exactKeys,
   jsonCandidates,
   modelText,
-} from '../model-json.js';
-import { getExecutor } from '../executors/index.js';
-import { getModelsRegistry } from '../models-registry.js';
+} from '../modelJson.ts';
+import { getExecutor } from '../executors/index.ts';
+import { getModelsRegistry } from '../modelsRegistry.ts';
 import { inboxTranscript, visibleInboxMessages, INBOX_DRAFT_LIMITS } from './draft.ts';
 
 // Соседи разбора — ещё JavaScript. Объявлено ровно то, чем пользуется разбор:
@@ -709,7 +709,7 @@ export async function resolveInboxTriageTarget({
 }: {
   modelRef?: unknown;
   config?: Record<string, unknown>;
-  modelsRegistry?: (config: unknown) => Promise<unknown> | unknown;
+  modelsRegistry?: (config: { modelsPath: string }) => Promise<unknown> | unknown;
   executorResolver?: (provider: string) => Promise<unknown> | unknown;
   requireImages?: boolean;
   log?: LogPort;
@@ -719,7 +719,9 @@ export async function resolveInboxTriageTarget({
 
   let registry: unknown;
 
-  try { registry = await modelsRegistry(config); } catch {
+  // Реестру нужен только путь к models.json; здесь лежит серверный config целиком,
+  // и его точная форма объявлена не тут, а в config.ts.
+  try { registry = await modelsRegistry(config as { modelsPath: string }); } catch {
     return { ok: false, error: 'registry_failed' };
   }
 
@@ -779,7 +781,7 @@ export async function runInboxTriage({
   modelRef?: unknown;
   config?: Record<string, unknown>;
   providerSettings?: Record<string, unknown>;
-  modelsRegistry?: (config: unknown) => Promise<unknown> | unknown;
+  modelsRegistry?: (config: { modelsPath: string }) => Promise<unknown> | unknown;
   executorResolver?: (provider: string) => Promise<unknown> | unknown;
   log?: LogPort;
   signal?: AbortSignal;

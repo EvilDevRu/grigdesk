@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { config } from '../../config.js';
+import { config } from '../../config.ts';
 import { pathToFileURL } from 'node:url';
 import { openKnowledgeStorage } from './storage.ts';
 import { createKnowledgeTransfer } from './transfer.ts';
-import { PrefsStore } from '../prefs-store.js';
-import { projectMapsRoot } from '../projects.js';
+import { PrefsStore } from '../prefsStore.ts';
+import { projectMapsRoot } from '../projects.ts';
 import { runKnowledgeSearchRuntimePreflight } from './runtimePreflight.ts';
 
 const SOURCE_DOCUMENT_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;

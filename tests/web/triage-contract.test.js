@@ -9,7 +9,7 @@ import {
   parseAnalysisQueue,
   parseAnalysisRows,
 } from '../../shared/analysisContracts.ts';
-import { api } from '../../web/src/shared/api-client.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 import { analysisApi, analysisDisabledFailure } from '../../web/src/shared/analysisApi.ts';
 
 const question = {

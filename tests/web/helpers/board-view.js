@@ -16,7 +16,7 @@ let mountNonce = 0;
 export async function compileBoardView() {
   return compileVue(VIEW_PATH, {
     stubs: {
-      '../shared/format.js': `
+      '../shared/format.ts': `
         export const hoursToHM = (value) => String(value ?? 0);
         export const liveTimerSec = (task) => task.timerElapsed || 0;
         export const secToHMS = (value) => String(value ?? 0);
@@ -64,10 +64,10 @@ export async function compileBoardView() {
             + ' @click="$emit(\\'toggle\\')">{{ taskTitle }}</button>',
         };
       `,
-      '../shared/api-client.js': `
+      '../shared/apiClient.ts': `
         export const api = { get: async () => ({ tasks: [] }) };
       `,
-      '../composables/useSse.js': `
+      '../composables/useSse.ts': `
         export const useSse = () => ({});
       `,
     },

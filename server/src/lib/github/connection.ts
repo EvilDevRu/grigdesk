@@ -2,7 +2,7 @@
 // remote hook и reconciliation не переходят в общий data-plane contract.
 import { randomBytes as cryptoRandomBytes, timingSafeEqual } from 'node:crypto';
 
-import { AccountRuntimeManager } from '../account-runtime.js';
+import { AccountRuntimeManager } from '../accountRuntime.ts';
 import {
   createRepositoryHook,
   deleteRepositoryHook,

@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ChatHistoryStore } from '../../server/src/lib/chat/history-store.js';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 
 const registry = {
   claude: [{ id: 'claude-opus-5', aliases: ['opus'], tier: 100 }],

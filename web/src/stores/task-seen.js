@@ -1,7 +1,7 @@
 // Серверные отметки «задачу просмотрели». Хранятся, как избранное: у окна нет своей
 // копии, поэтому открытая на компьютере задача перестаёт быть новой и на планшете.
 import { defineStore } from 'pinia';
-import { api } from '../shared/api-client.js';
+import { api } from '../shared/apiClient.ts';
 
 function taskKey(value) {
   return String(value ?? '').trim();

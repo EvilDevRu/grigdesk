@@ -8,7 +8,7 @@ import {
   exactJsonNumber,
   exactUnsignedInteger,
   parseExactJson,
-} from '../../server/src/lib/analytics/exact-json.js';
+} from '../../server/src/lib/analytics/exactJson.ts';
 
 test('exact JSON сохраняет исходный numeric lexeme без IEEE-754', () => {
   const value = parseExactJson(

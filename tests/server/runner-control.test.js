@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   FactoryRunnerControl,
   RunnerControlInputError,
-} from '../../server/src/lib/runner-control.js';
+} from '../../server/src/lib/runnerControl.ts';
 
 test('runner control invokes only the canonical factory switch command', async () => {
   const calls = [];

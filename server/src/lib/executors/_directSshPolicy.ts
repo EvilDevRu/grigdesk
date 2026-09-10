@@ -2,7 +2,6 @@ import path from 'node:path';
 import { isIP } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
-import { NODE_TS_ARGS } from '../nodeTsRuntime.ts';
 
 const DIRECT_CLIENTS = new Set([
   'ssh',
@@ -51,12 +50,11 @@ export const DIRECT_SSH_HOOK_PATH = fileURLToPath(
   new URL('./_direct-ssh-policy-hook.js', import.meta.url),
 );
 
-// Хук запускает чужой CLI отдельным процессом, и флаги запуска сервера ему не
-// достаются. Сам хук остаётся JavaScript, но правила он читает из TypeScript-модуля,
-// поэтому type stripping включается явно: на Node, где оно ещё не по умолчанию, хук
-// иначе не стартовал бы вовсе — а неудачный запуск рубежа означает разрешённую команду.
-export const DIRECT_SSH_HOOK_COMMAND =
-  `${process.execPath} ${NODE_TS_ARGS.join(' ')} ${DIRECT_SSH_HOOK_PATH}`;
+// Хук запускает чужой CLI отдельным процессом — тем же Node, что и сервер. Минимум
+// 22.18 исполняет TypeScript сам, поэтому команда состоит из пути к рантайму и пути
+// к хуку: неудачный запуск рубежа означал бы разрешённую команду, и лишних условий
+// в этой строке быть не должно.
+export const DIRECT_SSH_HOOK_COMMAND = `${process.execPath} ${DIRECT_SSH_HOOK_PATH}`;
 export const CLAUDE_DIRECT_SSH_DENY = Object.freeze([
   'Bash(ssh:*)',
   'Bash(slogin:*)',

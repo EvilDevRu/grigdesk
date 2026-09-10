@@ -59,17 +59,17 @@ async function compileToolHostPublisher() {
       '../../stores/taskShelf.ts': `
         export const useTaskShelfStore = () => globalThis.__uiContextTaskShelf;
       `,
-      '../../composables/useUiContextSource.js': `
+      '../../composables/useUiContextSource.ts': `
         export const useUiContextSource = (...args) => globalThis.__uiContextSourceHelper(...args);
       `,
-      '../nav-icons.js': 'export const NAV_ICONS = { code: "", plugin: "" };',
-      '../tools/registry.js': `
+      '../navIcons.ts': 'export const NAV_ICONS = { code: "", plugin: "" };',
+      '../tools/registry.ts': `
         export const TOOL_REGISTRY = globalThis.__uiContextToolRegistry.TOOL_REGISTRY;
         export const TOOL_BY_ID = globalThis.__uiContextToolRegistry.TOOL_BY_ID;
         export const toolAvailability = (...args) =>
           globalThis.__uiContextToolRegistry.toolAvailability(...args);
       `,
-      '../tools/viewport.js': `
+      '../tools/viewport.ts': `
         export const useDockViewport = () => ({
           dockCapable: globalThis.__uiContextDockCapable,
         });
@@ -88,7 +88,7 @@ test('COMP-PROV-09/10: owner dispose и explicit focus управляют scope 
   ]);
   const [{ useUiContextStore }, { useUiContextSource }] = await Promise.all([
     import('../../web/src/stores/ui-context.js'),
-    import('../../web/src/composables/useUiContextSource.js'),
+    import('../../web/src/composables/useUiContextSource.ts'),
   ]);
 
   const pinia = createPinia();
@@ -169,7 +169,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/src/stores/ui-context.js'),
-    import('../../web/src/composables/useUiContextSource.js'),
+    import('../../web/src/composables/useUiContextSource.ts'),
   ]);
 
   const pinia = createPinia();
@@ -295,7 +295,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
   };
   globalThis.__uiContextApi = globalThis.__uiContextTaskApi;
   globalThis.__uiContextPipelineWait = await import('../../shared/pipelineWait.ts');
-  globalThis.__uiContextRunnerDisplay = await import('../../web/src/shared/runner-display.js');
+  globalThis.__uiContextRunnerDisplay = await import('../../web/src/shared/runnerDisplay.ts');
   globalThis.__uiContextFactoryGraph = {
     name: 'FactoryGraph',
     props: ['graph', 'loopsOn'],
@@ -391,7 +391,7 @@ test('COMP-PROV-12: реальный ToolHost не публикует hidden pan
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/src/stores/ui-context.js'),
-    import('../../web/src/composables/useUiContextSource.js'),
+    import('../../web/src/composables/useUiContextSource.ts'),
     import('../../web/src/stores/dock.js'),
   ]);
   const pinia = createPinia();
