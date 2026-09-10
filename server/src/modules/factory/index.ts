@@ -60,7 +60,11 @@ import type { ArbiterCardsStore } from '../../lib/arbiterCards.ts';
 import type { FactoryArbiterLive } from '../../lib/factoryArbiterLive.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import type { RouteConfig } from '../../lib/factoryRouteCli.ts';
-import type { LaunchConfig, NormalizedLaunchInputs, TriageAnalysis } from '../../lib/factoryLaunchContract.ts';
+import type {
+  LaunchConfig,
+  NormalizedLaunchInputs,
+  TriageAnalysis,
+} from '../../lib/factoryLaunchContract.ts';
 import type { RouteTicket } from '../../lib/factoryTicket.ts';
 import type { ArbiterExecutor, ArbiterRunOutput } from '../../lib/factoryArbiter.ts';
 import type { SlotDecision } from '../../lib/sandboxSlots.ts';
@@ -492,7 +496,9 @@ async function factoryModule(
   fastify.get<FactoryRoute>('/api/factory/stages', async () => ({ kinds: StageKind, stages: STAGES }));
 
   // Установленные исполнители (адаптеры движка) — для формы запуска и модалки этапа.
-  fastify.get<FactoryRoute>('/api/factory/runners', async () => ({ runners: await listInstalledRunners(config) }));
+  fastify.get<FactoryRoute>('/api/factory/runners', async () => ({
+    runners: await listInstalledRunners(config),
+  }));
 
   // Правило кокпита: isolated-конвейер стартует со свежего кода (worktree задачи
   // форкается от локального master). Безопасно: ff-only и только чистый master;
@@ -505,7 +511,10 @@ async function factoryModule(
       fastify.log.info({ task: id, gitRefresh }, 'репозитории обновлены перед конвейером');
       return gitRefresh;
     } catch (e) {
-      fastify.log.warn({ task: id, err: errorMessage(e) }, 'обновление репозиториев перед конвейером не удалось');
+      fastify.log.warn(
+        { task: id, err: errorMessage(e) },
+        'обновление репозиториев перед конвейером не удалось',
+      );
       return null;
     }
   }
@@ -573,7 +582,10 @@ async function factoryModule(
           .join('\n');
         if (comm) sections.push({ title: '[Комментарии к задаче из трекера]', text: comm });
       } catch (e) {
-        fastify.log.warn({ task: id, err: errorMessage(e) }, 'комментарии для тикета не получены — конвейер стартует без них');
+        fastify.log.warn(
+          { task: id, err: errorMessage(e) },
+          'комментарии для тикета не получены — конвейер стартует без них',
+        );
       }
     }
 
@@ -762,7 +774,9 @@ async function factoryModule(
           status: 409,
           body: {
             error: 'launch_contract_unavailable',
-            message: e instanceof FactoryLaunchContractError ? errorMessage(e) : 'profile launch contract недоступен',
+            message: e instanceof FactoryLaunchContractError
+              ? errorMessage(e)
+              : 'profile launch contract недоступен',
           },
         },
       };
@@ -801,7 +815,11 @@ async function factoryModule(
           ok: false,
           result: {
             status: 409,
-            body: { error: 'no_ticket', message: `сохранённой постановки нет или она не проходит проверку (${errorMessage(e)}) — запусти задачу кнопкой «на конвейер»` },
+            body: {
+              error: 'no_ticket',
+              message: 'сохранённой постановки нет или она не проходит проверку'
+                + ` (${errorMessage(e)}) — запусти задачу кнопкой «на конвейер»`,
+            },
           },
         };
       }
@@ -1141,7 +1159,10 @@ async function factoryModule(
       catch (err) {
         return {
           status: 409,
-          body: { error: 'attempt_integrity_failed', message: `Проекция прогона не совпадает с trusted control ledger: ${errorMessage(err)}` },
+          body: {
+            error: 'attempt_integrity_failed',
+            message: `Проекция прогона не совпадает с trusted control ledger: ${errorMessage(err)}`,
+          },
         };
       }
       if (factoryState.isDaemonAlive(reg.ORCH_PID, id)) {
@@ -1847,7 +1868,9 @@ async function factoryModule(
   });
 
   // Указание агенту (side-файл, читается на границе этапов). Пусто — снять.
-  fastify.get<FactoryRoute>('/api/tasks/:id/instruction', async (request) => ({ text: readInstruction({ ...cfg, task: String(request.params.id).replace(/[^0-9]/g, '') }) }));
+  fastify.get<FactoryRoute>('/api/tasks/:id/instruction', async (request) => ({
+    text: readInstruction({ ...cfg, task: String(request.params.id).replace(/[^0-9]/g, '') }),
+  }));
   fastify.post<FactoryRoute>('/api/tasks/:id/instruction', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });

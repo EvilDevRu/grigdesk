@@ -671,7 +671,10 @@ export class B24Client {
      * Полные детали задачи (getTaskDetails).
      */
     async taskDetails(taskId: unknown): Promise<Payload> {
-        const data = await this.apiGet2('/local/ajax/dashboard.php', `action=getTaskDetails&taskId=${encodeURIComponent(String(taskId))}`);
+        const data = await this.apiGet2(
+            '/local/ajax/dashboard.php',
+            `action=getTaskDetails&taskId=${encodeURIComponent(String(taskId))}`,
+        );
         if (!data.success) {
             throw new Error(String(data.error || 'Не удалось получить детали задачи'));
         }

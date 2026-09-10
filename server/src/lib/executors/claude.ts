@@ -369,7 +369,8 @@ export async function resolveClaudeCliToken({
     release = await acquireOauthRefreshLock(credentialsPath, sleep);
   } catch (error) {
     return refreshFailure({
-      error: `oauth_refresh_lock_${String((error as { code?: unknown } | null)?.code || 'failed').toLowerCase()}`,
+      error: 'oauth_refresh_lock_'
+        + String((error as { code?: unknown } | null)?.code || 'failed').toLowerCase(),
     });
   }
   if (!release) {
@@ -1689,7 +1690,12 @@ export default {
     workspaceAccess?: WorkspaceAccess | null;
     workTools?: { descriptors?: unknown } | null;
   }) {
-    const args = ['-p', String(message ?? ''), '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode || 'default'];
+    const args = [
+      '-p', String(message ?? ''),
+      '--output-format', 'stream-json',
+      '--verbose',
+      '--permission-mode', permissionMode || 'default',
+    ];
     const scoped = workspaceAccess && typeof workspaceAccess === 'object';
     const readableRoots: readonly string[] = scoped
       ? [...new Set((workspaceAccess?.readableRoots || []).map(String))]

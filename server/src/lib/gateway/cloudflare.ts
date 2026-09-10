@@ -228,7 +228,11 @@ export async function findZone(token: string, domain: string, { fetchImpl }: {
     throw new CloudflareError('bad_domain', `Не похоже на домен: «${domain}».`);
   }
   for (const name of candidates) {
-    const list = await cfFetch(token, `/zones?name=${encodeURIComponent(name)}&status=active`, { fetchImpl }) as Array<{ id?: unknown; name?: unknown }> | null;
+    const list = await cfFetch(
+      token,
+      `/zones?name=${encodeURIComponent(name)}&status=active`,
+      { fetchImpl },
+    ) as Array<{ id?: unknown; name?: unknown }> | null;
     if (!Array.isArray(list)) {
       throw new CloudflareError(
         'cloudflare_bad_response',

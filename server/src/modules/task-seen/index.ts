@@ -80,7 +80,10 @@ async function taskSeenModule(
     try {
       return await operation(request);
     } catch (error) {
-      request.log?.error?.({ code: (error as { code?: unknown } | null)?.code }, 'Ошибка отметок просмотра задач');
+      request.log?.error?.(
+        { code: (error as { code?: unknown } | null)?.code },
+        'Ошибка отметок просмотра задач',
+      );
       return publicError(reply, error);
     }
   };

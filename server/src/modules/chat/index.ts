@@ -80,7 +80,10 @@ import type { WorkIpc, WorkToolsPort } from '../../lib/executors/workIpc.ts';
 import type { ExecutorAdapter, ExecutorRunInput, ExecutorRunResult } from '../../lib/executors/index.ts';
 import type { SshBroker, BrokerScope, BrokerInput } from '../../lib/ssh/broker.ts';
 import type { DbBroker, DbBrokerScope, DbBrokerInput } from '../../lib/db/broker.ts';
-import type { KnowledgeToolScope, KnowledgeToolInput } from '../../lib/executors/work-tools/knowledgeSearch.ts';
+import type {
+  KnowledgeToolScope,
+  KnowledgeToolInput,
+} from '../../lib/executors/work-tools/knowledgeSearch.ts';
 import type { createKnowledgeBroker } from '../../lib/search/broker.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 
@@ -377,7 +380,11 @@ function sameSpeechStreamAudio(value: unknown) {
 }
 
 /** WebSocket с cookie принимаем только со строгого origin самого Cockpit. */
-export function speechStreamOriginMatches(request: { headers?: Record<string, unknown>; host?: string; protocol?: string }) {
+export function speechStreamOriginMatches(request: {
+  headers?: Record<string, unknown>;
+  host?: string;
+  protocol?: string;
+}) {
   const rawOrigin = request?.headers?.origin;
   const host = request?.host || request?.headers?.host;
   if (typeof rawOrigin !== 'string' || !rawOrigin || typeof host !== 'string' || !host) return false;
@@ -551,7 +558,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         }
         return { ...repo, path: canonicalPath };
       }));
-      return { kind: 'generic', workspaceMode: trusted.workspaceMode, repos: canonicalRepos as TaskSandbox['repos'] };
+      return {
+        kind: 'generic',
+        workspaceMode: trusted.workspaceMode,
+        repos: canonicalRepos as TaskSandbox['repos'],
+      };
     } catch {
       return null;
     }
@@ -699,7 +710,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    */
   // ── Активные запуски агента: перезагруженная страница восстанавливает «думает…»
   // и уже показанную ленту шагов текущего хода. ──
-  const activeRuns = new Map<string | undefined, RunningTurn>(); // ключ чата → { startedAt, tokens, steps[], ac, compact }
+  // Ключ чата → { startedAt, tokens, steps[], ac, compact }.
+  const activeRuns = new Map<string | undefined, RunningTurn>();
 
   // ── Живые сессии исполнителей ────────────────────────────────────────────────
   // Процесс агента переживает свой ход, поэтому фоновые команды и субагенты не гибнут
@@ -760,7 +772,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Поэтому сообщение, пришедшее во время чужого хода, НЕ отклоняем и ввод не блокируем
   // (человек имеет право готовить следующее сообщение) — ставим в очередь: запрос висит,
   // пока не дойдёт черёд, и уходит сразу после текущего хода.
-  const lastSession = new Map<string | undefined, string | null>();  // chatKey → sessionId последнего завершённого хода
+  // chatKey → sessionId последнего завершённого хода.
+  const lastSession = new Map<string | undefined, string | null>();
 
   /**
    * Сделать текущую Kimi session непригодной для resume, не удаляя сам vendor transcript.
@@ -924,7 +937,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
     if (hasLive) await liveSessions.close(chatKey, 'сброс памяти агента');
-    if ((record.modelRef as { provider?: unknown } | null)?.provider !== 'kimi') return { ok: true, reset: hasLive };
+    const modelRef = record.modelRef as { provider?: unknown } | null;
+
+    if (modelRef?.provider !== 'kimi') return { ok: true, reset: hasLive };
     // Проверка busy и постановка собственного chat lock идут без await между ними:
     // новый ход либо успевает первым (тогда 409 выше), либо ждёт уже пустой binding.
     const binding = await turnLocks.run({ chatKey }, () => (
@@ -2067,12 +2082,17 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         } catch (resetErrorValue) {
       const resetError = resetErrorValue as ChatFailure;
           fastify.log.error({ chatKey, err: resetError.message }, 'Kimi binding после пустого хода не сброшен');
-          const error: Error & { code?: string; sessionResetFailed?: boolean } = new Error('Kimi завершил ход без ответа, но сессию сбросить не удалось. Выполни явный сброс памяти перед повтором.');
+          const error: Error & { code?: string; sessionResetFailed?: boolean } = new Error(
+            'Kimi завершил ход без ответа, но сессию сбросить не удалось.'
+            + ' Выполни явный сброс памяти перед повтором.',
+          );
           error.code = 'kimi_session_reset_failed';
           error.sessionResetFailed = true;
           throw error;
         }
-        const error: Error & { code?: string; sessionReset?: boolean } = new Error('Kimi завершил ход без ответа. Сессия сброшена; повтори сообщение явно.');
+        const error: Error & { code?: string; sessionReset?: boolean } = new Error(
+          'Kimi завершил ход без ответа. Сессия сброшена; повтори сообщение явно.',
+        );
         error.code = 'kimi_empty_response';
         error.sessionReset = true;
         throw error;
@@ -2214,7 +2234,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   });
 
   // Отдача вложения (превью в истории чата).
-  const ATTACH_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', pdf: 'application/pdf' };
+  const ATTACH_MIME: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    pdf: 'application/pdf',
+  };
   fastify.get<ChatRoute>('/api/chat/attachment/:file', async (request, reply) => {
     const p = await attachFile(request.params.file);
     if (!p) return reply.code(400).send({ error: 'bad_file' });
@@ -2735,7 +2763,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Полная запись стора. Осталась для миграции со старой схемы и восстановления
   // из браузерного снимка; в обычной работе клиент ею НЕ пользуется — с ростом истории
   // тело перерастало лимит запроса, сервер отвечал 413, и переписка не сохранялась вообще.
-  fastify.put<ChatRoute & { Body: Omit<ChatBody, 'archived'> & { archived?: StoredChat[] } }>('/api/chat/store', async (request, reply) => {
+  type ChatStoreRoute = ChatRoute & {
+    Body: Omit<ChatBody, 'archived'> & { archived?: StoredChat[] };
+  };
+
+  fastify.put<ChatStoreRoute>('/api/chat/store', async (request, reply) => {
     const body = request.body || {};
     const chatIds = [
       ...(Array.isArray(body.sessions) ? body.sessions : []),

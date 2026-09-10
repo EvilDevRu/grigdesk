@@ -679,9 +679,11 @@ export async function runContainedKimi({
       await onSessionCreated?.(currentSession);
       sessionId = currentSession;
     }
-    const setConfigOption = (configId: string, value: unknown) => client.request('session/set_config_option', {
-      sessionId: currentSession, configId, value,
-    }, 15_000);
+    const setConfigOption = (configId: string, value: unknown) => client.request(
+      'session/set_config_option',
+      { sessionId: currentSession, configId, value },
+      15_000,
+    );
     if (launchMode === 'host') {
       // Host config может не определять pinned id вида kimi-code/k3: модель/effort —
       // best-effort, фактическую покажет /status. Отказ не должен валить ход.
@@ -693,7 +695,10 @@ export async function runContainedKimi({
       });
       if (effort) {
         await setConfigOption('thinking', effort).catch((error: unknown) => {
-          log?.warn?.({ effort, reason: (error as Error)?.message }, 'Kimi host: effort не принят host config');
+          log?.warn?.(
+            { effort, reason: (error as Error)?.message },
+            'Kimi host: effort не принят host config',
+          );
         });
       }
     } else {

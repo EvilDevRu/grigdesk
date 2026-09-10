@@ -155,7 +155,10 @@ export function routeStartArgs(config: RouteConfig, {
   return args;
 }
 
-export function routeResumeArgs(config: RouteConfig, { task, profile, attempt }: RouteIdentityArgs): string[] {
+export function routeResumeArgs(
+  config: RouteConfig,
+  { task, profile, attempt }: RouteIdentityArgs,
+): string[] {
   return [String(task), 'resume', '--profile', profile, '--attempt', attempt, ...routePathArgs(config)];
 }
 
